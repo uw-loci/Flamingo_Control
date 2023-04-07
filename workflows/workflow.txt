@@ -13,7 +13,7 @@
     Save image directory = snapshot
     Comments = green
     Save max projection = false
-    Display max projection = true
+    Display max projection = false
     Save image data in tiff format = true
     Save image data in raw format = false
     Save to subfolders = false
@@ -27,7 +27,7 @@
     </Camera Settings>
     <Stack Settings>
     Stack index = 
-    Change in Z axis (mm) = 0.010
+    Change in Z axis (mm) = 0.01
     Number of planes = 1
     Number of planes saved = 
     Stage velocity (mm/s) = 
@@ -44,21 +44,21 @@
     Stack option settings 2 = 
     </Stack Settings>
     <Start Position>
-    X (mm) = 14.153
-    Y (mm) = 7.597
-    Z (mm) = 13.483
-    Angle (degrees) = -0.001
+    X (mm) = 14.17
+    Y (mm) = 1.737
+    Z (mm) = 13.7
+    Angle (degrees) = 0
     </Start Position>
     <End Position>
-    X (mm) = 14.153
-    Y (mm) = 7.597
-    Z (mm) = 13.473
-    Angle (degrees) = -0.001
+    X (mm) = 14.17
+    Y (mm) = 1.737
+    Z (mm) = 13.69
+    Angle (degrees) = 0
     </End Position>
     <Illumination Source>
     Laser 1 640 nm = 0.00 0
     Laser 2 561 nm = 0.00 0
-    Laser 3 488 nm = 0.00 0
+    Laser 3 488 nm = 5.00 1
     Laser 4 405 nm = 0.00 0
     LED_RGB_Board = 28.04 0
     LED selection = 1 0

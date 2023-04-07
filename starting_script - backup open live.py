@@ -52,3 +52,27 @@ tcpip_nuc.command_to_nuc(FLAMINGO_IP, FLAMINGO_PORT, wf_file, command)
 #     print('connected to: '+addr[0]+':'+str(addr[1]))
 
 #     start_new_thread(threaded_client,(conn,))
+
+# def test_check_maxima():
+#     lsts = [
+#         list(range(20)),  # ascending sequence
+#         list(np.random.rand(20) * 10),  # random sequence
+#         [0,1,1,0,3,4,5,6,5,4,3,8,9,20,19,17,0,0,200,300],  # peak sequence
+#         [1,2,3],  # too short sequence
+#     ]
+    
+#     expected_results = [
+#         False,
+#         False,
+#         13,
+#         False,
+#     ]
+    
+#     for i, lst in enumerate(lsts):
+#         result = check_maxima(lst)
+#         expected_result = expected_results[i]
+#         assert result == expected_result, f"Failed for {lst} {i}. Got {result}, expected {expected_result}"
+    
+#     print("All tests passed!")
+    
+# test_check_maxima()

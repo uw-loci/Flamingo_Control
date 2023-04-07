@@ -3,7 +3,7 @@ import os
 import sys
 import time
 import numpy as np
-
+import select
 import struct
 
 
@@ -29,10 +29,8 @@ def wf_to_nuc(client, wf_file, command):
     '''
 
     fileBytes = os.path.getsize(wf_file)
-    print(fileBytes)
-
-
     #print(fileBytes)
+
     cmd_start = np.uint32(0xF321E654)  # start command
 
     cmd = np.uint32(command) #cmd command (CommandCodes.h): open in Visual Studio Code + install C/C++ Extension IntelliSense, when hovering over command binary number visible
@@ -76,15 +74,15 @@ def wf_to_nuc(client, wf_file, command):
 
 
     try:
-
+        #print('try')
         client.send(scmd)
-
+        #print(wf_file)
         workflow_file = open(wf_file).read()
-
+        #print('sending')
         client.send(workflow_file.encode())
-
+        print('Workflow file sent')
         msg = client.recv(128)
-
+        #print(len(msg))
         received = s.unpack(msg)
         return received
         #addData = client.recv(received[11]) # unpack additional data sent by the nuc
@@ -157,25 +155,26 @@ def command_to_nuc(client,command, data0=0, data1=0, data2=0, value=0.0):
                   doubleData, addDataBytes, buffer_72, cmd_end)
 
 
-    print('before try')
+    #print('before try')
     try:
-
         client.send(scmd)
-        print('before receive')
+        # set timeout to 1 second
+        client.settimeout(1)
+        # receive data with timeout
         msg = client.recv(128)
-        print('after receive')
         received = s.unpack(msg)
-
-        addData = client.recv(received[11]) # unpack additional data sent by the nuc
+        print('command to nuc returning with received')
         return received
     except socket.error:
-
         print('Failed to send data')
+    except socket.timeout:
+        print('Timeout: no data received in 1 second')
+        return None
 
 
 def is_stage_stopped(client, c_StageStopCheck):
     all_true = False
-    xb, yb, zb, rb = False
+    xb= yb= zb= rb = False
     while not all_true:
         if not xb:
             xb = command_to_nuc(client, c_StageStopCheck, data0 = 0)[1] #second entry should be "status", with 0 indicating not finished

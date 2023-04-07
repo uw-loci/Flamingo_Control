@@ -3,7 +3,7 @@ import datetime
 # create an option to read in a previous workflow but make minor changes
 
 def workflow_to_dict(filename):
-    print('worflow to dict '+filename)
+    #print('workflow to dict '+filename)
     with open(filename, 'r') as f:
         # Skip the first line
         next(f)
@@ -33,20 +33,20 @@ def workflow_to_dict(filename):
 
 
 def dict_to_workflow(file_name, settings_dict):
-    print("dict_to_workflow "+file_name)
+    #print("dict_to_workflow "+file_name)
     # Start with the <Workflow Settings> tag
     output = '<Workflow Settings>\n'
 
     # Loop over each section in the settings dictionary
     for section, settings in settings_dict.items():
         # Add a header tag for the current section
-        output += f'\t<{section}>\n'
+        output += f'    <{section}>\n'
         # Loop over each key-value pair in the current section's settings dictionary
         for key, value in settings.items():
             # Add the key-value pair to the output string with proper indentation
-            output += f'\t{key} = {value}\n'
+            output += f'    {key} = {value}\n'
         # Add a closing tag for the current section
-        output += f'\t</{section}>\n'
+        output += f'    </{section}>\n'
 
     # Add the closing tag for the <Workflow Settings> tag
     output += '</Workflow Settings>'
