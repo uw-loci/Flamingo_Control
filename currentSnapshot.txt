@@ -45,15 +45,15 @@
     </Stack Settings>
     <Start Position>
     X (mm) = 14.17
-    Y (mm) = 5
-    Z (mm) = 13.7
+    Y (mm) = 6.2
+    Z (mm) = 13.5
     Angle (degrees) = 0
     </Start Position>
     <End Position>
     X (mm) = 14.17
-    Y (mm) = 5
-    Z (mm) = 13.69
-    Angle (degrees) = 0
+    Y (mm) = 6.2
+    Z (mm) = 13.505
+    Angle (degrees) = -0.002
     </End Position>
     <Illumination Source>
     Laser 1 640 nm = 0.00 0

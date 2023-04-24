@@ -52,7 +52,7 @@ def dict_to_workflow(file_name, settings_dict):
     output += '</Workflow Settings>'
 
     # Write the output string to the specified file
-    with open(file_name, 'w') as f:
+    with open(file_name, 'w', newline='\n') as f:
         f.write(output)
 
 

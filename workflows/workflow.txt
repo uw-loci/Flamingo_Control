@@ -10,8 +10,8 @@
     Angle step size = 
     Region = 
     Save image drive = /media/deploy/MSN_LS
-    Save image directory = snapshot
-    Comments = green
+    Save image directory = DemoZ
+    Comments = Default
     Save max projection = false
     Display max projection = false
     Save image data in tiff format = true
@@ -27,8 +27,8 @@
     </Camera Settings>
     <Stack Settings>
     Stack index = 
-    Change in Z axis (mm) = 0.01
-    Number of planes = 1
+    Change in Z axis (mm) = 0.4
+    Number of planes = 20
     Number of planes saved = 
     Stage velocity (mm/s) = 
     Date time stamp = 
@@ -45,22 +45,22 @@
     </Stack Settings>
     <Start Position>
     X (mm) = 14.17
-    Y (mm) = 1.737
-    Z (mm) = 13.7
+    Y (mm) = 7.4
+    Z (mm) = 13.899999999999999
     Angle (degrees) = 0
     </Start Position>
     <End Position>
-    X (mm) = 14.17
-    Y (mm) = 1.737
-    Z (mm) = 13.69
-    Angle (degrees) = 0
+    X (mm) = 14.254
+    Y (mm) = 7.4
+    Z (mm) = 13.5
+    Angle (degrees) = -0.002
     </End Position>
     <Illumination Source>
     Laser 1 640 nm = 0.00 0
     Laser 2 561 nm = 0.00 0
-    Laser 3 488 nm = 5.00 1
+    Laser 3 488 nm = 5.18 0
     Laser 4 405 nm = 0.00 0
-    LED_RGB_Board = 28.04 0
+    LED_RGB_Board = 28.04 1
     LED selection = 1 0
     LED DAC = 41403 0
     </Illumination Source>

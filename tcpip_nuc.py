@@ -6,9 +6,12 @@ import numpy as np
 import select
 import struct
 
+NUC_IP = '10.129.37.17' #From Connection tab in GUI
+PORT_NUC = 53717 #From Connection tab in GUI
 
 
 def wf_to_nuc(client, wf_file, command):
+
 
     '''
 
@@ -28,6 +31,7 @@ def wf_to_nuc(client, wf_file, command):
 
     '''
 
+    #print(f"workflow command is {command}")
     fileBytes = os.path.getsize(wf_file)
     #print(fileBytes)
 
@@ -43,7 +47,7 @@ def wf_to_nuc(client, wf_file, command):
 
     clientID = np.int32(0)
 
-    int32Data0 = np.int32(0) #e.g. for stage movement: 0 == x-axis, 1 == y.axis, 2 == z.axis, 3 = rotational axis
+    int32Data0 = np.int32(0) #e.g. for stage movement: 1 == x-axis, 2 == y.axis, 3 == z.axis, 4 = rotational axis
 
     int32Data1 = np.int32(0)
 
@@ -71,25 +75,23 @@ def wf_to_nuc(client, wf_file, command):
 
                   doubleData, addDataBytes, buffer_72, cmd_end)
 
-
-
     try:
-        #print('try')
-        client.send(scmd)
+        #print(command)
+
         #print(wf_file)
         workflow_file = open(wf_file).read()
         #print('sending')
+        client.send(scmd)
+        #print(len(scmd))
         client.send(workflow_file.encode())
         print('Workflow file sent')
-        msg = client.recv(128)
-        #print(len(msg))
-        received = s.unpack(msg)
-        return received
+
+        return
         #addData = client.recv(received[11]) # unpack additional data sent by the nuc
 
     except socket.error:
 
-        print('Failed to send data')
+        print('Failed to send data wf')
 
 
 def command_to_nuc(client,command, data0=0, data1=0, data2=0, value=0.0):
@@ -111,8 +113,6 @@ def command_to_nuc(client,command, data0=0, data1=0, data2=0, value=0.0):
     :return: nothing
 
     '''
-
-    fileBytes = 0
 
     cmd_start = np.uint32(0xF321E654)  # start command
 
@@ -136,7 +136,7 @@ def command_to_nuc(client,command, data0=0, data1=0, data2=0, value=0.0):
 
     doubleData = float(value) #e.g. 64-bits, values of the end-position of the axis
 
-    addDataBytes = np.int32(fileBytes) # only if you sent a workflow file, else fileBytes = 0
+    addDataBytes = np.int32(0) # only if you sent a workflow file, else fileBytes = 0
 
     buffer_72 = b'\0' * 72
 
@@ -158,34 +158,25 @@ def command_to_nuc(client,command, data0=0, data1=0, data2=0, value=0.0):
     #print('before try')
     try:
         client.send(scmd)
-        # set timeout to 1 second
-        client.settimeout(1)
-        # receive data with timeout
-        msg = client.recv(128)
-        received = s.unpack(msg)
-        print('command to nuc returning with received')
-        return received
-    except socket.error:
-        print('Failed to send data')
-    except socket.timeout:
-        print('Timeout: no data received in 1 second')
-        return None
+        return #received
+    except socket.error as e:
+        print('cmd to nuc - Failed to send data', e)
 
-
-def is_stage_stopped(client, c_StageStopCheck):
-    all_true = False
-    xb= yb= zb= rb = False
-    while not all_true:
-        if not xb:
-            xb = command_to_nuc(client, c_StageStopCheck, data0 = 0)[1] #second entry should be "status", with 0 indicating not finished
-        if not yb:
-            yb = command_to_nuc(client, c_StageStopCheck, data0 = 1)[1]
-        if not zb:
-            zb = command_to_nuc(client, c_StageStopCheck, data0 = 2)[1]
-        if not rb:
-            rb = command_to_nuc(client, c_StageStopCheck, data0 = 3)[1]
-        all_true = xb*yb*rb*zb #if any value isn't 1, all_true stays 0/False
-        time.sleep(0.5)
+# replaced by idle_state
+# def is_stage_stopped(client, c_StageStopCheck):
+#     all_true = False
+#     xb= yb= zb= rb = False
+#     while not all_true:
+#         if not xb:
+#             xb = command_to_nuc(client, c_StageStopCheck, data0 = 0)[2] #second entry should be "status", with 0 indicating not finished
+#         if not yb:
+#             yb = command_to_nuc(client, c_StageStopCheck, data0 = 1)[2]
+#         if not zb:
+#             zb = command_to_nuc(client, c_StageStopCheck, data0 = 2)[2]
+#         if not rb:
+#             rb = command_to_nuc(client, c_StageStopCheck, data0 = 3)[2]
+#         all_true = xb*yb*rb*zb #if any value isn't 1, all_true stays 0/False
+#         time.sleep(0.5)
 
 
 if __name__ == 'main':

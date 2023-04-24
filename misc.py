@@ -20,16 +20,17 @@ def find_most_in_focus_plane(z_stack):
     
     # Initialize an empty list to hold the sharpness measures for each image
     sharpness_measures = []
-    
+    z_stack=z_stack.astype(np.float32)
     # Calculate the Laplacian for each image in the Z-stack and append the result to the list
     for i in range(z_stack.shape[0]):
-        laplacian = cv2.Laplacian(z_stack[i,:,:], cv2.CV_16S)
+        dst = np.zeros_like(z_stack[i,:,:], dtype=np.float32) 
+        laplacian = cv2.Laplacian(z_stack[i,:,:], cv2.CV_32F, dst)
         sharpness_measure = np.mean(np.abs(laplacian))
         sharpness_measures.append(sharpness_measure)
     
     # Find the index of the image with the highest sharpness measure
     most_in_focus_plane_index = np.argmax(sharpness_measures)
-    
+    print(f'most in focus plane is: {most_in_focus_plane_index}')
     return most_in_focus_plane_index
 
 def check_maxima(lst):
