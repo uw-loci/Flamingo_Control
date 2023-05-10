@@ -21,3 +21,11 @@ misc.py has extra functions for processing data, like calculating the most in fo
 
 workflow_gen.py creates and reads workflow files. Workflows are text files saved to the current computer/OS that can be sent to the "nuc" to perform an acquisition.
 They are currently parsed and stored as dictionaries in order to edit particular entries, then re-saved as text files when, for example, you need to change Y position before taking another Z stack.
+
+
+Control of what runs when is handled by a fairly messy set of "events" to let different threads know when to check a "queue" for the presence of data to process or a command to send. 
+
+Short term goals -
+Improved commenting and making sure all of the lightsheet interactions are working as expected.
+Improve data transfer rate by binning at the camera
+Streamline the workflow to minimize the number of events, while maintaining sufficient flexibility to grow out the code for additional functionality.
