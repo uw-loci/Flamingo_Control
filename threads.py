@@ -70,7 +70,7 @@ def command_listen_thread(client, idle_state, terminate_event, c_idle_state):
             #         altmsg = client.recv(data_waiting)
             #         print("Data received on command listen that was not 128 or 0 bytes: " + str(len(altmsg)))
 
-def live_listen_thread(live_client, terminate_event, processing_event, intensity_queue, image_queue):
+def live_listen_thread(live_client, terminate_event, processing_event, image_queue):
     global index
     print('LISTENING for image data on ' +str(live_client))
     while not terminate_event.is_set():
@@ -91,9 +91,12 @@ def live_listen_thread(live_client, terminate_event, processing_event, intensity
             #get the stack size from the workflow file, as it is not sent as part of the header information
             current_workflow_dict = workflow_gen.workflow_to_dict('workflows/workflow.txt')
             stack_size = float(current_workflow_dict['Stack Settings']['Number of planes'])
+            MIP = current_workflow_dict['Experiment Settings']['Display max projection']
 
             # receive the image data
-            if stack_size == 1:
+            # Coule probably be condensed with some better preparation
+            if MIP == "true" or stack_size == 1:
+                #print(f'MIP is {MIP}')
                 #Single image from snapshot workflows
                 image_data = b''
                 while len(image_data) < image_size:
@@ -111,10 +114,10 @@ def live_listen_thread(live_client, terminate_event, processing_event, intensity
                 
                 # return the grayscale image
                 #store intensity sum 
+                image_queue.put(np.array(grayscale_image))
+                print('processing set')
+                processing_event.set()
 
-                intensity_sum = np.sum(grayscale_image)
-                print(f'intensity sum: {intensity_sum}')
-                intensity_queue.put(intensity_sum)
 
             else: 
                 print("entering stack handling stack size: "+str(stack_size))
@@ -204,16 +207,28 @@ def send_thread(client,  command_queue, send_event, system_idle, c_workflow, dat
 
 
 
-def processing_thread(z_plane_queue, terminate_event, processing_event, image_queue):
+def processing_thread(z_plane_queue, terminate_event, processing_event, intensity_queue, image_queue):
     while True:
         if terminate_event.is_set():
             break
         processing_event.wait()
         print('processing thread active')
-        #process to find the most in focus of a stack
-        #Possibly add a function for the Discrete Cosine Transform?
-        z_stack = image_queue.get()
-        z_plane_queue.put(misc.find_most_in_focus_plane(z_stack))
-        processing_event.clear()
+        #determine what type of event to process
+        #Needs to be made more generic
+        image_data=image_queue.get()
+
+        #maybe both results could just be "result_queue"
+        if len(image_data.shape) == 2:
+            intensity_sum = np.sum(image_data)
+            print(f'intensity sum: {intensity_sum}')
+            intensity_queue.put(intensity_sum)
+            processing_event.clear()        
+        else:
+            #process to find the most in focus of a stack
+            #Possibly add a function for the Discrete Cosine Transform?
+            #using IF this could probably just be the max again, but it would be nice to see this work
+
+            z_plane_queue.put(misc.find_most_in_focus_plane(image_data))
+            processing_event.clear()
 
 
