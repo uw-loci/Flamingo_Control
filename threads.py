@@ -3,14 +3,16 @@ import workflow_gen
 import misc
 import socket
 import struct
-from PIL import Image, ImageOps
-from queue import Queue
+from PIL import Image#, ImageOps
+#from queue import Queue
 import socket
 import numpy as np
 import select
 import tcpip_nuc
-import time
+#import time
+
 index = 0
+
 def empty_socket(sock):
     """remove the data present on the socket"""
     input = [sock]
@@ -41,7 +43,8 @@ def bytes_waiting(sock):
         return 0
 
 
-
+#Commands sent to the Nuc get responses, this listens for and processes those responses.
+#Primary purpose is currently to listen for the "idle" state
 def command_listen_thread(client, idle_state, terminate_event, c_idle_state):
     print('LISTENING for commands on ' +str(client))
     empty_socket(client)
@@ -55,8 +58,10 @@ def command_listen_thread(client, idle_state, terminate_event, c_idle_state):
             #print(len(msg))
             received = s.unpack(msg)
             #print(f"Received on 53717: {received[1]} : {received[2]} : {received[3]} : {received[6]} : {received[10]} : size {received[11]}")
-            #need to check 53717 for received[1] being idle
-            #print("listening to 53717 got " + str(received[1]))
+            ####
+            # need to check 53717 for received[1] being idle
+            # print("listening to 53717 got " + str(received[1]))
+            ####
             if received[1] == c_idle_state:
                 print('status idle: '+str(received[2]))
                 if received[2] == 1:                    
@@ -70,6 +75,7 @@ def command_listen_thread(client, idle_state, terminate_event, c_idle_state):
             #         altmsg = client.recv(data_waiting)
             #         print("Data received on command listen that was not 128 or 0 bytes: " + str(len(altmsg)))
 
+#Listen for image data, which is sent via the "live" settings in the workflow file. Does not actually get full image data.
 def live_listen_thread(live_client, terminate_event, processing_event, image_queue):
     global index
     print('LISTENING for image data on ' +str(live_client))
@@ -166,6 +172,7 @@ def live_listen_thread(live_client, terminate_event, processing_event, image_que
     print('I guess termination')
     return None
 
+#Send commands or workflows to the controller, which then passes them on to the Flamingo
 def send_thread(client,  command_queue, send_event, system_idle, c_workflow, data0_queue, data1_queue, data2_queue, value_queue):
     while True:
         #only go when an event is set
@@ -206,7 +213,7 @@ def send_thread(client,  command_queue, send_event, system_idle, c_workflow, dat
         #need to check 53717 for received[1] being a "idle" code 36874
 
 
-
+#Take data from the image_queue and do something with it
 def processing_thread(z_plane_queue, terminate_event, processing_event, intensity_queue, image_queue):
     while True:
         if terminate_event.is_set():

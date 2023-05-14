@@ -1,15 +1,15 @@
 import socket
 import os
-import sys
-import time
+#import sys
+#import time
 import numpy as np
-import select
+#import select
 import struct
 
 NUC_IP = '10.129.37.17' #From Connection tab in GUI
 PORT_NUC = 53717 #From Connection tab in GUI
 
-
+#This used to be one function instead of two and could still go back. It was easier to understand as two, for me.
 def wf_to_nuc(client, wf_file, command):
 
 
@@ -93,7 +93,7 @@ def wf_to_nuc(client, wf_file, command):
 
         print('Failed to send data wf')
 
-
+#Commands to nuc, requires additional input values, data#, and does not require a workflow file
 def command_to_nuc(client,command, data0=0, data1=0, data2=0, value=0.0):
 
     '''
@@ -177,10 +177,3 @@ def command_to_nuc(client,command, data0=0, data1=0, data2=0, value=0.0):
 #             rb = command_to_nuc(client, c_StageStopCheck, data0 = 3)[2]
 #         all_true = xb*yb*rb*zb #if any value isn't 1, all_true stays 0/False
 #         time.sleep(0.5)
-
-
-if __name__ == 'main':
-    print("what")
-    wf_to_nuc('10.129.37.17', 53717, "40StackWorkflow.txt", 12292, wf = True)
-    print("Test")
-

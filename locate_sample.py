@@ -1,28 +1,38 @@
+'''
+Main command/control thread for LOCATING AND IF SAMPLE. Takes in some hard coded values which could potentially be handled through a GUI.
+Goes to the tip of the sample holder, then proceeds downward taking MIPs to find the sample. 
+Currently uses a provided IF channel to find a maxima, but it might be possible to use brightfield LEDs to find a minima.
+ TO DO: handle different magnifications, search ranges
+'''
 #laser_channel = "Laser 3 488 nm" # Check the workflow file under Illumination Source
 laser_channel = "Laser 1 640 nm" # Check the workflow file under Illumination Source
 
 laser_setting = '5.00 1' # A string that contains'laser power(double) On/Off(1/0)' with On=1 and Off=0
 LED_off = '28.04 0'
 LED_on = '38.04 1'
+ymax = 10 # might need to read this from the system - system dependent
+search = 0.4 #distance in mm to search for focus
 #Workflow templates
 #Current code requires EITHER Display max projection OR Work flow live view enabled
 #but not both
 wf_zstack = "ZStack.txt" #Fluorescent Z stack to find sample
 wf_snapshot = "Snapshot.txt"
-import tcpip_nuc
+
+
+
+#import tcpip_nuc
 import workflow_gen
 from threads import command_listen_thread, processing_thread, send_thread, live_listen_thread
 import misc
 import socket
 import shutil
 from threading import Event, Thread
-from PIL import Image, ImageOps
+#from PIL import Image, ImageOps
 import socket
-import multiprocessing as mp
-import numpy as np
+#import multiprocessing as mp
+#import numpy as np
 from queue import Queue
 import time
-
 #######CONNECTION START##########
 NUC_IP = '10.129.37.17' #From Connection tab in GUI
 PORT_NUC = 53717 #From Connection tab in GUI
@@ -35,6 +45,7 @@ live_client.connect((NUC_IP, PORT_LISTEN))
 
 #print('listener thread socket created on ' + str(IP_REMOTE)+ ' : '+str(PORT_REMOTE))
 #########CONNECTION END ###############
+
 
 ########DISCOVER INSTRUMENT ID#######
 #######SET VARIABLES BASED ON INSTRUMENT#
@@ -51,9 +62,7 @@ y_init = 1.7
 z_init = 13.7
 r_init = 0
 ##########
-#ymax = 10 # might need to read this from the system - system dependent
-##########
-search = 0.4 #distance in mm to search for focus
+
 
 
 #commands
@@ -67,14 +76,12 @@ c_update_live = 4119
 c_command_update= 36869
 c_idle_state = 40962
 ##############################
-#print('first snap')
-# returnedData = 0
-# while returnedData ==0:
-#     returnedData = tcpip_nuc.command_to_nuc(nuc_client, c_snap)
-# print('returned '+ str(returnedData[2]))
-#wf_file = 'workflows/workflow.txt'
 
-image_queue = Queue() #I think this only need to be defined in py
+##
+#Queues and Events for keeping track of what state the software/hardware is in
+#and pass information between threads (Queues)
+##
+image_queue = Queue() 
 z_plane_queue = Queue()
 intensity_queue = Queue()
 command_queue = Queue()
@@ -86,11 +93,8 @@ system_idle = Event()
 data0_queue, data1_queue, data2_queue, value_queue = Queue(),Queue(),Queue(),Queue()
 
 
-#returnedData = tcpip_nuc.command_to_nuc(nuc_client, c_command_update)
+# Start the threads to send commands, process data, and receive both command data and image data
 
-# Start the listener, generator, and processor threads
-live_listen_thread = Thread(target=live_listen_thread, 
-                         args=(live_client, terminate_event, processing_event, image_queue))
 send_thread = Thread(target=send_thread, 
                         args=(nuc_client, command_queue, send_event, system_idle, c_workflow, data0_queue, data1_queue, data2_queue, value_queue))
 processing_thread = Thread(target=processing_thread, 
@@ -98,6 +102,8 @@ processing_thread = Thread(target=processing_thread,
 
 command_listen_thread = Thread(target=command_listen_thread, 
                         args=(nuc_client, system_idle, terminate_event, c_idle_state))
+live_listen_thread = Thread(target=live_listen_thread, 
+                         args=(live_client, terminate_event, processing_event, image_queue))
 live_listen_thread.start()
 command_listen_thread.start()
 send_thread.start()
@@ -105,6 +111,7 @@ processing_thread.start()
 
 #####################
 print("moving to tip of sample holder")
+#data0_queue.put(0) doesn't represent a motion axis
 data0_queue.put(1) #xaxis 
 data1_queue.put(0)
 data2_queue.put(0)
@@ -171,16 +178,11 @@ send_event.set()
 while not system_idle.is_set():
     time.sleep(0.1)
 
-#start loop
 #Move half of a frame down from the current position
 ######how to determine half of a frame generically?######
+
 images = []
 coords = []
-# intensity = intensity_queue.get()
-# print('intensity '+ str(intensity))
-# coords.append([x_init,y_init,z_init,r_init,])
-#test removal of next line, shouldn't be necessary
-# print(coords)
 # initialize the active coordinates
 x = x_init
 y = y_init
@@ -189,14 +191,19 @@ r = r_init
 print(f"coordinates x: {x}, y: {y}, z:{z}, r:{r}")
 # send a command and listen for a response in a loop
 wf_dict = workflow_gen.workflow_to_dict("workflows/"+wf_zstack)
+
 ####
 ####maybe find max value for Y on instrument to set search range
 
-#loop through changing the position of the acquired brightfield Z stack by updating the currentZstack.txt file
-#Also update the position of currentSnapshot.txt to take IF images
-# both txt files are copied to workflow.txt right before use since the functions in "threads.py" all use workflow.txt
+#Loop through a set of Y positions (increasing is "lower" on the sample)
+# check for a terminated thread or that the search range has gone "too far" which is instrument dependent
+#Get a max intensity projection at each Y and look for a peak that could represent the sample
+  #Sending the MIP reduces the amount of data sent across the network, minimizing total time
+#Store the position of the peak and then go back to that stack and try to find the focus
+
+
 i=0
-while not terminate_event.is_set() and i <15:
+while not terminate_event.is_set() and y_init+search*i <ymax:
     print("starting loop round " + str(i+1))
     print("*")      
     #adjust the Zstack position based on the last snapshot Z position
@@ -225,31 +232,7 @@ while not terminate_event.is_set() and i <15:
     #print('after acquire Z'+ str(i+1))
 
 
-    #Take a snapshot there using the user defined laser and power
 
-    ##############
-    # snap_dict = workflow_gen.workflow_to_dict("workflows/current"+wf_snapshot)
-    # snap_dict['Start Position']['X (mm)'] = wf_dict['Start Position']['X (mm)']
-    # snap_dict['Start Position']['Y (mm)'] = wf_dict['Start Position']['Y (mm)']
-    # snap_dict['Start Position']['Angle (degrees)'] = wf_dict['Start Position']['Angle (degrees)']
-    # snap_dict['Start Position']['Z (mm)'] = str(zSnap)
-    # snap_dict['End Position']['X (mm)'] = wf_dict['Start Position']['X (mm)']
-    # snap_dict['End Position']['Y (mm)'] = wf_dict['Start Position']['Y (mm)']
-    # snap_dict['End Position']['Z (mm)'] = str(zSnap+0.005)   
-    # snap_dict['End Position']['Angle (degrees)'] = wf_dict['End Position']['Angle (degrees)']
-
-    # workflow_gen.dict_to_workflow("current"+wf_snapshot, snap_dict)
-    # shutil.copy("workflows/current"+wf_snapshot, 'workflows/workflow.txt')
-    # print(f"Starting Snapshot: {i+1}")
-    # command_queue.put(c_workflow)
-    # send_event.set()   
-    # while not system_idle.is_set():
-    #     time.sleep(0.1)
-    # print('test')
-    ##################################################
-    #start loop
-    #Move half of a frame down from the current position
-    ######how to determine half of a frame generically?#####
     intensity = intensity_queue.get()
     #print(f'intensity sum is {intensity}')
     #Store data about IF signal at current in focus location
@@ -353,3 +336,32 @@ zSnap = min(z1, z2)+step*float(queue_z)
 ######################
 print("Object located... maybe")
 ## ??SET HOME TO LOCATION OF SAMPLE??
+
+
+
+
+#extra code
+    #Take a snapshot there using the user defined laser and power
+
+    ##############
+    # snap_dict = workflow_gen.workflow_to_dict("workflows/current"+wf_snapshot)
+    # snap_dict['Start Position']['X (mm)'] = wf_dict['Start Position']['X (mm)']
+    # snap_dict['Start Position']['Y (mm)'] = wf_dict['Start Position']['Y (mm)']
+    # snap_dict['Start Position']['Angle (degrees)'] = wf_dict['Start Position']['Angle (degrees)']
+    # snap_dict['Start Position']['Z (mm)'] = str(zSnap)
+    # snap_dict['End Position']['X (mm)'] = wf_dict['Start Position']['X (mm)']
+    # snap_dict['End Position']['Y (mm)'] = wf_dict['Start Position']['Y (mm)']
+    # snap_dict['End Position']['Z (mm)'] = str(zSnap+0.005)   
+    # snap_dict['End Position']['Angle (degrees)'] = wf_dict['End Position']['Angle (degrees)']
+
+    # workflow_gen.dict_to_workflow("current"+wf_snapshot, snap_dict)
+    # shutil.copy("workflows/current"+wf_snapshot, 'workflows/workflow.txt')
+    # print(f"Starting Snapshot: {i+1}")
+    # command_queue.put(c_workflow)
+    # send_event.set()   
+    # while not system_idle.is_set():
+    #     time.sleep(0.1)
+    # print('test')
+    ##################################################
+    #Move half of a frame down from the current position
+    ######how to determine half of a frame generically?#####
