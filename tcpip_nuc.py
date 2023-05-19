@@ -1,3 +1,6 @@
+# Communicate directly with the nuc by way of workflows and commands
+# These workflows and commands will then be processed by the nuc and used to control the microscope hardware
+
 import socket
 import os
 #import sys
