@@ -4,13 +4,18 @@ import text_file_parsing
 import calculations
 import socket
 import struct
-from PIL import Image#, ImageOps
-#from queue import Queue
+from PIL import Image
 import socket
 import numpy as np
 import select
 import tcpip_nuc
 import time
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+import os
+from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+from PyQt5.QtGui import QPixmap, QImage, QColor
+from PyQt5.QtCore import Qt
 
 index = 0
 
@@ -43,10 +48,36 @@ def bytes_waiting(sock):
         # If there is no data waiting, return 0.
         return 0
 
+def convert_to_qimage(image_data):
+    """
+    Convert a 16-bit grayscale image to QImage, scaling the values to the full range of 8-bit RGB values,
+    and resizing the image to 512x512 using bilinear interpolation.
+    """
+    # Resize the image data to 512x512 using bilinear interpolation
+    image = Image.fromarray(image_data)
+    resized_image = image.resize((512, 512), resample=Image.BILINEAR)
+
+    width, height = resized_image.size
+    qimage = QImage(width, height, QImage.Format_RGB32)
+
+    min_value = np.min(resized_image)
+    max_value = np.max(resized_image)
+
+    # Calculate the scaling factors
+    scale = 255 / (max_value - min_value)
+    offset = -min_value * scale
+
+    for y in range(height):
+        for x in range(width):
+            value = int(resized_image.getpixel((x, y)) * scale + offset)
+            color = QColor(value, value, value)  # Grayscale color
+            qimage.setPixel(x, y, color.rgb())
+
+    return qimage
 
 #Commands sent to the Nuc get responses, this listens for and processes those responses.
 #Primary purpose is currently to listen for the "idle" state
-def command_listen_thread(client, idle_state, terminate_event, c_idle_state, c_scope_settings):
+def command_listen_thread(client, idle_state, terminate_event, c_idle_state, c_scope_settings_returned):
     print('LISTENING for commands on ' +str(client))
     empty_socket(client)
     s = struct.Struct('I I I I I I I I I I d I 72s I') # pack everything to binary via struct
@@ -69,27 +100,23 @@ def command_listen_thread(client, idle_state, terminate_event, c_idle_state, c_s
                 if received[2] == 1:                    
                     idle_state.set()
             ###############################
-            if received[1] == 4103:
+            if received[1] == c_scope_settings_returned:
                 time.sleep(0.05)
                 print(f'Getting microscope settings = {received[2]}')
                 bytes=bytes_waiting(client)
                 text_bytes = client.recv(bytes)
+                if not os.path.exists("microscope_settings"):
+                    os.makedirs("microscope_settings")
                 # "wb" setting is important here to write the binary data to the file as text. "w" fails
-                with open("workflows/ScopeSettings.txt", "wb") as file:
+                with open("microscope_settings/ScopeSettings.txt", "wb") as file:
                     file.write(text_bytes)
             #if received[1] == ????:
                 #Check if double data is -1 or a pixel FoV
     return
-            # data_waiting = 1
-            # while data_waiting != 128 and data_waiting!=0:
-            #     data_waiting = bytes_waiting(client)
-            #     print('data waiting: '+str(data_waiting))
-            #     if data_waiting != 128 and data_waiting!=0:
-            #         altmsg = client.recv(data_waiting)
-            #         print("Data received on command listen that was not 128 or 0 bytes: " + str(len(altmsg)))
+
 
 #Listen for image data, which is sent via the "live" settings in the workflow file. Does not actually get full image data.
-def live_listen_thread(live_client, terminate_event, processing_event, image_queue):
+def live_listen_thread(live_client, terminate_event, image_queue):
     global index
     print('LISTENING for image data on ' +str(live_client))
     while not terminate_event.is_set():
@@ -121,7 +148,7 @@ def live_listen_thread(live_client, terminate_event, processing_event, image_que
         # receive the image data
         # Coule probably be condensed with some better preparation
         if MIP == "true" or stack_size == 1:
-            #print(f'MIP is {MIP}')
+            print(f'MIP is {MIP}')
             #Single image from snapshot workflows
             image_data = b''
             while len(image_data) < image_size:
@@ -136,10 +163,11 @@ def live_listen_thread(live_client, terminate_event, processing_event, image_que
             index = index+1
             ################################
             grayscale_image = rotated_image.convert("L")
-            
+            print('imagequeue put')
             # return the grayscale image
             #store intensity sum 
             image_queue.put(np.array(grayscale_image))
+            #visualize_event.set()
 
 
         else: 
@@ -194,7 +222,7 @@ def live_listen_thread(live_client, terminate_event, processing_event, image_que
             #np.save(f'output_npy/output{index}.npy', stack)
             image_queue.put(stack)
 
-        #print("looping")
+        print("Listening thread returning to default state")
 
 
     print('Image data collection thread terminating')
@@ -280,3 +308,47 @@ def processing_thread(z_plane_queue, terminate_event, processing_event, intensit
     return
 
 
+
+# def visualization_thread(terminate_event, visualize_event, image_queue, stage_location_queue):
+#     # Create the application and main window
+#     app = QApplication(sys.argv)
+#     window = QWidget()
+#     layout = QVBoxLayout(window)
+
+#     # Initialize the QLabel for the image
+#     image_label = QLabel()
+#     layout.addWidget(image_label)
+
+#     # Initialize the QLabel for the text
+#     text_label = QLabel()
+#     layout.addWidget(text_label)
+
+#     window.show()
+
+#     while not terminate_event.is_set():
+#         if visualize_event.wait(timeout=0.1):
+#             # Get the latest data from the queues
+#             ##THIS PART IS FAILING
+#             #image_data = image_queue.queue[0]
+#             print("before get queue")
+#             image_data = image_queue.get()
+#             image_queue.put(image_data)
+#             x,y,z,r = stage_location_queue.get()
+#             print(f'image data shape {image_data.shape}')
+#             print(f'image data shape {image_data.dtype}')
+#             # Convert the image data to QPixmap
+#             if image_data is not None:
+#                 qimage = convert_to_qimage(image_data)
+#                 pixmap = QPixmap.fromImage(qimage)
+
+#                 # Display the image in the QLabel
+#                 image_label.setPixmap(pixmap)
+
+#             # Update the text
+#             text = f"x: {x}, y: {y}, z: {z}, r: {r}"
+#             text_label.setText(text)
+
+#             # Process events to update the GUI
+#             QApplication.processEvents()
+
+#     app.quit()

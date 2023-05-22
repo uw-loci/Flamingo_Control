@@ -3,10 +3,7 @@
 
 import socket
 import os
-#import sys
-#import time
 import numpy as np
-#import select
 import struct
 
 NUC_IP = '10.129.37.17' #From Connection tab in GUI

@@ -1,5 +1,4 @@
 # Includes functions to read and write text files specifically designed for the Flamingo
-import datetime
 # create an option to read in a previous workflow but make minor changes
 
 def workflow_to_dict(filename):

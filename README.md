@@ -1,4 +1,13 @@
 # Flamingo_Control
+Current workflow:
+Run GUI.py
+It will check to see if you have a ZStack.txt file in the workflows folder, if not, it will ask the user to find a workflow file it can use as a template.
+Once the workflow file is acquired, a GUI will let the user double check the settings and make any changes.
+They can then Find Sample to locate the sample, which will proceed from a pre-recorded start point down the Y axis until it finds a "bump" in the fluorescence intensity.
+Pictures of the various MIPs will be stored in the output_png folder, along with an initial brightfield image of the starting point, and a final image of the sample.
+
+
+
  Controlling a Flamingo microscope from Python
  Two main methods to send information
  Commands: Individual instructions, limited, e.g. move X axis position to "value"
@@ -29,3 +38,6 @@ Short term goals -
 Improved commenting and making sure all of the lightsheet interactions are working as expected.
 Improve data transfer rate by binning at the camera
 Streamline the workflow to minimize the number of events, while maintaining sufficient flexibility to grow out the code for additional functionality.
+
+
+Use the environment.yml file to set up the Conda environment.
