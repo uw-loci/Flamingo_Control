@@ -1,14 +1,13 @@
 # Functions that run in parallel with the main script, listening for data, sending commands/workflows, and performing processing steps
-import tcpip_nuc
-import text_file_parsing
-import calculations
+import functions.tcpip_nuc
+import functions.text_file_parsing
+import functions.calculations
 import socket
 import struct
 from PIL import Image
 import socket
 import numpy as np
 import select
-import tcpip_nuc
 import time
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -48,42 +47,16 @@ def bytes_waiting(sock):
         # If there is no data waiting, return 0.
         return 0
 
-def convert_to_qimage(image_data):
-    """
-    Convert a 16-bit grayscale image to QImage, scaling the values to the full range of 8-bit RGB values,
-    and resizing the image to 512x512 using bilinear interpolation.
-    """
-    # Resize the image data to 512x512 using bilinear interpolation
-    image = Image.fromarray(image_data)
-    resized_image = image.resize((512, 512), resample=Image.BILINEAR)
-
-    width, height = resized_image.size
-    qimage = QImage(width, height, QImage.Format_RGB32)
-
-    min_value = np.min(resized_image)
-    max_value = np.max(resized_image)
-
-    # Calculate the scaling factors
-    scale = 255 / (max_value - min_value)
-    offset = -min_value * scale
-
-    for y in range(height):
-        for x in range(width):
-            value = int(resized_image.getpixel((x, y)) * scale + offset)
-            color = QColor(value, value, value)  # Grayscale color
-            qimage.setPixel(x, y, color.rgb())
-
-    return qimage
 
 #Commands sent to the Nuc get responses, this listens for and processes those responses.
 #Primary purpose is currently to listen for the "idle" state
-def command_listen_thread(client, idle_state, terminate_event, c_idle_state, c_scope_settings_returned):
+def command_listen_thread(client, idle_state, terminate_event, c_idle_state, c_scope_settings_returned, c_pixel_size, other_data_queue):
     print('LISTENING for commands on ' +str(client))
     empty_socket(client)
     s = struct.Struct('I I I I I I I I I I d I 72s I') # pack everything to binary via struct
     while not terminate_event.is_set():
         while True:
-
+            #print('waiting for command response')
             msg = client.recv(128)
             #print(len(msg))
             if len(msg) != 128:
@@ -100,7 +73,7 @@ def command_listen_thread(client, idle_state, terminate_event, c_idle_state, c_s
                 if received[2] == 1:                    
                     idle_state.set()
             ###############################
-            if received[1] == c_scope_settings_returned:
+            elif received[1] == c_scope_settings_returned:
                 time.sleep(0.05)
                 print(f'Getting microscope settings = {received[2]}')
                 bytes=bytes_waiting(client)
@@ -110,13 +83,26 @@ def command_listen_thread(client, idle_state, terminate_event, c_idle_state, c_s
                 # "wb" setting is important here to write the binary data to the file as text. "w" fails
                 with open("microscope_settings/ScopeSettings.txt", "wb") as file:
                     file.write(text_bytes)
-            #if received[1] == ????:
+            elif received[1] == c_pixel_size:
+                print('pixel size '+str(received[10]))
+                if (received[10] < 0 ):
+                    print('Threads.py command_listen_thread: No pixel size detected from system. Exiting.')
+                    exit()                   
+                other_data_queue.put(received[10])
+            elif received[1] == 12331:
+                print('frame size '+str(received[7]))
+                if (received[10] < 0 ):
+                    print('Threads.py command_listen_thread: No camera size detected from system. Exiting.')
+                    exit()                   
+                other_data_queue.put(received[7])
+            
+
                 #Check if double data is -1 or a pixel FoV
     return
 
 
 #Listen for image data, which is sent via the "live" settings in the workflow file. Does not actually get full image data.
-def live_listen_thread(live_client, terminate_event, image_queue):
+def live_listen_thread(live_client, terminate_event, image_queue, visualize_queue):
     global index
     print('LISTENING for image data on ' +str(live_client))
     while not terminate_event.is_set():
@@ -130,7 +116,7 @@ def live_listen_thread(live_client, terminate_event, image_queue):
             break
 
         #make sure the queue is empty for a new in focus Z slice position
-        #print('header')
+        print('Data received on image thread')
         if len(header_data) != 40:
             raise ValueError(f'Header length should be 40 bytes, not {len(header_data)}')
         
@@ -140,7 +126,7 @@ def live_listen_thread(live_client, terminate_event, image_queue):
         image_size, image_width, image_height= header[0], header[1], header[2]
 
         #get the stack size from the workflow file, as it is not sent as part of the header information
-        current_workflow_dict = text_file_parsing.workflow_to_dict('workflows/workflow.txt')
+        current_workflow_dict = functions.text_file_parsing.workflow_to_dict('workflows/workflow.txt')
         stack_size = float(current_workflow_dict['Stack Settings']['Number of planes'])
         MIP = current_workflow_dict['Experiment Settings']['Display max projection']
         name = current_workflow_dict['Experiment Settings']['Comments']
@@ -156,17 +142,19 @@ def live_listen_thread(live_client, terminate_event, image_queue):
                 if not data:
                     raise socket.error('Incomplete image data')
                 image_data += data
+            
             image = Image.frombytes('I;16', (image_width, image_height), image_data)
             rotated_image = image.rotate(90, expand=True)
 
             rotated_image.save(f'output_png/{name}_{index}.png')
+            #print(f'rotated image shape is {np.array(rotated_image).shape} {np.array(rotated_image).dtype}')
             index = index+1
             ################################
-            grayscale_image = rotated_image.convert("L")
-            print('imagequeue put')
+            #grayscale_image = rotated_image.convert("L")
+            #print('imagequeue put')
             # return the grayscale image
-            #store intensity sum 
-            image_queue.put(np.array(grayscale_image))
+            image_queue.put(np.array(rotated_image))
+            visualize_queue.put(np.array(rotated_image))
             #visualize_event.set()
 
 
@@ -221,8 +209,8 @@ def live_listen_thread(live_client, terminate_event, image_queue):
             # save the stack as a numpy array
             #np.save(f'output_npy/output{index}.npy', stack)
             image_queue.put(stack)
-
-        print("Listening thread returning to default state")
+            #TO DO? Add the option to visualize the max intensity projection of a received stack?
+        #print("Listening thread returning to default state")
 
 
     print('Image data collection thread terminating')
@@ -242,7 +230,7 @@ def send_thread(client,  command_queue, send_event, system_idle, c_workflow, dat
 
         if command == c_workflow:
             #print("Sending workflow to nuc")
-            tcpip_nuc.wf_to_nuc(client, 'workflows/workflow.txt', c_workflow)
+            functions.tcpip_nuc.wf_to_nuc(client, 'workflows/workflow.txt', c_workflow)
             send_event.clear()
         else: #Handle commands
             print('Send non-workflow command to nuc: ' +str(command))
@@ -264,21 +252,23 @@ def send_thread(client,  command_queue, send_event, system_idle, c_workflow, dat
             else:
                 value=0    
             #print(f'command to nuc uses command {command}, data0 {data0}, data1 {data1}, data2 {data2}, value {value}')            
-            tcpip_nuc.command_to_nuc(client, command, data0, data1,data2,value)
+            functions.tcpip_nuc.command_to_nuc(client, command, data0, data1,data2,value)
             send_event.clear()
-        #returnedData = tcpip_nuc.command_to_nuc(client, 4119)
+        #returnedData = functions.tcpip_nuc.command_to_nuc(client, 4119)
         #need to check 53717 for received[1] being a "idle" code 36874
 
 
 #Take data from the image_queue and do something with it
+#Probably need to move this somewhere else?
 def processing_thread(z_plane_queue, terminate_event, processing_event, intensity_queue, image_queue):
     while not terminate_event.is_set():
         processing_event.wait()
-        print('processing thread waiting for data')
+        #print('processing thread waiting for data')
         #determine what type of event to process
         #Needs to be made more generic
         image_data=image_queue.get()
-        print(f'Processing thread acquired data of shape: {image_data.shape}')
+        #print(f'Processing thread acquired data of shape: {image_data.shape}')
+        #print(f'Processing thread acquired data of shape: {image_data.dtype}')
         #maybe both results could just be "result_queue"
         if len(image_data.shape) == 2:
             # Flatten the array to a 1D array
@@ -295,7 +285,7 @@ def processing_thread(z_plane_queue, terminate_event, processing_event, intensit
 
             # Calculate the mean of the largest quarter
             mean_largest_quarter = np.mean(largest_quarter)
-            print(f'top 25th percentile mean intensity {mean_largest_quarter}')
+            #print(f'top 25th percentile mean intensity {mean_largest_quarter}')
             intensity_queue.put(mean_largest_quarter)
             processing_event.clear()        
         else:
@@ -303,52 +293,9 @@ def processing_thread(z_plane_queue, terminate_event, processing_event, intensit
             #Possibly add a function for the Discrete Cosine Transform?
             #using IF this could probably just be the max again, but it would be nice to see this work
 
-            z_plane_queue.put(calculations.find_most_in_focus_plane(image_data))
+            z_plane_queue.put(functions.calculations.find_most_in_focus_plane(image_data))
             processing_event.clear()
     return
 
 
 
-# def visualization_thread(terminate_event, visualize_event, image_queue, stage_location_queue):
-#     # Create the application and main window
-#     app = QApplication(sys.argv)
-#     window = QWidget()
-#     layout = QVBoxLayout(window)
-
-#     # Initialize the QLabel for the image
-#     image_label = QLabel()
-#     layout.addWidget(image_label)
-
-#     # Initialize the QLabel for the text
-#     text_label = QLabel()
-#     layout.addWidget(text_label)
-
-#     window.show()
-
-#     while not terminate_event.is_set():
-#         if visualize_event.wait(timeout=0.1):
-#             # Get the latest data from the queues
-#             ##THIS PART IS FAILING
-#             #image_data = image_queue.queue[0]
-#             print("before get queue")
-#             image_data = image_queue.get()
-#             image_queue.put(image_data)
-#             x,y,z,r = stage_location_queue.get()
-#             print(f'image data shape {image_data.shape}')
-#             print(f'image data shape {image_data.dtype}')
-#             # Convert the image data to QPixmap
-#             if image_data is not None:
-#                 qimage = convert_to_qimage(image_data)
-#                 pixmap = QPixmap.fromImage(qimage)
-
-#                 # Display the image in the QLabel
-#                 image_label.setPixmap(pixmap)
-
-#             # Update the text
-#             text = f"x: {x}, y: {y}, z: {z}, r: {r}"
-#             text_label.setText(text)
-
-#             # Process events to update the GUI
-#             QApplication.processEvents()
-
-#     app.quit()

@@ -1,10 +1,9 @@
 # Communicate directly with the nuc by way of workflows and commands
 # These workflows and commands will then be processed by the nuc and used to control the microscope hardware
 
-import socket
-import os
+import socket, os, sys, struct
 import numpy as np
-import struct
+
 
 NUC_IP = '10.129.37.17' #From Connection tab in GUI
 PORT_NUC = 53717 #From Connection tab in GUI
@@ -35,29 +34,29 @@ def wf_to_nuc(client, wf_file, command):
     fileBytes = os.path.getsize(wf_file)
     #print(fileBytes)
 
-    cmd_start = np.uint32(0xF321E654)  # start command
+    cmd_start = np.uint32(0xF321E654)  # start command [0]
 
-    cmd = np.uint32(command) #cmd command (CommandCodes.h): open in Visual Studio Code + install C/C++ Extension IntelliSense, when hovering over command binary number visible
+    cmd = np.uint32(command) #[1] cmd command (CommandCodes.h): open in Visual Studio Code + install C/C++ Extension IntelliSense, when hovering over command binary number visible
 
-    status = np.int32(0)
+    status = np.int32(0) #[2]
 
-    hardwareID = np.int32(0)
+    hardwareID = np.int32(0) #[3]
 
-    subsystemID = np.int32(0)
+    subsystemID = np.int32(0) #[4]
 
-    clientID = np.int32(0)
+    clientID = np.int32(0) #[5]
 
-    int32Data0 = np.int32(0) #e.g. for stage movement: 1 == x-axis, 2 == y.axis, 3 == z.axis, 4 = rotational axis
+    int32Data0 = np.int32(0) #[6]  e.g. for stage movement: 1 == x-axis, 2 == y.axis, 3 == z.axis, 4 = rotational axis
 
-    int32Data1 = np.int32(0)
+    int32Data1 = np.int32(0) #[7]
 
-    int32Data2 = np.int32(0)
+    int32Data2 = np.int32(0) #[8]
 
-    cmdDataBits0 = np.int32(0)
+    cmdDataBits0 = np.int32(0) #[9]
 
-    doubleData = float(0) #e.g. 64-bits, values of the end-position of the axis
+    doubleData = float(0) # #[10] e.g. 64-bits, values of the end-position of the axis
 
-    addDataBytes = np.int32(fileBytes) # only if you sent a workflow file, else fileBytes = 0
+    addDataBytes = np.int32(fileBytes) #[11] only if you sent a workflow file, else fileBytes = 0
 
     buffer_72 = b'\0' * 72
 
@@ -79,11 +78,11 @@ def wf_to_nuc(client, wf_file, command):
         #print(command)
 
         #print(wf_file)
-        workflow_file = open(wf_file).read()
+        workflow_file = open(wf_file, encoding='utf-8').read()
         #print('sending')
         client.send(scmd)
         #print(len(scmd))
-        client.send(workflow_file.encode())
+        client.send(workflow_file.encode('utf-8'))
         print('Workflow file sent')
 
         return
@@ -132,7 +131,7 @@ def command_to_nuc(client,command, data0=0, data1=0, data2=0, value=0.0):
 
     int32Data2 = np.int32(data2)
 
-    cmdDataBits0 = np.int32(0)
+    cmdDataBits0 = np.uint32(0x80000000) # 0x80000000
 
     doubleData = float(value) #e.g. 64-bits, values of the end-position of the axis
 

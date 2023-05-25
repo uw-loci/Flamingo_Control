@@ -12,8 +12,12 @@ import numpy as np
 
 import time
 
+x_init = 13.37
+y_init = 1.7
+z_init = 13.7
+r_init = 0
 
-def locate_sample( image_queue, command_queue, z_plane_queue, intensity_queue, view_snapshot, system_idle, processing_event, send_event, terminate_event, data0_queue, data1_queue, data2_queue, value_queue, stage_location_queue, laser_channel = "Laser 3 488 nm", laser_setting = '5.00 1', z_search_depth = 2.0, data_storage_location = '/media/deploy/MSN_LS'):
+def locate_sample(visualize_queue, visualize_event,other_data_queue, image_queue, command_queue, z_plane_queue, intensity_queue, view_snapshot, system_idle, processing_event, send_event, terminate_event, data0_queue, data1_queue, data2_queue, value_queue, stage_location_queue, laser_channel = "Laser 3 488 nm", laser_setting = '5.00 1', z_search_depth = 2.0, data_storage_location = '/media/deploy/MSN_LS'):
     '''
     Main command/control thread for LOCATING AND IF SAMPLE. Takes in some hard coded values which could potentially be handled through a GUI.
     Goes to the tip of the sample holder, then proceeds downward taking MIPs to find the sample. 
@@ -30,19 +34,7 @@ def locate_sample( image_queue, command_queue, z_plane_queue, intensity_queue, v
 
      # A string that contains'laser power(double) On/Off(1/0)' with On=1 and Off=0
 
-    nuc_client, live_client, pixel_size, wf_snapshot, wf_zstack, LED_on, LED_off = start_connection()
-    #coordinates for metal sample holder on Elsa
-    # x_init = 14.17
-    # y_init = 1.737
-    # z_init = 13.7
-    # r_init = 0
-    x_init = 13.37
-    y_init = 1.7
-    z_init = 13.7
-    r_init = 0
-    ##########
-
-
+    nuc_client, live_client, wf_snapshot, wf_zstack, LED_on, LED_off = start_connection()
 
     #commands
 
@@ -58,6 +50,8 @@ def locate_sample( image_queue, command_queue, z_plane_queue, intensity_queue, v
     c_update_live = 4119
     c_command_update= 36869
     c_idle_state = 40962
+    c_pixel_size = 12347
+    c_camera_ROI_size_pixels = 12331
     ##############################
 
     ##
@@ -69,13 +63,16 @@ def locate_sample( image_queue, command_queue, z_plane_queue, intensity_queue, v
 
     # Start the threads to send commands, process data, and receive both command data and image data
 
-    live_listen_thread_var, command_listen_thread_var,send_thread_var,processing_thread_var=create_threads(c_scope_settings_returned,c_idle_state,c_workflow, nuc_client, live_client, image_queue, command_queue, z_plane_queue, intensity_queue, view_snapshot, system_idle, processing_event, send_event, terminate_event, data0_queue, data1_queue, data2_queue, value_queue, stage_location_queue)
+    live_listen_thread_var, command_listen_thread_var,send_thread_var,processing_thread_var=create_threads(c_pixel_size, c_scope_settings_returned,c_idle_state,c_workflow, nuc_client, live_client,other_data_queue, image_queue, command_queue, z_plane_queue, intensity_queue, visualize_queue, view_snapshot, system_idle, processing_event, send_event, terminate_event, data0_queue, data1_queue, data2_queue, value_queue, stage_location_queue)
     
+    pixel_size, scope_settings = get_microscope_settings(command_queue,other_data_queue, c_scope_settings_request, c_pixel_size, send_event)
+    command_queue.put(c_camera_ROI_size_pixels)
+    send_event.set()
+    time.sleep(0.5)
 
-
-    voxel_dimensions, scope_settings = get_microscope_settings(command_queue, c_scope_settings_request, send_event)
+    #frame_size = other_data_queue.get()
     #FOV = image_pixel_size*number_of_pixels
-    y_move = 0.4
+    y_move =0.8 # pixel_size*frame_size #pixel size in mm*number of pixels per frame
     ############
     ymax = float(scope_settings['Stage limits']['Soft limit max y-axis'])
     print(f'ymax is {ymax}')
@@ -84,13 +81,11 @@ def locate_sample( image_queue, command_queue, z_plane_queue, intensity_queue, v
     go_to_XYZR(data0_queue, data1_queue, data2_queue, value_queue, command_queue, send_event, c_setStagePos,x_init, y_init, z_init, r_init)
     ####################
 
-
     #Brightfield image to verify sample holder location
     print(f"coordinates x: {x_init}, y: {y_init}, z:{z_init}, r:{r_init}")
-    snap_dict = text_file_parsing.workflow_to_dict("workflows/"+wf_snapshot)
+    snap_dict = functions.text_file_parsing.workflow_to_dict("workflows/"+wf_snapshot)
     snap_dict['Experiment Settings']['Save image drive'] = data_storage_location #'/media/deploy/'+ USB_drive_name
     snap_dict['Experiment Settings']['Save image directory'] = 'Sample Search'
-    snap_dict['Experiment Settings']['Save image data in tiff format'] = 'false'
     snap_dict['Experiment Settings']['Comments'] = 'Brightfield'
     snap_dict['Start Position']['X (mm)'] = x_init
     snap_dict['Start Position']['Y (mm)'] = y_init
@@ -101,20 +96,27 @@ def locate_sample( image_queue, command_queue, z_plane_queue, intensity_queue, v
     snap_dict['Start Position']['Angle (degrees)'] = r_init
     snap_dict['End Position']['Angle (degrees)'] = r_init
     snap_dict['Stack Settings']['Change in Z axis (mm)'] = 0.01
-    text_file_parsing.dict_to_workflow("workflows/current"+wf_snapshot, snap_dict)
+    functions.text_file_parsing.dict_to_workflow("workflows/current"+wf_snapshot, snap_dict)
 
     #WORKFLOW.TXT FILE IS ALWAYS USED FOR send_event
     shutil.copy("workflows/current"+wf_snapshot, 'workflows/workflow.txt')
-    #take a snapshot
-    print('Acquire a brightfield snapshot')
-    command_queue.put(c_workflow)
-    send_event.set()
 
-    while not system_idle.is_set():
-        time.sleep(0.1)
-    #Clear out collected data
-    processing_event.set()
-    top25_percentile_mean = intensity_queue.get()
+ 
+    # #take a snapshot
+    # print('Acquire a brightfield snapshot')
+    # command_queue.put(c_workflow)
+    # send_event.set()
+
+    # while not system_idle.is_set():
+    #     time.sleep(0.1)
+    # print('VISUALIZE EVENT SET*****************')
+    # #visualize_event.set()
+    # #Clear out collected data
+    # processing_event.set()
+    # top25_percentile_mean = intensity_queue.get()
+
+
+
     #Move half of a frame down from the current position
     ######how to determine half of a frame generically?######
 
@@ -129,11 +131,10 @@ def locate_sample( image_queue, command_queue, z_plane_queue, intensity_queue, v
     zend = float(z) +float(z_search_depth)/2
     print(f"coordinates x: {x}, y: {y}, z:{z}, r:{r}")
     # Settings for the Z-stacks
-    wf_dict = text_file_parsing.workflow_to_dict("workflows/"+wf_zstack)
+    wf_dict = functions.text_file_parsing.workflow_to_dict("workflows/"+wf_zstack)
     # wf_dict['Illumination Source'][laser_channel] = "0.00 0"
     # wf_dict['Illumination Source']['LED_RGB_Board'] = LED_on
     wf_dict['Experiment Settings']['Save image drive'] = data_storage_location
-    wf_dict['Experiment Settings']['Save image data in tiff format'] = 'false'
     wf_dict['Experiment Settings']['Save image directory'] = 'Sample Search'
     wf_dict['Experiment Settings']['Comments'] = 'Delete'
     wf_dict['Stack Settings']['Change in Z axis (mm)'] = z_search_depth
@@ -142,7 +143,7 @@ def locate_sample( image_queue, command_queue, z_plane_queue, intensity_queue, v
     wf_dict['Illumination Source'][laser_channel] = str(laser_setting)+' 1' # 1 indicates that the laser should be used/on.
     wf_dict['Illumination Source']['LED_RGB_Board'] = LED_off
     framerate = 40.0032 #/s
-    wf_dict['Stack Settings']['Stage velocity (mm/s)']  = str(10*framerate/1000) #10um spacing and conversion to mm/s
+    wf_dict['Stack Settings']['Z stage velocity (mm/s)']  = str(10*framerate/1000) #10um spacing and conversion to mm/s
 
     #Loop through a set of Y positions (increasing is "lower" on the sample)
     # check for a terminated thread or that the search range has gone "too far" which is instrument dependent
@@ -165,9 +166,10 @@ def locate_sample( image_queue, command_queue, z_plane_queue, intensity_queue, v
         wf_dict['End Position']['Angle (degrees)'] = r
         
         # Write a new workflow based on new Y positions
-        text_file_parsing.dict_to_workflow("workflows/current"+wf_zstack, wf_dict)
-        
+        functions.text_file_parsing.dict_to_workflow("workflows/current"+wf_zstack, wf_dict)
+        functions.text_file_parsing.dict_to_text("workflows/current_test_"+wf_zstack, wf_dict)
         #Additional step for records that nothing went wrong if swapping between snapshots and Zstacks
+        
         shutil.copy("workflows/current"+wf_zstack, 'workflows/workflow.txt')
         print(f"coordinates x: {x}, y: {y}, z:{z}, r:{r}")
         
@@ -178,8 +180,8 @@ def locate_sample( image_queue, command_queue, z_plane_queue, intensity_queue, v
         while not system_idle.is_set():
             time.sleep(0.1)
         stage_location_queue.put([x,y,z,r])
-        # visualize_event.set()
-        # time.sleep(0.1)
+        visualize_event.set()
+        time.sleep(0.1)
         #print('after acquire Z'+ str(i+1))
         print('processing set')
         processing_event.set()
@@ -193,12 +195,17 @@ def locate_sample( image_queue, command_queue, z_plane_queue, intensity_queue, v
         
         top25_percentile_means = [coord[4] for coord in coords]
         print(f'Intensity means: {top25_percentile_means}')
-        if (maxima :=calculations.check_maxima(top25_percentile_means)):
+        if (maxima :=functions.calculations.check_maxima(top25_percentile_means)):
             break
         #move the stage up
         y = y + y_move
         i=i+1
-
+    #Check for cancellation from GUI
+    if terminate_event.is_set():
+        print('thread terminating')
+        close_connection(nuc_client, live_client,live_listen_thread_var, command_listen_thread_var,send_thread_var,processing_thread_var)
+        exit()
+    
     x = coords[maxima][0]
     y = coords[maxima][1]
     z = coords[maxima][2]
@@ -237,10 +244,15 @@ def locate_sample( image_queue, command_queue, z_plane_queue, intensity_queue, v
     combined_stack = []
     for i in range(loops):
         print(f'Subset of planes acquisition {i} in {loops}')
+        #Check for cancellation from GUI
+        if terminate_event.is_set():
+            print('thread terminating')
+            close_connection(nuc_client, live_client,live_listen_thread_var, command_listen_thread_var,send_thread_var,processing_thread_var)
+            exit()
         wf_dict['Start Position']['Z (mm)'] = str(float(z) -float(z_search_depth)/2 + i*buffer_max*step_size_mm)
         wf_dict['End Position']['Z (mm)'] = str(float(z) - float(z_search_depth)/2 + (i+1)*buffer_max*step_size_mm)
 
-        text_file_parsing.dict_to_workflow("workflows/current"+wf_zstack, wf_dict)
+        functions.text_file_parsing.dict_to_workflow("workflows/current"+wf_zstack, wf_dict)
         shutil.copy("workflows/current"+wf_zstack, 'workflows/workflow.txt')
         print(f"start: {wf_dict['Start Position']['Z (mm)']}, end: {wf_dict['End Position']['Z (mm)']}")
         command_queue.put(c_workflow)
@@ -297,10 +309,10 @@ def locate_sample( image_queue, command_queue, z_plane_queue, intensity_queue, v
     #Take a snapshot there using the user defined laser and power
 
     ##############
-    snap_dict = text_file_parsing.workflow_to_dict("workflows/current"+wf_snapshot)
+    snap_dict = functions.text_file_parsing.workflow_to_dict("workflows/current"+wf_snapshot)
     snap_dict['Experiment Settings']['Save image directory'] = 'Sample'
     snap_dict['Experiment Settings']['Comments'] = 'Sample located'
-    snap_dict['Illumination Source'][laser_channel] = str(laser_setting)
+    snap_dict['Illumination Source'][laser_channel] = str(laser_setting)+' 1' # 1 indicates that the laser should be used/on.
     snap_dict['Illumination Source']['LED_RGB_Board'] = LED_off
     snap_dict['Start Position']['X (mm)'] = str(x)
     snap_dict['Start Position']['Y (mm)'] = str(y) #increment y (down the sample tube)
@@ -311,18 +323,18 @@ def locate_sample( image_queue, command_queue, z_plane_queue, intensity_queue, v
     snap_dict['Start Position']['Z (mm)'] = str(zSnap)
     snap_dict['End Position']['Z (mm)'] = str(zSnap+0.005)   
 
-    text_file_parsing.dict_to_workflow("workflows/current"+wf_snapshot, snap_dict)
+    functions.text_file_parsing.dict_to_workflow("workflows/current"+wf_snapshot, snap_dict)
     shutil.copy("workflows/current"+wf_snapshot, 'workflows/workflow.txt')
     print(f"Starting Snapshot")
     command_queue.put(c_workflow)
-    send_event.set()   
+    send_event.set() 
     while not system_idle.is_set():
         time.sleep(0.1)
-    print('Shutting down connection')
-    ###
+    #only close out the connections once the final image is collected
+    image_queue.get()
     #Clean up "delete" PNG files or dont make them
     ###
-    
+    print('Shutting down connection')
     close_connection(nuc_client, live_client,live_listen_thread_var, command_listen_thread_var,send_thread_var,processing_thread_var)
 
     exit()
