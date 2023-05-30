@@ -11,7 +11,7 @@ A visual of each Zstack (a maximum intensity projection) collected as the progra
 Once a maxima is found in the IF intensity of the channel selected through the GUI, another Z stack will be taken at that Y axis location to find a rough depth for the sample.
 Pictures of the various MIPs will be stored in the output_png folder, along with an initial brightfield image of the starting point, and a final image of the sample where the instrument found focus.
 
-![alt text](https://github.com/MichaelSNelson/Flamingo_Control/blob/main/images/workflow.png?raw=true)
+![Overall control flow](https://github.com/uw-loci/Flamingo_Control/blob/main/images/workflow.PNG?raw=true)
 
  Controlling a Flamingo microscope from Python
  Two main methods to send information
@@ -21,7 +21,9 @@ Pictures of the various MIPs will be stored in the output_png folder, along with
 
 Main file - GUI.py
 
-The buttons are mostly non-functional at this point, but the Find focus button triggers the find_focus function in a new thread.
+![Current status of GUI](https://github.com/uw-loci/Flamingo_Control/blob/main/images/GUI.PNG?raw=true)
+Find focus, go to position, and take IF snapshot are all funcitoning now. There is room to add new functionality. The graphical representation to the right is somewhat laggy, and may skip images.
+
 The thread then connects to the microscope and spins off four more threads to handle:
 
 1. Sending commands - send commands and workflows
