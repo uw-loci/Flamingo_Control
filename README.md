@@ -21,7 +21,8 @@ Pictures of the various MIPs will be stored in the output_png folder, along with
 
 Main file - GUI.py
 
-![Current status of GUI](https://github.com/uw-loci/Flamingo_Control/blob/main/images/GUI.PNG?raw=true)
+![Current status of GUI](https://github.com/uw-loci/Flamingo_Control/blob/main/images/GUI.png?raw=true)
+
 Find focus, go to position, and take IF snapshot are all funcitoning now. There is room to add new functionality. The graphical representation to the right is somewhat laggy, and may skip images.
 
 The thread then connects to the microscope and spins off four more threads to handle:
