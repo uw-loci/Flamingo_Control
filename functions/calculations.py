@@ -55,7 +55,8 @@ def check_maxima(lst):
     lst_std = np.std(lst_sorted)
     #print(f'mean of intensities is {lst_mean}')
     #print(f'std of intensities is {lst_std}')
-    threshold = lst_mean + 20 * lst_std
+    #Threshold of 10 standard deviations was somewhat arbitrary for the samples tested. It is possible it could be much lower.
+    threshold = lst_mean + 15 * lst_std
     
     # Find maxima above the threshold with below threshold values on both sides of it
     maxima_above_threshold = []

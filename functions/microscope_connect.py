@@ -3,60 +3,66 @@ import socket
 import time
 from threading import Event, Thread
 from functions.threads import command_listen_thread, processing_thread, send_thread, live_listen_thread
-import functions.text_file_parsing
+from functions.text_file_parsing import text_to_dict
 import tkinter as tk
 from tkinter import messagebox
+#Default values for LED on and off
+LED_off = '00.00 0'
+LED_on = '50.0 1'
+#commands
+commands = text_to_dict('functions/command_list.txt')
+#Testing fidelity
+#print(commands)
+#dict_to_text('functions/command_test.txt', commands)
 
-#Need a way to get this information from the user
-CAMERA_PIXEL_SIZE = 0.65
-NUC_IP = '10.129.37.17' #From Connection tab in GUI
-PORT_NUC = 53717 #From Connection tab in GUI
-PORT_LISTEN = PORT_NUC+1 #Live mode data, on 53718
-#There should also be an associated initial x,y,z,r 
+COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD'] )
+COMMAND_CODES_COMMON_SCOPE_SETTINGS  = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS'])
+COMMAND_CODES_CAMERA_WORK_FLOW_START  = int(commands['CommandCodes.h']['COMMAND_CODES_CAMERA_WORK_FLOW_START'] )
+COMMAND_CODES_STAGE_POSITION_SET  = int(commands['CommandCodes.h']['COMMAND_CODES_STAGE_POSITION_SET'])
+COMMAND_CODES_SYSTEM_STATE_IDLE  = int(commands['CommandCodes.h']['COMMAND_CODES_SYSTEM_STATE_IDLE'])
+COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET  = int(commands['CommandCodes.h']['COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET'])
+COMMAND_CODES_CAMERA_IMAGE_SIZE_GET  = int(commands['CommandCodes.h']['COMMAND_CODES_CAMERA_IMAGE_SIZE_GET'])
+    ##############################
 
 
-def go_to_XYZR(data0_queue, data1_queue, data2_queue, value_queue, command_queue, send_event, c_setStagePos, x,y,z,r):
+
+def go_to_XYZR(command_data_queue, command_queue, send_event, COMMAND_CODES_STAGE_POSITION_SET, xyzr):
+    # Unpack the provided XYZR coordinates, r is in degrees, other values are in mm
+    x,y,z,r = xyzr
     print(f"moving to {x} {y} {z} {r}")
     #data0_queue.put(0) doesn't represent a motion axis
-    data0_queue.put(1) #xaxis 
-    data1_queue.put(0)
-    data2_queue.put(0)
-    value_queue.put(x)
-    command_queue.put(c_setStagePos) #movement
+    # Put X-axis movement command data in the queue
+    command_data_queue.put([1,0,0,x])# 1 = xaxis
+    # Put movement command in the queue
+    command_queue.put(COMMAND_CODES_STAGE_POSITION_SET ) #movement
+    # Signal the send event to trigger command sending
+    send_event.set()
+    # Wait until the command queue is empty (indicating the command has been sent off to the controller)
+    while not command_queue.empty():
+        time.sleep(.1)
+
+    command_data_queue.put([3,0,0,z])# 3 = zaxis
+    command_queue.put(COMMAND_CODES_STAGE_POSITION_SET ) #movement
     send_event.set()
     while not command_queue.empty():
         time.sleep(.1)
 
-    data0_queue.put(3) #zaxis 
-    data1_queue.put(0)
-    data2_queue.put(0)
-    value_queue.put(z)
-    command_queue.put(c_setStagePos) #movement
+    command_data_queue.put([4,0,0,r])# 4 = rotation
+    command_queue.put(COMMAND_CODES_STAGE_POSITION_SET ) #movement
     send_event.set()
     while not command_queue.empty():
         time.sleep(.1)
 
-    data0_queue.put(4) #rotation
-    data1_queue.put(0)
-    data2_queue.put(0)
-    value_queue.put(r)
-    command_queue.put(c_setStagePos) #movement
-    send_event.set()
-    while not command_queue.empty():
-        time.sleep(.1)
-
-    data0_queue.put(2) #yaxis 
-    data1_queue.put(0)
-    data2_queue.put(0)
-    value_queue.put(y)
-    command_queue.put(c_setStagePos) #movement
+    command_data_queue.put([2,0,0,y])# 2 = yaxis
+    command_queue.put(COMMAND_CODES_STAGE_POSITION_SET ) #movement
     send_event.set()
     while not command_queue.empty():
         time.sleep(.1)
 
 
-def get_microscope_settings(command_queue,other_data_queue, c_scope_settings_request, c_pixel_size, send_event):
-    command_queue.put(c_scope_settings_request) #movement
+def get_microscope_settings(command_queue, other_data_queue, COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD,
+                            COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET, send_event):
+    command_queue.put(COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD) #movement
     send_event.set()
     while not command_queue.empty():
         time.sleep(.3)
@@ -65,17 +71,14 @@ def get_microscope_settings(command_queue,other_data_queue, c_scope_settings_req
     #convert them into a dict to extract useful information
     #########
 
-    #Not currently used
-    metadata_settings = functions.text_file_parsing.text_to_dict("microscope_settings/FlamingoMetaData.txt")
-    scope_settings = functions.text_file_parsing.text_to_dict("microscope_settings/ScopeSettings.txt")
-    ################
-    #Occasionally there is an error on this next step, not entirely sure why. Inconsistent.
-    #######
-    objective_mag = float(metadata_settings['Instrument']['Type']['Objective lens magnification'])
-    tube_lens_design_length = float(metadata_settings['Instrument']['Type']['Tube lens design focal length (mm)'])
-    tube_lens_actual_length = float(metadata_settings['Instrument']['Type']['Tube lens length (mm)'])
-    #######################################################
-    command_queue.put(c_pixel_size) #movement
+
+    scope_settings = text_to_dict("microscope_settings/ScopeSettings.txt")
+
+    # objective_mag = float(metadata_settings['Instrument']['Type']['Objective lens magnification'])
+    # tube_lens_design_length = float(metadata_settings['Instrument']['Type']['Tube lens design focal length (mm)'])
+    # tube_lens_actual_length = float(metadata_settings['Instrument']['Type']['Tube lens length (mm)'])
+    # #######################################################
+    command_queue.put(COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET ) #movement
     send_event.set()
     while not command_queue.empty():
         time.sleep(.3)
@@ -83,24 +86,13 @@ def get_microscope_settings(command_queue,other_data_queue, c_scope_settings_req
     image_pixel_size = other_data_queue.get()
     return image_pixel_size, scope_settings
 
-def start_connection():
-    LED_off = '00.00 0'
-    LED_on = '38.04 1'
-     #Depth of Z stack to search for sample in mm
-
+def start_connection(NUC_IP, PORT_NUC):
+    PORT_LISTEN = PORT_NUC+1
     #Workflow templates
     #Current code requires EITHER Display max projection OR Work flow live view enabled
     #but not both
     wf_zstack = "ZStack.txt" #Fluorescent Z stack to find sample
-    wf_snapshot = "Snapshot.txt"
-
-
     ########
-    if not os.path.exists("workflows"):
-        os.makedirs("workflows")
-    if not os.path.exists("ouput_png"):
-        os.makedirs("ouput_png")
-
     #Function specific, validate that Snapshot.txt and ZStack.txt exist, or find way to make sure they don't need to exist
     try:
         nuc_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -123,32 +115,43 @@ def start_connection():
 
     #print('listener thread socket created on ' + str(IP_REMOTE)+ ' : '+str(PORT_REMOTE))
     #########CONNECTION END ###############
-    return nuc_client, live_client, wf_snapshot, wf_zstack, LED_on, LED_off
+    return nuc_client, live_client, wf_zstack, LED_on, LED_off
 
-    ########DISCOVER INSTRUMENT ID#######
-    #######SET VARIABLES BASED ON INSTRUMENT#
-    #################################
 
-def create_threads(c_pixel_size, c_scope_settings_returned,c_idle_state,c_workflow, nuc_client, live_client,other_data_queue, image_queue, command_queue, z_plane_queue, intensity_queue, visualize_queue, view_snapshot, system_idle, processing_event, send_event, terminate_event, data0_queue, data1_queue, data2_queue, value_queue, stage_location_queue):
+def create_threads(nuc_client, live_client, other_data_queue=None, image_queue=None, command_queue=None, z_plane_queue=None,
+                   intensity_queue=None, visualize_queue=None, system_idle=None, processing_event=None, send_event=None,
+                   terminate_event=None, command_data_queue=None, stage_location_queue=None):
+    # Create the image processing thread
     processing_thread_var = Thread(target=processing_thread, 
-                            args=(z_plane_queue, terminate_event, processing_event, intensity_queue, image_queue))
+                                   args=(z_plane_queue, terminate_event, processing_event, intensity_queue, image_queue))
+    
+    # Create the send thread to send individual commands and workflows to the microscope control software
     send_thread_var = Thread(target=send_thread, 
-                            args=(nuc_client, command_queue, send_event, system_idle, c_workflow, data0_queue, data1_queue, data2_queue, value_queue))
+                             args=(nuc_client, command_queue, send_event, system_idle, COMMAND_CODES_CAMERA_WORK_FLOW_START , command_data_queue))
+    
+    # Create the command listen thread to listen to responses from the microscope about its status
     command_listen_thread_var = Thread(target=command_listen_thread, 
-                            args=(nuc_client, system_idle, terminate_event, c_idle_state, c_scope_settings_returned, c_pixel_size, other_data_queue))
+                                       args=(nuc_client, system_idle, terminate_event, COMMAND_CODES_SYSTEM_STATE_IDLE , COMMAND_CODES_COMMON_SCOPE_SETTINGS , COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET , other_data_queue))
+    
+    # Create the live listen thread to receive image data sent to the "live" view
     live_listen_thread_var = Thread(target=live_listen_thread, 
-                            args=(live_client, terminate_event, image_queue, visualize_queue))
+                                    args=(live_client, terminate_event, image_queue, visualize_queue))
+    
+    # Set daemon flag for threads (optional)
     live_listen_thread_var.daemon = True
     send_thread_var.daemon = True
     command_listen_thread_var.daemon = True
     processing_thread_var.daemon = True
     
+    # Start the threads
     live_listen_thread_var.start()
     command_listen_thread_var.start()
     send_thread_var.start()
     processing_thread_var.start()
- 
-    return live_listen_thread_var, command_listen_thread_var,send_thread_var,processing_thread_var
+    
+    # Return the thread variables for potential later use
+    return live_listen_thread_var, command_listen_thread_var, send_thread_var, processing_thread_var
+
 
 def close_connection(nuc_client, live_client,live_listen_thread_var, command_listen_thread_var,send_thread_var,processing_thread_var):
     #Join may no longer be necessary due to use of daemon=true?

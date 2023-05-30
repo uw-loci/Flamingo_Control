@@ -11,7 +11,7 @@ A visual of each Zstack (a maximum intensity projection) collected as the progra
 Once a maxima is found in the IF intensity of the channel selected through the GUI, another Z stack will be taken at that Y axis location to find a rough depth for the sample.
 Pictures of the various MIPs will be stored in the output_png folder, along with an initial brightfield image of the starting point, and a final image of the sample where the instrument found focus.
 
-
+![alt text](https://github.com/MichaelSNelson/Flamingo_Control/blob/main/images/workflow.png?raw=true)
 
  Controlling a Flamingo microscope from Python
  Two main methods to send information
@@ -49,9 +49,15 @@ image_display.py currently only handles some image processing so that 16bit imag
 Control of what runs when is handled by a fairly messy set of "events" to let different threads know when to check a "queue" for the presence of data to process or a command to send. 
 
 Short term goals -
-Improved commenting and making sure all of the lightsheet interactions are working as expected.
-Ideas for improving data transfer and handling?
 Streamline the workflow to minimize the number of events, while maintaining sufficient flexibility to grow out the code for additional functionality.
+
+Important non-coding files
+functions/command_list.txt contains commands that can be sent to the controller, and their numerical codes. These can be used to send workflows or request data from the system, among other things.
+workflows/???.txt workflows are all variations on the workflow file the Flamingo controller expects to conduct some sort of experiment, be it a Zstack, time series, tile, or combination of those.
+microscope_settings/
+FlamingoMetaData.txt contains important information about your instrument and allows Python to connect correctly.
+ScopeSettings.txt contains useful information about the system configuration that can help determine pixel size metadata etc.
+???_start position.txt should contain the start position to search for the sample. Generally this would be the tip of the sample holder, though you may want larger Z value to make the search quicker (ignore space near the tip of sample holder).
 
 
 Use the environment.yml file to set up the Conda environment.

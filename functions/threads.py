@@ -9,8 +9,7 @@ import socket
 import numpy as np
 import select
 import time
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
+
 import os
 from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 from PyQt5.QtGui import QPixmap, QImage, QColor
@@ -50,7 +49,7 @@ def bytes_waiting(sock):
 
 #Commands sent to the Nuc get responses, this listens for and processes those responses.
 #Primary purpose is currently to listen for the "idle" state
-def command_listen_thread(client, idle_state, terminate_event, c_idle_state, c_scope_settings_returned, c_pixel_size, other_data_queue):
+def command_listen_thread(client, idle_state, terminate_event, COMMAND_CODES_SYSTEM_STATE_IDLE , COMMAND_CODES_COMMON_SCOPE_SETTINGS , COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET , other_data_queue):
     print('LISTENING for commands on ' +str(client))
     empty_socket(client)
     s = struct.Struct('I I I I I I I I I I d I 72s I') # pack everything to binary via struct
@@ -68,12 +67,12 @@ def command_listen_thread(client, idle_state, terminate_event, c_idle_state, c_s
             # need to check 53717 for received[1] being idle
             #print("listening to 53717 got " + str(received[1]))
             ####
-            if received[1] == c_idle_state:
+            if received[1] == COMMAND_CODES_SYSTEM_STATE_IDLE :
                 print('status idle: '+str(received[2]))
                 if received[2] == 1:                    
                     idle_state.set()
             ###############################
-            elif received[1] == c_scope_settings_returned:
+            elif received[1] == COMMAND_CODES_COMMON_SCOPE_SETTINGS :
                 time.sleep(0.05)
                 print(f'Getting microscope settings = {received[2]}')
                 bytes=bytes_waiting(client)
@@ -83,7 +82,7 @@ def command_listen_thread(client, idle_state, terminate_event, c_idle_state, c_s
                 # "wb" setting is important here to write the binary data to the file as text. "w" fails
                 with open("microscope_settings/ScopeSettings.txt", "wb") as file:
                     file.write(text_bytes)
-            elif received[1] == c_pixel_size:
+            elif received[1] == COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET :
                 print('pixel size '+str(received[10]))
                 if (received[10] < 0 ):
                     print('Threads.py command_listen_thread: No pixel size detected from system. Exiting.')
@@ -145,17 +144,19 @@ def live_listen_thread(live_client, terminate_event, image_queue, visualize_queu
             
             image = Image.frombytes('I;16', (image_width, image_height), image_data)
             rotated_image = image.rotate(90, expand=True)
-
+            print('current working directory is:')
+            print(os.getcwd())
             rotated_image.save(f'output_png/{name}_{index}.png')
             #print(f'rotated image shape is {np.array(rotated_image).shape} {np.array(rotated_image).dtype}')
             index = index+1
-            ################################
-            #grayscale_image = rotated_image.convert("L")
-            #print('imagequeue put')
+
             # return the grayscale image
             image_queue.put(np.array(rotated_image))
+            #Place a duplicate new image in the visualization queue
+            #This was added due to the image_queue emptying too quickly for the same queue to be used in two different threads.
+            
             visualize_queue.put(np.array(rotated_image))
-            #visualize_event.set()
+
 
 
         else: 
@@ -218,41 +219,31 @@ def live_listen_thread(live_client, terminate_event, image_queue, visualize_queu
 
 
 #Send commands or workflows to the controller, which then passes them on to the Flamingo
-def send_thread(client,  command_queue, send_event, system_idle, c_workflow, data0_queue, data1_queue, data2_queue, value_queue):
+def send_thread(client,  command_queue, send_event, system_idle, COMMAND_CODES_CAMERA_WORK_FLOW_START , command_data_queue):
     while True:
         #only go when an event is set
         send_event.wait()
         #print('send event triggered')
-        #acquire_event.wait()
         command = command_queue.get()
 
         system_idle.clear()
-
-        if command == c_workflow:
+        #Handle workflows separately (special type of command)
+        if command == COMMAND_CODES_CAMERA_WORK_FLOW_START :
             #print("Sending workflow to nuc")
-            functions.tcpip_nuc.wf_to_nuc(client, 'workflows/workflow.txt', c_workflow)
+            functions.tcpip_nuc.wf_to_nuc(client, 'workflows/workflow.txt', COMMAND_CODES_CAMERA_WORK_FLOW_START )
             send_event.clear()
-        else: #Handle commands
-            print('Send non-workflow command to nuc: ' +str(command))
+        else: #Handle all other commands
+            #print('Send non-workflow command to nuc: ' +str(command))
             #make sure the queues are not empty, if they are use the default value of 0
-            if not data0_queue.empty():
-                data0=data0_queue.get()
+            command_data = []
+            if command_data_queue.empty():
+                #if there is no data, the default values for command_data will be 0s
+                functions.tcpip_nuc.command_to_nuc(client, command)
             else:
-                data0=0
-            if not data1_queue.empty():
-                data1=data1_queue.get()
-            else:
-                data1=0
-            if not data2_queue.empty():
-                data2=data2_queue.get()
-            else:
-                data2=0
-            if not value_queue.empty():
-                value=value_queue.get()
-            else:
-                value=0    
-            #print(f'command to nuc uses command {command}, data0 {data0}, data1 {data1}, data2 {data2}, value {value}')            
-            functions.tcpip_nuc.command_to_nuc(client, command, data0, data1,data2,value)
+                #print('command data')
+                command_data=command_data_queue.get()
+                #print(f'command to nuc uses command {command}, command_data {command_data}')            
+                functions.tcpip_nuc.command_to_nuc(client, command, command_data)
             send_event.clear()
         #returnedData = functions.tcpip_nuc.command_to_nuc(client, 4119)
         #need to check 53717 for received[1] being a "idle" code 36874

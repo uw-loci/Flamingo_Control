@@ -10,11 +10,11 @@
     Angle step size = 
     Region = 
     Save image drive = /media/deploy/MSN_LS
-    Save image directory = Sample Search
-    Comments = Delete
+    Save image directory = DummyExpt
+    Comments = GUI Snapshot
     Save max projection = false
     Display max projection = true
-    Save image data = Tiff
+    Save image data = NotSaved
     Save to subfolders = false
     Work flow live view enabled = false
     </Experiment Settings>
@@ -26,8 +26,8 @@
     </Camera Settings>
     <Stack Settings>
     Stack index = 
-    Change in Z axis (mm) = 2.0
-    Number of planes = 200
+    Change in Z axis (mm) = 0.01
+    Number of planes = 1
     Number of planes saved = 
     Z stage velocity (mm/s) = 0.400032
     Rotational stage velocity (°/s) = 0
@@ -44,23 +44,23 @@
     Stack option settings 2 = 
     </Stack Settings>
     <Start Position>
-    X (mm) = 13.37
-    Y (mm) = 6.499999999999999
-    Z (mm) = 12.7
-    Angle (degrees) = 0
+    X (mm) = 13.4
+    Y (mm) = 4.7
+    Z (mm) = 13.0
+    Angle (degrees) = 0.0
     </Start Position>
     <End Position>
-    X (mm) = 13.37
-    Y (mm) = 6.499999999999999
-    Z (mm) = 14.7
-    Angle (degrees) = 0
+    X (mm) = 13.4
+    Y (mm) = 4.7
+    Z (mm) = 13.01
+    Angle (degrees) = 0.0
     </End Position>
     <Illumination Source>
     Laser 1 640 nm = 0.00 0
     Laser 2 561 nm = 0.00 0
     Laser 3 488 nm = 3.97 1
     Laser 4 405 nm = 0.00 0
-    LED_RGB_Board = 00.00 0
+    LED_RGB_Board = 0.00 0
     LED selection = 1 0
     LED DAC = 42205 0
     </Illumination Source>

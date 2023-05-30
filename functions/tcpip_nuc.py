@@ -93,7 +93,7 @@ def wf_to_nuc(client, wf_file, command):
         print('Failed to send data wf')
 
 #Commands to nuc, requires additional input values, data#, and does not require a workflow file
-def command_to_nuc(client,command, data0=0, data1=0, data2=0, value=0.0):
+def command_to_nuc(client,command, command_data = [0,0,0,0.0]):
 
     '''
 
@@ -113,6 +113,8 @@ def command_to_nuc(client,command, data0=0, data1=0, data2=0, value=0.0):
 
     '''
 
+    # if no command_data is provided, these can be 0
+    data0, data1, data2, value = command_data
     cmd_start = np.uint32(0xF321E654)  # start command
 
     cmd = np.uint32(command) #cmd command (CommandCodes.h): open in Visual Studio Code + install C/C++ Extension IntelliSense, when hovering over command binary number visible
@@ -161,18 +163,3 @@ def command_to_nuc(client,command, data0=0, data1=0, data2=0, value=0.0):
     except socket.error as e:
         print('cmd to nuc - Failed to send data', e)
 
-# replaced by idle_state
-# def is_stage_stopped(client, c_StageStopCheck):
-#     all_true = False
-#     xb= yb= zb= rb = False
-#     while not all_true:
-#         if not xb:
-#             xb = command_to_nuc(client, c_StageStopCheck, data0 = 0)[2] #second entry should be "status", with 0 indicating not finished
-#         if not yb:
-#             yb = command_to_nuc(client, c_StageStopCheck, data0 = 1)[2]
-#         if not zb:
-#             zb = command_to_nuc(client, c_StageStopCheck, data0 = 2)[2]
-#         if not rb:
-#             rb = command_to_nuc(client, c_StageStopCheck, data0 = 3)[2]
-#         all_true = xb*yb*rb*zb #if any value isn't 1, all_true stays 0/False
-#         time.sleep(0.5)
