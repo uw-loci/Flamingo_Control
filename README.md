@@ -4,10 +4,13 @@ To connect to Elsa requires being at Morgridge on their network (not eduroam), o
 Current workflow:
 Run GUI.py
 There are two checks that need to be passed first - a Zstack.txt file needs to be in the workflows folder, and a FlamingoMetaData.txt needs to be in the microscope_settings folder.
+
 If these are not present, the user will be prompted to get find a copy to use as a baseline for connecting to the microscope.
 Once the files are acquired, a GUI will let the user double check the settings and make any changes.
+
 They can then Find Sample to locate the sample, which will proceed from a pre-recorded start point down the Y axis until it finds a "bump" in the fluorescence intensity.
 A visual of each Zstack (a maximum intensity projection) collected as the program pans down the Y axis of the sample tube will be shown to the user.
+
 Once a maxima is found in the IF intensity of the channel selected through the GUI, another Z stack will be taken at that Y axis location to find a rough depth for the sample.
 Pictures of the various MIPs will be stored in the output_png folder, along with an initial brightfield image of the starting point, and a final image of the sample where the instrument found focus.
 
@@ -24,6 +27,8 @@ Main file - GUI.py
 ![Current status of GUI](https://github.com/uw-loci/Flamingo_Control/blob/main/images/GUI.png?raw=true)
 
 Find focus, go to position, and take IF snapshot are all funcitoning now. There is room to add new functionality. The graphical representation to the right is somewhat laggy, and may skip images.
+The display range adapts to the current image, always. Thus, the apparent intensity of each image displayed has no correlation to any other image.
+
 
 The thread then connects to the microscope and spins off four more threads to handle:
 

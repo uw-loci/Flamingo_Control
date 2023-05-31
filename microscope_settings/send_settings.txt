@@ -1,0 +1,95 @@
+<Filter wheel encoder counts>
+  Filter wheel position 1 = 3820 0
+  Filter wheel position 2 = 3310 0
+  Filter wheel position 3 = 2800 0
+  Filter wheel position 4 = 2290 0
+  Filter wheel position 5 = 1780 0
+  Filter wheel position 6 = 1270 0
+  Filter wheel position 7 = 760 0
+  Filter wheel position 8 = 250 0
+  Filter wheel description 1 = 450/50
+  Filter wheel description 2 = 500 LP
+  Filter wheel description 3 = 525/50
+  Filter wheel description 4 = 575 LP
+  Filter wheel description 5 = 595/50
+  Filter wheel description 6 = 655 LP
+  Filter wheel description 7 = ND3
+  Filter wheel description 8 = empty
+</Filter wheel encoder counts>
+<Filter wheel position assignments>
+  Laser 1 = 5
+  Laser 2 = 3
+  Laser 3 = 7
+  Laser 4 = 0
+  LED = 7
+</Filter wheel position assignments>
+<Illumination settings>
+  Offset left x-axis = 2525
+  Offset left y-axis = -1
+  Offset right x-axis = 1270
+  Offset right y-axis = -1
+  Amplitude left x-axis = 400
+  Amplitude left y-axis = -1
+  Amplitude right x-axis = 400
+  Amplitude right y-axis = -1
+  Alignment center x-axis = 1850
+  Alignment center y-axis = -1
+  Sample scan frequency (Hz) = 200
+</Illumination settings>
+<Stage limits>
+  Hard limit max x-axis = 16.000
+  Hard limit max y-axis = 26.000
+  Hard limit max z-axis = 17.000
+  Hard limit max r-axis = 720.000
+  Hard limit min x-axis = 12.000
+  Hard limit min y-axis = 1.000
+  Hard limit min z-axis = 12.000
+  Hard limit min r-axis = -720.000
+  Soft limit max x-axis = 15.500
+  Soft limit max y-axis = 26.000
+  Soft limit max z-axis = 16.000
+  Soft limit max r-axis = 720.000
+  Soft limit min x-axis = 12.000
+  Soft limit min y-axis = 1.000
+  Soft limit min z-axis = 12.000
+  Soft limit min r-axis = -720.000
+  Home x-axis = 13.4
+  Home y-axis = 1.7
+  Home z-axis = 13.7
+  Home r-axis = 0.0
+  Unload x-axis = 14.000
+  Unload y-axis = 22.000
+  Unload z-axis = 14.000
+  Unload r-axis = 0.000
+  Default velocity x-axis = 1.000
+  Default velocity y-axis = 1.000
+  Default velocity z-axis = 1.000
+  Default velocity r-axis = 50.000
+</Stage limits>
+<Camera overlap settings>
+  Camera 1 overlap percent = 0
+  Camera 1 capture mode (0: full, 1: from front, 2: from back) = 0
+  Camera 2 overlap percent = 100
+  Camera 2 capture mode (0: full, 1: from front, 2: from back) = 0
+</Camera overlap settings>
+<LED settings>
+  LED selection (0 red, 1 green, 2 blue, 3 white) = 1
+  Preview on = 0
+  Recording on = 0
+  Intensity red = 46171
+  Intensity green = 41403
+  Intensity blue = 53997
+  Intensity white = 41529
+  UI slider min (match LED DAC) = 3200000
+  UI slider max (match LED DAC) = 6553500
+  UI slider factor adjustment = 100
+</LED settings>
+<Type>
+  Microscope type = T, X, L, V SPIM
+  Microscope name = Flamingo
+  Microscope address = 10.129.37.5 53717
+  Microscope builder = Builder
+  Objective lens magnification = 16
+  Tube lens design focal length (mm) = 200
+  Tube lens length (mm) = 200
+</Type>

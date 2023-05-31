@@ -1,8 +1,8 @@
 #Additional calculations to be used elsewhere, like finding a maxima or focal plane
 import numpy as np
-#import cv2
+from typing import Tuple
 
-def find_most_in_focus_plane(z_stack):
+def find_most_in_focus_plane(z_stack:np.ndarray[np.uint16, Tuple[int, int, int]]):
     """
     Finds the most in-focus plane in a Z-stack of 16-bit grayscale images using the sum of intensities.
     
@@ -26,7 +26,7 @@ def find_most_in_focus_plane(z_stack):
     
     return most_in_focus_plane_index
 
-def check_maxima(lst):
+def check_maxima(lst: Tuple[float]):
     """
     This function takes a list of numbers as input and returns the position of the 
     maximum value of any maxima in the list above a certain threshold determined by 
@@ -83,37 +83,4 @@ def check_maxima(lst):
         return max_pos
     else:
         return False
-
-# def find_most_in_focus_plane(z_stack):
-#     """
-#     Finds the most in-focus plane in a Z-stack of 16-bit grayscale images using the Laplacian operator.
-    
-#     Parameters
-#     ----------
-#     z_stack : numpy.ndarray
-#         A 3D numpy array representing the Z-stack of images, where the first dimension corresponds to
-#         the position in the Z-stack, and the second and third dimensions represent the pixel values of
-#         the image at that position. The pixel values should be represented as 16-bit integers.
-    
-#     Returns
-#     -------
-#     int
-#         The index of the most in-focus plane in the Z-stack.
-#     """
-    
-#     # Initialize an empty list to hold the sharpness measures for each image
-#     sharpness_measures = []
-#     z_stack=z_stack.astype(np.float32)
-#     # Calculate the Laplacian for each image in the Z-stack and append the result to the list
-#     for i in range(z_stack.shape[0]):
-#         dst = np.zeros_like(z_stack[i,:,:], dtype=np.float32) 
-#         var_laplacian = cv2.Laplacian(z_stack[i,:,:], cv2.CV_32F, dst).var()
-#         sharpness_measures.append(var_laplacian)
-    
-#     # Find the index of the image with the highest sharpness measure
-#     most_in_focus_plane_index = np.argmax(sharpness_measures)
-#     print(f'most in focus plane is: {most_in_focus_plane_index}')
-#     print(sharpness_measures)
-#     return most_in_focus_plane_index
-
 

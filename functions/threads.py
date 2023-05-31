@@ -1,14 +1,11 @@
 # Functions that run in parallel with the main script, listening for data, sending commands/workflows, and performing processing steps
 import functions.tcpip_nuc
-import functions.text_file_parsing
+from functions.text_file_parsing import text_to_dict, workflow_to_dict
 import functions.calculations
-import socket
-import struct
+import struct, socket, select, time
 from PIL import Image
-import socket
 import numpy as np
-import select
-import time
+from threading import Event
 
 import os
 from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
@@ -16,20 +13,31 @@ from PyQt5.QtGui import QPixmap, QImage, QColor
 from PyQt5.QtCore import Qt
 
 index = 0
+commands = text_to_dict(os.path.join('functions','command_list.txt'))
 
-def empty_socket(sock):
-    """remove the data present on the socket"""
+COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE'] )
+COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD'] )
+COMMAND_CODES_COMMON_SCOPE_SETTINGS  = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS'])
+COMMAND_CODES_CAMERA_WORK_FLOW_START  = int(commands['CommandCodes.h']['COMMAND_CODES_CAMERA_WORK_FLOW_START'] )
+COMMAND_CODES_STAGE_POSITION_SET  = int(commands['CommandCodes.h']['COMMAND_CODES_STAGE_POSITION_SET'])
+COMMAND_CODES_SYSTEM_STATE_IDLE  = int(commands['CommandCodes.h']['COMMAND_CODES_SYSTEM_STATE_IDLE'])
+COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET  = int(commands['CommandCodes.h']['COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET'])
+COMMAND_CODES_CAMERA_IMAGE_SIZE_GET  = int(commands['CommandCodes.h']['COMMAND_CODES_CAMERA_IMAGE_SIZE_GET'])
+##############################
+
+def empty_socket(sock:socket):
+    '''remove the data present on the socket'''
     input = [sock]
     while 1:
         sock.setblocking(0)
         inputready, o, e = select.select(input,[],[], 0.0)
-        print("Data amount waiting " +str(len(inputready)))
+        print('Data amount waiting ' +str(len(inputready)))
         if len(inputready)==0: break
         for s in inputready: s.recv(1)
     print(f'socket {sock} clear')
     sock.setblocking(1)
 
-def bytes_waiting(sock):
+def bytes_waiting(sock:socket):
     # Use select() to check if there is data waiting to be read
     # on the socket.
     r, _, _ = select.select([sock], [], [], 0)
@@ -40,7 +48,7 @@ def bytes_waiting(sock):
         sock.setblocking(0)
         data = len(sock.recv(80000, socket.MSG_PEEK))
         sock.setblocking(1)
-        #print(f"length of data {data}")
+        #print(f'length of data {data}')
         return data
     else:
         # If there is no data waiting, return 0.
@@ -48,8 +56,8 @@ def bytes_waiting(sock):
 
 
 #Commands sent to the Nuc get responses, this listens for and processes those responses.
-#Primary purpose is currently to listen for the "idle" state
-def command_listen_thread(client, idle_state, terminate_event, COMMAND_CODES_SYSTEM_STATE_IDLE , COMMAND_CODES_COMMON_SCOPE_SETTINGS , COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET , other_data_queue):
+#Primary purpose is currently to listen for the 'idle' state
+def command_listen_thread(client:socket, idle_state:Event, terminate_event:Event, other_data_queue):
     print('LISTENING for commands on ' +str(client))
     empty_socket(client)
     s = struct.Struct('I I I I I I I I I I d I 72s I') # pack everything to binary via struct
@@ -62,10 +70,10 @@ def command_listen_thread(client, idle_state, terminate_event, COMMAND_CODES_SYS
                 break
 
             received = s.unpack(msg)
-            #print(f"Received on 53717: {received[1]} : {received[2]} : {received[3]} : {received[6]} : {received[10]} : size {received[11]}")
+            #print(f'Received on 53717: {received[1]} : {received[2]} : {received[3]} : {received[6]} : {received[10]} : size {received[11]}')
             ####
             # need to check 53717 for received[1] being idle
-            #print("listening to 53717 got " + str(received[1]))
+            #print('listening to 53717 got ' + str(received[1]))
             ####
             if received[1] == COMMAND_CODES_SYSTEM_STATE_IDLE :
                 print('status idle: '+str(received[2]))
@@ -77,10 +85,10 @@ def command_listen_thread(client, idle_state, terminate_event, COMMAND_CODES_SYS
                 print(f'Getting microscope settings = {received[2]}')
                 bytes=bytes_waiting(client)
                 text_bytes = client.recv(bytes)
-                if not os.path.exists("microscope_settings"):
-                    os.makedirs("microscope_settings")
-                # "wb" setting is important here to write the binary data to the file as text. "w" fails
-                with open("microscope_settings/ScopeSettings.txt", "wb") as file:
+                if not os.path.exists('microscope_settings'):
+                    os.makedirs('microscope_settings')
+                # 'wb' setting is important here to write the binary data to the file as text. 'w' fails
+                with open(os.path.join('microscope_settings', 'ScopeSettings.txt'), 'wb') as file:
                     file.write(text_bytes)
             elif received[1] == COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET :
                 print('pixel size '+str(received[10]))
@@ -100,13 +108,13 @@ def command_listen_thread(client, idle_state, terminate_event, COMMAND_CODES_SYS
     return
 
 
-#Listen for image data, which is sent via the "live" settings in the workflow file. Does not actually get full image data.
-def live_listen_thread(live_client, terminate_event, image_queue, visualize_queue):
+#Listen for image data, which is sent via the 'live' settings in the workflow file. Does not actually get full image data.
+def live_listen_thread(live_client:socket, terminate_event:Event, image_queue, visualize_queue):
     global index
     print('LISTENING for image data on ' +str(live_client))
     while not terminate_event.is_set():
         # receive the header
-        #print("Waiting for image data")
+        #print('Waiting for image data')
         try:
             header_data = live_client.recv(40)
         except socket.error as e:
@@ -120,19 +128,19 @@ def live_listen_thread(live_client, terminate_event, image_queue, visualize_queu
             raise ValueError(f'Header length should be 40 bytes, not {len(header_data)}')
         
         # parse the header
-        #print("parsing header, entering data acquisition")
+        #print('parsing header, entering data acquisition')
         header = struct.unpack('I I I I I I I I I I', header_data)
         image_size, image_width, image_height= header[0], header[1], header[2]
 
         #get the stack size from the workflow file, as it is not sent as part of the header information
-        current_workflow_dict = functions.text_file_parsing.workflow_to_dict('workflows/workflow.txt')
+        current_workflow_dict = workflow_to_dict(os.path.join('workflows', 'workflow.txt'))
         stack_size = float(current_workflow_dict['Stack Settings']['Number of planes'])
         MIP = current_workflow_dict['Experiment Settings']['Display max projection']
         name = current_workflow_dict['Experiment Settings']['Comments']
         Zpos = current_workflow_dict['Start Position']['Z (mm)']
         # receive the image data
         # Coule probably be condensed with some better preparation
-        if MIP == "true" or stack_size == 1:
+        if MIP == 'true' or stack_size == 1:
             print(f'MIP is {MIP}')
             #Single image from snapshot workflows
             image_data = b''
@@ -141,26 +149,28 @@ def live_listen_thread(live_client, terminate_event, image_queue, visualize_queu
                 if not data:
                     raise socket.error('Incomplete image data')
                 image_data += data
+            # Convert the bytes to a NumPy array
+            image_array = np.frombuffer(image_data, dtype=np.uint16)
             
-            image = Image.frombytes('I;16', (image_width, image_height), image_data)
-            rotated_image = image.rotate(90, expand=True)
-            print('current working directory is:')
-            print(os.getcwd())
-            rotated_image.save(f'output_png/{name}_{index}.png')
+            # Reshape the array to match the image dimensions
+            image_array = image_array.reshape((image_height, image_width)).T
+            image_array = np.flipud(image_array)
+            #ADD BACK IN SAVE IMAGES?
+            #rotated_image.save(os.path.join('output_png', f'{name}_{index}.png'))
             #print(f'rotated image shape is {np.array(rotated_image).shape} {np.array(rotated_image).dtype}')
             index = index+1
 
             # return the grayscale image
-            image_queue.put(np.array(rotated_image))
+            image_queue.put(np.array(image_array))
             #Place a duplicate new image in the visualization queue
             #This was added due to the image_queue emptying too quickly for the same queue to be used in two different threads.
             
-            visualize_queue.put(np.array(rotated_image))
+            visualize_queue.put(np.array(image_array))
 
 
 
         else: 
-            print("entering stack handling stack size: "+str(stack_size))
+            print('entering stack handling stack size: '+str(stack_size))
             images = []
             live_client.settimeout(1)
             #count down through stack, getting each image and adding it to images
@@ -185,7 +195,7 @@ def live_listen_thread(live_client, terminate_event, image_queue, visualize_queu
                 # rotate the image and append it to the list of images
                 rotated_image = image.rotate(90, expand=True)
                 #Optional z-stack check
-                rotated_image.save(f'output_png/plane_{Zpos}_{step}.png')
+                rotated_image.save(os.path.join(f'output_png',f'plane_{Zpos}_{step}.png'))
 
                 images.append(rotated_image)
                 step=step+1
@@ -207,11 +217,9 @@ def live_listen_thread(live_client, terminate_event, image_queue, visualize_queu
 
             live_client.settimeout(0)
             live_client.setblocking(True)
-            # save the stack as a numpy array
-            #np.save(f'output_npy/output{index}.npy', stack)
             image_queue.put(stack)
             #TO DO? Add the option to visualize the max intensity projection of a received stack?
-        #print("Listening thread returning to default state")
+        #print('Listening thread returning to default state')
 
 
     print('Image data collection thread terminating')
@@ -219,7 +227,7 @@ def live_listen_thread(live_client, terminate_event, image_queue, visualize_queu
 
 
 #Send commands or workflows to the controller, which then passes them on to the Flamingo
-def send_thread(client,  command_queue, send_event, system_idle, COMMAND_CODES_CAMERA_WORK_FLOW_START , command_data_queue):
+def send_thread(client:socket,  command_queue, send_event, system_idle:Event, command_data_queue):
     while True:
         #only go when an event is set
         send_event.wait()
@@ -229,11 +237,15 @@ def send_thread(client,  command_queue, send_event, system_idle, COMMAND_CODES_C
         system_idle.clear()
         #Handle workflows separately (special type of command)
         if command == COMMAND_CODES_CAMERA_WORK_FLOW_START :
-            #print("Sending workflow to nuc")
-            functions.tcpip_nuc.wf_to_nuc(client, 'workflows/workflow.txt', COMMAND_CODES_CAMERA_WORK_FLOW_START )
+            #print('Sending workflow to nuc')
+            functions.tcpip_nuc.text_to_nuc(client, os.path.join('workflows','workflow.txt'), COMMAND_CODES_CAMERA_WORK_FLOW_START )
+            send_event.clear()
+        elif command == COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE:
+            print('saving microscope settings for home postion')
+            functions.tcpip_nuc.text_to_nuc(client, os.path.join('microscope_settings','send_settings.txt'), COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE )
             send_event.clear()
         else: #Handle all other commands
-            #print('Send non-workflow command to nuc: ' +str(command))
+            print('Send non-workflow command to nuc: ' +str(command))
             #make sure the queues are not empty, if they are use the default value of 0
             command_data = []
             if command_data_queue.empty():
@@ -246,7 +258,7 @@ def send_thread(client,  command_queue, send_event, system_idle, COMMAND_CODES_C
                 functions.tcpip_nuc.command_to_nuc(client, command, command_data)
             send_event.clear()
         #returnedData = functions.tcpip_nuc.command_to_nuc(client, 4119)
-        #need to check 53717 for received[1] being a "idle" code 36874
+        #need to check 53717 for received[1] being a 'idle' code 36874
 
 
 #Take data from the image_queue and do something with it
@@ -260,7 +272,7 @@ def processing_thread(z_plane_queue, terminate_event, processing_event, intensit
         image_data=image_queue.get()
         #print(f'Processing thread acquired data of shape: {image_data.shape}')
         #print(f'Processing thread acquired data of shape: {image_data.dtype}')
-        #maybe both results could just be "result_queue"
+        #maybe both results could just be 'result_queue'
         if len(image_data.shape) == 2:
             # Flatten the array to a 1D array
             flattened = image_data.flatten()

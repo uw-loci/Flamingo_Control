@@ -43,11 +43,11 @@ def dict_positions(workflow_dict, xyzr, zEnd, save_with_data=False, get_zstack =
     workflow_dict['End Position']['Angle (degrees)'] = float(r)
     workflow_dict['Stack Settings']['Change in Z axis (mm)'] = abs(float(z)-float(zEnd))
     if get_zstack:
-        workflow_dict['Experiment Settings']['Display max projection'] = "false"
-        workflow_dict['Experiment Settings']['Work flow live view enabled'] = "true"
+        workflow_dict['Experiment Settings']['Display max projection'] = 'false'
+        workflow_dict['Experiment Settings']['Work flow live view enabled'] = 'true'
     else:
-        workflow_dict['Experiment Settings']['Display max projection'] = "true"
-        workflow_dict['Experiment Settings']['Work flow live view enabled'] = "false"
+        workflow_dict['Experiment Settings']['Display max projection'] = 'true'
+        workflow_dict['Experiment Settings']['Work flow live view enabled'] = 'false'
 
     return workflow_dict
 
@@ -86,8 +86,8 @@ def dict_to_snap(workflow_dict, xyzr, framerate, plane_spacing, save_with_data=F
     workflow_dict['Start Position']['Angle (degrees)'] = float(r)
     workflow_dict['End Position']['Angle (degrees)'] = float(r)
     workflow_dict['Stack Settings']['Change in Z axis (mm)'] = 0.01
-    workflow_dict['Experiment Settings']['Display max projection'] = "true"
-    workflow_dict['Experiment Settings']['Work flow live view enabled'] = "false"
+    workflow_dict['Experiment Settings']['Display max projection'] = 'true'
+    workflow_dict['Experiment Settings']['Work flow live view enabled'] = 'false'
     workflow_dict['Stack Settings']['Number of planes'] = 1
     workflow_dict['Experiment Settings'] ['Plane spacing (um)'] = plane_spacing #widest plane spacing allowed.
     workflow_dict['Stack Settings']['Z stage velocity (mm/s)']  = str(plane_spacing*framerate/1000) #10um spacing and conversion to mm/s    
@@ -134,7 +134,7 @@ def text_to_dict(filename):
         return settings_dict
     
 def dict_to_text(file_location, settings_dict):
-    with open(file_location, 'w') as f:
+    with open(file_location, 'w', newline='\n') as f:
         # Write the settings to the file
         write_dict(settings_dict, f, 0)
 
@@ -144,15 +144,15 @@ def write_dict(settings_dict, file, indent_level):
     for key, value in settings_dict.items():
         if isinstance(value, dict):
             # Start of a section
-            file.write(f"{indent}<{key}>\n")
+            file.write(f'{indent}<{key}>\n')
             write_dict(value, file, indent_level + 1)
-            file.write(f"{indent}</{key}>\n")
+            file.write(f'{indent}</{key}>\n')
         else:
             # Key-value pair
-            file.write(f"{indent}{key} = {value}\n")
+            file.write(f'{indent}{key} = {value}\n')
 
 def dict_to_workflow(file_name, settings_dict):
-    #print("dict_to_workflow "+file_name)
+    #print('dict_to_workflow '+file_name)
     # Start with the <Workflow Settings> tag
     output = '<Workflow Settings>\n'
 

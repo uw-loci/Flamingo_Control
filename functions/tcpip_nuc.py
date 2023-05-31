@@ -4,38 +4,30 @@
 import socket, os, sys, struct
 import numpy as np
 
-
-NUC_IP = '10.129.37.17' #From Connection tab in GUI
-PORT_NUC = 53717 #From Connection tab in GUI
-
 #This used to be one function instead of two and could still go back. It was easier to understand as two, for me.
-def wf_to_nuc(client, wf_file, command):
+def text_to_nuc(client:socket, wf_file: str, command:int):
 
 
     '''
 
     function to send a workflow file to nuc and start the workflow
 
-    :param FLAMINGO_IP: ip address of NUC
-
-    :param FLAMINGO_PORT: Port 53717
+    :param client: socket to connect to the nuc
 
     :param wf_file: path to workflow file
 
     :param command: 4136 to start a workflow (microscope control software verison dependent)
 
-    :param wf: whether a workflow file is sent of not
-
     :return: nothing
 
     '''
 
-    #print(f"workflow command is {command}")
+    #print(f'workflow command is {command}')
     fileBytes = os.path.getsize(wf_file)
     #print(fileBytes)
 
     cmd_start = np.uint32(0xF321E654)  # start command [0]
-
+    # cmd_start = bytes(0xF321E654)
     cmd = np.uint32(command) #[1] cmd command (CommandCodes.h): open in Visual Studio Code + install C/C++ Extension IntelliSense, when hovering over command binary number visible
 
     status = np.int32(0) #[2]
@@ -78,12 +70,14 @@ def wf_to_nuc(client, wf_file, command):
         #print(command)
 
         #print(wf_file)
-        workflow_file = open(wf_file, encoding='utf-8').read()
+        #workflow_file = open(wf_file, encoding='utf-8').read()
+        workflow_file = open(wf_file, 'rb' ).read()
         #print('sending')
         client.send(scmd)
         #print(len(scmd))
-        client.send(workflow_file.encode('utf-8'))
-        print('Workflow file sent')
+        client.send(workflow_file)
+        #client.send(workflow_file.encode('utf-8'))
+        #print('Text file sent')
 
         return
         #addData = client.recv(received[11]) # unpack additional data sent by the nuc
@@ -93,7 +87,7 @@ def wf_to_nuc(client, wf_file, command):
         print('Failed to send data wf')
 
 #Commands to nuc, requires additional input values, data#, and does not require a workflow file
-def command_to_nuc(client,command, command_data = [0,0,0,0.0]):
+def command_to_nuc(client:socket,command:int, command_data = [0,0,0,0.0]):
 
     '''
 

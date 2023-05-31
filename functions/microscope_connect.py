@@ -6,15 +6,12 @@ from functions.threads import command_listen_thread, processing_thread, send_thr
 from functions.text_file_parsing import text_to_dict
 import tkinter as tk
 from tkinter import messagebox
+from typing import Tuple
 #Default values for LED on and off
 LED_off = '00.00 0'
 LED_on = '50.0 1'
 #commands
-commands = text_to_dict('functions/command_list.txt')
-#Testing fidelity
-#print(commands)
-#dict_to_text('functions/command_test.txt', commands)
-
+commands = text_to_dict(os.path.join('functions','command_list.txt'))
 COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD'] )
 COMMAND_CODES_COMMON_SCOPE_SETTINGS  = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS'])
 COMMAND_CODES_CAMERA_WORK_FLOW_START  = int(commands['CommandCodes.h']['COMMAND_CODES_CAMERA_WORK_FLOW_START'] )
@@ -26,10 +23,10 @@ COMMAND_CODES_CAMERA_IMAGE_SIZE_GET  = int(commands['CommandCodes.h']['COMMAND_C
 
 
 
-def go_to_XYZR(command_data_queue, command_queue, send_event, COMMAND_CODES_STAGE_POSITION_SET, xyzr):
+def go_to_XYZR(command_data_queue, command_queue, send_event, xyzr:Tuple[float, float, float, float]):
     # Unpack the provided XYZR coordinates, r is in degrees, other values are in mm
     x,y,z,r = xyzr
-    print(f"moving to {x} {y} {z} {r}")
+    print(f'moving to {x} {y} {z} {r}')
     #data0_queue.put(0) doesn't represent a motion axis
     # Put X-axis movement command data in the queue
     command_data_queue.put([1,0,0,x])# 1 = xaxis
@@ -60,8 +57,7 @@ def go_to_XYZR(command_data_queue, command_queue, send_event, COMMAND_CODES_STAG
         time.sleep(.1)
 
 
-def get_microscope_settings(command_queue, other_data_queue, COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD,
-                            COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET, send_event):
+def get_microscope_settings(command_queue, other_data_queue, send_event):
     command_queue.put(COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD) #movement
     send_event.set()
     while not command_queue.empty():
@@ -70,9 +66,7 @@ def get_microscope_settings(command_queue, other_data_queue, COMMAND_CODES_COMMO
     #microscope settings should now be in a text file called ScopeSettings.txt in the 'workflows' directory
     #convert them into a dict to extract useful information
     #########
-
-
-    scope_settings = text_to_dict("microscope_settings/ScopeSettings.txt")
+    scope_settings = text_to_dict('microscope_settings/ScopeSettings.txt')
 
     # objective_mag = float(metadata_settings['Instrument']['Type']['Objective lens magnification'])
     # tube_lens_design_length = float(metadata_settings['Instrument']['Type']['Tube lens design focal length (mm)'])
@@ -86,12 +80,12 @@ def get_microscope_settings(command_queue, other_data_queue, COMMAND_CODES_COMMO
     image_pixel_size = other_data_queue.get()
     return image_pixel_size, scope_settings
 
-def start_connection(NUC_IP, PORT_NUC):
+def start_connection(NUC_IP:str, PORT_NUC:int):
     PORT_LISTEN = PORT_NUC+1
     #Workflow templates
     #Current code requires EITHER Display max projection OR Work flow live view enabled
     #but not both
-    wf_zstack = "ZStack.txt" #Fluorescent Z stack to find sample
+    wf_zstack = 'ZStack.txt' #Fluorescent Z stack to find sample
     ########
     #Function specific, validate that Snapshot.txt and ZStack.txt exist, or find way to make sure they don't need to exist
     try:
@@ -105,20 +99,19 @@ def start_connection(NUC_IP, PORT_NUC):
         # Handle the connection timeout and show a popup message
         root = tk.Tk()
         root.withdraw()
-        messagebox.showinfo("Connection Error", "Check that you have network access to the microscope. This may also be an IT issue. Close the program and try again.")
+        messagebox.showinfo('Connection Error', 'Check that you have network access to the microscope. This may also be an IT issue. Close the program and try again.')
         exit()
     except ConnectionRefusedError:
     # Handle the connection error and show a popup message
         root = tk.Tk()
         root.withdraw()
-        messagebox.showinfo("Connection Error", "Connection was refused.")
+        messagebox.showinfo('Connection Error', 'Connection was refused.')
 
     #print('listener thread socket created on ' + str(IP_REMOTE)+ ' : '+str(PORT_REMOTE))
     #########CONNECTION END ###############
     return nuc_client, live_client, wf_zstack, LED_on, LED_off
 
-
-def create_threads(nuc_client, live_client, other_data_queue=None, image_queue=None, command_queue=None, z_plane_queue=None,
+def create_threads(nuc_client:socket, live_client:socket, other_data_queue=None, image_queue=None, command_queue=None, z_plane_queue=None,
                    intensity_queue=None, visualize_queue=None, system_idle=None, processing_event=None, send_event=None,
                    terminate_event=None, command_data_queue=None, stage_location_queue=None):
     # Create the image processing thread
@@ -127,13 +120,13 @@ def create_threads(nuc_client, live_client, other_data_queue=None, image_queue=N
     
     # Create the send thread to send individual commands and workflows to the microscope control software
     send_thread_var = Thread(target=send_thread, 
-                             args=(nuc_client, command_queue, send_event, system_idle, COMMAND_CODES_CAMERA_WORK_FLOW_START , command_data_queue))
+                             args=(nuc_client, command_queue, send_event, system_idle, command_data_queue))
     
     # Create the command listen thread to listen to responses from the microscope about its status
     command_listen_thread_var = Thread(target=command_listen_thread, 
-                                       args=(nuc_client, system_idle, terminate_event, COMMAND_CODES_SYSTEM_STATE_IDLE , COMMAND_CODES_COMMON_SCOPE_SETTINGS , COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET , other_data_queue))
+                                       args=(nuc_client, system_idle, terminate_event, other_data_queue))
     
-    # Create the live listen thread to receive image data sent to the "live" view
+    # Create the live listen thread to receive image data sent to the 'live' view
     live_listen_thread_var = Thread(target=live_listen_thread, 
                                     args=(live_client, terminate_event, image_queue, visualize_queue))
     
@@ -153,7 +146,7 @@ def create_threads(nuc_client, live_client, other_data_queue=None, image_queue=N
     return live_listen_thread_var, command_listen_thread_var, send_thread_var, processing_thread_var
 
 
-def close_connection(nuc_client, live_client,live_listen_thread_var, command_listen_thread_var,send_thread_var,processing_thread_var):
+def close_connection(nuc_client:socket, live_client:socket,live_listen_thread_var:Thread, command_listen_thread_var:Thread,send_thread_var:Thread,processing_thread_var:Thread):
     #Join may no longer be necessary due to use of daemon=true?
     send_thread_var.join()
     live_listen_thread_var.join()

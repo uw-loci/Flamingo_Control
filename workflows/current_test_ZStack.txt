@@ -44,13 +44,13 @@
 </Stack Settings>
 <Start Position>
   X (mm) = 13.4
-  Y (mm) = 9.408
+  Y (mm) = 7.108
   Z (mm) = 12.7
   Angle (degrees) = 0.0
 </Start Position>
 <End Position>
   X (mm) = 13.4
-  Y (mm) = 9.408
+  Y (mm) = 7.108
   Z (mm) = 14.7
   Angle (degrees) = 0.0
 </End Position>
