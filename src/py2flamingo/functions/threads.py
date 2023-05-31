@@ -13,7 +13,7 @@ from PyQt5.QtGui import QPixmap, QImage, QColor
 from PyQt5.QtCore import Qt
 
 index = 0
-commands = text_to_dict(os.path.join('functions','command_list.txt'))
+commands = text_to_dict(os.path.join('src','py2flamingo', 'functions','command_list.txt'))
 
 COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE'] )
 COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD'] )

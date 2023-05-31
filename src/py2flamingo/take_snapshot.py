@@ -12,7 +12,7 @@ def take_snapshot(connection_data:list, xyzr_init:Tuple[float,float,float,float]
 
     #commands
     #Look in the functions/command_list.txt file for other command codes, or add more
-    commands = text_to_dict(os.path.join('functions','command_list.txt'))
+    commands = text_to_dict(os.path.join('src','py2flamingo','functions','command_list.txt'))
     COMMAND_CODES_CAMERA_WORK_FLOW_START  = int(commands['CommandCodes.h']['COMMAND_CODES_CAMERA_WORK_FLOW_START'] )
     ##############################
     #Brightfield image to verify sample holder location

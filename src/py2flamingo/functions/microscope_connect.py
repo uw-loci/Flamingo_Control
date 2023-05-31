@@ -11,7 +11,7 @@ from typing import Tuple
 LED_off = '00.00 0'
 LED_on = '50.0 1'
 #commands
-commands = text_to_dict(os.path.join('functions','command_list.txt'))
+commands = text_to_dict(os.path.join('src','py2flamingo','functions','command_list.txt'))
 COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD'] )
 COMMAND_CODES_COMMON_SCOPE_SETTINGS  = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS'])
 COMMAND_CODES_CAMERA_WORK_FLOW_START  = int(commands['CommandCodes.h']['COMMAND_CODES_CAMERA_WORK_FLOW_START'] )

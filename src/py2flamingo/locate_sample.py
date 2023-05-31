@@ -27,7 +27,7 @@ def locate_sample(connection_data:list, xyzr_init:list, visualize_event, other_d
     '''
 
     #Look in the functions/command_list.txt file for other command codes, or add more
-    commands = text_to_dict(os.path.join('functions', 'command_list.txt'))
+    commands = text_to_dict(os.path.join('src','py2flamingo','functions', 'command_list.txt'))
 
     #Testing fidelity
     #print(commands)

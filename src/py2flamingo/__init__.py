@@ -1,5 +1,5 @@
 #TO DO? Create initial dialog to ask about which microscope to connect to. Create named files based on the microscope (settings, workflows)
-
+#TODO move the microscope connection functions out of the GUI. Or move the GUI out of init?
 import sys, os, shutil, time
 from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QPushButton 
 from PyQt5.QtWidgets import QRadioButton, QFileDialog, QMessageBox, QWidget, QVBoxLayout, QFormLayout, QHBoxLayout
@@ -152,7 +152,7 @@ class FlamingoController(QMainWindow):
         self.instrument_name = metadata_dict['Instrument']['Type']['Microscope name']  # Get the microscope name from the dictionary
         ## Currently non-functional as the text file always gives all models.
         self.instrument_type = metadata_dict['Instrument']['Type']['Microscope type']  # Get the microscope type from the dictionary
-        commands = text_to_dict(os.path.join('functions', 'command_list.txt'))
+        commands = text_to_dict(os.path.join('src','py2flamingo','functions', 'command_list.txt'))
         COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD'] )
         command_queue.put(COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD) #movement
         send_event.set()

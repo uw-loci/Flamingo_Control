@@ -6,7 +6,7 @@ from queue import Queue
 
 def set_home(connection_data: list, xyzr:list, command_queue:Queue, other_data_queue:Queue,send_event:Event):
     nuc_client, live_client, wf_zstack, LED_on, LED_off = connection_data
-    commands = text_to_dict(os.path.join('functions','command_list.txt'))
+    commands = text_to_dict(os.path.join('src','py2flamingo','functions','command_list.txt'))
     COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD'] )
     COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE'] )
     print('load settings')
