@@ -92,9 +92,8 @@ def locate_sample(
     FOV = image_pixel_size * frame_size
     # Currently a 1.3 modifier hardcoded since all samples in use are larger than a field of view
     # This makes the search faster and is unlikely to miss the sample.
-    y_move = (
-        FOV * 1.3
-    )  # pixel_size*frame_size #pixel size in mm*number of pixels per frame
+    # pixel_size*frame_size #pixel size in mm*number of pixels per frame
+    y_move = FOV * 1.3 
     print(f"y_move search step size is currently {y_move}mm")
     ############
     ymax = float(scope_settings["Stage limits"]["Soft limit max y-axis"])
@@ -164,7 +163,7 @@ def locate_sample(
     # Store the position of the peak and then go back to that stack and try to find the focus
     i = 0
     # xyzr_init[1] is the initial y position
-    while not terminate_event.is_set() and float(xyzr_init[1]) + y_move * i < ymax:
+    while not terminate_event.is_set() and (float(xyzr_init[1]) + y_move * i) < ymax:
         print("Starting Y axis search " + str(i + 1))
         print("*")
         # adjust the Zstack position based on the last snapshot Z position
@@ -186,12 +185,12 @@ def locate_sample(
         # print('before acquire Z'+ str(i+1))
         command_queue.put(COMMAND_CODES_CAMERA_WORK_FLOW_START)
         send_event.set()
-
+        visualize_event.set()
         while not system_idle.is_set():
             time.sleep(0.1)
 
         stage_location_queue.put(xyzr)
-        visualize_event.set()
+
         # print('after acquire Z'+ str(i+1))
         # print('processing set')
         processing_event.set()
@@ -226,14 +225,14 @@ def locate_sample(
 
     # Wireless is too slow and the nuc buffer is only 10 images, which can lead to overflow and deletion before the local computer pulls the data
     # for Z stacks larger than 10, make sure to split them into 10 image components and wait for each to complete.
-    planes = float(wf_dict["Stack Settings"]["Number of planes"])
+    total_number_of_planes = float(wf_dict["Stack Settings"]["Number of planes"])
 
     # number of image planes the nuc can/will hold in its buffer before overwriting
     # check with Joe Li before increasing this above 10. Decreasing it below 10 is fine.
     buffer_max = 10
     ###################################################################################
     # loop through the total number of planes, 10 planes at a time
-    loops = int(planes / buffer_max + 0.5)
+    loops = int(total_number_of_planes / buffer_max + 0.5)
     step_size_mm = float(wf_dict["Experiment Settings"]["Plane spacing (um)"]) / 1000
     z_search_depth = step_size_mm * buffer_max
     wf_dict = calculate_zplanes(wf_dict, z_search_depth, framerate, plane_spacing)
@@ -257,10 +256,9 @@ def locate_sample(
             float(z) - float(z_search_depth) / 2 + (i + 1) * buffer_max * step_size_mm
         )
         dict_positions(wf_dict, xyzr, zEnd, save_with_data=False, get_zstack=False)
-        # wf_dict['Start Position']['Z (mm)'] = str(float(z) -float(z_search_depth)/2 + i*buffer_max*step_size_mm)
-        # wf_dict['End Position']['Z (mm)'] = str(float(z) - float(z_search_depth)/2 + (i+1)*buffer_max*step_size_mm)
 
         dict_to_workflow(os.path.join("workflows", "current" + wf_zstack), wf_dict)
+
         shutil.copy(
             os.path.join("workflows", "current" + wf_zstack),
             os.path.join("workflows", "workflow.txt"),
@@ -270,11 +268,11 @@ def locate_sample(
         )
         command_queue.put(COMMAND_CODES_CAMERA_WORK_FLOW_START)
         send_event.set()
-
+        visualize_event.set()
         while not system_idle.is_set():
             time.sleep(0.1)
         stage_location_queue.put(xyzr)
-        visualize_event.set()
+
         # print('after acquire Z'+ str(i+1))
         # print('processing set')
         processing_event.set()
@@ -286,28 +284,7 @@ def locate_sample(
         if maxima := functions.calculations.check_maxima(top25_percentile_means):
             break
 
-        # new_image_stack=image_queue.get()
-        # #Add an axis so that the 2D images can stack, and the 3D array can be sent to processing
-        # new_image_stack = np.expand_dims(new_image_stack, axis=0)
-        # if combined_stack:
-        #     combined_stack.append(new_image_stack)
-        # else:
-        #     combined_stack = [new_image_stack]
-        # print(f'combined stack length {len(combined_stack)}')
-    # merge all of the stacks into a single data structure
-    # combined_stack = np.concatenate(combined_stack, axis=0)
 
-    # place the data in the queue for the processing thread to access
-    # print(f'combined Zstack shape {combined_stack.shape}')
-    # image_queue.put(combined_stack)
-
-    # while not system_idle.is_set():
-    #     time.sleep(0.1)
-
-    # processing_event.set()
-    # #find the most in focus MIP, which for an IF channel is expected to be the brightest
-    # #should be in z_plane_queue
-    # queue_z = z_plane_queue.get()
     xyzr = coordsZ[maxima][0]
     x = coordsZ[maxima][0][0]
     y = coordsZ[maxima][0][1]
@@ -338,23 +315,25 @@ def locate_sample(
     ##############
     snap_dict = wf_dict
     xyzr[2] = zSnap
+    print(f'final xyzr snap {xyzr}')
     snap_dict["Experiment Settings"]["Save image directory"] = "Sample"
     snap_dict = dict_comment(snap_dict, "Sample located")
 
     snap_dict = dict_to_snap(snap_dict, xyzr, framerate, plane_spacing)
-
+    snap_dict = laser_or_LED(snap_dict, laser_channel, laser_setting, laser_on=True)
     dict_to_workflow(os.path.join("workflows", "current" + wf_zstack), snap_dict)
     shutil.copy(
-        os.path.join("workflows", "currentSnapshot.txt"),
+        os.path.join("workflows", "current" + wf_zstack),
         os.path.join("workflows", "workflow.txt"),
     )
     command_queue.put(COMMAND_CODES_CAMERA_WORK_FLOW_START)
     send_event.set()
+    stage_location_queue.put(xyzr)
+    visualize_event.set()
     while not system_idle.is_set():
         time.sleep(0.1)
     # only close out the connections once the final image is collected
-    stage_location_queue.put(xyzr)
-    visualize_event.set()
+
     image_queue.get()
     # Clean up 'delete' PNG files or dont make them
     ###

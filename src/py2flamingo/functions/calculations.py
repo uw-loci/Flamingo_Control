@@ -1,10 +1,10 @@
 # Additional calculations to be used elsewhere, like finding a maxima or focal plane
-from typing import Tuple
+from typing import Sequence
 
 import numpy as np
 
 
-def find_most_in_focus_plane(z_stack: np.ndarray[np.uint16, Tuple[int, int, int]]):
+def find_most_in_focus_plane(z_stack: np.ndarray[np.uint16, Sequence[int]]):
     """
     Finds the most in-focus plane in a Z-stack of 16-bit grayscale images using the sum of intensities.
 
@@ -29,7 +29,7 @@ def find_most_in_focus_plane(z_stack: np.ndarray[np.uint16, Tuple[int, int, int]
     return most_in_focus_plane_index
 
 
-def check_maxima(lst: Tuple[float]):
+def check_maxima(lst: Sequence[int]):
     """
     This function takes a list of numbers as input and returns the position of the
     maximum value of any maxima in the list above a certain threshold determined by

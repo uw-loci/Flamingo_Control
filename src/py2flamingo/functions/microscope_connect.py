@@ -1,10 +1,11 @@
+#TODO probably rename this file. There will be another module for connecting to the microscope, this is more helper functions for that
 import os
 import socket
 import time
 import tkinter as tk
 from threading import Event, Thread
 from tkinter import messagebox
-from typing import Tuple
+from typing import Sequence
 
 from functions.text_file_parsing import text_to_dict
 from functions.threads import (
@@ -49,7 +50,7 @@ def go_to_XYZR(
     command_data_queue,
     command_queue,
     send_event,
-    xyzr: Tuple[float, float, float, float],
+    xyzr: Sequence[float],
 ):
     # Unpack the provided XYZR coordinates, r is in degrees, other values are in mm
     x, y, z, r = xyzr

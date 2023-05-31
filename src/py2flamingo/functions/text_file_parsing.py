@@ -1,6 +1,6 @@
 # Includes functions to read and write text files specifically designed for the Flamingo
 # create an option to read in a previous workflow but make minor changes
-
+from typing import Sequence
 
 def calculate_zplanes(wf_dict, z_search_depth, framerate, plane_spacing):
     wf_dict["Stack Settings"]["Number of planes"] = round(
@@ -34,7 +34,7 @@ def laser_or_LED(
     return workflow_dict
 
 
-def dict_positions(workflow_dict, xyzr, zEnd, save_with_data=False, get_zstack=False):
+def dict_positions(workflow_dict:map, xyzr:Sequence[float], zEnd:float, save_with_data=False, get_zstack=False):
     """
     Take in a workflow dictionary and modify it to take a zstack from xyzr to zEnd (only the Z axis changes)
     By default the MIP will be returned, and the data saved to the drive.
@@ -74,7 +74,7 @@ def dict_positions(workflow_dict, xyzr, zEnd, save_with_data=False, get_zstack=F
     return workflow_dict
 
 
-def dict_comment(workflow_dict, comment="No Comment"):
+def dict_comment(workflow_dict:map, comment="No Comment"):
     """
     Take a workflow dict and a String to replace the comment and then return the updated dict.
     """
@@ -82,7 +82,7 @@ def dict_comment(workflow_dict, comment="No Comment"):
     return workflow_dict
 
 
-def dict_to_snap(workflow_dict, xyzr, framerate, plane_spacing, save_with_data=False):
+def dict_to_snap(workflow_dict:map, xyzr:Sequence[float], framerate:float, plane_spacing:float, save_with_data=False):
     """
     Take in a workflow dictionary and modify it to take a snapshot using the same imaging settings as the dict
     Snapshot will be acquired at the provided xyzr coordinates
@@ -125,7 +125,7 @@ def dict_to_snap(workflow_dict, xyzr, framerate, plane_spacing, save_with_data=F
     return workflow_dict
 
 
-def text_to_dict(filename):
+def text_to_dict(filename:str):
     with open(filename, "r") as f:
         # Create an empty dictionary to store the settings
         settings_dict = {}
@@ -164,26 +164,26 @@ def text_to_dict(filename):
         return settings_dict
 
 
-def dict_to_text(file_location, settings_dict):
+def dict_to_text(file_location:str, settings_dict:map):
     with open(file_location, "w", newline="\n") as f:
         # Write the settings to the file
-        write_dict(settings_dict, f, 0)
+        write_dict(f, settings_dict,  0)
 
 
-def write_dict(settings_dict, file, indent_level):
+def write_dict( file:str, settings_dict:map, indent_level:int):
     indent = "  " * indent_level
     for key, value in settings_dict.items():
         if isinstance(value, dict):
             # Start of a section
             file.write(f"{indent}<{key}>\n")
-            write_dict(value, file, indent_level + 1)
+            write_dict( file,value, indent_level + 1)
             file.write(f"{indent}</{key}>\n")
         else:
             # Key-value pair
             file.write(f"{indent}{key} = {value}\n")
 
 
-def dict_to_workflow(file_name, settings_dict):
+def dict_to_workflow(file_name:str, settings_dict:map):
     # print('dict_to_workflow '+file_name)
     # Start with the <Workflow Settings> tag
     output = "<Workflow Settings>\n"
@@ -207,7 +207,7 @@ def dict_to_workflow(file_name, settings_dict):
         f.write(output)
 
 
-def workflow_to_dict(filename):
+def workflow_to_dict(filename:str):
     # print('workflow to dict '+filename)
     with open(filename, "r") as f:
         # Skip the first line

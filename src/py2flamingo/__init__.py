@@ -71,6 +71,7 @@ class FlamingoController(QMainWindow):
         self.check_zstack_file()
         self.check_start_position()
         self.setWindowTitle(f"Flamingo Controller: {self.instrument_name}")
+        self.setStyleSheet("QMainWindow { background-color: rgb(255, 230, 238); }")
         self.setGeometry(200, 200, 600, 550)
 
         # Create labels and fields
@@ -101,9 +102,11 @@ class FlamingoController(QMainWindow):
             if visualize_event.is_set():
                 visualize_event.clear()
                 # Get the latest image from the queue
+                while visualize_queue.qsize() > 1:
+                    visualize_queue.get()
                 image = visualize_queue.get()
                 self.display_image(image)
-                print(f"image to display is {image.shape} and {image.dtype}")
+                #print(f"image to display is {image.shape} and {image.dtype}")
                 # Update the display with the image
                 if not stage_location_queue.empty():
                     # in case data transfer was slow, get the last shown image location only.
@@ -335,14 +338,31 @@ class FlamingoController(QMainWindow):
     def create_GUI_layout(self):
         layout = QHBoxLayout()  # Create a QHBoxLayout for the main layout
         radio_layout = QHBoxLayout()  # Create a QHBoxLayout for radio buttons
-        button_layout = QVBoxLayout()  # Create a QVBoxLayout for buttons
+        button_layout1 = QVBoxLayout()  # Create the first QVBoxLayout for buttons
+        button_layout2 = QVBoxLayout()  # Create the second QVBoxLayout for buttons
+        button_layout = QHBoxLayout()   # Create a QHBoxLayout to hold the two columns
         form_layout = QFormLayout()  # Create a QFormLayout for form fields
-        start_position_layout = (
-            QHBoxLayout()
+
+        start_position_widget = QWidget()
+        start_position_form = (
+            QHBoxLayout(start_position_widget)
         )  # Create a QHBoxLayout for the tip of the sample holder
+        start_position_widget.setStyleSheet("background-color: rgb(255, 213, 168);")
+        start_position_widget.setToolTip(
+            "The provided coordinates are used for the Find Sample button"
+        )
+        position_widget = QWidget()
+        position_form = (
+            QHBoxLayout(position_widget)
+        )  # Create a QHBoxLayout for the active positioning and snapshots
+        position_widget.setStyleSheet("background-color: rgb(168, 241, 255);")
+
+        current_position_widget = QWidget()
         current_position_layout = (
             QHBoxLayout()
         )  # Create a QHBoxLayout for the current position
+        current_position_widget.setStyleSheet("background-color: rgb(244, 181, 252);")
+
         image_layout = (
             QVBoxLayout()
         )  # Create a QVBoxLayout for the image plus coordinates
@@ -393,13 +413,51 @@ class FlamingoController(QMainWindow):
         form_layout.addRow(
             f"{self.instrument_name} command port (default 53717)", self.command_port
         )
-        form_layout.addRow("Laser Power Percent:", self.laser_power_field)
+        form_layout.addRow("Laser Power (percent):", self.laser_power_field)
         form_layout.addRow("Z Search Depth (mm):", self.z_search_depth_field)
         form_layout.addRow("Data storage path:", self.data_storage_field)
-        ##Add in HBox for information
         # form_layout.addRow('Initial XYZR coordinate for 'Find Sample'. Also Snapshot position.')
 
         # Create form fields for sample start location
+        self.start_label_x_mm = QLabel("x (mm): ")
+        self.start_field_x_mm = self.create_field(default_value=self.start_position[0])
+
+        self.start_label_y_mm = QLabel("y (mm): ")
+        self.start_field_y_mm = self.create_field(default_value=self.start_position[1])
+
+        self.start_label_z_mm = QLabel("z (mm): ")
+        self.start_field_z_mm = self.create_field(default_value=self.start_position[2])
+
+        self.start_label_r_deg = QLabel("r (°): ")
+        self.start_field_r_deg = self.create_field(default_value=self.start_position[3])
+
+        # Set current coordinates
+        self.current_coordinates = [
+            self.start_position[0],
+            self.start_position[1],
+            self.start_position[2],
+            self.start_position[3],
+        ]
+
+        # Add form fields and labels to the layout
+        start_position_form.addWidget(self.start_label_x_mm)
+        start_position_form.addWidget(self.start_field_x_mm)
+        start_position_form.addWidget(self.start_label_y_mm)
+        start_position_form.addWidget(self.start_field_y_mm)
+        start_position_form.addWidget(self.start_label_z_mm)
+        start_position_form.addWidget(self.start_field_z_mm)
+        start_position_form.addWidget(self.start_label_r_deg)
+        start_position_form.addWidget(self.start_field_r_deg) 
+        # Set current coordinates
+        self.current_coordinates = [
+            self.start_position[0],
+            self.start_position[1],
+            self.start_position[2],
+            self.start_position[3],
+        ]
+        # form_layout.addRow('Initial XYZR coordinate for 'Find Sample'. Also Snapshot position.')
+
+        # Create form fields to get location for actions from user
         self.label_x_mm = QLabel("x (mm): ")
         self.field_x_mm = self.create_field(default_value=self.start_position[0])
 
@@ -411,47 +469,58 @@ class FlamingoController(QMainWindow):
 
         self.label_r_deg = QLabel("r (°): ")
         self.field_r_deg = self.create_field(default_value=self.start_position[3])
-        # Set current coordinates
-        self.current_coordinates = [
-            self.start_position[0],
-            self.start_position[1],
-            self.start_position[2],
-            self.start_position[3],
-        ]
+
+
 
         # Add form fields and labels to the layout
-        start_position_layout.addWidget(self.label_x_mm)
-        start_position_layout.addWidget(self.field_x_mm)
-        start_position_layout.addWidget(self.label_y_mm)
-        start_position_layout.addWidget(self.field_y_mm)
-        start_position_layout.addWidget(self.label_z_mm)
-        start_position_layout.addWidget(self.field_z_mm)
-        start_position_layout.addWidget(self.label_r_deg)
-        start_position_layout.addWidget(self.field_r_deg)
+        position_form.addWidget(self.label_x_mm)
+        position_form.addWidget(self.field_x_mm)
+        position_form.addWidget(self.label_y_mm)
+        position_form.addWidget(self.field_y_mm)
+        position_form.addWidget(self.label_z_mm)
+        position_form.addWidget(self.field_z_mm)
+        position_form.addWidget(self.label_r_deg)
+        position_form.addWidget(self.field_r_deg)
 
         # Create and connect the buttons
         locate_sample_button = QPushButton("Find Sample", self)
         # locate_sample_button.clicked.connect(self.update_image_window)  # Uncomment and update the slot function
         locate_sample_button.clicked.connect(self.locate_sample_action)
+        locate_sample_button.setStyleSheet("background-color: rgb(255, 213, 168);")
+
         go_to_position_button = QPushButton("Go to XYZR", self)
         go_to_position_button.setToolTip(
             "Moves to the x,y,z,r coordinates listed above."
         )
+        go_to_position_button.setStyleSheet("background-color: rgb(168, 241, 255);")
         go_to_position_button.clicked.connect(self.go_to_position)
+
+        copy_current_position_button = QPushButton("Get current position", self)
+        copy_current_position_button.setToolTip(
+            "Copies the current (below the image) coordinates to the cyan active position form"
+        )
+        copy_current_position_button.setStyleSheet("background-color: rgb(168, 241, 255);")
+        copy_current_position_button.clicked.connect(self.copy_current_position)
+
         set_home_button = QPushButton("Set 'Home' on Mac", self)
         set_home_button.setToolTip(
             "Updates the values for the 'Home' position on the microscope\nusing the values displayed under the image."
         )
+        set_home_button.setStyleSheet("background-color: rgb(244, 181, 252);")
         set_home_button.clicked.connect(self.set_home_action)
+
         take_snapshot_button = QPushButton("Take IF snapshot", self)
         take_snapshot_button.setToolTip(
             "Takes a snapshot using the currently selected fluorescence settings and location"
         )
+        take_snapshot_button.setStyleSheet("background-color: rgb(168, 241, 255);")
         take_snapshot_button.clicked.connect(self.take_snapshot)
+
         duplicate_and_add_your_button = QPushButton(
             "Duplicate and add your button", self
         )
         duplicate_and_add_your_button.clicked.connect(self.add_your_code)
+
         kill_button = QPushButton("Stop AND CLOSE PROGRAM", self)
         kill_button.setToolTip(
             "Completely close the program and end connections to the microscope."
@@ -465,18 +534,24 @@ class FlamingoController(QMainWindow):
 
         # Add the buttons to the button layout
         # This controls the order they show up on screen
-        button_layout.addWidget(locate_sample_button)
-        button_layout.addWidget(set_home_button)
-        button_layout.addWidget(go_to_position_button)
-        button_layout.addWidget(take_snapshot_button)
-        button_layout.addWidget(duplicate_and_add_your_button)
-        button_layout.addWidget(kill_button)
-        button_layout.addWidget(cancel_button)
+        button_layout1.setAlignment(Qt.AlignTop)
+        button_layout2.setAlignment(Qt.AlignTop)
+        button_layout1.addWidget(locate_sample_button)
+        button_layout1.addWidget(set_home_button)
+        button_layout2.addWidget(go_to_position_button)
+        button_layout2.addWidget(take_snapshot_button)
+        button_layout2.addWidget(copy_current_position_button)
+        button_layout1.addWidget(duplicate_and_add_your_button)
+        button_layout1.addWidget(kill_button)
+        button_layout1.addWidget(cancel_button)
         # Add the combined vertical layouts (radio buttons, form fields, and buttons) to the main vertical layout
+        button_layout.addLayout(button_layout1)
+        button_layout.addLayout(button_layout2)
         vertical_layout.setAlignment(Qt.AlignTop)
         vertical_layout.addLayout(radio_layout)
         vertical_layout.addLayout(form_layout)
-        vertical_layout.addLayout(start_position_layout)
+        vertical_layout.addWidget(start_position_widget)
+        vertical_layout.addWidget(position_widget)
         vertical_layout.addLayout(button_layout)
 
         # Add the combined vertical layouts on the left and the image layout on the right to the horizontal layout
@@ -566,7 +641,7 @@ class FlamingoController(QMainWindow):
         # Check for a start position
 
         if not self.check_field(
-            [self.field_x_mm, self.field_y_mm, self.field_z_mm, self.field_r_deg]
+            [self.start_field_x_mm, self.start_field_y_mm, self.start_field_z_mm, self.start_field_r_deg]
         ):
             return
         # Get values from the GUI fields
@@ -576,17 +651,17 @@ class FlamingoController(QMainWindow):
         data_storage = self.data_storage_field.text()
         updated_position = {
             self.instrument_name: {
-                "x(mm)": self.field_x_mm.text(),
-                "y(mm)": self.field_y_mm.text(),
-                "z(mm)": self.field_z_mm.text(),
-                "r(°)": self.field_r_deg.text(),
+                "x(mm)": self.start_field_x_mm.text(),
+                "y(mm)": self.start_field_y_mm.text(),
+                "z(mm)": self.start_field_z_mm.text(),
+                "r(°)": self.start_field_r_deg.text(),
             }
         }
         xyzr_init = [
-            self.field_x_mm.text(),
-            self.field_y_mm.text(),
-            self.field_z_mm.text(),
-            self.field_r_deg.text(),
+            self.start_field_x_mm.text(),
+            self.start_field_y_mm.text(),
+            self.start_field_z_mm.text(),
+            self.start_field_r_deg.text(),
         ]
         dict_to_text(
             os.path.join(
@@ -639,7 +714,7 @@ class FlamingoController(QMainWindow):
             send_thread_var,
             processing_thread_var,
         ) = self.threads
-        nuc_client, live_client, wf_zstack, LED_on, LED_off = self.connection_data
+        nuc_client, live_client, _, _, _ = self.connection_data
         terminate_event.set()
         QApplication.instance().quit()
         print("Shutting down connection")
@@ -717,6 +792,16 @@ class FlamingoController(QMainWindow):
         # Start the thread
         set_home_thread.start()
 
+    def copy_current_position(self):
+        if not self.check_field(
+            [self.start_field_x_mm, self.start_field_y_mm, self.start_field_z_mm, self.start_field_r_deg]
+        ):
+            return
+        self.field_x_mm.setText(str(self.current_x.text().split(" ")[1]))
+        self.field_y_mm.setText(str(self.current_y.text().split(" ")[1]))
+        self.field_z_mm.setText(str(self.current_z.text().split(" ")[1]))
+        self.field_r_deg.setText(str(self.current_r.text().split(" ")[1]))
+
     def cancel_action(self):
         terminate_event.set()
         time.sleep(5)
@@ -729,7 +814,7 @@ class FlamingoController(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    # image_window = ImageWindow()
+
     controller = FlamingoController()
 
     controller.show()

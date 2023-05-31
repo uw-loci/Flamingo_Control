@@ -1,7 +1,7 @@
 import os
 import shutil
 import time
-from typing import Tuple
+from typing import Sequence
 
 from functions.text_file_parsing import *
 
@@ -11,7 +11,7 @@ framerate = 40.0032  # /s
 
 def take_snapshot(
     connection_data: list,
-    xyzr_init: Tuple[float, float, float, float],
+    xyzr_init: Sequence[float],
     visualize_event,
     image_queue,
     command_queue,
