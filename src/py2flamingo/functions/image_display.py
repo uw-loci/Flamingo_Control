@@ -1,8 +1,10 @@
-import numpy as np
-from PyQt5.QtGui import QImage
-from skimage import io#, transform
 import time
+
+import numpy as np
 from PIL import Image
+from PyQt5.QtGui import QImage
+from skimage import io  # , transform
+
 
 def convert_to_qimage(image_data):
     """
@@ -11,13 +13,15 @@ def convert_to_qimage(image_data):
     start_time = time.time()  # Record the start time
     new_height, new_width = 512, 512
     # Resize the image data to 512x512 using bilinear interpolation
-   # Resize the image data to 512x512 using bilinear interpolation
-    #print('Converting to QImage')
+    # Resize the image data to 512x512 using bilinear interpolation
+    # print('Converting to QImage')
     image = Image.fromarray(image_data)
 
     # Convert the image to grayscale mode and resize
-    #TODO scipy.ndimage scikit image
-    scaled_image = image.convert('L').resize((new_width, new_height), resample=Image.BILINEAR)
+    # TODO scipy.ndimage scikit image
+    scaled_image = image.convert("L").resize(
+        (new_width, new_height), resample=Image.BILINEAR
+    )
 
     # Calculate the lower and upper percentiles for display normalization
     lower_percentile = 2.5
@@ -33,14 +37,18 @@ def convert_to_qimage(image_data):
     scaled_image = (normalized_image * 255).astype(np.uint8)
 
     # Create the QImage directly from the numpy array
- 
+
     qimage = QImage(scaled_image.data, new_width, new_height, QImage.Format_Grayscale8)
 
     end_time = time.time()  # Record the end time
     elapsed_time = end_time - start_time  # Calculate the elapsed time
-    print('Image converted, time taken:', elapsed_time, 'seconds')  # Print the elapsed time, usually a few hundredths of a second or less
+    print(
+        "Image converted, time taken:", elapsed_time, "seconds"
+    )  # Print the elapsed time, usually a few hundredths of a second or less
 
     return qimage
+
+
 # def convert_to_qimage(image_data):
 #     """
 #     Convert a 16-bit grayscale image to QImage, resizing the image to 512x512 using bilinear interpolation.
@@ -77,4 +85,3 @@ def convert_to_qimage(image_data):
 #     # print('Image converted, time taken:', elapsed_time, 'seconds')  # Print the elapsed time, usually a few hundredths of a second or less
 
 #     return qimage
-
