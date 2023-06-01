@@ -1,13 +1,12 @@
 # TO DO? heavy use of workflow files could probably be reduced to logging, with dictionaries being sent instead.
 # TO DO? Modify to handle other types of workflows than Zstacks
-## ??SET HOME TO LOCATION OF SAMPLE??
 # HARDCODED plane spacing and framerate
 
 
 import copy
 import shutil
 import time
-
+from global_objects import clear_all_events_queues
 import functions.calculations
 from functions.microscope_connect import *
 from functions.text_file_parsing import *
@@ -44,7 +43,9 @@ def locate_sample(
 
     WiFi warning: image data transfer will be very slow over wireless networks - use hardwired connections
     """
-
+    #in case of second run, clear out any remaining data or flags.
+    terminate_event.clear() 
+    clear_all_events_queues()
     # Look in the functions/command_list.txt file for other command codes, or add more
     commands = text_to_dict(
         os.path.join("src", "py2flamingo", "functions", "command_list.txt")
@@ -79,11 +80,9 @@ def locate_sample(
     ##
 
     nuc_client, live_client, wf_zstack, LED_on, LED_off = connection_data
-
     image_pixel_size, scope_settings = get_microscope_settings(
         command_queue, other_data_queue, send_event
     )
-
     command_queue.put(COMMAND_CODES_CAMERA_IMAGE_SIZE_GET)
     send_event.set()
     time.sleep(0.1)
@@ -107,9 +106,7 @@ def locate_sample(
     snap_dict = workflow_to_dict(os.path.join("workflows", wf_zstack))
     snap_dict = dict_to_snap(snap_dict, xyzr_init, framerate, plane_spacing)
     snap_dict = laser_or_LED(snap_dict, laser_channel, laser_setting, laser_on=False)
-    # snap_dict['Illumination Source'][laser_channel] = '0.00 0'
-    # snap_dict['Illumination Source']['LED_RGB_Board'] = LED_on
-    # For troubleshooting, double check a recent snapshot workflow
+
     dict_to_workflow(os.path.join("workflows", "currentSnapshot.txt"), snap_dict)
 
     # WORKFLOW.TXT FILE IS ALWAYS USED FOR send_event, other workflow files are backups and only used to validate steps
@@ -125,7 +122,6 @@ def locate_sample(
 
     while not system_idle.is_set():
         time.sleep(0.1)
-    print("VISUALIZE EVENT SET*****************")
     # Possibly make this a mini function
     stage_location_queue.put(xyzr_init)
     visualize_event.set()
@@ -211,8 +207,9 @@ def locate_sample(
     # Check for cancellation from GUI
 
     if terminate_event.is_set():
-        print("Thread terminating")
-        raise SystemExit
+        print("Find Sample terminating")
+        terminate_event.clear()
+        return
 
     xyzr = coords[maxima][0]
     x, y, z, r = coords[maxima][0]
@@ -248,8 +245,9 @@ def locate_sample(
         print(f"Subset of planes acquisition {i} of {loops}")
         # Check for cancellation from GUI
         if terminate_event.is_set():
-            print("Thread terminating")
-            raise SystemExit
+            print("Find Sample terminating")
+            terminate_event.clear()
+            return
         # calculate the next step of the Z stack and apply that to the workflow file
         xyzr[2] = float(z) - float(z_search_depth) / 2 + i * buffer_max * step_size_mm
         zEnd = (

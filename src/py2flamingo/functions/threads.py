@@ -90,56 +90,55 @@ def command_listen_thread(
     s = struct.Struct(
         "I I I I I I I I I I d I 72s I"
     )  # pack everything to binary via struct
-    while not terminate_event.is_set():
-        while True:
-            # print('waiting for command response')
-            msg = client.recv(128)
-            # print(len(msg))
-            if len(msg) != 128:
-                break
 
-            received = s.unpack(msg)
-            # print(f'Received on 53717: {received[1]} : {received[2]} : {received[3]} : {received[6]} : {received[10]} : size {received[11]}')
-            ####
-            # need to check 53717 for received[1] being idle
-            # print('listening to 53717 got ' + str(received[1]))
-            ####
-            if received[1] == COMMAND_CODES_SYSTEM_STATE_IDLE:
-                print("status idle: " + str(received[2]))
-                if received[2] == 1:
-                    idle_state.set()
-            ###############################
-            elif received[1] == COMMAND_CODES_COMMON_SCOPE_SETTINGS:
-                time.sleep(0.05)
-                print(f"Getting microscope settings = {received[2]}")
-                bytes = bytes_waiting(client)
-                text_bytes = client.recv(bytes)
-                if not os.path.exists("microscope_settings"):
-                    os.makedirs("microscope_settings")
-                # 'wb' setting is important here to write the binary data to the file as text. 'w' fails
-                with open(
-                    os.path.join("microscope_settings", "ScopeSettings.txt"), "wb"
-                ) as file:
-                    file.write(text_bytes)
-            elif received[1] == COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET:
-                print("pixel size " + str(received[10]))
-                if received[10] < 0:
-                    print(
-                        "Threads.py command_listen_thread: No pixel size detected from system. Exiting."
-                    )
-                    exit()
-                other_data_queue.put(received[10])
-            elif received[1] == 12331:
-                print("frame size " + str(received[7]))
-                if received[10] < 0:
-                    print(
-                        "Threads.py command_listen_thread: No camera size detected from system. Exiting."
-                    )
-                    exit()
-                other_data_queue.put(received[7])
+    while True:
+        # print('waiting for command response')
+        msg = client.recv(128)
+        # print(len(msg))
+        if len(msg) != 128:
+            continue
+
+        received = s.unpack(msg)
+        #print(f'Received on 53717: {received[1]} : {received[2]} : {received[3]} : {received[6]} : {received[10]} : size {received[11]}')
+        ####
+        # need to check 53717 for received[1] being idle
+        # print('listening to 53717 got ' + str(received[1]))
+        ####
+        if received[1] == COMMAND_CODES_SYSTEM_STATE_IDLE:
+            print("status idle: " + str(received[2]))
+            if received[2] == 1:
+                idle_state.set()
+        ###############################
+        elif received[1] == COMMAND_CODES_COMMON_SCOPE_SETTINGS:
+            time.sleep(0.05)
+            print(f"Getting microscope settings = {received[2]}")
+            bytes = bytes_waiting(client)
+            text_bytes = client.recv(bytes)
+            if not os.path.exists("microscope_settings"):
+                os.makedirs("microscope_settings")
+            # 'wb' setting is important here to write the binary data to the file as text. 'w' fails
+            with open(
+                os.path.join("microscope_settings", "ScopeSettings.txt"), "wb"
+            ) as file:
+                file.write(text_bytes)
+        elif received[1] == COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET:
+            print("pixel size " + str(received[10]))
+            if received[10] < 0:
+                print(
+                    "Threads.py command_listen_thread: No pixel size detected from system. Exiting."
+                )
+                exit()
+            other_data_queue.put(received[10])
+        elif received[1] == 12331:
+            print("frame size " + str(received[7]))
+            if received[10] < 0:
+                print(
+                    "Threads.py command_listen_thread: No camera size detected from system. Exiting."
+                )
+                exit()
+            other_data_queue.put(received[7])
 
                 # Check if double data is -1 or a pixel FoV
-    return
 
 
 # Listen for image data, which is sent via the 'live' settings in the workflow file. Does not actually get full image data.
@@ -148,7 +147,7 @@ def live_listen_thread(
 ):
     global index
     print("LISTENING for image data on " + str(live_client))
-    while not terminate_event.is_set():
+    while True:
         # receive the header
         # print('Waiting for image data')
         try:
@@ -317,7 +316,7 @@ def send_thread(
 def processing_thread(
     z_plane_queue, terminate_event, processing_event, intensity_queue, image_queue
 ):
-    while not terminate_event.is_set():
+    while True:
         processing_event.wait()
         # print('processing thread waiting for data')
         # determine what type of event to process
@@ -353,4 +352,3 @@ def processing_thread(
                 functions.calculations.find_most_in_focus_plane(image_data)
             )
             processing_event.clear()
-    return

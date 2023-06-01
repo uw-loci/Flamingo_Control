@@ -20,6 +20,7 @@ def take_snapshot(
     laser_channel="Laser 3 488 nm",
     laser_setting="5.00 1",
 ):
+    print('Taking snapshot')
     wf_zstack = connection_data[2]
 
     # commands
@@ -52,7 +53,7 @@ def take_snapshot(
     # only close out the connections once the final image is collected
     stage_location_queue.put(xyzr_init)
     visualize_event.set()
-    image = image_queue.get()
-    print(image.shape)
+    image_queue.get()
+    print('snapshot taken')
     # Clean up 'delete' PNG files or dont make them
     ###
