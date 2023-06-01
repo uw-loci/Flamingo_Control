@@ -46,101 +46,145 @@ COMMAND_CODES_CAMERA_IMAGE_SIZE_GET = int(
 ##############################
 
 
-def go_to_XYZR(
-    command_data_queue,
-    command_queue,
-    send_event,
-    xyzr: Sequence[float],
-):
+def move_axis(command_data_queue, command_queue, send_event, axis_code, value):
+    """
+    Move a specific axis to the specified value.
+
+    Parameters
+    ----------
+    command_data_queue : queue.Queue
+        The queue to store the command data.
+    command_queue : queue.Queue
+        The queue to store the command.
+    send_event : threading.Event
+        The event to trigger sending of commands.
+    axis_code : int
+        The code of the axis to move.
+    value : float
+        The value to move the axis to.
+
+    Returns
+    -------
+    None
+    """
+    command_data_queue.put([axis_code, 0, 0, value])
+    command_queue.put(COMMAND_CODES_STAGE_POSITION_SET)
+    send_event.set()
+    while not command_queue.empty():
+        time.sleep(0.1)
+
+def go_to_XYZR(command_data_queue, command_queue, send_event, xyzr: Sequence[float]):
+    """
+    Move to the specified XYZR coordinates.
+
+    Parameters
+    ----------
+    command_data_queue : queue.Queue
+        The queue to store the command data.
+    command_queue : queue.Queue
+        The queue to store the command.
+    send_event : threading.Event
+        The event to trigger sending of commands.
+    xyzr : Sequence[float]
+        The XYZR coordinates to move to. r is in degrees, other values are in mm.
+
+    Returns
+    -------
+    None
+    """
     # Unpack the provided XYZR coordinates, r is in degrees, other values are in mm
     x, y, z, r = xyzr
-    print(f"moving to {x} {y} {z} {r}")
-    # data0_queue.put(0) doesn't represent a motion axis
-    # Put X-axis movement command data in the queue
-    command_data_queue.put([1, 0, 0, x])  # 1 = xaxis
-    # Put movement command in the queue
-    command_queue.put(COMMAND_CODES_STAGE_POSITION_SET)  # movement
-    # Signal the send event to trigger command sending
-    send_event.set()
-    # Wait until the command queue is empty (indicating the command has been sent off to the controller)
-    while not command_queue.empty():
-        time.sleep(0.1)
+    print(f"Moving to {x} {y} {z} {r}")
 
-    command_data_queue.put([3, 0, 0, z])  # 3 = zaxis
-    command_queue.put(COMMAND_CODES_STAGE_POSITION_SET)  # movement
-    send_event.set()
-    while not command_queue.empty():
-        time.sleep(0.1)
+    move_axis(command_data_queue, command_queue, send_event, 1, x)  # X-axis
+    move_axis(command_data_queue, command_queue, send_event, 3, z)  # Z-axis
+    move_axis(command_data_queue, command_queue, send_event, 4, r)  # Rotation
+    move_axis(command_data_queue, command_queue, send_event, 2, y)  # Y-axis
 
-    command_data_queue.put([4, 0, 0, r])  # 4 = rotation
-    command_queue.put(COMMAND_CODES_STAGE_POSITION_SET)  # movement
-    send_event.set()
-    while not command_queue.empty():
-        time.sleep(0.1)
-
-    command_data_queue.put([2, 0, 0, y])  # 2 = yaxis
-    command_queue.put(COMMAND_CODES_STAGE_POSITION_SET)  # movement
-    send_event.set()
-    while not command_queue.empty():
-        time.sleep(0.1)
 
 
 def get_microscope_settings(command_queue, other_data_queue, send_event):
+    """
+    Retrieve microscope settings and image pixel size.
+
+    This function retrieves the microscope settings and image pixel size by sending relevant commands to the controller.
+
+    Parameters
+    ----------
+    command_queue : queue.Queue
+        The queue to store the command.
+    other_data_queue : queue.Queue
+        The queue to store other data.
+    send_event : threading.Event
+        The event to trigger sending of commands.
+
+    Returns
+    -------
+    Tuple[float, dict]
+        A tuple containing the image pixel size and the microscope settings dictionary.
+    """
     command_queue.put(COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD)  # movement
     send_event.set()
     while not command_queue.empty():
         time.sleep(0.3)
 
-    # microscope settings should now be in a text file called ScopeSettings.txt in the 'workflows' directory
-    # convert them into a dict to extract useful information
-    #########
+    # Microscope settings should now be in a text file called ScopeSettings.txt in the 'microscope_settings' directory.
+    # Convert them into a dictionary to extract useful information.
     scope_settings = text_to_dict("microscope_settings/ScopeSettings.txt")
 
-    # objective_mag = float(metadata_settings['Instrument']['Type']['Objective lens magnification'])
-    # tube_lens_design_length = float(metadata_settings['Instrument']['Type']['Tube lens design focal length (mm)'])
-    # tube_lens_actual_length = float(metadata_settings['Instrument']['Type']['Tube lens length (mm)'])
-    # #######################################################
     command_queue.put(COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET)  # movement
     send_event.set()
     while not command_queue.empty():
         time.sleep(0.3)
-    # FIX HARDCODED 0.65
+
+    # Get the image pixel size from the other data queue
     image_pixel_size = other_data_queue.get()
+
     return image_pixel_size, scope_settings
 
 
 def start_connection(NUC_IP: str, PORT_NUC: int):
+    """
+    Start the connection with the Flamingo NUC and live client.
+
+    This function establishes the connection with the Flamingo NUC and live client using the provided IP and port.
+
+    Parameters
+    ----------
+    NUC_IP : str
+        The IP address of the Flamingo NUC.
+    PORT_NUC : int
+        The port number for the NUC connection.
+
+    Returns
+    -------
+    Tuple[socket.socket, socket.socket, str, str]
+        A tuple containing the NUC client socket, live client socket, ZStack.txt filename, LED on state, and LED off state.
+    """
     PORT_LISTEN = PORT_NUC + 1
-    # Workflow templates
-    # Current code requires EITHER Display max projection OR Work flow live view enabled
-    # but not both
     wf_zstack = "ZStack.txt"  # Fluorescent Z stack to find sample
-    ########
-    # Function specific, validate that Snapshot.txt and ZStack.txt exist, or find way to make sure they don't need to exist
+
     try:
+        # Create and connect the NUC client socket
         nuc_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         nuc_client.settimeout(2)
         nuc_client.connect((NUC_IP, PORT_NUC))
 
+        # Create and connect the live client socket
         live_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         live_client.connect((NUC_IP, PORT_LISTEN))
-    except socket.timeout:
-        # Handle the connection timeout and show a popup message
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showinfo(
-            "Connection Error",
-            "Check that you have network access to the microscope. This may also be an IT issue. Close the program and try again.",
-        )
-        exit()
-    except ConnectionRefusedError:
+    except (socket.timeout, ConnectionRefusedError) as e:
         # Handle the connection error and show a popup message
         root = tk.Tk()
         root.withdraw()
-        messagebox.showinfo("Connection Error", "Connection was refused.")
+        if isinstance(e, socket.timeout):
+            message = "Check that you have network access to the microscope. This may also be an IT issue. Close the program and try again."
+        else:
+            message = "Connection was refused."
+        messagebox.showinfo("Connection Error", message)
+        exit()
 
-    # print('listener thread socket created on ' + str(IP_REMOTE)+ ' : '+str(PORT_REMOTE))
-    #########CONNECTION END ###############
+    # Return the NUC client socket, live client socket, ZStack.txt filename, LED on state, and LED off state
     return nuc_client, live_client, wf_zstack, LED_on, LED_off
 
 
@@ -219,10 +263,33 @@ def close_connection(
     send_thread_var: Thread,
     processing_thread_var: Thread,
 ):
-    # Join may no longer be necessary due to use of daemon=true?
+    """
+    Close the connection with the microscope and terminate the threads.
+
+    This function joins the threads to ensure they finish their tasks, closes the socket connections,
+    and terminates the threads.
+
+    Parameters
+    ----------
+    nuc_client : socket
+        The socket for communication with the NUC.
+    live_client : socket
+        The socket for receiving live image data.
+    live_listen_thread_var : Thread
+        The variable representing the live listen thread.
+    command_listen_thread_var : Thread
+        The variable representing the command listen thread.
+    send_thread_var : Thread
+        The variable representing the send thread.
+    processing_thread_var : Thread
+        The variable representing the processing thread.
+    """
+    # Join the threads to ensure they finish their tasks
     send_thread_var.join()
     live_listen_thread_var.join()
     command_listen_thread_var.join()
     processing_thread_var.join()
+
+    # Close the socket connections
     nuc_client.close()
     live_client.close()

@@ -47,109 +47,408 @@ COMMAND_CODES_CAMERA_IMAGE_SIZE_GET = int(
 ##############################
 
 
-def empty_socket(sock: socket):
-    """remove the data present on the socket"""
+def clear_socket(sock: socket):
+    """
+    Empty the data present on the socket.
+
+    This function reads all data available on the socket and discards it. 
+    It's useful for ensuring a clean start before sending or receiving new data.
+
+    Parameters
+    ----------
+    sock: socket
+        The socket to be cleared of data.
+    """
+    # Create a list with the socket as its only member
     input = [sock]
-    while 1:
+
+    while True:
+        # Set socket to non-blocking mode
         sock.setblocking(0)
-        inputready, o, e = select.select(input, [], [], 0.0)
+
+        # Use select to check if there is data available on the socket
+        inputready, _, _ = select.select(input, [], [], 0.0)
+
         print("Data amount waiting " + str(len(inputready)))
+
+        # If there is no data available, break the loop
         if len(inputready) == 0:
             break
+
+        # If there is data available, receive it and discard
         for s in inputready:
             s.recv(1)
+
     print(f"socket {sock} clear")
+
+    # Set socket back to blocking mode
     sock.setblocking(1)
 
 
 def bytes_waiting(sock: socket):
-    # Use select() to check if there is data waiting to be read
-    # on the socket.
+    """
+    Check if there is data waiting to be read on the socket and return the number of bytes.
+
+    Parameters
+    ----------
+    sock: socket
+        The socket to be checked for waiting data.
+
+    Returns
+    -------
+    int
+        The number of bytes waiting to be read. If there is no data waiting, return 0.
+    """
+    # Use select() to check if there is data waiting to be read on the socket
     r, _, _ = select.select([sock], [], [], 0)
+
     if r:
-        # If there is data waiting, use the recv() method with
-        # MSG_PEEK flag to peek at the first byte of data and get
-        # the total number of bytes waiting to be read.
+        # If there is data waiting, set socket to non-blocking mode
         sock.setblocking(0)
+
+        # Peek at the first byte of data and get the total number of bytes waiting to be read
         data = len(sock.recv(80000, socket.MSG_PEEK))
+
+        # Set socket back to blocking mode
         sock.setblocking(1)
-        # print(f'length of data {data}')
+
+        # Return the length of data
         return data
     else:
-        # If there is no data waiting, return 0.
+        # If there is no data waiting, return 0
         return 0
 
 
-# Commands sent to the Nuc get responses, this listens for and processes those responses.
-# Primary purpose is currently to listen for the 'idle' state
-def command_listen_thread(
-    client: socket, idle_state: Event, terminate_event: Event, other_data_queue
-):
-    print("LISTENING for commands on " + str(client))
-    empty_socket(client)
-    s = struct.Struct(
-        "I I I I I I I I I I d I 72s I"
-    )  # pack everything to binary via struct
 
-    while True:
-        # print('waiting for command response')
+# Commands sent to the Nuc get responses, this listens for and processes those responses.
+#########################COMMAND_LISTENING SECTION#############
+
+def unpack_received_message(msg):
+    """
+    Unpacks the received message using a specific struct format.
+
+    Parameters
+    ----------
+    msg : bytes
+        The received message to unpack.
+
+    Returns
+    -------
+    tuple
+        The unpacked values from the message.
+    """
+    # Unpack the received message
+    s = struct.Struct("I I I I I I I I I I d I 72s I")
+    return s.unpack(msg)
+
+
+def handle_idle_state(received, idle_state):
+    """
+    Handles the idle state based on the received message.
+
+    Parameters
+    ----------
+    received : tuple
+        The unpacked values from the received message.
+    idle_state : threading.Event
+        The event to set when the system is idle.
+
+    Returns
+    -------
+    None
+    """
+    print("status idle: " + str(received[2]))
+    if received[2] == 1:
+        idle_state.set()
+
+
+def fetch_microscope_settings(received, client):
+    """
+    Fetches the microscope settings from the client.
+
+    Parameters
+    ----------
+    received : tuple
+        The unpacked values from the received message.
+    client : socket
+        The socket client to fetch the settings from.
+
+    Returns
+    -------
+    None
+    """
+    time.sleep(0.05)
+    print(f"Getting microscope settings = {received[2]}")
+
+    # Fetch the microscope settings
+    bytes = bytes_waiting(client)
+    text_bytes = client.recv(bytes)
+
+    # Save the settings to a file
+    if not os.path.exists("microscope_settings"):
+        os.makedirs("microscope_settings")
+    with open(os.path.join("microscope_settings", "ScopeSettings.txt"), "wb") as file:
+        file.write(text_bytes)
+
+
+def handle_pixel_field_of_view(received, other_data_queue):
+    """
+    Handles the pixel field of view based on the received message.
+
+    Parameters
+    ----------
+    received : tuple
+        The unpacked values from the received message.
+    other_data_queue : queue.Queue
+        The queue to put the pixel field of view value.
+
+    Returns
+    -------
+    None
+    """
+    print("pixel size " + str(received[10]))
+    if received[10] < 0:
+        print("Threads.py command_listen_thread: No pixel size detected from system. Exiting.")
+        exit()
+    other_data_queue.put(received[10])
+
+
+def handle_camera_frame_size(received, other_data_queue):
+    """
+    Handles the camera frame size based on the received message.
+
+    Parameters
+    ----------
+    received : tuple
+        The unpacked values from the received message.
+    other_data_queue : queue.Queue
+        The queue to put the camera frame size value.
+
+    Returns
+    -------
+    None
+    """
+    print("frame size " + str(received[7]))
+    if received[10] < 0:
+        print("Threads.py command_listen_thread: No camera size detected from system. Exiting.")
+        exit()
+    other_data_queue.put(received[7])
+
+
+def command_listen_thread(client: socket, idle_state: Event, terminate_event: Event, other_data_queue):
+    """
+    Thread that listens for commands from the client and handles them accordingly.
+
+    Parameters
+    ----------
+    client : socket
+        The socket client to listen for commands.
+    idle_state : threading.Event
+        The event to set when the system is idle.
+    terminate_event : threading.Event
+        The event to terminate the thread.
+    other_data_queue : queue.Queue
+        The queue to store other data.
+
+    Returns
+    -------
+    None
+    """
+    print("LISTENING for commands on " + str(client))
+    
+    # Clear out any data currently in the socket
+    clear_socket(client)
+
+    while not terminate_event.is_set():
+        # Wait to receive a message from the client
         msg = client.recv(128)
-        # print(len(msg))
+
+        # Ignore messages of incorrect size
         if len(msg) != 128:
             continue
 
-        received = s.unpack(msg)
-        #print(f'Received on 53717: {received[1]} : {received[2]} : {received[3]} : {received[6]} : {received[10]} : size {received[11]}')
-        ####
-        # need to check 53717 for received[1] being idle
-        # print('listening to 53717 got ' + str(received[1]))
-        ####
+        # Unpack the received message
+        received = unpack_received_message(msg)
+
+        # Check the command code in the received message and respond appropriately
         if received[1] == COMMAND_CODES_SYSTEM_STATE_IDLE:
-            print("status idle: " + str(received[2]))
-            if received[2] == 1:
-                idle_state.set()
-        ###############################
+            handle_idle_state(received, idle_state)
         elif received[1] == COMMAND_CODES_COMMON_SCOPE_SETTINGS:
-            time.sleep(0.05)
-            print(f"Getting microscope settings = {received[2]}")
-            bytes = bytes_waiting(client)
-            text_bytes = client.recv(bytes)
-            if not os.path.exists("microscope_settings"):
-                os.makedirs("microscope_settings")
-            # 'wb' setting is important here to write the binary data to the file as text. 'w' fails
-            with open(
-                os.path.join("microscope_settings", "ScopeSettings.txt"), "wb"
-            ) as file:
-                file.write(text_bytes)
+            fetch_microscope_settings(received, client)
         elif received[1] == COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET:
-            print("pixel size " + str(received[10]))
-            if received[10] < 0:
-                print(
-                    "Threads.py command_listen_thread: No pixel size detected from system. Exiting."
-                )
-                exit()
-            other_data_queue.put(received[10])
+            handle_pixel_field_of_view(received, other_data_queue)
         elif received[1] == 12331:
-            print("frame size " + str(received[7]))
-            if received[10] < 0:
-                print(
-                    "Threads.py command_listen_thread: No camera size detected from system. Exiting."
-                )
-                exit()
-            other_data_queue.put(received[7])
-
-                # Check if double data is -1 or a pixel FoV
+            handle_camera_frame_size(received, other_data_queue)
 
 
-# Listen for image data, which is sent via the 'live' settings in the workflow file. Does not actually get full image data.
-def live_listen_thread(
-    live_client: socket, terminate_event: Event, image_queue, visualize_queue
-):
+
+##################################################
+
+
+############LIVE LISTEN THREAD SECTION################
+def receive_image_data(live_client, image_size):
+    """
+    Receives image data from the live client socket.
+
+    This function receives the image data in chunks from the live client socket until the entire image 
+    has been received.
+
+    Parameters
+    ----------
+    live_client : socket
+        The live client socket for receiving data.
+
+    image_size : int
+        The size of the image data to be received.
+
+    Returns
+    -------
+    image_data : bytes
+        The received image data as bytes.
+
+    Raises
+    ------
+    socket.error
+        If incomplete image data is received.
+
+    """
+    image_data = b""
+    while len(image_data) < image_size:
+        data = live_client.recv(image_size - len(image_data))
+        if not data:
+            raise socket.error("Incomplete image data")
+        image_data += data
+    return image_data
+
+
+def process_single_image(live_client, image_size, image_width, image_height, image_queue, visualize_queue):
+    """
+    Processes a single image received from the live client socket.
+
+    This function receives a single image from the live client socket, processes it, and puts it into 
+    the image queue and visualize queue for further use.
+
+    Parameters
+    ----------
+    live_client : socket
+        The live client socket for receiving data.
+
+    image_size : int
+        The size of the image data to be received.
+
+    image_width : int
+        The width of the image.
+
+    image_height : int
+        The height of the image.
+
+    image_queue : Queue
+        A queue for holding the received image data.
+
+    visualize_queue : Queue
+        A queue for holding the image data to be used for visualization.
+
+    """
+    image_data = receive_image_data(live_client, image_size)
+
+    image_array = np.frombuffer(image_data, dtype=np.uint16)
+    image_array = image_array.reshape((image_height, image_width)).T
+    image_array = np.flipud(image_array)
+
+    image_queue.put(np.array(image_array))
+    visualize_queue.put(np.array(image_array))
+
+
+def receive_zstack_images(live_client, image_size, image_width, image_height, stack_size, Zpos, image_queue):
+    """
+    Receives a stack of images from the live client socket.
+
+    This function receives a stack of images from the live client socket, rotates and saves each image, 
+    and combines them into a 3D array. The resulting stack is then put into the image queue for further use.
+
+    Parameters
+    ----------
+    live_client : socket
+        The live client socket for receiving data.
+
+    image_size : int
+        The size in bytes of each image in the stack.
+
+    image_width : int
+        The width of the images in pixels.
+
+    image_height : int
+        The height of the images in pixzels.
+
+    stack_size : int
+        The number of images in the stack.
+
+    Zpos : float
+        The Z position of an image.
+
+    image_queue : Queue
+        A queue for holding the received image stack.
+
+    """
+    images = []
+    live_client.settimeout(1)
+    exit_loop = False
+    step = 0
+
+    while step < stack_size:
+        if exit_loop:
+            print("1 second timeout reached while waiting for additional Z slices, returning to standard listening mode")
+            break
+
+        image_data = receive_image_data(live_client, image_size)
+
+        image = Image.frombytes("I;16", (image_width, image_height), image_data)
+        rotated_image = image.rotate(90, expand=True)
+        rotated_image.save(os.path.join(f"output_png", f"plane_{Zpos}_{step}.png"))
+
+        images.append(rotated_image)
+        step += 1
+
+        if step != stack_size:
+            try:
+                header_data = live_client.recv(40)
+            except socket.timeout:
+                exit_loop = True
+
+    stack = np.stack([np.array(image) for image in images])
+    live_client.settimeout(0)
+    live_client.setblocking(True)
+
+    image_queue.put(stack)
+
+
+def live_listen_thread(live_client: socket, terminate_event: Event, image_queue, visualize_queue):
+    """
+    Thread for listening to image data from the live client socket.
+
+    This thread listens to the live client socket for incoming image data. It receives the image 
+    header, parses it, and determines whether it's a single image or a stack of images based on the 
+    workflow settings. It then processes the received data accordingly.
+
+    Parameters
+    ----------
+    live_client : socket
+        The live client socket for receiving image data.
+
+    terminate_event : Event
+        An event to signal when to terminate the thread.
+
+    image_queue : Queue
+        A queue for holding the received image data.
+
+    visualize_queue : Queue
+        A queue for holding the image data to be used for visualization.
+
+    """
     global index
     print("LISTENING for image data on " + str(live_client))
+
     while True:
-        # receive the header
-        # print('Waiting for image data')
         try:
             header_data = live_client.recv(40)
         except socket.error as e:
@@ -157,174 +456,175 @@ def live_listen_thread(
             live_client.close()
             break
 
-        # make sure the queue is empty for a new in focus Z slice position
-        print("Data received on image thread")
         if len(header_data) != 40:
-            raise ValueError(
-                f"Header length should be 40 bytes, not {len(header_data)}"
-            )
+            raise ValueError(f"Header length should be 40 bytes, not {len(header_data)}")
 
-        # parse the header
-        # print('parsing header, entering data acquisition')
         header = struct.unpack("I I I I I I I I I I", header_data)
         image_size, image_width, image_height = header[0], header[1], header[2]
 
-        # get the stack size from the workflow file, as it is not sent as part of the header information
-        current_workflow_dict = workflow_to_dict(
-            os.path.join("workflows", "workflow.txt")
-        )
+        current_workflow_dict = workflow_to_dict(os.path.join("workflows", "workflow.txt"))
         stack_size = float(current_workflow_dict["Stack Settings"]["Number of planes"])
         MIP = current_workflow_dict["Experiment Settings"]["Display max projection"]
         name = current_workflow_dict["Experiment Settings"]["Comments"]
         Zpos = current_workflow_dict["Start Position"]["Z (mm)"]
-        # receive the image data
-        # Coule probably be condensed with some better preparation
+
         if MIP == "true" or stack_size == 1:
-            print(f"MIP is {MIP}")
-            # Single image from snapshot workflows
-            image_data = b""
-            while len(image_data) < image_size:
-                data = live_client.recv(image_size - len(image_data))
-                if not data:
-                    raise socket.error("Incomplete image data")
-                image_data += data
-            # Convert the bytes to a NumPy array
-            image_array = np.frombuffer(image_data, dtype=np.uint16)
-
-            # Reshape the array to match the image dimensions
-            image_array = image_array.reshape((image_height, image_width)).T
-            image_array = np.flipud(image_array)
-            # ADD BACK IN SAVE IMAGES?
-            # rotated_image.save(os.path.join('output_png', f'{name}_{index}.png'))
-            # print(f'rotated image shape is {np.array(rotated_image).shape} {np.array(rotated_image).dtype}')
-            index = index + 1
-
-            # return the grayscale image
-            image_queue.put(np.array(image_array))
-            # Place a duplicate new image in the visualization queue
-            # This was added due to the image_queue emptying too quickly for the same queue to be used in two different threads.
-
-            visualize_queue.put(np.array(image_array))
-
+            process_single_image(live_client, image_size, image_width, image_height, image_queue, visualize_queue)
         else:
-            print("entering stack handling stack size: " + str(stack_size))
-            images = []
-            live_client.settimeout(1)
-            # count down through stack, getting each image and adding it to images
-            # finally, place whole stack in the image_queue
-            # Handle incomplete data transfer gracefully by checking for lack of incoming data
-            exit_loop = False
-            step = 0
-            while step < stack_size:
-                if exit_loop:
-                    print(
-                        "1 second timeout reached while waiting for additional Z slices, returning to standard listening mode"
-                    )
-                    break
-                image_data = b""
-                while len(image_data) < image_size:
-                    data = live_client.recv(image_size - len(image_data))
-                    if not data:
-                        raise socket.error("Incomplete image data")
-                    image_data += data
-                print("image data received, plane " + str(step))
-                # convert the image data to a PIL image object
-                image = Image.frombytes("I;16", (image_width, image_height), image_data)
-
-                # rotate the image and append it to the list of images
-                rotated_image = image.rotate(90, expand=True)
-                # Optional z-stack check
-                rotated_image.save(
-                    os.path.join(f"output_png", f"plane_{Zpos}_{step}.png")
-                )
-
-                images.append(rotated_image)
-                step = step + 1
-                # strip off header
-                if step != stack_size:
-                    try:
-                        header_data = live_client.recv(40)
-
-                    except socket.timeout:
-                        # If no data is received within 1 second, break out of the loop
-                        # Prevent hanging on expecting more data but none arriving
-                        exit_loop = True
-
-            # combine the images into a single 3D array
-            stack = np.stack([np.array(image) for image in images])
-            print(f"stack shape is: {stack.shape}")
-
-            # We no longer want to time out while waiting for new image data
-
-            live_client.settimeout(0)
-            live_client.setblocking(True)
-            image_queue.put(stack)
-            # TO DO? Add the option to visualize the max intensity projection of a received stack?
-        # print('Listening thread returning to default state')
+            receive_zstack_images(live_client, image_size, image_width, image_height, stack_size, Zpos, image_queue)
 
     print("Image data collection thread terminating")
     return
 
 
-# Send commands or workflows to the controller, which then passes them on to the Flamingo
-def send_thread(
-    client: socket, command_queue, send_event, system_idle: Event, command_data_queue
-):
-    while True:
-        # only go when an event is set
-        send_event.wait()
-        # print('send event triggered')
-        command = command_queue.get()
+######################################################
 
+####################SEND COMMANDS THREAD SECTION################
+def handle_workflow_start(client):
+    """
+    Handles the command to start a workflow in the Flamingo controller.
+
+    Parameters
+    ----------
+    client : socket
+        The socket client for communication.
+
+    Returns
+    -------
+    None
+    """
+    functions.tcpip_nuc.text_to_nuc(
+        client,
+        os.path.join("workflows", "workflow.txt"),
+        COMMAND_CODES_CAMERA_WORK_FLOW_START,
+    )
+
+def handle_scope_settings_save(client):
+    """
+    Handles the command to save microscope settings for the home position in the Flamingo controller.
+
+    Parameters
+    ----------
+    client : socket
+        The socket client for communication.
+
+    Returns
+    -------
+    None
+    """
+    print("Saving microscope settings for home position")
+    functions.tcpip_nuc.text_to_nuc(
+        client,
+        os.path.join("microscope_settings", "send_settings.txt"),
+        COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE,
+    )
+
+def handle_non_workflow_command(client, command, command_data):
+    """
+    Handles a non-workflow command in the Flamingo controller.
+
+    Parameters
+    ----------
+    client : socket
+        The socket client for communication.
+    command : int
+        The command code.
+    command_data : list
+        Additional command data.
+
+    Returns
+    -------
+    None
+    """
+    if command_data:
+        functions.tcpip_nuc.command_to_nuc(client, command, command_data)
+    else:
+        functions.tcpip_nuc.command_to_nuc(client, command)
+
+def send_thread(client: socket, command_queue, send_event, system_idle: Event, command_data_queue):
+    """
+    Thread that sends commands or workflows to the Flamingo controller.
+
+    Parameters
+    ----------
+    client : socket
+        The socket client for communication.
+    command_queue : queue.Queue
+        The queue containing commands to be sent.
+    send_event : threading.Event
+        The event that triggers sending of commands.
+    system_idle : threading.Event
+        The event that indicates the system is idle.
+    command_data_queue : queue.Queue
+        The queue containing additional command data.
+
+    Returns
+    -------
+    None
+    """
+    while True:
+        # Wait for the send event to be set
+        send_event.wait()
+
+        command = command_queue.get()
         system_idle.clear()
+
         # Handle workflows separately (special type of command)
         if command == COMMAND_CODES_CAMERA_WORK_FLOW_START:
-            # print('Sending workflow to nuc')
-            functions.tcpip_nuc.text_to_nuc(
-                client,
-                os.path.join("workflows", "workflow.txt"),
-                COMMAND_CODES_CAMERA_WORK_FLOW_START,
-            )
+            handle_workflow_start(client)
             send_event.clear()
         elif command == COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE:
-            print("saving microscope settings for home postion")
-            functions.tcpip_nuc.text_to_nuc(
-                client,
-                os.path.join("microscope_settings", "send_settings.txt"),
-                COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE,
-            )
+            handle_scope_settings_save(client)
             send_event.clear()
         else:  # Handle all other commands
             print("Send non-workflow command to nuc: " + str(command))
-            # make sure the queues are not empty, if they are use the default value of 0
             command_data = []
-            if command_data_queue.empty():
-                # if there is no data, the default values for command_data will be 0s
-                functions.tcpip_nuc.command_to_nuc(client, command)
-            else:
-                # print('command data')
+
+            if not command_data_queue.empty():
                 command_data = command_data_queue.get()
-                # print(f'command to nuc uses command {command}, command_data {command_data}')
-                functions.tcpip_nuc.command_to_nuc(client, command, command_data)
+
+            handle_non_workflow_command(client, command, command_data)
             send_event.clear()
-        # returnedData = functions.tcpip_nuc.command_to_nuc(client, 4119)
-        # need to check 53717 for received[1] being a 'idle' code 36874
 
 
-# Take data from the image_queue and do something with it
-# Probably need to move this somewhere else?
+################################################
+
+
+##Needs the most work, and will probably get the most expansion in the near future.
 def processing_thread(
     z_plane_queue, terminate_event, processing_event, intensity_queue, image_queue
 ):
+    """
+    Thread for processing data from the image queue.
+
+    This thread waits for the processing event to be set, indicating that there is data available 
+    in the image queue to be processed. It retrieves the data from the image queue and performs 
+    specific processing based on the type of data received. The processed results are then stored 
+    in the appropriate output queues.
+
+    Parameters
+    ----------
+    z_plane_queue : Queue
+        A queue for holding the processed data related to the most in-focus plane.
+
+    terminate_event : Event
+        An event to signal when to terminate the thread.
+
+    processing_event : Event
+        An event to signal when there is data available for processing.
+
+    intensity_queue : Queue
+        A queue for holding the calculated mean intensity values.
+
+    image_queue : Queue
+        A queue for holding the image data to be processed.
+
+    """
     while True:
         processing_event.wait()
-        # print('processing thread waiting for data')
-        # determine what type of event to process
-        # Needs to be made more generic
+
         image_data = image_queue.get()
-        # print(f'Processing thread acquired data of shape: {image_data.shape}')
-        # print(f'Processing thread acquired data of shape: {image_data.dtype}')
-        # maybe both results could just be 'result_queue'
+
         if len(image_data.shape) == 2:
             # Flatten the array to a 1D array
             flattened = image_data.flatten()
@@ -340,14 +640,10 @@ def processing_thread(
 
             # Calculate the mean of the largest quarter
             mean_largest_quarter = np.mean(largest_quarter)
-            # print(f'top 25th percentile mean intensity {mean_largest_quarter}')
+
             intensity_queue.put(mean_largest_quarter)
             processing_event.clear()
         else:
-            # process to find the most in focus of a stack
-            # Possibly add a function for the Discrete Cosine Transform?
-            # using IF this could probably just be the max again, but it would be nice to see this work
-
             z_plane_queue.put(
                 functions.calculations.find_most_in_focus_plane(image_data)
             )

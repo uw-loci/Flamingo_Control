@@ -11,6 +11,7 @@ from GUI import Py2FlamingoGUI
 import sys
 from global_objects import view_snapshot, system_idle, processing_event, send_event, terminate_event, visualize_event
 from global_objects import image_queue, command_queue, z_plane_queue, intensity_queue, visualize_queue, command_data_queue, stage_location_queue, other_data_queue
+from global_objects import OS
 
 queues_and_events = {
     'queues': [image_queue, command_queue, z_plane_queue, intensity_queue, visualize_queue],

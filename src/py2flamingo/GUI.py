@@ -35,8 +35,31 @@ from global_objects import image_queue, command_queue, z_plane_queue, intensity_
 
 
 class Py2FlamingoGUI(QMainWindow):
+    """
+    This class represents the main window of the Py2Flamingo application. It inherits from QMainWindow, a class in PyQt5 that provides a main application window.
+
+    The Py2FlamingoGUI class is responsible for initializing the connection to the microscope through FlamingoConnect, creating the GUI layout, and updating the display.
+
+    Attributes
+    ----------
+    microscope_connection : FlamingoConnect
+        The connection to the microscope, which is established through FlamingoConnect.
+    lasers : list
+        A list of lasers available for use with the microscope.
+    start_position : list
+        The starting position of the microscope, represented as a list of four strings.
+    selected_laser : str
+        The laser currently selected for use.
+    laser_power : str
+        The power level of the laser in percent.
+    data_storage_location : str
+        The location where data is saved, generally a USB drive connected to the microscope controller.
+    current_coordinates : list
+        The current coordinates of the microscope, represented as a list of four strings.
+    """
     def __init__(self, queues_and_events):
         super().__init__()
+        # Initialize the connection to the microscope
         self.microscope_connection = FlamingoConnect(queues_and_events)
         self.lasers = []
         self.start_position = ["", "", "", ""]
@@ -45,130 +68,136 @@ class Py2FlamingoGUI(QMainWindow):
         self.data_storage_location = ""
         self.current_coordinates = []
 
+        # Set the window title and style
         self.setWindowTitle(f"Flamingo Controller: {self.microscope_connection.instrument_name}")
         self.setStyleSheet("QMainWindow { background-color: rgb(255, 230, 238); }")
         self.setGeometry(200, 200, 600, 550)
 
         # Create labels and fields
         self.create_image_label()  # Create the QLabel widget for displaying the image
-        self.create_GUI_layout()
-        # self.create_buttons()
-        self.update_display_timer()
+        self.create_GUI_layout()  # Create the layout of the GUI
+        self.update_display_timer()  # Start the timer for updating the display
+
 
     def create_image_label(self):
-        self.image_label = QLabel(self)  # Create the QLabel widget
-        self.image_label.setAlignment(
-            Qt.AlignCenter
-        )  # Center-align the image within the label
+        """
+        This function creates a QLabel widget to display the microscope image. The image is center-aligned within the label.
 
-        # self.image_label.setGeometry(400, 1000, 512, 512)  # Set the position and size of the label within the main window
+        Returns
+        -------
+        None
+        """
+        self.image_label = QLabel(self)  # Create the QLabel widget
+        self.image_label.setAlignment(Qt.AlignCenter)  # Center-align the image within the label
 
     def update_display_timer(self):
-        self.display_timer = QTimer()
-        self.display_timer.timeout.connect(self.update_display)
+        """
+        This function creates a QTimer to periodically update the display with the latest microscope image.
 
-        # Set the interval for the QTimer (e.g., update every 100 milliseconds)
-        update_interval = 200
-        self.display_timer.start(update_interval)
+        Returns
+        -------
+        None
+        """
+        self.display_timer = QTimer()  # Create the QTimer
+        self.display_timer.timeout.connect(self.update_display)  # Connect the QTimer timeout signal to the update_display function
+
+        update_interval = 200  # Set the interval for the QTimer (e.g., update every 200 milliseconds)
+        self.display_timer.start(update_interval)  # Start the QTimer
 
     def update_display(self):
+        """
+        This function updates the display with the latest microscope image and the current coordinates. If there are multiple 
+        images in the queue, it discards all but the latest one.
+
+        Returns
+        -------
+        None
+        """
         # Check if there are images in the queue
         if not visualize_queue.empty():
             if visualize_event.is_set():
                 visualize_event.clear()
                 # Get the latest image from the queue
                 while visualize_queue.qsize() > 1:
-                    visualize_queue.get()
-                image = visualize_queue.get()
-                self.display_image(image)
-                #print(f"image to display is {image.shape} and {image.dtype}")
-                # Update the display with the image
-                if not stage_location_queue.empty():
-                    # in case data transfer was slow, get the last shown image location only.
-                    while stage_location_queue.qsize() > 1:
-                        stage_location_queue.get()
-                    self.current_coordinates = stage_location_queue.get()
+                    visualize_queue.get()  # Discard all but the latest image
+                image = visualize_queue.get()  # Get the latest image
+                self.display_image(image)  # Display the image
 
-                    self.current_x.setText(
-                        f"x(mm): {round(float(self.current_coordinates[0]),2)}"
-                    )
-                    self.current_y.setText(
-                        f"y(mm): {round(float(self.current_coordinates[1]),2)}"
-                    )
-                    self.current_z.setText(
-                        f"z(mm): {round(float(self.current_coordinates[2]),2)}"
-                    )
-                    self.current_r.setText(
-                        f"r(°): {round(float(self.current_coordinates[3]),2)}"
-                    )
+                # Update the display with the current coordinates
+                if not stage_location_queue.empty():
+                    # In case data transfer was slow, get the last shown image location only.
+                    while stage_location_queue.qsize() > 1:
+                        stage_location_queue.get()  # Discard all but the latest coordinates
+                    self.current_coordinates = stage_location_queue.get()  # Get the latest coordinates
+
+                    # Update the coordinate labels with the current coordinates
+                    self.current_x.setText(f"x(mm): {round(float(self.current_coordinates[0]),2)}")
+                    self.current_y.setText(f"y(mm): {round(float(self.current_coordinates[1]),2)}")
+                    self.current_z.setText(f"z(mm): {round(float(self.current_coordinates[2]),2)}")
+                    self.current_r.setText(f"r(°): {round(float(self.current_coordinates[3]),2)}")
             else:
-                image = visualize_queue.get()
+                image = visualize_queue.get()  # Get the latest image without updating the coordinates
 
     def display_image(self, image):
-        # print('display_image')
+        """
+        This function displays the given image on the QLabel widget created by the create_image_label function. 
+        It first converts the numpy array image to a QImage, then creates a QPixmap from the QImage, scales it to fit 
+        the QLabel, and finally sets it as the QLabel's pixmap.
+
+        Parameters
+        ----------
+        image : numpy.ndarray
+            The image to be displayed, represented as a numpy array.
+
+        Returns
+        -------
+        None
+        """
         # Convert the numpy array image to QImage
         q_image = convert_to_qimage(image)
 
-        # Create a pixmap and set it as the label's pixmap
+        # Create a QPixmap from the QImage
         pixmap = QPixmap.fromImage(q_image)
+
+        # Scale the QPixmap to fit the QLabel while maintaining the aspect ratio
         pixmap = pixmap.scaled(QSize(512, 512), Qt.KeepAspectRatio)
+
+        # Set the QPixmap as the QLabel's pixmap
         self.image_label.setPixmap(pixmap)
 
 
     def create_GUI_layout(self):
-        global_layout = QHBoxLayout()  # Create a QHBoxLayout for the main layout
-        start_position_widget = QWidget()
-        # Create a QHBoxLayout for the tip of the sample holder
-        start_position_form = (
-            QHBoxLayout(start_position_widget)
-        )  
+        """
+        This function creates the main layout for the Py2Flamingo GUI.
 
-        vertical_layout = (
-            QVBoxLayout()
-        )  # Create a QVBoxLayout to combine the radio buttons, form fields, and buttons
-        #start_position_widget.setStyleSheet("background-color: rgb(255, 213, 168);")
-        start_position_widget.setStyleSheet(
-            """
-            QLineEdit {
-                background-color: beige;
-            }
-            QLineEdit:focus {
-                background-color: yellow;
-            }
-            """
-        )
-        start_position_widget.setToolTip(
-            "The provided coordinates are used for the Find Sample button"
-        )
-        position_widget = QWidget()
-        position_form = (
-            QHBoxLayout(position_widget)
-        )  # Create a QHBoxLayout for the active positioning and snapshots
-        position_widget.setStyleSheet(
-            """
-            QLineEdit {
-                background-color: paleturquoise;
-            }
-            QLineEdit:focus {
-                background-color: yellow;
-            }
-            """
-        )
+        The GUI is divided into two main sections: a left interface and an image display on the right. The left interface
+        contains radio buttons for selecting the laser, form fields for entering various parameters, two sets of coordinate
+        fields (one for the start position and one for the active position), and several buttons for performing actions like
+        locating the sample, going to a specific position, and taking a snapshot. The image display shows the current image
+        from the microscope and the current coordinates.
 
-        # Create form fields for sample start location
-        self.start_label_x_mm = QLabel("x (mm): ")
-        self.start_field_x_mm = self.create_field(default_value=self.microscope_connection.start_position[0])
+        The layout is created using Qt's QHBoxLayout and QVBoxLayout classes. The QHBoxLayout is used for the main layout,
+        which contains the left interface layout and the image layout. The QVBoxLayout is used for the left interface layout,
+        which contains the radio buttons, form fields, coordinate fields, and buttons.
 
-        self.start_label_y_mm = QLabel("y (mm): ")
-        self.start_field_y_mm = self.create_field(default_value=self.microscope_connection.start_position[1])
+        The function also sets the current coordinates to the start position obtained from the microscope connection.
 
-        self.start_label_z_mm = QLabel("z (mm): ")
-        self.start_field_z_mm = self.create_field(default_value=self.microscope_connection.start_position[2])
+        Parameters
+        ----------
+        None
 
-        self.start_label_r_deg = QLabel("r (°): ")
-        self.start_field_r_deg = self.create_field(default_value=self.microscope_connection.start_position[3])
+        Returns
+        -------
+        None
+        """
 
-        # Set current coordinates
+        # Create a QHBoxLayout for the main layout
+        global_layout = QHBoxLayout()
+
+        # Create a QVBoxLayout for the left interface layout
+        left_interface_layout = QVBoxLayout()
+
+        # Set the current coordinates to the start position from the microscope connection
         self.current_coordinates = [
             self.microscope_connection.start_position[0],
             self.microscope_connection.start_position[1],
@@ -176,95 +205,205 @@ class Py2FlamingoGUI(QMainWindow):
             self.microscope_connection.start_position[3],
         ]
 
-        # Add form fields and labels to the layout
-        start_position_form.addWidget(self.start_label_x_mm)
-        start_position_form.addWidget(self.start_field_x_mm)
-        start_position_form.addWidget(self.start_label_y_mm)
-        start_position_form.addWidget(self.start_field_y_mm)
-        start_position_form.addWidget(self.start_label_z_mm)
-        start_position_form.addWidget(self.start_field_z_mm)
-        start_position_form.addWidget(self.start_label_r_deg)
-        start_position_form.addWidget(self.start_field_r_deg) 
-        # Set current coordinates
-        self.current_coordinates = [
-            self.start_position[0],
-            self.start_position[1],
-            self.start_position[2],
-            self.start_position[3],
-        ]
-        # form_layout.addRow('Initial XYZR coordinate for 'Find Sample'. Also Snapshot position.')
+        # Align the left interface layout to the top
+        left_interface_layout.setAlignment(Qt.AlignTop)
 
-        # Create form fields to get location for actions from user
-        self.label_x_mm = QLabel("x (mm): ")
-        self.field_x_mm = self.create_field(default_value=self.start_position[0])
+        # Create the radio buttons, form fields, and coordinate fields, and add them to the left interface layout
+        self.create_radio_buttons(left_interface_layout)
+        self.create_form_fields(left_interface_layout)
+        self.create_coordinate_fields(left_interface_layout, "start", self.microscope_connection.start_position, "beige")
+        self.create_coordinate_fields(left_interface_layout, "", self.start_position, "paleturquoise")
 
-        self.label_y_mm = QLabel("y (mm): ")
-        self.field_y_mm = self.create_field(default_value=self.start_position[1])
+        # Create the buttons and add them to the left interface layout
+        self.create_buttons(left_interface_layout)
 
-        self.label_z_mm = QLabel("z (mm): ")
-        self.field_z_mm = self.create_field(default_value=self.start_position[2])
-
-        self.label_r_deg = QLabel("r (°): ")
-        self.field_r_deg = self.create_field(default_value=self.start_position[3])
-
-
-
-        # Add form fields and labels to the layout
-        position_form.addWidget(self.label_x_mm)
-        position_form.addWidget(self.field_x_mm)
-        position_form.addWidget(self.label_y_mm)
-        position_form.addWidget(self.field_y_mm)
-        position_form.addWidget(self.label_z_mm)
-        position_form.addWidget(self.field_z_mm)
-        position_form.addWidget(self.label_r_deg)
-        position_form.addWidget(self.field_r_deg)
-
-        vertical_layout.setAlignment(Qt.AlignTop)
-        self.create_radio_buttons(vertical_layout)
-        self.create_form_fields(vertical_layout)
-        vertical_layout.addWidget(start_position_widget)
-        vertical_layout.addWidget(position_widget)
-        self.create_buttons(vertical_layout)
-
-        # Add the combined vertical layouts on the left and the image layout on the right to the horizontal layout
-        global_layout.addLayout(vertical_layout)
-        # Create a QVBoxLayout for the image plus coordinates
-        image_layout = (
-            QVBoxLayout()
-        )  
+        # Add the left interface layout and the image layout to the main layout
+        global_layout.addLayout(left_interface_layout)
+        image_layout = QVBoxLayout()  # Create a QVBoxLayout for the image layout
         self.fill_image_layout(image_layout)
         global_layout.addLayout(image_layout)
-        central_widget = QWidget()  # Create a QWidget for the central widget
-        central_widget.setLayout(global_layout)  # Set the layout for the central widget
-        self.setCentralWidget(
-            central_widget
-        )  # Set the central widget for the main window
+
+        # Create a QWidget for the central widget, set its layout to the main layout, and set it as the central widget for the main window
+        central_widget = QWidget()
+        central_widget.setLayout(global_layout)
+        self.setCentralWidget(central_widget)
+
 
     def create_form_fields(self, layout):
-        # Create a QHBoxLayout for the form fields
+        """
+        This function creates the form fields for the GUI and adds them to the provided layout.
+
+        The form fields include the IP address, command port, laser power, Z search depth, and data storage path. Each form 
+        field is created using the create_form_field function, which also adds the form field to a QFormLayout. The QFormLayout 
+        is then added to the provided layout.
+
+        Parameters
+        ----------
+        layout : QVBoxLayout
+            The layout to which the form fields are added.
+
+        Returns
+        -------
+        None
+        """
+
+        # Create a QFormLayout for the form fields
         form_layout = QFormLayout()
-        # Create the form fields with their default values
+
+        # Create the form fields with their default values and add them to the form layout
         self.create_form_field(form_layout, "IP Address", self.microscope_connection.IP, is_string=True)
         self.create_form_field(form_layout, "command port (default 53717)", self.microscope_connection.port)
         self.create_form_field(form_layout, "Laser Power (percent):", self.microscope_connection.laser_power, is_string=True)
         self.create_form_field(form_layout, "Z Search Depth (mm):", "2.0")
         self.create_form_field(form_layout, "Data storage path:", self.microscope_connection.data_storage_location, is_string=True)
+
+        # Add the form layout to the provided layout
         layout.addLayout(form_layout)
 
     def create_form_field(self, layout, label, default_value, is_string=False):
+        """
+        This function creates a form field with the provided label and default value, and adds it to the provided layout.
+
+        The function also sets an attribute of the GUI object with the name derived from the label and the value of the form field. 
+        This allows the form field to be accessed elsewhere in the program using the attribute.
+
+        Parameters
+        ----------
+        layout : QFormLayout
+            The layout to which the form field is added.
+        label : str
+            The label for the form field.
+        default_value : str or float
+            The default value for the form field.
+        is_string : bool, optional
+            Whether the form field should accept string input. If False (default), the form field will only accept floating-point numbers.
+
+        Returns
+        -------
+        None
+        """
+
+        # Create a QLineEdit widget for the form field
         field = self.create_field(is_string=is_string, default_value=default_value)
+
+        # Generate a variable name from the label
         var_name = ''.join(e for e in label if e.isalnum() or e.isspace()).replace(" ", "_").lower()[:12].rstrip('_')
-        #print(var_name)
+
+        # Set an attribute of the GUI object with the variable name and the value of the form field
         setattr(self, var_name, field)
+
+        # Add the form field to the provided layout
         layout.addRow(f"{self.microscope_connection.instrument_name} {label}", field)
 
+    def create_coordinate_fields(self, layout, prefix, start_position, color):
+        """
+        This function creates the coordinate fields for the GUI and adds them to the provided layout.
 
+        The coordinate fields include the x, y, z, and r coordinates. Each coordinate field is created using the 
+        create_coordinate_field function, which also adds the coordinate field to a QHBoxLayout. The QHBoxLayout is then 
+        added to the provided layout.
+
+        Parameters
+        ----------
+        layout : QVBoxLayout
+            The layout to which the coordinate fields are added.
+        prefix : str
+            The prefix for the coordinate field labels and variable names.
+        start_position : list of float
+            The default values for the coordinate fields.
+        color : str
+            The background color for the coordinate fields.
+
+        Returns
+        -------
+        None
+        """
+
+        # Create a QWidget and a QHBoxLayout for the coordinate fields
+        position_widget = QWidget()
+        position_form = QHBoxLayout(position_widget)
+
+        # Set the background color for the coordinate fields
+        position_widget.setStyleSheet(
+            f"""
+            QLineEdit {{
+                background-color: {color};
+            }}
+            QLineEdit:focus {{
+                background-color: yellow;
+            }}
+            """
+        )
+
+        # Set a tooltip for the coordinate fields
+        position_widget.setToolTip("The provided coordinates are used for the Find Sample button")
+
+        # Create the coordinate fields and add them to the QHBoxLayout
+        coordinates = ['x', 'y', 'z', 'r']
+        units = ['mm', 'mm', 'mm', '°']
+        if prefix:
+            prefix = prefix+'_'
+        var_names = [f"{prefix}field_{coord}_mm" for coord in coordinates]
+        var_names[-1] = f"{prefix}field_r_deg"  # The variable name for 'r' should end with '_deg', not '_mm'
+        for coord, unit, var_name in zip(coordinates, units, var_names):
+            self.create_coordinate_field(position_form, f"{prefix}{coord} ({unit}): ", start_position[coordinates.index(coord)], var_name)
+
+        # Add the QHBoxLayout to the provided layout
+        layout.addWidget(position_widget)
+
+    def create_coordinate_field(self, layout, label, default_value, var_name):
+        """
+        This function creates a coordinate field with the provided label and default value, and adds it to the provided layout.
+
+        The function also sets an attribute of the GUI object with the name derived from the label and the value of the coordinate field. 
+        This allows the coordinate field to be accessed elsewhere in the program using the attribute.
+
+        Parameters
+        ----------
+        layout : QHBoxLayout
+            The layout to which the coordinate field is added.
+        label : str
+            The label for the coordinate field.
+        default_value : float
+            The default value for the coordinate field.
+        var_name : str
+            The variable name for the coordinate field.
+
+        Returns
+        -------
+        None
+        """
+
+        # Create a QLineEdit widget for the coordinate field
+        field = self.create_field(default_value=default_value)
+
+        # Set an attribute of the GUI object with the variable name and the value of the coordinate field
+        setattr(self, var_name, field)
+
+        # Add the coordinate field to the provided layout
+        layout.addWidget(QLabel(label))
+        layout.addWidget(field)
 
 
     def create_buttons(self, layout):
-        button_layout1 = QVBoxLayout()  # Create the first QVBoxLayout for buttons
-        button_layout2 = QVBoxLayout()  # Create the second QVBoxLayout for buttons
+        """
+        This function creates a set of buttons for the GUI and adds them to the provided layout. Each button is associated with a specific action.
+
+        Parameters
+        ----------
+        layout : QVBoxLayout
+            The layout to which the buttons are added.
+
+        Returns
+        -------
+        None
+        """
+        # Create QVBoxLayouts for the buttons
+        button_layout1 = QVBoxLayout()  
+        button_layout2 = QVBoxLayout()  
         button_layout = QHBoxLayout()   # Create a QHBoxLayout to hold the two columns
+
+        # Define button styles
         kill_button_style = """
             QPushButton:hover {
                 background-color: yellow;
@@ -325,69 +464,176 @@ class Py2FlamingoGUI(QMainWindow):
         layout.addLayout(button_layout)
 
     def create_button(self, layout, label, action, color=None, style=None):
+        """
+        This function creates a button with the provided label and action, and adds it to the provided layout.
+
+        Parameters
+        ----------
+        layout : QVBoxLayout
+            The layout to which the button is added.
+        label : str
+            The label for the button.
+        action : function
+            The function to be executed when the button is clicked.
+        color : str, optional
+            The background colorSure, here's the continuation of the `create_button` function's docstring and comments:
+
+    ```python
+            for the button. If provided, the button's background color is set to this color.
+        style : str, optional
+            The style for the button. If provided, the button's style is set to this style.
+
+        Returns
+        -------
+        None
+        """
+        # Create a QPushButton widget for the button
         button = QPushButton(label, self)
+
+        # Connect the button's clicked signal to the provided action
         button.clicked.connect(action)
+
+        # Set the button's background color if a color is provided
         if color:
             button.setStyleSheet(f"background-color: rgb({color});")
+
+        # Set the button's style if a style is provided
         if style:
             button.setStyleSheet(style)
+
+        # Add the button to the provided layout
         layout.addWidget(button)
 
-
     def fill_image_layout(self, layout):
+        """
+        This function adds an image label and current position labels to the provided layout.
+
+        Parameters
+        ----------
+        layout : QVBoxLayout
+            The layout to which the image label and current position labels are added.
+
+        Returns
+        -------
+        None
+        """
+        # Align the layout's contents to the top
         layout.setAlignment(Qt.AlignTop)
-        layout.addWidget(self.image_label)  # Add the image label to the image layout
-        # initialize current position values with the starting position
+
+        # Add the image label to the layout
+        layout.addWidget(self.image_label)
+
+        # Initialize current position labels with the starting position
         self.current_x = QLabel()
         self.current_y = QLabel()
         self.current_z = QLabel()
         self.current_r = QLabel()
-        current_position_layout = QHBoxLayout()  # Create a QHBoxLayout for the current position
+
+        # Create a QHBoxLayout for the current position labels
+        current_position_layout = QHBoxLayout()
+
+        # Add the current position labels to the QHBoxLayout
         current_position_layout.addWidget(self.current_x)
         current_position_layout.addWidget(self.current_y)
         current_position_layout.addWidget(self.current_z)
         current_position_layout.addWidget(self.current_r)
+
+        # Add the QHBoxLayout to the provided layout
         layout.addLayout(current_position_layout)
 
     def create_radio_buttons(self, layout):
-        radio_layout = QHBoxLayout()  # Create a QHBoxLayout for radio buttons
-        # Get labels from the parsed metadata file
+        """
+        This function creates a set of radio buttons for the GUI and adds them to the provided layout. The labels for the radio buttons are obtained from the microscope connection.
+
+        Parameters
+        ----------
+        layout : QVBoxLayout
+            The layout to which the radio buttons are added.
+
+        Returns
+        -------
+        None
+        """
+        # Create a QHBoxLayout for the radio buttons
+        radio_layout = QHBoxLayout()
+
+        # Get labels from the microscope connection
         labels = self.microscope_connection.lasers
+
+        # Initialize a list to store the radio buttons
         self.radio_buttons = []
+
+        # Create a QRadioButton for each label and add it to the radio layout
         for label in labels:
-            radio_button = QRadioButton(label)  # Create a QRadioButton for each label
+            radio_button = QRadioButton(label)
             if label == self.microscope_connection.selected_laser:
                 radio_button.setChecked(True)  # Set the checked state based on the selected laser
             self.radio_buttons.append(radio_button)  # Add the radio button to the list
             radio_layout.addWidget(radio_button)  # Add the radio button to the radio layout
+
+        # Add the radio layout to the provided layout
         layout.addLayout(radio_layout)
+
     def create_field(self, default_value=None, is_string=False):
+        """
+        This function creates a QLineEdit widget with the provided default value.
+
+        Parameters
+        ----------
+        default_value : str or float, optional
+            The default value for the QLineEdit widget. If not provided, the QLineEdit widget is empty.
+        is_string : bool, optional
+            A flag indicating whether the default value is a string. If False, the QLineEdit widget is restricted to valid floating-point numbers.
+
+        Returns
+        -------
+        QLineEdit
+            The created QLineEdit widget.
+        """
         # Create a QLineEdit widget
         field = QLineEdit(self)
 
         # Align the text to the right within the QLineEdit
         field.setAlignment(Qt.AlignRight)
 
+        # If a default value is provided, set the QLineEdit widget's text to the default value
         if default_value is not None:
+            # If the default value is not a string, restrict the QLineEdit widget's input to valid floating-point numbers
             if not is_string:
-                # Set a validator to restrict the input to valid floating-point numbers
                 field.setValidator(QDoubleValidator())
-                default_value = str(default_value)  # Convert float to string
+                default_value = str(default_value)  # Convert the default value to a string
+
+            # Set the QLineEdit widget's text to the default value
             field.setText(default_value)
+
+        # Return the created QLineEdit widget
         return field
 
+
     def check_field(self, entries):
+        """
+        This function checks if the provided entries are valid. An entry is considered valid if it is not empty and can be converted to a float.
+
+        Parameters
+        ----------
+        entries : list of QLineEdit
+            The entries to check.
+
+        Returns
+        -------
+        bool
+            True if all entries are valid, False otherwise.
+        """
         for entry in entries:
             text = entry.text().strip()
 
             # Check if the field is empty
             if text == "":
+                # Display a warning message if the field is empty
                 message_box = QMessageBox()
                 message_box.setIcon(QMessageBox.Warning)
                 message_box.setWindowTitle("Field error")
-                message_box.setText(
-                    "A necessary field to perform this function is blank!"
-                )
+                message_box.setText("A necessary field to perform this function is blank!")
                 message_box.setStandardButtons(QMessageBox.Ok)
                 message_box.exec_()
                 return False
@@ -395,34 +641,40 @@ class Py2FlamingoGUI(QMainWindow):
             # Attempt to convert the text to a float
             try:
                 value = float(text)
-                #print("Value:", value)
             except ValueError:
+                # Display a warning message if the text cannot be converted to a float
                 message_box = QMessageBox()
                 message_box.setIcon(QMessageBox.Warning)
                 message_box.setWindowTitle("Settings required")
-                message_box.setText(
-                    "To find the sample requires a starting point (XYZR), generally near the tip of the sample holder. One of the fields does not contain a numerical value."
-                )
+                message_box.setText("To find the sample requires a starting point (XYZR), generally near the tip of the sample holder. One of the fields does not contain a numerical value.")
                 message_box.setStandardButtons(QMessageBox.Ok)
                 message_box.exec_()
-                # QMessageBox.warning(central_widget, 'Field Error', 'Invalid number!')
                 return False
+
+        # If all entries are valid, return True
         return True
 
     def go_to_position(self):
-        if not self.check_field(
-            [self.field_x_mm, self.field_y_mm, self.field_z_mm, self.field_r_deg]
-        ):
-            return
-        # Get values from the GUI fields
+        """
+        This function starts a thread to go to the position specified in the GUI fields.
 
+        Returns
+        -------
+        None
+        """
+        # Check if the fields for the position are valid
+        if not self.check_field([self.field_x_mm, self.field_y_mm, self.field_z_mm, self.field_r_deg]):
+            return
+
+        # Get values from the GUI fields
         xyzr_init = [
             self.field_x_mm.text(),
             self.field_y_mm.text(),
             self.field_z_mm.text(),
             self.field_r_deg.text(),
         ]
-        # Create a thread for the locate_sample function
+
+        # Create a thread for the go_to_position function
         go_to_position_thread = Thread(
             target=go_to_position,
             args=(xyzr_init, command_data_queue, command_queue, send_event),
@@ -434,21 +686,28 @@ class Py2FlamingoGUI(QMainWindow):
         # Start the thread
         go_to_position_thread.start()
 
-    def locate_sample_action(self):
-        # Check for a start position
 
-        if not self.check_field(
-            [self.start_field_x_mm, self.start_field_y_mm, self.start_field_z_mm, self.start_field_r_deg]
-        ):
+    def locate_sample_action(self):
+        """
+        This function initiates the process of locating the sample based on the values specified in the GUI fields. 
+        It checks the validity of the start position fields, retrieves values from the GUI fields, updates the position, 
+        and starts a thread for the locate_sample function.
+
+        Returns
+        -------
+        None
+        """
+        # Check if the fields for the start position are valid
+        if not self.check_field([self.start_field_x_mm, self.start_field_y_mm, self.start_field_z_mm, self.start_field_r_deg]):
             return
+
         # Get values from the GUI fields
-        print(self.laser_power.text())
-        print(self.z_search_dep.text())
-        print(self.data_storage.text())
         laser_value = self.get_selected_radio_value()
         power_percent_value = self.laser_power.text()
         z_depth_value = self.z_search_dep.text()
         data_storage = self.data_storage.text()
+
+        # Check the starting position fields to update the text file that stores the starting position.
         updated_position = {
             self.microscope_connection.instrument_name: {
                 "x(mm)": self.start_field_x_mm.text(),
@@ -457,40 +716,21 @@ class Py2FlamingoGUI(QMainWindow):
                 "r(°)": self.start_field_r_deg.text(),
             }
         }
+        print(f"{self.microscope_connection.instrument_name}_start_position.txt")
+        print(updated_position)
+        # Save the updated position to a text file
+        dict_to_text(
+            str(os.path.join("microscope_settings", f"{self.microscope_connection.instrument_name}_start_position.txt")),
+            updated_position,
+        )
+
+        # Get the starting position and save it to xyzr_init
         xyzr_init = [
             self.start_field_x_mm.text(),
             self.start_field_y_mm.text(),
             self.start_field_z_mm.text(),
             self.start_field_r_deg.text(),
         ]
-        print(xyzr_init)
-        dict_to_text(
-            os.path.join(
-                "microscope_settings", f"{self.microscope_connection.instrument_name}_start_position.txt"
-            ),
-            updated_position,
-        )
-        alist = [                self.microscope_connection.connection_data,
-                xyzr_init,
-                visualize_event,
-                other_data_queue,
-                image_queue,
-                command_queue,
-                z_plane_queue,
-                intensity_queue,
-                system_idle,
-                processing_event,
-                send_event,
-                terminate_event,
-                command_data_queue,
-                stage_location_queue,
-                laser_value,
-                power_percent_value,
-                z_depth_value,
-                data_storage]
-        # print('print check')
-        # for item in alist:
-        #     print(item)
         # Create a thread for the locate_sample function
         locate_sample_thread = Thread(
             target=locate_sample,
@@ -523,6 +763,14 @@ class Py2FlamingoGUI(QMainWindow):
         locate_sample_thread.start()
 
     def get_selected_radio_value(self):
+        """
+        This function returns the text of the selected radio button.
+
+        Returns
+        -------
+        str
+            The text of the selected radio button, or None if no radio button is selected.
+        """
         for radio_button in self.radio_buttons:
             if radio_button.isChecked():
                 return radio_button.text()
@@ -530,6 +778,14 @@ class Py2FlamingoGUI(QMainWindow):
         return None
 
     def close_program(self):
+        """
+        This function closes the program and shuts down the connection. It sets the terminate event, quits the application, 
+        shuts down the connection, and closes the window.
+
+        Returns
+        -------
+        None
+        """
         (
             live_listen_thread_var,
             command_listen_thread_var,
@@ -537,8 +793,14 @@ class Py2FlamingoGUI(QMainWindow):
             processing_thread_var,
         ) = self.microscope_connection.threads
         nuc_client, live_client, _, _, _ = self.microscope_connection.connection_data
+
+        # Set the terminate event
         terminate_event.set()
+
+        # Quit the application
         QApplication.instance().quit()
+
+        # Shut down the connection
         print("Shutting down connection")
         close_thread = Thread(
             target=mc.close_connection,
@@ -555,25 +817,33 @@ class Py2FlamingoGUI(QMainWindow):
         close_thread.daemon = True
         close_thread.start()
 
+        # Close the window
         self.close()
 
     def take_snapshot(self):
-        # Open the PNG file
-        if not self.check_field(
-            [self.field_x_mm, self.field_y_mm, self.field_z_mm, self.field_r_deg]
-        ):
+        """
+        This function initiates the process of taking a snapshot at the current position. It checks the validity of the 
+        position fields, retrieves values from the GUI fields, and starts a thread for the take_snapshot function.
+
+        Returns
+        -------
+        None
+        """
+        # Check if the fields for the position are valid
+        if not self.check_field([self.field_x_mm, self.field_y_mm, self.field_z_mm, self.field_r_deg]):
             return
-        print('snapshot check passed')
+
+        # Get values from the GUI fields
         xyzr = [
             self.field_x_mm.text(),
             self.field_y_mm.text(),
             self.field_z_mm.text(),
             self.field_r_deg.text(),
         ]
-        #print(f'snapshot coordinates {xyzr}')
         laser_value = self.get_selected_radio_value()
         power_percent_value = self.laser_power.text()
-        # all functions must be run on a separate thread, targetting a function, including its arguments, and then start()
+
+        # Create a thread for the take_snapshot function
         take_snapshot_thread = Thread(
             target=take_snapshot,
             args=(
@@ -588,28 +858,34 @@ class Py2FlamingoGUI(QMainWindow):
                 power_percent_value,
             ),
         )
+
         # Set the thread as a daemon (exits when the main program exits)
         take_snapshot_thread.daemon = True
+
         # Start the thread
         take_snapshot_thread.start()
 
     def set_home_action(self):
+        """
+        This function sets the 'Home' coordinates to the currently displayed xyzr under the image.
 
-        # set the Home coordinates to the currently displayed xyzr under the image
-
-        if not self.check_field(
-            [self.field_x_mm, self.field_y_mm, self.field_z_mm, self.field_r_deg]
-        ):
+        Returns
+        -------
+        None
+        """
+        # Check if the fields for the position are valid
+        if not self.check_field([self.field_x_mm, self.field_y_mm, self.field_z_mm, self.field_r_deg]):
             return
+
+        # Get values from the GUI fields
         xyzr_init = [
             float(self.current_x.text().split(" ")[1]),
             float(self.current_y.text().split(" ")[1]),
             float(self.current_z.text().split(" ")[1]),
             float(self.current_r.text().split(" ")[1]),
         ]
-        print(f"New 'Home' coordinates {xyzr_init}")
 
-        # all functions must be run on a separate thread, targetting a function, including its arguments, and then start()
+        # Create a thread for the set_home function
         set_home_thread = Thread(
             target=set_home,
             args=(
@@ -620,37 +896,51 @@ class Py2FlamingoGUI(QMainWindow):
                 send_event,
             ),
         )
+
         # Set the thread as a daemon (exits when the main program exits)
         set_home_thread.daemon = True
+
         # Start the thread
         set_home_thread.start()
 
     def copy_current_position(self):
         """
-        Copy to the cyan colored active fields either
-        1. The position of the microscope after some function, as shown under the GUI image
-        2. The initial positions
-        otherwise ignore.
+        This function copies the current position of the microscope to the cyan colored active fields. If the current 
+        position fields are empty, it copies the initial positions instead.
+
+        Returns
+        -------
+        None
         """
+        # Check if the current position fields are empty
         if not all([self.current_x.text(), self.current_y.text(), self.current_z.text(), self.current_r.text()]):
-            if self.check_field(
-            [self.start_field_x_mm, self.start_field_y_mm, self.start_field_z_mm, self.start_field_r_deg]
-                ):
+            # If the current position fields are empty, copy the initial positions instead
+            if self.check_field([self.start_field_x_mm, self.start_field_y_mm, self.start_field_z_mm, self.start_field_r_deg]):
                 self.field_x_mm.setText(str(self.start_field_x_mm.text()))
                 self.field_y_mm.setText(str(self.start_field_y_mm.text()))
                 self.field_z_mm.setText(str(self.start_field_z_mm.text()))
                 self.field_r_deg.setText(str(self.start_field_r_deg.text()))
                 return
-            else: return
-            
-        print(str(self.current_x.text()))
+            else: 
+                return
+
+        # Copy the current position to the active fields
         self.field_x_mm.setText(str(self.current_x.text().split(" ")[1]))
         self.field_y_mm.setText(str(self.current_y.text().split(" ")[1]))
         self.field_z_mm.setText(str(self.current_z.text().split(" ")[1]))
         self.field_r_deg.setText(str(self.current_r.text().split(" ")[1]))
 
     def cancel_action(self):
+        """
+        This function sets the terminate event, effectively signaling all GUI-BASED running threads to stop their operations.
+        It does not interfere with the threads maintaining the connection to the microscope, defined in threads.py
+
+        Returns
+        -------
+        None
+        """
         terminate_event.set()
+
         
 
     def add_your_code(self):

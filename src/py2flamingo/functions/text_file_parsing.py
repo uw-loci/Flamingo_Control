@@ -3,16 +3,36 @@
 from typing import Sequence
 
 def calculate_zplanes(wf_dict, z_search_depth, framerate, plane_spacing):
-    wf_dict["Stack Settings"]["Number of planes"] = round(
-        1000 * float(z_search_depth) / plane_spacing
-    )
+    """
+    Calculates and updates the number of z-planes and related settings in a Flamingo workflow dictionary.
+
+    This function takes a Flamingo workflow dictionary, the desired z-search depth, framerate, and plane spacing,
+    and calculates and updates the necessary settings for z-planes in the workflow dictionary.
+
+    Parameters
+    ----------
+    wf_dict : dict
+        Flamingo workflow dictionary.
+    z_search_depth : float
+        Desired z-search depth in millimeters.
+    framerate : float
+        Framerate in frames per second.
+    plane_spacing : float
+        Spacing between adjacent z-planes in micrometers.
+
+    Returns
+    -------
+    dict
+        Updated Flamingo workflow dictionary.
+    """
+    # Calculate the number of planes based on z-search depth and plane spacing
+    wf_dict["Stack Settings"]["Number of planes"] = round(1000 * float(z_search_depth) / plane_spacing)
+
+    # Update related settings
     wf_dict["Stack Settings"]["Change in Z axis (mm)"] = z_search_depth
-    wf_dict["Experiment Settings"][
-        "Plane spacing (um)"
-    ] = plane_spacing  # widest plane spacing allowed.
-    wf_dict["Stack Settings"]["Z stage velocity (mm/s)"] = str(
-        plane_spacing * framerate / 1000
-    )  # 10um spacing and conversion to mm/s
+    wf_dict["Experiment Settings"]["Plane spacing (um)"] = plane_spacing
+    wf_dict["Stack Settings"]["Z stage velocity (mm/s)"] = str(plane_spacing * framerate / 1000)
+
     return wf_dict
 
 
@@ -24,14 +44,43 @@ def laser_or_LED(
     LED_on="50.0 1",
     laser_on=True,
 ):
-    workflow_dict["Illumination Source"][laser_channel] = (
-        str(laser_setting) + " " + str(int(laser_on))
-    )  # 1 indicates that the laser should be used/on.
+    """
+    Updates the illumination source settings in a Flamingo workflow dictionary to use a laser or LED.
+
+    This function takes a Flamingo workflow dictionary, a laser channel, laser setting, and optional LED settings,
+    and updates the illumination source settings in the workflow dictionary to use the specified laser or LED.
+
+    Parameters
+    ----------
+    workflow_dict : dict
+        Flamingo workflow dictionary.
+    laser_channel : str
+        Laser channel to update in the workflow dictionary.
+    laser_setting : float
+        Laser setting to use.
+    LED_off : str, optional
+        LED off setting. Default is "0.00 0".
+    LED_on : str, optional
+        LED on setting. Default is "50.0 1".
+    laser_on : bool, optional
+        Flag indicating whether the laser should be turned on. Default is True.
+
+    Returns
+    -------
+    dict
+        Updated Flamingo workflow dictionary.
+    """
+    # Update the laser channel with the specified laser setting and laser_on flag
+    workflow_dict["Illumination Source"][laser_channel] = str(laser_setting) + " " + str(int(laser_on))
+
+    # Update the LED setting based on the laser_on flag
     if laser_on:
         workflow_dict["Illumination Source"]["LED_RGB_Board"] = LED_off
     else:
         workflow_dict["Illumination Source"]["LED_RGB_Board"] = LED_on
+
     return workflow_dict
+
 
 
 def dict_positions(workflow_dict:map, xyzr:Sequence[float], zEnd:float, save_with_data=False, get_zstack=False):
@@ -125,52 +174,94 @@ def dict_to_snap(workflow_dict:map, xyzr:Sequence[float], framerate:float, plane
     return workflow_dict
 
 
-def text_to_dict(filename:str):
+def text_to_dict(filename: str) -> dict:
+    """
+    Converts a text file containing Flamingo settings into a dictionary.
+
+    This function reads a text file with Flamingo settings and converts it into a dictionary format.
+    The text file should follow a specific format where each line represents a key-value pair in the format "key = value".
+    Sections and nested sections are represented using XML-like tags "<section>...</section>".
+
+    Parameters
+    ----------
+    filename : str
+        The path to the text file containing the Flamingo settings.
+
+    Returns
+    -------
+    dict
+        A dictionary representation of the Flamingo settings.
+    """
     with open(filename, "r") as f:
-        # Create an empty dictionary to store the settings
         settings_dict = {}
         stack = []
 
-        # Read the lines and parse them
         for line in f:
-            # Strip leading and trailing whitespace from the line
             line = line.strip()
 
             if line.startswith("</") and line.endswith(">"):
-                # End of a section
                 closing_tag = line[2:-1]
                 while stack:
                     current_dict = stack.pop()
                     if closing_tag == list(current_dict.keys())[0]:
                         break
             elif line.startswith("<") and line.endswith(">"):
-                # Start of a new section
                 section_name = line[1:-1]
                 new_dict = {}
                 if stack:
-                    # Add the new dictionary to its parent dictionary
                     parent_dict = stack[-1]
                     parent_dict[section_name] = new_dict
                 else:
-                    # Top-level dictionary
                     settings_dict[section_name] = new_dict
                 stack.append(new_dict)
             else:
-                # Parse the key and value from the line
                 key, value = line.split("=")
                 current_dict = stack[-1]
                 current_dict[key.strip()] = value.strip()
 
-        return settings_dict
+    return settings_dict
 
 
-def dict_to_text(file_location:str, settings_dict:map):
+def dict_to_text(file_location: str, settings_dict: dict):
+    """
+    Writes Flamingo settings from a dictionary to a text file.
+
+    This function writes Flamingo settings stored in a dictionary to a text file.
+    The settings are written in the format "key = value", and sections and nested sections are represented
+    using XML-like tags "<section>...</section>".
+
+    Parameters
+    ----------
+    file_location : str
+        The path to the output text file.
+    settings_dict : dict
+        A dictionary containing the Flamingo settings to write.
+    """
     with open(file_location, "w", newline="\n") as f:
-        # Write the settings to the file
-        write_dict(f, settings_dict,  0)
+        write_dict(f, settings_dict, 0)
+
 
 
 def write_dict( file:str, settings_dict:map, indent_level:int):
+    """
+    Recursively writes dictionary data to a file with the specified indentation level.
+
+    This function is used to recursively write a dictionary and its nested sections to a file.
+    Each section is represented by XML-like tags ("<section>...</section>") and key-value pairs are written as "key = value".
+
+    Parameters
+    ----------
+    file : str
+        The file object or file path to write the dictionary data.
+    settings_dict : dict
+        The dictionary data to write to the file.
+    indent_level : int
+        The current indentation level for nested sections.
+
+    Returns
+    -------
+    None
+    """
     indent = "  " * indent_level
     for key, value in settings_dict.items():
         if isinstance(value, dict):
@@ -183,8 +274,28 @@ def write_dict( file:str, settings_dict:map, indent_level:int):
             file.write(f"{indent}{key} = {value}\n")
 
 
-def dict_to_workflow(file_name:str, settings_dict:map):
-    # print('dict_to_workflow '+file_name)
+
+
+
+def dict_to_workflow(file_name: str, settings_dict: dict):
+    """
+    Converts a dictionary of Flamingo settings to a Flamingo workflow file.
+
+    This function takes a dictionary of Flamingo settings and converts it into a Flamingo workflow file format.
+    The settings are written in the format "key = value", with XML-like tags representing sections and nested sections.
+
+    Parameters
+    ----------
+    file_name : str
+        The path to the output Flamingo workflow file.
+    settings_dict : dict
+        A dictionary containing the Flamingo settings to convert.
+
+    Returns
+    -------
+    None
+        This function does not return anything, but writes the Flamingo workflow file to the specified path.
+    """
     # Start with the <Workflow Settings> tag
     output = "<Workflow Settings>\n"
 
@@ -207,13 +318,28 @@ def dict_to_workflow(file_name:str, settings_dict:map):
         f.write(output)
 
 
-def workflow_to_dict(filename:str):
-    # print('workflow to dict '+filename)
-    with open(filename, "r") as f:
-        # Skip the first line
-        next(f)
 
-        # Create an empty dictionary to store the settings
+def workflow_to_dict(filename: str) -> dict:
+    """
+    Converts a Flamingo workflow file into a dictionary.
+
+    This function reads a Flamingo workflow file and converts it into a dictionary format.
+    The workflow file should follow a specific format where each line represents a key-value pair in the format "key = value".
+    The file should also contain XML-like tags to mark different sections of the workflow.
+
+    Parameters
+    ----------
+    filename : str
+        The path to the Flamingo workflow file.
+
+    Returns
+    -------
+    dict
+        A dictionary representation of the Flamingo workflow.
+    """
+    with open(filename, "r") as f:
+        next(f)  # Skip the first line
+
         settings_dict = {
             "Experiment Settings": {},
             "Camera Settings": {},
@@ -224,11 +350,10 @@ def workflow_to_dict(filename:str):
             "Illumination Path": {},
         }
 
-        # Read the rest of the lines and parse them
-        current_section = ""
+        current_section = ""  # Initialize the current section
         for line in f:
-            # Check if this line marks the start of a new section
             if "<" in line and ">" in line:
+                # Start of a new section
                 current_section = line.strip()[1:-1]
             else:
                 # Parse the key and value from the line
