@@ -58,11 +58,11 @@ Find sample is a first simple test of the system, where:
  ![Overall control flow](https://github.com/uw-loci/Flamingo_Control/blob/main/images/workflow.PNG?raw=true)
 -------------------
 
- Communicating with the Flamingo  
+**Communicating with the Flamingo**  
  
- Commands: Individual instructions, limited, e.g. move X axis position to "value"
+Commands: Individual instructions, limited, e.g. move X axis position to "value"
 
- Workflows: Also a command, but followed by a text file structured something like a JSON that conducts and entire workflow, e.g. a time series/Zstack with certain cameras, lasers, etc. and handles data storage/distribution.
+Workflows: Also a command, but followed by a text file structured something like a JSON that conducts and entire workflow, e.g. a time series/Zstack with certain cameras, lasers, etc. and handles data storage/distribution.
 
 Main file - __init__.py  
 
