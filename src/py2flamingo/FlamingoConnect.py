@@ -2,17 +2,27 @@ import os
 import shutil
 from queue import Queue
 from threading import Event, Thread
+
 import functions.microscope_connect as mc
 from functions.text_file_parsing import text_to_dict, workflow_to_dict
-from PyQt5.QtWidgets import (
-
-    QFileDialog,
-
-    QMessageBox,
-
+from global_objects import (
+    command_data_queue,
+    command_queue,
+    image_queue,
+    intensity_queue,
+    other_data_queue,
+    processing_event,
+    send_event,
+    stage_location_queue,
+    system_idle,
+    terminate_event,
+    view_snapshot,
+    visualize_event,
+    visualize_queue,
+    z_plane_queue,
 )
-from global_objects import view_snapshot, system_idle, processing_event, send_event, terminate_event, visualize_event
-from global_objects import image_queue, command_queue, z_plane_queue, intensity_queue, visualize_queue, command_data_queue, stage_location_queue, other_data_queue
+from PyQt5.QtWidgets import QFileDialog, QMessageBox
+
 
 class FlamingoConnect:
     """
@@ -65,10 +75,23 @@ class FlamingoConnect:
     data_storage_location : str
         The location where data is stored.
     """
+
     def __init__(self, queues_and_events):
         # Get queues and events defined in global_objects.py
-        self.image_queue, self.command_queue, self.z_plane_queue, self.intensity_queue, self.visualize_queue = queues_and_events['queues']
-        self.view_snapshot, self.system_idle, self.processing_event, self.send_event, self.terminate_event = queues_and_events['events']
+        (
+            self.image_queue,
+            self.command_queue,
+            self.z_plane_queue,
+            self.intensity_queue,
+            self.visualize_queue,
+        ) = queues_and_events["queues"]
+        (
+            self.view_snapshot,
+            self.system_idle,
+            self.processing_event,
+            self.send_event,
+            self.terminate_event,
+        ) = queues_and_events["events"]
 
         # Initialize properties
         self.IP = None
@@ -82,17 +105,16 @@ class FlamingoConnect:
         self.lasers = []
         self.selected_laser = ""
         self.laser_power = ""
-        self.data_storage_location = ""        
+        self.data_storage_location = ""
 
         # Check if necessary folders exist, and create them if not
         self.check_folders()
 
         # Check if necessary metadata files exist, and prompt the user to select a file if not
         self.check_metadata_file_and_connect()
-        
+
         self.check_zstack_file()
         self.check_start_position()
-
 
     def check_folders(self):
         """
@@ -139,7 +161,6 @@ class FlamingoConnect:
             ]
             self.current_coordinates = self.start_position.copy()
 
-
     def check_file_exists(self, file_path):
         """
         Checks whether a specified file exists.
@@ -162,7 +183,7 @@ class FlamingoConnect:
         """
         Displays a warning message box.
 
-        This function uses the QMessageBox class from the PyQt5.QtWidgets library to display a message box 
+        This function uses the QMessageBox class from the PyQt5.QtWidgets library to display a message box
         with a specified warning message.
 
         Parameters
@@ -173,9 +194,7 @@ class FlamingoConnect:
         message_box = QMessageBox()
         message_box.setIcon(QMessageBox.Warning)
         message_box.setWindowTitle("File Not Found")
-        message_box.setText(
-            warning
-        )
+        message_box.setText(warning)
         message_box.setStandardButtons(QMessageBox.Ok)
         message_box.exec_()
 
@@ -183,7 +202,7 @@ class FlamingoConnect:
         """
         Prompts the user to select a file.
 
-        This function uses the QFileDialog class from the PyQt5.QtWidgets library to open a file dialog 
+        This function uses the QFileDialog class from the PyQt5.QtWidgets library to open a file dialog
         where the user can select a file. The dialog is configured to only show existing text files.
 
         Returns
@@ -201,13 +220,12 @@ class FlamingoConnect:
         else:
             return ""
 
-
     def process_selected_file(self, file_dialog, file_path):
         """
         Processes a file selected by the user.
 
-        This function first checks whether a file has been selected in the provided file dialog. If a file 
-        has been selected, it is copied to a specified path. If an error occurs during the copy operation, 
+        This function first checks whether a file has been selected in the provided file dialog. If a file
+        has been selected, it is copied to a specified path. If an error occurs during the copy operation,
         a warning message is displayed.
 
         Parameters
@@ -219,20 +237,26 @@ class FlamingoConnect:
         """
         if file_dialog.exec_():
             selected_file = file_dialog.selectedFiles()[0]  # Get the selected file path
-            os.makedirs("microscope_settings", exist_ok=True)  # Create the 'microscope_settings' directory if it doesn't exist
+            os.makedirs(
+                "microscope_settings", exist_ok=True
+            )  # Create the 'microscope_settings' directory if it doesn't exist
             try:
-                shutil.copy(selected_file, file_path)  # Copy the selected file to the 'microscope_settings' directory
+                shutil.copy(
+                    selected_file, file_path
+                )  # Copy the selected file to the 'microscope_settings' directory
             except OSError as e:
                 QMessageBox.warning(self, "Error", str(e))
         else:
-            QMessageBox.warning(self, "Warning", "FlamingoMetaData.txt file not found! Closing.")
+            QMessageBox.warning(
+                self, "Warning", "FlamingoMetaData.txt file not found! Closing."
+            )
 
     def read_metadata(self, file_path):
         """
         Reads microscope metadata from a file.
 
-        This function uses the text_to_dict function to convert the contents of a specified text file 
-        into a dictionary. The IP, port, instrument name, and instrument type attributes of the class 
+        This function uses the text_to_dict function to convert the contents of a specified text file
+        into a dictionary. The IP, port, instrument name, and instrument type attributes of the class
         are then set using the data from this dictionary.
 
         Parameters
@@ -247,20 +271,23 @@ class FlamingoConnect:
         """
         metadata_dict = text_to_dict(file_path)
 
-        self.IP = metadata_dict["Instrument"]["Type"]["Microscope address"].split(" ")[0]
-        self.port = int(metadata_dict["Instrument"]["Type"]["Microscope address"].split(" ")[1])
+        self.IP = metadata_dict["Instrument"]["Type"]["Microscope address"].split(" ")[
+            0
+        ]
+        self.port = int(
+            metadata_dict["Instrument"]["Type"]["Microscope address"].split(" ")[1]
+        )
         self.instrument_name = metadata_dict["Instrument"]["Type"]["Microscope name"]
         self.instrument_type = metadata_dict["Instrument"]["Type"]["Microscope type"]
 
         return metadata_dict
 
-
     def connect_to_microscope(self, metadata_dict):
         """
         Establishes a connection to the microscope.
 
-        This function uses the start_connection function from the mc (microscope_connect) module 
-        to establish a connection to the microscope and then create relevant threads for handling 
+        This function uses the start_connection function from the mc (microscope_connect) module
+        to establish a connection to the microscope and then create relevant threads for handling
         the connection and processing data. The connection data and threads are stored as class attributes.
 
         Parameters
@@ -269,7 +296,9 @@ class FlamingoConnect:
             A dictionary containing the metadata information necessary for establishing the connection.
         """
         # Start connection and get relevant client objects and commands
-        nuc_client, live_client, wf_zstack, LED_on, LED_off = mc.start_connection(self.IP, self.port)
+        nuc_client, live_client, wf_zstack, LED_on, LED_off = mc.start_connection(
+            self.IP, self.port
+        )
         self.connection_data = [nuc_client, live_client, wf_zstack, LED_on, LED_off]
 
         # Create relevant threads for listening, sending and processing data
@@ -305,8 +334,8 @@ class FlamingoConnect:
         """
         Checks for a metadata file and establishes a connection to the microscope.
 
-        This function first checks whether a file named "FlamingoMetaData.txt" exists in the 
-        "microscope_settings" directory. If it does not, the user is warned and asked to select a metadata file, 
+        This function first checks whether a file named "FlamingoMetaData.txt" exists in the
+        "microscope_settings" directory. If it does not, the user is warned and asked to select a metadata file,
         which is then processed. If the file exists, it is read and used to establish a connection to the microscope.
         """
         file_path = os.path.join("microscope_settings", "FlamingoMetaData.txt")
@@ -319,13 +348,11 @@ class FlamingoConnect:
             metadata_dict = self.read_metadata(file_path)
             self.connect_to_microscope(metadata_dict)
 
-
-
     def prompt_user_for_zstack_file(self):
         """
         Prompts the user to select a ZStack file.
 
-        This function uses the QFileDialog class from the PyQt5.QtWidgets library to open a file dialog 
+        This function uses the QFileDialog class from the PyQt5.QtWidgets library to open a file dialog
         where the user can select a ZStack file. The dialog is configured to only show existing text files.
 
         Returns
@@ -343,8 +370,8 @@ class FlamingoConnect:
         """
         Processes a ZStack file selected by the user.
 
-        This function first checks whether a file has been selected in the provided file dialog. If a file 
-        has been selected, it is copied to a specified path. If an error occurs during the copy operation, 
+        This function first checks whether a file has been selected in the provided file dialog. If a file
+        has been selected, it is copied to a specified path. If an error occurs during the copy operation,
         a warning message is displayed.
 
         Parameters
@@ -356,20 +383,23 @@ class FlamingoConnect:
         """
         if file_dialog.exec_():
             selected_file = file_dialog.selectedFiles()[0]  # Get the selected file path
-            os.makedirs("workflows", exist_ok=True)  # Create the 'workflows' directory if it doesn't exist
+            os.makedirs(
+                "workflows", exist_ok=True
+            )  # Create the 'workflows' directory if it doesn't exist
             try:
-                shutil.copy(selected_file, file_path)  # Copy the selected file to the 'workflows' directory
+                shutil.copy(
+                    selected_file, file_path
+                )  # Copy the selected file to the 'workflows' directory
             except OSError as e:
                 QMessageBox.warning(self, "Error", str(e))
         else:
             QMessageBox.warning(self, "Warning", "ZStack.txt file not found! Closing.")
 
-
     def read_workflow(self, file_path):
         """
         Reads a workflow file and sets relevant class attributes.
 
-        This function reads a workflow file at a given file path, extracts the information about 
+        This function reads a workflow file at a given file path, extracts the information about
         lasers and data storage location from the file, and sets the corresponding class attributes.
 
         Parameters
@@ -397,16 +427,17 @@ class FlamingoConnect:
         """
         Checks for a ZStack file and reads it if found.
 
-        This function first checks whether a file named "ZStack.txt" exists in the 
-        "workflows" directory. If it does not, the user is warned and asked to select a workflow file, 
+        This function first checks whether a file named "ZStack.txt" exists in the
+        "workflows" directory. If it does not, the user is warned and asked to select a workflow file,
         which is then processed. If the file exists, it is read and the relevant class attributes are updated.
         """
         file_path = os.path.join("workflows", "ZStack.txt")
-        if not self.check_file_exists(file_path):  # Using the previously defined function
+        if not self.check_file_exists(
+            file_path
+        ):  # Using the previously defined function
             warning = "The file ZStack.txt was not found at workflows/ZStack.txt. \nPlease locate a workflow text (workflow.txt) file to use as the basis for your settings (Laser line, laser power). One should be generated when a workflow is manually run on the microscope."
             self.show_warning_message(warning)
             file_dialog = self.prompt_user_for_zstack_file()
             self.process_selected_zstack_file(file_dialog, file_path)
         else:
             self.read_workflow(file_path)
-

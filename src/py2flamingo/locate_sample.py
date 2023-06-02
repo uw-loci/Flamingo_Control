@@ -6,13 +6,96 @@
 import copy
 import shutil
 import time
-from global_objects import clear_all_events_queues
+
 import functions.calculations
 from functions.microscope_connect import *
 from functions.text_file_parsing import *
+from global_objects import clear_all_events_queues
 
 plane_spacing = 10
 framerate = 40.0032  # /s
+
+
+def initial_setup(command_queue, other_data_queue, send_event):
+    clear_all_events_queues()
+    # Look in the functions/command_list.txt file for other command codes, or add more
+    commands = text_to_dict(
+        os.path.join("src", "py2flamingo", "functions", "command_list.txt")
+    )
+
+    # Testing fidelity
+    # print(commands)
+    # dict_to_text('functions/command_test.txt', commands)
+
+    COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(
+        commands["CommandCodes.h"]["COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD"]
+    )
+    # COMMAND_CODES_COMMON_SCOPE_SETTINGS  = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS'])
+    COMMAND_CODES_CAMERA_WORK_FLOW_START = int(
+        commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_WORK_FLOW_START"]
+    )
+    COMMAND_CODES_STAGE_POSITION_SET = int(
+        commands["CommandCodes.h"]["COMMAND_CODES_STAGE_POSITION_SET"]
+    )
+    # COMMAND_CODES_SYSTEM_STATE_IDLE  = int(commands['CommandCodes.h']['COMMAND_CODES_SYSTEM_STATE_IDLE'])
+    COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET = int(
+        commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET"]
+    )
+    COMMAND_CODES_CAMERA_IMAGE_SIZE_GET = int(
+        commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_IMAGE_SIZE_GET"]
+    )
+    command_labels = [
+        COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD,
+        COMMAND_CODES_CAMERA_WORK_FLOW_START,
+        COMMAND_CODES_STAGE_POSITION_SET,
+        COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET,
+        COMMAND_CODES_CAMERA_IMAGE_SIZE_GET,
+    ]
+
+    image_pixel_size_um, scope_settings = get_microscope_settings(
+        command_queue, other_data_queue, send_event
+    )
+    command_queue.put(COMMAND_CODES_CAMERA_IMAGE_SIZE_GET)
+    send_event.set()
+    time.sleep(0.1)
+
+    frame_size = other_data_queue.get()
+    FOV = image_pixel_size_um * frame_size
+
+    # pixel_size*frame_size #pixel size in mm*number of pixels per frame
+    y_move = FOV * 1.3
+    print(f"y_move search step size is currently {y_move}mm")
+    ############
+    ymax = float(scope_settings["Stage limits"]["Soft limit max y-axis"])
+    print(f"ymax is {ymax}")
+    ###############
+    return command_labels, ymax, y_move
+
+
+def send_workflow(
+    command_queue,
+    send_event,
+    stage_location_queue,
+    system_idle: Event,
+    xyzr_init: Sequence[float],
+    visualize_event,
+    processing_event,
+    intensity_queue,
+):
+    command_queue.put(COMMAND_CODES_CAMERA_WORK_FLOW_START)
+    send_event.set()
+
+    while not system_idle.is_set():
+        time.sleep(0.1)
+    # Possibly make this a mini function
+    stage_location_queue.put(xyzr_init)
+    visualize_event.set()
+
+    # Clear out collected data
+    processing_event.set()
+    # clear the data out of the data queues
+    top25_percentile_mean = intensity_queue.get()
+    return top25_percentile_mean
 
 
 def locate_sample(
@@ -43,61 +126,24 @@ def locate_sample(
 
     WiFi warning: image data transfer will be very slow over wireless networks - use hardwired connections
     """
-    #in case of second run, clear out any remaining data or flags.
-    terminate_event.clear() 
-    clear_all_events_queues()
-    # Look in the functions/command_list.txt file for other command codes, or add more
-    commands = text_to_dict(
-        os.path.join("src", "py2flamingo", "functions", "command_list.txt")
+    # in case of second run, clear out any remaining data or flags.
+    command_labels, ymax, y_move = initial_setup(
+        command_queue, other_data_queue, send_event
     )
-
-    # Testing fidelity
-    # print(commands)
-    # dict_to_text('functions/command_test.txt', commands)
-
-    COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(
-        commands["CommandCodes.h"]["COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD"]
-    )
-    # COMMAND_CODES_COMMON_SCOPE_SETTINGS  = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS'])
-    COMMAND_CODES_CAMERA_WORK_FLOW_START = int(
-        commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_WORK_FLOW_START"]
-    )
-    COMMAND_CODES_STAGE_POSITION_SET = int(
-        commands["CommandCodes.h"]["COMMAND_CODES_STAGE_POSITION_SET"]
-    )
-    # COMMAND_CODES_SYSTEM_STATE_IDLE  = int(commands['CommandCodes.h']['COMMAND_CODES_SYSTEM_STATE_IDLE'])
-    COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET = int(
-        commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET"]
-    )
-    COMMAND_CODES_CAMERA_IMAGE_SIZE_GET = int(
-        commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_IMAGE_SIZE_GET"]
-    )
+    nuc_client, live_client, wf_zstack, LED_on, LED_off = connection_data
+    (
+        COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD,
+        COMMAND_CODES_CAMERA_WORK_FLOW_START,
+        COMMAND_CODES_STAGE_POSITION_SET,
+        COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET,
+        COMMAND_CODES_CAMERA_IMAGE_SIZE_GET,
+    ) = command_labels
     ##############################
 
     ##
     # Queues and Events for keeping track of what state the software/hardware is in
     # and pass information between threads (Queues)
     ##
-
-    nuc_client, live_client, wf_zstack, LED_on, LED_off = connection_data
-    image_pixel_size, scope_settings = get_microscope_settings(
-        command_queue, other_data_queue, send_event
-    )
-    command_queue.put(COMMAND_CODES_CAMERA_IMAGE_SIZE_GET)
-    send_event.set()
-    time.sleep(0.1)
-
-    frame_size = other_data_queue.get()
-    FOV = image_pixel_size * frame_size
-    # Currently a 1.3 modifier hardcoded since all samples in use are larger than a field of view
-    # This makes the search faster and is unlikely to miss the sample.
-    # pixel_size*frame_size #pixel size in mm*number of pixels per frame
-    y_move = FOV * 1.3 
-    print(f"y_move search step size is currently {y_move}mm")
-    ############
-    ymax = float(scope_settings["Stage limits"]["Soft limit max y-axis"])
-    print(f"ymax is {ymax}")
-    ###############
 
     go_to_XYZR(command_data_queue, command_queue, send_event, xyzr_init)
     ####################
@@ -117,19 +163,16 @@ def locate_sample(
 
     # take a snapshot
     print("Acquire a brightfield snapshot")
-    command_queue.put(COMMAND_CODES_CAMERA_WORK_FLOW_START)
-    send_event.set()
-
-    while not system_idle.is_set():
-        time.sleep(0.1)
-    # Possibly make this a mini function
-    stage_location_queue.put(xyzr_init)
-    visualize_event.set()
-
-    # Clear out collected data
-    processing_event.set()
-    # clear the data out of the data queues
-    top25_percentile_mean = intensity_queue.get()
+    top25_percentile_mean = send_workflow(
+        command_queue,
+        send_event,
+        stage_location_queue,
+        system_idle,
+        xyzr_init,
+        visualize_event,
+        processing_event,
+        intensity_queue,
+    )
 
     # Move half of a frame down from the current position
     ######how to determine half of a frame generically?######
@@ -176,21 +219,24 @@ def locate_sample(
             os.path.join("workflows", "current" + wf_zstack),
             os.path.join("workflows", "workflow.txt"),
         )
-        print(f"coordinates x: {xyzr[0]}, y: {xyzr[1]}, z:{xyzr[2]}, r:{xyzr[3]}")
+        xyzr_centered = xyzr.copy()
+        xyzr_centered[2] = (float(xyzr_centered[2]) + zend) / 2
+        print(
+            f"coordinates x: {xyzr[0]}, y: {xyzr[1]}, z:{xyzr_centered[2]}, r:{xyzr[3]}"
+        )
+        top25_percentile_mean = send_workflow(
+            command_queue,
+            send_event,
+            stage_location_queue,
+            system_idle,
+            xyzr_centered,
+            visualize_event,
+            processing_event,
+            intensity_queue,
+        )
 
         # print('before acquire Z'+ str(i+1))
-        command_queue.put(COMMAND_CODES_CAMERA_WORK_FLOW_START)
-        send_event.set()
-        visualize_event.set()
-        while not system_idle.is_set():
-            time.sleep(0.1)
 
-        stage_location_queue.put(xyzr)
-
-        # print('after acquire Z'+ str(i+1))
-        # print('processing set')
-        processing_event.set()
-        top25_percentile_mean = intensity_queue.get()
         # print(f'intensity sum is {intensity}')
         # Store data about IF signal at current in focus location
         coords.append([copy.deepcopy(xyzr), top25_percentile_mean])
@@ -232,6 +278,7 @@ def locate_sample(
     loops = int(total_number_of_planes / buffer_max + 0.5)
     step_size_mm = float(wf_dict["Experiment Settings"]["Plane spacing (um)"]) / 1000
     z_search_depth = step_size_mm * buffer_max
+    print(f" z search dpeth {z_search_depth}")
     wf_dict = calculate_zplanes(wf_dict, z_search_depth, framerate, plane_spacing)
     # wf_dict['Stack Settings']['Number of planes'] = buffer_max
     # combined_stack = []
@@ -261,9 +308,14 @@ def locate_sample(
             os.path.join("workflows", "current" + wf_zstack),
             os.path.join("workflows", "workflow.txt"),
         )
-        print(
-            f"start: {wf_dict['Start Position']['Z (mm)']}, end: {wf_dict['End Position']['Z (mm)']}"
-        )
+        print(wf_zstack)
+        # shutil.copy(
+        #     os.path.join("workflows", "Zstack.txt"),
+        #     os.path.join("workflows", "workflow.txt"),
+        # )
+        # print(
+        #     f"start: {wf_dict['Start Position']['Z (mm)']}, end: {wf_dict['End Position']['Z (mm)']}"
+        # )
         command_queue.put(COMMAND_CODES_CAMERA_WORK_FLOW_START)
         send_event.set()
         visualize_event.set()
@@ -281,7 +333,6 @@ def locate_sample(
         print(f"Intensity means: {top25_percentile_means}")
         if maxima := functions.calculations.check_maxima(top25_percentile_means):
             break
-
 
     xyzr = coordsZ[maxima][0]
     x = coordsZ[maxima][0][0]
@@ -313,7 +364,7 @@ def locate_sample(
     ##############
     snap_dict = wf_dict
     xyzr[2] = zSnap
-    print(f'final xyzr snap {xyzr}')
+    print(f"final xyzr snap {xyzr}")
     snap_dict["Experiment Settings"]["Save image directory"] = "Sample"
     snap_dict = dict_comment(snap_dict, "Sample located")
 

@@ -2,8 +2,9 @@ import os
 import shutil
 import time
 from typing import Sequence
-from global_objects import clear_all_events_queues
+
 from functions.text_file_parsing import *
+from global_objects import clear_all_events_queues
 
 plane_spacing = 10
 framerate = 40.0032  # /s
@@ -37,7 +38,7 @@ def take_snapshot(
     Returns:
     None
     """
-    print('Taking snapshot')
+    print("Taking snapshot")
 
     # Extract the workflow zstack from the connection data
     wf_zstack = connection_data[2]
@@ -46,8 +47,12 @@ def take_snapshot(
     clear_all_events_queues()
 
     # Load command codes from the command_list.txt file
-    commands = text_to_dict(os.path.join("src", "py2flamingo", "functions", "command_list.txt"))
-    COMMAND_CODES_CAMERA_WORK_FLOW_START = int(commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_WORK_FLOW_START"])
+    commands = text_to_dict(
+        os.path.join("src", "py2flamingo", "functions", "command_list.txt")
+    )
+    COMMAND_CODES_CAMERA_WORK_FLOW_START = int(
+        commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_WORK_FLOW_START"]
+    )
 
     # Prepare the workflow for the snapshot
     snap_dict = workflow_to_dict(os.path.join("workflows", wf_zstack))
@@ -59,7 +64,10 @@ def take_snapshot(
     dict_to_workflow(os.path.join("workflows", "currentSnapshot.txt"), snap_dict)
 
     # Copy the currentSnapshot.txt file to the workflow.txt file
-    shutil.copy(os.path.join("workflows", "currentSnapshot.txt"), os.path.join("workflows", "workflow.txt"))
+    shutil.copy(
+        os.path.join("workflows", "currentSnapshot.txt"),
+        os.path.join("workflows", "workflow.txt"),
+    )
 
     # Send the command to start the workflow to the microscope
     command_queue.put(COMMAND_CODES_CAMERA_WORK_FLOW_START)
@@ -72,8 +80,5 @@ def take_snapshot(
     # Retrieve the image from the image_queue
     image_queue.get()
 
-    print('snapshot taken')
+    print("snapshot taken")
     # TODO Clean up 'delete' PNG files or dont make them
-
-
-

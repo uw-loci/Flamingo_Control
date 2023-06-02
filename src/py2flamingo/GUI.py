@@ -4,11 +4,28 @@ import sys
 import time
 from queue import Queue
 from threading import Event, Thread
-from FlamingoConnect import FlamingoConnect
+
 # then use mc.etc as function calls
 import functions.microscope_connect as mc
+from FlamingoConnect import FlamingoConnect
 from functions.image_display import convert_to_qimage
 from functions.text_file_parsing import dict_to_text, text_to_dict, workflow_to_dict
+from global_objects import (
+    command_data_queue,
+    command_queue,
+    image_queue,
+    intensity_queue,
+    other_data_queue,
+    processing_event,
+    send_event,
+    stage_location_queue,
+    system_idle,
+    terminate_event,
+    view_snapshot,
+    visualize_event,
+    visualize_queue,
+    z_plane_queue,
+)
 from go_to_position import go_to_position
 from locate_sample import locate_sample
 from PyQt5.QtCore import QSize, Qt, QTimer
@@ -29,9 +46,6 @@ from PyQt5.QtWidgets import (
 )
 from set_home import set_home
 from take_snapshot import take_snapshot
-
-from global_objects import view_snapshot, system_idle, processing_event, send_event, terminate_event, visualize_event
-from global_objects import image_queue, command_queue, z_plane_queue, intensity_queue, visualize_queue, command_data_queue, stage_location_queue, other_data_queue
 
 
 class Py2FlamingoGUI(QMainWindow):
@@ -57,6 +71,7 @@ class Py2FlamingoGUI(QMainWindow):
     current_coordinates : list
         The current coordinates of the microscope, represented as a list of four strings.
     """
+
     def __init__(self, queues_and_events):
         super().__init__()
         # Initialize the connection to the microscope
@@ -69,7 +84,9 @@ class Py2FlamingoGUI(QMainWindow):
         self.current_coordinates = []
 
         # Set the window title and style
-        self.setWindowTitle(f"Flamingo Controller: {self.microscope_connection.instrument_name}")
+        self.setWindowTitle(
+            f"Flamingo Controller: {self.microscope_connection.instrument_name}"
+        )
         self.setStyleSheet("QMainWindow { background-color: rgb(255, 230, 238); }")
         self.setGeometry(200, 200, 600, 550)
 
@@ -77,7 +94,6 @@ class Py2FlamingoGUI(QMainWindow):
         self.create_image_label()  # Create the QLabel widget for displaying the image
         self.create_GUI_layout()  # Create the layout of the GUI
         self.update_display_timer()  # Start the timer for updating the display
-
 
     def create_image_label(self):
         """
@@ -88,7 +104,9 @@ class Py2FlamingoGUI(QMainWindow):
         None
         """
         self.image_label = QLabel(self)  # Create the QLabel widget
-        self.image_label.setAlignment(Qt.AlignCenter)  # Center-align the image within the label
+        self.image_label.setAlignment(
+            Qt.AlignCenter
+        )  # Center-align the image within the label
 
     def update_display_timer(self):
         """
@@ -99,14 +117,18 @@ class Py2FlamingoGUI(QMainWindow):
         None
         """
         self.display_timer = QTimer()  # Create the QTimer
-        self.display_timer.timeout.connect(self.update_display)  # Connect the QTimer timeout signal to the update_display function
+        self.display_timer.timeout.connect(
+            self.update_display
+        )  # Connect the QTimer timeout signal to the update_display function
 
-        update_interval = 200  # Set the interval for the QTimer (e.g., update every 200 milliseconds)
+        update_interval = (
+            200  # Set the interval for the QTimer (e.g., update every 200 milliseconds)
+        )
         self.display_timer.start(update_interval)  # Start the QTimer
 
     def update_display(self):
         """
-        This function updates the display with the latest microscope image and the current coordinates. If there are multiple 
+        This function updates the display with the latest microscope image and the current coordinates. If there are multiple
         images in the queue, it discards all but the latest one.
 
         Returns
@@ -128,20 +150,32 @@ class Py2FlamingoGUI(QMainWindow):
                     # In case data transfer was slow, get the last shown image location only.
                     while stage_location_queue.qsize() > 1:
                         stage_location_queue.get()  # Discard all but the latest coordinates
-                    self.current_coordinates = stage_location_queue.get()  # Get the latest coordinates
+                    self.current_coordinates = (
+                        stage_location_queue.get()
+                    )  # Get the latest coordinates
 
                     # Update the coordinate labels with the current coordinates
-                    self.current_x.setText(f"x(mm): {round(float(self.current_coordinates[0]),2)}")
-                    self.current_y.setText(f"y(mm): {round(float(self.current_coordinates[1]),2)}")
-                    self.current_z.setText(f"z(mm): {round(float(self.current_coordinates[2]),2)}")
-                    self.current_r.setText(f"r(°): {round(float(self.current_coordinates[3]),2)}")
+                    self.current_x.setText(
+                        f"x(mm): {round(float(self.current_coordinates[0]),2)}"
+                    )
+                    self.current_y.setText(
+                        f"y(mm): {round(float(self.current_coordinates[1]),2)}"
+                    )
+                    self.current_z.setText(
+                        f"z(mm): {round(float(self.current_coordinates[2]),2)}"
+                    )
+                    self.current_r.setText(
+                        f"r(°): {round(float(self.current_coordinates[3]),2)}"
+                    )
             else:
-                image = visualize_queue.get()  # Get the latest image without updating the coordinates
+                image = (
+                    visualize_queue.get()
+                )  # Get the latest image without updating the coordinates
 
     def display_image(self, image):
         """
-        This function displays the given image on the QLabel widget created by the create_image_label function. 
-        It first converts the numpy array image to a QImage, then creates a QPixmap from the QImage, scales it to fit 
+        This function displays the given image on the QLabel widget created by the create_image_label function.
+        It first converts the numpy array image to a QImage, then creates a QPixmap from the QImage, scales it to fit
         the QLabel, and finally sets it as the QLabel's pixmap.
 
         Parameters
@@ -164,7 +198,6 @@ class Py2FlamingoGUI(QMainWindow):
 
         # Set the QPixmap as the QLabel's pixmap
         self.image_label.setPixmap(pixmap)
-
 
     def create_GUI_layout(self):
         """
@@ -211,8 +244,15 @@ class Py2FlamingoGUI(QMainWindow):
         # Create the radio buttons, form fields, and coordinate fields, and add them to the left interface layout
         self.create_radio_buttons(left_interface_layout)
         self.create_form_fields(left_interface_layout)
-        self.create_coordinate_fields(left_interface_layout, "start", self.microscope_connection.start_position, "beige")
-        self.create_coordinate_fields(left_interface_layout, "", self.start_position, "paleturquoise")
+        self.create_coordinate_fields(
+            left_interface_layout,
+            "start",
+            self.microscope_connection.start_position,
+            "beige",
+        )
+        self.create_coordinate_fields(
+            left_interface_layout, "", self.start_position, "paleturquoise"
+        )
 
         # Create the buttons and add them to the left interface layout
         self.create_buttons(left_interface_layout)
@@ -228,13 +268,12 @@ class Py2FlamingoGUI(QMainWindow):
         central_widget.setLayout(global_layout)
         self.setCentralWidget(central_widget)
 
-
     def create_form_fields(self, layout):
         """
         This function creates the form fields for the GUI and adds them to the provided layout.
 
-        The form fields include the IP address, command port, laser power, Z search depth, and data storage path. Each form 
-        field is created using the create_form_field function, which also adds the form field to a QFormLayout. The QFormLayout 
+        The form fields include the IP address, command port, laser power, Z search depth, and data storage path. Each form
+        field is created using the create_form_field function, which also adds the form field to a QFormLayout. The QFormLayout
         is then added to the provided layout.
 
         Parameters
@@ -251,11 +290,25 @@ class Py2FlamingoGUI(QMainWindow):
         form_layout = QFormLayout()
 
         # Create the form fields with their default values and add them to the form layout
-        self.create_form_field(form_layout, "IP Address", self.microscope_connection.IP, is_string=True)
-        self.create_form_field(form_layout, "command port (default 53717)", self.microscope_connection.port)
-        self.create_form_field(form_layout, "Laser Power (percent):", self.microscope_connection.laser_power, is_string=True)
+        self.create_form_field(
+            form_layout, "IP Address", self.microscope_connection.IP, is_string=True
+        )
+        self.create_form_field(
+            form_layout, "command port (default 53717)", self.microscope_connection.port
+        )
+        self.create_form_field(
+            form_layout,
+            "Laser Power (percent):",
+            self.microscope_connection.laser_power,
+            is_string=True,
+        )
         self.create_form_field(form_layout, "Z Search Depth (mm):", "2.0")
-        self.create_form_field(form_layout, "Data storage path:", self.microscope_connection.data_storage_location, is_string=True)
+        self.create_form_field(
+            form_layout,
+            "Data storage path:",
+            self.microscope_connection.data_storage_location,
+            is_string=True,
+        )
 
         # Add the form layout to the provided layout
         layout.addLayout(form_layout)
@@ -264,7 +317,7 @@ class Py2FlamingoGUI(QMainWindow):
         """
         This function creates a form field with the provided label and default value, and adds it to the provided layout.
 
-        The function also sets an attribute of the GUI object with the name derived from the label and the value of the form field. 
+        The function also sets an attribute of the GUI object with the name derived from the label and the value of the form field.
         This allows the form field to be accessed elsewhere in the program using the attribute.
 
         Parameters
@@ -287,7 +340,12 @@ class Py2FlamingoGUI(QMainWindow):
         field = self.create_field(is_string=is_string, default_value=default_value)
 
         # Generate a variable name from the label
-        var_name = ''.join(e for e in label if e.isalnum() or e.isspace()).replace(" ", "_").lower()[:12].rstrip('_')
+        var_name = (
+            "".join(e for e in label if e.isalnum() or e.isspace())
+            .replace(" ", "_")
+            .lower()[:12]
+            .rstrip("_")
+        )
 
         # Set an attribute of the GUI object with the variable name and the value of the form field
         setattr(self, var_name, field)
@@ -299,8 +357,8 @@ class Py2FlamingoGUI(QMainWindow):
         """
         This function creates the coordinate fields for the GUI and adds them to the provided layout.
 
-        The coordinate fields include the x, y, z, and r coordinates. Each coordinate field is created using the 
-        create_coordinate_field function, which also adds the coordinate field to a QHBoxLayout. The QHBoxLayout is then 
+        The coordinate fields include the x, y, z, and r coordinates. Each coordinate field is created using the
+        create_coordinate_field function, which also adds the coordinate field to a QHBoxLayout. The QHBoxLayout is then
         added to the provided layout.
 
         Parameters
@@ -336,17 +394,26 @@ class Py2FlamingoGUI(QMainWindow):
         )
 
         # Set a tooltip for the coordinate fields
-        position_widget.setToolTip("The provided coordinates are used for the Find Sample button")
+        position_widget.setToolTip(
+            "The provided coordinates are used for the Find Sample button"
+        )
 
         # Create the coordinate fields and add them to the QHBoxLayout
-        coordinates = ['x', 'y', 'z', 'r']
-        units = ['mm', 'mm', 'mm', '°']
+        coordinates = ["x", "y", "z", "r"]
+        units = ["mm", "mm", "mm", "°"]
         if prefix:
-            prefix = prefix+'_'
+            prefix = prefix + "_"
         var_names = [f"{prefix}field_{coord}_mm" for coord in coordinates]
-        var_names[-1] = f"{prefix}field_r_deg"  # The variable name for 'r' should end with '_deg', not '_mm'
+        var_names[
+            -1
+        ] = f"{prefix}field_r_deg"  # The variable name for 'r' should end with '_deg', not '_mm'
         for coord, unit, var_name in zip(coordinates, units, var_names):
-            self.create_coordinate_field(position_form, f"{prefix}{coord} ({unit}): ", start_position[coordinates.index(coord)], var_name)
+            self.create_coordinate_field(
+                position_form,
+                f"{prefix}{coord} ({unit}): ",
+                start_position[coordinates.index(coord)],
+                var_name,
+            )
 
         # Add the QHBoxLayout to the provided layout
         layout.addWidget(position_widget)
@@ -355,7 +422,7 @@ class Py2FlamingoGUI(QMainWindow):
         """
         This function creates a coordinate field with the provided label and default value, and adds it to the provided layout.
 
-        The function also sets an attribute of the GUI object with the name derived from the label and the value of the coordinate field. 
+        The function also sets an attribute of the GUI object with the name derived from the label and the value of the coordinate field.
         This allows the coordinate field to be accessed elsewhere in the program using the attribute.
 
         Parameters
@@ -384,7 +451,6 @@ class Py2FlamingoGUI(QMainWindow):
         layout.addWidget(QLabel(label))
         layout.addWidget(field)
 
-
     def create_buttons(self, layout):
         """
         This function creates a set of buttons for the GUI and adds them to the provided layout. Each button is associated with a specific action.
@@ -399,9 +465,9 @@ class Py2FlamingoGUI(QMainWindow):
         None
         """
         # Create QVBoxLayouts for the buttons
-        button_layout1 = QVBoxLayout()  
-        button_layout2 = QVBoxLayout()  
-        button_layout = QHBoxLayout()   # Create a QHBoxLayout to hold the two columns
+        button_layout1 = QVBoxLayout()
+        button_layout2 = QVBoxLayout()
+        button_layout = QHBoxLayout()  # Create a QHBoxLayout to hold the two columns
 
         # Define button styles
         kill_button_style = """
@@ -450,14 +516,58 @@ class Py2FlamingoGUI(QMainWindow):
             }
         """
         # Create and connect the buttons
-        self.create_button(button_layout1, "Find Sample", self.locate_sample_action, "245, 245, 220",find_focus_button_style)
-        self.create_button(button_layout2, "Go to XYZR", self.go_to_position, "175, 238, 238", coordinate_button_style)
-        self.create_button(button_layout2, "Take IF snapshot", self.take_snapshot, "175, 238, 238", coordinate_button_style)
-        self.create_button(button_layout2, "Copy position of image", self.copy_current_position, "175, 238, 238", coordinate_button_style)
-        self.create_button(button_layout2, "Set 'Home' on Mac", self.set_home_action, "175, 238, 238", coordinate_button_style)
-        self.create_button(button_layout1, "Duplicate and add your button", self.add_your_code)
-        self.create_button(button_layout1, "Stop AND CLOSE PROGRAM", self.close_program, "255, 255, 255", kill_button_style)
-        self.create_button(button_layout1, "Cancel current process", self.cancel_action, "255, 255, 255", kill_button_style)
+        self.create_button(
+            button_layout1,
+            "Find Sample",
+            self.locate_sample_action,
+            "245, 245, 220",
+            find_focus_button_style,
+        )
+        self.create_button(
+            button_layout2,
+            "Go to XYZR",
+            self.go_to_position,
+            "175, 238, 238",
+            coordinate_button_style,
+        )
+        self.create_button(
+            button_layout2,
+            "Take IF snapshot",
+            self.take_snapshot,
+            "175, 238, 238",
+            coordinate_button_style,
+        )
+        self.create_button(
+            button_layout2,
+            "Copy position of image",
+            self.copy_current_position,
+            "175, 238, 238",
+            coordinate_button_style,
+        )
+        self.create_button(
+            button_layout2,
+            "Set 'Home' on Mac",
+            self.set_home_action,
+            "175, 238, 238",
+            coordinate_button_style,
+        )
+        self.create_button(
+            button_layout1, "Duplicate and add your button", self.add_your_code
+        )
+        self.create_button(
+            button_layout1,
+            "Stop AND CLOSE PROGRAM",
+            self.close_program,
+            "255, 255, 255",
+            kill_button_style,
+        )
+        self.create_button(
+            button_layout1,
+            "Cancel current process",
+            self.cancel_action,
+            "255, 255, 255",
+            kill_button_style,
+        )
         # Add the combined vertical layouts (radio buttons, form fields, and buttons) to the main vertical layout
         button_layout.addLayout(button_layout1)
         button_layout.addLayout(button_layout2)
@@ -465,27 +575,27 @@ class Py2FlamingoGUI(QMainWindow):
 
     def create_button(self, layout, label, action, color=None, style=None):
         """
-        This function creates a button with the provided label and action, and adds it to the provided layout.
+            This function creates a button with the provided label and action, and adds it to the provided layout.
 
-        Parameters
-        ----------
-        layout : QVBoxLayout
-            The layout to which the button is added.
-        label : str
-            The label for the button.
-        action : function
-            The function to be executed when the button is clicked.
-        color : str, optional
-            The background colorSure, here's the continuation of the `create_button` function's docstring and comments:
+            Parameters
+            ----------
+            layout : QVBoxLayout
+                The layout to which the button is added.
+            label : str
+                The label for the button.
+            action : function
+                The function to be executed when the button is clicked.
+            color : str, optional
+                The background colorSure, here's the continuation of the `create_button` function's docstring and comments:
 
-    ```python
-            for the button. If provided, the button's background color is set to this color.
-        style : str, optional
-            The style for the button. If provided, the button's style is set to this style.
+        ```python
+                for the button. If provided, the button's background color is set to this color.
+            style : str, optional
+                The style for the button. If provided, the button's style is set to this style.
 
-        Returns
-        -------
-        None
+            Returns
+            -------
+            None
         """
         # Create a QPushButton widget for the button
         button = QPushButton(label, self)
@@ -567,9 +677,13 @@ class Py2FlamingoGUI(QMainWindow):
         for label in labels:
             radio_button = QRadioButton(label)
             if label == self.microscope_connection.selected_laser:
-                radio_button.setChecked(True)  # Set the checked state based on the selected laser
+                radio_button.setChecked(
+                    True
+                )  # Set the checked state based on the selected laser
             self.radio_buttons.append(radio_button)  # Add the radio button to the list
-            radio_layout.addWidget(radio_button)  # Add the radio button to the radio layout
+            radio_layout.addWidget(
+                radio_button
+            )  # Add the radio button to the radio layout
 
         # Add the radio layout to the provided layout
         layout.addLayout(radio_layout)
@@ -601,14 +715,15 @@ class Py2FlamingoGUI(QMainWindow):
             # If the default value is not a string, restrict the QLineEdit widget's input to valid floating-point numbers
             if not is_string:
                 field.setValidator(QDoubleValidator())
-                default_value = str(default_value)  # Convert the default value to a string
+                default_value = str(
+                    default_value
+                )  # Convert the default value to a string
 
             # Set the QLineEdit widget's text to the default value
             field.setText(default_value)
 
         # Return the created QLineEdit widget
         return field
-
 
     def check_field(self, entries):
         """
@@ -633,7 +748,9 @@ class Py2FlamingoGUI(QMainWindow):
                 message_box = QMessageBox()
                 message_box.setIcon(QMessageBox.Warning)
                 message_box.setWindowTitle("Field error")
-                message_box.setText("A necessary field to perform this function is blank!")
+                message_box.setText(
+                    "A necessary field to perform this function is blank!"
+                )
                 message_box.setStandardButtons(QMessageBox.Ok)
                 message_box.exec_()
                 return False
@@ -646,7 +763,9 @@ class Py2FlamingoGUI(QMainWindow):
                 message_box = QMessageBox()
                 message_box.setIcon(QMessageBox.Warning)
                 message_box.setWindowTitle("Settings required")
-                message_box.setText("To find the sample requires a starting point (XYZR), generally near the tip of the sample holder. One of the fields does not contain a numerical value.")
+                message_box.setText(
+                    "To find the sample requires a starting point (XYZR), generally near the tip of the sample holder. One of the fields does not contain a numerical value."
+                )
                 message_box.setStandardButtons(QMessageBox.Ok)
                 message_box.exec_()
                 return False
@@ -663,7 +782,9 @@ class Py2FlamingoGUI(QMainWindow):
         None
         """
         # Check if the fields for the position are valid
-        if not self.check_field([self.field_x_mm, self.field_y_mm, self.field_z_mm, self.field_r_deg]):
+        if not self.check_field(
+            [self.field_x_mm, self.field_y_mm, self.field_z_mm, self.field_r_deg]
+        ):
             return
 
         # Get values from the GUI fields
@@ -686,11 +807,10 @@ class Py2FlamingoGUI(QMainWindow):
         # Start the thread
         go_to_position_thread.start()
 
-
     def locate_sample_action(self):
         """
-        This function initiates the process of locating the sample based on the values specified in the GUI fields. 
-        It checks the validity of the start position fields, retrieves values from the GUI fields, updates the position, 
+        This function initiates the process of locating the sample based on the values specified in the GUI fields.
+        It checks the validity of the start position fields, retrieves values from the GUI fields, updates the position,
         and starts a thread for the locate_sample function.
 
         Returns
@@ -698,7 +818,14 @@ class Py2FlamingoGUI(QMainWindow):
         None
         """
         # Check if the fields for the start position are valid
-        if not self.check_field([self.start_field_x_mm, self.start_field_y_mm, self.start_field_z_mm, self.start_field_r_deg]):
+        if not self.check_field(
+            [
+                self.start_field_x_mm,
+                self.start_field_y_mm,
+                self.start_field_z_mm,
+                self.start_field_r_deg,
+            ]
+        ):
             return
 
         # Get values from the GUI fields
@@ -720,7 +847,12 @@ class Py2FlamingoGUI(QMainWindow):
         print(updated_position)
         # Save the updated position to a text file
         dict_to_text(
-            str(os.path.join("microscope_settings", f"{self.microscope_connection.instrument_name}_start_position.txt")),
+            str(
+                os.path.join(
+                    "microscope_settings",
+                    f"{self.microscope_connection.instrument_name}_start_position.txt",
+                )
+            ),
             updated_position,
         )
 
@@ -779,7 +911,7 @@ class Py2FlamingoGUI(QMainWindow):
 
     def close_program(self):
         """
-        This function closes the program and shuts down the connection. It sets the terminate event, quits the application, 
+        This function closes the program and shuts down the connection. It sets the terminate event, quits the application,
         shuts down the connection, and closes the window.
 
         Returns
@@ -822,7 +954,7 @@ class Py2FlamingoGUI(QMainWindow):
 
     def take_snapshot(self):
         """
-        This function initiates the process of taking a snapshot at the current position. It checks the validity of the 
+        This function initiates the process of taking a snapshot at the current position. It checks the validity of the
         position fields, retrieves values from the GUI fields, and starts a thread for the take_snapshot function.
 
         Returns
@@ -830,7 +962,9 @@ class Py2FlamingoGUI(QMainWindow):
         None
         """
         # Check if the fields for the position are valid
-        if not self.check_field([self.field_x_mm, self.field_y_mm, self.field_z_mm, self.field_r_deg]):
+        if not self.check_field(
+            [self.field_x_mm, self.field_y_mm, self.field_z_mm, self.field_r_deg]
+        ):
             return
 
         # Get values from the GUI fields
@@ -874,7 +1008,9 @@ class Py2FlamingoGUI(QMainWindow):
         None
         """
         # Check if the fields for the position are valid
-        if not self.check_field([self.field_x_mm, self.field_y_mm, self.field_z_mm, self.field_r_deg]):
+        if not self.check_field(
+            [self.field_x_mm, self.field_y_mm, self.field_z_mm, self.field_r_deg]
+        ):
             return
 
         # Get values from the GUI fields
@@ -905,7 +1041,7 @@ class Py2FlamingoGUI(QMainWindow):
 
     def copy_current_position(self):
         """
-        This function copies the current position of the microscope to the cyan colored active fields. If the current 
+        This function copies the current position of the microscope to the cyan colored active fields. If the current
         position fields are empty, it copies the initial positions instead.
 
         Returns
@@ -913,15 +1049,29 @@ class Py2FlamingoGUI(QMainWindow):
         None
         """
         # Check if the current position fields are empty
-        if not all([self.current_x.text(), self.current_y.text(), self.current_z.text(), self.current_r.text()]):
+        if not all(
+            [
+                self.current_x.text(),
+                self.current_y.text(),
+                self.current_z.text(),
+                self.current_r.text(),
+            ]
+        ):
             # If the current position fields are empty, copy the initial positions instead
-            if self.check_field([self.start_field_x_mm, self.start_field_y_mm, self.start_field_z_mm, self.start_field_r_deg]):
+            if self.check_field(
+                [
+                    self.start_field_x_mm,
+                    self.start_field_y_mm,
+                    self.start_field_z_mm,
+                    self.start_field_r_deg,
+                ]
+            ):
                 self.field_x_mm.setText(str(self.start_field_x_mm.text()))
                 self.field_y_mm.setText(str(self.start_field_y_mm.text()))
                 self.field_z_mm.setText(str(self.start_field_z_mm.text()))
                 self.field_r_deg.setText(str(self.start_field_r_deg.text()))
                 return
-            else: 
+            else:
                 return
 
         # Copy the current position to the active fields
@@ -940,8 +1090,6 @@ class Py2FlamingoGUI(QMainWindow):
         None
         """
         terminate_event.set()
-
-        
 
     def add_your_code(self):
         # all functions must be run on a separate thread, targetting a function, including its arguments, and then start()

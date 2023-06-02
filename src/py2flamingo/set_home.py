@@ -2,8 +2,10 @@ import os
 import time
 from queue import Queue
 from threading import Event
-from functions.text_file_parsing import *
 from typing import Sequence
+
+from functions.text_file_parsing import *
+
 
 def set_home(
     connection_data: Sequence,
@@ -16,7 +18,7 @@ def set_home(
     Sets the home coordinates for the microscope's stage.
 
     This function sends commands to the microscope to load its current settings. It then modifies these settings to
-    update the home coordinates and save these new settings back to the microscope. 
+    update the home coordinates and save these new settings back to the microscope.
 
     Parameters
     ----------
@@ -35,11 +37,17 @@ def set_home(
     nuc_client, live_client, wf_zstack, LED_on, LED_off = connection_data
 
     # Load command list from text file and convert it to a dictionary
-    commands = text_to_dict(os.path.join("src", "py2flamingo", "functions", "command_list.txt"))
+    commands = text_to_dict(
+        os.path.join("src", "py2flamingo", "functions", "command_list.txt")
+    )
 
     # Load commands for loading and saving scope settings from the dictionary
-    COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(commands["CommandCodes.h"]["COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD"])
-    COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE = int(commands["CommandCodes.h"]["COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE"])
+    COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(
+        commands["CommandCodes.h"]["COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD"]
+    )
+    COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE = int(
+        commands["CommandCodes.h"]["COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE"]
+    )
 
     print("load settings")
     print(COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD)
@@ -52,7 +60,9 @@ def set_home(
 
     # Microscope settings should now be in a text file called ScopeSettings.txt in the 'workflows' directory
     # Convert them into a dictionary to extract useful information
-    settings_dict = text_to_dict(os.path.join("microscope_settings", "ScopeSettings.txt"))
+    settings_dict = text_to_dict(
+        os.path.join("microscope_settings", "ScopeSettings.txt")
+    )
 
     # Update the home coordinates in the settings dictionary
     settings_dict["Stage limits"]["Home x-axis"] = xyzr[0]
@@ -61,7 +71,9 @@ def set_home(
     settings_dict["Stage limits"]["Home r-axis"] = xyzr[3]
 
     # Convert the updated settings dictionary back into a text file
-    dict_to_text(os.path.join("microscope_settings", "send_settings.txt"), settings_dict)
+    dict_to_text(
+        os.path.join("microscope_settings", "send_settings.txt"), settings_dict
+    )
 
     print("save settings")
 

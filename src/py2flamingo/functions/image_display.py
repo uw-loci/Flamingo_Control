@@ -4,7 +4,9 @@ import numpy as np
 from PIL import Image
 from PyQt5.QtGui import QImage
 from skimage import io  # , transform
+
 # TODO scipy.ndimage scikit image
+
 
 def convert_to_qimage(image_data):
     """
@@ -30,7 +32,9 @@ def convert_to_qimage(image_data):
     image = Image.fromarray(image_data)
 
     # Convert the image to grayscale mode and resize it to the new dimensions using bilinear interpolation
-    scaled_image = image.convert("L").resize((new_width, new_height), resample=Image.BILINEAR)
+    scaled_image = image.convert("L").resize(
+        (new_width, new_height), resample=Image.BILINEAR
+    )
 
     # Calculate the lower and upper percentiles for display normalization
     lower_percentile = 2.5
@@ -51,7 +55,7 @@ def convert_to_qimage(image_data):
     end_time = time.time()  # Record the end time
     elapsed_time = end_time - start_time  # Calculate the elapsed time
 
-    print("Image converted, time taken:", elapsed_time, "seconds")  # Print the elapsed time
+    # print("Image converted, time taken:", elapsed_time, "seconds")  # Print the elapsed time
 
     return qimage
 

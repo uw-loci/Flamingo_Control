@@ -1,4 +1,4 @@
-#TODO probably rename this file. There will be another module for connecting to the microscope, this is more helper functions for that
+# TODO probably rename this file. There will be another module for connecting to the microscope, this is more helper functions for that
 import os
 import socket
 import time
@@ -73,6 +73,7 @@ def move_axis(command_data_queue, command_queue, send_event, axis_code, value):
     while not command_queue.empty():
         time.sleep(0.1)
 
+
 def go_to_XYZR(command_data_queue, command_queue, send_event, xyzr: Sequence[float]):
     """
     Move to the specified XYZR coordinates.
@@ -100,7 +101,6 @@ def go_to_XYZR(command_data_queue, command_queue, send_event, xyzr: Sequence[flo
     move_axis(command_data_queue, command_queue, send_event, 3, z)  # Z-axis
     move_axis(command_data_queue, command_queue, send_event, 4, r)  # Rotation
     move_axis(command_data_queue, command_queue, send_event, 2, y)  # Y-axis
-
 
 
 def get_microscope_settings(command_queue, other_data_queue, send_event):

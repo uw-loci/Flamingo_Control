@@ -25,9 +25,9 @@ def text_to_nuc(client: socket, wf_file: str, command: int):
 
     """
 
-    # print(f'workflow command is {command}')
+    print(f"workflow command is {command}")
     fileBytes = os.path.getsize(wf_file)
-    # print(fileBytes)
+    print(fileBytes)
 
     cmd_start = np.uint32(0xF321E654)  # start command [0]
     # cmd_start = bytes(0xF321E654)
@@ -95,7 +95,7 @@ def text_to_nuc(client: socket, wf_file: str, command: int):
         # print(len(scmd))
         client.send(workflow_file)
         # client.send(workflow_file.encode('utf-8'))
-        # print('Text file sent')
+        print("Text file sent")
 
         return
         # addData = client.recv(received[11]) # unpack additional data sent by the nuc

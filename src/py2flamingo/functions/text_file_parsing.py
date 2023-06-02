@@ -2,6 +2,7 @@
 # create an option to read in a previous workflow but make minor changes
 from typing import Sequence
 
+
 def calculate_zplanes(wf_dict, z_search_depth, framerate, plane_spacing):
     """
     Calculates and updates the number of z-planes and related settings in a Flamingo workflow dictionary.
@@ -26,12 +27,16 @@ def calculate_zplanes(wf_dict, z_search_depth, framerate, plane_spacing):
         Updated Flamingo workflow dictionary.
     """
     # Calculate the number of planes based on z-search depth and plane spacing
-    wf_dict["Stack Settings"]["Number of planes"] = round(1000 * float(z_search_depth) / plane_spacing)
+    wf_dict["Stack Settings"]["Number of planes"] = round(
+        1000 * float(z_search_depth) / plane_spacing
+    )
 
     # Update related settings
     wf_dict["Stack Settings"]["Change in Z axis (mm)"] = z_search_depth
     wf_dict["Experiment Settings"]["Plane spacing (um)"] = plane_spacing
-    wf_dict["Stack Settings"]["Z stage velocity (mm/s)"] = str(plane_spacing * framerate / 1000)
+    wf_dict["Stack Settings"]["Z stage velocity (mm/s)"] = str(
+        plane_spacing * framerate / 1000
+    )
 
     return wf_dict
 
@@ -71,7 +76,9 @@ def laser_or_LED(
         Updated Flamingo workflow dictionary.
     """
     # Update the laser channel with the specified laser setting and laser_on flag
-    workflow_dict["Illumination Source"][laser_channel] = str(laser_setting) + " " + str(int(laser_on))
+    workflow_dict["Illumination Source"][laser_channel] = (
+        str(laser_setting) + " " + str(int(laser_on))
+    )
 
     # Update the LED setting based on the laser_on flag
     if laser_on:
@@ -82,8 +89,13 @@ def laser_or_LED(
     return workflow_dict
 
 
-
-def dict_positions(workflow_dict:map, xyzr:Sequence[float], zEnd:float, save_with_data=False, get_zstack=False):
+def dict_positions(
+    workflow_dict: map,
+    xyzr: Sequence[float],
+    zEnd: float,
+    save_with_data=False,
+    get_zstack=False,
+):
     """
     Take in a workflow dictionary and modify it to take a zstack from xyzr to zEnd (only the Z axis changes)
     By default the MIP will be returned, and the data saved to the drive.
@@ -123,7 +135,7 @@ def dict_positions(workflow_dict:map, xyzr:Sequence[float], zEnd:float, save_wit
     return workflow_dict
 
 
-def dict_comment(workflow_dict:map, comment="No Comment"):
+def dict_comment(workflow_dict: map, comment="No Comment"):
     """
     Take a workflow dict and a String to replace the comment and then return the updated dict.
     """
@@ -131,7 +143,18 @@ def dict_comment(workflow_dict:map, comment="No Comment"):
     return workflow_dict
 
 
-def dict_to_snap(workflow_dict:map, xyzr:Sequence[float], framerate:float, plane_spacing:float, save_with_data=False):
+def dict_save_directory(workflow_dict: map, directory="Default"):
+    workflow_dict["Experiment Settings"]["Save image directory"] = directory
+    return workflow_dict
+
+
+def dict_to_snap(
+    workflow_dict: map,
+    xyzr: Sequence[float],
+    framerate: float,
+    plane_spacing: float,
+    save_with_data=False,
+):
     """
     Take in a workflow dictionary and modify it to take a snapshot using the same imaging settings as the dict
     Snapshot will be acquired at the provided xyzr coordinates
@@ -241,8 +264,7 @@ def dict_to_text(file_location: str, settings_dict: dict):
         write_dict(f, settings_dict, 0)
 
 
-
-def write_dict( file:str, settings_dict:map, indent_level:int):
+def write_dict(file: str, settings_dict: map, indent_level: int):
     """
     Recursively writes dictionary data to a file with the specified indentation level.
 
@@ -267,14 +289,11 @@ def write_dict( file:str, settings_dict:map, indent_level:int):
         if isinstance(value, dict):
             # Start of a section
             file.write(f"{indent}<{key}>\n")
-            write_dict( file,value, indent_level + 1)
+            write_dict(file, value, indent_level + 1)
             file.write(f"{indent}</{key}>\n")
         else:
             # Key-value pair
             file.write(f"{indent}{key} = {value}\n")
-
-
-
 
 
 def dict_to_workflow(file_name: str, settings_dict: dict):
@@ -316,7 +335,6 @@ def dict_to_workflow(file_name: str, settings_dict: dict):
     # Write the output string to the specified file
     with open(file_name, "w", newline="\n") as f:
         f.write(output)
-
 
 
 def workflow_to_dict(filename: str) -> dict:
