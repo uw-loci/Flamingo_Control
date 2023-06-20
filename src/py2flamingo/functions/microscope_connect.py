@@ -139,7 +139,7 @@ def get_microscope_settings(command_queue, other_data_queue, send_event):
 
     # Get the image pixel size from the other data queue
     image_pixel_size = other_data_queue.get()
-
+    #print(f'image pixel size from system {image_pixel_size}')
     return image_pixel_size, scope_settings
 
 

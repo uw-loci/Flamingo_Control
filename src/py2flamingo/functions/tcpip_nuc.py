@@ -1,6 +1,7 @@
 # Communicate directly with the nuc by way of workflows and commands
 # These workflows and commands will then be processed by the nuc and used to control the microscope hardware
-
+# Courtesy of Gesine Fiona Müller from the Huisken lab.
+ 
 import os
 import socket
 import struct
@@ -25,9 +26,9 @@ def text_to_nuc(client: socket, wf_file: str, command: int):
 
     """
 
-    print(f"workflow command is {command}")
+    #print(f"workflow command is {command}")
     fileBytes = os.path.getsize(wf_file)
-    print(fileBytes)
+    #print(fileBytes)
 
     cmd_start = np.uint32(0xF321E654)  # start command [0]
     # cmd_start = bytes(0xF321E654)
@@ -51,7 +52,7 @@ def text_to_nuc(client: socket, wf_file: str, command: int):
 
     int32Data2 = np.int32(0)  # [8]
 
-    cmdDataBits0 = np.int32(0)  # [9]
+    cmdDataBits0 = np.int32(1)  # [9]
 
     doubleData = float(0)  # #[10] e.g. 64-bits, values of the end-position of the axis
 
@@ -86,7 +87,6 @@ def text_to_nuc(client: socket, wf_file: str, command: int):
 
     try:
         # print(command)
-
         # print(wf_file)
         # workflow_file = open(wf_file, encoding='utf-8').read()
         workflow_file = open(wf_file, "rb").read()
@@ -94,8 +94,7 @@ def text_to_nuc(client: socket, wf_file: str, command: int):
         client.send(scmd)
         # print(len(scmd))
         client.send(workflow_file)
-        # client.send(workflow_file.encode('utf-8'))
-        print("Text file sent")
+        #print("Text file sent")
 
         return
         # addData = client.recv(received[11]) # unpack additional data sent by the nuc

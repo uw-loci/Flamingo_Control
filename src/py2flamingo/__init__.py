@@ -1,6 +1,5 @@
 # TO DO? Create initial dialog to ask about which microscope to connect to. Create named files based on the microscope (settings, workflows)
-# TODO move the microscope connection functions out of the GUI. Or move the GUI out of init?
-# TODO cancel button does cancel, but then most functions do not work after.
+#TODO Running from command line currently not supported but should be the goal
 # Run black . and isort --profile black
 
 ######################################
@@ -25,7 +24,6 @@ from global_objects import (
     z_plane_queue,
 )
 
-# from global_objects import
 from GUI import Py2FlamingoGUI
 from PyQt5.QtWidgets import QApplication
 

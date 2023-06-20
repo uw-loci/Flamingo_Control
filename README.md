@@ -6,6 +6,7 @@ This repository provides control software for Flamingo systems. It is designed f
 - Currently intended for use with Elsa.
 - Requires version 2.16.2 of the Flamingo software for Py2Flamingo to interface correctly.
 - To connect to Elsa, you need to be on Morgridge's network or VPNed in.
+- For any new system, certain aspects of the object detection will change, such as the min/max depths allowed per axis. 
 
 ## Getting Started
 

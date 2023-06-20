@@ -1,8 +1,10 @@
+#TODO complete check_coordinate_limits to validate that ranges in workflow are within soft limits
+
 # Includes functions to read and write text files specifically designed for the Flamingo
 # create an option to read in a previous workflow but make minor changes
 from typing import Sequence
-
-
+import os
+import re
 def calculate_zplanes(wf_dict, z_search_depth, framerate, plane_spacing):
     """
     Calculates and updates the number of z-planes and related settings in a Flamingo workflow dictionary.
@@ -89,42 +91,140 @@ def laser_or_LED(
     return workflow_dict
 
 
+def check_coordinate_limits(workflow_dict):
+    """
+    Validate the coordinates in a workflow dictionary against predefined limits.
+
+    This function checks whether the 'start' and 'end' coordinates for the X, Y, and Z axes
+    in the provided workflow dictionary are strictly within the limits specified in a settings file.
+    The settings file is assumed to be located at 'microscope_settings/ScopeSettings.txt' and is
+    expected to be in a format that can be converted to a dictionary using the `text_to_dict` function.
+
+    Parameters:
+    workflow_dict (dict): A dictionary containing 'start' and 'end' coordinates for the X, Y, and Z axes.
+
+    Returns:
+    bool: True if all coordinates are strictly within the limits, False otherwise.
+
+    Raises:
+    ValueError: If a 'start' or 'end' coordinate is outside the limits.
+    """
+    # Load the scope settings from the settings file
+    scope_settings = text_to_dict(os.path.join('microscope_settings', 'ScopeSettings.txt'))
+
+    # Loop over each axis
+    for axis in ['x', 'y', 'z']:
+        # Extract the coordinate limits from the settings
+        min_limit = float(scope_settings['Stage limits'][f'Soft limit min {axis}-axis'])
+        max_limit = float(scope_settings['Stage limits'][f'Soft limit max {axis}-axis'])
+
+        # Extract the 'start' and 'end' coordinates from the workflow dictionary
+        workflow_start = float(workflow_dict['Start Position'][f'{axis.upper()} (mm)'])
+        workflow_end = float(workflow_dict['End Position'][f'{axis.upper()} (mm)'])
+
+        # Check whether the 'start' and 'end' coordinates are strictly within the limits
+        if not (min_limit < workflow_start < max_limit and min_limit < workflow_end < max_limit):
+            raise ValueError(f"The {axis}-axis workflow coordinates are outside the limits. "
+                             f"Start: {workflow_start}, End: {workflow_end}, "
+                             f"Min Limit: {min_limit}, Max Limit: {max_limit}")
+
+    # If all coordinates are within the limits, return True
+    return True
+
+
+# def dict_positions(
+#     workflow_dict: map,
+#     xyzr: Sequence[float],
+#     zEnd: float,
+#     save_with_data=False,
+#     get_zstack=False,
+# ):
+#     """
+#     Take in a workflow dictionary and modify it to take a zstack from xyzr to zEnd (only the Z axis changes)
+#     By default the MIP will be returned, and the data saved to the drive.
+#     workflow_dict: A mapping between elements of a text file used to control the microscope, created in text_file_parsing.py
+#     xyzr = 4 element list of floats [x,y,z,r]
+#     save_with_data: boolean to determine whether the snapshot is saved. When false, it would only be (depending on visualize_event flag) displayed in the GUI
+#     get_zstack: boolean to determine whether every frame of the zstack is returned to this program for processing
+#     WARNING: get_zstack WILL BE VERY SLOW AND LIKELY FAIL OVER SLOWER NETWORK CONNECTIONS LIKE WIFI
+#     """
+#     x, y, z, r = xyzr
+#     if save_with_data:
+#         workflow_dict["Experiment Settings"][
+#             "Comments"
+#         ] = f"Snapshot at {x}, {y}, {z}, {r}"
+#         workflow_dict["Experiment Settings"]["Save image data"] = "Tiff"
+#     else:
+#         workflow_dict["Experiment Settings"]["Save image data"] = "NotSaved"
+
+#     workflow_dict["Start Position"]["X (mm)"] = float(x)
+#     workflow_dict["Start Position"]["Y (mm)"] = float(y)
+#     workflow_dict["Start Position"]["Z (mm)"] = float(z)
+#     workflow_dict["End Position"]["Z (mm)"] = float(zEnd)
+#     workflow_dict["End Position"]["X (mm)"] = float(x)
+#     workflow_dict["End Position"]["Y (mm)"] = float(y)
+#     workflow_dict["Start Position"]["Angle (degrees)"] = float(r)
+#     workflow_dict["End Position"]["Angle (degrees)"] = float(r)
+#     workflow_dict["Stack Settings"]["Change in Z axis (mm)"] = abs(
+#         float(z) - float(zEnd)
+#     )
+#     if get_zstack:
+#         workflow_dict["Experiment Settings"]["Display max projection"] = "false"
+#         workflow_dict["Experiment Settings"]["Work flow live view enabled"] = "true"
+#     else:
+#         workflow_dict["Experiment Settings"]["Display max projection"] = "true"
+#         workflow_dict["Experiment Settings"]["Work flow live view enabled"] = "false"
+
+#     return workflow_dict
+
+
 def dict_positions(
-    workflow_dict: map,
+    workflow_dict: dict,
     xyzr: Sequence[float],
-    zEnd: float,
+    xyzr2: Sequence[float] = None,
+    zEnd: float = None,
     save_with_data=False,
     get_zstack=False,
 ):
     """
     Take in a workflow dictionary and modify it to take a zstack from xyzr to zEnd (only the Z axis changes)
-    By default the MIP will be returned, and the data saved to the drive.
+    By default, the MIP will be returned, and the data saved to the drive.
     workflow_dict: A mapping between elements of a text file used to control the microscope, created in text_file_parsing.py
-    xyzr = 4 element list of floats [x,y,z,r]
+    xyzr = 4 element list of floats [x, y, z, r]
+    xyzr2 (optional): 4 element list of floats for the second set of position values [x2, y2, z2, r2]
+    zEnd (optional): float representing the end position on the Z axis when xyzr2 is not provided
     save_with_data: boolean to determine whether the snapshot is saved. When false, it would only be (depending on visualize_event flag) displayed in the GUI
     get_zstack: boolean to determine whether every frame of the zstack is returned to this program for processing
     WARNING: get_zstack WILL BE VERY SLOW AND LIKELY FAIL OVER SLOWER NETWORK CONNECTIONS LIKE WIFI
     """
     x, y, z, r = xyzr
+    workflow_dict["Start Position"]["X (mm)"] = float(x)
+    workflow_dict["Start Position"]["Y (mm)"] = float(y)
+    workflow_dict["Start Position"]["Z (mm)"] = float(z)
+    workflow_dict["Start Position"]["Angle (degrees)"] = float(r)
+
+    if xyzr2 is not None:
+        x2, y2, z2, r2 = xyzr2
+        workflow_dict["End Position"]["X (mm)"] = float(x2)
+        workflow_dict["End Position"]["Y (mm)"] = float(y2)
+        workflow_dict["End Position"]["Z (mm)"] = float(z2)
+        workflow_dict["End Position"]["Angle (degrees)"] = float(r2)
+        workflow_dict["Stack Settings"]["Change in Z axis (mm)"] = abs(float(z) - float(z2))
+    elif zEnd is not None:
+        workflow_dict["End Position"]["X (mm)"] = float(x)
+        workflow_dict["End Position"]["Y (mm)"] = float(y)
+        workflow_dict["End Position"]["Z (mm)"] = float(zEnd)
+        workflow_dict["End Position"]["Angle (degrees)"] = float(r)
+        workflow_dict["Stack Settings"]["Change in Z axis (mm)"] = abs(float(z) - float(zEnd))
+    else:
+        raise ValueError("Either xyzr2 or zEnd must be provided.")
+
     if save_with_data:
-        workflow_dict["Experiment Settings"][
-            "Comments"
-        ] = f"Snapshot at {x}, {y}, {z}, {r}"
+        workflow_dict["Experiment Settings"]["Comments"] = f"Snapshot at {x}, {y}, {z}, {r}"
         workflow_dict["Experiment Settings"]["Save image data"] = "Tiff"
     else:
         workflow_dict["Experiment Settings"]["Save image data"] = "NotSaved"
 
-    workflow_dict["Start Position"]["X (mm)"] = float(x)
-    workflow_dict["Start Position"]["Y (mm)"] = float(y)
-    workflow_dict["Start Position"]["Z (mm)"] = float(z)
-    workflow_dict["End Position"]["Z (mm)"] = float(zEnd)
-    workflow_dict["End Position"]["X (mm)"] = float(x)
-    workflow_dict["End Position"]["Y (mm)"] = float(y)
-    workflow_dict["Start Position"]["Angle (degrees)"] = float(r)
-    workflow_dict["End Position"]["Angle (degrees)"] = float(r)
-    workflow_dict["Stack Settings"]["Change in Z axis (mm)"] = abs(
-        float(z) - float(zEnd)
-    )
     if get_zstack:
         workflow_dict["Experiment Settings"]["Display max projection"] = "false"
         workflow_dict["Experiment Settings"]["Work flow live view enabled"] = "true"
@@ -195,6 +295,19 @@ def dict_to_snap(
     )  # 10um spacing and conversion to mm/s
 
     return workflow_dict
+
+def is_valid_filename(filename):
+
+
+    # Check for invalid characters
+    if re.search(r'[<>:"/\\|?*]', filename):
+        return False
+
+    # Check for reserved words
+    if filename.upper() in ['CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9', 'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9']:
+        return False
+
+    return True
 
 
 def text_to_dict(filename: str) -> dict:

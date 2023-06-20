@@ -45,6 +45,12 @@ COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET = int(
 COMMAND_CODES_CAMERA_IMAGE_SIZE_GET = int(
     commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_IMAGE_SIZE_GET"]
 )
+COMMAND_CODES_CAMERA_CHECK_STACK = int(
+    commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_CHECK_STACK"]
+) 
+COMMAND_CODES_CAMERA_CHECK_STACK_UPDATES = int(
+    commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_CHECK_STACK_UPDATES"]
+)  
 ##############################
 
 
@@ -216,6 +222,17 @@ def handle_pixel_field_of_view(received, other_data_queue):
     other_data_queue.put(received[10])
 
 
+def check_stack(other_data_queue, client):
+    # print('Check stack output')
+    # for value in received:
+    #     print(value)
+    #print(f"Checking Stack Viability = {received[2]}")
+    bytes = bytes_waiting(client)
+    text_bytes = client.recv(bytes)
+    other_data_queue.put(text_bytes)
+    #Possibly replace with adding the text data to other_data_queue
+
+
 def handle_camera_frame_size(received, other_data_queue):
     """
     Handles the camera frame size based on the received message.
@@ -277,7 +294,7 @@ def command_listen_thread(
 
         # Unpack the received message
         received = unpack_received_message(msg)
-        # print('listening to 53717 got ' + str(received[1]))
+        #print('listening to 53717 got ' + str(received[1]))
         # Check the command code in the received message and respond appropriately
         if received[1] == COMMAND_CODES_SYSTEM_STATE_IDLE:
             handle_idle_state(received, idle_state)
@@ -285,14 +302,16 @@ def command_listen_thread(
             fetch_microscope_settings(received, client)
         elif received[1] == COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET:
             handle_pixel_field_of_view(received, other_data_queue)
-        elif received[1] == 12331:
+        elif received[1] == COMMAND_CODES_CAMERA_CHECK_STACK:
+            check_stack(other_data_queue, client)
+        elif received[1] == COMMAND_CODES_CAMERA_IMAGE_SIZE_GET:
             handle_camera_frame_size(received, other_data_queue)
 
 
 ##################################################
 
 
-############LIVE LISTEN THREAD SECTION################
+############LIVE (IMAGE) LISTEN THREAD SECTION################
 def receive_image_data(live_client, image_size):
     """
     Receives image data from the live client socket.
@@ -364,7 +383,7 @@ def process_single_image(
     image_array = np.frombuffer(image_data, dtype=np.uint16)
     image_array = image_array.reshape((image_height, image_width)).T
     image_array = np.flipud(image_array)
-    print("putting image into queues")
+    #print("putting image into queues")
     image_queue.put(np.array(image_array))
     visualize_queue.put(np.array(image_array))
 
@@ -477,8 +496,9 @@ def live_listen_thread(
                 f"Header length should be 40 bytes, not {len(header_data)}"
             )
         # parse the header
-        # print('parsing header, entering data acquisition')
+        #print('parsing header, entering data acquisition')
         header = struct.unpack("I I I I I I I I I I", header_data)
+        print(f'hardwareID number: {header[3]}')
         image_size, image_width, image_height = header[0], header[1], header[2]
         # get the stack size and other info from the workflow file, as it is not sent as part of the header information
         current_workflow_dict = workflow_to_dict(
@@ -530,6 +550,7 @@ def handle_workflow_start(client):
     -------
     None
     """
+    #print('Workflow sent')
     functions.tcpip_nuc.text_to_nuc(
         client,
         os.path.join("workflows", "workflow.txt"),
@@ -555,6 +576,15 @@ def handle_scope_settings_save(client):
         client,
         os.path.join("microscope_settings", "send_settings.txt"),
         COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE,
+    )
+
+
+def check_workflow(client):
+    #print('Checking workflow for errors')
+    functions.tcpip_nuc.text_to_nuc(
+        client,
+        os.path.join("workflows", "workflow.txt"),
+        COMMAND_CODES_CAMERA_CHECK_STACK,
     )
 
 
@@ -615,6 +645,9 @@ def send_thread(
         if command == COMMAND_CODES_CAMERA_WORK_FLOW_START:
             handle_workflow_start(client)
             send_event.clear()
+        elif command == COMMAND_CODES_CAMERA_CHECK_STACK:
+            check_workflow(client)
+            send_event.clear()
         elif command == COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE:
             handle_scope_settings_save(client)
             send_event.clear()
@@ -664,29 +697,21 @@ def processing_thread(
     """
     while True:
         processing_event.wait()
-        print("waiting for image")
-        image_data = image_queue.get()
-        print("Processing image")
-        if len(image_data.shape) == 2:
-            # Flatten the array to a 1D array
-            flattened = image_data.flatten()
+        processing_event.clear()
+        # print("waiting for image")
+        # image_data = image_queue.get()
+        # #print("Processing image")
+        # if len(image_data.shape) == 2:
+        #     print('processing 2D')
+        #     #depending on the need for granularity, could either use the mean of the brightest parts of the entire image
+        #     #or find the brightest lines using a rolling average
+        #     mean_largest_quarter, y_intensity_map= functions.calculations.calculate_rolling_y_intensity(image_data, 21)
 
-            # Sort the flattened array in descending order
-            sorted_array = np.sort(flattened)[::-1]
-
-            # Determine the index to slice the array to keep the largest quarter of values
-            slice_index = len(sorted_array) // 4
-
-            # Slice the sorted array to keep only the largest quarter of values
-            largest_quarter = sorted_array[:slice_index]
-
-            # Calculate the mean of the largest quarter
-            mean_largest_quarter = np.mean(largest_quarter)
-
-            intensity_queue.put(mean_largest_quarter)
-            processing_event.clear()
-        else:
-            z_plane_queue.put(
-                functions.calculations.find_most_in_focus_plane(image_data)
-            )
-            processing_event.clear()
+        #     intensity_queue.put(y_intensity_map)
+        #     processing_event.clear()
+        # else:
+        #     print('processig 3D')
+        #     z_plane_queue.put(
+        #         functions.calculations.find_most_in_focus_plane(image_data)
+        #     )
+        #     processing_event.clear()

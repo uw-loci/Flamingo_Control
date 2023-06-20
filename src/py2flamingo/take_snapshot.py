@@ -59,7 +59,7 @@ def take_snapshot(
     snap_dict = dict_to_snap(snap_dict, xyzr_init, framerate, plane_spacing)
     snap_dict = laser_or_LED(snap_dict, laser_channel, laser_setting, laser_on=True)
     snap_dict = dict_comment(snap_dict, "GUI Snapshot")
-
+    snap_dict = dict_save_directory(snap_dict, directory="Snapshots")
     # Write the updated workflow back to the currentSnapshot.txt file
     dict_to_workflow(os.path.join("workflows", "currentSnapshot.txt"), snap_dict)
 

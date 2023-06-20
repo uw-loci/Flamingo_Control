@@ -23,7 +23,25 @@ from global_objects import (
 )
 from PyQt5.QtWidgets import QFileDialog, QMessageBox
 
+def show_warning_message(warning):
+    """
+    Displays a warning message box.
 
+    This function uses the QMessageBox class from the PyQt5.QtWidgets library to display a message box
+    with a specified warning message.
+
+    Parameters
+    ----------
+    warning : str
+        The warning message to display.
+    """
+    message_box = QMessageBox()
+    message_box.setIcon(QMessageBox.Warning)
+    message_box.setWindowTitle("Something went wrong!")
+    message_box.setText(warning)
+    message_box.setStandardButtons(QMessageBox.Ok)
+    message_box.exec_()
+    return
 class FlamingoConnect:
     """
     This class is responsible for establishing and managing the connection to the microscope. It also initializes various properties related to the microscope, such as its IP address, port, instrument name, and type, as well as the start position, current coordinates, available lasers, selected laser, laser power, and data storage location.
@@ -106,19 +124,25 @@ class FlamingoConnect:
         self.selected_laser = ""
         self.laser_power = ""
         self.data_storage_location = ""
-
+        self.z_default = ""
         # Check if necessary folders exist, and create them if not
         self.check_folders()
 
         # Check if necessary metadata files exist, and prompt the user to select a file if not
         self.check_metadata_file_and_connect()
-
+        self.get_initial_z_depth()
         self.check_zstack_file()
         self.check_start_position()
 
+    def get_initial_z_depth(self):
+        _, scope_settings = mc.get_microscope_settings(command_queue, other_data_queue, send_event)
+        zmax = scope_settings['Stage limits']['Soft limit max z-axis']
+        zmin = scope_settings['Stage limits']['Soft limit min z-axis']
+        self.z_default = abs(float(zmax) - float(zmin)) * 0.9 #try to avoid pushing the limits which causes errors
+
     def check_folders(self):
         """
-        Checks if the necessary folders 'workflows' and 'output_png' exist in the current directory. If they do not exist, the method creates them.
+        Checks if the necessary folders exist in the current directory. If they do not exist, the method creates them.
         """
         # Check if the 'workflows' folder exists, and create it if not
         if not os.path.exists("workflows"):
@@ -127,6 +151,10 @@ class FlamingoConnect:
         # Check if the 'output_png' folder exists, and create it if not
         if not os.path.exists("output_png"):
             os.makedirs("output_png")
+
+        # Check if the 'output_png' folder exists, and create it if not
+        if not os.path.exists("sample_txt"):
+            os.makedirs("sample_txt")
 
     def check_start_position(self):
         """
@@ -165,8 +193,6 @@ class FlamingoConnect:
         """
         Checks whether a specified file exists.
 
-        This function uses the os library's path.exists method to check whether a file at a given path exists.
-
         Parameters
         ----------
         file_path : str
@@ -179,24 +205,25 @@ class FlamingoConnect:
         """
         return os.path.exists(file_path)
 
-    def show_warning_message(self, warning):
-        """
-        Displays a warning message box.
+    # def show_warning_message(self, warning):
+    #     """
+    #     Displays a warning message box.
 
-        This function uses the QMessageBox class from the PyQt5.QtWidgets library to display a message box
-        with a specified warning message.
+    #     This function uses the QMessageBox class from the PyQt5.QtWidgets library to display a message box
+    #     with a specified warning message.
 
-        Parameters
-        ----------
-        warning : str
-            The warning message to display.
-        """
-        message_box = QMessageBox()
-        message_box.setIcon(QMessageBox.Warning)
-        message_box.setWindowTitle("File Not Found")
-        message_box.setText(warning)
-        message_box.setStandardButtons(QMessageBox.Ok)
-        message_box.exec_()
+    #     Parameters
+    #     ----------
+    #     warning : str
+    #         The warning message to display.
+    #     """
+    #     message_box = QMessageBox()
+    #     message_box.setIcon(QMessageBox.Warning)
+    #     message_box.setWindowTitle("File Not Found")
+    #     message_box.setText(warning)
+    #     message_box.setStandardButtons(QMessageBox.Ok)
+    #     message_box.exec_()
+    #     return
 
     def prompt_user_for_file(self):
         """
@@ -220,7 +247,7 @@ class FlamingoConnect:
         else:
             return ""
 
-    def process_selected_file(self, file_dialog, file_path):
+    def process_selected_file(self, file_path, file_destination):
         """
         Processes a file selected by the user.
 
@@ -235,15 +262,16 @@ class FlamingoConnect:
         file_path : str
             The path to copy the selected file to.
         """
-        if file_dialog.exec_():
-            selected_file = file_dialog.selectedFiles()[0]  # Get the selected file path
+        if os.path.isfile(file_path):
+            #selected_file = file_dialog.selectedFiles()[0]  # Get the selected file path
             os.makedirs(
                 "microscope_settings", exist_ok=True
             )  # Create the 'microscope_settings' directory if it doesn't exist
             try:
                 shutil.copy(
-                    selected_file, file_path
+                    file_path, file_destination
                 )  # Copy the selected file to the 'microscope_settings' directory
+                return True
             except OSError as e:
                 QMessageBox.warning(self, "Error", str(e))
         else:
@@ -341,9 +369,12 @@ class FlamingoConnect:
         file_path = os.path.join("microscope_settings", "FlamingoMetaData.txt")
         if not self.check_file_exists(file_path):
             warning = "The file FlamingoMetaData.txt was not found at microscope_settings/FlamingoMetadata.txt. \nPlease locate a Metadata text file to use as the basis for your microscope (e.g. IP address, tube length). One should be generated when a workflow is manually run on the microscope."
-            self.show_warning_message(warning)
+            show_warning_message(warning)
             file_dialog = self.prompt_user_for_file()
-            self.process_selected_file(file_dialog, file_path)
+            check = self.process_selected_file(file_dialog, file_path)
+            if check:
+                metadata_dict = self.read_metadata(file_path)
+                self.connect_to_microscope(metadata_dict)
         else:
             metadata_dict = self.read_metadata(file_path)
             self.connect_to_microscope(metadata_dict)
@@ -436,7 +467,7 @@ class FlamingoConnect:
             file_path
         ):  # Using the previously defined function
             warning = "The file ZStack.txt was not found at workflows/ZStack.txt. \nPlease locate a workflow text (workflow.txt) file to use as the basis for your settings (Laser line, laser power). One should be generated when a workflow is manually run on the microscope."
-            self.show_warning_message(warning)
+            show_warning_message(warning)
             file_dialog = self.prompt_user_for_zstack_file()
             self.process_selected_zstack_file(file_dialog, file_path)
         else:
