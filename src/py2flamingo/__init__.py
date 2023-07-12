@@ -1,7 +1,8 @@
 # TO DO? Create initial dialog to ask about which microscope to connect to. Create named files based on the microscope (settings, workflows)
 #TODO Running from command line currently not supported but should be the goal
+#TODO Feedback window indicating status
 # Run black . and isort --profile black
-
+#TODO TODO TODO Cancel button stopped working at some point during the restructuring. It does cancel but does not leave the program in a workable state.
 ######################################
 
 import sys

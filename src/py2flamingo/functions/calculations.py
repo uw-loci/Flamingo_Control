@@ -5,84 +5,161 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.signal import find_peaks
 import scipy.stats as stats
+from scipy.ndimage import gaussian_filter1d
+from itertools import combinations
+import csv
+import statistics
 
-#TODO hard code warning /4
-def calculate_background_threshold(data, method="mode_std", percentile_value=10):
+def adjust_peak_bounds(bounds, data):
     """
-    Function to calculate the background threshold using different methods.
-    :param data: (list or numpy array) The data from which to calculate the background threshold.
-    :param method: (str) The method used to calculate the background. Currently supports "percentile", "mode_std".
-    :param percentile_value: (int) The percentile to use if method="percentile". Default is 10.
-    :return: background_threshold: (float) The calculated background threshold.
+    For small data sets, bump the bounds out by 1, except for edge cases - the literal edge, and TODO touching bounds
     """
-    data = np.array(data)
-    if method == "percentile":
-        background_threshold = np.percentile(data, percentile_value)
-    elif method == "mode_std":
-        rounded_data = np.round(data / 5) * 5
-        mode = stats.mode(rounded_data)[0][0]
-        background_threshold = mode +  np.std(data)/4
+    if len(data) < 256:
+        for bound in bounds:
+            if bound[0] != 0:
+                bound[0] = bound[0]-1
+            if bound[1] != len(data)-1:
+                bound[1] = bound[1]+1
+    return bounds
+
+#TODO hardcoded 5 for prominence
+def process_data(data, smoothing_sigma=None, background_pct=10):
+    """
+    Process a list of data points by applying Gaussian smoothing and subtracting the background level.
+
+    Parameters
+    ----------
+    data : list
+        The list of data points to process.
+    smoothing_sigma : float, optional
+        The standard deviation for Gaussian kernel. The default is None, which means no smoothing is applied.
+    background_pct : int, optional
+        The percentile of the data that should be considered as the background level. The default is 10, which means the lowest 10% of the data is considered as the background.
+
+    Returns
+    -------
+    processed_data : list
+        The processed data, where Gaussian smoothing has been applied and the background level has been subtracted.
+    """
+    #print(f"data: {data}")
+    # Apply Gaussian smoothing if a sigma value is provided
+    if smoothing_sigma:
+        data = gaussian_filter1d(data, smoothing_sigma)
+        # Uncomment the following line to print the smoothed data for debugging
+        # print(data)
+
+    # Round the smoothed data to the nearest integer for simplicity
+    smoothed_data = [round(x) for x in data]
+    #print(f"smoothed data: {smoothed_data}")
+    # Calculate the background level as the given percentile of the smoothed data
+    background_level = np.percentile(smoothed_data, background_pct)
+    #print(f"background {background_level}")
+    # Subtract the background level from the smoothed data
+    processed_data = smoothed_data - background_level
+
+    return processed_data
+
+
+
+def find_peak_bounds(data, num_peaks=1, threshold_pct=5, sample_intensity_above_background = 10):
+    """
+    Find the bounds of peaks in a list of data points.
+
+    The function first applies Gaussian smoothing and subtracts the background level from the data. It then finds all peaks in the data and selects the ones that maximize the average distance between peaks. The bounds of each peak are determined by moving to the left and right from the peak until the data value drops below a certain threshold.
+
+    Parameters
+    ----------
+    data : list
+        The list of data points to process.
+    num_peaks : int, optional
+        The number of expected peaks in the data. The default is 1.
+    threshold_pct : int, optional
+        The percentage of the peak value that should be used as the threshold for determining the bounds of the peak. The default is 5.
+
+    Returns
+    -------
+    peak_bounds : list of tuples
+        A list of tuples where each tuple contains the start and end indices of a peak. If no peaks are found, or if the start or end of the list is reached before a peak bound is found, the function returns None.
+    """
+    # Process the data by applying Gaussian smoothing and subtracting the background level
+    if len(data) > 1000:
+        smooth = 5
     else:
-        raise ValueError(f"Unsupported background calculation method: {method}")
-    print(background_threshold, mode, np.std(data))
-    return background_threshold
+        smooth = None
+    data = process_data(data, smooth)
+    #print(f'data length {len(data)}')
+    #print_list_summary(data)
+    #print(data)
+    all_peaks, _ = find_peaks(data, height = sample_intensity_above_background)
 
-def find_peak_bounds(data, method="mode_std", background_percentage=10):
-    """
-    Finds the indices of the tallest peak in the data that returns to the background level.
-    
-    Parameters:
-    data (list of float): The input data, a list of floating point numbers.
-    background_percentage (float, optional): The percentage of the max peak intensity considered as the background level. Default is 10.
-    
-    Returns:
-    tuple of int: The start and end indices of the peak. If no peaks are found or if the peak doesn't return to the background level, 
-                  the function returns the start and end of the data list.
-    """
-    # Convert list to numpy array for efficient operations
-    data = np.array(data)
+    #For help determining issues with large data sets
+    # filtered_list = data[::10]
+    # with open('floats.csv', 'w', newline='') as f:
+    #     writer = csv.writer(f)
+    #     writer.writerow(filtered_list)
+    # If no peaks are found, return None
 
-    # Use the scipy function find_peaks to find the indices of the peaks
-    peaks, _ = find_peaks(data)
-    
-    # If no peaks are found, return the start and end of the data list
-    if len(peaks) == 0:
-        start_index = 0
-        end_index = len(data) - 1
+    if len(all_peaks) == 0:
+        print('No peaks found')
+        return [[None, None]]
+    print(f'Peak found {all_peaks}, value {data[all_peaks]}')
+
+    # If more peaks are found than expected, select the ones that maximize the average distance between peaks
+    if len(all_peaks) > num_peaks:
+        # If only one peak is expected, keep the highest peak
+        if num_peaks == 1:
+            peaks = [all_peaks[np.argmax(data[all_peaks])]]
+        else:
+            # Otherwise, select the num_peaks peaks that maximize the average distance between peaks
+            peak_combinations = list(combinations(all_peaks, num_peaks))
+            avg_distances = [np.mean(np.diff(peak_comb)) for peak_comb in peak_combinations]
+            max_distance_index = np.argmax(avg_distances)
+            peaks = list(peak_combinations[max_distance_index])
     else:
-        # Find the tallest peak
-        tallest_peak_index = peaks[np.argmax([data[i] for i in peaks])]
-        
-        # Calculate the background threshold as a percentage of the max intensity
-        # Calculate the background threshold
-        background_threshold = calculate_background_threshold(data, method, background_percentage)
-        if method == "mode_std":
-            data = np.round(data / 5) * 5
+        peaks = all_peaks
 
-        #background_threshold = max_intensity * (background_percentage / 100)
+    # Initialize list to store peak bounds
+    peak_bounds = []
+    #print(f'peaks {peaks}')
+    # Loop over each peak
+    for i, peak in enumerate(peaks):
+        # Initialize start and end of peak
+        start = peak
+        end = peak
 
-        try:
-            # Find the index where the data drops below the background threshold before the tallest peak
-            start_index = np.where(data[:tallest_peak_index] <= background_threshold)[0][-1]
-            # Buffer for imaging
-            if start_index > 0:
-                start_index = start_index-1
-        except IndexError:
-            # If there's no data point below the threshold before the tallest peak, use the start of the data list
-            start_index = 0
-        
-        try:
-            # Find the index where the data drops below the background threshold after the tallest peak
-            end_index = np.where(data[tallest_peak_index:] <= background_threshold)[0][0] + tallest_peak_index
-            # Buffer for imaging
-            if end_index < len(data) - 1:
-                end_index = end_index+1
-        except IndexError:
-            # If there's no data point below the threshold after the tallest peak, use the end of the data list
-            end_index = len(data) - 1
+        # Calculate threshold value
+        threshold_value = data[peak] * threshold_pct / 100
 
-    return start_index, end_index
+        # Move start to the left until it's no longer part of the peak
+        while start > 0 and data[start-1] > threshold_value:
+            start -= 1
 
+        # If start of list is reached before bound is found, return None
+        if start == 0 and data[start] > threshold_value:
+            return [[None, None]]
+        # If there's a previous peak and the current start is to the left of the previous peak's end, set the start to be the previous peak's end 
+        if i > 0 and start < peak_bounds[i-1][1]:
+            start = peak_bounds[i-1][1]
+
+        # Move end to the right until it's no longer part of the peak
+        while end < len(data)-1 and data[end+1] > threshold_value:
+            end += 1
+
+        # If end of list is reached before bound is found, return None
+        if end == len(data)-1 and data[end] > threshold_value:
+            return [[None, None]]
+
+        # If there's another peak and the next peak is before the current 'end', use the lowest point between the two peaks as the end of this peak
+        if i < len(peaks) - 1 and peaks[i+1] < end:
+            next_peak = peaks[i+1]
+            min_point = np.argmin(data[peak:next_peak]) + peak
+            end = min_point
+
+
+        # Append peak bounds to list
+        peak_bounds.append((start, end))
+
+    return peak_bounds
 
 def find_most_in_focus_plane(z_stack: np.ndarray[np.uint16, Sequence[int]]):
     """
@@ -143,7 +220,7 @@ def check_maxima(lst: Sequence[int], window_size: int = 5, threshold_factor: int
                             for i in range(window_size-1, len(lst))])
     thresholds = np.concatenate((initial_thresholds, thresholds))
     
-    print(f'thresholds {thresholds}')
+    #print(f'thresholds {thresholds}')
 
     # Find maxima that are above the threshold with values below the threshold on both sides
     # The list indices are iterated from 1 to len(lst) - 1 because a maxima, by our definition, has to have 
@@ -172,7 +249,7 @@ def check_maxima(lst: Sequence[int], window_size: int = 5, threshold_factor: int
     # If any maxima were found, return the position of the maxima with the greatest value
     if len(maxima_above_threshold) > 0:
         max_pos = max(maxima_above_threshold, key=lambda x: lst[x])
-        print(f"Maxima found at position {max_pos}")
+        print(f"Maxima {lst[max_pos]} found at position {max_pos} out of {len(lst)}")
         return max_pos
     else:
         # If no maxima were found, return False
@@ -324,9 +401,11 @@ def calculate_rolling_x_intensity(image_data, n_lines: int):
     return mean_largest_quarter, x_intensity_map
 
 
+
 def calculate_rolling_y_intensity(image_data, n_lines: int):
+
     """
-    Calculates the rolling average of line intensities in a single channel image 
+    Calculates the rolling average of the brightest quarter of line intensities in a single channel image 
     and also computes the mean of the largest quarter of the pixel intensities.
 
     Parameters:
@@ -341,13 +420,13 @@ def calculate_rolling_y_intensity(image_data, n_lines: int):
     """
     # Flatten the image data to a 1D array
     flattened = image_data.flatten()
-    
+
     # Sort the flattened array
     sorted_array = np.sort(flattened)
-    
+
     # Determine the index to slice the array to keep the largest quarter of values
     slice_index = len(sorted_array) // 4
-    
+
     # Calculate the mean of the largest quarter of the pixel intensities
     mean_largest_quarter = np.mean(sorted_array[-slice_index:])
 
@@ -362,57 +441,100 @@ def calculate_rolling_y_intensity(image_data, n_lines: int):
 
     # Iterate over each line in the image data
     for i in range(half_window, image_data.shape[0] + half_window):
-        # Calculate the mean intensity of the lines in the current window
-        mean_intensity = np.mean(padded_image_data[i - half_window: i + half_window + 1])
+        # Calculate the mean intensity of the brightest quarter of the lines in the current window
+        # First, sort the window values
+        window_values = np.sort(padded_image_data[i - half_window: i + half_window + 1].flatten())
         
+        # Then, keep the brightest quarter or at least one pixel
+        slice_index_window = max(len(window_values) // 4, 1)
+        top_quarter_window = window_values[-slice_index_window:]
+        
+        # Calculate the mean of the brightest quarter
+        mean_intensity = np.mean(top_quarter_window)
+
         # Add the line position and its corresponding rolling average intensity to the map
         y_intensity_map.append((i - half_window, mean_intensity))
 
     return mean_largest_quarter, y_intensity_map
 
+import statistics
+import math
+
+def print_list_summary(data):
+    if len(data) > 0:
+        # Calculate summary statistics if the list is not empty
+        mean = statistics.mean(data)
+        median = statistics.median(data)
+        min_value = min(data)
+        max_value = max(data)
+
+        # Handle standard deviation calculation
+        if len(data) > 1:
+            stdev = statistics.stdev(data)
+        else:
+            stdev = math.nan
+
+        # Print the summary statistics
+        print("Mean:", mean)
+        print("Median:", median)
+        print("Standard Deviation:", stdev)
+        print("Minimum Value:", min_value)
+        print("Maximum Value:", max_value)
+    else:
+        # Handle empty list case
+        print("The list is empty.")
+
+def find_center(top_bounds_mm, bottom_bounds_mm):
+    """
+    Find the center point between two points in 3D space.
+    Input, two lists of [x,y,z,r], output, one list of the same
+    """
+    centerpoint_mm = []
+    for top, bottom in zip(top_bounds_mm, bottom_bounds_mm):
+        centerpoint_mm.append((float(top) + float(bottom)) / 2)
+
+    return centerpoint_mm
 
 
 
+# # def calculate_rolling_y_intensity(image_data, n_lines):
+#     # Flatten the array to a 1D array
+#     flattened = image_data.flatten()
 
+#     # Sort the flattened array in descending order
+#     sorted_array = np.sort(flattened)[::-1]
 
-# def calculate_rolling_y_intensity(image_data, n_lines):
-    # Flatten the array to a 1D array
-    flattened = image_data.flatten()
+#     # Determine the index to slice the array to keep the largest quarter of values
+#     slice_index = len(sorted_array) // 4
 
-    # Sort the flattened array in descending order
-    sorted_array = np.sort(flattened)[::-1]
+#     # Slice the sorted array to keep only the largest quarter of values
+#     largest_quarter = sorted_array[:slice_index]
 
-    # Determine the index to slice the array to keep the largest quarter of values
-    slice_index = len(sorted_array) // 4
+#     # Calculate the mean of the largest quarter
+#     mean_largest_quarter = np.mean(largest_quarter)
 
-    # Slice the sorted array to keep only the largest quarter of values
-    largest_quarter = sorted_array[:slice_index]
+#     # Calculate the rolling average of n_lines lines along the Y axis
+#     y_intensity_map = []
 
-    # Calculate the mean of the largest quarter
-    mean_largest_quarter = np.mean(largest_quarter)
+#     # Mirror the intensities for values beyond the edge of the image in the Y direction only
+#     padded_image_data = np.pad(image_data, ((n_lines // 2, n_lines - n_lines // 2 - 1), (0, 0)), mode='reflect')
+#     #print(padded_image_data)
+#    # Iterate over each line in the image
+#     for i in range(image_data.shape[0]):
+#         # Calculate the start and end indices for the rolling average
+#         start_index = i
+#         end_index = i+(n_lines)
 
-    # Calculate the rolling average of n_lines lines along the Y axis
-    y_intensity_map = []
+#         # Slice the padded image data to get the current set of lines
+#         lines = padded_image_data[start_index:end_index, :]
+#         #print(lines)
+#         # Calculate the mean intensity of the current set of lines
+#         mean_intensity = np.mean(lines)
 
-    # Mirror the intensities for values beyond the edge of the image in the Y direction only
-    padded_image_data = np.pad(image_data, ((n_lines // 2, n_lines - n_lines // 2 - 1), (0, 0)), mode='reflect')
-    #print(padded_image_data)
-   # Iterate over each line in the image
-    for i in range(image_data.shape[0]):
-        # Calculate the start and end indices for the rolling average
-        start_index = i
-        end_index = i+(n_lines)
+#         # Calculate the corresponding y position for the center line of the rolling average
+#         y_position = i
 
-        # Slice the padded image data to get the current set of lines
-        lines = padded_image_data[start_index:end_index, :]
-        #print(lines)
-        # Calculate the mean intensity of the current set of lines
-        mean_intensity = np.mean(lines)
+#         # Append the pair of values to the y_intensity_map
+#         y_intensity_map.append((y_position, mean_intensity))
 
-        # Calculate the corresponding y position for the center line of the rolling average
-        y_position = i
-
-        # Append the pair of values to the y_intensity_map
-        y_intensity_map.append((y_position, mean_intensity))
-
-    return mean_largest_quarter, y_intensity_map
+#     return mean_largest_quarter, y_intensity_map

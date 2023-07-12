@@ -136,10 +136,14 @@ def get_microscope_settings(command_queue, other_data_queue, send_event):
     send_event.set()
     while not command_queue.empty():
         time.sleep(0.3)
-
+    tube_Lens_Length = float(scope_settings['Type']['Tube lens design focal length (mm)'])
+    tube_Lens_Design_FocalLength = float(scope_settings['Type']['Tube lens length (mm)'])
+    objective_Lens_Magnification = float(scope_settings['Type']['Objective lens magnification'])
     # Get the image pixel size from the other data queue
     image_pixel_size = other_data_queue.get()
-    #print(f'image pixel size from system {image_pixel_size}')
+    #image_pixel_size = camera_pixel_size / ((tube_Lens_Length / tube_Lens_Design_FocalLength) * objective_Lens_Magnification)
+    print(f'image pixel size from system {image_pixel_size}, objective mag {objective_Lens_Magnification}')
+    #return 0.000488, scope_settings
     return image_pixel_size, scope_settings
 
 
@@ -178,7 +182,7 @@ def start_connection(NUC_IP: str, PORT_NUC: int):
         root = tk.Tk()
         root.withdraw()
         if isinstance(e, socket.timeout):
-            message = "Check that you have network access to the microscope. This may also be an IT issue. Close the program and try again."
+            message = "Check that you have network access to the microscope. This may also be an IT issue, or the software may have crashed on the microscope control side (Linux). Close this program and try again."
         else:
             message = "Connection was refused."
         messagebox.showinfo("Connection Error", message)

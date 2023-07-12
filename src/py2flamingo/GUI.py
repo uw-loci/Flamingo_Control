@@ -919,6 +919,29 @@ class Py2FlamingoGUI(QMainWindow):
 
         # If all entries are valid, return True
         return True
+    
+    def get_selected_radio_value(self):
+        """
+        This function returns the text of the selected radio button.
+
+        Returns
+        -------
+        str
+            The text of the selected radio button, or False if no radio button is selected.
+        """
+        for radio_button in self.radio_buttons:
+            if radio_button.isChecked():
+                return radio_button.text()
+        # Display a warning message if the no radio option is selected
+        message_box = QMessageBox()
+        message_box.setIcon(QMessageBox.Warning)
+        message_box.setWindowTitle("Radio button error")
+        message_box.setText(
+            "A necessary radio button is not selected!"
+        )
+        message_box.setStandardButtons(QMessageBox.Ok)
+        message_box.exec_()
+        return False
 
     def check_for_active_thread(self):
         # Check if any of the threads are still alive
@@ -941,6 +964,7 @@ class Py2FlamingoGUI(QMainWindow):
         -------
         None
         """
+        print("Go to position button pressed")
         # Make sure the thread is not already active if the function is attempted a second time
         if self.check_for_active_thread():
             return
@@ -982,6 +1006,7 @@ class Py2FlamingoGUI(QMainWindow):
         -------
         None
         """
+        print("Locate sample button pressed")
         #First ensure the laser is selected
         laser_value = self.get_selected_radio_value()
         if laser_value is False:
@@ -1056,13 +1081,14 @@ class Py2FlamingoGUI(QMainWindow):
             z_mm,
             r_deg,
         ]
-        sample_count = dialog.sample_count
+        #Ensure an int is passed for downstream use
+        sample_count = int(dialog.sample_count.text())
         # Create a thread for the locate_sample function
         self.locate_sample_thread = Thread(
             target=locate_sample,
             args=(
                 self.microscope_connection.connection_data,
-                self.sample_name,
+                self.sample_name.text(),
                 sample_count,
                 xyzr_init,
                 visualize_event,
@@ -1088,28 +1114,6 @@ class Py2FlamingoGUI(QMainWindow):
         self.locate_sample_thread.start()
         self.threads.append(self.locate_sample_thread)
 
-    def get_selected_radio_value(self):
-        """
-        This function returns the text of the selected radio button.
-
-        Returns
-        -------
-        str
-            The text of the selected radio button, or False if no radio button is selected.
-        """
-        for radio_button in self.radio_buttons:
-            if radio_button.isChecked():
-                return radio_button.text()
-        # Display a warning message if the no radio option is selected
-        message_box = QMessageBox()
-        message_box.setIcon(QMessageBox.Warning)
-        message_box.setWindowTitle("Radio button error")
-        message_box.setText(
-            "A necessary radio button is not selected!"
-        )
-        message_box.setStandardButtons(QMessageBox.Ok)
-        message_box.exec_()
-        return False
 
     def close_program(self):
         """
@@ -1120,6 +1124,7 @@ class Py2FlamingoGUI(QMainWindow):
         -------
         None
         """
+        print("Stop and close program button pressed")
         (
             live_listen_thread_var,
             command_listen_thread_var,
@@ -1127,7 +1132,7 @@ class Py2FlamingoGUI(QMainWindow):
             processing_thread_var,
         ) = self.microscope_connection.threads
         nuc_client, live_client, _, _, _ = self.microscope_connection.connection_data
-
+        
         # Set the terminate event
         terminate_event.set()
 
@@ -1165,6 +1170,7 @@ class Py2FlamingoGUI(QMainWindow):
         """
         # Protect against double clicks on the button
         # Make sure the thread is not already active if the function is attempted a second time
+        print("Take snapshot button pressed")
         if self.check_for_active_thread():
             return
 
@@ -1193,6 +1199,7 @@ class Py2FlamingoGUI(QMainWindow):
                 self.microscope_connection.connection_data,
                 xyzr,
                 visualize_event,
+                other_data_queue,
                 image_queue,
                 command_queue,
                 stage_location_queue,
@@ -1216,13 +1223,14 @@ class Py2FlamingoGUI(QMainWindow):
         -------
         None
         """
+        print("Setting Home in the Mac software")
         # Make sure the thread is not already active if the function is attempted a second time
         if self.check_for_active_thread():
             return
 
         # Check if the fields for the position are valid
         if not self.check_field(
-            [self.field_x_mm, self.field_y_mm, self.field_z_mm, self.field_r_deg]
+            [self.current_x, self.current_y, self.current_z, self.current_r]
         ):
             return
 
@@ -1263,6 +1271,7 @@ class Py2FlamingoGUI(QMainWindow):
         None
         """
         # Check if the current position fields are empty
+        print("Copy current image position to cyan fields pressed")
         if not all(
             [
                 self.current_x.text(),
@@ -1303,10 +1312,12 @@ class Py2FlamingoGUI(QMainWindow):
         -------
         None
         """
+        print("Cancel buttons pressed to set terminate event.")
         terminate_event.set()
     #TODO add dialog step to ask for the angle step size
     def trace_ellipse_action(self):
-        angle_step_size_deg = 5
+        print("Trace Ellipse button pressed")
+        angle_step_size_deg = 20
         """
         This function starts at the currently located sample (requires confirmation that the current location is good),
         then proceeds to rotate the sample 120 degrees twice and focus through Z to find three points that can be used
@@ -1355,6 +1366,7 @@ class Py2FlamingoGUI(QMainWindow):
                 other_data_queue,
                 image_queue,
                 command_queue,
+                command_data_queue,
                 system_idle,
                 processing_event,
                 send_event,
@@ -1377,7 +1389,7 @@ class Py2FlamingoGUI(QMainWindow):
         self.threads.append(self.trace_ellipse_thread)
 
     def predict_sample_focus_at_angle(self):
-
+        print("Predict sample location at angle pressed")
         if self.check_for_active_thread():
             return
 
@@ -1413,6 +1425,7 @@ class Py2FlamingoGUI(QMainWindow):
 
     #TODO Need to handle cases with more than one laser collection - maybe base on MultiAngle.txt??
     def multi_angle_dialog(self):
+        print("Multi-angle collection button pressed")
         """
         This function creates a dialog to collect information specifically needed to collect a multi-angle acquisition.
         1. Validate start position
@@ -1466,6 +1479,7 @@ class Py2FlamingoGUI(QMainWindow):
         
         # all functions must be run on a separate thread, targetting a function, including its arguments, and then start()
         pass
+    #incomplete
     def basic_workflow_action(self):
         """
         Docstring here

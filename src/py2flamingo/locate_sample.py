@@ -12,319 +12,12 @@ import functions.calculations as calc
 from functions.microscope_connect import *
 from functions.text_file_parsing import *
 from global_objects import clear_all_events_queues
-
+from take_snapshot import take_snapshot
+from functions.image_display import save_png
+import functions.microscope_interactions as scope
 plane_spacing = 10
 framerate = 40.0032  # /s
-
-
-def initial_setup(command_queue, other_data_queue, send_event):
-    clear_all_events_queues()
-    # Look in the functions/command_list.txt file for other command codes, or add more
-    commands = text_to_dict(
-        os.path.join("src", "py2flamingo", "functions", "command_list.txt")
-    )
-
-    # Testing fidelity
-    # print(commands)
-    # dict_to_text('functions/command_test.txt', commands)
-
-    COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(
-        commands["CommandCodes.h"]["COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD"]
-    )
-    # COMMAND_CODES_COMMON_SCOPE_SETTINGS  = int(commands['CommandCodes.h']['COMMAND_CODES_COMMON_SCOPE_SETTINGS'])
-    COMMAND_CODES_CAMERA_WORK_FLOW_START = int(
-        commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_WORK_FLOW_START"]
-    )
-    COMMAND_CODES_STAGE_POSITION_SET = int(
-        commands["CommandCodes.h"]["COMMAND_CODES_STAGE_POSITION_SET"]
-    )
-    # COMMAND_CODES_SYSTEM_STATE_IDLE  = int(commands['CommandCodes.h']['COMMAND_CODES_SYSTEM_STATE_IDLE'])
-    COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET = int(
-        commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET"]
-    )
-    COMMAND_CODES_CAMERA_IMAGE_SIZE_GET = int(
-        commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_IMAGE_SIZE_GET"]
-    )
-    COMMAND_CODES_CAMERA_CHECK_STACK = int(
-        commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_CHECK_STACK"]
-    ) 
-    command_labels = [
-        COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD,
-        COMMAND_CODES_CAMERA_WORK_FLOW_START,
-        COMMAND_CODES_STAGE_POSITION_SET,
-        COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET,
-        COMMAND_CODES_CAMERA_IMAGE_SIZE_GET,
-        COMMAND_CODES_CAMERA_CHECK_STACK,
-    ]
-
-    image_pixel_size_mm, scope_settings = get_microscope_settings(
-        command_queue, other_data_queue, send_event
-    )
-    command_queue.put(COMMAND_CODES_CAMERA_IMAGE_SIZE_GET)
-    send_event.set()
-    time.sleep(0.1)
-
-    frame_size = other_data_queue.get()
-    FOV = image_pixel_size_mm * frame_size
-
-    # pixel_size*frame_size #pixel size in mm*number of pixels per frame
-    y_move = FOV #* 1.3 # increase step size for large samples and coarse search
-    print(f"y_move search step size is currently {y_move}mm")
-    ############
-    ymax = float(scope_settings["Stage limits"]["Soft limit max y-axis"])
-    print(f"ymax is {ymax}")
-    ###############
-    return command_labels, ymax, y_move, image_pixel_size_mm, frame_size
-
-
-def check_workflow(command_queue, send_event, other_data_queue, COMMAND_CODES_CAMERA_CHECK_STACK):
-    other_data_queue.empty()
-    command_queue.put(COMMAND_CODES_CAMERA_CHECK_STACK)
-    send_event.set()
-    while send_event.isSet():
-        time.sleep(0.05)
-    text_bytes = other_data_queue.get()
-    if "hard limit" in str(text_bytes):
-        text_data = text_bytes.decode('utf-8')
-        print(text_data)
-
-
-def send_workflow(
-    command_queue,
-    send_event,
-    stage_location_queue,
-    system_idle: Event,
-    xyzr_init: Sequence[float],
-    visualize_event,
-    image_queue
-):
-    workflow_dict=workflow_to_dict(os.path.join("workflows", "workflow.txt"))
-    if not check_coordinate_limits(workflow_dict):
-        return
-    command_queue.put(COMMAND_CODES_CAMERA_WORK_FLOW_START)
-    send_event.set()
-
-    while not system_idle.is_set():
-        time.sleep(0.1)
-
-    stage_location_queue.put(xyzr_init)
-    visualize_event.set()
-    image_data = image_queue.get()
-    return image_data
-
-
-def search_sample_z_stacks(
-    i: int,
-    ymax: float,
-    xyzr: list,
-    xyzr_init: list,
-    y_move: float,
-    wf_dict: dict,
-    zend: float,
-    wf_zstack: str,
-    command_queue,
-    send_event,
-    other_data_queue,
-    COMMAND_CODES_CAMERA_CHECK_STACK,
-    stage_location_queue,
-    system_idle,
-    visualize_event,
-    image_queue,
-    image_pixel_size_mm,
-    terminate_event
-):
-    """
-    Function that takes in information about a starting location and enough variables to run some workflows to scan down the Y axis. 
-    It returns coordinates and intensities that can be used to predict the locations of samples.
-    Maxima are detected using a rolling average of horizontal lines in the image.
-    """
-    coords = []
-    maxima = None
-
-    while not terminate_event.is_set() and (float(xyzr_init[1]) + y_move * i) < ymax:
-        print("Starting Y axis search " + str(i + 1))
-        print("*")
-
-        # adjust the Zstack position based on the last snapshot Z position
-        wf_dict = dict_positions(wf_dict, xyzr, zEnd=zend)
-
-        # Write a new workflow based on new Y positions
-        dict_to_workflow(os.path.join("workflows", "current" + wf_zstack), wf_dict)
-        dict_to_text(os.path.join("workflows", "current_test_" + wf_zstack), wf_dict)
-
-        # Additional step for records that nothing went wrong if swapping between snapshots and Zstacks
-        shutil.copy(
-            os.path.join("workflows", "current" + wf_zstack),
-            os.path.join("workflows", "workflow.txt"),
-        )
-        #Minor adjustment - since we are taking the MIP of a Z stack, use the center of that Z stack
-        #rather than the starting or ending position
-        xyzr_centered = xyzr.copy()
-        xyzr_centered[2] = (float(xyzr_centered[2]) + zend) / 2
-        print(
-            f"coordinates x: {xyzr[0]}, y: {xyzr[1]}, z:{xyzr_centered[2]}, r:{xyzr[3]}"
-        )
-
-        check_workflow(command_queue, send_event, other_data_queue, COMMAND_CODES_CAMERA_CHECK_STACK)
-
-        image_data = send_workflow(
-            command_queue,
-            send_event,
-            stage_location_queue,
-            system_idle,
-            xyzr_centered,
-            visualize_event,
-            image_queue
-        )
-
-        _, y_intensity_map = calc.calculate_rolling_y_intensity(image_data, 21)
-
-        # Store data about IF signal at current in focus location
-        coords.append([copy.deepcopy(xyzr), y_intensity_map])
-
-        # Loop may finish early if drastic maxima in intensity sum is detected
-        processing_output_full = [y_intensity for coord in coords for _, y_intensity in coord[1]]
-
-        if maxima := calc.check_maxima(processing_output_full, window_size = 500):
-            break
-
-        # move the stage up
-        xyzr[1] = float(xyzr[1]) + y_move
-        i = i + 1
-
-    return maxima, coords, xyzr, i
-
-#TODO fine Z focus to find edges of sample
-def process_z_stack(
-    i: int,
-    loops: int,
-    xyzr: list,
-    z_init: float,
-    z_search_depth_mm: float,
-    z_step_depth: float,
-    wf_dict: dict,
-    wf_zstack: str,
-    command_queue,
-    send_event,
-    other_data_queue,
-    COMMAND_CODES_CAMERA_CHECK_STACK,
-    stage_location_queue,
-    system_idle,
-    visualize_event,
-    image_queue,
-    coordsZ,
-    maxima,
-    terminate_event
-):
-    """
-    Function that can be used within a loop to collect the MIP of a Z stack. Outside the function, the brightness of the MIPs are tracked
-    in order to determine the brightest MIP across the set of Z stacks.
-    """
-    print(f"Subset of planes acquisition {i} of {loops-1}")
-    # Check for cancellation from GUI
-    if terminate_event.is_set():
-        print("Find Sample terminating")
-        terminate_event.clear()
-        return None, None
-    # calculate the next step of the Z stack and apply that to the workflow file
-    xyzr[2] = float(z_init) - float(z_search_depth_mm) / 2 + i * z_step_depth
-    zEnd = float(z_init) - float(z_search_depth_mm) / 2 + (i + 1) * z_step_depth
-
-    print(f'zstart and end {xyzr[2]}, {zEnd}')
-    dict_positions(wf_dict, xyzr, zEnd = zEnd, save_with_data=False, get_zstack=False)
-
-    dict_to_workflow(os.path.join("workflows", "current" + wf_zstack), wf_dict)
-
-    shutil.copy(
-        os.path.join("workflows", "current" + wf_zstack),
-        os.path.join("workflows", "workflow.txt"),
-    )
-    check_workflow(command_queue, send_event, other_data_queue, COMMAND_CODES_CAMERA_CHECK_STACK)
-
-    xyzr_centered = copy.deepcopy(xyzr)
-    xyzr_centered[2] = (float(xyzr_centered[2]) + zEnd) / 2
-
-    image_data = send_workflow(
-        command_queue,
-        send_event,
-        stage_location_queue,
-        system_idle,
-        xyzr_centered,
-        visualize_event,
-        image_queue
-    )
-
-    mean_largest_quarter, _ = calc.calculate_rolling_y_intensity(image_data, 21)
-    coordsZ.append([copy.deepcopy(xyzr_centered), mean_largest_quarter])
-    top25_percentile_means = [coord[1] for coord in coordsZ]
-
-    print(f"Intensity means: {top25_percentile_means}")
-    if maxima := calc.check_maxima(top25_percentile_means):
-        print(f'max position {maxima}')
-
-    return top25_percentile_means, coordsZ, maxima, image_data
-
-
-def acquire_brightfield_image(
-    command_queue,
-    send_event,
-    stage_location_queue,
-    system_idle,
-    xyzr_init,
-    visualize_event,
-    image_queue,
-    wf_zstack,
-    framerate,
-    plane_spacing,
-    laser_channel,
-    laser_setting
-):
-    """
-    Acquires a brightfield image to verify sample holder location (assuming the sample holder is visible at the start
-    coordinates).
-
-    Parameters:
-    command_queue: A queue to hold command data.
-    send_event: An event flag used for send synchronization.
-    stage_location_queue: A queue to hold stage location data.
-    system_idle (Event): An event flag indicating if the system is idle.
-    xyzr_init (list): Initial coordinates (x,y,z) and rotation (r).
-    visualize_event: An event flag used for visualization synchronization.
-    image_queue: A queue to hold image data.
-    wf_zstack: The name of the workflow file for Z stack operation.
-    framerate: The framerate to be used for snapshot operation.
-    plane_spacing: The plane spacing to be used for snapshot operation.
-    laser_channel (str): Laser channel to be used.
-    laser_setting (str): Laser setting (%power and 1 or 0 to indicate on or off) to be used.
-    """
-
-    # Convert workflow to dictionary and adjust settings for snapshot
-    snap_dict = workflow_to_dict(os.path.join("workflows", wf_zstack))
-    snap_dict = dict_to_snap(snap_dict, xyzr_init, framerate, plane_spacing)
-    snap_dict = laser_or_LED(snap_dict, laser_channel, laser_setting, laser_on=False)
-
-    # Save the workflow dictionary to a file
-    dict_to_workflow(os.path.join("workflows", "currentSnapshot.txt"), snap_dict)
-
-    # Copy the workflow file to the always used workflow file
-    shutil.copy(
-        os.path.join("workflows", "currentSnapshot.txt"),
-        os.path.join("workflows", "workflow.txt"),
-    )
-
-    # Acquire a brightfield snapshot and return the image data
-    print("Acquire a brightfield snapshot")
-    image_data = send_workflow(
-        command_queue,
-        send_event,
-        stage_location_queue,
-        system_idle,
-        xyzr_init,
-        visualize_event,
-        image_queue
-    )
-
-    return image_data
+BUFFER_MAX = 10
 
 
 def locate_sample(
@@ -368,7 +61,7 @@ def locate_sample(
     * Function operation may be slow over wireless networks, it is recommended to use hardwired connections.
     """
     # in case of second run, clear out any remaining data or flags.
-    command_labels, ymax, y_move, image_pixel_size_mm, frame_size = initial_setup(
+    command_labels, ymax, y_move, image_pixel_size_mm, frame_size = scope.initial_setup(
         command_queue, other_data_queue, send_event
     )
     nuc_client, live_client, wf_zstack, LED_on, LED_off = connection_data
@@ -411,7 +104,8 @@ def locate_sample(
     zstart = float(z_init) - float(z_search_depth_mm) / 2
     zend = float(z_init) + float(z_search_depth_mm) / 2
     xyzr = [xyzr_init[0], xyzr_init[1], zstart, xyzr_init[3]]
-
+    xyzr_sample_top_mm = [None,None,None,None]
+    xyzr_sample_bottom_mm = [None,None,None,None]
     # Settings for the Z-stacks, assuming an IF search
     wf_dict = workflow_to_dict(os.path.join("workflows", wf_zstack))
     wf_dict = laser_or_LED(wf_dict, laser_channel, laser_setting, LED_off, LED_on, True)
@@ -427,12 +121,12 @@ def locate_sample(
     # Get a max intensity projection at each Y and look for a peak that could represent the sample
     # Sending the MIP reduces the amount of data sent across the network, minimizing total time
     # Store the position of the peak and then go back to that stack and try to find the focus
-    i = 0
-    maxima = False
+
+    bounds = [None, None]
     coords = []
     # xyzr_init[1] is the initial y position
-    maxima, coords, xyzr, i = search_sample_z_stacks(
-        i=0,
+    bounds, coords, xyzr, i = scope.y_axis_sample_boundary_search(
+        sample_count,
         ymax=ymax,
         xyzr=xyzr,
         xyzr_init=xyzr_init,
@@ -451,25 +145,31 @@ def locate_sample(
         image_pixel_size_mm=image_pixel_size_mm,
         terminate_event=terminate_event
     )
-    processing_output_full = [y_intensity for coord in coords for _, y_intensity in coord[1]]
-    bottom_bound_y, top_bound_y = calc.find_peak_bounds(processing_output_full, method="mode_std", background_percentage=10)
-    print(f"yBounds detected at {bottom_bound_y} and {top_bound_y}")
+    #if no bounds were found on either end of the search, use the ends of the search instead.
+    bounds = scope.replace_none(bounds, ((i+1)*frame_size))
+    #TODO handle multiple samples in a loop
+    top_bound_y_px, bottom_bound_y_px = bounds[0]
+    print(f'Bottom bounds y {bottom_bound_y_px} top bounds y {top_bound_y_px}')
+    print(f'top addition {top_bound_y_px * image_pixel_size_mm} bottom addition {bottom_bound_y_px * image_pixel_size_mm}')
+    xyzr_sample_bottom_mm[1] = float(xyzr_init[1]) + bottom_bound_y_px * image_pixel_size_mm
+    xyzr_sample_top_mm[1] = float(xyzr_init[1]) + top_bound_y_px * image_pixel_size_mm
+    #print(processing_output_full)
+    print(f"yBounds detected at {xyzr_sample_bottom_mm[1]} and {xyzr_sample_top_mm[1]}")
 
     # Check for cancellation from GUI or if no sample is found
-    if maxima is False:
-        print('No sample found, returning to GUI')
-        return
     if terminate_event.is_set():
         print("Find Sample terminating")
         terminate_event.clear()
         return
 
-    print(f'Maxima found {maxima} pixels below the start point')
     #Multiply out the number of pixels times the pixel size, convert to mm, and add to the initial start position in mm
     #Subtract an additional half frame to center the object.
-    print(f'y init {xyzr_init[1]} + distance searched {maxima*image_pixel_size_mm}')
-    xyzr[1] = float(xyzr_init[1]) + (maxima-float(frame_size)/2) *image_pixel_size_mm
-    print(f"Sample located at x: {xyzr[0]}, y: {xyzr[1]}, r:{xyzr[3]}")
+    print(f'y init {xyzr_init[1]} + distance searched {(i+1)*frame_size*image_pixel_size_mm}')
+    sample_midpoint = (xyzr_sample_top_mm[1]+xyzr_sample_bottom_mm[1])/2
+    #shift up half a frame so that the middle of the sample is in the middle of the imaging FOV
+    frame_shift_midpoint = sample_midpoint-frame_size*image_pixel_size_mm/2
+    xyzr[1] = frame_shift_midpoint
+
     print("Finding focus in Z.")
 
     # Not really necessary as the workflow will handle this.
@@ -478,29 +178,31 @@ def locate_sample(
 
     # Wireless is too slow and the nuc buffer is only 10 images, which can lead to overflow and deletion before the local computer pulls the data
     # for Z stacks larger than 10, make sure to split them into 10 image components and wait for each to complete.
-    total_number_of_planes = z_search_depth_mm/float(wf_dict['Experiment Settings']['Plane spacing (um)'])
-
+    total_number_of_planes = float(z_search_depth_mm)*1000/float(wf_dict['Experiment Settings']['Plane spacing (um)'])
+    print(f" z depth {z_search_depth_mm}, plane spacing {float(wf_dict['Experiment Settings']['Plane spacing (um)'])}")
     # number of image planes the nuc can/will hold in its buffer before overwriting
     # check with Joe Li before increasing this above 10. Decreasing it below 10 is fine.
-    buffer_max = 10
+
     ###################################################################################
     # loop through the total number of planes, 10 planes at a time
-    loops = int(total_number_of_planes / buffer_max + 0.5)
-    step_size_mm = float(wf_dict["Experiment Settings"]["Plane spacing (um)"]) / 1000
-    z_step_depth = step_size_mm * buffer_max
+    loops = int(total_number_of_planes / BUFFER_MAX + 0.5)
+    step_size_mm = float(wf_dict["Experiment Settings"]["Plane spacing (um)"]) / 1000 #um to mm
+    z_step_depth_mm = step_size_mm * BUFFER_MAX
     print(f" z search depth {z_search_depth_mm}")
-    wf_dict = calculate_zplanes(wf_dict, z_step_depth, framerate, plane_spacing)
+    wf_dict = calculate_zplanes(wf_dict, z_step_depth_mm, framerate, plane_spacing)
 
     coordsZ = []
-    maxima = False
+    top25_percentile_means=None
+    print(f'loops count {loops}')
+    #Based on the center of the Y bounding box, search for the Z bounding box - simple search, may fail if the widest part of the sample isn't near the center
     for i in range(loops):
-        top25_percentile_means, coordsZ, maxima, _ = process_z_stack(
+        top25_percentile_means, coordsZ, bounds, _ = scope.z_axis_sample_boundary_search(
             i=i,
             loops=loops,
             xyzr=xyzr,
             z_init=z_init,
             z_search_depth_mm=z_search_depth_mm,
-            z_step_depth=z_step_depth,
+            z_step_depth_mm=z_step_depth_mm,
             wf_dict=wf_dict,
             wf_zstack=wf_zstack,
             command_queue=command_queue,
@@ -512,119 +214,158 @@ def locate_sample(
             visualize_event=visualize_event,
             image_queue=image_queue,
             coordsZ=coordsZ,
-            maxima=maxima,
             terminate_event=terminate_event
         )
-
-        if maxima:
+        if terminate_event.is_set():
+            break
+        if bounds is not None and all(b is not None for sublist in bounds for b in sublist):
+            print(f'bounds {bounds}')
             break
 
-    bottom_bound_z, top_bound_z = calc.find_peak_bounds(top25_percentile_means, method="mode_std", background_percentage=10)
-    print(f"zBounds detected at {bottom_bound_z} and {top_bound_z}")
+    if terminate_event.is_set():
+        print("Find Sample terminating")
+        terminate_event.clear()
+        return
+    print(f'xyzr is currently {xyzr}')
+    #bounds = calc.find_peak_bounds(top25_percentile_means)
+    bounds = scope.replace_none(bounds, loops)
+    #TODO handle a loop for multiple objects
+    bottom_bound_z_vx, top_bound_z_vx = bounds[0]
+
+    zSearchStart = float(z_init) - float(z_search_depth_mm) / 2
+    print(f'zstart {zSearchStart}, zsearchdepth {z_search_depth_mm}, zstepdepth {z_step_depth_mm}')
+    xyzr_sample_bottom_mm[2] = zSearchStart + bottom_bound_z_vx * z_step_depth_mm
+    xyzr_sample_top_mm[2] = zSearchStart + top_bound_z_vx * z_step_depth_mm
+    midpoint_z_mm = (xyzr_sample_top_mm[2]+xyzr_sample_bottom_mm[2])/2
+    print(f"zBounds detected at {xyzr_sample_top_mm[2]} and {xyzr_sample_bottom_mm[2]}")
     
-    print(f'maxima is {maxima}')
-    z_positions = [point[0][2] for point in coordsZ]
-    if not maxima:
-        maxima = np.argmax(top25_percentile_means)
+    # z_positions = [point[0][2] for point in coordsZ]
 
-
-    print("z focus plane " + str(z_positions[maxima]))
-
-    # calculate the Z position for that slice
-
-    # step = float(wf_dict['Experiment Settings']['Plane spacing (um)'])*0.001 #convert to mm
-    # Find the Z location for the snapshot, starting from the lowest value in the Z search range
-    # 0.5 is subtracted from 'queue_z' to find the middle of one of the MIPs, which is made up of 'buffer_max' individual 'step's
-    zSnap = z_positions[maxima]
-    ######################
-    print(f"Object located at {zSnap}")
-    print(f'Midpoint of bounds located at {(bottom_bound_z+top_bound_z)/2}')
+    print("z focus plane " + str(midpoint_z_mm))
 
     # XYR should all be correct already
     # Move to correct Z position, command 24580
-    command_data_queue.put([3, 0, 0, zSnap])
+    command_data_queue.put([3, 0, 0, midpoint_z_mm])
 
     command_queue.put(COMMAND_CODES_STAGE_POSITION_SET)  # movement
     send_event.set()
     while not command_queue.empty():
         time.sleep(0.1)
+    #update Z center for X search
+    xyzr[2] = midpoint_z_mm
+    # # Take a snapshot there using the user defined laser and power
 
-    # Take a snapshot there using the user defined laser and power
+    # ##############
+    # snap_dict = wf_dict
+    # #only the z position should have changed over the last search
+    # xyzr[2] = midpoint_z_mm
+    # print(f"final xyzr snap {xyzr}")
+    # snap_dict["Experiment Settings"]["Save image directory"] = "Sample"
+    # snap_dict = dict_comment(snap_dict, "Sample located")
 
-    ##############
-    snap_dict = wf_dict
-    #only the z position should have changed over the last search
-    xyzr[2] = zSnap
-    print(f"final xyzr snap {xyzr}")
-    snap_dict["Experiment Settings"]["Save image directory"] = "Sample"
-    snap_dict = dict_comment(snap_dict, "Sample located")
-
-    snap_dict = dict_to_snap(snap_dict, xyzr, framerate, plane_spacing)
-    snap_dict = laser_or_LED(snap_dict, laser_channel, laser_setting, laser_on=True)
-    dict_to_workflow(os.path.join("workflows", "current" + wf_zstack), snap_dict)
-    shutil.copy(
-        os.path.join("workflows", "current" + wf_zstack),
-        os.path.join("workflows", "workflow.txt"),
-    )
-    image_data = send_workflow(
-        command_queue,
-        send_event,
-        stage_location_queue,
-        system_idle,
-        xyzr,
-        visualize_event,
-        image_queue
-    )
-    #Check initial IF peak
+    # snap_dict = dict_to_snap(snap_dict, xyzr, framerate, plane_spacing)
+    # snap_dict = laser_or_LED(snap_dict, laser_channel, laser_setting, laser_on=True)
+    # dict_to_workflow(os.path.join("workflows", "current" + wf_zstack), snap_dict)
+    # shutil.copy(
+    #     os.path.join("workflows", "current" + wf_zstack),
+    #     os.path.join("workflows", "workflow.txt"),
+    # )
+    # image_data = scope.send_workflow(
+    #     command_queue,
+    #     send_event,
+    #     stage_location_queue,
+    #     system_idle,
+    #     xyzr,
+    #     visualize_event,
+    #     image_queue
+    # )
+##############################Center X################
     ROLLING_AVERAGE_WIDTH = 101
-    _, intensity_list_map = calc.calculate_rolling_x_intensity(image_data, ROLLING_AVERAGE_WIDTH)
-    x_intensities = [intensity for _, intensity in intensity_list_map]
-    bottom_bound_x, top_bound_x = calc.find_peak_bounds(x_intensities, method="mode_std", background_percentage=10)
-    print(f"xBounds detected at {bottom_bound_x} and {top_bound_x}")
+    i=0
+    #Make sure the bounding box is within the frame, if possible
+    top_bound_x_px = 0
+    bottom_bound_x_px = frame_size
+    while (top_bound_x_px == 0 or bottom_bound_x_px == frame_size) or i<5:
+        i=i+1
+        #print(f'xloop {i}')
+        x_before_move = xyzr[0]
+        image_data = take_snapshot(
+            connection_data,
+            xyzr,
+            visualize_event,
+            other_data_queue,
+            image_queue,
+            command_queue,
+            stage_location_queue,
+            send_event,
+            laser_channel,
+            laser_setting,
+        )
+        save_png(image_data, f'{xyzr[3]} X pos {xyzr[0]}')
+        # print('after snapshot')
+        _, intensity_list_map = calc.calculate_rolling_x_intensity(image_data, ROLLING_AVERAGE_WIDTH)
+        x_intensities = [intensity for _, intensity in intensity_list_map]
 
-    max_x = np.argmax(x_intensities)
-    print(f'current x {xyzr[0]}')
-    print(f'max_x {max_x}')
-    # print(f'shift in mm {max_x*image_pixel_size_mm}')
-    xyzr[0]=xyzr[0]-max_x*image_pixel_size_mm
-    print(f'adjusted xyzr {xyzr}')
-    #TODO maybe locate the center of the bounding box?
+        bounds  = calc.find_peak_bounds(x_intensities)
+        print(f'original x bounds {bounds}')
+        if bounds is not None and all(b is not None for sublist in bounds for b in sublist):
+            top_bound_x_px, bottom_bound_x_px = bounds[0]
+        else:
+            max_x = np.argmax(x_intensities)
+            xyzr[0] = float(xyzr[0]) - (frame_size / 2 - max_x) * image_pixel_size_mm
+        #TODO handle samples that are larger than 1 X axis frame
+        #TODO possible check - find widest bounds along Y axis and store position, check that position in Y for X bounds beyond frame width.
+        bounds = scope.replace_none(bounds, frame_size)
+        #break out of loop if the movement is minor
+        #This does not prevent oscillating between two points
+        if abs(float(x_before_move) - float(xyzr[0])) <= 0.05:
+            print('breaking out of x search loop')
+            print(f' x values are {bounds}')
+            break
 
-    #TODO figure out these values using calculations
-    xyzr_top = [5,5,5,0]
-    xyzr_bottom = [8,8,8,0]
+    #At this point the bounding box should either be the entire image, or fully "in frame"
+    #Calculate the bounding box positions in mm
+    xyzr_sample_bottom_mm[0] = float(xyzr[0]) + bottom_bound_x_px * image_pixel_size_mm
+    xyzr_sample_top_mm[0] = float(xyzr[0]) + top_bound_x_px * image_pixel_size_mm
+    print(f"xBounds detected at {xyzr_sample_bottom_mm[0]} and {xyzr_sample_top_mm[0]}")
+    x_sample_midpoint_mm = (xyzr_sample_top_mm[0]+xyzr_sample_bottom_mm[0])/2
+
+    #Shift midpoint to the midpoint of the visible frame
+    x_sample_midpoint_frameshift_mm =x_sample_midpoint_mm -frame_size*image_pixel_size_mm/2
+    xyzr[0]= x_sample_midpoint_frameshift_mm
+    
     location_path = os.path.join('sample_txt',sample_name, "bounds_"+sample_name+".txt")
 
     # store the bounding box coordinates in a dict
     bounding_dict = {
-        "bounding box 1": {
-            "x (mm)": top_bound_x,
-            "y (mm)": top_bound_y,
-            "z (mm)": top_bound_z,
-            "r (°)": xyzr_top[3],
+        "bounds 1": {
+            "x (mm)": xyzr_sample_top_mm[0],
+            "y (mm)": xyzr_sample_top_mm[1],
+            "z (mm)": xyzr_sample_top_mm[2],
+            "r (°)": xyzr[3],
         },
-        "bounding box 2": {
-            "x (mm)": bottom_bound_x,
-            "y (mm)": bottom_bound_y,
-            "z (mm)": bottom_bound_z,
-            "r (°)": xyzr_bottom[3],
+        "bounds 2": {
+            "x (mm)": xyzr_sample_bottom_mm[0],
+            "y (mm)": xyzr_sample_bottom_mm[1],
+            "z (mm)": xyzr_sample_bottom_mm[2],
+            "r (°)": xyzr[3],
         }
     }
-    # bounding_dict = {
-    #     "bounding box 1": {
-    #         "x (mm)": xyzr_top[0],
-    #         "y (mm)": xyzr_top[1],
-    #         "z (mm)": xyzr_top[2],
-    #         "r (°)": xyzr_top[3],
-    #     },
-    #     "bounding box 2": {
-    #         "x (mm)": xyzr_bottom[0],
-    #         "y (mm)": xyzr_bottom[1],
-    #         "z (mm)": xyzr_bottom[2],
-    #         "r (°)": xyzr_bottom[3],
-    #     }
-    # }
     dict_to_text(location_path, bounding_dict)
 
+
+    image_data = take_snapshot(
+        connection_data,
+        xyzr,
+        visualize_event,
+        other_data_queue,
+        image_queue,
+        command_queue,
+        stage_location_queue,
+        send_event,
+        laser_channel,
+        laser_setting,
+    )
+    save_png(image_data, f'{xyzr[3]} post-X adjusted')
     print('All done with finding the sample(s)!')
 

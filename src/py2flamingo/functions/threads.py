@@ -194,11 +194,18 @@ def fetch_microscope_settings(received, client):
     # Save the settings to a file
     if not os.path.exists("microscope_settings"):
         os.makedirs("microscope_settings")
-    with open(os.path.join("microscope_settings", "ScopeSettings.txt"), "wb") as file:
+    file_path = os.path.join("microscope_settings", "ScopeSettings.txt")
+    
+    # If the file already exists, remove it
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    
+    # Write the new data to the file
+    with open(file_path, "wb") as file:
         file.write(text_bytes)
 
 
-def handle_pixel_field_of_view(received, other_data_queue):
+def pixel_field_of_view(received, other_data_queue):
     """
     Handles the pixel field of view based on the received message.
 
@@ -213,7 +220,7 @@ def handle_pixel_field_of_view(received, other_data_queue):
     -------
     None
     """
-    print("pixel size " + str(received[10]))
+    #print("pixel size " + str(received[10]))
     if received[10] < 0:
         print(
             "Threads.py command_listen_thread: No pixel size detected from system. Exiting."
@@ -248,7 +255,7 @@ def handle_camera_frame_size(received, other_data_queue):
     -------
     None
     """
-    print("frame size " + str(received[7]))
+    #print("frame size " + str(received[7]))
     if received[10] < 0:
         print(
             "Threads.py command_listen_thread: No camera size detected from system. Exiting."
@@ -301,7 +308,7 @@ def command_listen_thread(
         elif received[1] == COMMAND_CODES_COMMON_SCOPE_SETTINGS:
             fetch_microscope_settings(received, client)
         elif received[1] == COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET:
-            handle_pixel_field_of_view(received, other_data_queue)
+            pixel_field_of_view(received, other_data_queue)
         elif received[1] == COMMAND_CODES_CAMERA_CHECK_STACK:
             check_stack(other_data_queue, client)
         elif received[1] == COMMAND_CODES_CAMERA_IMAGE_SIZE_GET:
@@ -381,6 +388,7 @@ def process_single_image(
     image_data = receive_image_data(live_client, image_size)
     # build and reformat pixel data
     image_array = np.frombuffer(image_data, dtype=np.uint16)
+    #TODO move out of image processing?
     image_array = image_array.reshape((image_height, image_width)).T
     image_array = np.flipud(image_array)
     #print("putting image into queues")
@@ -435,11 +443,12 @@ def receive_zstack_images(
 
         image_data = receive_image_data(live_client, image_size)
 
-        image = Image.frombytes("I;16", (image_width, image_height), image_data)
-        rotated_image = image.rotate(90, expand=True)
-        rotated_image.save(os.path.join(f"output_png", f"plane_{Zpos}_{step}.png"))
+        image_array = np.frombuffer(image_data, dtype=np.uint16)
+        #TODO move out of image processing?
+        image_array = image_array.reshape((image_height, image_width)).T
+        image_array = np.flipud(image_array)
 
-        images.append(rotated_image)
+        images.append(image_array)
         step += 1
 
         if step != stack_size:

@@ -2,7 +2,7 @@ import os
 import shutil
 import time
 from typing import Sequence
-
+import functions.microscope_interactions as scope
 from functions.text_file_parsing import *
 from global_objects import clear_all_events_queues
 
@@ -14,6 +14,7 @@ def take_snapshot(
     connection_data: Sequence,
     xyzr_init: Sequence[float],
     visualize_event,
+    other_data_queue,
     image_queue,
     command_queue,
     stage_location_queue,
@@ -53,6 +54,9 @@ def take_snapshot(
     COMMAND_CODES_CAMERA_WORK_FLOW_START = int(
         commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_WORK_FLOW_START"]
     )
+    COMMAND_CODES_CAMERA_CHECK_STACK = int(
+        commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_CHECK_STACK"]
+    )
 
     # Prepare the workflow for the snapshot
     snap_dict = workflow_to_dict(os.path.join("workflows", wf_zstack))
@@ -62,14 +66,14 @@ def take_snapshot(
     snap_dict = dict_save_directory(snap_dict, directory="Snapshots")
     # Write the updated workflow back to the currentSnapshot.txt file
     dict_to_workflow(os.path.join("workflows", "currentSnapshot.txt"), snap_dict)
-
     # Copy the currentSnapshot.txt file to the workflow.txt file
     shutil.copy(
         os.path.join("workflows", "currentSnapshot.txt"),
         os.path.join("workflows", "workflow.txt"),
     )
-
+    scope.check_workflow(command_queue, send_event, other_data_queue, COMMAND_CODES_CAMERA_CHECK_STACK)
     # Send the command to start the workflow to the microscope
+
     command_queue.put(COMMAND_CODES_CAMERA_WORK_FLOW_START)
     send_event.set()
 
@@ -78,7 +82,8 @@ def take_snapshot(
     visualize_event.set()
 
     # Retrieve the image from the image_queue
-    image_queue.get()
+    image_data = image_queue.get()
 
     print("snapshot taken")
     # TODO Clean up 'delete' PNG files or dont make them
+    return image_data

@@ -90,6 +90,19 @@ def laser_or_LED(
 
     return workflow_dict
 
+def dict_to_bounds(bounding_dict):
+    """
+    Convert a dict to two sets of coordinates defining a bounding cube
+    """
+    points = []
+    for point in bounding_dict.values():
+        coordinates = []
+        for coord in point.values():
+            coordinates.append(float(coord))
+        points.append(coordinates)
+
+    return points
+
 
 def check_coordinate_limits(workflow_dict):
     """

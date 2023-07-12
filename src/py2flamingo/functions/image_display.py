@@ -91,14 +91,19 @@ def convert_to_qimage(image_data):
     )
 
     # Calculate the lower and upper percentiles for display normalization
-    lower_percentile = 2.5
-    upper_percentile = 97.5
+    lower_percentile = 1
+    upper_percentile = 99
     lower_value = np.percentile(scaled_image, lower_percentile)
     upper_value = np.percentile(scaled_image, upper_percentile)
+    #print(f'Lower value: {lower_value}')
+    #print(f'Upper value: {upper_value}')
 
     # Clip the pixel values to the middle 95% range and normalize to [0, 1]
     clipped_image = np.clip(scaled_image, lower_value, upper_value)
-    normalized_image = (clipped_image - lower_value) / (upper_value - lower_value)
+
+    epsilon = 1e-7
+    normalized_image = (clipped_image - lower_value) / (upper_value - lower_value + epsilon)
+    #print(np.unique(normalized_image))
 
     # Scale the normalized values to the full range of 8-bit grayscale values
     scaled_image = (normalized_image * 255).astype(np.uint8)
