@@ -1,5 +1,6 @@
-import time
 import os
+import time
+
 import numpy as np
 from PIL import Image
 from PyQt5.QtGui import QImage
@@ -7,9 +8,7 @@ from skimage import io  # , transform
 
 # TODO scipy.ndimage scikit image
 
-import numpy as np
-from PIL import Image
-import os
+
 
 def save_png(image_data, image_title):
     """
@@ -52,14 +51,14 @@ def save_png(image_data, image_title):
     image_resized = image.resize((512, 512))
 
     # Define the output directory
-    output_dir = 'output_png'
+    output_dir = "output_png"
 
     # Create the output directory if it doesn't exist
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     # Save the image
-    image_resized.save(os.path.join(output_dir, f'{image_title}.png'))
+    image_resized.save(os.path.join(output_dir, f"{image_title}.png"))
 
 
 def convert_to_qimage(image_data):
@@ -81,7 +80,7 @@ def convert_to_qimage(image_data):
     """
     start_time = time.time()  # Record the start time
     new_height, new_width = 512, 512
-    #print(f'image data shape {image_data.shape}')
+    # print(f'image data shape {image_data.shape}')
     # Convert the numpy array to a PIL Image
     image = Image.fromarray(image_data)
 
@@ -95,15 +94,17 @@ def convert_to_qimage(image_data):
     upper_percentile = 99
     lower_value = np.percentile(scaled_image, lower_percentile)
     upper_value = np.percentile(scaled_image, upper_percentile)
-    #print(f'Lower value: {lower_value}')
-    #print(f'Upper value: {upper_value}')
+    # print(f'Lower value: {lower_value}')
+    # print(f'Upper value: {upper_value}')
 
     # Clip the pixel values to the middle 95% range and normalize to [0, 1]
     clipped_image = np.clip(scaled_image, lower_value, upper_value)
 
     epsilon = 1e-7
-    normalized_image = (clipped_image - lower_value) / (upper_value - lower_value + epsilon)
-    #print(np.unique(normalized_image))
+    normalized_image = (clipped_image - lower_value) / (
+        upper_value - lower_value + epsilon
+    )
+    # print(np.unique(normalized_image))
 
     # Scale the normalized values to the full range of 8-bit grayscale values
     scaled_image = (normalized_image * 255).astype(np.uint8)
@@ -117,4 +118,3 @@ def convert_to_qimage(image_data):
     # print("Image converted, time taken:", elapsed_time, "seconds")  # Print the elapsed time
 
     return qimage
-

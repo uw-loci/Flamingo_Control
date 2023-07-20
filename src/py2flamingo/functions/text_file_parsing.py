@@ -1,15 +1,10 @@
-
-
 # Includes functions to read and write text files specifically designed for the Flamingo
 # create an option to read in a previous workflow but make minor changes
-from typing import Sequence
+import csv
 import os
 import re
-import csv
+from typing import Sequence
 
-
-import os
-import csv
 
 def dict_append_workflow(file_path: str, workflow_dict: dict):
     """
@@ -49,8 +44,6 @@ def dict_append_workflow(file_path: str, workflow_dict: dict):
         f.write("</Workflow Settings>\n")
 
 
-
-
 def save_points_to_csv(sample_name: str, points_dict, description: str = None):
     """
     Save points from a dictionary to a CSV file.
@@ -77,8 +70,8 @@ def save_points_to_csv(sample_name: str, points_dict, description: str = None):
     first_key, second_key = bounds_keys[0], bounds_keys[1]
 
     # Extract the 'r' values and compute the angle step size
-    first_r = float(points_dict[first_key]['r (°)'])
-    second_r = float(points_dict[second_key]['r (°)'])
+    first_r = float(points_dict[first_key]["r (°)"])
+    second_r = float(points_dict[second_key]["r (°)"])
     angle_step_size_deg = second_r - first_r
 
     # Define the location of the output file
@@ -93,14 +86,16 @@ def save_points_to_csv(sample_name: str, points_dict, description: str = None):
         # Create a CSV writer
         writer = csv.writer(f)
         # Write the header row to the CSV file
-        writer.writerow(['bounds', 'x (mm)', 'y (mm)', 'z (mm)', 'r (°)'])
+        writer.writerow(["bounds", "x (mm)", "y (mm)", "z (mm)", "r (°)"])
         # Iterate over the points in the dictionary
         for bounds, point in points_dict.items():
             # Write each point to a new row in the CSV file
             writer.writerow([bounds] + list(point.values()))
 
 
-def set_workflow_type(dict, experiment_type: str, overlap: float, overlap_y: float = None):
+def set_workflow_type(
+    dict, experiment_type: str, overlap: float, overlap_y: float = None
+):
     """
     TODO: figure out the rest
     Modify a dict file to perform a non-standard workflow, the standard being a single Zstack
@@ -140,10 +135,10 @@ def calculate_zplanes(wf_dict, z_search_depth, framerate, plane_spacing=None):
         Updated Flamingo workflow dictionary.
     """
     # Calculate the number of planes based on z-search depth and plane spacing
-    #if no plane spacing is specified, use what is already in the workflow
+    # if no plane spacing is specified, use what is already in the workflow
     if plane_spacing is None:
         plane_spacing = float(wf_dict["Experiment Settings"]["Plane spacing (um)"])
-        
+
     wf_dict["Stack Settings"]["Number of planes"] = round(
         1000 * float(z_search_depth) / plane_spacing
     )
@@ -205,6 +200,7 @@ def laser_or_LED(
 
     return workflow_dict
 
+
 def dict_to_bounds(bounding_dict):
     """
     Convert a dict to two sets of coordinates defining a bounding cube
@@ -246,38 +242,52 @@ def check_coordinate_limits(workflow_input):
 
     # Determine the type of the input: either a single dictionary or a list of dictionaries
     if isinstance(workflow_input, dict):
-        workflow_list = [workflow_input]  # Convert single dictionary to a list for uniform processing
+        workflow_list = [
+            workflow_input
+        ]  # Convert single dictionary to a list for uniform processing
     elif isinstance(workflow_input, list):
         workflow_list = workflow_input
     else:
         raise TypeError("Input must be a dictionary or a list of dictionaries")
 
     # Load the scope settings from a predefined settings file
-    scope_settings = text_to_dict(os.path.join('microscope_settings', 'ScopeSettings.txt'))
+    scope_settings = text_to_dict(
+        os.path.join("microscope_settings", "ScopeSettings.txt")
+    )
 
     # Loop over each workflow in the list
     for workflow_dict in workflow_list:
 
         # Loop over each axis (X, Y, Z) to validate the coordinates
-        for axis in ['x', 'y', 'z']:
+        for axis in ["x", "y", "z"]:
 
             # Extract coordinate limits for the current axis from the settings
-            min_limit = float(scope_settings['Stage limits'][f'Soft limit min {axis}-axis'])
-            max_limit = float(scope_settings['Stage limits'][f'Soft limit max {axis}-axis'])
+            min_limit = float(
+                scope_settings["Stage limits"][f"Soft limit min {axis}-axis"]
+            )
+            max_limit = float(
+                scope_settings["Stage limits"][f"Soft limit max {axis}-axis"]
+            )
 
             # Extract 'start' and 'end' coordinates for the current axis from the workflow
-            workflow_start = float(workflow_dict['Start Position'][f'{axis.upper()} (mm)'])
-            workflow_end = float(workflow_dict['End Position'][f'{axis.upper()} (mm)'])
+            workflow_start = float(
+                workflow_dict["Start Position"][f"{axis.upper()} (mm)"]
+            )
+            workflow_end = float(workflow_dict["End Position"][f"{axis.upper()} (mm)"])
 
             # Check and validate that the coordinates are within the predefined limits
-            if not (min_limit < workflow_start < max_limit and min_limit < workflow_end < max_limit):
-                raise ValueError(f"The {axis}-axis workflow coordinates are outside the limits. "
-                                 f"Start: {workflow_start}, End: {workflow_end}, "
-                                 f"Min Limit: {min_limit}, Max Limit: {max_limit}")
+            if not (
+                min_limit < workflow_start < max_limit
+                and min_limit < workflow_end < max_limit
+            ):
+                raise ValueError(
+                    f"The {axis}-axis workflow coordinates are outside the limits. "
+                    f"Start: {workflow_start}, End: {workflow_end}, "
+                    f"Min Limit: {min_limit}, Max Limit: {max_limit}"
+                )
 
     # If all coordinates of all workflows pass validation, return True
     return True
-
 
 
 def dict_positions(
@@ -311,18 +321,24 @@ def dict_positions(
         workflow_dict["End Position"]["Y (mm)"] = float(y2)
         workflow_dict["End Position"]["Z (mm)"] = float(z2)
         workflow_dict["End Position"]["Angle (degrees)"] = float(r2)
-        workflow_dict["Stack Settings"]["Change in Z axis (mm)"] = abs(float(z) - float(z2))
+        workflow_dict["Stack Settings"]["Change in Z axis (mm)"] = abs(
+            float(z) - float(z2)
+        )
     elif zEnd is not None:
         workflow_dict["End Position"]["X (mm)"] = float(x)
         workflow_dict["End Position"]["Y (mm)"] = float(y)
         workflow_dict["End Position"]["Z (mm)"] = float(zEnd)
         workflow_dict["End Position"]["Angle (degrees)"] = float(r)
-        workflow_dict["Stack Settings"]["Change in Z axis (mm)"] = abs(float(z) - float(zEnd))
+        workflow_dict["Stack Settings"]["Change in Z axis (mm)"] = abs(
+            float(z) - float(zEnd)
+        )
     else:
         raise ValueError("Either xyzr2 or zEnd must be provided.")
 
     if save_with_data:
-        workflow_dict["Experiment Settings"]["Comments"] = f"Snapshot at {x}, {y}, {z}, {r}"
+        workflow_dict["Experiment Settings"][
+            "Comments"
+        ] = f"Snapshot at {x}, {y}, {z}, {r}"
         workflow_dict["Experiment Settings"]["Save image data"] = "Tiff"
     else:
         workflow_dict["Experiment Settings"]["Save image data"] = "NotSaved"
@@ -398,8 +414,8 @@ def dict_to_snap(
 
     return workflow_dict
 
-def is_valid_filename(filename):
 
+def is_valid_filename(filename):
 
     # Check for invalid characters
     if re.search(r'[<>:"/\\|?*]', filename):
@@ -407,28 +423,28 @@ def is_valid_filename(filename):
 
     # Check for reserved words
     return filename.upper() not in [
-        'CON',
-        'PRN',
-        'AUX',
-        'NUL',
-        'COM1',
-        'COM2',
-        'COM3',
-        'COM4',
-        'COM5',
-        'COM6',
-        'COM7',
-        'COM8',
-        'COM9',
-        'LPT1',
-        'LPT2',
-        'LPT3',
-        'LPT4',
-        'LPT5',
-        'LPT6',
-        'LPT7',
-        'LPT8',
-        'LPT9',
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "COM1",
+        "COM2",
+        "COM3",
+        "COM4",
+        "COM5",
+        "COM6",
+        "COM7",
+        "COM8",
+        "COM9",
+        "LPT1",
+        "LPT2",
+        "LPT3",
+        "LPT4",
+        "LPT5",
+        "LPT6",
+        "LPT7",
+        "LPT8",
+        "LPT9",
     ]
 
 
@@ -612,7 +628,9 @@ def workflow_to_dict(filename: str):
                         # Start of a new section
                         current_section = line.strip()[1:-1]
                         settings_dict[current_section] = {}
-                    elif "=" in line and current_section:  # Ensure current_section is not None
+                    elif (
+                        "=" in line and current_section
+                    ):  # Ensure current_section is not None
                         # Parse the key and value from the line
                         key, value = line.strip().split("=")
                         settings_dict[current_section][key.strip()] = value.strip()
@@ -663,6 +681,7 @@ def workflow_to_dict(filename: str):
 #                 settings_dict[current_section][key.strip()] = value.strip()
 
 #         return settings_dict
+
 
 def points_to_dict(points):
     """
@@ -722,10 +741,10 @@ def save_ellipse_params(sample_name, params, angle_step_size_deg, xyzr):
             "a": params[2],  # The length of the semi-major axis
             "b": params[3],  # The length of the semi-minor axis
         },
-        "Additional information":{
+        "Additional information": {
             "Angle step size (deg)": angle_step_size_deg,
-            "Y position (mm)": xyzr[1]
-        }
+            "Y position (mm)": xyzr[1],
+        },
     }
 
     # Define the path for the output text file.
@@ -733,9 +752,7 @@ def save_ellipse_params(sample_name, params, angle_step_size_deg, xyzr):
     # and the filename will follow the pattern "{sample_name}_{angle_step_size_deg}_deg_ellipse_params.txt".
     output_path = str(
         os.path.join(
-            "sample_txt",
-            f"{sample_name}",
-            f"{sample_name}_ellipse_params.txt",
+            "sample_txt", f"{sample_name}", f"{sample_name}_ellipse_params.txt",
         )
     )
 

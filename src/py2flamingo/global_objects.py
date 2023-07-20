@@ -17,16 +17,7 @@ OS = platform.system()
     command_data_queue,
     stage_location_queue,
     other_data_queue,
-) = (
-    Queue(),
-    Queue(),
-    Queue(),
-    Queue(),
-    Queue(),
-    Queue(),
-    Queue(),
-    Queue()
-)
+) = (Queue(), Queue(), Queue(), Queue(), Queue(), Queue(), Queue(), Queue())
 
 # Create events for signaling between threads
 (
@@ -50,7 +41,7 @@ def clear_all_events_queues():
         processing_event,
         send_event,
         terminate_event,
-        visualize_event
+        visualize_event,
     ]
     # List of all queues
     queues = [
@@ -61,7 +52,7 @@ def clear_all_events_queues():
         visualize_queue,
         command_data_queue,
         stage_location_queue,
-        other_data_queue
+        other_data_queue,
     ]
 
     # Clear all events

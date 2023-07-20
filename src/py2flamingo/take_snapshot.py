@@ -2,6 +2,7 @@ import os
 import shutil
 import time
 from typing import Sequence
+
 import functions.microscope_interactions as scope
 from functions.text_file_parsing import *
 from global_objects import clear_all_events_queues
@@ -71,7 +72,9 @@ def take_snapshot(
         os.path.join("workflows", "currentSnapshot.txt"),
         os.path.join("workflows", "workflow.txt"),
     )
-    scope.check_workflow(command_queue, send_event, other_data_queue, COMMAND_CODES_CAMERA_CHECK_STACK)
+    scope.check_workflow(
+        command_queue, send_event, other_data_queue, COMMAND_CODES_CAMERA_CHECK_STACK
+    )
     # Send the command to start the workflow to the microscope
 
     command_queue.put(COMMAND_CODES_CAMERA_WORK_FLOW_START)

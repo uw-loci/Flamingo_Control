@@ -1,15 +1,18 @@
 # Additional calculations to be used elsewhere, like finding a maxima or focal plane
+import csv
+import math
+import statistics
+from itertools import combinations
 from typing import Sequence
-from sklearn.linear_model import RANSACRegressor
+
 import numpy as np
-from scipy.optimize import minimize
-from scipy.signal import find_peaks
 import scipy.stats as stats
 from scipy.ndimage import gaussian_filter1d
-from itertools import combinations
-import csv
-import statistics
-import math
+from scipy.optimize import minimize
+from scipy.signal import find_peaks
+from sklearn.linear_model import RANSACRegressor
+
+
 def adjust_peak_bounds(bounds, data):
     """
     For small data sets, bump the bounds out by 1, except for edge cases - the literal edge, and TODO touching bounds
@@ -17,12 +20,13 @@ def adjust_peak_bounds(bounds, data):
     if len(data) < 256:
         for bound in bounds:
             if bound[0] != 0:
-                bound[0] = bound[0]-1
-            if bound[1] != len(data)-1:
-                bound[1] = bound[1]+1
+                bound[0] = bound[0] - 1
+            if bound[1] != len(data) - 1:
+                bound[1] = bound[1] + 1
     return bounds
 
-#TODO hardcoded 5 for prominence
+
+# TODO hardcoded 5 for prominence
 def process_data(data, smoothing_sigma=None, background_pct=10):
     """
     Process a list of data points by applying Gaussian smoothing and subtracting the background level.
@@ -41,7 +45,7 @@ def process_data(data, smoothing_sigma=None, background_pct=10):
     processed_data : list
         The processed data, where Gaussian smoothing has been applied and the background level has been subtracted.
     """
-    #print(f"data: {data}")
+    # print(f"data: {data}")
     # Apply Gaussian smoothing if a sigma value is provided
     if smoothing_sigma:
         data = gaussian_filter1d(data, smoothing_sigma)
@@ -50,14 +54,15 @@ def process_data(data, smoothing_sigma=None, background_pct=10):
 
     # Round the smoothed data to the nearest integer for simplicity
     smoothed_data = [round(x) for x in data]
-    #print(f"smoothed data: {smoothed_data}")
+    # print(f"smoothed data: {smoothed_data}")
     # Calculate the background level as the given percentile of the smoothed data
     background_level = np.percentile(smoothed_data, background_pct)
     return smoothed_data - background_level
 
 
-
-def find_peak_bounds(data, num_peaks=1, threshold_pct=10, sample_intensity_above_background = 10):
+def find_peak_bounds(
+    data, num_peaks=1, threshold_pct=10, sample_intensity_above_background=10
+):
     """
     Find the bounds of peaks in a list of data points.
 
@@ -80,12 +85,12 @@ def find_peak_bounds(data, num_peaks=1, threshold_pct=10, sample_intensity_above
     # Process the data by applying Gaussian smoothing and subtracting the background level
     smooth = 5 if len(data) > 1000 else None
     data = process_data(data, smooth)
-    #print(f'data length {len(data)}')
-    #print_list_summary(data)
-    #print(data)
-    all_peaks, _ = find_peaks(data, height = sample_intensity_above_background)
+    # print(f'data length {len(data)}')
+    # print_list_summary(data)
+    # print(data)
+    all_peaks, _ = find_peaks(data, height=sample_intensity_above_background)
 
-    #For help determining issues with large data sets
+    # For help determining issues with large data sets
     # filtered_list = data[::10]
     # with open('floats.csv', 'w', newline='') as f:
     #     writer = csv.writer(f)
@@ -93,9 +98,9 @@ def find_peak_bounds(data, num_peaks=1, threshold_pct=10, sample_intensity_above
     # If no peaks are found, return None
 
     if len(all_peaks) == 0:
-        print('No peaks found')
+        print("No peaks found")
         return [[None, None]]
-    print(f'Peak found {all_peaks}, value {data[all_peaks]}')
+    print(f"Peak found {all_peaks}, value {data[all_peaks]}")
 
     # If more peaks are found than expected, select the ones that maximize the average distance between peaks
     if len(all_peaks) > num_peaks:
@@ -105,7 +110,9 @@ def find_peak_bounds(data, num_peaks=1, threshold_pct=10, sample_intensity_above
         else:
             # Otherwise, select the num_peaks peaks that maximize the average distance between peaks
             peak_combinations = list(combinations(all_peaks, num_peaks))
-            avg_distances = [np.mean(np.diff(peak_comb)) for peak_comb in peak_combinations]
+            avg_distances = [
+                np.mean(np.diff(peak_comb)) for peak_comb in peak_combinations
+            ]
             max_distance_index = np.argmax(avg_distances)
             peaks = list(peak_combinations[max_distance_index])
     else:
@@ -113,7 +120,7 @@ def find_peak_bounds(data, num_peaks=1, threshold_pct=10, sample_intensity_above
 
     # Initialize list to store peak bounds
     peak_bounds = []
-    #print(f'peaks {peaks}')
+    # print(f'peaks {peaks}')
     # Loop over each peak
     for i, peak in enumerate(peaks):
         # Initialize start and end of peak
@@ -124,35 +131,35 @@ def find_peak_bounds(data, num_peaks=1, threshold_pct=10, sample_intensity_above
         threshold_value = data[peak] * threshold_pct / 100
 
         # Move start to the left until it's no longer part of the peak
-        while start > 0 and data[start-1] > threshold_value:
+        while start > 0 and data[start - 1] > threshold_value:
             start -= 1
 
         # If start of list is reached before bound is found, return None
         if start == 0 and data[start] > threshold_value:
             return [[None, None]]
-        # If there's a previous peak and the current start is to the left of the previous peak's end, set the start to be the previous peak's end 
-        if i > 0 and start < peak_bounds[i-1][1]:
-            start = peak_bounds[i-1][1]
+        # If there's a previous peak and the current start is to the left of the previous peak's end, set the start to be the previous peak's end
+        if i > 0 and start < peak_bounds[i - 1][1]:
+            start = peak_bounds[i - 1][1]
 
         # Move end to the right until it's no longer part of the peak
-        while end < len(data)-1 and data[end+1] > threshold_value:
+        while end < len(data) - 1 and data[end + 1] > threshold_value:
             end += 1
 
         # If end of list is reached before bound is found, return None
-        if end == len(data)-1 and data[end] > threshold_value:
+        if end == len(data) - 1 and data[end] > threshold_value:
             return [[None, None]]
 
         # If there's another peak and the next peak is before the current 'end', use the lowest point between the two peaks as the end of this peak
-        if i < len(peaks) - 1 and peaks[i+1] < end:
-            next_peak = peaks[i+1]
+        if i < len(peaks) - 1 and peaks[i + 1] < end:
+            next_peak = peaks[i + 1]
             min_point = np.argmin(data[peak:next_peak]) + peak
             end = min_point
-
 
         # Append peak bounds to list
         peak_bounds.append((start, end))
 
     return peak_bounds
+
 
 def find_most_in_focus_plane(z_stack: np.ndarray[np.uint16, Sequence[int]]):
     """
@@ -204,22 +211,33 @@ def check_maxima(lst: Sequence[int], window_size: int = 5, threshold_factor: int
     # Create an array of thresholds, where each threshold is based on a rolling window of the list
     # For the first few elements where a complete window isn't available, use the mean and standard deviation
     # of the available elements
-    initial_thresholds = np.array([np.mean(lst[:i+1]) + threshold_factor * np.std(lst[:i+1]) 
-                                   for i in range(window_size)])
-    thresholds = np.array([np.mean(lst[i-window_size+1:i+1]) + threshold_factor * np.std(lst[i-window_size+1:i+1]) 
-                            for i in range(window_size-1, len(lst))])
+    initial_thresholds = np.array(
+        [
+            np.mean(lst[: i + 1]) + threshold_factor * np.std(lst[: i + 1])
+            for i in range(window_size)
+        ]
+    )
+    thresholds = np.array(
+        [
+            np.mean(lst[i - window_size + 1 : i + 1])
+            + threshold_factor * np.std(lst[i - window_size + 1 : i + 1])
+            for i in range(window_size - 1, len(lst))
+        ]
+    )
     thresholds = np.concatenate((initial_thresholds, thresholds))
 
-    #print(f'thresholds {thresholds}')
+    # print(f'thresholds {thresholds}')
 
     # Find maxima that are above the threshold with values below the threshold on both sides
-    # The list indices are iterated from 1 to len(lst) - 1 because a maxima, by our definition, has to have 
+    # The list indices are iterated from 1 to len(lst) - 1 because a maxima, by our definition, has to have
     # both a predecessor and a successor in the list
     maxima_above_threshold = []
     for i in range(1, len(lst) - 1):
         # A maxima is a point that is greater than its neighbors and greater than the threshold
         if lst[i] > thresholds[i] and lst[i] > lst[i - 1] and lst[i] > lst[i + 1]:
-            left_below_thresh = any(lst[j] < thresholds[j] for j in range(i - 1, -1, -1))
+            left_below_thresh = any(
+                lst[j] < thresholds[j] for j in range(i - 1, -1, -1)
+            )
             right_below_thresh = any(
                 lst[j] < thresholds[j] for j in range(i + 1, len(lst))
             )
@@ -255,27 +273,29 @@ def fit_ellipse(points):
     # Extract x and z coordinates from the points
     x = np.array([point[0] for point in points])
     z = np.array([point[2] for point in points])
-    
+
     # Define the equation of an ellipse in 2D space
     def ellipse(h, k, a, b, x, z):
-        return ((x-h)**2/a**2) + ((z-k)**2/b**2) - 1
+        return ((x - h) ** 2 / a ** 2) + ((z - k) ** 2 / b ** 2) - 1
 
     # Define the objective function for least squares minimization
     # This is the function we want to minimize.
     def objective(params):
         h, k, a, b = params
-        return np.sum(ellipse(h, k, a, b, x, z)**2)
+        return np.sum(ellipse(h, k, a, b, x, z) ** 2)
 
     # Initial guess for parameters h, k, a, and b
     # h and k are set to the mean of x and z coordinates respectively
     # a and b are set to half of the range of x and z coordinates respectively
-    p0 = (np.mean(x), np.mean(z), np.ptp(x)/2, np.ptp(z)/2)
+    p0 = (np.mean(x), np.mean(z), np.ptp(x) / 2, np.ptp(z) / 2)
 
     # Perform the minimization using the 'minimize' function from scipy.optimize
     # The function to minimize is 'objective' and the initial guess is 'p0'
     # Bounds are set so that a and b are non-negative
-    result = minimize(objective, p0, bounds=((None, None), (None, None), (0, None), (0, None)))
-    
+    result = minimize(
+        objective, p0, bounds=((None, None), (None, None), (0, None), (0, None))
+    )
+
     # Return the optimized parameters
     return result.x
 
@@ -289,8 +309,10 @@ def fit_ellipse_with_ransac(points):
     z = points[:, 2]
 
     # Create a RANSAC regressor
-    ransac = RANSACRegressor(min_samples=0.85)  # Here, 0.85 indicates that 85% of the data should be inliers
-    
+    ransac = RANSACRegressor(
+        min_samples=0.85
+    )  # Here, 0.85 indicates that 85% of the data should be inliers
+
     # Fit the RANSAC regressor to the data
     ransac.fit(x.reshape(-1, 1), z)
 
@@ -323,15 +345,16 @@ def point_on_ellipse(params, angle):
     """
     # Convert params to float and extract the parameters
     h, k, a, b = [float(param) for param in params]
-    
+
     # Convert the angle to radians
     angle_rad = np.deg2rad(angle)
-    
+
     # Compute the x, z coordinates
     x = h + a * np.cos(angle_rad)
     z = k + b * np.sin(angle_rad)
-    
+
     return x, z
+
 
 def calculate_rolling_x_intensity(image_data, n_lines: int):
     """
@@ -350,13 +373,13 @@ def calculate_rolling_x_intensity(image_data, n_lines: int):
     """
     # Flatten the image data to a 1D array
     flattened = image_data.flatten()
-    
+
     # Sort the flattened array
     sorted_array = np.sort(flattened)
-    
+
     # Determine the index to slice the array to keep the largest quarter of values
     slice_index = len(sorted_array) // 4
-    
+
     # Calculate the mean of the largest quarter of the pixel intensities
     mean_largest_quarter = np.mean(sorted_array[-slice_index:])
 
@@ -367,18 +390,21 @@ def calculate_rolling_x_intensity(image_data, n_lines: int):
     half_window = n_lines // 2
 
     # Add padding to the image data beyond the edge along the X direction
-    padded_image_data = np.pad(image_data, ((0, 0), (half_window, half_window)), mode='edge')
+    padded_image_data = np.pad(
+        image_data, ((0, 0), (half_window, half_window)), mode="edge"
+    )
 
     # Iterate over each line in the image data
     for i in range(half_window, image_data.shape[1] + half_window):
         # Calculate the mean intensity of the lines in the current window
-        mean_intensity = np.mean(padded_image_data[:, i - half_window: i + half_window + 1])
-        
+        mean_intensity = np.mean(
+            padded_image_data[:, i - half_window : i + half_window + 1]
+        )
+
         # Add the line position and its corresponding rolling average intensity to the map
         x_intensity_map.append((i - half_window, mean_intensity))
 
     return mean_largest_quarter, x_intensity_map
-
 
 
 def calculate_rolling_y_intensity(image_data, n_lines: int):
@@ -416,18 +442,22 @@ def calculate_rolling_y_intensity(image_data, n_lines: int):
     half_window = n_lines // 2
 
     # Add padding to the image data beyond the edge along the Y direction
-    padded_image_data = np.pad(image_data, ((half_window, half_window), (0, 0)), mode='edge')
+    padded_image_data = np.pad(
+        image_data, ((half_window, half_window), (0, 0)), mode="edge"
+    )
 
     # Iterate over each line in the image data
     for i in range(half_window, image_data.shape[0] + half_window):
         # Calculate the mean intensity of the brightest quarter of the lines in the current window
         # First, sort the window values
-        window_values = np.sort(padded_image_data[i - half_window: i + half_window + 1].flatten())
-        
+        window_values = np.sort(
+            padded_image_data[i - half_window : i + half_window + 1].flatten()
+        )
+
         # Then, keep the brightest quarter or at least one pixel
         slice_index_window = max(len(window_values) // 4, 1)
         top_quarter_window = window_values[-slice_index_window:]
-        
+
         # Calculate the mean of the brightest quarter
         mean_intensity = np.mean(top_quarter_window)
 
@@ -435,7 +465,6 @@ def calculate_rolling_y_intensity(image_data, n_lines: int):
         y_intensity_map.append((i - half_window, mean_intensity))
 
     return mean_largest_quarter, y_intensity_map
-
 
 
 def print_list_summary(data):
@@ -458,7 +487,8 @@ def print_list_summary(data):
         # Handle empty list case
         print("The list is empty.")
 
-def find_center(top_bounds_mm, bottom_bounds_mm, shift = None):
+
+def find_center(top_bounds_mm, bottom_bounds_mm, shift=None):
     """
     Find the center point between two points in 3D space.
     Input, two lists of [x,y,z,r], output, one list of the same
@@ -474,6 +504,7 @@ def find_center(top_bounds_mm, bottom_bounds_mm, shift = None):
         centerpoint_mm = shift_frame(centerpoint_mm, shift)
 
     return centerpoint_mm
+
 
 def shift_frame(point, frameshift):
     """
@@ -513,15 +544,15 @@ def bounding_point_from_angle(points_list, angle):
 
     lower_point, upper_point = None, None
 
-    # Search for two closest points such that one has an angle less than the target 
+    # Search for two closest points such that one has an angle less than the target
     # and the other has an angle more than the target.
     for i, point in enumerate(sorted_points):
         if point[3] > angle:
-            lower_point = sorted_points[i-1]
+            lower_point = sorted_points[i - 1]
             upper_point = point
             break
 
-    # If not found, it means there's a wrap-around. The points with highest and lowest 
+    # If not found, it means there's a wrap-around. The points with highest and lowest
     # angles are chosen as the bounding points.
     if lower_point is None and upper_point is None:
         lower_point = sorted_points[-1]
@@ -533,7 +564,9 @@ def bounding_point_from_angle(points_list, angle):
         lower_value = lower_point[i]
         upper_value = upper_point[i]
         if upper_point[3] != lower_point[3]:  # Prevent division by zero
-            interpolated_value = lower_value + ((upper_value - lower_value) / (upper_point[3] - lower_point[3])) * (angle - lower_point[3])
+            interpolated_value = lower_value + (
+                (upper_value - lower_value) / (upper_point[3] - lower_point[3])
+            ) * (angle - lower_point[3])
         else:  # If the points have the same angle, just use the lower value
             interpolated_value = lower_value
         interpolated_point.append(interpolated_value)
@@ -542,4 +575,3 @@ def bounding_point_from_angle(points_list, angle):
     interpolated_point.append(angle)
 
     return interpolated_point
-

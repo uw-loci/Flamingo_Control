@@ -1,9 +1,11 @@
 # TO DO? Create initial dialog to ask about which microscope to connect to. Create named files based on the microscope (settings, workflows)
-#TODO Running from command line currently not supported but should be the goal
-#TODO Feedback window indicating status
-# Run black . and isort --profile black
-#TODO create chatGPT prompt that allows the creation of new functions and buttons.
-#TODO TODO TODO Cancel button stopped working at some point during the restructuring. It does cancel but does not leave the program in a workable state.
+# TODO Running from command line currently not supported but should be the goal
+# TODO Feedback window indicating status
+# Run 
+# black .
+# isort . --profile black
+# TODO create chatGPT prompt that allows the creation of new functions and buttons.
+# TODO TODO TODO Cancel button stopped working at some point during the restructuring. It does cancel but does not leave the program in a workable state.
 ######################################
 
 import sys
@@ -25,7 +27,6 @@ from global_objects import (
     visualize_queue,
     z_plane_queue,
 )
-
 from GUI import Py2FlamingoGUI
 from PyQt5.QtWidgets import QApplication
 

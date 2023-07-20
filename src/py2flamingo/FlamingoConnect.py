@@ -23,6 +23,7 @@ from global_objects import (
 )
 from PyQt5.QtWidgets import QFileDialog, QMessageBox
 
+
 def show_warning_message(warning):
     """
     Displays a warning message box.
@@ -42,6 +43,8 @@ def show_warning_message(warning):
     message_box.setStandardButtons(QMessageBox.Ok)
     message_box.exec_()
     return
+
+
 class FlamingoConnect:
     """
     This class is responsible for establishing and managing the connection to the microscope. It also initializes various properties related to the microscope, such as its IP address, port, instrument name, and type, as well as the start position, current coordinates, available lasers, selected laser, laser power, and data storage location.
@@ -135,10 +138,14 @@ class FlamingoConnect:
         self.check_start_position()
 
     def get_initial_z_depth(self):
-        _, scope_settings = mc.get_microscope_settings(command_queue, other_data_queue, send_event)
-        zmax = scope_settings['Stage limits']['Soft limit max z-axis']
-        zmin = scope_settings['Stage limits']['Soft limit min z-axis']
-        self.z_default = abs(float(zmax) - float(zmin)) * 0.9 #try to avoid pushing the limits which causes errors
+        _, scope_settings = mc.get_microscope_settings(
+            command_queue, other_data_queue, send_event
+        )
+        zmax = scope_settings["Stage limits"]["Soft limit max z-axis"]
+        zmin = scope_settings["Stage limits"]["Soft limit min z-axis"]
+        self.z_default = (
+            abs(float(zmax) - float(zmin)) * 0.9
+        )  # try to avoid pushing the limits which causes errors
 
     def check_folders(self):
         """
@@ -188,7 +195,6 @@ class FlamingoConnect:
                 float(positions_dict[self.instrument_name]["r(°)"]),
             ]
             self.current_coordinates = self.start_position.copy()
-
 
     # def show_warning_message(self, warning):
     #     """
@@ -248,7 +254,7 @@ class FlamingoConnect:
             The path to copy the selected file to.
         """
         if os.path.isfile(file_path):
-            #selected_file = file_dialog.selectedFiles()[0]  # Get the selected file path
+            # selected_file = file_dialog.selectedFiles()[0]  # Get the selected file path
             os.makedirs(
                 "microscope_settings", exist_ok=True
             )  # Create the 'microscope_settings' directory if it doesn't exist
@@ -448,9 +454,7 @@ class FlamingoConnect:
         which is then processed. If the file exists, it is read and the relevant class attributes are updated.
         """
         file_path = os.path.join("workflows", "ZStack.txt")
-        if not os.path.exists(
-            file_path
-        ):  # Using the previously defined function
+        if not os.path.exists(file_path):  # Using the previously defined function
             warning = "The file ZStack.txt was not found at workflows/ZStack.txt. \nPlease locate a workflow text (workflow.txt) file to use as the basis for your settings (Laser line, laser power). One should be generated when a workflow is manually run on the microscope."
             show_warning_message(warning)
             file_dialog = self.prompt_user_for_zstack_file()

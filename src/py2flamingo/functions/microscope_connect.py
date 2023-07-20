@@ -45,10 +45,10 @@ COMMAND_CODES_CAMERA_IMAGE_SIZE_GET = int(
 )
 COMMAND_CODES_SYSTEM_STATE_GET = int(
     commands["CommandCodes.h"]["COMMAND_CODES_SYSTEM_STATE_GET"]
-) 
-COMMAND_CODES_CAMERA_WORK_FLOW_STOP  = int(
+)
+COMMAND_CODES_CAMERA_WORK_FLOW_STOP = int(
     commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_WORK_FLOW_STOP"]
-) 
+)
 ##############################
 
 
@@ -129,9 +129,7 @@ def get_microscope_settings(command_queue, other_data_queue, send_event):
     Tuple[float, dict]
         A tuple containing the image pixel size and the microscope settings dictionary.
     """
-    send_command(
-        command_queue, COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD, send_event
-    )
+    send_command(command_queue, COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD, send_event)
     # Microscope settings should now be in a text file called ScopeSettings.txt in the 'microscope_settings' directory.
     # Convert them into a dictionary to extract useful information.
     scope_settings = text_to_dict("microscope_settings/ScopeSettings.txt")
@@ -139,16 +137,23 @@ def get_microscope_settings(command_queue, other_data_queue, send_event):
     send_command(
         command_queue, COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET, send_event
     )
-    tube_Lens_Length = float(scope_settings['Type']['Tube lens design focal length (mm)'])
-    tube_Lens_Design_FocalLength = float(scope_settings['Type']['Tube lens length (mm)'])
-    objective_Lens_Magnification = float(scope_settings['Type']['Objective lens magnification'])
+    tube_Lens_Length = float(
+        scope_settings["Type"]["Tube lens design focal length (mm)"]
+    )
+    tube_Lens_Design_FocalLength = float(
+        scope_settings["Type"]["Tube lens length (mm)"]
+    )
+    objective_Lens_Magnification = float(
+        scope_settings["Type"]["Objective lens magnification"]
+    )
     # Get the image pixel size from the other data queue
     image_pixel_size = other_data_queue.get()
-    #image_pixel_size = camera_pixel_size / ((tube_Lens_Length / tube_Lens_Design_FocalLength) * objective_Lens_Magnification)
-    print(f'image pixel size from system {image_pixel_size}, objective mag {objective_Lens_Magnification}')
-    #return 0.000488, scope_settings
+    # image_pixel_size = camera_pixel_size / ((tube_Lens_Length / tube_Lens_Design_FocalLength) * objective_Lens_Magnification)
+    print(
+        f"image pixel size from system {image_pixel_size}, objective mag {objective_Lens_Magnification}"
+    )
+    # return 0.000488, scope_settings
     return image_pixel_size, scope_settings
-
 
 
 def send_command(command_queue, arg1, send_event):

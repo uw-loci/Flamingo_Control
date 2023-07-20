@@ -1,13 +1,15 @@
 import copy
+import queue
 import shutil
 import time
-import numpy as np
+
 import functions.calculations as calc
+import functions.image_display
+import numpy as np
 from functions.microscope_connect import *
 from functions.text_file_parsing import *
 from global_objects import clear_all_events_queues
-import functions.image_display
-import queue
+
 
 def initial_setup(command_queue, other_data_queue, send_event):
     """
@@ -24,7 +26,6 @@ def initial_setup(command_queue, other_data_queue, send_event):
     commands = text_to_dict(
         os.path.join("src", "py2flamingo", "functions", "command_list.txt")
     )
-
 
     COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(
         commands["CommandCodes.h"]["COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD"]
@@ -45,7 +46,7 @@ def initial_setup(command_queue, other_data_queue, send_event):
     )
     COMMAND_CODES_CAMERA_CHECK_STACK = int(
         commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_CHECK_STACK"]
-    ) 
+    )
 
     command_labels = [
         COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD,
@@ -67,7 +68,7 @@ def initial_setup(command_queue, other_data_queue, send_event):
     FOV = image_pixel_size_mm * frame_size
 
     # pixel_size*frame_size #pixel size in mm*number of pixels per frame
-    y_move = FOV #* 1.3 # increase step size for large samples and coarse search
+    y_move = FOV  # * 1.3 # increase step size for large samples and coarse search
     print(f"y_move search step size is currently {y_move}mm")
     ############
     ymax = float(scope_settings["Stage limits"]["Soft limit max y-axis"])
@@ -76,7 +77,9 @@ def initial_setup(command_queue, other_data_queue, send_event):
     return command_labels, ymax, y_move, image_pixel_size_mm, frame_size
 
 
-def check_workflow(command_queue, send_event, other_data_queue, COMMAND_CODES_CAMERA_CHECK_STACK):
+def check_workflow(
+    command_queue, send_event, other_data_queue, COMMAND_CODES_CAMERA_CHECK_STACK
+):
     other_data_queue.empty()
     command_queue.put(COMMAND_CODES_CAMERA_CHECK_STACK)
     send_event.set()
@@ -84,38 +87,33 @@ def check_workflow(command_queue, send_event, other_data_queue, COMMAND_CODES_CA
         time.sleep(0.05)
     text_bytes = other_data_queue.get()
     if "hard limit" in str(text_bytes):
-        text_data = text_bytes.decode('utf-8')
+        text_data = text_bytes.decode("utf-8")
         print(text_data)
 
 
 def send_workflow(
-    command_queue,
-    send_event,
-    system_idle: Event,
+    command_queue, send_event, system_idle: Event,
 ):
-    workflow_dict=workflow_to_dict(os.path.join("workflows", "workflow.txt"))
+    workflow_dict = workflow_to_dict(os.path.join("workflows", "workflow.txt"))
     if not check_coordinate_limits(workflow_dict):
         return
     command_queue.put(COMMAND_CODES_CAMERA_WORK_FLOW_START)
     send_event.set()
 
-    #TODO this is a hacky way to avoid the problem that I am not getting all of the system idle event messages as of 7/11/2023. This has not happened before.
+    # TODO this is a hacky way to avoid the problem that I am not getting all of the system idle event messages as of 7/11/2023. This has not happened before.
     start_time = time.time()
     while not system_idle.is_set():
-        #check to see if we missed the idle command
-        if time.time() - start_time > 5: 
+        # check to see if we missed the idle command
+        if time.time() - start_time > 5:
             command_queue.put(COMMAND_CODES_SYSTEM_STATE_GET)
             send_event.set()
             start_time = time.time()
         time.sleep(0.1)
 
+
 def resolve_workflow(
-        stage_location_queue,
-        xyzr_init,
-        image_queue,
-        visualize_event,
-        terminate_event,
-    ):
+    stage_location_queue, xyzr_init, image_queue, visualize_event, terminate_event,
+):
     """
     To be run immediately after
     """
@@ -124,7 +122,7 @@ def resolve_workflow(
     # Check for image data or terminate_event
     while True:
         try:
-            return image_queue.get(timeout=1) # Wait for 1 second
+            return image_queue.get(timeout=1)  # Wait for 1 second
         except queue.Empty:
             if terminate_event.is_set():
                 # Terminate event is set, break the loop
@@ -132,6 +130,7 @@ def resolve_workflow(
 
     # Return None or some other appropriate response if terminated
     return None
+
 
 def replace_none(values, replacement):
     """
@@ -157,7 +156,6 @@ def replace_none(values, replacement):
     return values
 
 
-
 def y_axis_sample_boundary_search(
     sample_count: int,
     ymax: float,
@@ -176,7 +174,7 @@ def y_axis_sample_boundary_search(
     visualize_event,
     image_queue,
     image_pixel_size_mm,
-    terminate_event
+    terminate_event,
 ):
     """
     Function that takes in information about a starting location and enough variables to run some workflows to scan down the Y axis. 
@@ -201,21 +199,23 @@ def y_axis_sample_boundary_search(
             os.path.join("workflows", f"current{wf_zstack}"),
             os.path.join("workflows", "workflow.txt"),
         )
-        #Minor adjustment - since we are taking the MIP of a Z stack, use the center of that Z stack
-        #rather than the starting or ending position
+        # Minor adjustment - since we are taking the MIP of a Z stack, use the center of that Z stack
+        # rather than the starting or ending position
         xyzr_centered = xyzr.copy()
         xyzr_centered[2] = (float(xyzr_centered[2]) + zend) / 2
         print(
             f"coordinates x: {xyzr[0]}, y: {xyzr[1]}, z:{xyzr_centered[2]}, r:{xyzr[3]}"
         )
 
-        check_workflow(command_queue, send_event, other_data_queue, COMMAND_CODES_CAMERA_CHECK_STACK)
-
-        send_workflow(
+        check_workflow(
             command_queue,
             send_event,
-            system_idle,
+            other_data_queue,
+            COMMAND_CODES_CAMERA_CHECK_STACK,
+        )
 
+        send_workflow(
+            command_queue, send_event, system_idle,
         )
         image_data = resolve_workflow(
             stage_location_queue,
@@ -224,20 +224,24 @@ def y_axis_sample_boundary_search(
             visualize_event,
             terminate_event,
         )
-        functions.image_display.save_png(image_data, f'yscan_{xyzr_centered[1]}')
+        functions.image_display.save_png(image_data, f"yscan_{xyzr_centered[1]}")
         _, y_intensity_map = calc.calculate_rolling_y_intensity(image_data, 21)
 
         # Store data about IF signal at current in focus location
         coords.append([copy.deepcopy(xyzr), y_intensity_map])
 
         # Loop may finish early if drastic maxima in intensity sum is detected
-        processing_output_full = [y_intensity for coord in coords for _, y_intensity in coord[1]]
+        processing_output_full = [
+            y_intensity for coord in coords for _, y_intensity in coord[1]
+        ]
 
         # if maxima := calc.check_maxima(processing_output_full, window_size = 100):
         #     break
         bounds = calc.find_peak_bounds(processing_output_full, num_peaks=sample_count)
-        if bounds is not None and all(b is not None for sublist in bounds for b in sublist):
-            print(f'bounds {bounds}')
+        if bounds is not None and all(
+            b is not None for sublist in bounds for b in sublist
+        ):
+            print(f"bounds {bounds}")
             break
 
         # move the stage up
@@ -246,7 +250,8 @@ def y_axis_sample_boundary_search(
 
     return bounds, coords, xyzr, i
 
-#TODO fine Z focus to find edges of sample?
+
+# TODO fine Z focus to find edges of sample?
 def z_axis_sample_boundary_search(
     i: int,
     loops: int,
@@ -265,7 +270,7 @@ def z_axis_sample_boundary_search(
     visualize_event,
     image_queue,
     coordsZ,
-    terminate_event
+    terminate_event,
 ):
     """
     Function that can be used within a loop to collect the MIP of a Z stack. Outside the function, the brightness of the MIPs are tracked
@@ -280,8 +285,8 @@ def z_axis_sample_boundary_search(
     xyzr[2] = float(z_init) - float(z_search_depth_mm) / 2 + i * z_step_depth_mm
     zEnd = float(z_init) - float(z_search_depth_mm) / 2 + (i + 1) * z_step_depth_mm
 
-    print(f'zstart and end {xyzr[2]}, {zEnd}')
-    dict_positions(wf_dict, xyzr, zEnd = zEnd, save_with_data=False, get_zstack=False)
+    print(f"zstart and end {xyzr[2]}, {zEnd}")
+    dict_positions(wf_dict, xyzr, zEnd=zEnd, save_with_data=False, get_zstack=False)
 
     dict_to_workflow(os.path.join("workflows", f"current{wf_zstack}"), wf_dict)
 
@@ -289,16 +294,15 @@ def z_axis_sample_boundary_search(
         os.path.join("workflows", f"current{wf_zstack}"),
         os.path.join("workflows", "workflow.txt"),
     )
-    check_workflow(command_queue, send_event, other_data_queue, COMMAND_CODES_CAMERA_CHECK_STACK)
+    check_workflow(
+        command_queue, send_event, other_data_queue, COMMAND_CODES_CAMERA_CHECK_STACK
+    )
 
     xyzr_centered = copy.deepcopy(xyzr)
     xyzr_centered[2] = (float(xyzr_centered[2]) + zEnd) / 2
 
     send_workflow(
-        command_queue,
-        send_event,
-        system_idle,
-
+        command_queue, send_event, system_idle,
     )
     image_data = resolve_workflow(
         stage_location_queue,
@@ -307,20 +311,20 @@ def z_axis_sample_boundary_search(
         visualize_event,
         terminate_event,
     )
-    #This doesn't really take the rolling Y intensity, as that part isn't kept. It's just used for the mean largest quarter value
+    # This doesn't really take the rolling Y intensity, as that part isn't kept. It's just used for the mean largest quarter value
     mean_largest_quarter, _ = calc.calculate_rolling_y_intensity(image_data, 3)
     coordsZ.append([copy.deepcopy(xyzr_centered), mean_largest_quarter])
     top25_percentile_means = [coord[1] for coord in coordsZ]
 
-    #print(f"Intensity means: {top25_percentile_means}")
+    # print(f"Intensity means: {top25_percentile_means}")
     # if maxima := calc.check_maxima(top25_percentile_means):
     #     #Once a maxima is assigned, the loop should break.
     #     print(f'max position {maxima}')
 
-    #Don't start searching for peaks too early.
+    # Don't start searching for peaks too early.
     if len(top25_percentile_means) > 4:
         if bounds := calc.find_peak_bounds(top25_percentile_means, threshold_pct=30):
-            print(f'bounds {bounds}')
+            print(f"bounds {bounds}")
     else:
         bounds = [[None, None]]
     return top25_percentile_means, coordsZ, bounds, image_data
@@ -339,7 +343,7 @@ def acquire_brightfield_image(
     plane_spacing,
     laser_channel,
     laser_setting,
-    terminate_event
+    terminate_event,
 ):
     """
     Acquires a brightfield image to verify sample holder location (assuming the sample holder is visible at the start
@@ -377,15 +381,8 @@ def acquire_brightfield_image(
     # Acquire a brightfield snapshot and return the image data
     print("Acquire a brightfield snapshot")
     send_workflow(
-        command_queue,
-        send_event,
-        system_idle,
-
+        command_queue, send_event, system_idle,
     )
     return resolve_workflow(
-        stage_location_queue,
-        xyzr_init,
-        image_queue,
-        visualize_event,
-        terminate_event,
+        stage_location_queue, xyzr_init, image_queue, visualize_event, terminate_event,
     )

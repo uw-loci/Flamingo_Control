@@ -47,10 +47,10 @@ COMMAND_CODES_CAMERA_IMAGE_SIZE_GET = int(
 )
 COMMAND_CODES_CAMERA_CHECK_STACK = int(
     commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_CHECK_STACK"]
-) 
+)
 COMMAND_CODES_CAMERA_CHECK_STACK_UPDATES = int(
     commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_CHECK_STACK_UPDATES"]
-)  
+)
 ##############################
 
 
@@ -195,11 +195,11 @@ def fetch_microscope_settings(received, client):
     if not os.path.exists("microscope_settings"):
         os.makedirs("microscope_settings")
     file_path = os.path.join("microscope_settings", "ScopeSettings.txt")
-    
+
     # If the file already exists, remove it
     if os.path.exists(file_path):
         os.remove(file_path)
-    
+
     # Write the new data to the file
     with open(file_path, "wb") as file:
         file.write(text_bytes)
@@ -220,7 +220,7 @@ def pixel_field_of_view(received, other_data_queue):
     -------
     None
     """
-    #print("pixel size " + str(received[10]))
+    # print("pixel size " + str(received[10]))
     if received[10] < 0:
         print(
             "Threads.py command_listen_thread: No pixel size detected from system. Exiting."
@@ -233,11 +233,11 @@ def check_stack(other_data_queue, client):
     # print('Check stack output')
     # for value in received:
     #     print(value)
-    #print(f"Checking Stack Viability = {received[2]}")
+    # print(f"Checking Stack Viability = {received[2]}")
     bytes_data = bytes_waiting(client)
     text_bytes = client.recv(bytes_data)
     other_data_queue.put(text_bytes)
-    #Possibly replace with adding the text data to other_data_queue
+    # Possibly replace with adding the text data to other_data_queue
 
 
 def handle_camera_frame_size(received, other_data_queue):
@@ -255,7 +255,7 @@ def handle_camera_frame_size(received, other_data_queue):
     -------
     None
     """
-    #print("frame size " + str(received[7]))
+    # print("frame size " + str(received[7]))
     if received[10] < 0:
         print(
             "Threads.py command_listen_thread: No camera size detected from system. Exiting."
@@ -301,7 +301,7 @@ def command_listen_thread(
 
         # Unpack the received message
         received = unpack_received_message(msg)
-        #print('listening to 53717 got ' + str(received[1]))
+        # print('listening to 53717 got ' + str(received[1]))
         # Check the command code in the received message and respond appropriately
         if received[1] == COMMAND_CODES_SYSTEM_STATE_IDLE:
             handle_idle_state(received, idle_state)
@@ -388,10 +388,10 @@ def process_single_image(
     image_data = receive_image_data(live_client, image_size)
     # build and reformat pixel data
     image_array = np.frombuffer(image_data, dtype=np.uint16)
-    #TODO move out of image processing?
+    # TODO move out of image processing?
     image_array = image_array.reshape((image_height, image_width)).T
     image_array = np.flipud(image_array)
-    #print("putting image into queues")
+    # print("putting image into queues")
     image_queue.put(np.array(image_array))
     visualize_queue.put(np.array(image_array))
 
@@ -444,7 +444,7 @@ def receive_zstack_images(
         image_data = receive_image_data(live_client, image_size)
 
         image_array = np.frombuffer(image_data, dtype=np.uint16)
-        #TODO move out of image processing?
+        # TODO move out of image processing?
         image_array = image_array.reshape((image_height, image_width)).T
         image_array = np.flipud(image_array)
 
@@ -505,10 +505,10 @@ def live_listen_thread(
                 f"Header length should be 40 bytes, not {len(header_data)}"
             )
         # parse the header
-        #print('parsing header, entering data acquisition')
+        # print('parsing header, entering data acquisition')
         header = struct.unpack("I I I I I I I I I I", header_data)
-        #Check which camera/objective is being used.
-        #print(f'hardwareID number: {header[3]}')
+        # Check which camera/objective is being used.
+        # print(f'hardwareID number: {header[3]}')
         image_size, image_width, image_height = header[0], header[1], header[2]
         # get the stack size and other info from the workflow file, as it is not sent as part of the header information
         current_workflow_dict = workflow_to_dict(
@@ -517,10 +517,11 @@ def live_listen_thread(
         if isinstance(current_workflow_dict, list):
             current_workflow_dict = current_workflow_dict[0]
 
-
         temp = current_workflow_dict["Stack Settings"]["Number of planes"]
         if temp != "auto":
-            stack_size = float(current_workflow_dict["Stack Settings"]["Number of planes"])
+            stack_size = float(
+                current_workflow_dict["Stack Settings"]["Number of planes"]
+            )
         else:
             stack_size = 200
         MIP = current_workflow_dict["Experiment Settings"]["Display max projection"]
@@ -534,7 +535,7 @@ def live_listen_thread(
                 visualize_queue,
             )
         else:
-            #name = current_workflow_dict["Experiment Settings"]["Comments"]
+            # name = current_workflow_dict["Experiment Settings"]["Comments"]
             Zpos = current_workflow_dict["Start Position"]["Z (mm)"]
 
             receive_zstack_images(
@@ -568,7 +569,7 @@ def handle_workflow_start(client):
     -------
     None
     """
-    #print('Workflow sent')
+    # print('Workflow sent')
     functions.tcpip_nuc.text_to_nuc(
         client,
         os.path.join("workflows", "workflow.txt"),
@@ -598,7 +599,7 @@ def handle_scope_settings_save(client):
 
 
 def check_workflow(client):
-    #print('Checking workflow for errors')
+    # print('Checking workflow for errors')
     functions.tcpip_nuc.text_to_nuc(
         client,
         os.path.join("workflows", "workflow.txt"),
@@ -667,7 +668,7 @@ def send_thread(
         elif command == COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE:
             handle_scope_settings_save(client)
         else:  # Handle all other commands
-            #print("Send non-workflow command to nuc: " + str(command))
+            # print("Send non-workflow command to nuc: " + str(command))
             command_data = []
 
             if not command_data_queue.empty():
