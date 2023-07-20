@@ -63,7 +63,8 @@ Some images showing the folder structure and files:
 
 <img src="https://github.com/uw-loci/Flamingo_Control/blob/main/images/microscope_settings_folder.PNG" width="25%" height="25%">
 
-<img src="https://github.com/uw-loci/Flamingo_Control/blob/main/images/Output_png_folder.PNG" width="25%" height="25%">
+<img src="https://github.com/uw-loci/Flamingo_Control/blob/main/images/Output_png_folder.PNG" width="50%" height="50%">
+
 ### Short-term Goals
 The short-term goals for this project include streamlining the workflow and improving flexibility.
 
