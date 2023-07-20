@@ -67,16 +67,16 @@ def clear_socket(sock: socket):
         The socket to be cleared of data.
     """
     # Create a list with the socket as its only member
-    input = [sock]
+    input_data = [sock]
 
     while True:
         # Set socket to non-blocking mode
         sock.setblocking(0)
 
         # Use select to check if there is data available on the socket
-        inputready, _, _ = select.select(input, [], [], 0.0)
+        inputready, _, _ = select.select(input_data, [], [], 0.0)
 
-        print("Data amount waiting " + str(len(inputready)))
+        print(f"Data amount waiting {len(inputready)}")
 
         # If there is no data available, break the loop
         if len(inputready) == 0:
@@ -164,7 +164,7 @@ def handle_idle_state(received, idle_state):
     -------
     None
     """
-    print("status idle: " + str(received[2]))
+    print(f"status idle: {str(received[2])}")
     if received[2] == 1:
         idle_state.set()
 
@@ -188,8 +188,8 @@ def fetch_microscope_settings(received, client):
     print(f"Getting microscope settings = {received[2]}")
 
     # Fetch the microscope settings
-    bytes = bytes_waiting(client)
-    text_bytes = client.recv(bytes)
+    bytes_data = bytes_waiting(client)
+    text_bytes = client.recv(bytes_data)
 
     # Save the settings to a file
     if not os.path.exists("microscope_settings"):
@@ -234,8 +234,8 @@ def check_stack(other_data_queue, client):
     # for value in received:
     #     print(value)
     #print(f"Checking Stack Viability = {received[2]}")
-    bytes = bytes_waiting(client)
-    text_bytes = client.recv(bytes)
+    bytes_data = bytes_waiting(client)
+    text_bytes = client.recv(bytes_data)
     other_data_queue.put(text_bytes)
     #Possibly replace with adding the text data to other_data_queue
 
@@ -285,7 +285,7 @@ def command_listen_thread(
     -------
     None
     """
-    print("LISTENING for commands on " + str(client))
+    print(f"LISTENING for commands on {str(client)}")
 
     # Clear out any data currently in the socket
     clear_socket(client)
@@ -347,10 +347,10 @@ def receive_image_data(live_client, image_size):
     """
     image_data = b""
     while len(image_data) < image_size:
-        data = live_client.recv(image_size - len(image_data))
-        if not data:
+        if data := live_client.recv(image_size - len(image_data)):
+            image_data += data
+        else:
             raise socket.error("Incomplete image data")
-        image_data += data
     return image_data
 
 
@@ -490,7 +490,7 @@ def live_listen_thread(
 
     """
     global index
-    print("LISTENING for image data on " + str(live_client))
+    print(f"LISTENING for image data on {str(live_client)}")
 
     while True:
         try:
@@ -507,17 +507,23 @@ def live_listen_thread(
         # parse the header
         #print('parsing header, entering data acquisition')
         header = struct.unpack("I I I I I I I I I I", header_data)
-        print(f'hardwareID number: {header[3]}')
+        #Check which camera/objective is being used.
+        #print(f'hardwareID number: {header[3]}')
         image_size, image_width, image_height = header[0], header[1], header[2]
         # get the stack size and other info from the workflow file, as it is not sent as part of the header information
         current_workflow_dict = workflow_to_dict(
             os.path.join("workflows", "workflow.txt")
         )
-        stack_size = float(current_workflow_dict["Stack Settings"]["Number of planes"])
-        MIP = current_workflow_dict["Experiment Settings"]["Display max projection"]
-        name = current_workflow_dict["Experiment Settings"]["Comments"]
-        Zpos = current_workflow_dict["Start Position"]["Z (mm)"]
+        if isinstance(current_workflow_dict, list):
+            current_workflow_dict = current_workflow_dict[0]
 
+
+        temp = current_workflow_dict["Stack Settings"]["Number of planes"]
+        if temp != "auto":
+            stack_size = float(current_workflow_dict["Stack Settings"]["Number of planes"])
+        else:
+            stack_size = 200
+        MIP = current_workflow_dict["Experiment Settings"]["Display max projection"]
         if MIP == "true" or stack_size == 1:
             process_single_image(
                 live_client,
@@ -528,6 +534,9 @@ def live_listen_thread(
                 visualize_queue,
             )
         else:
+            #name = current_workflow_dict["Experiment Settings"]["Comments"]
+            Zpos = current_workflow_dict["Start Position"]["Z (mm)"]
+
             receive_zstack_images(
                 live_client,
                 image_size,
@@ -653,22 +662,20 @@ def send_thread(
         # Handle workflows separately (special type of command)
         if command == COMMAND_CODES_CAMERA_WORK_FLOW_START:
             handle_workflow_start(client)
-            send_event.clear()
         elif command == COMMAND_CODES_CAMERA_CHECK_STACK:
             check_workflow(client)
-            send_event.clear()
         elif command == COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE:
             handle_scope_settings_save(client)
-            send_event.clear()
         else:  # Handle all other commands
-            print("Send non-workflow command to nuc: " + str(command))
+            #print("Send non-workflow command to nuc: " + str(command))
             command_data = []
 
             if not command_data_queue.empty():
                 command_data = command_data_queue.get()
 
             handle_non_workflow_command(client, command, command_data)
-            send_event.clear()
+
+        send_event.clear()
 
 
 ################################################

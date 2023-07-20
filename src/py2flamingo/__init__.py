@@ -2,6 +2,7 @@
 #TODO Running from command line currently not supported but should be the goal
 #TODO Feedback window indicating status
 # Run black . and isort --profile black
+#TODO create chatGPT prompt that allows the creation of new functions and buttons.
 #TODO TODO TODO Cancel button stopped working at some point during the restructuring. It does cancel but does not leave the program in a workable state.
 ######################################
 

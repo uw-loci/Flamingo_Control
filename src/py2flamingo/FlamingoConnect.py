@@ -189,21 +189,6 @@ class FlamingoConnect:
             ]
             self.current_coordinates = self.start_position.copy()
 
-    def check_file_exists(self, file_path):
-        """
-        Checks whether a specified file exists.
-
-        Parameters
-        ----------
-        file_path : str
-            The path of the file to check.
-
-        Returns
-        -------
-        bool
-            True if the file exists, False otherwise.
-        """
-        return os.path.exists(file_path)
 
     # def show_warning_message(self, warning):
     #     """
@@ -367,7 +352,7 @@ class FlamingoConnect:
         which is then processed. If the file exists, it is read and used to establish a connection to the microscope.
         """
         file_path = os.path.join("microscope_settings", "FlamingoMetaData.txt")
-        if not self.check_file_exists(file_path):
+        if not os.path.exists(file_path):
             warning = "The file FlamingoMetaData.txt was not found at microscope_settings/FlamingoMetadata.txt. \nPlease locate a Metadata text file to use as the basis for your microscope (e.g. IP address, tube length). One should be generated when a workflow is manually run on the microscope."
             show_warning_message(warning)
             file_dialog = self.prompt_user_for_file()
@@ -463,7 +448,7 @@ class FlamingoConnect:
         which is then processed. If the file exists, it is read and the relevant class attributes are updated.
         """
         file_path = os.path.join("workflows", "ZStack.txt")
-        if not self.check_file_exists(
+        if not os.path.exists(
             file_path
         ):  # Using the previously defined function
             warning = "The file ZStack.txt was not found at workflows/ZStack.txt. \nPlease locate a workflow text (workflow.txt) file to use as the basis for your settings (Laser line, laser power). One should be generated when a workflow is manually run on the microscope."

@@ -6,10 +6,11 @@ import os
 
 from threading import Thread
 import functions.microscope_connect as mc
-import functions.calculations as calcs
+import functions.microscope_interactions as scope
+import functions.calculations as calc
 from FlamingoConnect import FlamingoConnect
 from functions.image_display import convert_to_qimage
-from functions.text_file_parsing import dict_to_text, is_valid_filename, text_to_dict
+import functions.text_file_parsing as txt
 from FlamingoConnect import show_warning_message
 from global_objects import (
     command_data_queue,
@@ -31,11 +32,13 @@ from go_to_position import go_to_position
 from locate_sample import locate_sample
 from trace_ellipse import trace_ellipse
 from functions.run_workflow_basic import run_workflow
+from multi_angle_collection import multi_angle_collection
 
 from PyQt5.QtCore import QSize, Qt, QTimer
 from PyQt5.QtGui import QDoubleValidator, QPixmap, QIntValidator
 from PyQt5.QtWidgets import (
     QApplication,
+    QFileDialog,
     QDialog,
     QFormLayout,
     QHBoxLayout,
@@ -125,37 +128,96 @@ class CoordinateDialog(QDialog):
         
         # Set the layout for the dialog
         self.setLayout(layout)
-#TODO Expand to bounding box data
-class ExtendedCoordinateDialog(CoordinateDialog):
-    def __init__(self, start_position, z_default, parent=None):
-        super().__init__(start_position, z_default, parent)
+
+
+class MultiAngleDialog(QDialog):
+    def __init__(self, sample_name, parent=None):
+        super().__init__(parent)
+
+        # Set the window title
         self.setWindowTitle("Multi-angle data collection")
-        # Create the new fields
-        self.field_increment_angle = QLineEdit()
-        self.field_workflow_source = QLineEdit()
-        self.field_sample_name = QLineEdit()
-        self.field_sample_comment = QLineEdit()
+        self.setModal(True)
+
+        # Create the Okay and Cancel buttons
+        self.button_okay = QPushButton("Okay")
+        self.button_cancel = QPushButton("Cancel")
+
+        # Connect the "Cancel" button's signal to reject the dialog
+        self.button_cancel.clicked.connect(self.reject)
+
+        # Create the layout and add the fields and buttons
+        layout = QGridLayout()
+        layout.setColumnMinimumWidth(1, 200)  # Set the minimum width of the second column to 200
+        # Create a QLabel with the note
+        note_label = QLabel("""NOTE: This function does not use the values in the original dialog for microscope settings, \n
+                            they are all expected to be in the workflow file that is selected. This includes the base file storage location! 
+                            \nDue to the large amounts of data this function can generate, it is handled separately from the rest.
+                            \n This function will not work as written for angle increments below one degree.""")
         
+        # Set the font size to be larger
+        note_label.setStyleSheet("font-size: 20px;")
+        
+        # Add the note label to the grid layout at the top
+        layout.addWidget(note_label, 0, 0, 1, 3)
+        
+        # Create new fields
+        self.field_increment_angle = QLineEdit("20")
+        self.field_workflow_source_button = QPushButton('Browse')
+        self.field_workflow_source =  QLineEdit()
+        self.field_sample_name = QLineEdit(sample_name)
+        self.field_sample_comment = QLineEdit("TestComment")
+        width = 500
+        self.field_increment_angle.setMaximumWidth(width)
+        self.field_workflow_source.setMaximumWidth(width)
+        self.field_sample_name.setMaximumWidth(width)
+        self.field_sample_comment.setMaximumWidth(width)
         # Set validators
         self.field_increment_angle.setValidator(QDoubleValidator())
         
-        # Set initial values
-        self.field_increment_angle.setText('180') 
-        self.field_workflow_source.setText('multiangle.txt') 
+       
+        # Initialize workflow_source_path
+        self.workflow_source_path = 'workflows/'  # Default path
         
-        # Remove unwanted fields
-        self.sample_count.setParent(None)
-        self.sample_count = None
-        self.z_search_depth.setParent(None)
-        self.z_search_depth = None
+        # Connect browse button clicked signal to slot
+        self.field_workflow_source_button.clicked.connect(self.browse_file)
+
+        # Add new fields to the layout
+        layout.addWidget(QLabel("Increment Angle (°):"), 1, 0)
+        layout.addWidget(self.field_increment_angle, 1, 1)
+        layout.addWidget(QLabel("Workflow Source:"), 2, 0)
+        layout.addWidget(self.field_workflow_source, 2, 1)
+        layout.addWidget(self.field_workflow_source_button, 2, 2)
+        layout.addWidget(QLabel("Name for current run:"), 3, 0)
+        layout.addWidget(self.field_sample_name, 3, 1)
+        layout.addWidget(QLabel("Comment:"), 4, 0)
+        layout.addWidget(self.field_sample_comment, 4, 1)
+
+        # Add the Okay and Cancel buttons
+        layout.addWidget(self.button_okay, 5, 0)
+        layout.addWidget(self.button_cancel, 5, 1)
+
+        # Set the layout for the dialog
+        self.setLayout(layout)
         
-        # Add the new fields to the layout
-        self.layout().insertRow(0, QLabel("Increment Angle (°):"), self.field_increment_angle)
-        self.layout().insertRow(0, QLabel("Workflow Source:"), self.field_workflow_source)
-        self.layout().insertRow(0, QLabel("Sample name:"), self.field_sample_name)
-        self.layout().insertRow(0, QLabel("Comment:"), self.field_sample_comment)
         # Update the help text
         self.setToolTip("Use an existing workflow with correct lasers, laser power, and collection settings to collect the sample at set angle increments based on an initial location.")
+
+    def browse_file(self):
+        """
+        Slot for handling browse button clicked signal.
+        Opens a QFileDialog and stores the selected file path.
+        """
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        file_name, _ = QFileDialog.getOpenFileName(self, "QFileDialog.getOpenFileName()", 
+                                                   self.workflow_source_path, 
+                                                   "All Files (*);;Text Files (*.txt)", 
+                                                   options=options)
+        if file_name:
+            self.workflow_source_path = file_name
+            file_name_only = os.path.basename(file_name)  # Get only the file's name, excluding the path
+            self.field_workflow_source.setText(file_name_only)  # Set the QLineEdit text to the selected file's name
+
 
 
 class Py2FlamingoGUI(QMainWindow):
@@ -302,7 +364,7 @@ class Py2FlamingoGUI(QMainWindow):
         )
         self.display_timer.start(update_interval)  # Start the QTimer
 
-    def update_display(self):
+    def update_display(self):  # sourcery skip: extract-method, last-if-guard
         """
         This function updates the display with the latest microscope image and the current coordinates. If there are multiple
         images in the queue, it discards all but the latest one.
@@ -515,7 +577,7 @@ class Py2FlamingoGUI(QMainWindow):
         coordinates = ["x", "y", "z", "r"]
         units = ["mm", "mm", "mm", "°"]
         if prefix:
-            prefix = prefix + "_"
+            prefix = f"{prefix}_"
         var_names = [f"{prefix}field_{coord}_mm" for coord in coordinates]
         var_names[
             -1
@@ -617,6 +679,23 @@ class Py2FlamingoGUI(QMainWindow):
                 border: 2px solid white;
             }
         """
+        data_collection_style = """
+            QPushButton:hover {
+                background-color: yellow;
+            }
+            QPushButton {
+                border: 2px solid white;
+                border-radius: 5px;
+                padding: 5px;
+                background-color: bisque;
+            }
+            QPushButton:hover {
+                border: 2px solid red;
+            }
+            QPushButton:pressed {
+                border: 2px solid white;
+            }
+        """
         coordinate_button_style = """
             QPushButton:hover {
                 background-color: yellow;
@@ -682,15 +761,18 @@ class Py2FlamingoGUI(QMainWindow):
             coordinate_button_style,
         )
         self.create_button(
-            button_layout2, "Track sample by angle", self.trace_ellipse_action, '175,238,238', coordinate_button_style, tooltip = "The user input coordinates are used to track the sample through a 360 degree rotation. The first point is assumed to be the provided point, and is assumed to be in focus. Outputs are stored in 'sampletxt/Sample Name' folder"
+            button_layout2, "Track sample by angle", self.trace_ellipse_action, '249, 132, 229',data_collection_style, tooltip = "The selected file bounding box is used to track the sample through a 360 degree rotation.\n The first position is assumed to be the provided point, and is assumed to be correct.\n Outputs are stored in 'sampletxt/Sample Name' folder"
         )
         self.create_button(
-            button_layout2, "Find sample at angle", self.predict_sample_focus_at_angle, '175,238,238', coordinate_button_style, tooltip = "Given the current 'Sample Name', the angle in the cyan user input box 'r' and the result of the ellipse calculation generated by the 'Track sample by angle' button predict the location of the sample at the given angle, and take a snapshot"
+            button_layout2, "Find sample at angle", self.predict_sample_focus_at_angle, '175,238,238', coordinate_button_style, tooltip = "Given the current 'Sample Name', the angle in the cyan user input box 'r' and the result of the ellipse calculation generated \nby the 'Track sample by angle' button predict the location of the sample at the given angle, and take a snapshot"
         )
         
         self.create_button(
-            button_layout1, "Multi-angle collection", self.multi_angle_collection
-        )        
+            button_layout1, "Multi-angle collection", self.multi_angle_dialog, style=data_collection_style
+        )
+        self.create_button(
+            button_layout1, "Collect volume", self.basic_workflow_action, style=data_collection_style
+        )            
         self.create_button(
             button_layout1, "Duplicate and add your button", self.add_your_code
         )
@@ -891,34 +973,31 @@ class Py2FlamingoGUI(QMainWindow):
 
             # Check if the field is empty
             if text == "":
-                # Display a warning message if the field is empty
-                message_box = QMessageBox()
-                message_box.setIcon(QMessageBox.Warning)
-                message_box.setWindowTitle("Field error")
-                message_box.setText(
-                    "A necessary field to perform this function is blank!"
+                return self.message_box(
+                    "Field error",
+                    "A necessary field to perform this function is blank!",
                 )
-                message_box.setStandardButtons(QMessageBox.Ok)
-                message_box.exec_()
-                return False
-
             # Attempt to convert the text to a float
             try:
                 value = float(text)
             except ValueError:
-                # Display a warning message if the text cannot be converted to a float
-                message_box = QMessageBox()
-                message_box.setIcon(QMessageBox.Warning)
-                message_box.setWindowTitle("Settings required")
-                message_box.setText(
-                    "To find the sample requires a starting point (XYZR), generally near the tip of the sample holder. One of the fields does not contain a numerical value."
+                return self.message_box(
+                    "Settings required",
+                    "To find the sample requires a starting point (XYZR), generally near the tip of the sample holder. \nOne of the fields does not contain a numerical value.",
                 )
-                message_box.setStandardButtons(QMessageBox.Ok)
-                message_box.exec_()
-                return False
-
         # If all entries are valid, return True
         return True
+
+    # TODO Rename this here and in `check_field`
+    def message_box(self, title, message):
+        # Display a warning message if the field is empty
+        message_box = QMessageBox()
+        message_box.setIcon(QMessageBox.Warning)
+        message_box.setWindowTitle(title)
+        message_box.setText(message)
+        message_box.setStandardButtons(QMessageBox.Ok)
+        message_box.exec_()
+        return False
     
     def get_selected_radio_value(self):
         """
@@ -933,14 +1012,7 @@ class Py2FlamingoGUI(QMainWindow):
             if radio_button.isChecked():
                 return radio_button.text()
         # Display a warning message if the no radio option is selected
-        message_box = QMessageBox()
-        message_box.setIcon(QMessageBox.Warning)
-        message_box.setWindowTitle("Radio button error")
-        message_box.setText(
-            "A necessary radio button is not selected!"
-        )
-        message_box.setStandardButtons(QMessageBox.Ok)
-        message_box.exec_()
+        self.message_box(self, "Radio button error", "A necessary radio button is not selected!")
         return False
 
     def check_for_active_thread(self):
@@ -949,12 +1021,8 @@ class Py2FlamingoGUI(QMainWindow):
 
         # Update the list of threads
         self.threads = active_threads
-
         # If there are any active threads, return True
-        if active_threads:
-            return True
-
-        return False
+        return bool(active_threads)
 
     def go_to_position(self):
         """
@@ -967,6 +1035,7 @@ class Py2FlamingoGUI(QMainWindow):
         print("Go to position button pressed")
         # Make sure the thread is not already active if the function is attempted a second time
         if self.check_for_active_thread():
+            print("Something else is still running!")
             return
 
         # Check if the fields for the position are valid
@@ -1018,15 +1087,14 @@ class Py2FlamingoGUI(QMainWindow):
         dialog.button_okay.clicked.connect(lambda: self.locate_sample(dialog))
 
         # Show the dialog
-        if dialog.exec() == QDialog.Accepted:
-            pass
-        else:
+        if dialog.exec() != QDialog.Accepted:
             # if Okay was not clicked, do not proceed with the function.
             return
 
     def locate_sample(self, dialog):
         # Make sure the thread is not already active if the function is attempted a second time
         if self.check_for_active_thread():
+            print("Something else is still running!")
             return
         # Check if the fields for the start position are valid
         if not self.check_field(
@@ -1064,7 +1132,7 @@ class Py2FlamingoGUI(QMainWindow):
         print(f"{self.microscope_connection.instrument_name}_start_position.txt")
         #print(updated_position)
         # Save the updated position to a text file
-        dict_to_text(
+        txt.dict_to_text(
             str(
                 os.path.join(
                     "microscope_settings",
@@ -1172,6 +1240,7 @@ class Py2FlamingoGUI(QMainWindow):
         # Make sure the thread is not already active if the function is attempted a second time
         print("Take snapshot button pressed")
         if self.check_for_active_thread():
+            print("Something else is still running!")
             return
 
         # Check if the fields for the position are valid
@@ -1226,6 +1295,7 @@ class Py2FlamingoGUI(QMainWindow):
         print("Setting Home in the Mac software")
         # Make sure the thread is not already active if the function is attempted a second time
         if self.check_for_active_thread():
+            print("Something else is still running!")
             return
 
         # Check if the fields for the position are valid
@@ -1293,10 +1363,7 @@ class Py2FlamingoGUI(QMainWindow):
                 self.field_y_mm.setText(str(self.start_field_y_mm.text()))
                 self.field_z_mm.setText(str(self.start_field_z_mm.text()))
                 self.field_r_deg.setText(str(self.start_field_r_deg.text()))
-                return
-            else:
-                return
-
+            return
         # Copy the current position to the active fields
         self.field_x_mm.setText(str(self.current_x.text().split(" ")[1]))
         self.field_y_mm.setText(str(self.current_y.text().split(" ")[1]))
@@ -1312,8 +1379,16 @@ class Py2FlamingoGUI(QMainWindow):
         -------
         None
         """
+        commands = txt.text_to_dict(
+            os.path.join("src", "py2flamingo", "functions", "command_list.txt")
+        )
+        COMMAND_CODES_CAMERA_WORK_FLOW_STOP  = int(
+            commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_WORK_FLOW_STOP"]
+        )
         print("Cancel buttons pressed to set terminate event.")
         terminate_event.set()
+        command_queue.put(COMMAND_CODES_CAMERA_WORK_FLOW_STOP)
+        send_event.set()
     #TODO add dialog step to ask for the angle step size
     def trace_ellipse_action(self):
         print("Trace Ellipse button pressed")
@@ -1329,26 +1404,17 @@ class Py2FlamingoGUI(QMainWindow):
         print('Trace ellipse button pressed')
         # Make sure the thread is not already active if the function is attempted a second time
         if self.check_for_active_thread():
+            print("Something else is still running!")
             return
-        # Check if the fields for the position are valid
-        if not self.check_field(
-            [self.field_x_mm, self.field_y_mm, self.field_z_mm, self.field_r_deg]
-        ):
-            return
+
         # Check if the sample name is a valid file name
-        if not is_valid_filename(self.sample_name.text()):
+        if not txt.is_valid_filename(self.sample_name.text()):
             show_warning_message('The sample name is not a valid file name')
             return
         # Check if the sample folder exists, and create it if not
         if not os.path.exists(os.path.join("sample_txt", self.sample_name.text())):
             os.makedirs(os.path.join("sample_txt", self.sample_name.text()))
         # Get values from the GUI fields
-        xyzr = [
-            self.field_x_mm.text(),
-            self.field_y_mm.text(),
-            self.field_z_mm.text(),
-            self.field_r_deg.text(),
-        ]
         laser_value = self.get_selected_radio_value()
         if laser_value is False:
             return
@@ -1361,7 +1427,6 @@ class Py2FlamingoGUI(QMainWindow):
             target=trace_ellipse,
             args=(
                 self.microscope_connection.connection_data,
-                xyzr,
                 visualize_event,
                 other_data_queue,
                 image_queue,
@@ -1389,37 +1454,42 @@ class Py2FlamingoGUI(QMainWindow):
         self.threads.append(self.trace_ellipse_thread)
 
     def predict_sample_focus_at_angle(self):
-        print("Predict sample location at angle pressed")
+        print("Predict sample location at angle selected")
         if self.check_for_active_thread():
+            print("Something else is still running!")
             return
 
         # Check if the fields for the position are valid
         if not self.check_field(
-            [self.field_y_mm.text(), self.field_r_deg]
+            [self.field_y_mm, self.field_r_deg]
         ):
             return
         # Get values from the GUI fields
         #get the current angle
         r_deg = float(self.field_r_deg.text())
+        if 0 > r_deg > 360:
+            show_warning_message("The angle chosen is outside the 0 to 360 range.")
+            return
 
         # Check if the parameter file exists
-        if not os.path.exists(os.path.join("sample_txt", self.sample_name.text(), f"{self.sample_name.text()}_ellipse_params.txt")):
+        if not os.path.exists(os.path.join("sample_txt", self.sample_name.text(), f"top_bounds_{self.sample_name.text()}.txt")):
             show_warning_message(f"{self.sample_name.text()}_ellipse_params.txt not found in sample_txt/{self.sample_name.text()}")
             return
-        param_dict = text_to_dict(os.path.join("sample_txt", self.sample_name.text(), f"{self.sample_name.text()}_ellipse_params.txt"))
-        params = (
-            param_dict['Ellipse parameters']['h'],
-            param_dict['Ellipse parameters']['k'],
-            param_dict['Ellipse parameters']['a'],
-            param_dict['Ellipse parameters']['b']
-        )
-        y = param_dict['Additional information']["Y position (mm)"]
-        #Using the parameters of the ellipse and the angle value from the user input fields, predict the XZ coordinates.
-        x,z = calcs.point_on_ellipse(params, r_deg)
-        #Update the fields in the GUI in order to take a snapshot
-        self.field_x_mm.setText(x)
-        self.field_x_mm.setText(y)
-        self.field_z_mm.setText(z)
+        if not os.path.exists(os.path.join("sample_txt", self.sample_name.text(), f"bottom_bounds_{self.sample_name.text()}.txt")):
+            show_warning_message(f"{self.sample_name.text()}_ellipse_params.txt not found in sample_txt/{self.sample_name.text()}")
+            return
+        top_bounds_dict = txt.text_to_dict(os.path.join("sample_txt", self.sample_name.text(), f"top_bounds_{self.sample_name.text()}.txt"))
+        bottom_bounds_dict = txt.text_to_dict(os.path.join("sample_txt", self.sample_name.text(), f"bottom_bounds_{self.sample_name.text()}.txt"))
+        top_points = txt.dict_to_bounds(top_bounds_dict)
+        bottom_points = txt.dict_to_bounds(bottom_bounds_dict)
+        top_bound_at_angle = calc.bounding_point_from_angle(top_points, r_deg)
+        bottom_bound_at_angle = calc.bounding_point_from_angle(bottom_points, r_deg)
+        _, _, _, image_pixel_size_mm, frame_size= scope.initial_setup(command_queue, other_data_queue, send_event)
+        center_point = calc.find_center(top_bound_at_angle, bottom_bound_at_angle, shift=frame_size*image_pixel_size_mm/2)
+
+        self.field_x_mm.setText(str(round(center_point[0], 3)))
+        self.field_y_mm.setText(str(round(center_point[1], 3)))
+        self.field_z_mm.setText(str(round(center_point[2], 3)))
         self.take_snapshot()
 
 
@@ -1428,7 +1498,7 @@ class Py2FlamingoGUI(QMainWindow):
         print("Multi-angle collection button pressed")
         """
         This function creates a dialog to collect information specifically needed to collect a multi-angle acquisition.
-        1. Validate start position
+        1. Validate start position (bounding box)
         2. Angle increment for collection
         3. Text file as the basis for collection exists
         4. Validate saved file location and comments/folder descriptions
@@ -1437,44 +1507,89 @@ class Py2FlamingoGUI(QMainWindow):
         -------
         None
         """
-        xyzr = [
-            self.field_x_mm.text(),
-            self.field_y_mm.text(),
-            self.field_z_mm.text(),
-            self.field_r_deg.text(),
-        ]
+        #Get the bounding box from a text file
+
         # # Create the coordinate dialog
-        dialog = ExtendedCoordinateDialog(xyzr, self.microscope_connection.z_default, self)
+        if not os.path.exists(os.path.join("sample_txt", self.sample_name.text(), f"top_bounds_{self.sample_name.text()}.txt")):
+            show_warning_message(f"{self.sample_name.text()} bounds text file not found in sample_txt/{self.sample_name.text()} \n The sample name in the original dialog must match an existing bounds file.")
+            return
+        if not os.path.exists(os.path.join("sample_txt", self.sample_name.text(), f"bottom_bounds_{self.sample_name.text()}.txt")):
+            show_warning_message(f"{self.sample_name.text()} bounds text file not found in sample_txt/{self.sample_name.text()}. \n The sample name in the original dialog must match an existing bounds file.")
+            return
+        #Create start_bounds from the two boundary files
+        top_bounds_dict = txt.text_to_dict(os.path.join("sample_txt", self.sample_name.text(), f"top_bounds_{self.sample_name.text()}.txt"))
+        bottom_bounds_dict = txt.text_to_dict(os.path.join("sample_txt", self.sample_name.text(), f"bottom_bounds_{self.sample_name.text()}.txt"))
+        top_points = txt.dict_to_bounds(top_bounds_dict)
+        bottom_points = txt.dict_to_bounds(bottom_bounds_dict)
+
+        dialog = MultiAngleDialog(self.sample_name.text(), self)
 
         # Connect the "Okay" button's signal to a lambda function that executes the remaining code
-        dialog.button_okay.clicked.connect(lambda: self.multi_angle_collection(dialog))
+        dialog.button_okay.clicked.connect(lambda: self.multi_angle_collection(dialog, top_points,bottom_points))
 
         # Show the dialog
-        if dialog.exec() == QDialog.Accepted:
-            pass
-        else:
+        if dialog.exec() != QDialog.Accepted:
             # if Okay was not clicked, do not proceed with the function.
             return
 
-    def multi_angle_collection(self, dialog):
+    def multi_angle_collection(self, dialog, top_points, bottom_points):
         # Make sure the thread is not already active if the function is attempted a second time
         if self.check_for_active_thread():
+            print("Something else is still running!")
             return
-        increment_angle = dialog.field_increment_angle.setText('180') 
-        workflow_name = dialog.field_workflow_source.setText('multiangle.txt')
+        sample_name = dialog.field_sample_name.text()
+        angle_step_size_deg = float(dialog.field_increment_angle.text())
+        workflow_filename = dialog.field_workflow_source.text()
+        comment = dialog.field_sample_comment.text() 
+        print(f'increment angle found to be {angle_step_size_deg}')
+        print(f'workflow_name is: {workflow_filename}')
+        #Close the starting dialog
+        dialog.accept()
         #check that the workflow file exists
-        if not os.path.exists(os.path.join("sample_txt", self.sample_name.text(), f"{self.sample_name.text()}_ellipse_params.txt")):
-            show_warning_message(f"{self.sample_name.text()}_ellipse_params.txt not found in sample_txt/{self.sample_name.text()}")
+        if not os.path.exists(os.path.join("workflows", workflow_filename)):
+            show_warning_message(f"{workflow_filename} not found in the workflows folder!")
             return
-          
-        pass
+
+        # Create a thread for the trace_ellipse function
+        self.multi_angle_collection_thread = Thread(
+            target=multi_angle_collection,
+            args=(
+                self.microscope_connection.connection_data,
+                visualize_event,
+                other_data_queue,
+                image_queue,
+                command_queue,
+                command_data_queue,
+                system_idle,
+                processing_event,
+                send_event,
+                terminate_event,
+                stage_location_queue,
+                angle_step_size_deg,
+                sample_name,
+                comment,
+                top_points,
+                bottom_points,
+                workflow_filename,
+                #overlap_percent,
+             ),
+        )
+
+        # Set the thread as a daemon (exits when the main program exits)
+        self.multi_angle_collection_thread.daemon = True
+        print('starting multi-angle collection thread')
+        # Start the thread
+        self.multi_angle_collection_thread.start()
+        self.threads.append(self.multi_angle_collection_thread)
+
     
-    def add_your_code(self):
+    def add_your_code(self):  # sourcery skip: remove-redundant-pass
         """
         Docstring here
         """
         # Make sure the thread is not already active if the function is attempted a second time
         if self.check_for_active_thread():
+            print("Something else is still running!")
             return
         
         # all functions must be run on a separate thread, targetting a function, including its arguments, and then start()
@@ -1482,19 +1597,63 @@ class Py2FlamingoGUI(QMainWindow):
     #incomplete
     def basic_workflow_action(self):
         """
-        Docstring here
+        We need two things for a basic workflow. 
+        1. The settings, probably based off an existing workflow file OR GUI settings
+        2. The location to scan, which should be two sets of x,y,z,r coordinates, where the coordinates represent the upper left corner of the scan location.
         """
         # Make sure the thread is not already active if the function is attempted a second time
         if self.check_for_active_thread():
+            print("Something else is still running!")
             return
-        workflow_string = "volume.txt"
-        # Create a thread for the take_snapshot function
+
+        # Get the default folder path for the file dialog
+        default_folder = os.path.join(os.getcwd(), "sample_txt")
+
+        # Open a file dialog to select the boudaries file
+        file_dialog = QFileDialog()
+        file_dialog.setFileMode(QFileDialog.ExistingFile)
+        file_dialog.setNameFilter("Text files (*.txt)")
+        file_dialog.setWindowTitle("Select a boundary file that contains the coordinates you would like to scan")
+        # Set the default folder if it exists
+        if os.path.exists(default_folder):
+            file_dialog.setDirectory(default_folder)
+
+        if file_dialog.exec_():
+            if selected_files := file_dialog.selectedFiles():
+                boundary_file = selected_files[0]
+                boundary_dict = txt.text_to_dict(boundary_file)
+                top_bound, bottom_bound = txt.dict_to_bounds(boundary_dict)
+            else:
+                print("Either the workflow or boundaries were not found, exiting function.")
+                return
+        ###############
+        default_folder = os.path.join(os.getcwd(), "workflows")
+
+        # Open a file dialog to select the boudaries file
+        file_dialog = QFileDialog()
+        file_dialog.setFileMode(QFileDialog.ExistingFile)
+        file_dialog.setNameFilter("Text files (*.txt)")
+        file_dialog.setWindowTitle("Select a workflow file to base your scan on")
+        # Set the default folder if it exists
+        if os.path.exists(default_folder):
+            file_dialog.setDirectory(default_folder)
+
+        if file_dialog.exec_():
+            if selected_files := file_dialog.selectedFiles():
+                workflow_file = selected_files[0]
+                workflow_dict = txt.workflow_to_dict(workflow_file)
+            else:
+                print("Either the workflow or boundaries were not found, exiting function.")
+                return
+
+        workflow_dict = txt.dict_positions(workflow_dict,top_bound, bottom_bound, save_with_data=True)
+        # Create a thread for the run workflow
         self.run_workflow = Thread(
             target=run_workflow,
             args=(
                 self.microscope_connection.connection_data,
                 self.sample_name.text(),
-                workflow_string,
+                workflow_dict,
                 visualize_event,
                 image_queue,
                 command_queue,
@@ -1504,7 +1663,7 @@ class Py2FlamingoGUI(QMainWindow):
         )
 
         # Set the thread as a daemon (exits when the main program exits)
-        self.take_snapshot_thread.daemon = True
+        self.run_workflow.daemon = True
 
         # Start the thread
-        self.take_snapshot_thread.start()
+        self.run_workflow.start()

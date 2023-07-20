@@ -7,18 +7,24 @@ from functions.microscope_connect import *
 from functions.text_file_parsing import *
 from global_objects import clear_all_events_queues
 import functions.image_display
-
+import queue
 
 def initial_setup(command_queue, other_data_queue, send_event):
+    """
+    Essentially, this function generates some values that will be useful for downstream processes within a given function.
+    Sends some information to the microscope nuc, and returns
+    command_labels: list of command codes
+    ymax: boundaries for Y
+    y_move: distance for one frame to move in the Y direction and not overlap
+    image_pixel_size_mm: size of a pixel in mm, in the image (not the camera pixel size)
+    frame_size: the number of pixels in a frame, assumed to be square TODO: don't assume square and replace with [x,y,z?]
+    """
     clear_all_events_queues()
     # Look in the functions/command_list.txt file for other command codes, or add more
     commands = text_to_dict(
         os.path.join("src", "py2flamingo", "functions", "command_list.txt")
     )
 
-    # Testing fidelity
-    # print(commands)
-    # dict_to_text('functions/command_test.txt', commands)
 
     COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(
         commands["CommandCodes.h"]["COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD"]
@@ -40,6 +46,7 @@ def initial_setup(command_queue, other_data_queue, send_event):
     COMMAND_CODES_CAMERA_CHECK_STACK = int(
         commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_CHECK_STACK"]
     ) 
+
     command_labels = [
         COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD,
         COMMAND_CODES_CAMERA_WORK_FLOW_START,
@@ -84,11 +91,7 @@ def check_workflow(command_queue, send_event, other_data_queue, COMMAND_CODES_CA
 def send_workflow(
     command_queue,
     send_event,
-    stage_location_queue,
     system_idle: Event,
-    xyzr_init: Sequence[float],
-    visualize_event,
-    image_queue
 ):
     workflow_dict=workflow_to_dict(os.path.join("workflows", "workflow.txt"))
     if not check_coordinate_limits(workflow_dict):
@@ -96,18 +99,39 @@ def send_workflow(
     command_queue.put(COMMAND_CODES_CAMERA_WORK_FLOW_START)
     send_event.set()
 
-    # while not system_idle.is_set():
-    #     time.sleep(0.1)
     #TODO this is a hacky way to avoid the problem that I am not getting all of the system idle event messages as of 7/11/2023. This has not happened before.
     start_time = time.time()
     while not system_idle.is_set():
-        if time.time() - start_time > 15:  # If 15 seconds have passed
-            break
+        #check to see if we missed the idle command
+        if time.time() - start_time > 5: 
+            command_queue.put(COMMAND_CODES_SYSTEM_STATE_GET)
+            send_event.set()
+            start_time = time.time()
         time.sleep(0.1)
+
+def resolve_workflow(
+        stage_location_queue,
+        xyzr_init,
+        image_queue,
+        visualize_event,
+        terminate_event,
+    ):
+    """
+    To be run immediately after
+    """
     stage_location_queue.put(xyzr_init)
     visualize_event.set()
-    image_data = image_queue.get()
-    return image_data
+    # Check for image data or terminate_event
+    while True:
+        try:
+            return image_queue.get(timeout=1) # Wait for 1 second
+        except queue.Empty:
+            if terminate_event.is_set():
+                # Terminate event is set, break the loop
+                break
+
+    # Return None or some other appropriate response if terminated
+    return None
 
 def replace_none(values, replacement):
     """
@@ -162,19 +186,19 @@ def y_axis_sample_boundary_search(
     coords = []
     i = 0
     while not terminate_event.is_set() and (float(xyzr_init[1]) + y_move * i) < ymax:
-        print("Starting Y axis search " + str(i + 1))
+        print(f"Starting Y axis search {str(i + 1)}")
         print("*")
 
         # adjust the Zstack position based on the last snapshot Z position
         wf_dict = dict_positions(wf_dict, xyzr, zEnd=zend)
 
         # Write a new workflow based on new Y positions
-        dict_to_workflow(os.path.join("workflows", "current" + wf_zstack), wf_dict)
-        dict_to_text(os.path.join("workflows", "current_test_" + wf_zstack), wf_dict)
+        dict_to_workflow(os.path.join("workflows", f"current{wf_zstack}"), wf_dict)
+        dict_to_text(os.path.join("workflows", f"current_test_{wf_zstack}"), wf_dict)
 
         # Additional step for records that nothing went wrong if swapping between snapshots and Zstacks
         shutil.copy(
-            os.path.join("workflows", "current" + wf_zstack),
+            os.path.join("workflows", f"current{wf_zstack}"),
             os.path.join("workflows", "workflow.txt"),
         )
         #Minor adjustment - since we are taking the MIP of a Z stack, use the center of that Z stack
@@ -187,14 +211,18 @@ def y_axis_sample_boundary_search(
 
         check_workflow(command_queue, send_event, other_data_queue, COMMAND_CODES_CAMERA_CHECK_STACK)
 
-        image_data = send_workflow(
+        send_workflow(
             command_queue,
             send_event,
-            stage_location_queue,
             system_idle,
-            xyzr_centered,
+
+        )
+        image_data = resolve_workflow(
+            stage_location_queue,
+            xyzr_init,
+            image_queue,
             visualize_event,
-            image_queue
+            terminate_event,
         )
         functions.image_display.save_png(image_data, f'yscan_{xyzr_centered[1]}')
         _, y_intensity_map = calc.calculate_rolling_y_intensity(image_data, 21)
@@ -214,18 +242,18 @@ def y_axis_sample_boundary_search(
 
         # move the stage up
         xyzr[1] = float(xyzr[1]) + y_move
-        i = i + 1
+        i += 1
 
     return bounds, coords, xyzr, i
 
-#TODO fine Z focus to find edges of sample
+#TODO fine Z focus to find edges of sample?
 def z_axis_sample_boundary_search(
     i: int,
     loops: int,
     xyzr: list,
-    z_init: float,
-    z_search_depth_mm: float,
-    z_stack_depth_mm: float,
+    z_init,
+    z_search_depth_mm,
+    z_step_depth_mm,
     wf_dict: dict,
     wf_zstack: str,
     command_queue,
@@ -242,20 +270,23 @@ def z_axis_sample_boundary_search(
     """
     Function that can be used within a loop to collect the MIP of a Z stack. Outside the function, the brightness of the MIPs are tracked
     in order to determine the brightest MIP across the set of Z stacks.
+    z_step_depth_mm - the depth in Z for each sub-Z stack.
+    z_search_depth_mm - total search range through Z, usually limited by the Z axis bounds in the software for a particular sytem
+    z_init = Starting central position within the Z-search range
     """
     print(f"Subset of planes acquisition {i} of {loops-1}")
 
     # calculate the next step of the Z stack and apply that to the workflow file
-    xyzr[2] = float(z_init) - float(z_search_depth_mm) / 2 + i * z_stack_depth_mm
-    zEnd = float(z_init) - float(z_search_depth_mm) / 2 + (i + 1) * z_stack_depth_mm
+    xyzr[2] = float(z_init) - float(z_search_depth_mm) / 2 + i * z_step_depth_mm
+    zEnd = float(z_init) - float(z_search_depth_mm) / 2 + (i + 1) * z_step_depth_mm
 
     print(f'zstart and end {xyzr[2]}, {zEnd}')
     dict_positions(wf_dict, xyzr, zEnd = zEnd, save_with_data=False, get_zstack=False)
 
-    dict_to_workflow(os.path.join("workflows", "current" + wf_zstack), wf_dict)
+    dict_to_workflow(os.path.join("workflows", f"current{wf_zstack}"), wf_dict)
 
     shutil.copy(
-        os.path.join("workflows", "current" + wf_zstack),
+        os.path.join("workflows", f"current{wf_zstack}"),
         os.path.join("workflows", "workflow.txt"),
     )
     check_workflow(command_queue, send_event, other_data_queue, COMMAND_CODES_CAMERA_CHECK_STACK)
@@ -263,17 +294,21 @@ def z_axis_sample_boundary_search(
     xyzr_centered = copy.deepcopy(xyzr)
     xyzr_centered[2] = (float(xyzr_centered[2]) + zEnd) / 2
 
-    image_data = send_workflow(
+    send_workflow(
         command_queue,
         send_event,
-        stage_location_queue,
         system_idle,
-        xyzr_centered,
-        visualize_event,
-        image_queue
-    )
 
-    mean_largest_quarter, _ = calc.calculate_rolling_y_intensity(image_data, 21)
+    )
+    image_data = resolve_workflow(
+        stage_location_queue,
+        xyzr_centered,
+        image_queue,
+        visualize_event,
+        terminate_event,
+    )
+    #This doesn't really take the rolling Y intensity, as that part isn't kept. It's just used for the mean largest quarter value
+    mean_largest_quarter, _ = calc.calculate_rolling_y_intensity(image_data, 3)
     coordsZ.append([copy.deepcopy(xyzr_centered), mean_largest_quarter])
     top25_percentile_means = [coord[1] for coord in coordsZ]
 
@@ -284,7 +319,7 @@ def z_axis_sample_boundary_search(
 
     #Don't start searching for peaks too early.
     if len(top25_percentile_means) > 4:
-        if bounds := calc.find_peak_bounds(top25_percentile_means):
+        if bounds := calc.find_peak_bounds(top25_percentile_means, threshold_pct=30):
             print(f'bounds {bounds}')
     else:
         bounds = [[None, None]]
@@ -303,7 +338,8 @@ def acquire_brightfield_image(
     framerate,
     plane_spacing,
     laser_channel,
-    laser_setting
+    laser_setting,
+    terminate_event
 ):
     """
     Acquires a brightfield image to verify sample holder location (assuming the sample holder is visible at the start
@@ -340,14 +376,16 @@ def acquire_brightfield_image(
 
     # Acquire a brightfield snapshot and return the image data
     print("Acquire a brightfield snapshot")
-    image_data = send_workflow(
+    send_workflow(
         command_queue,
         send_event,
-        stage_location_queue,
         system_idle,
-        xyzr_init,
-        visualize_event,
-        image_queue
-    )
 
-    return image_data
+    )
+    return resolve_workflow(
+        stage_location_queue,
+        xyzr_init,
+        image_queue,
+        visualize_event,
+        terminate_event,
+    )

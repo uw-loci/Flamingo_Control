@@ -43,6 +43,12 @@ COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET = int(
 COMMAND_CODES_CAMERA_IMAGE_SIZE_GET = int(
     commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_IMAGE_SIZE_GET"]
 )
+COMMAND_CODES_SYSTEM_STATE_GET = int(
+    commands["CommandCodes.h"]["COMMAND_CODES_SYSTEM_STATE_GET"]
+) 
+COMMAND_CODES_CAMERA_WORK_FLOW_STOP  = int(
+    commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_WORK_FLOW_STOP"]
+) 
 ##############################
 
 
@@ -123,19 +129,16 @@ def get_microscope_settings(command_queue, other_data_queue, send_event):
     Tuple[float, dict]
         A tuple containing the image pixel size and the microscope settings dictionary.
     """
-    command_queue.put(COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD)  # movement
-    send_event.set()
-    while not command_queue.empty():
-        time.sleep(0.3)
-
+    send_command(
+        command_queue, COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD, send_event
+    )
     # Microscope settings should now be in a text file called ScopeSettings.txt in the 'microscope_settings' directory.
     # Convert them into a dictionary to extract useful information.
     scope_settings = text_to_dict("microscope_settings/ScopeSettings.txt")
 
-    command_queue.put(COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET)  # movement
-    send_event.set()
-    while not command_queue.empty():
-        time.sleep(0.3)
+    send_command(
+        command_queue, COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET, send_event
+    )
     tube_Lens_Length = float(scope_settings['Type']['Tube lens design focal length (mm)'])
     tube_Lens_Design_FocalLength = float(scope_settings['Type']['Tube lens length (mm)'])
     objective_Lens_Magnification = float(scope_settings['Type']['Objective lens magnification'])
@@ -145,6 +148,14 @@ def get_microscope_settings(command_queue, other_data_queue, send_event):
     print(f'image pixel size from system {image_pixel_size}, objective mag {objective_Lens_Magnification}')
     #return 0.000488, scope_settings
     return image_pixel_size, scope_settings
+
+
+
+def send_command(command_queue, arg1, send_event):
+    command_queue.put(arg1)
+    send_event.set()
+    while not command_queue.empty():
+        time.sleep(0.3)
 
 
 def start_connection(NUC_IP: str, PORT_NUC: int):

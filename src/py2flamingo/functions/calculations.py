@@ -9,7 +9,7 @@ from scipy.ndimage import gaussian_filter1d
 from itertools import combinations
 import csv
 import statistics
-
+import math
 def adjust_peak_bounds(bounds, data):
     """
     For small data sets, bump the bounds out by 1, except for edge cases - the literal edge, and TODO touching bounds
@@ -53,15 +53,11 @@ def process_data(data, smoothing_sigma=None, background_pct=10):
     #print(f"smoothed data: {smoothed_data}")
     # Calculate the background level as the given percentile of the smoothed data
     background_level = np.percentile(smoothed_data, background_pct)
-    #print(f"background {background_level}")
-    # Subtract the background level from the smoothed data
-    processed_data = smoothed_data - background_level
-
-    return processed_data
+    return smoothed_data - background_level
 
 
 
-def find_peak_bounds(data, num_peaks=1, threshold_pct=5, sample_intensity_above_background = 10):
+def find_peak_bounds(data, num_peaks=1, threshold_pct=10, sample_intensity_above_background = 10):
     """
     Find the bounds of peaks in a list of data points.
 
@@ -82,10 +78,7 @@ def find_peak_bounds(data, num_peaks=1, threshold_pct=5, sample_intensity_above_
         A list of tuples where each tuple contains the start and end indices of a peak. If no peaks are found, or if the start or end of the list is reached before a peak bound is found, the function returns None.
     """
     # Process the data by applying Gaussian smoothing and subtracting the background level
-    if len(data) > 1000:
-        smooth = 5
-    else:
-        smooth = None
+    smooth = 5 if len(data) > 1000 else None
     data = process_data(data, smooth)
     #print(f'data length {len(data)}')
     #print_list_summary(data)
@@ -180,10 +173,7 @@ def find_most_in_focus_plane(z_stack: np.ndarray[np.uint16, Sequence[int]]):
     # Calculate the sum of intensities for each plane in the Z-stack
     intensity_sums = np.sum(z_stack, axis=(1, 2))
 
-    # Find the index of the plane with the highest intensity sum
-    most_in_focus_plane_index = np.argmax(intensity_sums)
-
-    return most_in_focus_plane_index
+    return np.argmax(intensity_sums)
 
 
 def check_maxima(lst: Sequence[int], window_size: int = 5, threshold_factor: int = 15):
@@ -219,7 +209,7 @@ def check_maxima(lst: Sequence[int], window_size: int = 5, threshold_factor: int
     thresholds = np.array([np.mean(lst[i-window_size+1:i+1]) + threshold_factor * np.std(lst[i-window_size+1:i+1]) 
                             for i in range(window_size-1, len(lst))])
     thresholds = np.concatenate((initial_thresholds, thresholds))
-    
+
     #print(f'thresholds {thresholds}')
 
     # Find maxima that are above the threshold with values below the threshold on both sides
@@ -229,31 +219,20 @@ def check_maxima(lst: Sequence[int], window_size: int = 5, threshold_factor: int
     for i in range(1, len(lst) - 1):
         # A maxima is a point that is greater than its neighbors and greater than the threshold
         if lst[i] > thresholds[i] and lst[i] > lst[i - 1] and lst[i] > lst[i + 1]:
-            # Check if there are not values above the threshold on both sides of the maxima
-            left_below_thresh = False
-            right_below_thresh = False
-            # Iterate to the left until a value below the threshold is found
-            for j in range(i - 1, -1, -1):
-                if lst[j] < thresholds[j]:
-                    left_below_thresh = True
-                    break
-            # Iterate to the right until a value below the threshold is found
-            for j in range(i + 1, len(lst)):
-                if lst[j] < thresholds[j]:
-                    right_below_thresh = True
-                    break
+            left_below_thresh = any(lst[j] < thresholds[j] for j in range(i - 1, -1, -1))
+            right_below_thresh = any(
+                lst[j] < thresholds[j] for j in range(i + 1, len(lst))
+            )
             # If values below the threshold were found on both sides, add this maxima's position to the list
             if left_below_thresh and right_below_thresh:
                 maxima_above_threshold.append(i)
 
-    # If any maxima were found, return the position of the maxima with the greatest value
-    if len(maxima_above_threshold) > 0:
-        max_pos = max(maxima_above_threshold, key=lambda x: lst[x])
-        print(f"Maxima {lst[max_pos]} found at position {max_pos} out of {len(lst)}")
-        return max_pos
-    else:
+    if not maxima_above_threshold:
         # If no maxima were found, return False
         return False
+    max_pos = max(maxima_above_threshold, key=lambda x: lst[x])
+    print(f"Maxima {lst[max_pos]} found at position {max_pos} out of {len(lst)}")
+    return max_pos
 
 
 def fit_ellipse(points):
@@ -342,8 +321,8 @@ def point_on_ellipse(params, angle):
     tuple
         A tuple containing the x, z coordinates of the point.
     """
-    # Extract the parameters
-    h, k, a, b = params
+    # Convert params to float and extract the parameters
+    h, k, a, b = [float(param) for param in params]
     
     # Convert the angle to radians
     angle_rad = np.deg2rad(angle)
@@ -457,8 +436,7 @@ def calculate_rolling_y_intensity(image_data, n_lines: int):
 
     return mean_largest_quarter, y_intensity_map
 
-import statistics
-import math
+
 
 def print_list_summary(data):
     if len(data) > 0:
@@ -469,11 +447,7 @@ def print_list_summary(data):
         max_value = max(data)
 
         # Handle standard deviation calculation
-        if len(data) > 1:
-            stdev = statistics.stdev(data)
-        else:
-            stdev = math.nan
-
+        stdev = statistics.stdev(data) if len(data) > 1 else math.nan
         # Print the summary statistics
         print("Mean:", mean)
         print("Median:", median)
@@ -484,57 +458,88 @@ def print_list_summary(data):
         # Handle empty list case
         print("The list is empty.")
 
-def find_center(top_bounds_mm, bottom_bounds_mm):
+def find_center(top_bounds_mm, bottom_bounds_mm, shift = None):
     """
     Find the center point between two points in 3D space.
     Input, two lists of [x,y,z,r], output, one list of the same
+    Shift accounts for the frame shift needed to place the object in the center of the field of view.
+    Otherwise, the top left corner is the center of the object.
     """
-    centerpoint_mm = []
-    for top, bottom in zip(top_bounds_mm, bottom_bounds_mm):
-        centerpoint_mm.append((float(top) + float(bottom)) / 2)
+
+    centerpoint_mm = [
+        (float(top) + float(bottom)) / 2
+        for top, bottom in zip(top_bounds_mm, bottom_bounds_mm)
+    ]
+    if shift:
+        centerpoint_mm = shift_frame(centerpoint_mm, shift)
 
     return centerpoint_mm
 
+def shift_frame(point, frameshift):
+    """
+    Takes in a point [x,y,z,r] that generally represents the centroid of an object, and shifts the point so that the object will show up in the center of the screen by moving it half a screen towards the center X and Y
+    Returns a modified xyzr list.
+    """
+    point[1] -= frameshift
+    point[0] -= frameshift
+    return point
 
 
-# # def calculate_rolling_y_intensity(image_data, n_lines):
-#     # Flatten the array to a 1D array
-#     flattened = image_data.flatten()
+def bounding_point_from_angle(points_list, angle):
+    """
+    Interpolate a point at a given angle from a list of bounding points. The function handles 
+    the cyclic nature of angles, ensuring interpolation is always between two closest points 
+    even if they wrap around the 0°/360° boundary.
 
-#     # Sort the flattened array in descending order
-#     sorted_array = np.sort(flattened)[::-1]
+    Parameters
+    ----------
+    points_list : list
+        A list of lists where each sublist is a point [x, y, z, r].
+    angle : float
+        The target angle.
 
-#     # Determine the index to slice the array to keep the largest quarter of values
-#     slice_index = len(sorted_array) // 4
+    Returns
+    -------
+    list
+        A list containing the interpolated x, y, z, and r values for the target angle.
+    """
 
-#     # Slice the sorted array to keep only the largest quarter of values
-#     largest_quarter = sorted_array[:slice_index]
+    # Convert all elements in points_list to float
+    points_list = [[float(x) for x in point] for point in points_list]
+    angle = float(angle)
 
-#     # Calculate the mean of the largest quarter
-#     mean_largest_quarter = np.mean(largest_quarter)
+    # Sort the points by their angle (r value)
+    sorted_points = sorted(points_list, key=lambda p: p[3])
 
-#     # Calculate the rolling average of n_lines lines along the Y axis
-#     y_intensity_map = []
+    lower_point, upper_point = None, None
 
-#     # Mirror the intensities for values beyond the edge of the image in the Y direction only
-#     padded_image_data = np.pad(image_data, ((n_lines // 2, n_lines - n_lines // 2 - 1), (0, 0)), mode='reflect')
-#     #print(padded_image_data)
-#    # Iterate over each line in the image
-#     for i in range(image_data.shape[0]):
-#         # Calculate the start and end indices for the rolling average
-#         start_index = i
-#         end_index = i+(n_lines)
+    # Search for two closest points such that one has an angle less than the target 
+    # and the other has an angle more than the target.
+    for i, point in enumerate(sorted_points):
+        if point[3] > angle:
+            lower_point = sorted_points[i-1]
+            upper_point = point
+            break
 
-#         # Slice the padded image data to get the current set of lines
-#         lines = padded_image_data[start_index:end_index, :]
-#         #print(lines)
-#         # Calculate the mean intensity of the current set of lines
-#         mean_intensity = np.mean(lines)
+    # If not found, it means there's a wrap-around. The points with highest and lowest 
+    # angles are chosen as the bounding points.
+    if lower_point is None and upper_point is None:
+        lower_point = sorted_points[-1]
+        upper_point = sorted_points[0]
 
-#         # Calculate the corresponding y position for the center line of the rolling average
-#         y_position = i
+    # Perform linear interpolation for x, y, and z
+    interpolated_point = []
+    for i in range(3):  # Iterate over the indices for x, y, z
+        lower_value = lower_point[i]
+        upper_value = upper_point[i]
+        if upper_point[3] != lower_point[3]:  # Prevent division by zero
+            interpolated_value = lower_value + ((upper_value - lower_value) / (upper_point[3] - lower_point[3])) * (angle - lower_point[3])
+        else:  # If the points have the same angle, just use the lower value
+            interpolated_value = lower_value
+        interpolated_point.append(interpolated_value)
 
-#         # Append the pair of values to the y_intensity_map
-#         y_intensity_map.append((y_position, mean_intensity))
+    # Append the input angle to the list
+    interpolated_point.append(angle)
 
-#     return mean_largest_quarter, y_intensity_map
+    return interpolated_point
+

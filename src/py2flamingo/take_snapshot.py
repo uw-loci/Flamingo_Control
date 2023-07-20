@@ -7,7 +7,7 @@ from functions.text_file_parsing import *
 from global_objects import clear_all_events_queues
 
 plane_spacing = 10
-framerate = 40.0032  # /s
+FRAMERATE = 40.0032  # /s
 
 
 def take_snapshot(
@@ -60,7 +60,7 @@ def take_snapshot(
 
     # Prepare the workflow for the snapshot
     snap_dict = workflow_to_dict(os.path.join("workflows", wf_zstack))
-    snap_dict = dict_to_snap(snap_dict, xyzr_init, framerate, plane_spacing)
+    snap_dict = dict_to_snap(snap_dict, xyzr_init, FRAMERATE, plane_spacing)
     snap_dict = laser_or_LED(snap_dict, laser_channel, laser_setting, laser_on=True)
     snap_dict = dict_comment(snap_dict, "GUI Snapshot")
     snap_dict = dict_save_directory(snap_dict, directory="Snapshots")

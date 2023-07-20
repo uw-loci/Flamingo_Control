@@ -16,7 +16,7 @@ from take_snapshot import take_snapshot
 from functions.image_display import save_png
 import functions.microscope_interactions as scope
 plane_spacing = 10
-framerate = 40.0032  # /s
+FRAMERATE = 40.0032  # /s
 BUFFER_MAX = 10
 
 
@@ -97,7 +97,7 @@ def locate_sample(
     #     laser_channel,
     #     laser_setting
     # )
-    
+
 
     # initialize the active coordinates: starting Z position is treated as the middle of the search depth
     z_init = xyzr_init[2]
@@ -113,7 +113,7 @@ def locate_sample(
     wf_dict["Experiment Settings"]["Save image directory"] = "Sample Search"
     wf_dict = dict_comment(wf_dict, "Delete")
     ####################HARDCODE WARNING#
-    wf_dict = calculate_zplanes(wf_dict, z_search_depth_mm, framerate, plane_spacing)
+    wf_dict = calculate_zplanes(wf_dict, z_search_depth_mm, FRAMERATE, plane_spacing)
 
     ##############################################################################
     # Loop through a set of Y positions (increasing is 'lower' on the sample)
@@ -189,7 +189,7 @@ def locate_sample(
     step_size_mm = float(wf_dict["Experiment Settings"]["Plane spacing (um)"]) / 1000 #um to mm
     z_step_depth_mm = step_size_mm * BUFFER_MAX
     print(f" z search depth {z_search_depth_mm}")
-    wf_dict = calculate_zplanes(wf_dict, z_step_depth_mm, framerate, plane_spacing)
+    wf_dict = calculate_zplanes(wf_dict, z_step_depth_mm, FRAMERATE, plane_spacing)
 
     coordsZ = []
     top25_percentile_means=None
@@ -238,10 +238,10 @@ def locate_sample(
     xyzr_sample_top_mm[2] = zSearchStart + top_bound_z_vx * z_step_depth_mm
     midpoint_z_mm = (xyzr_sample_top_mm[2]+xyzr_sample_bottom_mm[2])/2
     print(f"zBounds detected at {xyzr_sample_top_mm[2]} and {xyzr_sample_bottom_mm[2]}")
-    
+
     # z_positions = [point[0][2] for point in coordsZ]
 
-    print("z focus plane " + str(midpoint_z_mm))
+    print(f"z focus plane {str(midpoint_z_mm)}")
 
     # XYR should all be correct already
     # Move to correct Z position, command 24580
@@ -286,7 +286,7 @@ def locate_sample(
     top_bound_x_px = 0
     bottom_bound_x_px = frame_size
     while (top_bound_x_px == 0 or bottom_bound_x_px == frame_size) or i<5:
-        i=i+1
+        i += 1
         #print(f'xloop {i}')
         x_before_move = xyzr[0]
         image_data = take_snapshot(
@@ -333,8 +333,10 @@ def locate_sample(
     #Shift midpoint to the midpoint of the visible frame
     x_sample_midpoint_frameshift_mm =x_sample_midpoint_mm -frame_size*image_pixel_size_mm/2
     xyzr[0]= x_sample_midpoint_frameshift_mm
-    
-    location_path = os.path.join('sample_txt',sample_name, "bounds_"+sample_name+".txt")
+
+    location_path = os.path.join(
+        'sample_txt', sample_name, f"sample_bounds_{sample_name}.txt"
+    )
 
     # store the bounding box coordinates in a dict
     bounding_dict = {
