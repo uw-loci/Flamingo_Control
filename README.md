@@ -59,11 +59,11 @@ Commands and workflows are used to interact with the Flamingo system. The main f
    - `???_start_position.txt`: Contains the starting position for searching the sample.
 Some images showing the folder structure and files:
 
-![Current status of GUI](https://github.com/uw-loci/Flamingo_Control/blob/main/images/Folder_structure.PNG?raw=true | width=100)
+<img src="https://github.com/uw-loci/Flamingo_Control/blob/main/images/Folder_structure.PNG?raw=true" width="50%" height="50%">
 
-![Current status of GUI](https://github.com/uw-loci/Flamingo_Control/blob/main/images/microscope_settings_folder.PNG?raw=true | width=100)
+![Settings](https://github.com/uw-loci/Flamingo_Control/blob/main/images/microscope_settings_folder.PNG?raw=true | width=100)
 
-![Current status of GUI](https://github.com/uw-loci/Flamingo_Control/blob/main/images/Output_png_folder.PNG?raw=true | width=100)
+![Output sample](https://github.com/uw-loci/Flamingo_Control/blob/main/images/Output_png_folder.PNG?raw=true | width=100)
 ### Short-term Goals
 The short-term goals for this project include streamlining the workflow and improving flexibility.
 
