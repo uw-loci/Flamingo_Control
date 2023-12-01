@@ -10,24 +10,28 @@
     Angle step size = 
     Region = 
     Save image drive = /media/deploy/MSN_LS
-    Save image directory = DummyExpt
-    Comments = GUI Snapshot
+    Save image directory = Sample Search
+    Comments = Delete
     Save max projection = false
     Display max projection = true
     Save image data = NotSaved
     Save to subfolders = false
     Work flow live view enabled = false
     </Experiment Settings>
+    </Experiment Settings>
+    <//Experiment Settings>
     <Camera Settings>
     Exposure time (us) = 
     Frame rate (f/s) = 
     AOI width = 
     AOI height = 
     </Camera Settings>
+    </Camera Settings>
+    <//Camera Settings>
     <Stack Settings>
     Stack index = 
-    Change in Z axis (mm) = 0.01
-    Number of planes = 1
+    Change in Z axis (mm) = 0.09999999999999987
+    Number of planes = 10
     Number of planes saved = 
     Z stage velocity (mm/s) = 0.400032
     Rotational stage velocity (°/s) = 0
@@ -43,29 +47,41 @@
     Stack option settings 1 = 
     Stack option settings 2 = 
     </Stack Settings>
+    </Stack Settings>
+    <//Stack Settings>
     <Start Position>
-    X (mm) = 13.4
-    Y (mm) = 7.1
-    Z (mm) = 13.0
+    X (mm) = 3.1
+    Y (mm) = 8.095875
+    Z (mm) = 1.55
     Angle (degrees) = 0.0
     </Start Position>
+    </Start Position>
+    <//Start Position>
     <End Position>
-    X (mm) = 13.4
-    Y (mm) = 7.1
-    Z (mm) = 13.01
+    X (mm) = 3.1
+    Y (mm) = 8.095875
+    Z (mm) = 1.65
     Angle (degrees) = 0.0
     </End Position>
+    </End Position>
+    <//End Position>
     <Illumination Source>
     Laser 1 640 nm = 0.00 0
     Laser 2 561 nm = 0.00 0
     Laser 3 488 nm = 3.97 1
     Laser 4 405 nm = 0.00 0
-    LED_RGB_Board = 0.00 0
+    LED_RGB_Board = 00.00 0
     LED selection = 1 0
     LED DAC = 42205 0
     </Illumination Source>
+    </Illumination Source>
+    <//Illumination Source>
     <Illumination Path>
     Left path = ON 1
     Right path = OFF 0
     </Illumination Path>
+    </Illumination Path>
+    <//Illumination Path>
+    </Workflow Settings>
+    <//Workflow Settings>
 </Workflow Settings>

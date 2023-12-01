@@ -229,7 +229,7 @@ class MultiAngleDialog(QDialog):
             )  # Set the QLineEdit text to the selected file's name
 
 
-class Py2FlamingoGUI(QMainWindow):
+class Py2FlamingoGUI(QWidget):
     """
     This class represents the main window of the Py2Flamingo application. It inherits from QMainWindow, a class in PyQt5 that provides a main application window.
 

@@ -10,7 +10,7 @@
     Angle step size = 
     Region = 
     Save image drive = /media/deploy/MSN_LS
-    Save image directory = DummyExpt
+    Save image directory = Snapshots
     Comments = GUI Snapshot
     Save max projection = false
     Display max projection = true
@@ -18,12 +18,16 @@
     Save to subfolders = false
     Work flow live view enabled = false
     </Experiment Settings>
+    </Experiment Settings>
+    <//Experiment Settings>
     <Camera Settings>
     Exposure time (us) = 
     Frame rate (f/s) = 
     AOI width = 
     AOI height = 
     </Camera Settings>
+    </Camera Settings>
+    <//Camera Settings>
     <Stack Settings>
     Stack index = 
     Change in Z axis (mm) = 0.01
@@ -43,18 +47,24 @@
     Stack option settings 1 = 
     Stack option settings 2 = 
     </Stack Settings>
+    </Stack Settings>
+    <//Stack Settings>
     <Start Position>
-    X (mm) = 13.4
-    Y (mm) = 7.1
-    Z (mm) = 13.0
+    X (mm) = 3.1
+    Y (mm) = 14.0
+    Z (mm) = 2.485
     Angle (degrees) = 0.0
     </Start Position>
+    </Start Position>
+    <//Start Position>
     <End Position>
-    X (mm) = 13.4
-    Y (mm) = 7.1
-    Z (mm) = 13.01
+    X (mm) = 3.1
+    Y (mm) = 14.0
+    Z (mm) = 2.4949999999999997
     Angle (degrees) = 0.0
     </End Position>
+    </End Position>
+    <//End Position>
     <Illumination Source>
     Laser 1 640 nm = 0.00 0
     Laser 2 561 nm = 0.00 0
@@ -64,8 +74,14 @@
     LED selection = 1 0
     LED DAC = 42205 0
     </Illumination Source>
+    </Illumination Source>
+    <//Illumination Source>
     <Illumination Path>
     Left path = ON 1
     Right path = OFF 0
     </Illumination Path>
+    </Illumination Path>
+    <//Illumination Path>
+    </Workflow Settings>
+    <//Workflow Settings>
 </Workflow Settings>

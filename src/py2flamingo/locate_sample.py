@@ -124,7 +124,7 @@ def locate_sample(
     # Store the position of the peak and then go back to that stack and try to find the focus
 
     bounds = [None, None]
-    coords = []
+    coords = [] #Currenty only for troubleshooting
     # xyzr_init[1] is the initial y position
     bounds, coords, xyzr, i = scope.y_axis_sample_boundary_search(
         sample_count,
@@ -277,33 +277,9 @@ def locate_sample(
         time.sleep(0.1)
     # update Z center for X search
     xyzr[2] = midpoint_z_mm
-    # # Take a snapshot there using the user defined laser and power
 
-    # ##############
-    # snap_dict = wf_dict
-    # #only the z position should have changed over the last search
-    # xyzr[2] = midpoint_z_mm
-    # print(f"final xyzr snap {xyzr}")
-    # snap_dict["Experiment Settings"]["Save image directory"] = "Sample"
-    # snap_dict = dict_comment(snap_dict, "Sample located")
-
-    # snap_dict = dict_to_snap(snap_dict, xyzr, framerate, plane_spacing)
-    # snap_dict = laser_or_LED(snap_dict, laser_channel, laser_setting, laser_on=True)
-    # dict_to_workflow(os.path.join("workflows", "current" + wf_zstack), snap_dict)
-    # shutil.copy(
-    #     os.path.join("workflows", "current" + wf_zstack),
-    #     os.path.join("workflows", "workflow.txt"),
-    # )
-    # image_data = scope.send_workflow(
-    #     command_queue,
-    #     send_event,
-    #     stage_location_queue,
-    #     system_idle,
-    #     xyzr,
-    #     visualize_event,
-    #     image_queue
-    # )
     ##############################Center X################
+
     ROLLING_AVERAGE_WIDTH = 101
     i = 0
     # Make sure the bounding box is within the frame, if possible
@@ -368,7 +344,7 @@ def locate_sample(
         "sample_txt", sample_name, f"sample_bounds_{sample_name}.txt"
     )
 
-    # store the bounding box coordinates in a dict
+    # store the bounding box coordinates in a dict and save to a file
     bounding_dict = {
         "bounds 1": {
             "x (mm)": xyzr_sample_top_mm[0],
