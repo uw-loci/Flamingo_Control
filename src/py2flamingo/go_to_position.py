@@ -1,7 +1,7 @@
 import os
 
-from functions.microscope_connect import go_to_XYZR
-from functions.text_file_parsing import text_to_dict
+from py2flamingo.functions.microscope_connect import go_to_XYZR
+from py2flamingo.functions.text_file_parsing import text_to_dict
 
 
 def go_to_position(xyzr, command_data_queue, command_queue, send_event):

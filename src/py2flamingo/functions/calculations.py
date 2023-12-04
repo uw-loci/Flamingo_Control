@@ -161,7 +161,7 @@ def find_peak_bounds(
     return peak_bounds
 
 
-def find_most_in_focus_plane(z_stack: np.ndarray[np.uint16, Sequence[int]]):
+def find_most_in_focus_plane(z_stack: np.ndarray):
     """
     Finds the most in-focus plane in a Z-stack of 16-bit grayscale images using the sum of intensities.
 

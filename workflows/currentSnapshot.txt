@@ -51,16 +51,16 @@
     <//Stack Settings>
     <Start Position>
     X (mm) = 3.1
-    Y (mm) = 14.0
-    Z (mm) = 2.485
+    Y (mm) = 13.0
+    Z (mm) = 2.25
     Angle (degrees) = 0.0
     </Start Position>
     </Start Position>
     <//Start Position>
     <End Position>
     X (mm) = 3.1
-    Y (mm) = 14.0
-    Z (mm) = 2.4949999999999997
+    Y (mm) = 13.0
+    Z (mm) = 2.26
     Angle (degrees) = 0.0
     </End Position>
     </End Position>

@@ -5,14 +5,14 @@
 import os
 from threading import Thread
 
-import functions.calculations as calc
-import functions.microscope_connect as mc
-import functions.microscope_interactions as scope
-import functions.text_file_parsing as txt
-from FlamingoConnect import FlamingoConnect, show_warning_message
-from functions.image_display import convert_to_qimage
-from functions.run_workflow_basic import run_workflow
-from global_objects import (
+import py2flamingo.functions.calculations as calc
+import py2flamingo.functions.microscope_connect as mc
+import py2flamingo.functions.microscope_interactions as scope
+import py2flamingo.functions.text_file_parsing as txt
+from .FlamingoConnect import FlamingoConnect, show_warning_message
+from py2flamingo.functions.image_display import convert_to_qimage
+from py2flamingo.functions.run_workflow_basic import run_workflow
+from .global_objects import (
     command_data_queue,
     command_queue,
     image_queue,
@@ -28,9 +28,9 @@ from global_objects import (
     visualize_queue,
     z_plane_queue,
 )
-from go_to_position import go_to_position
-from locate_sample import locate_sample
-from multi_angle_collection import multi_angle_collection
+from .go_to_position import go_to_position
+from .locate_sample import locate_sample
+from .multi_angle_collection import multi_angle_collection
 from PyQt5.QtCore import QSize, Qt, QTimer
 from PyQt5.QtGui import QDoubleValidator, QIntValidator, QPixmap
 from PyQt5.QtWidgets import (
@@ -49,9 +49,9 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from set_home import set_home
-from take_snapshot import take_snapshot
-from trace_ellipse import trace_ellipse
+from .set_home import set_home
+from .take_snapshot import take_snapshot
+from .trace_ellipse import trace_ellipse
 
 
 class CoordinateDialog(QDialog):
@@ -229,8 +229,8 @@ class MultiAngleDialog(QDialog):
             )  # Set the QLineEdit text to the selected file's name
 
 
-class Py2FlamingoGUI(QWidget):
-    """
+class Py2FlamingoGUI(QMainWindow):
+    """m
     This class represents the main window of the Py2Flamingo application. It inherits from QMainWindow, a class in PyQt5 that provides a main application window.
 
     The Py2FlamingoGUI class is responsible for initializing the connection to the microscope through FlamingoConnect, creating the GUI layout, and updating the display.
@@ -332,11 +332,11 @@ class Py2FlamingoGUI(QWidget):
 
         # Create the buttons and add them to the left interface layout
         self.create_buttons(left_interface_layout)
+        image_layout = QVBoxLayout()  # Create a QVBoxLayout for the image layout
+        self.fill_image_layout(left_interface_layout)
 
         # Add the left interface layout and the image layout to the main layout
         global_layout.addLayout(left_interface_layout)
-        image_layout = QVBoxLayout()  # Create a QVBoxLayout for the image layout
-        self.fill_image_layout(image_layout)
         global_layout.addLayout(image_layout)
 
         # Create a QWidget for the central widget, set its layout to the main layout, and set it as the central widget for the main window

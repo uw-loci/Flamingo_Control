@@ -2,9 +2,9 @@ import os
 import shutil
 import time
 from typing import Sequence
-
-from functions.text_file_parsing import *
-from global_objects import clear_all_events_queues
+from pathlib import Path
+from py2flamingo.functions.text_file_parsing import *
+from py2flamingo.global_objects import clear_all_events_queues
 
 plane_spacing = 10
 framerate = 40.0032  # /s
@@ -21,9 +21,9 @@ def run_workflow(
     send_event,
 ):
     # Load command codes from the command_list.txt file
-    commands = text_to_dict(
-        os.path.join("src", "py2flamingo", "functions", "command_list.txt")
-    )
+
+    commands = text_to_dict(Path(__file__).parent / "command_list.txt")
+
     COMMAND_CODES_CAMERA_WORK_FLOW_START = int(
         commands["CommandCodes.h"]["COMMAND_CODES_CAMERA_WORK_FLOW_START"]
     )

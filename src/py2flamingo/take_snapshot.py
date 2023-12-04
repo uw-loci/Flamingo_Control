@@ -3,9 +3,9 @@ import shutil
 import time
 from typing import Sequence
 
-import functions.microscope_interactions as scope
-from functions.text_file_parsing import *
-from global_objects import clear_all_events_queues
+import py2flamingo.functions.microscope_interactions as scope
+from py2flamingo.functions.text_file_parsing import *
+from .global_objects import clear_all_events_queues
 
 plane_spacing = 10
 FRAMERATE = 40.0032  # /s

@@ -7,19 +7,23 @@ import time
 from threading import Event
 from typing import Sequence
 
-import functions.calculations
-import functions.tcpip_nuc
+from pathlib import Path
+import py2flamingo.functions.calculations
+import py2flamingo.functions.tcpip_nuc
 import numpy as np
-from functions.text_file_parsing import text_to_dict, workflow_to_dict
+from py2flamingo.functions.text_file_parsing import text_to_dict, workflow_to_dict
 from PIL import Image
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QImage, QPixmap
 from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 index = 0
-commands = text_to_dict(
-    os.path.join("src", "py2flamingo", "functions", "command_list.txt")
-)
+
+##############################
+# Command codes
+
+commands = text_to_dict(Path(__file__).parent / "command_list.txt")
+
 
 COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE = int(
     commands["CommandCodes.h"]["COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE"]
@@ -570,7 +574,7 @@ def handle_workflow_start(client):
     None
     """
     # print('Workflow sent')
-    functions.tcpip_nuc.text_to_nuc(
+    py2flamingo.functions.tcpip_nuc.text_to_nuc(
         client,
         os.path.join("workflows", "workflow.txt"),
         COMMAND_CODES_CAMERA_WORK_FLOW_START,
@@ -591,7 +595,7 @@ def handle_scope_settings_save(client):
     None
     """
     print("Saving microscope settings for home position")
-    functions.tcpip_nuc.text_to_nuc(
+    py2flamingo.functions.tcpip_nuc.text_to_nuc(
         client,
         os.path.join("microscope_settings", "send_settings.txt"),
         COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE,
@@ -600,7 +604,7 @@ def handle_scope_settings_save(client):
 
 def check_workflow(client):
     # print('Checking workflow for errors')
-    functions.tcpip_nuc.text_to_nuc(
+    py2flamingo.functions.tcpip_nuc.text_to_nuc(
         client,
         os.path.join("workflows", "workflow.txt"),
         COMMAND_CODES_CAMERA_CHECK_STACK,
@@ -625,9 +629,9 @@ def handle_non_workflow_command(client, command: int, command_data: Sequence):
     None
     """
     if command_data:
-        functions.tcpip_nuc.command_to_nuc(client, command, command_data)
+        py2flamingo.functions.tcpip_nuc.command_to_nuc(client, command, command_data)
     else:
-        functions.tcpip_nuc.command_to_nuc(client, command)
+        py2flamingo.functions.tcpip_nuc.command_to_nuc(client, command)
 
 
 def send_thread(

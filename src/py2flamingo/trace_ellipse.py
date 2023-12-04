@@ -3,13 +3,13 @@ import copy
 import os
 import shutil
 
-import functions.calculations as calc
-import functions.microscope_connect as mc
-import functions.microscope_interactions as scope
-import functions.text_file_parsing as txt
+import py2flamingo.functions.calculations as calc
+import py2flamingo.functions.microscope_connect as mc
+import py2flamingo.functions.microscope_interactions as scope
+import py2flamingo.functions.text_file_parsing as txt
 import numpy as np
-from functions.image_display import save_png
-from take_snapshot import take_snapshot
+from py2flamingo.functions.image_display import save_png
+from .take_snapshot import take_snapshot
 
 # number of image planes the nuc can/will hold in its buffer before overwriting
 # check with Joe Li before increasing this above 10. Decreasing it below 10 is fine.
@@ -122,7 +122,7 @@ def find_sample_at_angle(
 
     # z_positions = [point[0][2] for point in coordsZ]
 
-    print("z focus plane " + str(midpoint_z_mm))
+    print(f"z focus plane {str(midpoint_z_mm)}")
 
     # XYR should all be correct already
     xyzr[2] = midpoint_z_mm
@@ -145,7 +145,7 @@ def find_sample_at_angle(
     top_bound_x_px = 0
     bottom_bound_x_px = frame_size
     while (top_bound_x_px == 0 or bottom_bound_x_px == frame_size) or i < 5:
-        i = i + 1
+        i += 1
         x_before_move = xyzr[0]
         image_data = take_snapshot(
             connection_data,
@@ -295,7 +295,7 @@ def trace_ellipse(
     #################
     # Try taking the starting position from the current sample bounds
     location_path = os.path.join(
-        "sample_txt", sample_name, "sample_bounds_" + sample_name + ".txt"
+        "sample_txt", sample_name, f"sample_bounds_{sample_name}.txt"
     )
 
     # Check if the file exists
@@ -314,12 +314,9 @@ def trace_ellipse(
 
     xyzr = copy.deepcopy(xyzr_init)
     print(f"Initial coordinates {xyzr}")
-    ellipse_points = []
-    ellipse_points.append(copy.deepcopy(xyzr_init))
-    top_ellipse_points = []
-    bottom_ellipse_points = []
-    top_ellipse_points.append(top_bound)
-    bottom_ellipse_points.append(bottom_bound)
+    ellipse_points = [copy.deepcopy(xyzr_init)]
+    top_ellipse_points = [top_bound]
+    bottom_ellipse_points = [bottom_bound]
     for i in range(1, int(360 / angle_step_size_deg)):
         # For large angle step sizes keeping xyzr can be problematic so restoring the initial values works better
         # xyzr = copy.deepcopy(xyzr_init)
@@ -367,11 +364,11 @@ def trace_ellipse(
     txt.save_points_to_csv(sample_name, top_points_dict, "top")
     txt.save_points_to_csv(sample_name, bottom_points_dict, "bottom")
     location_path = os.path.join(
-        "sample_txt", sample_name, "top_bounds_" + sample_name + ".txt"
+        "sample_txt", sample_name, f"top_bounds_{sample_name}.txt"
     )
     txt.dict_to_text(location_path, top_points_dict)
     location_path = os.path.join(
-        "sample_txt", sample_name, "bottom_bounds_" + sample_name + ".txt"
+        "sample_txt", sample_name, f"bottom_bounds_{sample_name}.txt"
     )
     txt.dict_to_text(location_path, bottom_points_dict)
     print(f"top: {top_ellipse_points}")

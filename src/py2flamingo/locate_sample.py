@@ -8,14 +8,14 @@ import copy
 import shutil
 import time
 
-import functions.calculations as calc
-import functions.microscope_interactions as scope
+import py2flamingo.functions.calculations as calc
+import py2flamingo.functions.microscope_interactions as scope
 import numpy as np
-from functions.image_display import save_png
-from functions.microscope_connect import *
-from functions.text_file_parsing import *
-from global_objects import clear_all_events_queues
-from take_snapshot import take_snapshot
+from py2flamingo.functions.image_display import save_png
+from py2flamingo.functions.microscope_connect import *
+from py2flamingo.functions.text_file_parsing import *
+from .global_objects import clear_all_events_queues
+from .take_snapshot import take_snapshot
 
 plane_spacing = 10
 FRAMERATE = 40.0032  # /s

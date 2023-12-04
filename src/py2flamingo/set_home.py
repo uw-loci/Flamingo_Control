@@ -3,8 +3,8 @@ import time
 from queue import Queue
 from threading import Event
 from typing import Sequence
-
-from functions.text_file_parsing import *
+from pathlib import Path
+from py2flamingo.functions.text_file_parsing import *
 
 
 def set_home(
@@ -37,10 +37,7 @@ def set_home(
     nuc_client, live_client, wf_zstack, LED_on, LED_off = connection_data
 
     # Load command list from text file and convert it to a dictionary
-    commands = text_to_dict(
-        os.path.join("src", "py2flamingo", "functions", "command_list.txt")
-    )
-
+    commands = text_to_dict(Path(__file__).parent / "command_list.txt")
     # Load commands for loading and saving scope settings from the dictionary
     COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(
         commands["CommandCodes.h"]["COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD"]

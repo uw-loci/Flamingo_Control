@@ -4,13 +4,13 @@ import copy
 import os
 import shutil
 
-import functions.calculations as calc
-import functions.microscope_connect as mc
-import functions.microscope_interactions as scope
-import functions.text_file_parsing as txt
+import py2flamingo.functions.calculations as calc
+import py2flamingo.functions.microscope_connect as mc
+import py2flamingo.functions.microscope_interactions as scope
+import py2flamingo.functions.text_file_parsing as txt
 import numpy as np
-from functions.image_display import save_png
-from take_snapshot import take_snapshot
+from py2flamingo.functions.image_display import save_png
+from .take_snapshot import take_snapshot
 
 FRAMERATE = 40.0032  # /s
 

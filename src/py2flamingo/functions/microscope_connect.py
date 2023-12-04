@@ -7,8 +7,9 @@ from threading import Event, Thread
 from tkinter import messagebox
 from typing import Sequence
 
-from functions.text_file_parsing import text_to_dict
-from functions.threads import (
+from pathlib import Path
+from py2flamingo.functions.text_file_parsing import text_to_dict
+from py2flamingo.functions.threads import (
     command_listen_thread,
     live_listen_thread,
     processing_thread,
@@ -19,9 +20,10 @@ from functions.threads import (
 LED_off = "00.00 0"
 LED_on = "50.0 1"
 # commands
-commands = text_to_dict(
-    os.path.join("src", "py2flamingo", "functions", "command_list.txt")
-)
+funcs = Path(__file__).parent
+
+commands = text_to_dict(Path(__file__).parent / "command_list.txt")
+
 COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(
     commands["CommandCodes.h"]["COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD"]
 )

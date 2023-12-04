@@ -3,12 +3,12 @@ import queue
 import shutil
 import time
 
-import functions.calculations as calc
-import functions.image_display
+import py2flamingo.functions.calculations as calc
+import py2flamingo.functions.image_display
 import numpy as np
-from functions.microscope_connect import *
-from functions.text_file_parsing import *
-from global_objects import clear_all_events_queues
+from py2flamingo.functions.microscope_connect import *
+from py2flamingo.functions.text_file_parsing import *
+from py2flamingo.global_objects import clear_all_events_queues
 
 
 def initial_setup(command_queue, other_data_queue, send_event):
@@ -23,9 +23,9 @@ def initial_setup(command_queue, other_data_queue, send_event):
     """
     clear_all_events_queues()
     # Look in the functions/command_list.txt file for other command codes, or add more
-    commands = text_to_dict(
-        os.path.join("src", "py2flamingo", "functions", "command_list.txt")
-    )
+
+    commands = text_to_dict(Path(__file__).parent / "command_list.txt")
+
 
     COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = int(
         commands["CommandCodes.h"]["COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD"]
@@ -224,7 +224,7 @@ def y_axis_sample_boundary_search(
             visualize_event,
             terminate_event,
         )
-        functions.image_display.save_png(image_data, f"yscan_{xyzr_centered[1]}")
+        py2flamingo.functions.image_display.save_png(image_data, f"yscan_{xyzr_centered[1]}")
         _, y_intensity_map = calc.calculate_rolling_y_intensity(image_data, 21)
 
         # Store data about IF signal at current in focus location

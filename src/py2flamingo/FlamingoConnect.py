@@ -3,9 +3,9 @@ import shutil
 from queue import Queue
 from threading import Event, Thread
 
-import functions.microscope_connect as mc
-from functions.text_file_parsing import text_to_dict, workflow_to_dict
-from global_objects import (
+import py2flamingo.functions.microscope_connect as mc
+from py2flamingo.functions.text_file_parsing import text_to_dict, workflow_to_dict
+from .global_objects import (
     command_data_queue,
     command_queue,
     image_queue,
