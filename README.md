@@ -13,7 +13,7 @@ This repository provides control software for Flamingo systems. It is designed f
 ### First Steps
 Before using this software, ensure that you are familiar with your Flamingo microscope and have a dataset on hand. Follow these steps:
 
-1. Run `__init__.py` to pass a series of checks and connect to the microscope.
+1. Modification - To start with Napari use `python -m py2flamingo.napari` within the correct environment.
 2. Make sure you have access to the necessary files:
    - FlamingoMetaData.txt (generated during any workflow) should be placed in the `microscope_settings` folder and contains the IP address and port information.
    - Copy a workflow text file to Zstack.txt within the `workflows` folder. This file is used as the basis for many of the default settings - if you want to change your default settings, collect a new workflow file and replace it.
