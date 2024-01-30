@@ -52,7 +52,7 @@
     <Start Position>
     X (mm) = 3.1
     Y (mm) = 13.0
-    Z (mm) = 2.25
+    Z (mm) = 2.185
     Angle (degrees) = 0.0
     </Start Position>
     </Start Position>
@@ -60,7 +60,7 @@
     <End Position>
     X (mm) = 3.1
     Y (mm) = 13.0
-    Z (mm) = 2.26
+    Z (mm) = 2.195
     Angle (degrees) = 0.0
     </End Position>
     </End Position>

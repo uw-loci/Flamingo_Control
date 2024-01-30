@@ -10,7 +10,7 @@
 
 import sys
 
-from .global_objects import (
+from py2flamingo.global_objects import (
     OS,
     command_data_queue,
     command_queue,
