@@ -9,7 +9,7 @@ import py2flamingo.functions.microscope_interactions as scope
 import py2flamingo.functions.text_file_parsing as txt
 import numpy as np
 from py2flamingo.functions.image_display import save_png
-from .take_snapshot import take_snapshot
+import take_snapshot
 
 # number of image planes the nuc can/will hold in its buffer before overwriting
 # check with Joe Li before increasing this above 10. Decreasing it below 10 is fine.
