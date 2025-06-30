@@ -72,48 +72,47 @@ class ConfigurationService:
         
         return None
     
-    def _prompt_for_file(self, filename: str, title: str, message: str) -> Optional[Path]:
-        """
-        Prompt user to select a file using Qt dialog.
+def _prompt_for_file(self, filename: str, title: str, message: str) -> Optional[Path]:
+    """
+    Prompt user to select a file using Qt dialog.
+    
+    Fixed to avoid QApplication conflicts.
+    """
+    try:
+        from PyQt5.QtWidgets import QFileDialog, QMessageBox, QApplication
         
-        Args:
-            filename: Name of file being requested
-            title: Dialog title
-            message: Help message for user
-            
-        Returns:
-            Optional[Path]: Selected file path or None
-        """
-        try:
-            from PyQt5.QtWidgets import QFileDialog, QMessageBox, QApplication
-            
-            # Ensure QApplication exists
-            app = QApplication.instance()
-            if not app:
-                app = QApplication([])
-            
-            # Show information message
-            msg = QMessageBox()
-            msg.setIcon(QMessageBox.Information)
-            msg.setWindowTitle("File Required")
-            msg.setText(f"The file {filename} was not found.")
-            msg.setInformativeText(message)
-            msg.setStandardButtons(QMessageBox.Ok)
-            msg.exec_()
-            
-            # Open file dialog
-            file_path, _ = QFileDialog.getOpenFileName(
-                None,
-                title,
-                str(self.base_path),
-                "Text files (*.txt);;All files (*.*)"
-            )
-            
-            return Path(file_path) if file_path else None
-            
-        except ImportError:
-            self.logger.error("Qt not available for file dialog")
+        # Check if we're in a Qt environment
+        app = QApplication.instance()
+        if not app:
+            # Log error instead of creating app
+            self.logger.error("No QApplication instance available for file dialog")
             return None
+        
+        # Show information message
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle("File Required")
+        msg.setText(f"The file {filename} was not found.")
+        msg.setInformativeText(message)
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec_()
+        
+        # Open file dialog
+        file_path, _ = QFileDialog.getOpenFileName(
+            None,
+            title,
+            str(self.base_path),
+            "Text files (*.txt);;All files (*.*)"
+        )
+        
+        return Path(file_path) if file_path else None
+        
+    except ImportError:
+        self.logger.error("Qt not available for file dialog")
+        return None
+    except Exception as e:
+        self.logger.error(f"Error showing file dialog: {e}")
+        return None
     
     def _copy_file_to_settings(self, source_path: Path, target_name: str) -> None:
         """

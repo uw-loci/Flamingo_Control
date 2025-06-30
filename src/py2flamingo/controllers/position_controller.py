@@ -127,22 +127,34 @@ class PositionController:
             value: The value to move the axis to
             axis_name: Human-readable axis name for logging
         """
+
         self.logger.debug(f"Moving {axis_name} to {value}")
         
-        # Put command data in queue
-        command_data = [axis_code, 0, 0, value]
-        self.queue_manager.put_nowait('command_data', command_data)
-        
-        # Put command in queue
-        self.queue_manager.put_nowait('command', self.COMMAND_CODES_STAGE_POSITION_SET)
-        
-        # Trigger send event
-        self.event_manager.set_event('send')
-        
-        # Wait for command to be processed
-        import time
-        while not self.queue_manager.get_queue('command').empty():
-            time.sleep(0.1)
+        try:
+            # Put command data in queue
+            command_data = [axis_code, 0, 0, value]
+            self.queue_manager.put_nowait('command_data', command_data)
+            
+            # Put command in queue
+            self.queue_manager.put_nowait('command', self.COMMAND_CODES_STAGE_POSITION_SET)
+            
+            # Trigger send event
+            self.event_manager.set_event('send')
+            
+            # Wait for command to be processed with timeout
+            import time
+            timeout = 5.0  # 5 second timeout
+            start_time = time.time()
+            
+            while not self.queue_manager.get_queue('command').empty():
+                if time.time() - start_time > timeout:
+                    raise TimeoutError(f"Timeout waiting for {axis_name} movement")
+                time.sleep(0.1)
+                
+        except Exception as e:
+            self.logger.error(f"Failed to move {axis_name}: {e}")
+            raise
+
     
     def _validate_position(self, position: Position) -> None:
         """

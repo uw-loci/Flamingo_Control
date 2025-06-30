@@ -1,42 +1,76 @@
+# src/py2flamingo/views/napari_viewer.py
+"""
+Napari implementation of the viewer interface.
+"""
 import napari
-from py2flamingo.GUI import Py2FlamingoGUI
 import numpy as np
+from typing import Optional, Dict, Any, Tuple
+import logging
 
+from .viewer_interface import ViewerInterface
 
-class NapariFlamingoGui(Py2FlamingoGUI):
-    def __init__(self, queues_and_events, viewer):
-        super().__init__(queues_and_events)
-        self.viewer = viewer
-        self.preview = None #viewer.add_image(np.zeros((10, 10)), name="Preview")
-        self.image_label.hide()
-
-    def display_image(self, image):
-        # Ensure the image is a 2D array
-        if image.ndim != 2:
-            raise ValueError("Provided image is not a 2D array")
-
-        # Convert the image to a 3D array (shape: (1, height, width))
-        image = np.expand_dims(image, axis=0)
-
-        # If the preview layer is not initialized, create it
-        if self.preview is None:
-            self.preview = self.viewer.add_image(image, name="Preview")
-            self.preview._keep_auto_contrast = True
-        elif self.preview.data.ndim == 3:
-            # Concatenate the new image
-            self.preview.data = np.concatenate((self.preview.data, image), axis=0)
-
-        else:
-            raise ValueError("Existing data is not a 3D array")
-
-        # Set the current step to the last image
-        self.viewer.dims.set_current_step(0, len(self.preview.data) - 1)
+class NapariViewer(ViewerInterface):
+    """
+    Napari-specific implementation of the viewer interface.
+    """
+    
+    def __init__(self, viewer: napari.Viewer):
+        """
+        Initialize with existing Napari viewer.
         
-if __name__ == "__main__":
-    from py2flamingo import queues_and_events
-
-    viewer = napari.Viewer()
-    controller = NapariFlamingoGui(queues_and_events, viewer)
-    viewer.window.add_dock_widget(controller, area="right")
-
-    napari.run()
+        Args:
+            viewer: Napari viewer instance
+        """
+        self.viewer = viewer
+        self.layers = {}  # name -> layer mapping
+        self.logger = logging.getLogger(__name__)
+    
+    def add_image(self, 
+                  data: np.ndarray, 
+                  name: str,
+                  scale: Optional[Tuple[float, ...]] = None,
+                  metadata: Optional[Dict[str, Any]] = None) -> Any:
+        """Add image to Napari viewer."""
+        try:
+            # Remove existing layer with same name
+            if name in self.layers:
+                self.remove_image(name)
+            
+            # Add new layer
+            layer = self.viewer.add_image(
+                data,
+                name=name,
+                scale=scale,
+                metadata=metadata or {}
+            )
+            
+            self.layers[name] = layer
+            return layer
+            
+        except Exception as e:
+            self.logger.error(f"Failed to add image {name}: {e}")
+            return None
+    
+    def update_image(self, name: str, data: np.ndarray) -> None:
+        """Update existing image data."""
+        if name in self.layers:
+            self.layers[name].data = data
+        else:
+            # Create new if doesn't exist
+            self.add_image(data, name)
+    
+    def remove_image(self, name: str) -> None:
+        """Remove image from viewer."""
+        if name in self.layers:
+            layer = self.layers.pop(name)
+            if layer in self.viewer.layers:
+                self.viewer.layers.remove(layer)
+    
+    def clear_all(self) -> None:
+        """Remove all images."""
+        for name in list(self.layers.keys()):
+            self.remove_image(name)
+    
+    def set_3d_mode(self, enabled: bool) -> None:
+        """Toggle 3D mode in Napari."""
+        self.viewer.dims.ndisplay = 3 if enabled else 2
