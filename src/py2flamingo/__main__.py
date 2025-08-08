@@ -104,7 +104,7 @@ def run_standalone_gui():
     
     try:
         from PyQt5.QtWidgets import QApplication
-        from .GUI import Py2FlamingoGUI
+        from .GUI import GUI as Py2FlamingoGUI
         from .application import Application
         
         # Create Qt application

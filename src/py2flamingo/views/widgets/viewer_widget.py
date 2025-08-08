@@ -9,7 +9,7 @@ import logging
 from typing import Optional, Dict, Any
 from queue import Empty
 
-from .viewer_interface import ViewerInterface
+from ..viewer_interface import ViewerInterface
 
 class ViewerWidget(QWidget):
     """

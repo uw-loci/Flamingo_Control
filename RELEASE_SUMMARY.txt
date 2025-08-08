@@ -1,0 +1,5 @@
+Refactor polish for viewer modularity & parity:
+- Keep Napari as an add‑on: new dockable `NapariFlamingoGui` with viewer widget.
+- Unify queues/events via legacy adapter; remove duplicate globals.
+- Fix imports and typos; correct entry points.
+- Maintains external compatibility and prepares for alternate viewers.
