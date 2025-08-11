@@ -1,6 +1,6 @@
 <MetaData>
   <Experiment>
-    Name = 25X
+    Name = 
     Active = true
     Image file location = 
     Purpose = 
@@ -89,10 +89,10 @@
 <Instrument>
   <Type>
     Microscope type = T, X, L, V SPIM
-    Microscope name = n7
-    Microscope address = 10.129.37.22 53717
+    Microscope name = zion
+    Microscope address = 10.129.37.20 53717
     Microscope builder = Builder
-    Objective lens magnification = 25.69
+    Objective lens magnification = 10
     Tube lens design focal length (mm) = 200
     Tube lens length (mm) = 200
   </Type>

@@ -1,71 +1,78 @@
 <Workflow Settings>
-    <Experiment Settings>
-    Plane spacing (um) = 10
-    Frame rate (f/s) = 40.003200
-    Exposure time (us) = 24998
+  <Experiment Settings>
+    Plane spacing (um) = 2.5
+    Frame rate (f/s) = 40.213000
+    Exposure time (us) = 9,002
     Duration (dd:hh:mm:ss) = 00:00:00:00
     Interval (dd:hh:mm:ss) = 00:00:00:00
     Sample = 
     Number of angles = 
     Angle step size = 
     Region = 
-    Save image drive = /media/deploy/MSN_LS
-    Save image directory = DummyExpt
-    Comments = TestSettings
-    Save max projection = false
-    Display max projection = true
-    Save image data = Tiff
+    Save image drive = /media/deploy/ctlsm1
+    Save image directory = MM01
+    Comments = test settings, smaller fov
+    Save max projection = true
+    Display max projection = false
+    Save image data = Raw
     Save to subfolders = false
     Work flow live view enabled = false
-    </Experiment Settings>
-    <Camera Settings>
+  </Experiment Settings>
+  <Camera Settings>
     Exposure time (us) = 
     Frame rate (f/s) = 
-    AOI width = 
-    AOI height = 
-    </Camera Settings>
-    <Stack Settings>
+    AOI width = 2048
+    AOI height = 2048
+  </Camera Settings>
+  <Stack Settings>
     Stack index = 
-    Change in Z axis (mm) = 1.125
-    Number of planes = 200
+    Change in Z axis (mm) = 1.191
+    Number of planes = 476
     Number of planes saved = 
-    Z stage velocity (mm/s) = 0.100008
+    Z stage velocity (mm/s) = 0.100533
     Rotational stage velocity (°/s) = 0
+    Auto update stack calculations = true
     Date time stamp = 
     Stack file name = 
-    Camera 1 capture percentage = 0
+    Camera 1 capture percentage = 100
     Camera 1 capture mode (0 full, 1 from front, 2 from back, 3 none) = 0
     Camera 1 capture range = 
     Camera 2 capture percentage = 100
     Camera 2 capture mode (0 full, 1 from front, 2 from back, 3 none) = 0
     Camera 2 capture range = 
-    Stack option = ZStack
-    Stack option settings 1 = 
-    Stack option settings 2 = 
-    </Stack Settings>
-    <Start Position>
-    X (mm) = 13.282
-    Y (mm) = 4.873
-    Z (mm) = 13.625
-    Angle (degrees) = -0.001
-    </Start Position>
-    <End Position>
-    X (mm) = 13.282
-    Y (mm) = 4.873
-    Z (mm) = 12.500
-    Angle (degrees) = -0.001
-    </End Position>
-    <Illumination Source>
-    Laser 1 640 nm = 0.00 0
-    Laser 2 561 nm = 0.00 0
-    Laser 3 488 nm = 3.97 1
-    Laser 4 405 nm = 0.00 0
-    LED_RGB_Board = 30.43 0
-    LED selection = 1 0
-    LED DAC = 42205 0
-    </Illumination Source>
-    <Illumination Path>
+    Stack option = Tile
+    Stack option settings 1 = 5
+    Stack option settings 2 = 5
+  </Stack Settings>
+  <Start Position>
+    X (mm) = 2.624
+    Y (mm) = 12.980
+    Z (mm) = 20.621
+    Angle (degrees) = 132.840
+  </Start Position>
+  <End Position>
+    X (mm) = 7.798
+    Y (mm) = 20
+    Z (mm) = 21.812
+    Angle (degrees) = 132.840
+  </End Position>
+  <Illumination Source>
+    Laser 1 1: 405 nm MLE = 0.00 0
+    Laser 2 2: 488 nm MLE = 10.67 0
+    Laser 3 3: 561 nm MLE = 5.88 1
+    Laser 4 4: 640 nm MLE = 8.01 1
+    Laser 5 = 0.00 0
+    Laser 6 = 0.00 0
+    Laser 7 = 0.00 0
+    LED_RGB_Board = 29.82 0
+    LED selection = 0 0
+    LED DAC = 42000 0
+  </Illumination Source>
+  <Illumination Path>
     Left path = ON 1
-    Right path = OFF 0
-    </Illumination Path>
+    Right path = ON 1
+  </Illumination Path>
+  <Illumination Options>
+    Run stack with multiple lasers on = false
+  </Illumination Options>
 </Workflow Settings>
