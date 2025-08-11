@@ -8,7 +8,7 @@ and their spatial boundaries within the microscope field of view.
 """
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
-from models.microscope import Position
+from ..models.microscope import Position
 
 @dataclass
 class SampleBounds:

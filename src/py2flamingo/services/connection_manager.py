@@ -12,7 +12,7 @@ import logging
 import time
 import numpy as np
 
-from models.microscope import Position
+from ..models.microscope import Position
 
 
 class ConnectionManager:

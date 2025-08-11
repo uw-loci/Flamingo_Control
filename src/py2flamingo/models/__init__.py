@@ -10,19 +10,18 @@ the application.
 from .microscope import (
     MicroscopeState,
     Position,
-    MicroscopeInfo,
     MicroscopeModel
 )
 
 from .workflow import (
     WorkflowType,
-    SaveFormat,
+
     IlluminationSettings,
     StackSettings,
     TileSettings,
     ExperimentSettings,
     WorkflowModel,
-    WorkflowResult
+
 )
 
 from .settings import (

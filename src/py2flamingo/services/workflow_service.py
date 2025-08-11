@@ -9,8 +9,8 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 import json
 
-from models.workflow import WorkflowModel, WorkflowType, IlluminationSettings
-from models.microscope import Position
+from ..models.workflow import WorkflowModel, WorkflowType, IlluminationSettings
+from ..models.microscope import Position
 
 
 class WorkflowService:

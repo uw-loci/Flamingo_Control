@@ -36,19 +36,19 @@ from .global_objects import (
 )
 
 # MVC Controller imports
-from controllers.position_controller import PositionController
-from controllers.sample_controller import SampleController
-from controllers.multi_angle_controller import MultiAngleController
-from controllers.settings_controller import SettingsController
-from controllers.snapshot_controller import SnapshotController
-from controllers.ellipse_controller import EllipseController
-from controllers.microscope_controller import MicroscopeController
+from ..controllers.position_controller import PositionController
+from ..controllers.sample_controller import SampleController
+from ..controllers.multi_angle_controller import MultiAngleController
+from ..controllers.settings_controller import SettingsController
+from ..controllers.snapshot_controller import SnapshotController
+from ..controllers.ellipse_controller import EllipseController
+from ..controllers.microscope_controller import MicroscopeController
 
-from models.microscope import Position
+from ..models.microscope import Position
 import numpy as np
 # MVC Service imports
-from services.communication.connection_manager import ConnectionManager
-from services.workflow_service import WorkflowService
+from ..services.communication.connection_manager import ConnectionManager
+from ..services.workflow_service import WorkflowService
 
 # PyQt5 imports
 from PyQt5.QtCore import QSize, Qt, QTimer

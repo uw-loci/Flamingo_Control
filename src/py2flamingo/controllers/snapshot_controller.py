@@ -1,8 +1,8 @@
 # controllers/snapshot_controller.py
-from models.workflow import WorkflowModel, WorkflowType, IlluminationSettings
-from models.microscope import Position
-from services.workflow_service import WorkflowService
-from services.communication import ConnectionManager
+from ..models.workflow import WorkflowModel, WorkflowType, IlluminationSettings
+from ..models.microscope import Position
+from ..services.workflow_service import WorkflowService
+from ..services.communication import ConnectionManager
 import logging
 
 class SnapshotController:

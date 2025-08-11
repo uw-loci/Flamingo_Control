@@ -8,8 +8,8 @@ from typing import List, Callable, Optional
 import logging
 from threading import Lock
 
-from models.microscope import MicroscopeModel, Position, MicroscopeState
-from services.communication.connection_manager import ConnectionManager
+from ..models.microscope import MicroscopeModel, Position, MicroscopeState
+from ..services.communication.connection_manager import ConnectionManager
 
 
 class MicroscopeController:

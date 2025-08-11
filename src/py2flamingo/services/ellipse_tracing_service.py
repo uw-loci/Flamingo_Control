@@ -10,7 +10,7 @@ import logging
 from scipy.optimize import least_squares
 from sklearn.decomposition import PCA
 
-from models.ellipse import EllipseParameters
+from ..models.ellipse import EllipseParameters
 
 
 class EllipseTracingService:

@@ -9,11 +9,11 @@ import logging
 from typing import Optional, Tuple, Callable
 from threading import Thread
 
-from models.sample import Sample, SampleBounds
-from models.microscope import Position, MicroscopeState
-from services.sample_search_service import SampleSearchService
-from services.workflow_service import WorkflowService
-from controllers.base_controller import BaseController
+from ..models.sample import Sample, SampleBounds
+from ..models.microscope import Position, MicroscopeState
+from ..services.sample_search_service import SampleSearchService
+from ..services.workflow_service import WorkflowService
+from ..controllers.base_controller import BaseController
 
 class SampleController(BaseController):
     """

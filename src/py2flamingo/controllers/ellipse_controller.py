@@ -9,12 +9,12 @@ from typing import Optional, List, Tuple
 import numpy as np
 from pathlib import Path
 
-from models.microscope import Position
-from models.ellipse import EllipseModel, EllipseParameters
-from controllers.microscope_controller import MicroscopeController
-from controllers.sample_controller import SampleController
-from services.communication.connection_manager import ConnectionManager
-from services.ellipse_tracing_service import EllipseTracingService
+from ..models.microscope import Position
+from ..models.ellipse import EllipseModel, EllipseParameters
+from ..controllers.microscope_controller import MicroscopeController
+from ..controllers.sample_controller import SampleController
+from ..services.communication.connection_manager import ConnectionManager
+from ..services.ellipse_tracing_service import EllipseTracingService
 import py2flamingo.functions.calculations as calc
 import py2flamingo.functions.text_file_parsing as txt
 

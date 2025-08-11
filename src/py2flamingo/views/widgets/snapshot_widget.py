@@ -1,6 +1,6 @@
 # views/widgets/snapshot_widget.py
 from PyQt5.QtWidgets import QWidget, QPushButton, QVBoxLayout
-from controllers.snapshot_controller import SnapshotController
+from ..controllers.snapshot_controller import SnapshotController
 
 class SnapshotWidget(QWidget):
     def __init__(self, snapshot_controller: SnapshotController):
