@@ -1,9 +1,9 @@
 # Flamingo_Control (Py2Flamingo)
 
-Control software for Flamingo light sheet systems. It communicates with the Flamingo ControlSystem over TCP, manages acquisition workflows, and can display images either in a standalone PyQt GUI or inside **Napari** as a dock widget.
+Control software for Flamingo light sheet systems. The ongoing refactor keeps a minimal core focused on TCP communication, a lightweight GUI, and validating workflow/microscope settings files. Images can be shown in a standalone PyQt GUI or inside **Napari** as a dock widget.
 
-> **Refactor status (updated 2025-08-11)**  
-> The codebase has been modularized (controllers/services/core/views). Napari remains an optional add‑on via a thin adapter. Legacy global queues/events are preserved via a compatibility layer.
+> **Refactor status (updated 2025-08-26)**
+> The codebase is modularized (controllers/services/core/views). Napari is optional via a thin adapter, and legacy queues/events are preserved through a compatibility layer.
 
 ---
 
@@ -34,14 +34,19 @@ python -m venv .venv
 # macOS/Linux
 source .venv/bin/activate
 
-# From repo root, install runtime deps
-pip install -r requirements.txt  # if present
+# From repo root, install dependencies
+pip install -r requirements-dev.txt  # includes test tools
+# Runtime-only install (minimal)
+pip install PyQt5 numpy
 # Optional: Napari viewer
 pip install napari
 ```
 
-> If you don’t have a `requirements.txt`, install PyQt5 and NumPy at minimum:  
-> `pip install PyQt5 numpy` (+ your image IO stack).
+After installing, optionally enable pre-commit hooks:
+
+```bash
+pre-commit install
+```
 
 ---
 

@@ -5,7 +5,7 @@ Defines methods that any viewer (Napari or custom) should implement to work with
 """
 
 from abc import ABC, abstractmethod
-import numpy as np
+from typing import Any
 
 
 class ViewerInterface(ABC):
@@ -14,12 +14,12 @@ class ViewerInterface(ABC):
     """
     
     @abstractmethod
-    def display_image(self, image: np.ndarray, title: str = "", metadata: dict = None):
+    def display_image(self, image: Any, title: str = "", metadata: dict = None):
         """
         Display an image in the viewer.
         
         Args:
-            image: Numpy array of image data.
+            image: Array-like image data.
             title: Title or name for the image.
             metadata: Additional metadata for the image.
         """

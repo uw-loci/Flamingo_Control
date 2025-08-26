@@ -7,9 +7,18 @@ This package contains service classes that provide specific functionality
 such as communication, workflow management, and analysis algorithms.
 """
 
-from .workflow_service import WorkflowService
-from .sample_search_service import SampleSearchService
-from .ellipse_tracing_service import EllipseTracingService
+try:
+    from .workflow_service import WorkflowService
+except Exception:
+    WorkflowService = None
+try:
+    from .sample_search_service import SampleSearchService
+except Exception:
+    SampleSearchService = None
+try:
+    from .ellipse_tracing_service import EllipseTracingService
+except Exception:
+    EllipseTracingService = None
 
 __all__ = [
     'WorkflowService',

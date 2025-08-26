@@ -1,7 +1,6 @@
 # tests/test_views_napari_adapter.py
 import types
 import sys
-import numpy as np
 import pytest
 
 def _install_fake_napari(monkeypatch):
@@ -41,16 +40,17 @@ def test_napari_viewer_add_and_update(monkeypatch):
     v = fake_napari.Viewer()
     adapter = NapariViewer(v)
 
-    img1 = np.zeros((4, 4), dtype=np.uint8)
+    img1 = [[0] * 4 for _ in range(4)]
     adapter.display_image(img1, title="Live", metadata={"a": 1})
     assert "Live" in v.layers
     assert v.layers["Live"].data is img1
     assert v.layers["Live"].metadata == {"a": 1}
 
     # Update same layer
-    img2 = np.ones((4, 4), dtype=np.uint8)
+    img2 = [[1] * 4 for _ in range(4)]
     adapter.display_image(img2, title="Live", metadata={"a": 2})
 
     assert "Live" in v.layers
     assert v.layers["Live"].data is img2  # data updated
     # name remains "Live"; metadata may or may not be updated by adapter (we don't rely on it)
+

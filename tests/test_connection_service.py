@@ -49,7 +49,7 @@ class TestConnectionService(unittest.TestCase):
         mock_socket_class.side_effect = [mock_nuc, mock_live]
         
         # Mock thread manager
-        with patch('src.py2flamingo.services.connection_service.ThreadManager', NoOpThreadManager):
+        with patch('py2flamingo.services.connection_service.ThreadManager', NoOpThreadManager):
 
             svc = ConnectionService()
 
@@ -128,7 +128,7 @@ class TestConnectionService(unittest.TestCase):
         
         self.assertIn("Not connected", str(context.exception))
     
-    @patch('src.py2flamingo.utils.file_handlers.dict_to_workflow')
+    @patch('py2flamingo.utils.file_handlers.dict_to_workflow')
     def test_send_workflow(self, mock_dict_to_workflow):
         """Test sending workflow through the service."""
         # Mock connection
@@ -153,7 +153,7 @@ class TestConnectionService(unittest.TestCase):
         command = self.queue_manager.get_nowait('command')
         self.assertEqual(command, 12292)  # CAMERA_WORK_FLOW_START
     
-    @patch('src.py2flamingo.utils.file_handlers.text_to_dict')
+    @patch('py2flamingo.utils.file_handlers.text_to_dict')
     def test_get_microscope_settings(self, mock_text_to_dict):
         """Test retrieving microscope settings."""
         # Mock connection
@@ -279,8 +279,8 @@ class TestMicroscopeCommands(unittest.TestCase):
     
     def test_stage_movement_sequence(self):
         """Test the sequence for moving the stage."""
-        from src.py2flamingo.controllers.position_controller import PositionController
-        from src.py2flamingo.models.microscope import Position
+        from py2flamingo.controllers.position_controller import PositionController
+        from py2flamingo.models.microscope import Position
         
         # Create mocks
         connection_service = Mock()
@@ -330,7 +330,7 @@ Tube lens length (mm) = 200
             temp_file = f.name
         
         try:
-            from src.py2flamingo.utils.file_handlers import text_to_dict
+            from py2flamingo.utils.file_handlers import text_to_dict
             
             result = text_to_dict(temp_file)
             

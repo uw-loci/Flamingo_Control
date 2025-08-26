@@ -9,13 +9,12 @@ import unittest
 from unittest.mock import Mock, patch, MagicMock, call
 import socket
 import struct
-import numpy as np
 import tempfile
 import os
 
-from src.py2flamingo.services.connection_service import ConnectionService
+from py2flamingo.services.connection_service import ConnectionService
+from py2flamingo.services.communication.tcp_client import TCPClient
 from tests.test_utils import NoOpThreadManager
-from unittest.mock import patch, MagicMock
 
 
 
@@ -194,9 +193,9 @@ class TestMicroscopeIntegration(unittest.TestCase):
         """Test a complete workflow execution sequence using ConnectionService."""
 
         from unittest.mock import patch, MagicMock
-        from src.py2flamingo.services.connection_service import ConnectionService
-        from src.py2flamingo.core.events import EventManager
-        from src.py2flamingo.core.queue_manager import QueueManager
+        from py2flamingo.services.connection_service import ConnectionService
+        from py2flamingo.core.events import EventManager
+        from py2flamingo.core.queue_manager import QueueManager
         # You'll add this tiny helper in tests/test_utils.py (see prior message)
         from tests.test_utils import NoOpThreadManager
 
@@ -215,7 +214,7 @@ class TestMicroscopeIntegration(unittest.TestCase):
         )
 
         # Inject the no-op ThreadManager & stub socket creation
-        with patch('src.py2flamingo.services.connection_service.ThreadManager', NoOpThreadManager):
+        with patch('py2flamingo.services.connection_service.ThreadManager', NoOpThreadManager):
             # If your ConnectionService calls a factory like _create_socket(), stub it to avoid real sockets
             with patch.object(conn_service, '_create_socket', side_effect=[mock_nuc_socket, mock_live_socket]):
 
@@ -266,7 +265,7 @@ Comments = Test workflow
         
         try:
             # Import and test
-            from src.py2flamingo.utils.file_handlers import workflow_to_dict
+            from py2flamingo.utils.file_handlers import workflow_to_dict
             
             result = workflow_to_dict(temp_file)
             
@@ -282,7 +281,7 @@ Comments = Test workflow
     
     def test_dict_to_workflow(self):
         """Test converting dictionary back to workflow text."""
-        from src.py2flamingo.utils.file_handlers import dict_to_workflow
+        from py2flamingo.utils.file_handlers import dict_to_workflow
         
         # Create workflow dict
         workflow_dict = {
