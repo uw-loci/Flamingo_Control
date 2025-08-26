@@ -1,120 +1,105 @@
+# src/py2flamingo/utils/image_processing.py
+"""
+Utility functions for image processing, conversion, and saving.
+
+Restored percentile scaling and 512×512 downsampling behavior
+from the pre-refactor implementation.
+"""
+
 import os
 import time
-
 import numpy as np
 from PIL import Image
 from PyQt5.QtGui import QImage
-from skimage import io  # , transform
 
-# TODO scipy.ndimage scikit image
+# -------------------------
+# Image saving (PNG)
+# -------------------------
 
-
-
-def save_png(image_data, image_title):
+def save_png(image_data: np.ndarray, image_title: str) -> None:
     """
-    Save a 16-bit 2D numpy array as a downsized PNG image.
+    Save a 16-bit (or float) 2D numpy array as a downsized PNG image.
 
-    This function takes a 16-bit 2D numpy array 'image_data' and a string 'image_title',
-    downsizes the image to 512x512, and saves it as a PNG file in the 'output_png' directory.
-    The PNG file will have the name specified by 'image_title'.
-
-    The image data is first normalized to the range [0, 1] by clipping to the 2.5th and 97.5th percentiles
-    of the data and scaling accordingly. It is then converted to an 8-bit format and saved as a PNG.
-
-    Parameters:
-    image_data (numpy.array): A 2D, 16-bit numpy array representing the image data.
-    image_title (str): The title to use when saving the image.
-
-    Returns:
-    None
+    - Clips to the 2.5–97.5 percentile window
+    - Normalizes to [0, 1]
+    - Converts to 8-bit
+    - Resizes to 512×512
+    - Writes to output_png/{image_title}.png
     """
-    # Ensure the image data is a numpy array
-    image_data = np.array(image_data)
+    # Ensure numpy array (make a copy to avoid modifying caller’s memory)
+    img = np.asarray(image_data)
 
-    # Calculate the lower and upper percentiles for display normalization
-    lower_percentile = 2.5
-    upper_percentile = 97.5
-    lower_value = np.percentile(image_data, lower_percentile)
-    upper_value = np.percentile(image_data, upper_percentile)
+    # Percentile-based display window
+    lower_p, upper_p = 2.5, 97.5
+    lo = np.percentile(img, lower_p)
+    hi = np.percentile(img, upper_p)
 
-    # Clip the pixel values to the middle 95% range and normalize to [0, 1]
-    clipped_image = np.clip(image_data, lower_value, upper_value)
-    normalized_image = (clipped_image - lower_value) / (upper_value - lower_value)
+    # Avoid divide-by-zero
+    if hi <= lo:
+        lo, hi = float(img.min()), float(img.max())
+        if hi <= lo:  # fully constant image
+            hi = lo + 1.0
 
-    # Convert the normalized image to 8-bit format
-    image_8bit = (normalized_image * 255).astype(np.uint8)
+    # Clip + normalize
+    img_clipped = np.clip(img, lo, hi)
+    img_norm = (img_clipped - lo) / (hi - lo)
 
-    # Create a PIL image object
-    image = Image.fromarray(image_8bit)
+    # 8-bit
+    img_u8 = (img_norm * 255.0).astype(np.uint8)
 
-    # Downsample the image to 512x512
-    image_resized = image.resize((512, 512))
+    # Downsample to 512×512 with bilinear
+    pil = Image.fromarray(img_u8)
+    pil_resized = pil.resize((512, 512), resample=Image.BILINEAR)
 
-    # Define the output directory
-    output_dir = "output_png"
+    # Ensure output dir
+    out_dir = "output_png"
+    os.makedirs(out_dir, exist_ok=True)
 
-    # Create the output directory if it doesn't exist
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    # Save the image
-    image_resized.save(os.path.join(output_dir, f"{image_title}.png"))
+    # Save
+    pil_resized.save(os.path.join(out_dir, f"{image_title}.png"), "PNG")
 
 
-def convert_to_qimage(image_data):
+# -------------------------
+# QImage conversion
+# -------------------------
+
+def convert_to_qimage(image_data: np.ndarray) -> QImage:
     """
-    This function converts a 16-bit grayscale image to a QImage, resizing the image to 512x512 pixels using bilinear interpolation.
-    It first resizes the image, then calculates the lower and upper percentiles for display normalization. The pixel values are then
-    clipped to the middle 95% range and normalized to [0, 1]. The normalized values are scaled to the full range of 8-bit grayscale values.
-    Finally, a QImage is created directly from the numpy array.
-
-    Parameters
-    ----------
-    image_data : numpy.ndarray
-        The image to be converted and displayed, represented as a numpy array.
-
-    Returns
-    -------
-    qimage : QImage
-        The converted image, represented as a QImage.
+    Convert a 16-bit (or float) grayscale numpy array to a 512×512 8-bit QImage
+    using percentile windowing (1–99%) and bilinear resize.
     """
-    start_time = time.time()  # Record the start time
-    new_height, new_width = 512, 512
-    # print(f'image data shape {image_data.shape}')
-    # Convert the numpy array to a PIL Image
-    image = Image.fromarray(image_data)
+    t0 = time.time()
 
-    # Convert the image to grayscale mode and resize it to the new dimensions using bilinear interpolation
-    scaled_image = image.convert("L").resize(
-        (new_width, new_height), resample=Image.BILINEAR
-    )
+    img = np.asarray(image_data)
 
-    # Calculate the lower and upper percentiles for display normalization
-    lower_percentile = 1
-    upper_percentile = 99
-    lower_value = np.percentile(scaled_image, lower_percentile)
-    upper_value = np.percentile(scaled_image, upper_percentile)
-    # print(f'Lower value: {lower_value}')
-    # print(f'Upper value: {upper_value}')
+    # Convert to PIL, force grayscale first (handles >8-bit nicely)
+    pil = Image.fromarray(img).convert("L")
+    pil_scaled = pil.resize((512, 512), resample=Image.BILINEAR)
 
-    # Clip the pixel values to the middle 95% range and normalize to [0, 1]
-    clipped_image = np.clip(scaled_image, lower_value, upper_value)
+    # Convert back to numpy for percentile windowing
+    arr = np.asarray(pil_scaled, dtype=np.float32)
 
-    epsilon = 1e-7
-    normalized_image = (clipped_image - lower_value) / (
-        upper_value - lower_value + epsilon
-    )
-    # print(np.unique(normalized_image))
+    # Percentile scaling (1–99%)
+    lo = np.percentile(arr, 1.0)
+    hi = np.percentile(arr, 99.0)
+    if hi <= lo:
+        lo, hi = float(arr.min()), float(arr.max())
+        if hi <= lo:
+            hi = lo + 1.0
 
-    # Scale the normalized values to the full range of 8-bit grayscale values
-    scaled_image = (normalized_image * 255).astype(np.uint8)
+    arr = np.clip(arr, lo, hi)
+    arr = (arr - lo) / (hi - lo + 1e-7)
+    arr_u8 = (arr * 255.0).astype(np.uint8, copy=False)
 
-    # Create the QImage directly from the numpy array
-    qimage = QImage(scaled_image.data, new_width, new_height, QImage.Format_Grayscale8)
+    h, w = arr_u8.shape
+    bytes_per_line = w  # grayscale
 
-    end_time = time.time()  # Record the end time
-    elapsed_time = end_time - start_time  # Calculate the elapsed time
+    # Important: ensure the array is C-contiguous so QImage can read it
+    if not arr_u8.flags['C_CONTIGUOUS']:
+        arr_u8 = np.ascontiguousarray(arr_u8)
 
-    # print("Image converted, time taken:", elapsed_time, "seconds")  # Print the elapsed time
+    qimg = QImage(arr_u8.data, w, h, bytes_per_line, QImage.Format_Grayscale8).copy()
+    # ^ .copy() makes QImage own the data (safe once function returns)
 
-    return qimage
+    # print(f"convert_to_qimage took {time.time() - t0:.3f}s")
+    return qimg

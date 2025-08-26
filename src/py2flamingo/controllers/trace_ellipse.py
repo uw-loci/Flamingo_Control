@@ -3,7 +3,7 @@ import copy
 import os
 import shutil
 
-import py2flamingo.functions.calculations as calc
+import py2flamingo.utils.calculations as calc
 import py2flamingo.functions.microscope_connect as mc
 import py2flamingo.functions.microscope_interactions as scope
 import py2flamingo.functions.text_file_parsing as txt

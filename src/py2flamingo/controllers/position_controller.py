@@ -1,4 +1,5 @@
 # src/py2flamingo/controllers/position_controller.py
+
 """
 Controller for microscope position management.
 

@@ -1,76 +1,65 @@
-# src/py2flamingo/views/napari_viewer.py
+# src/py2flamingo/views/napari_view.py
 """
-Napari implementation of the viewer interface.
+Napari adapter for the generic ViewerInterface.
+
+This keeps integration with Napari minimal. The rest of the app talks to
+ViewerInterface; swapping to a different viewer (e.g., NDV) just means
+providing another small adapter implementing the same methods.
 """
-import napari
+
+from typing import Optional, Dict, Any
 import numpy as np
-from typing import Optional, Dict, Any, Tuple
-import logging
+
+try:
+    import napari
+except ImportError:  # make napari strictly optional
+    napari = None
 
 from .viewer_interface import ViewerInterface
 
+
 class NapariViewer(ViewerInterface):
     """
-    Napari-specific implementation of the viewer interface.
+    Thin adapter that implements ViewerInterface on top of a napari.Viewer.
     """
-    
-    def __init__(self, viewer: napari.Viewer):
+    def __init__(self, viewer: Optional["napari.Viewer"] = None):
+        if napari is None:
+            raise ImportError("Napari is not installed. Install napari or use a different viewer adapter.")
+        self.viewer = viewer or napari.Viewer()
+        self._layer_name = "Flamingo Live"
+
+    def display_image(self, image: np.ndarray, title: str = "", metadata: Dict[str, Any] = None):
         """
-        Initialize with existing Napari viewer.
-        
-        Args:
-            viewer: Napari viewer instance
+        Display/refresh a single live image layer.
         """
-        self.viewer = viewer
-        self.layers = {}  # name -> layer mapping
-        self.logger = logging.getLogger(__name__)
-    
-    def add_image(self, 
-                  data: np.ndarray, 
-                  name: str,
-                  scale: Optional[Tuple[float, ...]] = None,
-                  metadata: Optional[Dict[str, Any]] = None) -> Any:
-        """Add image to Napari viewer."""
+        if image is None:
+            return
         try:
-            # Remove existing layer with same name
-            if name in self.layers:
-                self.remove_image(name)
-            
-            # Add new layer
-            layer = self.viewer.add_image(
-                data,
-                name=name,
-                scale=scale,
-                metadata=metadata or {}
-            )
-            
-            self.layers[name] = layer
-            return layer
-            
-        except Exception as e:
-            self.logger.error(f"Failed to add image {name}: {e}")
-            return None
-    
-    def update_image(self, name: str, data: np.ndarray) -> None:
-        """Update existing image data."""
-        if name in self.layers:
-            self.layers[name].data = data
-        else:
-            # Create new if doesn't exist
-            self.add_image(data, name)
-    
-    def remove_image(self, name: str) -> None:
-        """Remove image from viewer."""
-        if name in self.layers:
-            layer = self.layers.pop(name)
-            if layer in self.viewer.layers:
-                self.viewer.layers.remove(layer)
-    
-    def clear_all(self) -> None:
-        """Remove all images."""
-        for name in list(self.layers.keys()):
-            self.remove_image(name)
-    
-    def set_3d_mode(self, enabled: bool) -> None:
-        """Toggle 3D mode in Napari."""
-        self.viewer.dims.ndisplay = 3 if enabled else 2
+            # Reuse the layer if present (faster), otherwise add it
+            if self._layer_name in self.viewer.layers:
+                layer = self.viewer.layers[self._layer_name]
+                layer.data = image
+                if title:
+                    layer.name = title
+            else:
+                self.viewer.add_image(image, name=title or self._layer_name, metadata=metadata or {})
+        except Exception:
+            # Keep adapter fail-safe; don't propagate viewer failures into control logic
+            pass
+
+
+# (Optional) Legacy full Napari-only GUI – not used by the new architecture.
+# Kept for backward compatibility and manual testing.
+class NapariFlamingoGui:
+    """
+    Minimal wrapper to launch a naked napari.Viewer if someone really wants it.
+    Not used by the core app (which embeds a ViewerWidget).
+    """
+    def __init__(self):
+        if napari is None:
+            raise ImportError("Napari is not installed.")
+        self.viewer = napari.Viewer()
+
+    def show(self):
+        if self.viewer:
+            napari.run()

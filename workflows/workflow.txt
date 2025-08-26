@@ -1,0 +1,7 @@
+Work Flow Type = Stack
+<Start Position>
+X (mm) = 10.0
+</Start Position>
+<End Position>
+X (mm) = 10.0
+</End Position>

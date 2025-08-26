@@ -14,7 +14,7 @@ from ..models.collection import MultiAngleCollection, CollectionParameters
 from ..controllers.microscope_controller import MicroscopeController
 from ..services.workflow_service import WorkflowService
 from ..services.communication.connection_manager import ConnectionManager
-import py2flamingo.functions.calculations as calc
+import py2flamingo.utils.calculations as calc
 import py2flamingo.functions.text_file_parsing as txt
 
 

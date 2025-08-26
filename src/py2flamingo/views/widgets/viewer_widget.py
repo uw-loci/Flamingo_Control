@@ -9,7 +9,7 @@ import logging
 from typing import Optional, Dict, Any
 from queue import Empty
 
-from ..viewer_interface import ViewerInterface
+from py2flamingo.views.viewer_interface import ViewerInterface
 
 class ViewerWidget(QWidget):
     """
@@ -29,9 +29,9 @@ class ViewerWidget(QWidget):
         Initialize viewer widget.
         
         Args:
-            viewer: Any viewer implementing ViewerInterface
-            image_queue: Queue for acquired images
-            visualize_queue: Queue for preview images
+            viewer: An implementation of ViewerInterface.
+            image_queue: Queue with images from microscope.
+            visualize_queue: Queue for images to be visualized.
         """
         super().__init__()
         self.viewer = viewer
@@ -39,56 +39,38 @@ class ViewerWidget(QWidget):
         self.visualize_queue = visualize_queue
         self.logger = logging.getLogger(__name__)
         
-        self._setup_ui()
-        self._setup_polling()
+        self.layout = QVBoxLayout()
+        self.setLayout(self.layout)
+        # Example UI elements
+        self.label = QLabel("Viewer Status: Ready")
+        self.layout.addWidget(self.label)
         
-        # Connect signal
+        # Timer to poll for images
+        self.timer = QTimer()
+        self.timer.timeout.connect(self._check_for_image)
+        self.timer.start(500)  # check every 500 ms
+        
+        # Connect signal to viewer display
         self.image_ready.connect(self._display_image)
     
-    def _setup_ui(self):
-        """Create minimal UI."""
-        layout = QVBoxLayout(self)
-        
-        # Title
-        title = QLabel("Image Display")
-        title.setStyleSheet("font-weight: bold;")
-        layout.addWidget(title)
-        
-        # Control buttons
-        clear_btn = QPushButton("Clear All")
-        clear_btn.clicked.connect(self.viewer.clear_all)
-        layout.addWidget(clear_btn)
-        
-        toggle_3d_btn = QPushButton("Toggle 3D")
-        toggle_3d_btn.clicked.connect(lambda: self.viewer.set_3d_mode(True))
-        layout.addWidget(toggle_3d_btn)
-        
-        layout.addStretch()
-    
-    def _setup_polling(self):
-        """Setup timer to poll image queues."""
-        self.poll_timer = QTimer()
-        self.poll_timer.timeout.connect(self._check_queues)
-        self.poll_timer.start(100)  # 100ms
-    
-    def _check_queues(self):
-        """Check for new images in queues."""
-        # Check visualize queue (preview)
+    def _check_for_image(self):
+        """
+        Internal method to check queues for new images.
+        """
         try:
             image = self.visualize_queue.get_nowait()
-            if isinstance(image, np.ndarray):
-                self.image_ready.emit(image, "Preview", {"type": "preview"})
+            # Emit signal for thread-safe update
+            self.image_ready.emit(image, "Live Image", {})
         except Empty:
-            pass
-        
-        # Check image queue (acquisitions)
-        try:
-            image = self.image_queue.get_nowait()
-            if isinstance(image, np.ndarray):
-                self.image_ready.emit(image, "Acquisition", {"type": "acquisition"})
-        except Empty:
-            pass
+            return
     
-    def _display_image(self, data: np.ndarray, name: str, metadata: dict):
-        """Display image in viewer (thread-safe)."""
-        self.viewer.update_image(name, data)
+    def _display_image(self, image: np.ndarray, title: str, metadata: Dict[str, Any]):
+        """
+        Internal slot to display the image using the provided viewer.
+        """
+        try:
+            self.viewer.display_image(image, title=title, metadata=metadata)
+            self.label.setText("Last update: Image displayed.")
+        except Exception as e:
+            self.logger.error(f"Failed to display image: {e}")
+            self.label.setText("Error displaying image.")

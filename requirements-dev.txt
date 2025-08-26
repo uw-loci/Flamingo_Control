@@ -1,0 +1,29 @@
+# Development dependencies for Py2Flamingo
+# Install with: pip install -r requirements-dev.txt
+
+# Testing frameworks
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-timeout>=2.1.0
+coverage>=7.0.0
+
+# Mock and testing utilities  
+pytest-mock>=3.10.0
+responses>=0.22.0
+
+# Code quality
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
+pylint>=2.16.0
+
+# Documentation
+sphinx>=6.0.0
+sphinx-rtd-theme>=1.2.0
+
+# Development tools
+ipython>=8.10.0
+ipdb>=0.13.11
+
+# Pre-commit hooks
+pre-commit>=3.0.0

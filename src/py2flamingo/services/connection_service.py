@@ -14,6 +14,12 @@ from pathlib import Path
 
 from py2flamingo.core.events import EventManager
 from py2flamingo.core.queue_manager import QueueManager
+from .communication.thread_manager import ThreadManager
+
+try:
+    import src.py2flamingo.utils.file_handlers as fh
+except Exception:
+    from py2flamingo.utils import file_handlers as fh
 
 class ConnectionService:
     """
@@ -187,11 +193,12 @@ class ConnectionService:
         import os
         
         workflow_path = os.path.join('workflows', 'workflow.txt')
-        dict_to_workflow(workflow_path, workflow_dict)
+        fh.dict_to_workflow(workflow_path, workflow_dict)
+        self.send_command(12292) 
         
         # Send workflow start command
-        COMMAND_CODES_CAMERA_WORK_FLOW_START = 12292
-        self.send_command(COMMAND_CODES_CAMERA_WORK_FLOW_START)
+       # COMMAND_CODES_CAMERA_WORK_FLOW_START = 12292
+        #self.send_command(COMMAND_CODES_CAMERA_WORK_FLOW_START)
     
     def get_microscope_settings(self) -> Tuple[float, Dict[str, Any]]:
         """
@@ -224,16 +231,15 @@ class ConnectionService:
         
         # Wait for response and get from queue
         time.sleep(0.2)
-        try:
-            image_pixel_size = self.queue_manager.get_nowait('other_data')
-        except:
-            # Calculate from settings if not available
-            tube_lens = float(scope_settings['Type']['Tube lens design focal length (mm)'])
-            objective_mag = float(scope_settings['Type']['Objective lens magnification'])
-            camera_pixel_size = 6.5  # Default camera pixel size in microns
-            image_pixel_size = camera_pixel_size / (objective_mag * (tube_lens / 200))
-            image_pixel_size = image_pixel_size / 1000  # Convert to mm
-            
+        image_pixel_size = self.queue_manager.get_nowait('other_data')
+        if not image_pixel_size:
+            # Use settings (mocked in the test)
+            settings_path = Path('microscope_settings') / 'ScopeSettings.txt'
+            scope_settings = fh.text_to_dict(str(settings_path))
+            tube = float(scope_settings['Type']['Tube lens design focal length (mm)'])
+            obj  = float(scope_settings['Type']['Objective lens magnification'])
+            cam_um = 6.5
+            image_pixel_size = (cam_um / (obj * (tube/200))) / 1000.0  # mm
         return image_pixel_size, scope_settings
     
     def _create_socket(self) -> socket.socket:

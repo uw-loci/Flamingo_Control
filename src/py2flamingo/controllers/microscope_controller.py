@@ -8,8 +8,27 @@ from typing import List, Callable, Optional
 import logging
 from threading import Lock
 
-from ..models.microscope import MicroscopeModel, Position, MicroscopeState
-from ..services.communication.connection_manager import ConnectionManager
+try:
+    from ..models.microscope import MicroscopeModel, Position, MicroscopeState
+    from ..services.communication.connection_manager import ConnectionManager
+    MODELS_AVAILABLE = True
+except ImportError:
+    # Fallback for when models aren't available yet
+    MODELS_AVAILABLE = False
+    
+    class Position:
+        def __init__(self, x=0, y=0, z=0, r=0):
+            self.x, self.y, self.z, self.r = x, y, z, r
+    
+    class MicroscopeState:
+        IDLE = "idle"
+        MOVING = "moving"
+        ERROR = "error"
+    
+    class MicroscopeModel:
+        def __init__(self):
+            self.current_position = Position()
+            self.state = MicroscopeState.IDLE
 
 
 class MicroscopeController:
@@ -20,24 +39,33 @@ class MicroscopeController:
     communication with the hardware.
     """
     
-    def __init__(self, model: MicroscopeModel, connection_manager: ConnectionManager):
+    def __init__(self, model=None, connection_manager=None):
         """
         Initialize microscope controller.
         
         Args:
-            model: Microscope data model
-            connection_manager: Connection manager for hardware communication
+            model: Microscope data model (optional, will create default if None)
+            connection_manager: Connection manager for hardware communication (optional)
         """
-        self.model = model
+        # Create default model if none provided
+        if model is None:
+            if MODELS_AVAILABLE:
+                self.model = MicroscopeModel()
+            else:
+                self.model = MicroscopeModel()  # Fallback version
+        else:
+            self.model = model
+            
         self.connection = connection_manager
         self._observers: List[Callable] = []
         self._lock = Lock()
         self.logger = logging.getLogger(__name__)
         
-        # Subscribe to position updates from connection
-        self.connection.subscribe_position_updates(self._handle_position_update)
+        # Subscribe to position updates from connection if available
+        if self.connection and hasattr(self.connection, 'subscribe_position_updates'):
+            self.connection.subscribe_position_updates(self._handle_position_update)
         
-    def subscribe(self, callback: Callable[[MicroscopeModel], None]):
+    def subscribe(self, callback: Callable):
         """
         Subscribe to model updates.
         
@@ -47,7 +75,7 @@ class MicroscopeController:
         with self._lock:
             self._observers.append(callback)
     
-    def unsubscribe(self, callback: Callable[[MicroscopeModel], None]):
+    def unsubscribe(self, callback: Callable):
         """
         Unsubscribe from model updates.
         
@@ -90,20 +118,24 @@ class MicroscopeController:
         Args:
             position: Target position
         """
-        self.model.state = MicroscopeState.MOVING
+        if MODELS_AVAILABLE:
+            self.model.state = MicroscopeState.MOVING
         self._notify_observers()
         
         try:
-            # Send move command
-            self.connection.send_move_command(position)
+            # Send move command if connection available
+            if self.connection and hasattr(self.connection, 'send_move_command'):
+                self.connection.send_move_command(position)
             
             # Update model with target position
             self.model.current_position = position
-            self.model.state = MicroscopeState.IDLE
+            if MODELS_AVAILABLE:
+                self.model.state = MicroscopeState.IDLE
             
         except Exception as e:
             self.logger.error(f"Failed to move to position: {e}")
-            self.model.state = MicroscopeState.ERROR
+            if MODELS_AVAILABLE:
+                self.model.state = MicroscopeState.ERROR
             raise
         finally:
             self._notify_observers()
@@ -117,46 +149,22 @@ class MicroscopeController:
         """
         return self.model.current_position
     
-    def update_laser_settings(self, laser_channel: str, power: float):
-        """
-        Update laser settings.
-        
-        Args:
-            laser_channel: Laser channel name
-            power: Power percentage (0-100)
-        """
-        if laser_channel in self.model.lasers:
-            self.model.selected_laser = laser_channel
-            self.model.laser_power = power
-            self._notify_observers()
-        else:
-            raise ValueError(f"Unknown laser channel: {laser_channel}")
-    
-    def get_available_lasers(self) -> List[str]:
-        """
-        Get list of available laser channels.
-        
-        Returns:
-            List of laser channel names
-        """
-        return self.model.lasers.copy()
-    
-    def get_state(self) -> MicroscopeState:
-        """
-        Get current microscope state.
-        
-        Returns:
-            Current state
-        """
-        return self.model.state
+    def disconnect(self):
+        """Disconnect from microscope."""
+        if self.connection and hasattr(self.connection, 'disconnect'):
+            self.connection.disconnect()
+        self.logger.info("Microscope controller disconnected")
     
     def emergency_stop(self):
         """Execute emergency stop."""
         try:
-            self.connection.send_emergency_stop()
-            self.model.state = MicroscopeState.IDLE
+            if self.connection and hasattr(self.connection, 'send_emergency_stop'):
+                self.connection.send_emergency_stop()
+            if MODELS_AVAILABLE:
+                self.model.state = MicroscopeState.IDLE
         except Exception as e:
             self.logger.error(f"Emergency stop failed: {e}")
-            self.model.state = MicroscopeState.ERROR
+            if MODELS_AVAILABLE:
+                self.model.state = MicroscopeState.ERROR
         finally:
             self._notify_observers()

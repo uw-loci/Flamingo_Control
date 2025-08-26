@@ -1,22 +1,31 @@
-# views/widgets/snapshot_widget.py
-from PyQt5.QtWidgets import QWidget, QPushButton, QVBoxLayout
-from ..controllers.snapshot_controller import SnapshotController
+# src/py2flamingo/views/widgets/snapshgot_widget.py
+"""
+Widget for handling snapshot actions and display.
+"""
+
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel
 
 class SnapshotWidget(QWidget):
-    def __init__(self, snapshot_controller: SnapshotController):
+    """
+    A widget providing a button to take snapshot and display snapshot info.
+    """
+    def __init__(self, snapshot_controller):
         super().__init__()
-        self.controller = snapshot_controller
-        self._setup_ui()
+        self.snapshot_controller = snapshot_controller
+        self.layout = QVBoxLayout()
+        self.setLayout(self.layout)
         
-    def _setup_ui(self):
-        layout = QVBoxLayout()
+        self.snap_button = QPushButton("Take Snapshot")
+        self.snap_button.clicked.connect(self.take_snapshot)
+        self.layout.addWidget(self.snap_button)
         
-        self.snapshot_button = QPushButton("Take IF Snapshot")
-        self.snapshot_button.clicked.connect(self._on_snapshot_clicked)
-        
-        layout.addWidget(self.snapshot_button)
-        self.setLayout(layout)
-        
-    def _on_snapshot_clicked(self):
-        """Handle snapshot button click - no business logic here"""
-        self.controller.take_snapshot()
+        self.status_label = QLabel("No snapshot taken yet.")
+        self.layout.addWidget(self.status_label)
+    
+    def take_snapshot(self):
+        """Trigger the snapshot and update status."""
+        try:
+            self.snapshot_controller.take_snapshot()
+            self.status_label.setText("Snapshot taken successfully.")
+        except Exception as e:
+            self.status_label.setText(f"Snapshot failed: {e}")
