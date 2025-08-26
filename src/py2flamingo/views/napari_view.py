@@ -8,7 +8,6 @@ providing another small adapter implementing the same methods.
 """
 
 from typing import Optional, Dict, Any
-import numpy as np
 
 try:
     import napari
@@ -28,7 +27,7 @@ class NapariViewer(ViewerInterface):
         self.viewer = viewer or napari.Viewer()
         self._layer_name = "Flamingo Live"
 
-    def display_image(self, image: np.ndarray, title: str = "", metadata: Dict[str, Any] = None):
+    def display_image(self, image: Any, title: str = "", metadata: Dict[str, Any] = None):
         """
         Display/refresh a single live image layer.
         """

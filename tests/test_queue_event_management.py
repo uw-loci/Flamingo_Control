@@ -252,9 +252,9 @@ class TestLegacyAdapter(unittest.TestCase):
     def test_legacy_imports(self):
         """Test that legacy global objects can be imported."""
         # Import legacy objects
-        from src.py2flamingo.core.legacy_adapter import (
+        from py2flamingo.core.legacy_adapter import (
             image_queue, command_queue, send_event, system_idle,
-            clear_all_events_queues, OS
+            clear_all_events_queues, OS,
         )
         
         # Verify queues exist and are Queue objects
@@ -283,8 +283,8 @@ class TestLegacyAdapter(unittest.TestCase):
     def test_singleton_behavior(self):
         """Test that multiple imports get the same objects."""
         # Import twice
-        from src.py2flamingo.core.legacy_adapter import image_queue as q1
-        from src.py2flamingo.core.legacy_adapter import image_queue as q2
+        from py2flamingo.core.legacy_adapter import image_queue as q1
+        from py2flamingo.core.legacy_adapter import image_queue as q2
         
         # Should be the same object
         self.assertIs(q1, q2)

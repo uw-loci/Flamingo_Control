@@ -8,12 +8,10 @@
 # TODO TODO TODO Cancel button stopped working at some point during the restructuring. It does cancel but does not leave the program in a workable state.
 ######################################
 
-from .application import Application
-from .napari import NapariFlamingoGui
 # Keep backward compatibility imports during migration
 try:
     from .application import Application
-except Exception:
+except Exception:  # PyQt may be unavailable in headless tests
     Application = None
 
 try:

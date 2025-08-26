@@ -54,6 +54,10 @@ class QueueManager:
         if name not in self._queues:
             raise KeyError(f"Queue '{name}' not found. Available queues: {list(self._queues.keys())}")
         return self._queues[name]
+
+    def get_queue_nowait(self, name: str) -> Queue:
+        """Alias for get_queue for backward compatibility."""
+        return self.get_queue(name)
     
     def put_nowait(self, queue_name: str, item: Any) -> None:
         """
