@@ -2,8 +2,30 @@
 
 Control software for Flamingo light sheet systems. It communicates with the Flamingo ControlSystem over TCP, manages acquisition workflows, and can display images either in a standalone PyQt GUI or inside **Napari** as a dock widget.
 
-> **Refactor status (updated 2025-08-11)**  
+> **Latest Update (2025-10-10)**
+> A new **MVC Interface** is now available alongside the legacy interface. The MVC interface features clean architecture, comprehensive testing (400+ tests), and full type safety. See [MVC_QUICKSTART.md](MVC_QUICKSTART.md) to get started, or [README_MVC.md](README_MVC.md) for complete documentation.
+
+> **Refactor status (updated 2025-08-11)**
 > The codebase has been modularized (controllers/services/core/views). Napari remains an optional add‑on via a thin adapter. Legacy global queues/events are preserved via a compatibility layer.
+
+---
+
+## Quick Start
+
+**New MVC Interface** (Recommended for new users):
+```bash
+# See the quick start guide
+cat MVC_QUICKSTART.md
+
+# Or run directly
+python -m py2flamingo --ip 127.0.0.1 --port 53717
+```
+
+**Legacy Interface** (Original implementation):
+```bash
+cd Flamingo_Control/src
+python -m py2flamingo --mode standalone
+```
 
 ---
 

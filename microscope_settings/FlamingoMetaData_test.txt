@@ -1,0 +1,17 @@
+<MetaData>
+  <Experiment>
+    Name = Test
+    Active = true
+  </Experiment>
+  <Project>
+    Creator(s) = Test User
+  </Project>
+</MetaData>
+<Instrument>
+  <Type>
+    Microscope type = Mock Server
+    Microscope name = localhost
+    Microscope address = 127.0.0.1 53717
+    Microscope builder = Mock
+  </Type>
+</Instrument>

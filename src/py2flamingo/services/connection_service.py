@@ -279,3 +279,255 @@ class ConnectionService:
         self.threads = self.thread_manager.start_all_threads()
         
         self.logger.info("Communication threads started")
+
+
+# ============================================================================
+# MVC Refactoring - New Connection Service
+# ============================================================================
+
+class MVCConnectionService:
+    """
+    MVC-compliant connection service for microscope communication.
+
+    This service uses the new Core layer (TCPConnection, ProtocolEncoder)
+    and Models layer (ConnectionConfig, ConnectionModel) to manage
+    connections following the MVC pattern.
+
+    Attributes:
+        tcp_connection: Low-level TCP connection manager
+        encoder: Protocol encoder for command formatting
+        model: Observable connection model for state tracking
+        logger: Logger instance
+    """
+
+    def __init__(self,
+                 tcp_connection: 'TCPConnection',
+                 encoder: 'ProtocolEncoder'):
+        """
+        Initialize MVC connection service with dependency injection.
+
+        Args:
+            tcp_connection: TCPConnection instance from core layer
+            encoder: ProtocolEncoder instance from core layer
+        """
+        from py2flamingo.models.connection import ConnectionModel
+
+        self.tcp_connection = tcp_connection
+        self.encoder = encoder
+        self.model = ConnectionModel()
+        self.logger = logging.getLogger(__name__)
+
+        self._command_socket: Optional[socket.socket] = None
+        self._live_socket: Optional[socket.socket] = None
+
+    def connect(self, config: 'ConnectionConfig') -> None:
+        """
+        Establish TCP connection to microscope.
+
+        Args:
+            config: Validated connection configuration
+
+        Raises:
+            ValueError: If config is invalid
+            ConnectionError: If connection fails
+            TimeoutError: If connection times out
+        """
+        from py2flamingo.models.connection import ConnectionStatus, ConnectionState
+        from datetime import datetime
+
+        # Validate config
+        valid, errors = config.validate()
+        if not valid:
+            raise ValueError(f"Invalid config: {', '.join(errors)}")
+
+        # Check not already connected
+        if self.is_connected():
+            raise ConnectionError("Already connected. Disconnect first.")
+
+        # Update model to CONNECTING
+        self.model.status = ConnectionStatus(
+            state=ConnectionState.CONNECTING,
+            ip=config.ip_address,
+            port=config.port,
+            connected_at=None,
+            last_error=None
+        )
+
+        try:
+            # Use TCPConnection to establish dual sockets
+            self._command_socket, self._live_socket = self.tcp_connection.connect(
+                config.ip_address,
+                config.port,
+                timeout=config.timeout
+            )
+
+            # Update model to CONNECTED
+            self.model.status = ConnectionStatus(
+                state=ConnectionState.CONNECTED,
+                ip=config.ip_address,
+                port=config.port,
+                connected_at=datetime.now(),
+                last_error=None
+            )
+
+            self.logger.info(f"Connected to {config.ip_address}:{config.port}")
+
+        except socket.timeout as e:
+            error_msg = f"Connection timeout: {e}"
+            self.logger.error(error_msg)
+            self.model.status = ConnectionStatus(
+                state=ConnectionState.ERROR,
+                ip=config.ip_address,
+                port=config.port,
+                connected_at=None,
+                last_error=error_msg
+            )
+            raise TimeoutError(error_msg) from e
+
+        except socket.error as e:
+            error_msg = f"Connection failed: {e}"
+            self.logger.error(error_msg)
+            self.model.status = ConnectionStatus(
+                state=ConnectionState.ERROR,
+                ip=config.ip_address,
+                port=config.port,
+                connected_at=None,
+                last_error=error_msg
+            )
+            raise ConnectionError(error_msg) from e
+
+    def disconnect(self) -> None:
+        """
+        Close connection to microscope gracefully.
+
+        Raises:
+            RuntimeError: If not currently connected
+        """
+        from py2flamingo.models.connection import ConnectionStatus, ConnectionState
+
+        if not self.is_connected():
+            raise RuntimeError("Not connected to microscope")
+
+        try:
+            # Close sockets via TCPConnection
+            self.tcp_connection.disconnect()
+
+            self._command_socket = None
+            self._live_socket = None
+
+            # Update model to DISCONNECTED
+            self.model.status = ConnectionStatus(
+                state=ConnectionState.DISCONNECTED,
+                ip=None,
+                port=None,
+                connected_at=None,
+                last_error=None
+            )
+
+            self.logger.info("Disconnected successfully")
+
+        except Exception as e:
+            error_msg = f"Error during disconnect: {e}"
+            self.logger.error(error_msg)
+            self.model.status = ConnectionStatus(
+                state=ConnectionState.ERROR,
+                ip=None,
+                port=None,
+                connected_at=None,
+                last_error=error_msg
+            )
+            raise
+
+    def reconnect(self, config: 'ConnectionConfig') -> None:
+        """
+        Reconnect to microscope (disconnect if needed, then connect).
+
+        Args:
+            config: Connection configuration
+
+        Raises:
+            ValueError: If config is invalid
+            ConnectionError: If connection fails
+            TimeoutError: If connection times out
+        """
+        # Disconnect if currently connected
+        if self.is_connected():
+            try:
+                self.disconnect()
+            except Exception as e:
+                self.logger.warning(f"Error during reconnect disconnect: {e}")
+
+        # Connect with new config
+        self.connect(config)
+
+    def is_connected(self) -> bool:
+        """
+        Check if currently connected to microscope.
+
+        Returns:
+            True if connected, False otherwise
+        """
+        from py2flamingo.models.connection import ConnectionState
+        return self.model.status.state == ConnectionState.CONNECTED
+
+    def send_command(self, cmd: 'Command') -> bytes:
+        """
+        Send encoded command and get response.
+
+        Args:
+            cmd: Command object to send
+
+        Returns:
+            Response bytes from microscope
+
+        Raises:
+            RuntimeError: If not connected
+            ConnectionError: If send fails
+        """
+        if not self.is_connected():
+            raise RuntimeError("Not connected to microscope")
+
+        try:
+            # Encode command using ProtocolEncoder
+            cmd_bytes = self.encoder.encode_command(
+                code=cmd.code,
+                status=0,
+                parameters=cmd.parameters
+            )
+
+            # Send via command socket
+            if self._command_socket:
+                self._command_socket.sendall(cmd_bytes)
+
+                # Receive response (128 bytes expected)
+                response = self._command_socket.recv(128)
+
+                self.logger.debug(f"Sent command {cmd.code}, got {len(response)} bytes response")
+                return response
+            else:
+                raise ConnectionError("Command socket not available")
+
+        except socket.error as e:
+            error_msg = f"Failed to send command: {e}"
+            self.logger.error(error_msg)
+
+            # Update model to ERROR state
+            from py2flamingo.models.connection import ConnectionStatus, ConnectionState
+            self.model.status = ConnectionStatus(
+                state=ConnectionState.ERROR,
+                ip=self.model.status.ip,
+                port=self.model.status.port,
+                connected_at=self.model.status.connected_at,
+                last_error=error_msg
+            )
+
+            raise ConnectionError(error_msg) from e
+
+    def get_status(self) -> 'ConnectionStatus':
+        """
+        Get current connection status.
+
+        Returns:
+            Current ConnectionStatus
+        """
+        return self.model.status

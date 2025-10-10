@@ -277,3 +277,170 @@ class WorkflowService:
             Workflow dictionary or None
         """
         return self.workflow_templates.get(name)
+
+
+# ============================================================================
+# MVC Refactoring - New Workflow Service
+# ============================================================================
+
+class MVCWorkflowService:
+    """
+    MVC-compliant workflow service for workflow file operations and execution.
+
+    This service uses the new Core/Models/Utils layers to handle workflow
+    operations following the MVC pattern.
+
+    Attributes:
+        connection_service: MVCConnectionService for sending commands
+        logger: Logger instance
+    """
+
+    def __init__(self, connection_service: 'MVCConnectionService'):
+        """
+        Initialize MVC workflow service with dependency injection.
+
+        Args:
+            connection_service: MVCConnectionService instance
+        """
+        self.connection_service = connection_service
+        self.logger = logging.getLogger(__name__)
+
+    def load_workflow(self, path: Path) -> bytes:
+        """
+        Load and validate workflow file.
+
+        Args:
+            path: Path to workflow file
+
+        Returns:
+            Workflow file contents as bytes
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            ValueError: If workflow is invalid or too large
+        """
+        if not path.exists():
+            raise FileNotFoundError(f"Workflow file not found: {path}")
+
+        # Check file size (limit to 10MB)
+        file_size = path.stat().st_size
+        max_size = 10 * 1024 * 1024  # 10MB
+        if file_size > max_size:
+            raise ValueError(f"Workflow file too large: {file_size} bytes (max {max_size})")
+
+        # Read file
+        try:
+            workflow_bytes = path.read_bytes()
+            self.logger.info(f"Loaded workflow: {path.name} ({len(workflow_bytes)} bytes)")
+            return workflow_bytes
+
+        except Exception as e:
+            raise ValueError(f"Failed to read workflow file: {e}") from e
+
+    def start_workflow(self, workflow_data: bytes) -> bool:
+        """
+        Send CMD_WORKFLOW_START to microscope with workflow data.
+
+        Args:
+            workflow_data: Workflow file contents as bytes
+
+        Returns:
+            True if workflow started successfully
+
+        Raises:
+            RuntimeError: If not connected
+            ConnectionError: If send fails
+        """
+        from py2flamingo.models.command import WorkflowCommand
+        from py2flamingo.core.tcp_protocol import CommandCode
+
+        if not self.connection_service.is_connected():
+            raise RuntimeError("Not connected to microscope")
+
+        try:
+            # Create workflow command
+            cmd = WorkflowCommand(
+                code=CommandCode.CMD_WORKFLOW_START,
+                workflow_data=workflow_data
+            )
+
+            # Send command
+            response = self.connection_service.send_command(cmd)
+
+            self.logger.info(f"Workflow started: {len(workflow_data)} bytes sent")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to start workflow: {e}")
+            raise
+
+    def stop_workflow(self) -> bool:
+        """
+        Send CMD_WORKFLOW_STOP to microscope.
+
+        Returns:
+            True if workflow stopped successfully
+
+        Raises:
+            RuntimeError: If not connected
+            ConnectionError: If send fails
+        """
+        from py2flamingo.models.command import Command
+        from py2flamingo.core.tcp_protocol import CommandCode
+
+        if not self.connection_service.is_connected():
+            raise RuntimeError("Not connected to microscope")
+
+        try:
+            # Create stop command
+            cmd = Command(code=CommandCode.CMD_WORKFLOW_STOP)
+
+            # Send command
+            response = self.connection_service.send_command(cmd)
+
+            self.logger.info("Workflow stopped")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to stop workflow: {e}")
+            raise
+
+    def get_workflow_status(self) -> str:
+        """
+        Query current workflow state from microscope.
+
+        Returns:
+            Workflow status string
+
+        Raises:
+            RuntimeError: If not connected
+            ConnectionError: If query fails
+        """
+        from py2flamingo.models.command import StatusCommand
+        from py2flamingo.core.tcp_protocol import CommandCode
+
+        if not self.connection_service.is_connected():
+            raise RuntimeError("Not connected to microscope")
+
+        try:
+            # Create status command
+            cmd = StatusCommand(
+                code=CommandCode.CMD_SYSTEM_STATE_GET,
+                query_type="workflow_status"
+            )
+
+            # Send command
+            response = self.connection_service.send_command(cmd)
+
+            # Parse response (simplified - actual parsing depends on protocol)
+            status = "unknown"
+            if response:
+                # TODO: Decode response based on protocol
+                status = f"response_{len(response)}_bytes"
+
+            self.logger.debug(f"Workflow status: {status}")
+            return status
+
+        except Exception as e:
+            self.logger.error(f"Failed to get workflow status: {e}")
+            raise
