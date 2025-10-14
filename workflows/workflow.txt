@@ -1,3 +1,4 @@
+<Workflow Settings>
 Work Flow Type = Stack
 <Start Position>
 X (mm) = 10.0
@@ -5,3 +6,4 @@ X (mm) = 10.0
 <End Position>
 X (mm) = 10.0
 </End Position>
+</Workflow Settings>
