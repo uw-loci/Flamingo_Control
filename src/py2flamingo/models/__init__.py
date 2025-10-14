@@ -51,6 +51,20 @@ from .collection import (
     MultiAngleCollection
 )
 
+from .connection import (
+    ConnectionConfig,
+    ConnectionState,
+    ConnectionStatus,
+    ConnectionModel
+)
+
+from .command import (
+    Command,
+    WorkflowCommand,
+    StatusCommand,
+    PositionCommand
+)
+
 __all__ = [
     # Microscope
     'MicroscopeState',
@@ -89,5 +103,17 @@ __all__ = [
     # Collection
     'CollectionParameters',
     'AngleData',
-    'MultiAngleCollection'
+    'MultiAngleCollection',
+
+    # Connection
+    'ConnectionConfig',
+    'ConnectionState',
+    'ConnectionStatus',
+    'ConnectionModel',
+
+    # Command
+    'Command',
+    'WorkflowCommand',
+    'StatusCommand',
+    'PositionCommand'
 ]

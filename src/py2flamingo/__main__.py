@@ -1,15 +1,15 @@
 """
-Main entry point to run Py2Flamingo as a script.
-"""
-#TODO where did setup logging go?
-import sys
-from PyQt5.QtWidgets import QApplication
+Entry Point - Module Execution
 
-from py2flamingo import Application
+This module serves as the entry point when running the package as a module:
+    python -m py2flamingo
+
+It simply imports and calls the main() function from the CLI module.
+All command-line argument parsing and application initialization logic
+is in cli.py.
+"""
+
+from py2flamingo.cli import main
 
 if __name__ == "__main__":
-    # Launch the PyQt application for Py2Flamingo
-    app = QApplication(sys.argv)
-    flamingo_app = Application()
-    flamingo_app.show()
-    sys.exit(app.exec_())
+    main()
