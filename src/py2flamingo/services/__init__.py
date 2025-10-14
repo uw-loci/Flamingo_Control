@@ -12,6 +12,7 @@ such as communication, workflow management, and analysis algorithms.
 from .connection_service import MVCConnectionService
 from .workflow_service import MVCWorkflowService
 from .status_service import StatusService
+from .configuration_manager import ConfigurationManager, MicroscopeConfiguration
 
 # Legacy services (require numpy/scipy) - import with try/except
 try:
@@ -34,6 +35,8 @@ __all__ = [
     'MVCConnectionService',
     'MVCWorkflowService',
     'StatusService',
+    'ConfigurationManager',
+    'MicroscopeConfiguration',
     # Legacy services (may be None if numpy/scipy not installed)
     'WorkflowService',
     'SampleSearchService',

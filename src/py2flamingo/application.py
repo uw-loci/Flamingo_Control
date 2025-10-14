@@ -19,7 +19,9 @@ from PyQt5.QtWidgets import QApplication
 
 from py2flamingo.core import ProtocolEncoder, TCPConnection
 from py2flamingo.models import ConnectionModel
-from py2flamingo.services import MVCConnectionService, MVCWorkflowService, StatusService
+from py2flamingo.services import (
+    MVCConnectionService, MVCWorkflowService, StatusService, ConfigurationManager
+)
 from py2flamingo.controllers import ConnectionController, WorkflowController
 from py2flamingo.views import ConnectionView, WorkflowView
 
@@ -72,6 +74,7 @@ class FlamingoApplication:
         self.connection_service: Optional[MVCConnectionService] = None
         self.workflow_service: Optional[MVCWorkflowService] = None
         self.status_service: Optional[StatusService] = None
+        self.config_manager: Optional[ConfigurationManager] = None
 
         # Controllers layer components
         self.connection_controller: Optional[ConnectionController] = None
@@ -123,6 +126,10 @@ class FlamingoApplication:
             self.connection_service
         )
 
+        self.config_manager = ConfigurationManager(
+            settings_directory="microscope_settings"
+        )
+
         # Controllers layer - coordinate services and views
         self.logger.debug("Creating controllers layer components...")
         self.connection_controller = ConnectionController(
@@ -137,7 +144,10 @@ class FlamingoApplication:
 
         # Views layer - UI components
         self.logger.debug("Creating views layer components...")
-        self.connection_view = ConnectionView(self.connection_controller)
+        self.connection_view = ConnectionView(
+            self.connection_controller,
+            config_manager=self.config_manager
+        )
         self.workflow_view = WorkflowView(self.workflow_controller)
 
         # Set default connection values in view

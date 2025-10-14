@@ -2,8 +2,13 @@
 
 Control software for Flamingo light sheet systems. It communicates with the Flamingo ControlSystem over TCP, manages acquisition workflows, and can display images either in a standalone PyQt GUI or inside **Napari** as a dock widget.
 
-> **Latest Update (2025-10-10)**
-> A new **MVC Interface** is now available alongside the legacy interface. The MVC interface features clean architecture, comprehensive testing (400+ tests), and full type safety. See [MVC_QUICKSTART.md](MVC_QUICKSTART.md) to get started, or [README_MVC.md](README_MVC.md) for complete documentation.
+> **Latest Update (2025-10-14)**
+> - **Configuration Management**: Auto-discover and select from multiple microscope configurations
+> - **Connection Testing**: Test connectivity before connecting with detailed feedback
+> - **Network Guide**: Comprehensive guide for dual-network setups (internet + microscope subnet)
+>
+> **MVC Interface (2025-10-10)**
+> A new **MVC Interface** is available alongside the legacy interface. Features clean architecture, comprehensive testing (400+ tests), and full type safety. See [MVC_QUICKSTART.md](MVC_QUICKSTART.md) to get started, or [README_MVC.md](README_MVC.md) for complete documentation.
 
 > **Refactor status (updated 2025-08-11)**
 > The codebase has been modularized (controllers/services/core/views). Napari remains an optional add‑on via a thin adapter. Legacy global queues/events are preserved via a compatibility layer.
@@ -12,14 +17,53 @@ Control software for Flamingo light sheet systems. It communicates with the Flam
 
 ## Quick Start
 
+### 1. Check Network Configuration (if using microscope subnet)
+
+*Linux/macOS:*
+```bash
+./check_network.sh
+```
+
+*Windows (PowerShell):*
+```powershell
+.\check_network.ps1
+```
+
+### 2. Launch Application
+
 **New MVC Interface** (Recommended for new users):
+
+*Linux/macOS:*
 ```bash
 # See the quick start guide
 cat MVC_QUICKSTART.md
 
 # Or run directly
+PYTHONPATH=src python -m py2flamingo --ip 127.0.0.1 --port 53717
+```
+
+*Windows (PowerShell):*
+```powershell
+# Set Python path
+$env:PYTHONPATH="src"
+
+# Run application
 python -m py2flamingo --ip 127.0.0.1 --port 53717
 ```
+
+*Windows (Command Prompt):*
+```cmd
+REM Set Python path
+set PYTHONPATH=src
+
+REM Run application
+python -m py2flamingo --ip 127.0.0.1 --port 53717
+```
+
+**Features:**
+- **Configuration Selector**: Auto-discover and select from available microscopes
+- **Test Connection**: Verify connectivity before connecting
+- **Connection Parameters**: Manual entry or load from configuration files
 
 **Legacy Interface** (Original implementation):
 ```bash
@@ -43,6 +87,40 @@ python -m py2flamingo --mode standalone
 - `workflows/Zstack.txt` — the default workflow file used to seed settings. Replace it to change defaults.
 
 If any file is missing or malformed, the app will show a pop‑up explaining what to fix.
+
+### Network Configuration
+
+For systems with **dual network interfaces** (internet + microscope subnet):
+
+**Quick Check:**
+
+*Linux/macOS:*
+```bash
+# Run network diagnostic tool
+./check_network.sh
+
+# Or test specific microscope IP
+./check_network.sh 10.129.37.22
+```
+
+*Windows:*
+```powershell
+# Run PowerShell diagnostic tool
+.\check_network.ps1
+
+# Or test specific microscope IP
+.\check_network.ps1 10.129.37.22
+```
+
+**Key Points:**
+- Microscope subnet typically uses `10.129.37.x/24` range
+- Configure one network interface with a static IP in this subnet (e.g., `10.129.37.5`)
+- OS routing table automatically directs microscope traffic through correct interface
+- Use application's "Test Connection" button to verify routing
+
+**Platform-Specific Guides:**
+- **Windows 11:** See [WINDOWS_QUICKSTART.md](WINDOWS_QUICKSTART.md) for complete Windows setup
+- **All Platforms:** See [NETWORK_CONFIGURATION.md](NETWORK_CONFIGURATION.md) for detailed setup (Linux/Windows/macOS)
 
 ---
 

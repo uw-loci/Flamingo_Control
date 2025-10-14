@@ -249,6 +249,76 @@ class ConnectionController:
             self._logger.exception(f"Unhandled error type: {error_type}")
             return f"Error: {error_msg}"
 
+    def test_connection(self, ip: str, port: int, timeout: float = 2.0) -> Tuple[bool, str]:
+        """
+        Test connection to microscope without establishing a persistent connection.
+
+        Attempts to connect and immediately disconnect to verify the server
+        is reachable. Useful for validating configurations before connecting.
+
+        Args:
+            ip: IP address to test
+            port: Port number to test
+            timeout: Connection timeout in seconds (default: 2.0)
+
+        Returns:
+            Tuple of (success, message):
+                - (True, "Connection test successful") on success
+                - (False, error message) on failure
+        """
+        import socket
+
+        # Validate inputs
+        if not ip or not isinstance(ip, str):
+            return (False, "IP address cannot be empty")
+
+        if not self._validate_ip(ip):
+            return (False, f"Invalid IP address format: {ip}")
+
+        if not isinstance(port, int) or not (1 <= port <= 65535):
+            return (False, f"Invalid port number: {port}")
+
+        # Test connection
+        self._logger.info(f"Testing connection to {ip}:{port}")
+
+        try:
+            # Try to connect to command port
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+
+            try:
+                sock.connect((ip, port))
+                sock.close()
+                self._logger.info(f"Connection test successful: {ip}:{port}")
+                return (True, f"Connection test successful! Server is reachable at {ip}:{port}")
+
+            except socket.timeout:
+                self._logger.warning(f"Connection test timeout: {ip}:{port}")
+                return (False, f"Connection timeout. Server at {ip}:{port} is not responding.")
+
+            except ConnectionRefusedError:
+                self._logger.warning(f"Connection test refused: {ip}:{port}")
+                return (False, f"Connection refused. Server is not listening on port {port}.")
+
+            except OSError as e:
+                self._logger.warning(f"Connection test OS error: {e}")
+                if "Network is unreachable" in str(e):
+                    return (False, "Network unreachable. Check network connection.")
+                elif "No route to host" in str(e):
+                    return (False, f"No route to host {ip}. Check IP address.")
+                else:
+                    return (False, f"Network error: {str(e)}")
+
+            finally:
+                try:
+                    sock.close()
+                except:
+                    pass
+
+        except Exception as e:
+            self._logger.exception("Unexpected error during connection test")
+            return (False, f"Test error: {str(e)}")
+
     def _validate_ip(self, ip: str) -> bool:
         """
         Validate IPv4 address format.

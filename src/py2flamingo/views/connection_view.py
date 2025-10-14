@@ -4,10 +4,10 @@ Connection view for managing microscope connection.
 This module provides the ConnectionView widget for handling connection UI.
 """
 
-from typing import Tuple
+from typing import Tuple, Optional, List
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QSpinBox
+    QLineEdit, QPushButton, QSpinBox, QComboBox, QGroupBox
 )
 from PyQt5.QtCore import Qt
 
@@ -24,19 +24,58 @@ class ConnectionView(QWidget):
     The view is dumb - all logic is handled by the controller.
     """
 
-    def __init__(self, controller):
+    def __init__(self, controller, config_manager=None):
         """Initialize connection view with controller.
 
         Args:
             controller: ConnectionController for handling business logic
+            config_manager: Optional ConfigurationManager for loading configs
         """
         super().__init__()
         self._controller = controller
+        self._config_manager = config_manager
+        self._configurations = {}  # Map of name -> MicroscopeConfiguration
         self.setup_ui()
+
+        # Load configurations if manager provided
+        if self._config_manager:
+            self._load_configurations()
 
     def setup_ui(self) -> None:
         """Create and layout UI components."""
         layout = QVBoxLayout()
+
+        # Configuration selection group (if manager provided)
+        if self._config_manager:
+            config_group = QGroupBox("Configuration")
+            config_layout = QVBoxLayout()
+
+            # Configuration selector
+            selector_layout = QHBoxLayout()
+            selector_layout.addWidget(QLabel("Select Config:"))
+
+            self.config_combo = QComboBox()
+            self.config_combo.addItem("-- Manual Entry --")
+            self.config_combo.currentTextChanged.connect(self._on_config_selected)
+            selector_layout.addWidget(self.config_combo)
+
+            self.refresh_btn = QPushButton("Refresh")
+            self.refresh_btn.clicked.connect(self._on_refresh_clicked)
+            selector_layout.addWidget(self.refresh_btn)
+
+            config_layout.addLayout(selector_layout)
+
+            # Microscope name display
+            self.microscope_name_label = QLabel("Microscope: None")
+            self.microscope_name_label.setStyleSheet("color: blue; font-style: italic;")
+            config_layout.addWidget(self.microscope_name_label)
+
+            config_group.setLayout(config_layout)
+            layout.addWidget(config_group)
+
+        # Connection parameters group
+        connection_group = QGroupBox("Connection Parameters")
+        connection_layout = QVBoxLayout()
 
         # IP address input
         ip_layout = QHBoxLayout()
@@ -48,7 +87,7 @@ class ConnectionView(QWidget):
         self.ip_input.setText("127.0.0.1")  # Default
         self.ip_input.setPlaceholderText("e.g., 192.168.1.100")
         ip_layout.addWidget(self.ip_input)
-        layout.addLayout(ip_layout)
+        connection_layout.addLayout(ip_layout)
 
         # Port input
         port_layout = QHBoxLayout()
@@ -60,10 +99,17 @@ class ConnectionView(QWidget):
         self.port_input.setRange(1, 65535)
         self.port_input.setValue(53717)  # Default
         port_layout.addWidget(self.port_input)
-        layout.addLayout(port_layout)
+        connection_layout.addLayout(port_layout)
 
-        # Connect/Disconnect buttons
+        connection_group.setLayout(connection_layout)
+        layout.addWidget(connection_group)
+
+        # Action buttons
         button_layout = QHBoxLayout()
+
+        self.test_btn = QPushButton("Test Connection")
+        self.test_btn.clicked.connect(self._on_test_clicked)
+        button_layout.addWidget(self.test_btn)
 
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.clicked.connect(self._on_connect_clicked)
@@ -180,6 +226,73 @@ class ConnectionView(QWidget):
         """Clear the message display."""
         self.message_label.setText("")
 
+    def _on_test_clicked(self) -> None:
+        """Handle test connection button click."""
+        ip = self.ip_input.text()
+        port = self.port_input.value()
+
+        # Test connection via controller
+        success, message = self._controller.test_connection(ip, port)
+
+        # Display result
+        self._show_message(message, is_error=not success)
+
+    def _on_config_selected(self, config_name: str) -> None:
+        """Handle configuration selection from dropdown.
+
+        Args:
+            config_name: Name of selected configuration
+        """
+        if config_name == "-- Manual Entry --":
+            self.microscope_name_label.setText("Microscope: Manual Entry")
+            return
+
+        # Load configuration
+        config = self._configurations.get(config_name)
+        if config:
+            # Update UI with configuration values
+            self.ip_input.setText(config.connection_config.ip_address)
+            self.port_input.setValue(config.connection_config.port)
+            self.microscope_name_label.setText(f"Microscope: {config.name}")
+            self._show_message(f"Loaded configuration: {config.name}", is_error=False)
+
+    def _on_refresh_clicked(self) -> None:
+        """Handle refresh button click - reload configurations."""
+        self._load_configurations()
+        self._show_message("Configurations refreshed", is_error=False)
+
+    def _load_configurations(self) -> None:
+        """Load available configurations from config manager."""
+        if not self._config_manager:
+            return
+
+        try:
+            # Discover configurations
+            configs = self._config_manager.discover_configurations()
+
+            # Clear existing
+            self._configurations.clear()
+            if hasattr(self, 'config_combo'):
+                self.config_combo.clear()
+                self.config_combo.addItem("-- Manual Entry --")
+
+            # Add to combo box
+            for config in configs:
+                self._configurations[config.name] = config
+                if hasattr(self, 'config_combo'):
+                    self.config_combo.addItem(config.name)
+
+            # Try to select default
+            default_config = self._config_manager.get_default_configuration()
+            if default_config and hasattr(self, 'config_combo'):
+                index = self.config_combo.findText(default_config.name)
+                if index >= 0:
+                    self.config_combo.setCurrentIndex(index)
+
+        except Exception as e:
+            if hasattr(self, 'message_label'):
+                self._show_message(f"Error loading configurations: {str(e)}", is_error=True)
+
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable all interactive components.
 
@@ -191,8 +304,16 @@ class ConnectionView(QWidget):
             self.ip_input.setEnabled(True)
             self.port_input.setEnabled(True)
             self.connect_btn.setEnabled(True)
+            self.test_btn.setEnabled(True)
+            if hasattr(self, 'config_combo'):
+                self.config_combo.setEnabled(True)
+                self.refresh_btn.setEnabled(True)
         elif not enabled:
             self.ip_input.setEnabled(False)
             self.port_input.setEnabled(False)
             self.connect_btn.setEnabled(False)
             self.disconnect_btn.setEnabled(False)
+            self.test_btn.setEnabled(False)
+            if hasattr(self, 'config_combo'):
+                self.config_combo.setEnabled(False)
+                self.refresh_btn.setEnabled(False)
