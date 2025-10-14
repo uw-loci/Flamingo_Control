@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import Mock, MagicMock, patch
 from pathlib import Path
 from datetime import datetime
+import socket
 
 # Import controllers
 import sys
@@ -287,6 +288,193 @@ class TestConnectionController(unittest.TestCase):
         message = self.controller.handle_connection_error(error)
 
         self.assertIn("Invalid value", message)
+
+    def test_test_connection_success(self):
+        """Test successful connection test."""
+        with patch('socket.socket') as mock_socket_class:
+            # Mock successful connection
+            mock_socket = Mock()
+            mock_socket_class.return_value = mock_socket
+            mock_socket.connect.return_value = None
+
+            success, message = self.controller.test_connection("192.168.1.100", 53717)
+
+            self.assertTrue(success)
+            self.assertIn("successful", message.lower())
+            self.assertIn("192.168.1.100", message)
+            self.assertIn("53717", message)
+
+            # Verify socket was closed (may be called multiple times due to finally block)
+            mock_socket.close.assert_called()
+
+    def test_test_connection_invalid_ip_empty(self):
+        """Test connection test with empty IP."""
+        success, message = self.controller.test_connection("", 53717)
+
+        self.assertFalse(success)
+        self.assertIn("IP address", message)
+        self.assertIn("empty", message.lower())
+
+    def test_test_connection_invalid_ip_format(self):
+        """Test connection test with invalid IP format."""
+        invalid_ips = [
+            "not_an_ip",
+            "999.999.999.999",
+            "192.168.1",
+            "192.168.1.1.1",
+            "192.168.-1.1",
+        ]
+
+        for invalid_ip in invalid_ips:
+            success, message = self.controller.test_connection(invalid_ip, 53717)
+            self.assertFalse(success, f"Should reject {invalid_ip}")
+            self.assertIn("Invalid IP address", message)
+
+    def test_test_connection_invalid_port_type(self):
+        """Test connection test with invalid port type."""
+        success, message = self.controller.test_connection("192.168.1.100", "not_a_port")
+
+        self.assertFalse(success)
+        self.assertIn("invalid port", message.lower())
+
+    def test_test_connection_invalid_port_range(self):
+        """Test connection test with out-of-range port."""
+        invalid_ports = [0, -1, 65536, 70000]
+
+        for invalid_port in invalid_ports:
+            success, message = self.controller.test_connection("192.168.1.100", invalid_port)
+            self.assertFalse(success, f"Should reject port {invalid_port}")
+            self.assertIn("invalid port", message.lower())
+
+    def test_test_connection_timeout(self):
+        """Test connection test with timeout."""
+        with patch('socket.socket') as mock_socket_class:
+            mock_socket = Mock()
+            mock_socket_class.return_value = mock_socket
+            mock_socket.connect.side_effect = socket.timeout("Connection timed out")
+
+            success, message = self.controller.test_connection("192.168.1.100", 53717, timeout=1.0)
+
+            self.assertFalse(success)
+            self.assertIn("timeout", message.lower())
+            self.assertIn("not responding", message.lower())
+
+            # Socket should still be closed
+            mock_socket.close.assert_called()
+
+    def test_test_connection_refused(self):
+        """Test connection test with connection refused."""
+        with patch('socket.socket') as mock_socket_class:
+            mock_socket = Mock()
+            mock_socket_class.return_value = mock_socket
+            mock_socket.connect.side_effect = ConnectionRefusedError()
+
+            success, message = self.controller.test_connection("192.168.1.100", 53717)
+
+            self.assertFalse(success)
+            self.assertIn("refused", message.lower())
+            self.assertIn("not listening", message.lower())
+
+            mock_socket.close.assert_called()
+
+    def test_test_connection_host_unreachable(self):
+        """Test connection test with host unreachable."""
+        with patch('socket.socket') as mock_socket_class:
+            mock_socket = Mock()
+            mock_socket_class.return_value = mock_socket
+            mock_socket.connect.side_effect = OSError("No route to host")
+
+            success, message = self.controller.test_connection("192.168.1.100", 53717)
+
+            self.assertFalse(success)
+            self.assertIn("route to host", message.lower())
+
+            mock_socket.close.assert_called()
+
+    def test_test_connection_network_unreachable(self):
+        """Test connection test with network unreachable."""
+        with patch('socket.socket') as mock_socket_class:
+            mock_socket = Mock()
+            mock_socket_class.return_value = mock_socket
+            mock_socket.connect.side_effect = OSError("Network is unreachable")
+
+            success, message = self.controller.test_connection("192.168.1.100", 53717)
+
+            self.assertFalse(success)
+            self.assertIn("network", message.lower())
+            self.assertIn("unreachable", message.lower())
+
+            mock_socket.close.assert_called_once()
+
+    def test_test_connection_generic_error(self):
+        """Test connection test with generic error."""
+        with patch('socket.socket') as mock_socket_class:
+            mock_socket = Mock()
+            mock_socket_class.return_value = mock_socket
+            mock_socket.connect.side_effect = Exception("Unknown error")
+
+            success, message = self.controller.test_connection("192.168.1.100", 53717)
+
+            self.assertFalse(success)
+            self.assertIn("error", message.lower())
+
+            mock_socket.close.assert_called_once()
+
+    def test_test_connection_custom_timeout(self):
+        """Test connection test with custom timeout."""
+        with patch('socket.socket') as mock_socket_class:
+            mock_socket = Mock()
+            mock_socket_class.return_value = mock_socket
+            mock_socket.connect.return_value = None
+
+            success, message = self.controller.test_connection("192.168.1.100", 53717, timeout=5.0)
+
+            self.assertTrue(success)
+            # Verify timeout was set
+            mock_socket.settimeout.assert_called_once_with(5.0)
+
+    def test_test_connection_validates_before_connecting(self):
+        """Test that validation happens before attempting connection."""
+        # Invalid IP should not create socket
+        with patch('socket.socket') as mock_socket_class:
+            success, message = self.controller.test_connection("invalid_ip", 53717)
+
+            self.assertFalse(success)
+            # Socket should never be created for invalid input
+            mock_socket_class.assert_not_called()
+
+    def test_validate_ip_valid_ips(self):
+        """Test IP validation with valid addresses."""
+        valid_ips = [
+            "127.0.0.1",
+            "192.168.1.1",
+            "10.0.0.1",
+            "255.255.255.255",
+            "0.0.0.0",
+            "10.129.37.22",
+        ]
+
+        for ip in valid_ips:
+            is_valid = self.controller._validate_ip(ip)
+            self.assertTrue(is_valid, f"Should accept {ip}")
+
+    def test_validate_ip_invalid_ips(self):
+        """Test IP validation with invalid addresses."""
+        invalid_ips = [
+            "",
+            "not_an_ip",
+            "999.999.999.999",
+            "192.168.1",
+            "192.168.1.1.1",
+            "192.168.-1.1",
+            "192.168.1.256",
+            "192.168.1.1.1.1",
+            "abc.def.ghi.jkl",
+        ]
+
+        for ip in invalid_ips:
+            is_valid = self.controller._validate_ip(ip)
+            self.assertFalse(is_valid, f"Should reject {ip}")
 
 
 class TestWorkflowController(unittest.TestCase):

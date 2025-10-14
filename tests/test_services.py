@@ -547,6 +547,227 @@ class TestStatusService(unittest.TestCase):
         self.assertEqual(self.mock_conn_service.send_command.call_count, 2)
 
 
+class TestConfigurationManager(unittest.TestCase):
+    """Tests for ConfigurationManager service."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        import tempfile
+        import os
+
+        # Create temporary directory for test configurations
+        self.temp_dir = tempfile.mkdtemp()
+
+        # Create sample configuration files with valid format
+        self._create_test_config("Zion.txt", "10.129.37.22", 53717, "Zion")
+        self._create_test_config("Alpha.txt", "192.168.1.100", 53717, "Alpha")
+        self._create_test_config("Beta.txt", "192.168.1.101", 53718, "Beta")
+
+        # Create invalid config (missing address)
+        invalid_path = Path(self.temp_dir) / "Invalid.txt"
+        invalid_path.write_text("<Instrument>\nMicroscope name = Invalid\n</Instrument>\n")
+
+        # Import and create service
+        from py2flamingo.services.configuration_manager import ConfigurationManager
+        self.manager = ConfigurationManager(settings_directory=self.temp_dir)
+
+    def tearDown(self):
+        """Clean up temp directory."""
+        import shutil
+        if Path(self.temp_dir).exists():
+            shutil.rmtree(self.temp_dir)
+
+    def _create_test_config(self, filename: str, ip: str, port: int, name: str):
+        """Helper to create test configuration file in the format expected by parser."""
+        config_path = Path(self.temp_dir) / filename
+        # Use the format that parse_metadata_file expects
+        content = f"""<Instrument>
+  <Type>
+    Microscope name = {name}
+    Microscope address = {ip} {port}
+  </Type>
+</Instrument>
+"""
+        config_path.write_text(content)
+
+    def test_init(self):
+        """Test ConfigurationManager initialization."""
+        self.assertIsNotNone(self.manager)
+        self.assertEqual(str(self.manager.settings_directory), self.temp_dir)
+
+    def test_init_with_nonexistent_directory(self):
+        """Test initialization with non-existent directory."""
+        from py2flamingo.services.configuration_manager import ConfigurationManager
+
+        # Should not raise error, will create directory or fail gracefully
+        manager = ConfigurationManager(settings_directory="/tmp/nonexistent_dir_test_12345")
+        self.assertIsNotNone(manager)
+
+    def test_discover_configurations(self):
+        """Test discovering configuration files."""
+        configs = self.manager.discover_configurations()
+
+        # Should find 3 valid configs (Zion, Alpha, Beta) and skip Invalid
+        self.assertGreaterEqual(len(configs), 3)
+
+        # Check config names
+        config_names = [c.name for c in configs]
+        self.assertIn("Zion", config_names)
+        self.assertIn("Alpha", config_names)
+        self.assertIn("Beta", config_names)
+
+    def test_discover_configurations_filters_invalid(self):
+        """Test that invalid configs are filtered out."""
+        configs = self.manager.discover_configurations()
+
+        # Invalid.txt should be skipped (missing address)
+        config_names = [c.name for c in configs]
+        self.assertEqual(len(configs), 3)  # Only Zion, Alpha, Beta
+
+    def test_get_configuration_by_name(self):
+        """Test retrieving configuration by name."""
+        # Discover first
+        self.manager.discover_configurations()
+
+        # Get specific config
+        config = self.manager.get_configuration("Zion")
+
+        self.assertIsNotNone(config)
+        self.assertEqual(config.name, "Zion")
+        self.assertEqual(config.connection_config.ip_address, "10.129.37.22")
+        self.assertEqual(config.connection_config.port, 53717)
+
+    def test_get_configuration_not_found(self):
+        """Test retrieving non-existent configuration."""
+        self.manager.discover_configurations()
+
+        config = self.manager.get_configuration("NonExistent")
+
+        self.assertIsNone(config)
+
+    def test_get_configuration_before_discovery(self):
+        """Test getting configuration before discover is called."""
+        config = self.manager.get_configuration("Zion")
+
+        # Should return None since discover hasn't been called
+        self.assertIsNone(config)
+
+    def test_get_configuration_names(self):
+        """Test getting all configuration names."""
+        self.manager.discover_configurations()
+
+        names = self.manager.get_configuration_names()
+
+        self.assertGreaterEqual(len(names), 3)
+        self.assertIn("Zion", names)
+        self.assertIn("Alpha", names)
+        self.assertIn("Beta", names)
+
+    def test_get_configuration_names_empty(self):
+        """Test getting names when no configs discovered."""
+        names = self.manager.get_configuration_names()
+
+        self.assertEqual(names, [])
+
+    def test_load_configuration_from_file_valid(self):
+        """Test loading valid configuration file."""
+        config_path = Path(self.temp_dir) / "Zion.txt"
+
+        config = self.manager.load_configuration_from_file(str(config_path))
+
+        self.assertIsNotNone(config)
+        self.assertEqual(config.name, "Zion")
+        self.assertEqual(config.connection_config.ip_address, "10.129.37.22")
+        self.assertEqual(config.connection_config.port, 53717)
+
+    def test_load_configuration_from_file_not_found(self):
+        """Test loading non-existent file."""
+        with self.assertRaises(FileNotFoundError):
+            self.manager.load_configuration_from_file("/nonexistent/file.txt")
+
+    def test_load_configuration_from_file_invalid(self):
+        """Test loading invalid config file."""
+        invalid_path = Path(self.temp_dir) / "Invalid.txt"
+
+        with self.assertRaises(ValueError):
+            self.manager.load_configuration_from_file(str(invalid_path))
+
+    def test_configuration_dataclass_properties(self):
+        """Test MicroscopeConfiguration dataclass."""
+        from py2flamingo.services.configuration_manager import MicroscopeConfiguration
+        from py2flamingo.models.connection import ConnectionConfig
+
+        config = MicroscopeConfiguration(
+            name="Test Microscope",
+            connection_config=ConnectionConfig("192.168.1.100", 53717),
+            file_path=Path("/fake/path.txt"),
+            description="Test config"
+        )
+
+        self.assertEqual(config.name, "Test Microscope")
+        self.assertEqual(config.connection_config.ip_address, "192.168.1.100")
+        self.assertEqual(config.connection_config.port, 53717)
+        self.assertEqual(config.description, "Test config")
+        self.assertIn("192.168.1.100", str(config))
+
+    def test_refresh_configurations(self):
+        """Test refreshing configurations after changes."""
+        # Initial discovery
+        configs1 = self.manager.discover_configurations()
+        count1 = len(configs1)
+
+        # Add new configuration file
+        self._create_test_config("Gamma.txt", "192.168.1.102", 53717, "Gamma")
+
+        # Refresh
+        configs2 = self.manager.refresh()
+        count2 = len(configs2)
+
+        # Should have one more config
+        self.assertEqual(count2, count1 + 1)
+        config_names = [c.name for c in configs2]
+        self.assertIn("Gamma", config_names)
+
+    def test_get_default_configuration(self):
+        """Test getting default configuration."""
+        # Should auto-discover if not already done
+        default_config = self.manager.get_default_configuration()
+
+        self.assertIsNotNone(default_config)
+        # Should return first available config
+        self.assertIsInstance(default_config.name, str)
+
+    def test_get_default_configuration_empty_directory(self):
+        """Test getting default configuration with no configs."""
+        import tempfile
+        import shutil
+        from py2flamingo.services.configuration_manager import ConfigurationManager
+
+        empty_dir = tempfile.mkdtemp()
+        try:
+            manager = ConfigurationManager(settings_directory=empty_dir)
+            default_config = manager.get_default_configuration()
+
+            self.assertIsNone(default_config)
+        finally:
+            shutil.rmtree(empty_dir)
+
+    def test_empty_directory(self):
+        """Test with empty settings directory."""
+        import tempfile
+        import shutil
+        from py2flamingo.services.configuration_manager import ConfigurationManager
+
+        empty_dir = tempfile.mkdtemp()
+        try:
+            manager = ConfigurationManager(settings_directory=empty_dir)
+            configs = manager.discover_configurations()
+
+            self.assertEqual(len(configs), 0)
+        finally:
+            shutil.rmtree(empty_dir)
+
+
 class TestServiceIntegration(unittest.TestCase):
     """Integration tests for services working together."""
 
