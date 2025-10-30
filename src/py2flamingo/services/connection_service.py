@@ -16,10 +16,7 @@ from py2flamingo.core.events import EventManager
 from py2flamingo.core.queue_manager import QueueManager
 from .communication.thread_manager import ThreadManager
 
-try:
-    import src.py2flamingo.utils.file_handlers as fh
-except Exception:
-    from py2flamingo.utils import file_handlers as fh
+from py2flamingo.utils import file_handlers as fh
 
 class ConnectionService:
     """
@@ -39,9 +36,9 @@ class ConnectionService:
         logger: Logger instance
     """
     
-    def __init__(self, ip: str, port: int, 
-                 event_manager: EventManager, 
-                 queue_manager: QueueManager):
+    def __init__(self, ip: str = "127.0.0.1", port: int = 0,
+                 event_manager: EventManager | None = None,
+                 queue_manager: QueueManager | None = None):
         """
         Initialize the connection service.
         
@@ -53,8 +50,8 @@ class ConnectionService:
         """
         self.ip = ip
         self.port = port
-        self.event_manager = event_manager
-        self.queue_manager = queue_manager
+        self.event_manager = event_manager or EventManager()
+        self.queue_manager = queue_manager or QueueManager()
         self.logger = logging.getLogger(__name__)
         
         # Connection state
@@ -72,7 +69,7 @@ class ConnectionService:
         self.LED_on = "50.0 1"
         self.LED_off = "0.00 0"
     
-    def connect(self) -> bool:
+    def connect(self, ip: str | None = None, port: int | None = None) -> bool:
         """
         Establish connection to the microscope.
         
@@ -80,20 +77,23 @@ class ConnectionService:
             bool: True if connection successful
         """
         try:
+            if ip is not None:
+                self.ip = ip
+            if port is not None:
+                self.port = port
+
             self.logger.info(f"Connecting to microscope at {self.ip}:{self.port}")
-            
-            # Create sockets
+
             self.nuc_client = self._create_socket()
             self.live_client = self._create_socket()
-            
-            # Connect to microscope
+
             port_listen = self.port + 1
-            
+
             try:
                 self.nuc_client.settimeout(2)
                 self.nuc_client.connect((self.ip, self.port))
                 self.live_client.connect((self.ip, port_listen))
-                
+                self.nuc_client.settimeout(None)
             except (socket.timeout, ConnectionRefusedError) as e:
                 self.logger.error(f"Failed to connect: {e}")
                 self._cleanup_sockets()
@@ -127,7 +127,7 @@ class ConnectionService:
             
             # Stop threads
             if self.thread_manager:
-                self.thread_manager.stop_all_threads()
+                self.thread_manager.stop_all()
             
             # Close sockets
             self._cleanup_sockets()
@@ -265,19 +265,12 @@ class ConnectionService:
     def _start_threads(self) -> None:
         """Start communication threads."""
         # Import thread functions
-        from py2flamingo.services.communication.thread_manager import ThreadManager
-        
-        # Create thread manager
-        self.thread_manager = ThreadManager(
-            nuc_client=self.nuc_client,
-            live_client=self.live_client,
-            event_manager=self.event_manager,
-            queue_manager=self.queue_manager
-        )
-        
-        # Start threads
-        self.threads = self.thread_manager.start_all_threads()
-        
+        self.thread_manager = ThreadManager()
+        self.thread_manager.start_receivers(self.nuc_client, self.event_manager, self.queue_manager)
+        self.thread_manager.start_live_receiver(self.live_client, self.event_manager, self.queue_manager)
+        self.thread_manager.start_sender(self.nuc_client, self.event_manager, self.queue_manager)
+        self.thread_manager.start_processing(self.event_manager, self.queue_manager)
+        self.threads = ()
         self.logger.info("Communication threads started")
 
 

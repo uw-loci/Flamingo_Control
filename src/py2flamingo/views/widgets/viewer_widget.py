@@ -4,7 +4,6 @@ Simple widget that integrates with any viewer implementation.
 """
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel
 from PyQt5.QtCore import QTimer, pyqtSignal
-import numpy as np
 import logging
 from typing import Optional, Dict, Any
 from queue import Empty
@@ -20,7 +19,7 @@ class ViewerWidget(QWidget):
     """
     
     # Signal for thread-safe updates
-    image_ready = pyqtSignal(np.ndarray, str, dict)
+    image_ready = pyqtSignal(object, str, dict)
     
     def __init__(self, viewer: ViewerInterface, 
                  image_queue: 'Queue',
@@ -64,7 +63,7 @@ class ViewerWidget(QWidget):
         except Empty:
             return
     
-    def _display_image(self, image: np.ndarray, title: str, metadata: Dict[str, Any]):
+    def _display_image(self, image: Any, title: str, metadata: Dict[str, Any]):
         """
         Internal slot to display the image using the provided viewer.
         """

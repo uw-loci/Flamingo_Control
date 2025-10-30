@@ -1,11 +1,23 @@
 import unittest
+
+from unittest.mock import Mock, patch, MagicMock, call
+import socket
+import struct
+import tempfile
+import os
+
+from py2flamingo.services.connection_service import ConnectionService
+from py2flamingo.services.communication.tcp_client import TCPClient
+from tests.test_utils import NoOpThreadManager
+
 from unittest.mock import patch, MagicMock
 
-from src.py2flamingo.services.connection_service import ConnectionService
+
+#from src.py2flamingo.services.connection_service import ConnectionService
 from src.py2flamingo.core.events import EventManager
 from src.py2flamingo.core.queue_manager import QueueManager
 
-from tests.test_utils import NoOpThreadManager
+#from tests.test_utils import NoOpThreadManager
 
 
 class TestTCPClient(unittest.TestCase):
@@ -21,6 +33,39 @@ class TestTCPClient(unittest.TestCase):
         self.event_manager = EventManager()
         self.queue_manager = QueueManager()
 
+
+class TestMicroscopeIntegration(unittest.TestCase):
+    """Integration tests for complete microscope communication flow."""
+    
+    def test_complete_workflow_execution(self):
+        """Test a complete workflow execution sequence using ConnectionService."""
+
+        from unittest.mock import patch, MagicMock
+        from py2flamingo.services.connection_service import ConnectionService
+        from py2flamingo.core.events import EventManager
+        from py2flamingo.core.queue_manager import QueueManager
+        # You'll add this tiny helper in tests/test_utils.py (see prior message)
+        from tests.test_utils import NoOpThreadManager
+
+        # ---- Arrange ----
+        mock_nuc_socket = MagicMock()
+        mock_live_socket = MagicMock()
+
+        event_manager = EventManager()
+        queue_manager = QueueManager()
+
+        conn_service = ConnectionService(
+            ip="192.168.1.100",
+            port=53717,
+            event_manager=event_manager,
+            queue_manager=queue_manager
+        )
+
+        # Inject the no-op ThreadManager & stub socket creation
+        with patch('py2flamingo.services.connection_service.ThreadManager', NoOpThreadManager):
+            # If your ConnectionService calls a factory like _create_socket(), stub it to avoid real sockets
+            with patch.object(conn_service, '_create_socket', side_effect=[mock_nuc_socket, mock_live_socket]):
+
         self.conn = ConnectionService(
             ip=self.test_ip,
             port=self.test_port,
@@ -31,6 +76,7 @@ class TestTCPClient(unittest.TestCase):
         # Common socket mocks used across tests
         self.mock_nuc_socket = MagicMock(name="nuc_socket")
         self.mock_live_socket = MagicMock(name="live_socket")
+
 
     # ---------- helpers ----------
 
@@ -50,11 +96,105 @@ class TestTCPClient(unittest.TestCase):
 
     # ---------- tests ----------
 
+
+class TestWorkflowParsing(unittest.TestCase):
+    """Test workflow file parsing and generation."""
+    
+    def test_workflow_to_dict(self):
+        """Test parsing workflow text to dictionary."""
+        workflow_text = """<Workflow Settings>
+<Work Flow Type>
+Stack
+<Start Position>
+X (mm) = 10.0
+Y (mm) = 20.0
+Z (mm) = 5.0
+Angle (degrees) = 0.0
+<End Position>
+X (mm) = 10.0
+Y (mm) = 20.0
+Z (mm) = 15.0
+Angle (degrees) = 0.0
+<Stack Settings>
+Number of planes = 100
+Change in Z axis (mm) = 0.1
+<Experiment Settings>
+Save image data = Tiff
+Comments = Test workflow
+</Workflow Settings>"""
+        
+        # Write to temp file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            f.write(workflow_text)
+            temp_file = f.name
+        
+        try:
+            # Import and test
+            from py2flamingo.utils.file_handlers import workflow_to_dict
+            
+            result = workflow_to_dict(temp_file)
+            
+            # Verify structure
+            self.assertEqual(result['Work Flow Type'], 'Stack')
+            self.assertEqual(float(result['Start Position']['X (mm)']), 10.0)
+            self.assertEqual(float(result['End Position']['Z (mm)']), 15.0)
+            self.assertEqual(int(result['Stack Settings']['Number of planes']), 100)
+            self.assertEqual(result['Experiment Settings']['Save image data'], 'Tiff')
+            
+        finally:
+            os.unlink(temp_file)
+    
+    def test_dict_to_workflow(self):
+        """Test converting dictionary back to workflow text."""
+        from py2flamingo.utils.file_handlers import dict_to_workflow
+        
+        # Create workflow dict
+        workflow_dict = {
+            'Work Flow Type': 'Snap',
+            'Start Position': {
+                'X (mm)': '5.0',
+                'Y (mm)': '10.0',
+                'Z (mm)': '2.0',
+                'Angle (degrees)': '0.0'
+            },
+            'End Position': {
+                'X (mm)': '5.0',
+                'Y (mm)': '10.0',
+                'Z (mm)': '2.01',
+                'Angle (degrees)': '0.0'
+            },
+            'Experiment Settings': {
+                'Save image data': 'NotSaved',
+                'Comments': 'Unit test'
+            }
+        }
+        
+        # Write to temp file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            temp_file = f.name
+        
+        try:
+            dict_to_workflow(temp_file, workflow_dict)
+            
+            # Read back and verify
+            with open(temp_file, 'r') as f:
+                content = f.read()
+            
+            self.assertIn('<Workflow Settings>', content)
+            self.assertIn('Work Flow Type', content)
+            self.assertIn('Snap', content)
+            self.assertIn('X (mm) = 5.0', content)
+            self.assertIn('</Workflow Settings>', content)
+            
+        finally:
+            os.unlink(temp_file)
+
     def test_successful_connection(self):
         with self._patch_thread_manager(), self._patch_create_socket_success():
             ok = self.conn.connect()
             self.assertTrue(ok)
             self.assertTrue(self.conn.is_connected())
+
 
     def test_connection_timeout(self):
         # Simulate socket creation raising an error on first attempt
@@ -63,6 +203,10 @@ class TestTCPClient(unittest.TestCase):
             # Depending on your ConnectionService.connect() semantics,
             # it may return False or raise; adapt as needed.
             self.assertFalse(ok)
+
+
+if __name__ == '__main__':
+    unittest.main()
 
     def test_disconnect(self):
         with self._patch_thread_manager(), self._patch_create_socket_success():
@@ -150,3 +294,4 @@ class TestTCPClient(unittest.TestCase):
 
                 # Assert send event set
                 self.assertTrue(self.event_manager.is_set('send'), "'send' event should be set after send_workflow")
+

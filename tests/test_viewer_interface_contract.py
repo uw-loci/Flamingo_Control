@@ -1,5 +1,4 @@
 # tests/test_viewer_interface_contract.py
-import numpy as np
 import pytest
 
 def test_contract_signature():
@@ -12,6 +11,7 @@ def test_contract_signature():
             self.calls.append((image, title, metadata))
 
     dv = DummyViewer()
-    arr = np.zeros((2, 2))
+    arr = [[0, 0], [0, 0]]
     dv.display_image(arr, title="T", metadata={"k": "v"})
-    assert dv.calls and dv.calls[0][0] is arr
+    assert dv.calls and dv.calls[0][0] == arr
+

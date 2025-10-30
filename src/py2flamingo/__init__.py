@@ -1,6 +1,12 @@
 # py2flamingo package
 # Minimal initialization during restructuring
 
+# Keep backward compatibility imports during migration
+try:
+    from .application import Application
+except Exception:  # PyQt may be unavailable in headless tests
+    Application = None
+
 __version__ = "0.5.0-minimal"
 
 # Only import what's currently working
