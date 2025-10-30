@@ -55,7 +55,7 @@ You should see `(.venv)` in your terminal prompt.
 
 ```bash
 # Install required packages
-pip install -r requirements.txt
+pip install -r requirements-minimal.txt
 
 # Install development dependencies (optional, for testing)
 pip install -r requirements-dev.txt

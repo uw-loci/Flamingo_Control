@@ -19,6 +19,7 @@ except Exception:
 try:
     from .ellipse_tracing_service import EllipseTracingService
 except Exception:
+    EllipseTracingService = None
 
 # MVC Refactoring - New Services (use these for new MVC architecture)
 # Import these first as they have no numpy/scipy dependencies
@@ -41,7 +42,6 @@ except ImportError:
 try:
     from .ellipse_tracing_service import EllipseTracingService
 except ImportError:
-
     EllipseTracingService = None
 
 __all__ = [
