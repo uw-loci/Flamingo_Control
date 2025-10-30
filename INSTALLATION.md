@@ -52,7 +52,7 @@ Complete installation guide for Flamingo Microscope Control software on Windows,
 # 2. Python environment
 python -m venv .venv
 .venv\Scripts\activate
-pip install -r requirements-minimal.txt
+pip install -r requirements.txt
 
 # 3. Run application
 $env:PYTHONPATH="src"
@@ -67,7 +67,7 @@ python -m py2flamingo
 # 2. Python environment
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-minimal.txt
+pip install -r requirements.txt
 
 # 3. Run application
 PYTHONPATH=src python -m py2flamingo
@@ -123,18 +123,22 @@ source .venv/bin/activate
 ### 4. Install Dependencies
 
 ```bash
-# Minimal installation
-pip install PyQt5 numpy
-
-# Or from requirements file
-pip install -r requirements-minimal.txt
-
-# Full installation (includes optional dependencies)
+# Standard installation (recommended)
 pip install -r requirements.txt
+
+# Minimal installation (MVC interface only, limited functionality)
+pip install -r requirements-minimal.txt
 
 # Optional: Napari integration
 pip install napari
 ```
+
+**Note:** The standard `requirements.txt` includes all dependencies needed for full functionality:
+- PyQt5 (GUI framework)
+- numpy (numerical computing)
+- Pillow (image processing)
+- scipy (scientific computing)
+- scikit-learn (machine learning utilities)
 
 ---
 

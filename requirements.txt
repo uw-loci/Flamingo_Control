@@ -1,0 +1,14 @@
+# Runtime dependencies for Py2Flamingo
+# Install with: pip install -r requirements.txt
+
+# Core GUI and imaging
+PyQt5>=5.15.0
+numpy>=1.21.0
+Pillow>=9.0.0
+
+# Scientific computing (required for image processing and analysis)
+scipy>=1.8.0
+scikit-learn>=1.0.0
+
+# Optional: Napari integration (uncomment to enable)
+# napari>=0.4.0
