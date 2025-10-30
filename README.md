@@ -73,8 +73,8 @@ The application will:
 ## Documentation
 
 - **[INSTALLATION.md](INSTALLATION.md)** - Complete installation guide for all platforms
-- **[DEVELOPER.md](DEVELOPER.md)** - Developer guide, architecture, testing
-- **[CLAUDE.md](CLAUDE.md)** - AI assistant guidance for code work
+- **[DEVELOPER.md](docs/DEVELOPER.md)** - Developer guide, architecture, testing
+- **[CLAUDE.md](docs/CLAUDE.md)** - AI assistant guidance for code work
 
 ---
 
@@ -390,7 +390,7 @@ Flamingo_Control/
 ## Getting Help
 
 - **Installation Issues:** See [INSTALLATION.md](INSTALLATION.md)
-- **Development Questions:** See [DEVELOPER.md](DEVELOPER.md)
+- **Development Questions:** See [DEVELOPER.md](docs/DEVELOPER.md)
 - **Bug Reports:** [GitHub Issues](https://github.com/uw-loci/Flamingo_Control/issues)
 - **Network Problems:** Run diagnostic script (`check_network.sh` / `check_network.ps1`)
 
