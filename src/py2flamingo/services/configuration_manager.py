@@ -11,7 +11,7 @@ import logging
 
 from ..models.connection import ConnectionConfig
 from ..utils.metadata_parser import parse_metadata_file, validate_metadata_file
-from ..utils.file_handlers import text_to_dict
+from ..utils.file_handlers import text_to_dict, dict_to_text, safe_write
 
 
 logger = logging.getLogger(__name__)
@@ -237,3 +237,74 @@ class ConfigurationManager:
             Updated list of configurations
         """
         return self.discover_configurations()
+
+    def save_configuration(self, name: str, ip: str, port: int, description: str = "") -> Tuple[bool, str]:
+        """Save a new configuration to the settings directory.
+
+        Creates a configuration file with the specified connection parameters.
+        The configuration will be immediately available in the dropdown list.
+
+        Args:
+            name: Display name for the microscope configuration
+            ip: IP address (e.g., "192.168.1.1")
+            port: Port number (e.g., 53717)
+            description: Optional description
+
+        Returns:
+            Tuple of (success: bool, message: str)
+
+        Example:
+            >>> manager = ConfigurationManager()
+            >>> success, msg = manager.save_configuration("N7-10GB", "192.168.1.1", 53717)
+            >>> if success:
+            ...     print(f"Configuration saved: {msg}")
+        """
+        try:
+            # Validate connection parameters
+            config = ConnectionConfig(
+                ip_address=ip,
+                port=port,
+                live_port=port + 1
+            )
+            valid, errors = config.validate()
+            if not valid:
+                error_msg = ", ".join(errors)
+                logger.warning(f"Invalid configuration parameters: {error_msg}")
+                return False, f"Invalid parameters: {error_msg}"
+
+            # Create configuration dictionary in legacy format
+            config_dict = {
+                "Instrument": {
+                    "Type": {
+                        "Microscope name": name,
+                        "Microscope address": f"{ip} {port}"
+                    }
+                }
+            }
+
+            # Generate safe filename from name
+            safe_name = name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+            file_path = self.settings_directory / f"{safe_name}.txt"
+
+            # Check if file already exists
+            if file_path.exists():
+                logger.warning(f"Configuration file already exists: {file_path}")
+                return False, f"Configuration '{name}' already exists"
+
+            # Ensure settings directory exists
+            self.settings_directory.mkdir(parents=True, exist_ok=True)
+
+            # Convert to text format and write atomically
+            config_text = dict_to_text(config_dict)
+            safe_write(file_path, config_text)
+
+            logger.info(f"Saved configuration '{name}' to {file_path}")
+
+            # Refresh configurations to include the new one
+            self.discover_configurations()
+
+            return True, f"Configuration '{name}' saved successfully"
+
+        except Exception as e:
+            logger.error(f"Error saving configuration: {e}")
+            return False, f"Error: {str(e)}"

@@ -70,6 +70,16 @@ class ConnectionView(QWidget):
             self.microscope_name_label.setStyleSheet("color: blue; font-style: italic;")
             config_layout.addWidget(self.microscope_name_label)
 
+            # Save configuration section
+            save_layout = QHBoxLayout()
+            save_layout.addWidget(QLabel("Save as:"))
+
+            self.config_name_input = QLineEdit()
+            self.config_name_input.setPlaceholderText("Enter configuration name...")
+            save_layout.addWidget(self.config_name_input)
+
+            config_layout.addLayout(save_layout)
+
             config_group.setLayout(config_layout)
             layout.addWidget(config_group)
 
@@ -119,6 +129,12 @@ class ConnectionView(QWidget):
         self.disconnect_btn.clicked.connect(self._on_disconnect_clicked)
         self.disconnect_btn.setEnabled(False)  # Initially disabled
         button_layout.addWidget(self.disconnect_btn)
+
+        # Save configuration button (only if config manager available)
+        if self._config_manager:
+            self.save_config_btn = QPushButton("Save Configuration")
+            self.save_config_btn.clicked.connect(self._on_save_config_clicked)
+            button_layout.addWidget(self.save_config_btn)
 
         layout.addLayout(button_layout)
 
@@ -261,6 +277,41 @@ class ConnectionView(QWidget):
         self._load_configurations()
         self._show_message("Configurations refreshed", is_error=False)
 
+    def _on_save_config_clicked(self) -> None:
+        """Handle save configuration button click.
+
+        Saves the current IP and port as a named configuration.
+        """
+        # Get configuration name from input
+        config_name = self.config_name_input.text().strip()
+
+        if not config_name:
+            self._show_message("Please enter a configuration name", is_error=True)
+            return
+
+        # Get current IP and port
+        ip = self.ip_input.text()
+        port = self.port_input.value()
+
+        # Save configuration via controller
+        success, message = self._controller.save_configuration(config_name, ip, port)
+
+        # Display result
+        self._show_message(message, is_error=not success)
+
+        if success:
+            # Clear the name input
+            self.config_name_input.clear()
+
+            # Refresh configurations to show the new one
+            self._load_configurations()
+
+            # Select the newly saved configuration in the dropdown
+            if hasattr(self, 'config_combo'):
+                index = self.config_combo.findText(config_name)
+                if index >= 0:
+                    self.config_combo.setCurrentIndex(index)
+
     def _load_configurations(self) -> None:
         """Load available configurations from config manager."""
         if not self._config_manager:
@@ -308,6 +359,8 @@ class ConnectionView(QWidget):
             if hasattr(self, 'config_combo'):
                 self.config_combo.setEnabled(True)
                 self.refresh_btn.setEnabled(True)
+                self.config_name_input.setEnabled(True)
+                self.save_config_btn.setEnabled(True)
         elif not enabled:
             self.ip_input.setEnabled(False)
             self.port_input.setEnabled(False)
@@ -317,3 +370,5 @@ class ConnectionView(QWidget):
             if hasattr(self, 'config_combo'):
                 self.config_combo.setEnabled(False)
                 self.refresh_btn.setEnabled(False)
+                self.config_name_input.setEnabled(False)
+                self.save_config_btn.setEnabled(False)

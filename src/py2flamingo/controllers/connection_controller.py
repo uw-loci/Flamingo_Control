@@ -12,7 +12,7 @@ import logging
 from typing import Tuple, Dict, Any, Optional
 from pathlib import Path
 
-from ..services import MVCConnectionService
+from ..services import MVCConnectionService, ConfigurationManager
 from ..models import ConnectionModel, ConnectionConfig, ConnectionState
 
 
@@ -29,16 +29,19 @@ class ConnectionController:
         _logger: Logger instance
     """
 
-    def __init__(self, service: MVCConnectionService, model: ConnectionModel):
+    def __init__(self, service: MVCConnectionService, model: ConnectionModel,
+                 config_manager: Optional[ConfigurationManager] = None):
         """
         Initialize controller with dependencies.
 
         Args:
             service: Connection service for network operations
             model: Connection model for state management
+            config_manager: Optional configuration manager for saving configurations
         """
         self._service = service
         self._model = model
+        self._config_manager = config_manager
         self._logger = logging.getLogger(__name__)
 
     def connect(self, ip: str, port: int) -> Tuple[bool, str]:
@@ -341,3 +344,60 @@ class ConnectionController:
             return all(0 <= int(octet) <= 255 for octet in octets)
         except (ValueError, AttributeError):
             return False
+
+    def save_configuration(self, name: str, ip: str, port: int) -> Tuple[bool, str]:
+        """
+        Save a connection configuration for future use.
+
+        Creates a configuration file that will appear in the dropdown list
+        after the next refresh or application restart.
+
+        Args:
+            name: Display name for the configuration (e.g., "N7-10GB")
+            ip: IP address (e.g., "192.168.1.1")
+            port: Port number (e.g., 53717)
+
+        Returns:
+            Tuple of (success, message):
+                - (True, "Configuration saved successfully") on success
+                - (False, error message) on failure
+
+        Example:
+            >>> controller.save_configuration("N7-10GB", "192.168.1.1", 53717)
+            (True, "Configuration 'N7-10GB' saved successfully")
+        """
+        # Check if config manager is available
+        if self._config_manager is None:
+            return (False, "Configuration manager not available")
+
+        # Validate inputs
+        if not name or not name.strip():
+            return (False, "Configuration name cannot be empty")
+
+        if not ip or not isinstance(ip, str):
+            return (False, "IP address cannot be empty")
+
+        if not self._validate_ip(ip):
+            return (False, f"Invalid IP address format: {ip}")
+
+        if not isinstance(port, int) or not (1 <= port <= 65535):
+            return (False, f"Invalid port number: {port}")
+
+        # Save configuration via configuration manager
+        try:
+            success, message = self._config_manager.save_configuration(
+                name=name.strip(),
+                ip=ip,
+                port=port
+            )
+
+            if success:
+                self._logger.info(f"Saved configuration: {name}")
+            else:
+                self._logger.warning(f"Failed to save configuration '{name}': {message}")
+
+            return (success, message)
+
+        except Exception as e:
+            self._logger.exception(f"Error saving configuration: {e}")
+            return (False, f"Error: {str(e)}")

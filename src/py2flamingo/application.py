@@ -49,12 +49,12 @@ class FlamingoApplication:
         sys.exit(app.run())
     """
 
-    def __init__(self, default_ip: str = "127.0.0.1", default_port: int = 53717):
-        """Initialize application with default connection settings.
+    def __init__(self, default_ip: Optional[str] = None, default_port: Optional[int] = None):
+        """Initialize application with optional default connection settings.
 
         Args:
-            default_ip: Default server IP address
-            default_port: Default server port
+            default_ip: Default server IP address (None = user selects via GUI)
+            default_port: Default server port (None = user selects via GUI)
         """
         self.default_ip = default_ip
         self.default_port = default_port
@@ -134,7 +134,8 @@ class FlamingoApplication:
         self.logger.debug("Creating controllers layer components...")
         self.connection_controller = ConnectionController(
             self.connection_service,
-            self.connection_model
+            self.connection_model,
+            self.config_manager
         )
 
         self.workflow_controller = WorkflowController(
@@ -150,8 +151,10 @@ class FlamingoApplication:
         )
         self.workflow_view = WorkflowView(self.workflow_controller)
 
-        # Set default connection values in view
-        self.connection_view.set_connection_info(self.default_ip, self.default_port)
+        # Set default connection values in view if provided via CLI
+        if self.default_ip is not None and self.default_port is not None:
+            self.logger.debug(f"Setting CLI defaults: {self.default_ip}:{self.default_port}")
+            self.connection_view.set_connection_info(self.default_ip, self.default_port)
 
         self.logger.info("Application dependencies setup complete")
 

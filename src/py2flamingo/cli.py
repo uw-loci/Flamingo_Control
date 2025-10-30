@@ -47,19 +47,19 @@ For more information, visit the project documentation.
         """
     )
 
-    # Connection arguments
+    # Connection arguments (optional - users typically select via GUI)
     parser.add_argument(
         "--ip",
         type=str,
-        default="127.0.0.1",
-        help="Server IP address (default: 127.0.0.1)"
+        default=None,
+        help="Server IP address (optional - select via GUI if not specified)"
     )
 
     parser.add_argument(
         "--port",
         type=int,
-        default=53717,
-        help="Server port (default: 53717)"
+        default=None,
+        help="Server port (optional - select via GUI if not specified)"
     )
 
     # Workflow argument
@@ -99,18 +99,18 @@ def validate_args(args: argparse.Namespace) -> bool:
         True if arguments are valid, False otherwise
 
     This function validates:
-    - Port number is in valid range (1-65535)
-    - IP address is non-empty
+    - Port number is in valid range (1-65535) if provided
+    - IP address is valid format if provided
     - Workflow file exists if specified
     """
-    # Validate port range
-    if not (1 <= args.port <= 65535):
+    # Validate port range if provided
+    if args.port is not None and not (1 <= args.port <= 65535):
         print(f"Error: Port must be between 1 and 65535, got {args.port}")
         return False
 
-    # Validate IP address is not empty
-    if not args.ip or args.ip.strip() == "":
-        print("Error: IP address cannot be empty")
+    # Validate IP address if provided
+    if args.ip is not None and (not args.ip or args.ip.strip() == ""):
+        print("Error: IP address cannot be empty if specified")
         return False
 
     # Validate workflow file if specified
