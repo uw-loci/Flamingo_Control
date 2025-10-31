@@ -8,11 +8,11 @@ Handles user actions related to workflow execution.
 """
 
 import logging
-from typing import Tuple, Dict, Any, List
+from typing import Tuple, Dict, Any, List, Optional
 from pathlib import Path
 
 from ..services import MVCWorkflowService
-from ..models import ConnectionModel, ConnectionState
+from ..models import ConnectionModel, ConnectionState, WorkflowModel
 
 
 class WorkflowController:
@@ -29,16 +29,19 @@ class WorkflowController:
         _current_workflow_path: Path to currently loaded workflow
     """
 
-    def __init__(self, service: MVCWorkflowService, connection_model: ConnectionModel):
+    def __init__(self, service: MVCWorkflowService, connection_model: ConnectionModel,
+                 workflow_model: Optional[WorkflowModel] = None):
         """
         Initialize controller with dependencies.
 
         Args:
             service: Workflow service for workflow operations
             connection_model: Connection model to check connection status
+            workflow_model: Optional workflow model for state tracking
         """
         self._service = service
         self._connection_model = connection_model
+        self._workflow_model = workflow_model
         self._logger = logging.getLogger(__name__)
         self._current_workflow_path: Optional[Path] = None
 
@@ -112,6 +115,11 @@ class WorkflowController:
         # Attempt to start workflow
         try:
             self._service.start_workflow()
+
+            # Mark workflow as started in model
+            if self._workflow_model:
+                self._workflow_model.mark_started()
+
             self._logger.info(f"Started workflow: {self._current_workflow_path.name}")
             return (True, f"Workflow started: {self._current_workflow_path.name}")
 
@@ -144,6 +152,11 @@ class WorkflowController:
         # Attempt to stop workflow
         try:
             self._service.stop_workflow()
+
+            # Mark workflow as completed in model
+            if self._workflow_model:
+                self._workflow_model.mark_completed()
+
             self._logger.info("Stopped workflow")
             return (True, "Workflow stopped successfully")
 
@@ -165,15 +178,30 @@ class WorkflowController:
                 - 'running': bool - Whether workflow is running
                 - 'workflow_name': str or None - Name of loaded workflow
                 - 'workflow_path': str or None - Path to workflow file
+                - 'execution_time': float or None - Execution time in seconds
         """
-        status = self._service.get_workflow_status()
+        # Check workflow model for running state
+        is_running = self._workflow_model.is_running() if self._workflow_model else False
+        execution_time = self._workflow_model.get_execution_time() if self._workflow_model else None
 
         return {
             'loaded': self._current_workflow_path is not None,
-            'running': status.get('running', False),
+            'running': is_running,
             'workflow_name': self._current_workflow_path.name if self._current_workflow_path else None,
             'workflow_path': str(self._current_workflow_path) if self._current_workflow_path else None,
+            'execution_time': execution_time,
         }
+
+    def is_workflow_running(self) -> bool:
+        """
+        Check if workflow is currently executing.
+
+        Returns:
+            bool: True if workflow is running, False otherwise
+        """
+        if self._workflow_model:
+            return self._workflow_model.is_running()
+        return False
 
     def validate_workflow_file(self, path: str) -> Tuple[bool, List[str]]:
         """

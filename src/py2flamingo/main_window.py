@@ -10,6 +10,7 @@ into a cohesive application window. The MainWindow is responsible for:
 - Handling window lifecycle events
 """
 
+from typing import Optional
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QTabWidget,
     QAction, QMessageBox
@@ -17,6 +18,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 
 from py2flamingo.views import ConnectionView, WorkflowView
+from py2flamingo.views.live_feed_view import LiveFeedView
 
 
 class MainWindow(QMainWindow):
@@ -24,31 +26,36 @@ class MainWindow(QMainWindow):
 
     This class creates the main window UI by composing views created
     in the Views layer. It uses a tab widget to organize the
-    ConnectionView and WorkflowView into separate tabs.
+    ConnectionView, WorkflowView, and LiveFeedView into separate tabs.
 
     The window includes:
     - Menu bar (File → Exit, Help → About)
-    - Tab widget with Connection and Workflow tabs
+    - Tab widget with Connection, Workflow, and Live Feed tabs
     - Status bar for application messages
 
     Example:
-        main_window = MainWindow(connection_view, workflow_view)
+        main_window = MainWindow(connection_view, workflow_view, live_feed_view)
         main_window.setWindowTitle("Flamingo Microscope Control")
-        main_window.resize(600, 400)
+        main_window.resize(800, 600)
         main_window.show()
     """
 
-    def __init__(self, connection_view: ConnectionView, workflow_view: WorkflowView):
+    def __init__(self,
+                 connection_view: ConnectionView,
+                 workflow_view: WorkflowView,
+                 live_feed_view: Optional[LiveFeedView] = None):
         """Initialize main window with view components.
 
         Args:
             connection_view: ConnectionView instance for connection management
             workflow_view: WorkflowView instance for workflow operations
+            live_feed_view: Optional LiveFeedView instance for live image display
         """
         super().__init__()
 
         self.connection_view = connection_view
         self.workflow_view = workflow_view
+        self.live_feed_view = live_feed_view
 
         self._setup_ui()
         self._setup_menu()
@@ -58,7 +65,7 @@ class MainWindow(QMainWindow):
 
         This method creates:
         - Central widget with vertical layout
-        - Tab widget with Connection and Workflow tabs
+        - Tab widget with Connection, Workflow, and Live Feed tabs
         - Status bar
         """
         # Create central widget
@@ -75,6 +82,10 @@ class MainWindow(QMainWindow):
         # Add views as tabs
         self.tabs.addTab(self.connection_view, "Connection")
         self.tabs.addTab(self.workflow_view, "Workflow")
+
+        # Add live feed tab if available
+        if self.live_feed_view is not None:
+            self.tabs.addTab(self.live_feed_view, "Live Feed")
 
         # Add tabs to layout
         layout.addWidget(self.tabs)

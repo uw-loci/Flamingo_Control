@@ -65,6 +65,10 @@ from .command import (
     PositionCommand
 )
 
+from .image_display import (
+    ImageDisplayModel
+)
+
 __all__ = [
     # Microscope
     'MicroscopeState',
@@ -115,5 +119,8 @@ __all__ = [
     'Command',
     'WorkflowCommand',
     'StatusCommand',
-    'PositionCommand'
+    'PositionCommand',
+
+    # Image Display
+    'ImageDisplayModel',
 ]

@@ -18,12 +18,15 @@ from typing import Optional
 from PyQt5.QtWidgets import QApplication
 
 from py2flamingo.core import ProtocolEncoder, TCPConnection
-from py2flamingo.models import ConnectionModel
+from py2flamingo.models import (
+    ConnectionModel, WorkflowModel, WorkflowType, Position, ImageDisplayModel
+)
 from py2flamingo.services import (
     MVCConnectionService, MVCWorkflowService, StatusService, ConfigurationManager
 )
 from py2flamingo.controllers import ConnectionController, WorkflowController
 from py2flamingo.views import ConnectionView, WorkflowView
+from py2flamingo.views.live_feed_view import LiveFeedView
 
 
 class FlamingoApplication:
@@ -69,6 +72,8 @@ class FlamingoApplication:
 
         # Models layer components
         self.connection_model: Optional[ConnectionModel] = None
+        self.workflow_model: Optional[WorkflowModel] = None
+        self.display_model: Optional[ImageDisplayModel] = None
 
         # Services layer components
         self.connection_service: Optional[MVCConnectionService] = None
@@ -83,6 +88,7 @@ class FlamingoApplication:
         # Views layer components
         self.connection_view: Optional[ConnectionView] = None
         self.workflow_view: Optional[WorkflowView] = None
+        self.live_feed_view: Optional[LiveFeedView] = None
 
         # Setup logging
         self.logger = logging.getLogger(__name__)
@@ -110,6 +116,14 @@ class FlamingoApplication:
         # Models layer - data models
         self.logger.debug("Creating models layer components...")
         self.connection_model = ConnectionModel()
+
+        # Create a default workflow model for state tracking
+        self.workflow_model = WorkflowModel.create_snapshot(
+            position=Position(x=0.0, y=0.0, z=0.0, r=0.0)
+        )
+
+        # Create image display settings model
+        self.display_model = ImageDisplayModel()
 
         # Services layer - business logic
         self.logger.debug("Creating services layer components...")
@@ -140,7 +154,8 @@ class FlamingoApplication:
 
         self.workflow_controller = WorkflowController(
             self.workflow_service,
-            self.connection_model
+            self.connection_model,
+            self.workflow_model
         )
 
         # Views layer - UI components
@@ -150,6 +165,16 @@ class FlamingoApplication:
             config_manager=self.config_manager
         )
         self.workflow_view = WorkflowView(self.workflow_controller)
+
+        # Create live feed view with visualize queue from connection service
+        self.logger.debug("Creating live feed view...")
+        visualize_queue = self.connection_service.queue_manager.get_queue('visualize')
+        self.live_feed_view = LiveFeedView(
+            workflow_controller=self.workflow_controller,
+            visualize_queue=visualize_queue,
+            display_model=self.display_model,
+            update_interval_ms=500  # Poll every 500ms
+        )
 
         # Set default connection values in view if provided via CLI
         if self.default_ip is not None and self.default_port is not None:
@@ -165,16 +190,20 @@ class FlamingoApplication:
         window, passing in the views created during dependency setup.
 
         The MainWindow is responsible for:
-        - Composing ConnectionView and WorkflowView
+        - Composing ConnectionView, WorkflowView, and LiveFeedView
         - Creating menu bar and status bar
         - Managing window lifecycle
         """
         from py2flamingo.main_window import MainWindow
 
         self.logger.info("Creating main window...")
-        self.main_window = MainWindow(self.connection_view, self.workflow_view)
+        self.main_window = MainWindow(
+            self.connection_view,
+            self.workflow_view,
+            self.live_feed_view
+        )
         self.main_window.setWindowTitle("Flamingo Microscope Control")
-        self.main_window.resize(600, 400)
+        self.main_window.resize(1000, 700)  # Larger to accommodate live feed
         self.logger.info("Main window created")
 
     def run(self) -> int:

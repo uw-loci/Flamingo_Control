@@ -8,6 +8,7 @@ for image acquisition including snapshots, z-stacks, and tile scans.
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, List
 from enum import Enum
+from datetime import datetime
 
 from .microscope import Position
 
@@ -138,9 +139,9 @@ class ExperimentSettings:
 class WorkflowModel:
     """
     Complete workflow model for acquisition.
-    
+
     This model represents all settings needed for an acquisition workflow.
-    
+
     Attributes:
         type: Type of workflow
         name: Workflow name
@@ -151,6 +152,9 @@ class WorkflowModel:
         tile_settings: Settings for tile scan
         experiment_settings: General experiment settings
         metadata: Additional workflow metadata
+        _is_running: Internal flag tracking if workflow is executing
+        _start_time: Timestamp when workflow started
+        _end_time: Timestamp when workflow completed
     """
     type: WorkflowType
     name: str
@@ -161,6 +165,9 @@ class WorkflowModel:
     tile_settings: Optional[TileSettings] = None
     experiment_settings: ExperimentSettings = field(default_factory=ExperimentSettings)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    _is_running: bool = field(default=False, init=False, repr=False)
+    _start_time: Optional[datetime] = field(default=None, init=False, repr=False)
+    _end_time: Optional[datetime] = field(default=None, init=False, repr=False)
     
     def to_workflow_dict(self) -> Dict[str, Any]:
         """
@@ -229,9 +236,42 @@ class WorkflowModel:
         
         # Add any additional metadata
         workflow.update(self.metadata)
-        
+
         return workflow
-    
+
+    def mark_started(self) -> None:
+        """Mark workflow as started (called when CMD_WORKFLOW_START sent)."""
+        self._is_running = True
+        self._start_time = datetime.now()
+        self._end_time = None
+
+    def mark_completed(self) -> None:
+        """Mark workflow as completed (called when CMD_WORKFLOW_STOP sent or workflow finishes)."""
+        self._is_running = False
+        self._end_time = datetime.now()
+
+    def is_running(self) -> bool:
+        """
+        Check if workflow is currently executing.
+
+        Returns:
+            bool: True if workflow is running, False otherwise
+        """
+        return self._is_running
+
+    def get_execution_time(self) -> Optional[float]:
+        """
+        Get workflow execution time in seconds.
+
+        Returns:
+            Optional[float]: Execution time if started, None otherwise
+        """
+        if self._start_time is None:
+            return None
+
+        end_time = self._end_time or datetime.now()
+        return (end_time - self._start_time).total_seconds()
+
     @classmethod
     def create_snapshot(cls, position: Position, 
                        laser_channel: str = "Laser 3 488 nm",
