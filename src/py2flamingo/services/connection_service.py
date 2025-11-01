@@ -290,23 +290,27 @@ class MVCConnectionService:
         tcp_connection: Low-level TCP connection manager
         encoder: Protocol encoder for command formatting
         model: Observable connection model for state tracking
+        queue_manager: Queue manager for data flow
         logger: Logger instance
     """
 
     def __init__(self,
                  tcp_connection: 'TCPConnection',
-                 encoder: 'ProtocolEncoder'):
+                 encoder: 'ProtocolEncoder',
+                 queue_manager: Optional[QueueManager] = None):
         """
         Initialize MVC connection service with dependency injection.
 
         Args:
             tcp_connection: TCPConnection instance from core layer
             encoder: ProtocolEncoder instance from core layer
+            queue_manager: Optional queue manager for data flow
         """
         from py2flamingo.models.connection import ConnectionModel
 
         self.tcp_connection = tcp_connection
         self.encoder = encoder
+        self.queue_manager = queue_manager or QueueManager()
         self.model = ConnectionModel()
         self.logger = logging.getLogger(__name__)
 

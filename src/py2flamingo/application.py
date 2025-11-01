@@ -17,7 +17,7 @@ import logging
 from typing import Optional
 from PyQt5.QtWidgets import QApplication
 
-from py2flamingo.core import ProtocolEncoder, TCPConnection
+from py2flamingo.core import ProtocolEncoder, TCPConnection, QueueManager
 from py2flamingo.models import (
     ConnectionModel, WorkflowModel, WorkflowType, Position, ImageDisplayModel
 )
@@ -112,6 +112,7 @@ class FlamingoApplication:
         self.logger.debug("Creating core layer components...")
         self.tcp_connection = TCPConnection()
         self.protocol_encoder = ProtocolEncoder()
+        self.queue_manager = QueueManager()
 
         # Models layer - data models
         self.logger.debug("Creating models layer components...")
@@ -129,7 +130,8 @@ class FlamingoApplication:
         self.logger.debug("Creating services layer components...")
         self.connection_service = MVCConnectionService(
             self.tcp_connection,
-            self.protocol_encoder
+            self.protocol_encoder,
+            self.queue_manager
         )
 
         self.workflow_service = MVCWorkflowService(

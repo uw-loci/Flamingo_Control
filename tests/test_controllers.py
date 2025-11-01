@@ -678,9 +678,11 @@ class TestWorkflowController(unittest.TestCase):
     def test_get_workflow_status(self):
         """Test getting workflow status."""
         self.controller._current_workflow_path = Path("/fake/workflow.txt")
-        self.mock_service.get_workflow_status.return_value = {
-            'running': True
-        }
+
+        # Mock the workflow model's running state
+        self.controller._workflow_model = Mock()
+        self.controller._workflow_model.is_running.return_value = True
+        self.controller._workflow_model.get_execution_time.return_value = 10.5
 
         status = self.controller.get_workflow_status()
 

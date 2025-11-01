@@ -7,10 +7,12 @@ for communicating with the Flamingo microscope control system.
 
 from .tcp_protocol import ProtocolEncoder, ProtocolDecoder, CommandCode
 from .tcp_connection import TCPConnection
+from .queue_manager import QueueManager
 
 __all__ = [
     'ProtocolEncoder',
     'ProtocolDecoder',
     'CommandCode',
-    'TCPConnection'
+    'TCPConnection',
+    'QueueManager'
 ]
