@@ -11,6 +11,9 @@ from pathlib import Path
 import socket
 from datetime import datetime
 import time
+import tempfile
+import shutil
+import json
 
 
 class TestMVCConnectionService(unittest.TestCase):
@@ -547,227 +550,205 @@ class TestStatusService(unittest.TestCase):
         self.assertEqual(self.mock_conn_service.send_command.call_count, 2)
 
 
+import shutil
+from pathlib import Path
+import json
+
+
 class TestConfigurationManager(unittest.TestCase):
-    """Tests for ConfigurationManager service."""
+    """Tests for JSON-based ConfigurationManager service."""
 
     def setUp(self):
         """Set up test fixtures."""
-        import tempfile
-        import os
-
-        # Create temporary directory for test configurations
+        # Create temp directory for test config file
         self.temp_dir = tempfile.mkdtemp()
-
-        # Create sample configuration files with valid format
-        self._create_test_config("Zion.txt", "10.129.37.22", 53717, "Zion")
-        self._create_test_config("Alpha.txt", "192.168.1.100", 53717, "Alpha")
-        self._create_test_config("Beta.txt", "192.168.1.101", 53718, "Beta")
-
-        # Create invalid config (missing address)
-        invalid_path = Path(self.temp_dir) / "Invalid.txt"
-        invalid_path.write_text("<Instrument>\nMicroscope name = Invalid\n</Instrument>\n")
+        self.config_file = Path(self.temp_dir) / "test_configurations.json"
 
         # Import and create service
         from py2flamingo.services.configuration_manager import ConfigurationManager
-        self.manager = ConfigurationManager(settings_directory=self.temp_dir)
+        self.manager = ConfigurationManager(config_file=str(self.config_file))
 
     def tearDown(self):
         """Clean up temp directory."""
-        import shutil
         if Path(self.temp_dir).exists():
             shutil.rmtree(self.temp_dir)
-
-    def _create_test_config(self, filename: str, ip: str, port: int, name: str):
-        """Helper to create test configuration file in the format expected by parser."""
-        config_path = Path(self.temp_dir) / filename
-        # Use the format that parse_metadata_file expects
-        content = f"""<Instrument>
-  <Type>
-    Microscope name = {name}
-    Microscope address = {ip} {port}
-  </Type>
-</Instrument>
-"""
-        config_path.write_text(content)
 
     def test_init(self):
         """Test ConfigurationManager initialization."""
         self.assertIsNotNone(self.manager)
-        self.assertEqual(str(self.manager.settings_directory), self.temp_dir)
+        self.assertEqual(str(self.manager.config_file), str(self.config_file))
 
-    def test_init_with_nonexistent_directory(self):
-        """Test initialization with non-existent directory."""
-        from py2flamingo.services.configuration_manager import ConfigurationManager
-
-        # Should not raise error, will create directory or fail gracefully
-        manager = ConfigurationManager(settings_directory="/tmp/nonexistent_dir_test_12345")
-        self.assertIsNotNone(manager)
-
-    def test_discover_configurations(self):
-        """Test discovering configuration files."""
+    def test_init_creates_empty_configs(self):
+        """Test that initialization with no file creates empty configuration set."""
         configs = self.manager.discover_configurations()
+        self.assertEqual(len(configs), 0)
 
-        # Should find 3 valid configs (Zion, Alpha, Beta) and skip Invalid
-        self.assertGreaterEqual(len(configs), 3)
+    def test_save_configuration(self):
+        """Test saving a new configuration."""
+        success, message = self.manager.save_configuration("TestMicroscope", "192.168.1.100", 53717)
 
-        # Check config names
-        config_names = [c.name for c in configs]
-        self.assertIn("Zion", config_names)
-        self.assertIn("Alpha", config_names)
-        self.assertIn("Beta", config_names)
+        self.assertTrue(success)
+        self.assertIn("saved successfully", message.lower())
 
-    def test_discover_configurations_filters_invalid(self):
-        """Test that invalid configs are filtered out."""
+        # Verify it was saved
         configs = self.manager.discover_configurations()
+        self.assertEqual(len(configs), 1)
+        self.assertEqual(configs[0].name, "TestMicroscope")
+        self.assertEqual(configs[0].ip_address, "192.168.1.100")
+        self.assertEqual(configs[0].port, 53717)
 
-        # Invalid.txt should be skipped (missing address)
-        config_names = [c.name for c in configs]
-        self.assertEqual(len(configs), 3)  # Only Zion, Alpha, Beta
+    def test_save_configuration_creates_json_file(self):
+        """Test that saving creates the JSON file."""
+        self.assertFalse(self.config_file.exists())
 
-    def test_get_configuration_by_name(self):
-        """Test retrieving configuration by name."""
-        # Discover first
-        self.manager.discover_configurations()
+        self.manager.save_configuration("Test", "127.0.0.1", 53717)
 
-        # Get specific config
+        self.assertTrue(self.config_file.exists())
+
+    def test_save_duplicate_configuration_fails(self):
+        """Test that saving duplicate configuration name fails."""
+        self.manager.save_configuration("Test", "192.168.1.1", 53717)
+
+        success, message = self.manager.save_configuration("Test", "192.168.1.2", 53718)
+
+        self.assertFalse(success)
+        self.assertIn("already exists", message.lower())
+
+    def test_save_invalid_ip(self):
+        """Test saving with invalid IP address."""
+        success, message = self.manager.save_configuration("Test", "invalid.ip", 53717)
+
+        self.assertFalse(success)
+        self.assertIn("invalid", message.lower())
+
+    def test_save_invalid_port(self):
+        """Test saving with invalid port number."""
+        success, message = self.manager.save_configuration("Test", "192.168.1.1", 99999)
+
+        self.assertFalse(success)
+        self.assertIn("invalid", message.lower())
+
+    def test_get_configuration(self):
+        """Test getting configuration by name."""
+        self.manager.save_configuration("Zion", "10.129.37.22", 53717)
+
         config = self.manager.get_configuration("Zion")
 
         self.assertIsNotNone(config)
         self.assertEqual(config.name, "Zion")
-        self.assertEqual(config.connection_config.ip_address, "10.129.37.22")
-        self.assertEqual(config.connection_config.port, 53717)
+        self.assertEqual(config.ip_address, "10.129.37.22")
+        self.assertEqual(config.port, 53717)
 
     def test_get_configuration_not_found(self):
-        """Test retrieving non-existent configuration."""
-        self.manager.discover_configurations()
-
+        """Test getting non-existent configuration."""
         config = self.manager.get_configuration("NonExistent")
 
         self.assertIsNone(config)
 
-    def test_get_configuration_before_discovery(self):
-        """Test getting configuration before discover is called."""
-        config = self.manager.get_configuration("Zion")
-
-        # Should return None since discover hasn't been called
-        self.assertIsNone(config)
-
     def test_get_configuration_names(self):
-        """Test getting all configuration names."""
-        self.manager.discover_configurations()
+        """Test getting list of configuration names."""
+        self.manager.save_configuration("Zion", "10.129.37.22", 53717)
+        self.manager.save_configuration("Alpha", "192.168.1.100", 53717)
 
         names = self.manager.get_configuration_names()
 
-        self.assertGreaterEqual(len(names), 3)
+        self.assertEqual(len(names), 2)
         self.assertIn("Zion", names)
         self.assertIn("Alpha", names)
-        self.assertIn("Beta", names)
 
-    def test_get_configuration_names_empty(self):
-        """Test getting names when no configs discovered."""
+    def test_get_configuration_names_sorted(self):
+        """Test that configuration names are returned sorted."""
+        self.manager.save_configuration("Zion", "10.129.37.22", 53717)
+        self.manager.save_configuration("Alpha", "192.168.1.100", 53717)
+        self.manager.save_configuration("Beta", "192.168.1.101", 53718)
+
         names = self.manager.get_configuration_names()
 
-        self.assertEqual(names, [])
+        self.assertEqual(names, ["Alpha", "Beta", "Zion"])
 
-    def test_load_configuration_from_file_valid(self):
-        """Test loading valid configuration file."""
-        config_path = Path(self.temp_dir) / "Zion.txt"
+    def test_delete_configuration(self):
+        """Test deleting a configuration."""
+        self.manager.save_configuration("ToDelete", "192.168.1.1", 53717)
 
-        config = self.manager.load_configuration_from_file(str(config_path))
+        success, message = self.manager.delete_configuration("ToDelete")
 
-        self.assertIsNotNone(config)
-        self.assertEqual(config.name, "Zion")
-        self.assertEqual(config.connection_config.ip_address, "10.129.37.22")
-        self.assertEqual(config.connection_config.port, 53717)
+        self.assertTrue(success)
+        self.assertIn("deleted successfully", message.lower())
 
-    def test_load_configuration_from_file_not_found(self):
-        """Test loading non-existent file."""
-        with self.assertRaises(FileNotFoundError):
-            self.manager.load_configuration_from_file("/nonexistent/file.txt")
+        # Verify it was deleted
+        config = self.manager.get_configuration("ToDelete")
+        self.assertIsNone(config)
 
-    def test_load_configuration_from_file_invalid(self):
-        """Test loading invalid config file."""
-        invalid_path = Path(self.temp_dir) / "Invalid.txt"
+    def test_delete_nonexistent_configuration(self):
+        """Test deleting a non-existent configuration."""
+        success, message = self.manager.delete_configuration("NonExistent")
 
-        with self.assertRaises(ValueError):
-            self.manager.load_configuration_from_file(str(invalid_path))
+        self.assertFalse(success)
+        self.assertIn("not found", message.lower())
 
-    def test_configuration_dataclass_properties(self):
-        """Test MicroscopeConfiguration dataclass."""
-        from py2flamingo.services.configuration_manager import MicroscopeConfiguration
-        from py2flamingo.models.connection import ConnectionConfig
+    def test_refresh_reloads_from_json(self):
+        """Test that refresh reloads configurations from JSON file."""
+        # Save a configuration
+        self.manager.save_configuration("Test", "192.168.1.1", 53717)
 
-        config = MicroscopeConfiguration(
-            name="Test Microscope",
-            connection_config=ConnectionConfig("192.168.1.100", 53717),
-            file_path=Path("/fake/path.txt"),
-            description="Test config"
-        )
+        # Manually modify the JSON file
+        with open(self.config_file, 'r') as f:
+            data = json.load(f)
 
-        self.assertEqual(config.name, "Test Microscope")
-        self.assertEqual(config.connection_config.ip_address, "192.168.1.100")
-        self.assertEqual(config.connection_config.port, 53717)
-        self.assertEqual(config.description, "Test config")
-        self.assertIn("192.168.1.100", str(config))
+        data['configurations'].append({
+            'name': 'ManuallyAdded',
+            'ip_address': '192.168.1.2',
+            'port': 53718,
+            'description': ''
+        })
 
-    def test_refresh_configurations(self):
-        """Test refreshing configurations after changes."""
-        # Initial discovery
-        configs1 = self.manager.discover_configurations()
-        count1 = len(configs1)
+        with open(self.config_file, 'w') as f:
+            json.dump(data, f)
 
-        # Add new configuration file
-        self._create_test_config("Gamma.txt", "192.168.1.102", 53717, "Gamma")
+        # Refresh should pick up the manual change
+        configs = self.manager.refresh()
 
-        # Refresh
-        configs2 = self.manager.refresh()
-        count2 = len(configs2)
-
-        # Should have one more config
-        self.assertEqual(count2, count1 + 1)
-        config_names = [c.name for c in configs2]
-        self.assertIn("Gamma", config_names)
+        names = [c.name for c in configs]
+        self.assertIn("ManuallyAdded", names)
 
     def test_get_default_configuration(self):
         """Test getting default configuration."""
-        # Should auto-discover if not already done
-        default_config = self.manager.get_default_configuration()
+        self.manager.save_configuration("Zion", "10.129.37.22", 53717)
+        self.manager.save_configuration("Alpha", "192.168.1.100", 53717)
 
-        self.assertIsNotNone(default_config)
-        # Should return first available config
-        self.assertIsInstance(default_config.name, str)
+        default = self.manager.get_default_configuration()
 
-    def test_get_default_configuration_empty_directory(self):
-        """Test getting default configuration with no configs."""
-        import tempfile
-        import shutil
-        from py2flamingo.services.configuration_manager import ConfigurationManager
+        # Should return first alphabetically
+        self.assertIsNotNone(default)
+        self.assertEqual(default.name, "Alpha")
 
-        empty_dir = tempfile.mkdtemp()
-        try:
-            manager = ConfigurationManager(settings_directory=empty_dir)
-            default_config = manager.get_default_configuration()
+    def test_get_default_configuration_empty(self):
+        """Test getting default configuration when no configs exist."""
+        default = self.manager.get_default_configuration()
 
-            self.assertIsNone(default_config)
-        finally:
-            shutil.rmtree(empty_dir)
+        self.assertIsNone(default)
 
-    def test_empty_directory(self):
-        """Test with empty settings directory."""
-        import tempfile
-        import shutil
-        from py2flamingo.services.configuration_manager import ConfigurationManager
+    def test_configuration_to_connection_config(self):
+        """Test converting MicroscopeConfiguration to ConnectionConfig."""
+        self.manager.save_configuration("Test", "192.168.1.1", 53717)
+        config = self.manager.get_configuration("Test")
 
-        empty_dir = tempfile.mkdtemp()
-        try:
-            manager = ConfigurationManager(settings_directory=empty_dir)
-            configs = manager.discover_configurations()
+        conn_config = config.to_connection_config()
 
-            self.assertEqual(len(configs), 0)
-        finally:
-            shutil.rmtree(empty_dir)
+        self.assertEqual(conn_config.ip_address, "192.168.1.1")
+        self.assertEqual(conn_config.port, 53717)
+        self.assertEqual(conn_config.live_port, 53718)  # port + 1
 
+    def test_configuration_str_representation(self):
+        """Test string representation of configuration."""
+        self.manager.save_configuration("Test", "192.168.1.1", 53717)
+        config = self.manager.get_configuration("Test")
 
+        string_rep = str(config)
+
+        self.assertIn("Test", string_rep)
+        self.assertIn("192.168.1.1", string_rep)
+        self.assertIn("53717", string_rep)
 class TestServiceIntegration(unittest.TestCase):
     """Integration tests for services working together."""
 

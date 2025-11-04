@@ -143,7 +143,7 @@ class FlamingoApplication:
         )
 
         self.config_manager = ConfigurationManager(
-            settings_directory="microscope_settings"
+            config_file="saved_configurations.json"
         )
 
         # Controllers layer - coordinate services and views

@@ -401,3 +401,44 @@ class ConnectionController:
         except Exception as e:
             self._logger.exception(f"Error saving configuration: {e}")
             return (False, f"Error: {str(e)}")
+
+    def delete_configuration(self, name: str) -> Tuple[bool, str]:
+        """
+        Delete a saved configuration.
+
+        Removes the configuration from persistent storage.
+
+        Args:
+            name: Name of the configuration to delete
+
+        Returns:
+            Tuple of (success, message):
+                - (True, "Configuration deleted successfully") on success
+                - (False, error message) on failure
+
+        Example:
+            >>> controller.delete_configuration("Old Config")
+            (True, "Configuration 'Old Config' deleted successfully")
+        """
+        # Check if config manager is available
+        if self._config_manager is None:
+            return (False, "Configuration manager not available")
+
+        # Validate input
+        if not name or not name.strip():
+            return (False, "Configuration name cannot be empty")
+
+        # Delete configuration via configuration manager
+        try:
+            success, message = self._config_manager.delete_configuration(name.strip())
+
+            if success:
+                self._logger.info(f"Deleted configuration: {name}")
+            else:
+                self._logger.warning(f"Failed to delete configuration '{name}': {message}")
+
+            return (success, message)
+
+        except Exception as e:
+            self._logger.exception(f"Error deleting configuration: {e}")
+            return (False, f"Error: {str(e)}")

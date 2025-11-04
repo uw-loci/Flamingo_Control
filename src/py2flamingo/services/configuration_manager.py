@@ -1,17 +1,16 @@
 """
 Configuration management service for Flamingo microscope settings.
 
-This module provides utilities to discover, load, and manage microscope
-configuration files from the microscope_settings directory.
+This module provides utilities to save, load, and manage microscope
+configurations using JSON-based persistent storage.
 """
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 import logging
+import json
 
 from ..models.connection import ConnectionConfig
-from ..utils.metadata_parser import parse_metadata_file, validate_metadata_file
-from ..utils.file_handlers import text_to_dict, dict_to_text, safe_write
 
 
 logger = logging.getLogger(__name__)
@@ -21,135 +20,120 @@ logger = logging.getLogger(__name__)
 class MicroscopeConfiguration:
     """Complete microscope configuration with metadata."""
 
-    name: str  # Microscope name from file
-    file_path: Path  # Path to configuration file
-    connection_config: ConnectionConfig  # Parsed connection settings
+    name: str  # Microscope display name
+    ip_address: str  # IP address
+    port: int  # Port number
     description: str = ""  # Optional description
 
     def __str__(self) -> str:
         """String representation for display."""
-        return f"{self.name} ({self.connection_config.ip_address}:{self.connection_config.port})"
+        return f"{self.name} ({self.ip_address}:{self.port})"
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            'name': self.name,
+            'ip_address': self.ip_address,
+            'port': self.port,
+            'description': self.description
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'MicroscopeConfiguration':
+        """Create from dictionary loaded from JSON."""
+        return cls(
+            name=data['name'],
+            ip_address=data['ip_address'],
+            port=data['port'],
+            description=data.get('description', '')
+        )
+
+    def to_connection_config(self) -> ConnectionConfig:
+        """Convert to ConnectionConfig for connection service."""
+        return ConnectionConfig(
+            ip_address=self.ip_address,
+            port=self.port,
+            live_port=self.port + 1
+        )
 
 
 class ConfigurationManager:
-    """Manages discovery and loading of microscope configuration files."""
+    """Manages microscope configurations using JSON-based storage."""
 
-    def __init__(self, settings_directory: str = "microscope_settings"):
+    def __init__(self, config_file: str = "saved_configurations.json"):
         """Initialize configuration manager.
 
         Args:
-            settings_directory: Directory containing configuration files
+            config_file: Path to JSON file storing configurations
         """
-        self.settings_directory = Path(settings_directory)
+        self.config_file = Path(config_file)
         self._configurations: Dict[str, MicroscopeConfiguration] = {}
 
-    def discover_configurations(self) -> List[MicroscopeConfiguration]:
-        """Scan settings directory and discover valid configuration files.
+        # Load existing configurations on init
+        self._load_from_json()
 
-        Searches for all .txt files in the settings directory, validates them,
-        and extracts configuration information.
+    def _load_from_json(self) -> None:
+        """Load configurations from JSON file.
+
+        If file doesn't exist, start with empty configuration set.
+        """
+        if not self.config_file.exists():
+            logger.info(f"Configuration file not found: {self.config_file}. Starting with empty configuration set.")
+            self._configurations = {}
+            return
+
+        try:
+            with open(self.config_file, 'r') as f:
+                data = json.load(f)
+
+            # Load each configuration
+            for config_data in data.get('configurations', []):
+                config = MicroscopeConfiguration.from_dict(config_data)
+                self._configurations[config.name] = config
+
+            logger.info(f"Loaded {len(self._configurations)} configurations from {self.config_file}")
+
+        except Exception as e:
+            logger.error(f"Error loading configurations from JSON: {e}")
+            self._configurations = {}
+
+    def _save_to_json(self) -> None:
+        """Save current configurations to JSON file."""
+        try:
+            # Convert configurations to list of dicts
+            config_list = [config.to_dict() for config in self._configurations.values()]
+
+            data = {
+                'configurations': config_list,
+                'version': '1.0'
+            }
+
+            # Ensure parent directory exists
+            self.config_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Write to file with nice formatting
+            with open(self.config_file, 'w') as f:
+                json.dump(data, f, indent=2)
+
+            logger.info(f"Saved {len(self._configurations)} configurations to {self.config_file}")
+
+        except Exception as e:
+            logger.error(f"Error saving configurations to JSON: {e}")
+            raise
+
+    def discover_configurations(self) -> List[MicroscopeConfiguration]:
+        """Get all saved configurations.
 
         Returns:
-            List of valid MicroscopeConfiguration objects
+            List of MicroscopeConfiguration objects
 
         Example:
             >>> manager = ConfigurationManager()
             >>> configs = manager.discover_configurations()
             >>> for config in configs:
-            ...     print(config.name, config.connection_config.ip_address)
+            ...     print(config.name, config.ip_address)
         """
-        self._configurations = {}
-
-        if not self.settings_directory.exists():
-            logger.warning(f"Settings directory not found: {self.settings_directory}")
-            return []
-
-        # Find all .txt files
-        txt_files = list(self.settings_directory.glob("*.txt"))
-
-        logger.info(f"Found {len(txt_files)} .txt files in {self.settings_directory}")
-
-        for file_path in txt_files:
-            try:
-                # Validate file contains valid connection info
-                valid, errors = validate_metadata_file(file_path)
-
-                if not valid:
-                    logger.debug(f"Skipping {file_path.name}: {errors}")
-                    continue
-
-                # Parse configuration
-                connection_config = parse_metadata_file(file_path)
-
-                # Extract microscope name from file
-                microscope_name = self._extract_microscope_name(file_path)
-
-                # Create configuration object
-                config = MicroscopeConfiguration(
-                    name=microscope_name,
-                    file_path=file_path,
-                    connection_config=connection_config,
-                    description=f"Config from {file_path.name}"
-                )
-
-                # Store by name (use filename as fallback for duplicates)
-                key = microscope_name or file_path.stem
-                if key in self._configurations:
-                    key = f"{key} ({file_path.name})"
-
-                self._configurations[key] = config
-                logger.info(f"Loaded configuration: {key}")
-
-            except Exception as e:
-                logger.debug(f"Could not parse {file_path.name}: {e}")
-                continue
-
-        configs = list(self._configurations.values())
-        logger.info(f"Discovered {len(configs)} valid configurations")
-        return configs
-
-    def _extract_microscope_name(self, file_path: Path) -> str:
-        """Extract microscope name from configuration file.
-
-        Args:
-            file_path: Path to configuration file
-
-        Returns:
-            Microscope name, or filename if not found
-        """
-        try:
-            data = text_to_dict(file_path)
-
-            # Search for "Microscope name" field
-            name = self._find_in_dict(data, "Microscope name")
-            if name:
-                return str(name).strip()
-
-            # Fallback to filename without extension
-            return file_path.stem
-
-        except Exception as e:
-            logger.debug(f"Could not extract name from {file_path}: {e}")
-            return file_path.stem
-
-    def _find_in_dict(self, data: dict, key: str) -> Optional[str]:
-        """Recursively search for a key in nested dict.
-
-        Args:
-            data: Nested dictionary
-            key: Key to search for
-
-        Returns:
-            Value if found, None otherwise
-        """
-        for k, v in data.items():
-            if k == key:
-                return str(v)
-            elif isinstance(v, dict):
-                result = self._find_in_dict(v, key)
-                if result:
-                    return result
-        return None
+        return list(self._configurations.values())
 
     def get_configuration(self, name: str) -> Optional[MicroscopeConfiguration]:
         """Get configuration by name.
@@ -166,82 +150,39 @@ class ConfigurationManager:
         """Get list of all configuration names.
 
         Returns:
-            List of configuration names
+            List of configuration names sorted alphabetically
         """
-        return list(self._configurations.keys())
-
-    def load_configuration_from_file(self, file_path: str) -> MicroscopeConfiguration:
-        """Load a specific configuration file.
-
-        Args:
-            file_path: Path to configuration file
-
-        Returns:
-            MicroscopeConfiguration object
-
-        Raises:
-            FileNotFoundError: If file doesn't exist
-            ValueError: If file is invalid
-        """
-        path = Path(file_path)
-
-        if not path.exists():
-            raise FileNotFoundError(f"Configuration file not found: {path}")
-
-        # Validate
-        valid, errors = validate_metadata_file(path)
-        if not valid:
-            raise ValueError(f"Invalid configuration file: {', '.join(errors)}")
-
-        # Parse
-        connection_config = parse_metadata_file(path)
-        microscope_name = self._extract_microscope_name(path)
-
-        return MicroscopeConfiguration(
-            name=microscope_name,
-            file_path=path,
-            connection_config=connection_config,
-            description=f"Config from {path.name}"
-        )
+        return sorted(self._configurations.keys())
 
     def get_default_configuration(self) -> Optional[MicroscopeConfiguration]:
         """Get the default configuration.
 
-        Looks for:
-        1. FlamingoMetaData.txt (standard name)
-        2. First available configuration
+        Returns the first available configuration alphabetically,
+        or None if no configurations exist.
 
         Returns:
             Default MicroscopeConfiguration if any configs exist, None otherwise
         """
-        if not self._configurations:
-            self.discover_configurations()
-
-        # Try standard name first
-        for name, config in self._configurations.items():
-            if "FlamingoMetaData.txt" in str(config.file_path):
-                return config
-
-        # Return first available
-        if self._configurations:
-            return next(iter(self._configurations.values()))
-
+        names = self.get_configuration_names()
+        if names:
+            return self._configurations[names[0]]
         return None
 
     def refresh(self) -> List[MicroscopeConfiguration]:
         """Refresh the list of available configurations.
 
-        Re-scans the settings directory.
+        Reloads from JSON file to pick up any external changes.
 
         Returns:
             Updated list of configurations
         """
-        return self.discover_configurations()
+        self._load_from_json()
+        return list(self._configurations.values())
 
     def save_configuration(self, name: str, ip: str, port: int, description: str = "") -> Tuple[bool, str]:
-        """Save a new configuration to the settings directory.
+        """Save a new configuration to JSON storage.
 
-        Creates a configuration file with the specified connection parameters.
+        Creates or updates a configuration with the specified connection parameters.
         The configuration will be immediately available in the dropdown list.
 
         Args:
@@ -272,39 +213,61 @@ class ConfigurationManager:
                 logger.warning(f"Invalid configuration parameters: {error_msg}")
                 return False, f"Invalid parameters: {error_msg}"
 
-            # Create configuration dictionary in legacy format
-            config_dict = {
-                "Instrument": {
-                    "Type": {
-                        "Microscope name": name,
-                        "Microscope address": f"{ip} {port}"
-                    }
-                }
-            }
+            # Check if configuration already exists
+            if name in self._configurations:
+                logger.warning(f"Configuration '{name}' already exists")
+                return False, f"Configuration '{name}' already exists. Please use a different name or delete the existing one first."
 
-            # Generate safe filename from name
-            safe_name = name.replace(" ", "_").replace("/", "_").replace("\\", "_")
-            file_path = self.settings_directory / f"{safe_name}.txt"
+            # Create new configuration
+            new_config = MicroscopeConfiguration(
+                name=name,
+                ip_address=ip,
+                port=port,
+                description=description
+            )
 
-            # Check if file already exists
-            if file_path.exists():
-                logger.warning(f"Configuration file already exists: {file_path}")
-                return False, f"Configuration '{name}' already exists"
+            # Add to configurations
+            self._configurations[name] = new_config
 
-            # Ensure settings directory exists
-            self.settings_directory.mkdir(parents=True, exist_ok=True)
+            # Save to JSON file
+            self._save_to_json()
 
-            # Convert to text format and write atomically
-            config_text = dict_to_text(config_dict)
-            safe_write(file_path, config_text)
-
-            logger.info(f"Saved configuration '{name}' to {file_path}")
-
-            # Refresh configurations to include the new one
-            self.discover_configurations()
-
+            logger.info(f"Saved configuration '{name}' ({ip}:{port})")
             return True, f"Configuration '{name}' saved successfully"
 
         except Exception as e:
             logger.error(f"Error saving configuration: {e}")
+            return False, f"Error: {str(e)}"
+
+    def delete_configuration(self, name: str) -> Tuple[bool, str]:
+        """Delete a configuration from storage.
+
+        Args:
+            name: Name of configuration to delete
+
+        Returns:
+            Tuple of (success: bool, message: str)
+
+        Example:
+            >>> manager = ConfigurationManager()
+            >>> success, msg = manager.delete_configuration("Old Config")
+            >>> if success:
+            ...     print(f"Configuration deleted: {msg}")
+        """
+        try:
+            if name not in self._configurations:
+                logger.warning(f"Configuration '{name}' not found")
+                return False, f"Configuration '{name}' not found"
+
+            # Remove from configurations
+            del self._configurations[name]
+
+            # Save updated list to JSON
+            self._save_to_json()
+
+            logger.info(f"Deleted configuration '{name}'")
+            return True, f"Configuration '{name}' deleted successfully"
+
+        except Exception as e:
+            logger.error(f"Error deleting configuration: {e}")
             return False, f"Error: {str(e)}"

@@ -63,6 +63,11 @@ class ConnectionView(QWidget):
             self.refresh_btn.clicked.connect(self._on_refresh_clicked)
             selector_layout.addWidget(self.refresh_btn)
 
+            self.delete_btn = QPushButton("Delete")
+            self.delete_btn.clicked.connect(self._on_delete_clicked)
+            self.delete_btn.setEnabled(False)  # Initially disabled
+            selector_layout.addWidget(self.delete_btn)
+
             config_layout.addLayout(selector_layout)
 
             # Microscope name display
@@ -261,21 +266,63 @@ class ConnectionView(QWidget):
         """
         if config_name == "-- Manual Entry --":
             self.microscope_name_label.setText("Microscope: Manual Entry")
+            # Disable delete button for manual entry
+            if hasattr(self, 'delete_btn'):
+                self.delete_btn.setEnabled(False)
             return
 
         # Load configuration
         config = self._configurations.get(config_name)
         if config:
             # Update UI with configuration values
-            self.ip_input.setText(config.connection_config.ip_address)
-            self.port_input.setValue(config.connection_config.port)
+            self.ip_input.setText(config.ip_address)
+            self.port_input.setValue(config.port)
             self.microscope_name_label.setText(f"Microscope: {config.name}")
             self._show_message(f"Loaded configuration: {config.name}", is_error=False)
+
+            # Enable delete button for saved configurations
+            if hasattr(self, 'delete_btn'):
+                self.delete_btn.setEnabled(True)
 
     def _on_refresh_clicked(self) -> None:
         """Handle refresh button click - reload configurations."""
         self._load_configurations()
         self._show_message("Configurations refreshed", is_error=False)
+
+    def _on_delete_clicked(self) -> None:
+        """Handle delete button click - delete selected configuration."""
+        config_name = self.config_combo.currentText()
+
+        # Don't allow deleting manual entry
+        if config_name == "-- Manual Entry --":
+            self._show_message("Cannot delete manual entry", is_error=True)
+            return
+
+        # Confirm deletion
+        from PyQt5.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            'Delete Configuration',
+            f"Are you sure you want to delete configuration '{config_name}'?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.No:
+            return
+
+        # Delete configuration via controller
+        success, message = self._controller.delete_configuration(config_name)
+
+        # Display result
+        self._show_message(message, is_error=not success)
+
+        if success:
+            # Refresh configurations to update dropdown
+            self._load_configurations()
+
+            # Select manual entry
+            self.config_combo.setCurrentText("-- Manual Entry --")
 
     def _on_save_config_clicked(self) -> None:
         """Handle save configuration button click.
