@@ -4,10 +4,10 @@ Connection view for managing microscope connection.
 This module provides the ConnectionView widget for handling connection UI.
 """
 
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional, List, Dict, Any
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QSpinBox, QComboBox, QGroupBox
+    QLineEdit, QPushButton, QSpinBox, QComboBox, QGroupBox, QTextEdit
 )
 from PyQt5.QtCore import Qt
 
@@ -154,6 +154,32 @@ class ConnectionView(QWidget):
         self.message_label.setMinimumHeight(40)
         layout.addWidget(self.message_label)
 
+        # Microscope settings readout group
+        settings_group = QGroupBox("Microscope Settings")
+        settings_layout = QVBoxLayout()
+
+        # Text display with scrollbar for settings
+        self.settings_display = QTextEdit()
+        self.settings_display.setReadOnly(True)
+        self.settings_display.setMinimumHeight(200)
+        self.settings_display.setMaximumHeight(400)
+        self.settings_display.setPlaceholderText(
+            "Microscope settings will appear here after connection...\n\n"
+            "This will show:\n"
+            "• Stage limits and current position\n"
+            "• Laser configurations\n"
+            "• Objective and optical parameters\n"
+            "• Image sensor settings\n"
+            "• System status"
+        )
+        self.settings_display.setStyleSheet(
+            "QTextEdit { font-family: 'Courier New', monospace; font-size: 10pt; }"
+        )
+        settings_layout.addWidget(self.settings_display)
+
+        settings_group.setLayout(settings_layout)
+        layout.addWidget(settings_group)
+
         # Add stretch to push everything to top
         layout.addStretch()
 
@@ -164,6 +190,7 @@ class ConnectionView(QWidget):
 
         Retrieves IP and port from UI inputs and calls controller.
         Displays result message and updates UI state.
+        Pulls microscope settings and displays them.
         """
         ip = self.ip_input.text()
         port = self.port_input.value()
@@ -175,6 +202,8 @@ class ConnectionView(QWidget):
         self._show_message(message, is_error=not success)
         if success:
             self._update_status(connected=True)
+            # Pull and display microscope settings
+            self._load_and_display_settings()
 
     def _on_disconnect_clicked(self) -> None:
         """Handle disconnect button click.
@@ -257,6 +286,10 @@ class ConnectionView(QWidget):
 
         # Display result
         self._show_message(message, is_error=not success)
+
+        # If test successful, pull and display settings
+        if success:
+            self._load_and_display_settings()
 
     def _on_config_selected(self, config_name: str) -> None:
         """Handle configuration selection from dropdown.
@@ -419,3 +452,89 @@ class ConnectionView(QWidget):
                 self.refresh_btn.setEnabled(False)
                 self.config_name_input.setEnabled(False)
                 self.save_config_btn.setEnabled(False)
+
+    def _load_and_display_settings(self) -> None:
+        """Load microscope settings and display them in the text area."""
+        try:
+            # Get settings from controller
+            settings = self._controller.get_microscope_settings()
+
+            if settings:
+                # Format settings for display
+                formatted_text = self._format_settings(settings)
+                self.settings_display.setPlainText(formatted_text)
+                self.settings_display.setStyleSheet(
+                    "QTextEdit { font-family: 'Courier New', monospace; "
+                    "font-size: 10pt; background-color: #f0f0f0; }"
+                )
+            else:
+                self.settings_display.setPlainText("No settings available.")
+
+        except Exception as e:
+            error_msg = f"Error loading settings: {str(e)}"
+            self.settings_display.setPlainText(error_msg)
+            self.settings_display.setStyleSheet(
+                "QTextEdit { font-family: 'Courier New', monospace; "
+                "font-size: 10pt; color: red; }"
+            )
+
+    def _format_settings(self, settings: Dict[str, Any]) -> str:
+        """Format microscope settings dictionary into readable text.
+
+        Args:
+            settings: Dictionary containing microscope settings
+
+        Returns:
+            Formatted string for display
+        """
+        lines = []
+        lines.append("="*60)
+        lines.append("MICROSCOPE SETTINGS")
+        lines.append("="*60)
+        lines.append("")
+
+        # Helper function to format nested dictionaries
+        def format_section(data: Any, indent: int = 0) -> List[str]:
+            result = []
+            indent_str = "  " * indent
+
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    if isinstance(value, dict):
+                        result.append(f"{indent_str}{key}:")
+                        result.extend(format_section(value, indent + 1))
+                    elif isinstance(value, (list, tuple)):
+                        result.append(f"{indent_str}{key}: {', '.join(map(str, value))}")
+                    else:
+                        result.append(f"{indent_str}{key}: {value}")
+            else:
+                result.append(f"{indent_str}{data}")
+
+            return result
+
+        # Format all sections
+        for section_name, section_data in settings.items():
+            lines.append(f"[{section_name}]")
+            lines.append("-" * 60)
+            lines.extend(format_section(section_data, indent=1))
+            lines.append("")
+
+        lines.append("="*60)
+
+        return "\n".join(lines)
+
+    def update_settings_display(self, settings: Dict[str, Any]) -> None:
+        """Public method to update settings display from outside.
+
+        Args:
+            settings: Dictionary containing microscope settings
+        """
+        formatted_text = self._format_settings(settings)
+        self.settings_display.setPlainText(formatted_text)
+
+    def clear_settings_display(self) -> None:
+        """Clear the settings display."""
+        self.settings_display.clear()
+        self.settings_display.setPlaceholderText(
+            "Microscope settings will appear here after connection..."
+        )

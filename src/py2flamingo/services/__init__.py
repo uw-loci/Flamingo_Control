@@ -27,6 +27,9 @@ from .connection_service import MVCConnectionService
 from .workflow_service import MVCWorkflowService
 from .status_service import StatusService
 from .configuration_manager import ConfigurationManager, MicroscopeConfiguration
+from .workflow_execution_service import WorkflowExecutionService
+from .initialization_service import MicroscopeInitializationService, InitializationData
+from .image_acquisition_service import ImageAcquisitionService
 
 # Legacy services (require numpy/scipy) - import with try/except
 try:
@@ -51,6 +54,10 @@ __all__ = [
     'StatusService',
     'ConfigurationManager',
     'MicroscopeConfiguration',
+    'WorkflowExecutionService',
+    'MicroscopeInitializationService',
+    'InitializationData',
+    'ImageAcquisitionService',
     # Legacy services (may be None if numpy/scipy not installed)
     'WorkflowService',
     'SampleSearchService',

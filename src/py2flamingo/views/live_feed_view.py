@@ -12,12 +12,14 @@ from queue import Queue, Empty
 import numpy as np
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QCheckBox, QComboBox, QGroupBox, QSlider, QSizePolicy
+    QCheckBox, QComboBox, QGroupBox, QSlider, QSizePolicy,
+    QDoubleSpinBox, QSpinBox, QLineEdit
 )
 from PyQt5.QtCore import QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap
 
 from ..models import ImageDisplayModel
+from ..models.microscope import Position
 from ..controllers import WorkflowController
 from ..utils.image_transforms import Rotation, Colormap, apply_transforms
 from ..utils.image_processing import convert_to_qimage
@@ -41,11 +43,29 @@ class LiveFeedView(QWidget):
     # Signal emitted when new image is ready for display (thread-safe)
     image_ready = pyqtSignal(object)  # numpy array
 
+    # Signals for stage control
+    move_position_requested = pyqtSignal(Position)  # Move to absolute position
+    move_relative_requested = pyqtSignal(str, float)  # Move axis by relative amount
+
+    # Signals for laser control
+    laser_changed = pyqtSignal(str)  # Laser channel name
+    laser_power_changed = pyqtSignal(float)  # Laser power percentage
+
+    # Signals for image acquisition
+    snapshot_requested = pyqtSignal()
+    brightfield_requested = pyqtSignal()
+
+    # Signal for settings sync
+    sync_settings_requested = pyqtSignal()
+
     def __init__(self,
                  workflow_controller: WorkflowController,
                  visualize_queue: Queue,
                  display_model: Optional[ImageDisplayModel] = None,
-                 update_interval_ms: int = 500):
+                 update_interval_ms: int = 500,
+                 position_controller=None,
+                 image_acquisition_service=None,
+                 initialization_service=None):
         """
         Initialize live feed view.
 
@@ -54,6 +74,9 @@ class LiveFeedView(QWidget):
             visualize_queue: Queue with images from microscope
             display_model: Display settings model (creates default if None)
             update_interval_ms: Poll interval in milliseconds
+            position_controller: Controller for stage movement (optional)
+            image_acquisition_service: Service for image acquisition (optional)
+            initialization_service: Service for settings initialization (optional)
         """
         super().__init__()
 
@@ -61,10 +84,23 @@ class LiveFeedView(QWidget):
         self.visualize_queue = visualize_queue
         self.display_model = display_model or ImageDisplayModel()
         self.update_interval_ms = update_interval_ms
+        self.position_controller = position_controller
+        self.image_acquisition_service = image_acquisition_service
+        self.initialization_service = initialization_service
 
         self._logger = logging.getLogger(__name__)
         self._last_image: Optional[np.ndarray] = None
         self._frame_count = 0
+        self._current_position = Position(x=0.0, y=0.0, z=0.0, r=0.0)
+
+        # Available laser channels (will be populated from microscope settings)
+        self._laser_channels = [
+            "Laser 1 405 nm",
+            "Laser 2 445 nm",
+            "Laser 3 488 nm",
+            "Laser 4 561 nm",
+            "Laser 5 638 nm"
+        ]
 
         # Setup UI
         self.setup_ui()
@@ -193,6 +229,164 @@ class LiveFeedView(QWidget):
 
         controls_group.setLayout(controls_layout)
         layout.addWidget(controls_group)
+
+        # Stage control group
+        stage_group = QGroupBox("Stage Control")
+        stage_layout = QVBoxLayout()
+
+        # Current position display
+        position_display_layout = QHBoxLayout()
+        position_display_layout.addWidget(QLabel("Current Position:"))
+        self.position_label = QLabel("X: 0.00 Y: 0.00 Z: 0.00 R: 0.00°")
+        self.position_label.setStyleSheet("font-weight: bold; color: blue;")
+        position_display_layout.addWidget(self.position_label)
+        position_display_layout.addStretch()
+        stage_layout.addLayout(position_display_layout)
+
+        # X-axis control
+        x_layout = QHBoxLayout()
+        x_layout.addWidget(QLabel("X (mm):"))
+        self.x_spinbox = QDoubleSpinBox()
+        self.x_spinbox.setRange(-100.0, 100.0)
+        self.x_spinbox.setDecimals(3)
+        self.x_spinbox.setSingleStep(0.1)
+        self.x_spinbox.setValue(0.0)
+        x_layout.addWidget(self.x_spinbox)
+        self.x_minus_btn = QPushButton("-0.1")
+        self.x_minus_btn.clicked.connect(lambda: self._move_relative('X', -0.1))
+        x_layout.addWidget(self.x_minus_btn)
+        self.x_plus_btn = QPushButton("+0.1")
+        self.x_plus_btn.clicked.connect(lambda: self._move_relative('X', 0.1))
+        x_layout.addWidget(self.x_plus_btn)
+        stage_layout.addLayout(x_layout)
+
+        # Y-axis control
+        y_layout = QHBoxLayout()
+        y_layout.addWidget(QLabel("Y (mm):"))
+        self.y_spinbox = QDoubleSpinBox()
+        self.y_spinbox.setRange(-100.0, 100.0)
+        self.y_spinbox.setDecimals(3)
+        self.y_spinbox.setSingleStep(0.1)
+        self.y_spinbox.setValue(0.0)
+        y_layout.addWidget(self.y_spinbox)
+        self.y_minus_btn = QPushButton("-0.1")
+        self.y_minus_btn.clicked.connect(lambda: self._move_relative('Y', -0.1))
+        y_layout.addWidget(self.y_minus_btn)
+        self.y_plus_btn = QPushButton("+0.1")
+        self.y_plus_btn.clicked.connect(lambda: self._move_relative('Y', 0.1))
+        y_layout.addWidget(self.y_plus_btn)
+        stage_layout.addLayout(y_layout)
+
+        # Z-axis control
+        z_layout = QHBoxLayout()
+        z_layout.addWidget(QLabel("Z (mm):"))
+        self.z_spinbox = QDoubleSpinBox()
+        self.z_spinbox.setRange(-100.0, 100.0)
+        self.z_spinbox.setDecimals(3)
+        self.z_spinbox.setSingleStep(0.01)
+        self.z_spinbox.setValue(0.0)
+        z_layout.addWidget(self.z_spinbox)
+        self.z_minus_btn = QPushButton("-0.01")
+        self.z_minus_btn.clicked.connect(lambda: self._move_relative('Z', -0.01))
+        z_layout.addWidget(self.z_minus_btn)
+        self.z_plus_btn = QPushButton("+0.01")
+        self.z_plus_btn.clicked.connect(lambda: self._move_relative('Z', 0.01))
+        z_layout.addWidget(self.z_plus_btn)
+        stage_layout.addLayout(z_layout)
+
+        # R-axis (rotation) control
+        r_layout = QHBoxLayout()
+        r_layout.addWidget(QLabel("R (deg):"))
+        self.r_spinbox = QDoubleSpinBox()
+        self.r_spinbox.setRange(-720.0, 720.0)
+        self.r_spinbox.setDecimals(1)
+        self.r_spinbox.setSingleStep(1.0)
+        self.r_spinbox.setValue(0.0)
+        r_layout.addWidget(self.r_spinbox)
+        self.r_minus_btn = QPushButton("-1°")
+        self.r_minus_btn.clicked.connect(lambda: self._move_relative('R', -1.0))
+        r_layout.addWidget(self.r_minus_btn)
+        self.r_plus_btn = QPushButton("+1°")
+        self.r_plus_btn.clicked.connect(lambda: self._move_relative('R', 1.0))
+        r_layout.addWidget(self.r_plus_btn)
+        stage_layout.addLayout(r_layout)
+
+        # Move to position button
+        move_btn_layout = QHBoxLayout()
+        self.move_to_position_btn = QPushButton("Move to Position")
+        self.move_to_position_btn.clicked.connect(self._on_move_to_position)
+        self.move_to_position_btn.setStyleSheet("font-weight: bold;")
+        move_btn_layout.addWidget(self.move_to_position_btn)
+        stage_layout.addLayout(move_btn_layout)
+
+        stage_group.setLayout(stage_layout)
+        layout.addWidget(stage_group)
+
+        # Laser control group
+        laser_group = QGroupBox("Laser Control")
+        laser_layout = QVBoxLayout()
+
+        # Laser selection
+        laser_select_layout = QHBoxLayout()
+        laser_select_layout.addWidget(QLabel("Laser Channel:"))
+        self.laser_combo = QComboBox()
+        for laser in self._laser_channels:
+            self.laser_combo.addItem(laser)
+        self.laser_combo.setCurrentIndex(2)  # Default to Laser 3 488 nm
+        self.laser_combo.currentTextChanged.connect(self._on_laser_changed)
+        laser_select_layout.addWidget(self.laser_combo)
+        laser_layout.addLayout(laser_select_layout)
+
+        # Laser power control
+        power_layout = QHBoxLayout()
+        power_layout.addWidget(QLabel("Power (%):"))
+        self.power_spinbox = QDoubleSpinBox()
+        self.power_spinbox.setRange(0.0, 100.0)
+        self.power_spinbox.setDecimals(2)
+        self.power_spinbox.setSingleStep(0.5)
+        self.power_spinbox.setValue(5.0)
+        self.power_spinbox.valueChanged.connect(self._on_laser_power_changed)
+        power_layout.addWidget(self.power_spinbox)
+
+        self.power_slider = QSlider(Qt.Horizontal)
+        self.power_slider.setRange(0, 100)
+        self.power_slider.setValue(5)
+        self.power_slider.valueChanged.connect(lambda v: self.power_spinbox.setValue(v))
+        power_layout.addWidget(self.power_slider)
+        laser_layout.addLayout(power_layout)
+
+        laser_group.setLayout(laser_layout)
+        layout.addWidget(laser_group)
+
+        # Image acquisition group
+        acquisition_group = QGroupBox("Image Acquisition")
+        acquisition_layout = QVBoxLayout()
+
+        # Acquisition buttons
+        acq_btn_layout = QHBoxLayout()
+
+        self.snapshot_btn = QPushButton("Take Snapshot")
+        self.snapshot_btn.clicked.connect(self._on_snapshot_clicked)
+        self.snapshot_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        acq_btn_layout.addWidget(self.snapshot_btn)
+
+        self.brightfield_btn = QPushButton("Acquire Brightfield")
+        self.brightfield_btn.clicked.connect(self._on_brightfield_clicked)
+        self.brightfield_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
+        acq_btn_layout.addWidget(self.brightfield_btn)
+
+        acquisition_layout.addLayout(acq_btn_layout)
+
+        # Sync settings button
+        sync_layout = QHBoxLayout()
+        self.sync_settings_btn = QPushButton("Sync Settings from Microscope")
+        self.sync_settings_btn.clicked.connect(self._on_sync_settings)
+        self.sync_settings_btn.setToolTip("Pull current settings from microscope and update GUI")
+        sync_layout.addWidget(self.sync_settings_btn)
+        acquisition_layout.addLayout(sync_layout)
+
+        acquisition_group.setLayout(acquisition_layout)
+        layout.addWidget(acquisition_group)
 
         # Add stretch to push everything to top
         layout.addStretch()
@@ -381,3 +575,226 @@ class LiveFeedView(QWidget):
             self.timer.stop()
             self.timer.start(interval_ms)
             self._logger.info(f"Update interval changed to {interval_ms}ms")
+
+    # Stage control methods
+    def _move_relative(self, axis: str, delta: float) -> None:
+        """
+        Move stage by relative amount on specified axis.
+
+        Args:
+            axis: Axis name ('X', 'Y', 'Z', 'R')
+            delta: Amount to move (mm or degrees)
+        """
+        try:
+            # Update current position
+            if axis == 'X':
+                self._current_position.x += delta
+                self.x_spinbox.setValue(self._current_position.x)
+            elif axis == 'Y':
+                self._current_position.y += delta
+                self.y_spinbox.setValue(self._current_position.y)
+            elif axis == 'Z':
+                self._current_position.z += delta
+                self.z_spinbox.setValue(self._current_position.z)
+            elif axis == 'R':
+                self._current_position.r += delta
+                self.r_spinbox.setValue(self._current_position.r)
+
+            # Emit signal for relative movement
+            self.move_relative_requested.emit(axis, delta)
+
+            # Update position display
+            self._update_position_display()
+
+            self._logger.info(f"Moved {axis} by {delta}")
+
+        except Exception as e:
+            self._logger.error(f"Error moving {axis}: {e}")
+            self.status_label.setText(f"Status: Error moving stage - {str(e)}")
+            self.status_label.setStyleSheet("color: red; font-style: italic;")
+
+    def _on_move_to_position(self) -> None:
+        """Handle move to absolute position button click."""
+        try:
+            # Get target position from spinboxes
+            target = Position(
+                x=self.x_spinbox.value(),
+                y=self.y_spinbox.value(),
+                z=self.z_spinbox.value(),
+                r=self.r_spinbox.value()
+            )
+
+            # Emit signal for absolute movement
+            self.move_position_requested.emit(target)
+
+            # Update current position
+            self._current_position = target
+            self._update_position_display()
+
+            self._logger.info(f"Moving to position: {target}")
+            self.status_label.setText(f"Status: Moving to position...")
+            self.status_label.setStyleSheet("color: orange; font-style: italic;")
+
+        except Exception as e:
+            self._logger.error(f"Error moving to position: {e}")
+            self.status_label.setText(f"Status: Error - {str(e)}")
+            self.status_label.setStyleSheet("color: red; font-style: italic;")
+
+    def _update_position_display(self) -> None:
+        """Update the position label with current position."""
+        self.position_label.setText(
+            f"X: {self._current_position.x:.3f} "
+            f"Y: {self._current_position.y:.3f} "
+            f"Z: {self._current_position.z:.3f} "
+            f"R: {self._current_position.r:.1f}°"
+        )
+
+    def update_position(self, position: Position) -> None:
+        """
+        Update displayed position (called from controller).
+
+        Args:
+            position: New position from microscope
+        """
+        self._current_position = position
+        self.x_spinbox.setValue(position.x)
+        self.y_spinbox.setValue(position.y)
+        self.z_spinbox.setValue(position.z)
+        self.r_spinbox.setValue(position.r)
+        self._update_position_display()
+
+    # Laser control methods
+    def _on_laser_changed(self, laser_channel: str) -> None:
+        """
+        Handle laser channel selection change.
+
+        Args:
+            laser_channel: Selected laser channel name
+        """
+        self.laser_changed.emit(laser_channel)
+        self._logger.info(f"Laser changed to: {laser_channel}")
+
+    def _on_laser_power_changed(self, power: float) -> None:
+        """
+        Handle laser power change.
+
+        Args:
+            power: Laser power percentage (0-100)
+        """
+        # Update slider to match spinbox
+        self.power_slider.setValue(int(power))
+
+        # Emit signal
+        self.laser_power_changed.emit(power)
+        self._logger.debug(f"Laser power changed to: {power}%")
+
+    def get_laser_settings(self) -> tuple:
+        """
+        Get current laser settings from UI.
+
+        Returns:
+            Tuple of (laser_channel, laser_power)
+        """
+        return (
+            self.laser_combo.currentText(),
+            self.power_spinbox.value()
+        )
+
+    # Image acquisition methods
+    def _on_snapshot_clicked(self) -> None:
+        """Handle snapshot button click."""
+        try:
+            self._logger.info("Snapshot requested")
+            self.status_label.setText("Status: Taking snapshot...")
+            self.status_label.setStyleSheet("color: orange; font-style: italic;")
+
+            # Disable button during acquisition
+            self.snapshot_btn.setEnabled(False)
+
+            # Emit signal
+            self.snapshot_requested.emit()
+
+            # Re-enable after short delay (actual re-enable should come from controller)
+            QTimer.singleShot(1000, lambda: self.snapshot_btn.setEnabled(True))
+
+        except Exception as e:
+            self._logger.error(f"Error requesting snapshot: {e}")
+            self.status_label.setText(f"Status: Snapshot error - {str(e)}")
+            self.status_label.setStyleSheet("color: red; font-style: italic;")
+            self.snapshot_btn.setEnabled(True)
+
+    def _on_brightfield_clicked(self) -> None:
+        """Handle brightfield acquisition button click."""
+        try:
+            self._logger.info("Brightfield acquisition requested")
+            self.status_label.setText("Status: Acquiring brightfield image...")
+            self.status_label.setStyleSheet("color: orange; font-style: italic;")
+
+            # Disable button during acquisition
+            self.brightfield_btn.setEnabled(False)
+
+            # Emit signal
+            self.brightfield_requested.emit()
+
+            # Re-enable after short delay
+            QTimer.singleShot(1000, lambda: self.brightfield_btn.setEnabled(True))
+
+        except Exception as e:
+            self._logger.error(f"Error requesting brightfield: {e}")
+            self.status_label.setText(f"Status: Brightfield error - {str(e)}")
+            self.status_label.setStyleSheet("color: red; font-style: italic;")
+            self.brightfield_btn.setEnabled(True)
+
+    def _on_sync_settings(self) -> None:
+        """Handle sync settings button click."""
+        try:
+            self._logger.info("Settings sync requested")
+            self.status_label.setText("Status: Syncing settings from microscope...")
+            self.status_label.setStyleSheet("color: orange; font-style: italic;")
+
+            # Disable button during sync
+            self.sync_settings_btn.setEnabled(False)
+
+            # Emit signal
+            self.sync_settings_requested.emit()
+
+            # Re-enable after short delay
+            QTimer.singleShot(2000, lambda: self.sync_settings_btn.setEnabled(True))
+
+        except Exception as e:
+            self._logger.error(f"Error syncing settings: {e}")
+            self.status_label.setText(f"Status: Sync error - {str(e)}")
+            self.status_label.setStyleSheet("color: red; font-style: italic;")
+            self.sync_settings_btn.setEnabled(True)
+
+    def set_controls_enabled(self, enabled: bool) -> None:
+        """
+        Enable or disable all control widgets.
+
+        Args:
+            enabled: True to enable controls, False to disable
+        """
+        # Stage controls
+        self.x_spinbox.setEnabled(enabled)
+        self.y_spinbox.setEnabled(enabled)
+        self.z_spinbox.setEnabled(enabled)
+        self.r_spinbox.setEnabled(enabled)
+        self.x_minus_btn.setEnabled(enabled)
+        self.x_plus_btn.setEnabled(enabled)
+        self.y_minus_btn.setEnabled(enabled)
+        self.y_plus_btn.setEnabled(enabled)
+        self.z_minus_btn.setEnabled(enabled)
+        self.z_plus_btn.setEnabled(enabled)
+        self.r_minus_btn.setEnabled(enabled)
+        self.r_plus_btn.setEnabled(enabled)
+        self.move_to_position_btn.setEnabled(enabled)
+
+        # Laser controls
+        self.laser_combo.setEnabled(enabled)
+        self.power_spinbox.setEnabled(enabled)
+        self.power_slider.setEnabled(enabled)
+
+        # Acquisition controls
+        self.snapshot_btn.setEnabled(enabled)
+        self.brightfield_btn.setEnabled(enabled)
+        self.sync_settings_btn.setEnabled(enabled)
