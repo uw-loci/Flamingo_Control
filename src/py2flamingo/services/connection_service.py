@@ -528,3 +528,105 @@ class MVCConnectionService:
             Current ConnectionStatus
         """
         return self.model.status
+
+    def get_microscope_settings(self) -> Tuple[float, Dict[str, Any]]:
+        """
+        Retrieve comprehensive microscope settings and image pixel size.
+
+        This method queries the microscope for its current configuration including
+        stage limits, laser configurations, optical parameters, and calculates
+        the image pixel size based on the optical system.
+
+        Returns:
+            Tuple[float, Dict[str, Any]]:
+                - Image pixel size in millimeters
+                - Dictionary containing microscope settings with sections like:
+                  - 'Type': Optical parameters (tube lens, objective, etc.)
+                  - 'Stage limits': Min/max positions and home positions
+                  - 'Illumination': Available lasers and LED configs
+                  - Other microscope-specific sections
+
+        Raises:
+            RuntimeError: If not connected to microscope
+            FileNotFoundError: If settings file not found
+            ConnectionError: If communication fails
+
+        Example:
+            >>> pixel_size, settings = service.get_microscope_settings()
+            >>> print(f"Pixel size: {pixel_size} mm")
+            >>> print(f"Objective: {settings['Type']['Objective lens magnification']}x")
+        """
+        import time
+        from pathlib import Path
+        from py2flamingo.utils.file_handlers import text_to_dict
+        from py2flamingo.models.command import Command
+
+        if not self.is_connected():
+            raise RuntimeError("Not connected to microscope")
+
+        self.logger.info("Retrieving microscope settings...")
+
+        try:
+            # Step 1: Send command to load settings from microscope
+            COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = 4105
+            cmd_load = Command(code=COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD)
+
+            self.logger.debug("Sending SCOPE_SETTINGS_LOAD command")
+            self.send_command(cmd_load)
+
+            # Wait for settings to be saved to file
+            time.sleep(0.5)
+
+            # Step 2: Load settings from file
+            settings_path = Path('microscope_settings') / 'ScopeSettings.txt'
+
+            if not settings_path.exists():
+                self.logger.error(f"Settings file not found: {settings_path}")
+                raise FileNotFoundError(f"Microscope settings file not found: {settings_path}")
+
+            self.logger.debug(f"Reading settings from {settings_path}")
+            scope_settings = text_to_dict(str(settings_path))
+            self.logger.info(f"Loaded {len(scope_settings)} setting sections")
+
+            # Step 3: Get pixel size from microscope
+            COMMAND_CODES_CAMERA_PIXEL_FIELD_OF_VIEW_GET = 12347
+            cmd_pixel = Command(code=COMMAND_CODES_CAMERA_PIXEL_FIELD_OF_VIEW_GET)
+
+            self.logger.debug("Sending PIXEL_FIELD_OF_VIEW_GET command")
+            self.send_command(cmd_pixel)
+
+            # Wait for response
+            time.sleep(0.2)
+
+            # Try to get pixel size from queue
+            image_pixel_size = None
+            if self.queue_manager:
+                try:
+                    image_pixel_size = self.queue_manager.get_nowait('other_data')
+                    self.logger.debug(f"Got pixel size from queue: {image_pixel_size}")
+                except:
+                    pass
+
+            # If not in queue, calculate from settings
+            if not image_pixel_size:
+                self.logger.debug("Calculating pixel size from optical parameters")
+                try:
+                    tube = float(scope_settings['Type']['Tube lens design focal length (mm)'])
+                    obj = float(scope_settings['Type']['Objective lens magnification'])
+                    cam_um = 6.5  # Camera pixel size in micrometers (typical value)
+                    image_pixel_size = (cam_um / (obj * (tube / 200))) / 1000.0  # Convert to mm
+                    self.logger.info(f"Calculated pixel size: {image_pixel_size:.6f} mm")
+                except (KeyError, ValueError, TypeError) as e:
+                    self.logger.warning(f"Could not calculate pixel size: {e}")
+                    image_pixel_size = 0.000488  # Default fallback value
+
+            self.logger.info("Successfully retrieved microscope settings")
+            return image_pixel_size, scope_settings
+
+        except FileNotFoundError:
+            raise
+
+        except Exception as e:
+            error_msg = f"Error retrieving microscope settings: {e}"
+            self.logger.exception(error_msg)
+            raise ConnectionError(error_msg) from e

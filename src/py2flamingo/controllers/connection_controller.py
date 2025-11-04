@@ -491,12 +491,16 @@ class ConnectionController:
                 # Service doesn't support getting settings yet
                 # Return a placeholder for now
                 self._logger.warning("Service does not support get_microscope_settings()")
+
+                # Get connection info from service's model
+                status = self._service.get_status()
+
                 return {
                     'Connection': {
                         'Status': 'Connected',
-                        'IP': self._model.status.ip,
-                        'Port': self._model.status.port,
-                        'Connected at': str(self._model.status.connected_at) if self._model.status.connected_at else 'N/A'
+                        'IP': status.ip or 'Unknown',
+                        'Port': status.port or 'Unknown',
+                        'Connected at': str(status.connected_at) if status.connected_at else 'N/A'
                     },
                     'Note': {
                         'Message': 'Full settings retrieval not yet implemented for this connection type'
