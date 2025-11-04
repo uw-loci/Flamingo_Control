@@ -5,6 +5,7 @@ This module provides the ConnectionView widget for handling connection UI.
 """
 
 from typing import Tuple, Optional, List, Dict, Any
+import logging
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QSpinBox, QComboBox, QGroupBox, QTextEdit
@@ -35,6 +36,7 @@ class ConnectionView(QWidget):
         self._controller = controller
         self._config_manager = config_manager
         self._configurations = {}  # Map of name -> MicroscopeConfiguration
+        self._logger = logging.getLogger(__name__)
         self.setup_ui()
 
         # Load configurations if manager provided
@@ -195,14 +197,19 @@ class ConnectionView(QWidget):
         ip = self.ip_input.text()
         port = self.port_input.value()
 
+        self._logger.info(f"ConnectionView: Connect button clicked for {ip}:{port}")
+
         # Call controller
         success, message = self._controller.connect(ip, port)
+
+        self._logger.info(f"ConnectionView: Connection result - success={success}, message={message}")
 
         # Update UI
         self._show_message(message, is_error=not success)
         if success:
             self._update_status(connected=True)
             # Pull and display microscope settings
+            self._logger.info("ConnectionView: Calling _load_and_display_settings()")
             self._load_and_display_settings()
 
     def _on_disconnect_clicked(self) -> None:
@@ -281,15 +288,22 @@ class ConnectionView(QWidget):
         ip = self.ip_input.text()
         port = self.port_input.value()
 
+        self._logger.info(f"ConnectionView: Test connection button clicked for {ip}:{port}")
+
         # Test connection via controller
         success, message = self._controller.test_connection(ip, port)
+
+        self._logger.info(f"ConnectionView: Test result - success={success}, message={message}")
 
         # Display result
         self._show_message(message, is_error=not success)
 
         # If test successful, pull and display settings
         if success:
+            self._logger.info("ConnectionView: Test successful, loading settings...")
             self._load_and_display_settings()
+        else:
+            self._logger.warning(f"ConnectionView: Test failed, not loading settings")
 
     def _on_config_selected(self, config_name: str) -> None:
         """Handle configuration selection from dropdown.
@@ -455,23 +469,33 @@ class ConnectionView(QWidget):
 
     def _load_and_display_settings(self) -> None:
         """Load microscope settings and display them in the text area."""
+        self._logger.info("ConnectionView: _load_and_display_settings() called")
+
         try:
             # Get settings from controller
+            self._logger.debug("ConnectionView: Calling controller.get_microscope_settings()")
             settings = self._controller.get_microscope_settings()
 
+            self._logger.info(f"ConnectionView: Received settings - type={type(settings)}, is_none={settings is None}")
+
             if settings:
+                self._logger.info(f"ConnectionView: Settings has {len(settings)} top-level keys")
                 # Format settings for display
                 formatted_text = self._format_settings(settings)
+                self._logger.debug(f"ConnectionView: Formatted text length: {len(formatted_text)} chars")
                 self.settings_display.setPlainText(formatted_text)
                 self.settings_display.setStyleSheet(
                     "QTextEdit { font-family: 'Courier New', monospace; "
                     "font-size: 10pt; background-color: #f0f0f0; }"
                 )
+                self._logger.info("ConnectionView: Settings display updated successfully")
             else:
+                self._logger.warning("ConnectionView: No settings returned from controller")
                 self.settings_display.setPlainText("No settings available.")
 
         except Exception as e:
             error_msg = f"Error loading settings: {str(e)}"
+            self._logger.error(f"ConnectionView: {error_msg}", exc_info=True)
             self.settings_display.setPlainText(error_msg)
             self.settings_display.setStyleSheet(
                 "QTextEdit { font-family: 'Courier New', monospace; "

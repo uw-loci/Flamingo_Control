@@ -442,3 +442,67 @@ class ConnectionController:
         except Exception as e:
             self._logger.exception(f"Error deleting configuration: {e}")
             return (False, f"Error: {str(e)}")
+
+    def get_microscope_settings(self) -> Optional[Dict[str, Any]]:
+        """
+        Get current microscope settings from the connected microscope.
+
+        This method retrieves comprehensive microscope settings including
+        stage limits, laser configurations, optical parameters, and system status.
+
+        Returns:
+            Dictionary with microscope settings, or None if not connected or error.
+            The dictionary structure typically includes:
+                - 'Type': Optical parameters (tube lens, objective, etc.)
+                - 'Stage limits': Min/max positions and home positions
+                - 'Illumination': Available lasers and LED configs
+                - 'Camera': Frame size, pixel size, exposure settings
+                - And other microscope-specific sections
+
+        Raises:
+            None - Returns None on error instead of raising
+        """
+        self._logger.info("Getting microscope settings...")
+
+        # Check if connected
+        if not self._service.is_connected():
+            self._logger.warning("Cannot get settings: Not connected to microscope")
+            return None
+
+        try:
+            # Try to get settings from the service
+            # Note: This depends on which service is being used
+            # MVCConnectionService doesn't have get_microscope_settings yet
+            # We need to check if the service has this method
+
+            if hasattr(self._service, 'get_microscope_settings'):
+                self._logger.debug("Calling service.get_microscope_settings()")
+                pixel_size, settings_dict = self._service.get_microscope_settings()
+
+                # Add pixel size to settings if available
+                if pixel_size and settings_dict:
+                    if 'Camera' not in settings_dict:
+                        settings_dict['Camera'] = {}
+                    settings_dict['Camera']['Pixel size (mm)'] = pixel_size
+
+                self._logger.info(f"Retrieved settings with {len(settings_dict)} sections")
+                return settings_dict
+            else:
+                # Service doesn't support getting settings yet
+                # Return a placeholder for now
+                self._logger.warning("Service does not support get_microscope_settings()")
+                return {
+                    'Connection': {
+                        'Status': 'Connected',
+                        'IP': self._model.status.ip,
+                        'Port': self._model.status.port,
+                        'Connected at': str(self._model.status.connected_at) if self._model.status.connected_at else 'N/A'
+                    },
+                    'Note': {
+                        'Message': 'Full settings retrieval not yet implemented for this connection type'
+                    }
+                }
+
+        except Exception as e:
+            self._logger.exception(f"Error getting microscope settings: {e}")
+            return None
