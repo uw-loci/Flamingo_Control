@@ -13,7 +13,7 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QCheckBox, QComboBox, QGroupBox, QSlider, QSizePolicy,
-    QDoubleSpinBox, QSpinBox, QLineEdit
+    QDoubleSpinBox, QSpinBox, QLineEdit, QScrollArea
 )
 from PyQt5.QtCore import QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap
@@ -117,15 +117,29 @@ class LiveFeedView(QWidget):
 
     def setup_ui(self) -> None:
         """Create and layout UI components."""
-        layout = QVBoxLayout()
+        # Main layout for the widget
+        main_layout = QVBoxLayout()
 
-        # Image display area
+        # Create scroll area to handle overflow
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        # Create content widget for scroll area
+        content_widget = QWidget()
+        content_layout = QHBoxLayout()
+
+        # LEFT SIDE: Image display area
+        left_layout = QVBoxLayout()
+
         display_group = QGroupBox("Live Feed")
         display_layout = QVBoxLayout()
 
         self.image_label = QLabel("No image")
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setMinimumSize(512, 512)
+        self.image_label.setMaximumSize(800, 800)
         self.image_label.setScaledContents(False)
         self.image_label.setStyleSheet("QLabel { background-color: black; color: gray; }")
         display_layout.addWidget(self.image_label)
@@ -136,7 +150,11 @@ class LiveFeedView(QWidget):
         display_layout.addWidget(self.status_label)
 
         display_group.setLayout(display_layout)
-        layout.addWidget(display_group)
+        left_layout.addWidget(display_group)
+        left_layout.addStretch()
+
+        # RIGHT SIDE: All controls
+        right_layout = QVBoxLayout()
 
         # Transform controls
         controls_group = QGroupBox("Image Transformations")
@@ -228,7 +246,7 @@ class LiveFeedView(QWidget):
         controls_layout.addLayout(reset_layout)
 
         controls_group.setLayout(controls_layout)
-        layout.addWidget(controls_group)
+        right_layout.addWidget(controls_group)
 
         # Stage control group
         stage_group = QGroupBox("Stage Control")
@@ -320,7 +338,7 @@ class LiveFeedView(QWidget):
         stage_layout.addLayout(move_btn_layout)
 
         stage_group.setLayout(stage_layout)
-        layout.addWidget(stage_group)
+        right_layout.addWidget(stage_group)
 
         # Laser control group
         laser_group = QGroupBox("Laser Control")
@@ -356,7 +374,7 @@ class LiveFeedView(QWidget):
         laser_layout.addLayout(power_layout)
 
         laser_group.setLayout(laser_layout)
-        layout.addWidget(laser_group)
+        right_layout.addWidget(laser_group)
 
         # Image acquisition group
         acquisition_group = QGroupBox("Image Acquisition")
@@ -386,12 +404,24 @@ class LiveFeedView(QWidget):
         acquisition_layout.addLayout(sync_layout)
 
         acquisition_group.setLayout(acquisition_layout)
-        layout.addWidget(acquisition_group)
+        right_layout.addWidget(acquisition_group)
 
-        # Add stretch to push everything to top
-        layout.addStretch()
+        # Add stretch to push controls to top on right side
+        right_layout.addStretch()
 
-        self.setLayout(layout)
+        # Combine left and right layouts
+        content_layout.addLayout(left_layout)
+        content_layout.addLayout(right_layout)
+
+        # Set up scroll area
+        content_widget.setLayout(content_layout)
+        scroll_area.setWidget(content_widget)
+
+        # Add scroll area to main layout
+        main_layout.addWidget(scroll_area)
+
+        # Set main layout on the widget
+        self.setLayout(main_layout)
 
     def _check_for_image(self) -> None:
         """
