@@ -220,6 +220,29 @@ See `src/py2flamingo/core/tcp_protocol.py`:
 - `ProtocolEncoder.encode_command()` - Creates 128-byte packets
 - `ProtocolDecoder.decode_command()` - Parses 128-byte packets
 
+### Known Issue: Socket Contention
+
+**Problem:** The connection system runs a background `command_listen_thread` that continuously reads from the command socket via `client.recv(128)`. When debug queries try to send a command and read the response directly on the same socket, there's a race condition:
+
+1. Debug query sends command
+2. Microscope sends response
+3. Background thread may consume the response
+4. Debug query times out
+
+**Symptoms:**
+- Debug queries time out even for commands known to work
+- CAMERA_PIXEL_FIELD_OF_VIEW_GET works sometimes (race condition)
+- CAMERA_IMAGE_SIZE_GET times out frequently
+
+**Temporary Workaround:**
+Debug queries include a warning about this limitation. This is a diagnostic feature, not production code.
+
+**Proper Solutions (for future implementation):**
+1. Add socket lock/pause mechanism for exclusive access
+2. Route debug queries through the proper queue system
+3. Implement request-response correlation with unique IDs
+4. Temporarily stop listener thread during debug operations
+
 ---
 
 **Last Updated:** 2024-11-05

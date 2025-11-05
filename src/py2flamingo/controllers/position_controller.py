@@ -435,6 +435,12 @@ class PositionController:
                 - 'error': str - Error message if failed
                 - 'timeout_explanation': str - Explanation if timeout
 
+        Warning:
+            This method directly accesses the command socket, which may race with
+            the background command_listen_thread. If timeouts occur, the background
+            thread may be consuming responses before we can read them. This is a
+            known limitation of the debug feature.
+
         Note:
             This is a diagnostic/debug method for testing command responses.
         """
