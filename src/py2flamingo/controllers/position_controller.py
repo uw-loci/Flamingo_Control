@@ -437,14 +437,46 @@ class PositionController:
                 # Unpack value (double)
                 value = struct.unpack('<d', response_bytes[40:48])[0]
 
-                # Get data section
-                data = response_bytes[48:128]
+                # Get data section (80 bytes - this is only the TAIL of the full data!)
+                data_tail = response_bytes[48:128]
 
-                # Try to decode data as string
+                # Try to decode the tail as string
                 try:
-                    data_str = data.rstrip(b'\x00').decode('utf-8', errors='replace')
+                    data_tail_str = data_tail.rstrip(b'\x00').decode('utf-8', errors='replace')
                 except:
-                    data_str = '<binary data>'
+                    data_tail_str = '<binary data>'
+
+                # Check if microscope wrote data to a file (like SCOPE_SETTINGS does)
+                full_data_str = None
+                import time
+                from pathlib import Path
+                from py2flamingo.utils.file_handlers import text_to_dict
+
+                # Wait a moment for file to be written
+                time.sleep(0.3)
+
+                # Check common locations for position/settings files
+                possible_files = [
+                    Path('microscope_settings') / 'StagePosition.txt',
+                    Path('microscope_settings') / 'ScopeSettings.txt',
+                    Path('microscope_settings') / 'PositionSettings.txt',
+                ]
+
+                for file_path in possible_files:
+                    if file_path.exists():
+                        try:
+                            # Try to read as text
+                            with open(file_path, 'r') as f:
+                                full_data_str = f.read()
+                            self.logger.info(f"Found data file: {file_path} ({len(full_data_str)} chars)")
+                            break
+                        except Exception as e:
+                            self.logger.debug(f"Could not read {file_path}: {e}")
+
+                if full_data_str is None:
+                    # No file found, use what we have
+                    full_data_str = f"<No file found - only header data available>\n\nLast 80 bytes from response:\n{data_tail_str}"
+                    self.logger.warning("STAGE_POSITION_GET did not write to expected file locations")
 
                 parsed = {
                     'start_marker': f'0x{start_marker:08X}',
@@ -452,8 +484,10 @@ class PositionController:
                     'status_code': status_code,
                     'params': params,
                     'value': value,
-                    'data_string': data_str,
-                    'data_hex': data[:40].hex() if len(data) > 0 else ''
+                    'data_tail_string': data_tail_str,
+                    'data_tail_hex': data_tail[:40].hex() if len(data_tail) > 0 else '',
+                    'full_data': full_data_str,
+                    'data_length': len(full_data_str) if full_data_str else 0
                 }
 
                 self.logger.info(f"STAGE_POSITION_GET response parsed successfully")
@@ -498,16 +532,27 @@ class PositionController:
         interpretation_lines.append(f"  Value field: {parsed['value']}")
         interpretation_lines.append(f"  Params: {parsed['params']}")
 
-        data_str = parsed.get('data_string', '')
-        if data_str and len(data_str.strip()) > 0:
-            interpretation_lines.append(f"\n  Data contains: {repr(data_str[:100])}")
+        # Check if we have full data from file
+        full_data = parsed.get('full_data', '')
+        data_tail = parsed.get('data_tail_string', '')
+
+        if full_data and not full_data.startswith('<No file found'):
+            interpretation_lines.append(f"\n  ✓ Full data retrieved from file ({parsed.get('data_length', 0)} chars)")
+            interpretation_lines.append(f"  Data preview: {repr(full_data[:100])}")
             interpretation_lines.append("\n  ⚠ NOTE: This appears to be settings/configuration data,")
             interpretation_lines.append("  ⚠       NOT current position coordinates!")
+        elif data_tail and len(data_tail.strip()) > 0:
+            interpretation_lines.append(f"\n  ⚠ Only partial data available (80-byte tail from protocol)")
+            interpretation_lines.append(f"  Data tail: {repr(data_tail[:100])}")
         else:
             interpretation_lines.append("\n  Data section is empty or binary")
 
         interpretation_lines.append("\n  CONCLUSION:")
         interpretation_lines.append("  This command does NOT return current stage position.")
         interpretation_lines.append("  The microscope does not report actual position via this command.")
+        interpretation_lines.append("\n  Without position feedback:")
+        interpretation_lines.append("  - Software must track position locally (can drift)")
+        interpretation_lines.append("  - Cannot detect manual stage movement")
+        interpretation_lines.append("  - Cannot verify movements completed successfully")
 
         return '\n'.join(interpretation_lines)

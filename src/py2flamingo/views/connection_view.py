@@ -378,10 +378,23 @@ class ConnectionView(QWidget):
             text += f"Status Code:     {parsed.get('status_code', 'N/A')}\n"
             text += f"Parameters:      {parsed.get('params', 'N/A')}\n"
             text += f"Value Field:     {parsed.get('value', 'N/A')}\n"
-            text += f"\nData String:     {repr(parsed.get('data_string', '')[:200])}\n"
 
-            if parsed.get('data_hex'):
-                text += f"\nData (hex):      {parsed.get('data_hex', '')}\n"
+            # Show data tail from protocol response (last 80 bytes)
+            text += f"\nData Tail (80 bytes from protocol response):\n"
+            text += f"  {repr(parsed.get('data_tail_string', '')[:100])}\n"
+
+            # Show full data if available from file
+            if parsed.get('full_data'):
+                text += f"\n{'=' * 70}\n"
+                text += f"FULL DATA ({parsed.get('data_length', 0)} characters)\n"
+                text += f"{'=' * 70}\n\n"
+                full_data = parsed.get('full_data', '')
+                # Show first 3000 chars (should be enough for most data)
+                display_length = min(len(full_data), 3000)
+                text += full_data[:display_length]
+                if len(full_data) > 3000:
+                    text += f"\n\n... (truncated for display, {len(full_data)} total characters)"
+                text += "\n"
 
             text += "\n" + "=" * 70 + "\n"
             text += result.get('interpretation', '')
