@@ -751,18 +751,20 @@ class MVCConnectionService:
             finally:
                 self._command_socket.settimeout(None)
 
-            # Combine all data
-            complete_response = ack_data + additional_data
-            self.logger.info(f"Received total: {len(complete_response)} bytes")
+            # Log total data received
+            total_bytes = len(ack_data) + len(additional_data)
+            self.logger.info(f"Received total: {total_bytes} bytes (128 ack + {len(additional_data)} text)")
 
-            if len(complete_response) < expected_min_size:
+            # Check if we got enough text data (don't count the 128-byte ack)
+            if len(additional_data) < expected_min_size:
                 raise ValueError(
-                    f"Response too small: {len(complete_response)} bytes "
+                    f"Text response too small: {len(additional_data)} bytes "
                     f"(expected at least {expected_min_size})"
                 )
 
-            # Decode as text and clean up
-            text_response = complete_response.decode('utf-8', errors='replace')
+            # Decode ONLY the text data, not the binary ack
+            # The 128-byte ack is binary protocol structure, not text
+            text_response = additional_data.decode('utf-8', errors='replace')
             text_response = text_response.rstrip('\x00\r\n')
 
             # Remove any binary garbage after last '>'
