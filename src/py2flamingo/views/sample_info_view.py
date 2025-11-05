@@ -48,13 +48,22 @@ class SampleInfoView(QWidget):
 
         # Default values
         self._sample_name = ""
-        self._save_path = str(Path.cwd() / "data")
+        self._save_path = ""  # Relative path or subdirectory
+
+        # Network share configuration (microscope's perspective)
+        # This is the base network path that the microscope can access
+        self._network_share_base = r"\\192.168.1.2\CTLSM1"  # Default
+        self._local_mount_point = None  # Optional: where this is mounted locally
 
         self._init_ui()
 
     def _init_ui(self):
         """Initialize user interface."""
         layout = QVBoxLayout(self)
+
+        # Network Configuration Group
+        network_group = self._create_network_config_group()
+        layout.addWidget(network_group)
 
         # Sample Information Group
         sample_group = self._create_sample_info_group()
@@ -95,6 +104,55 @@ class SampleInfoView(QWidget):
         group.setLayout(layout)
         return group
 
+    def _create_network_config_group(self) -> QGroupBox:
+        """
+        Create network share configuration group.
+
+        Returns:
+            QGroupBox with network share settings
+        """
+        group = QGroupBox("Network Share Configuration")
+        layout = QVBoxLayout()
+
+        # Info text
+        info = QLabel(
+            "<b>Important:</b> Paths must be accessible from the microscope PC.<br>"
+            "Configure the network share base path (UNC format)."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #d35400; padding: 5px; background-color: #fef5e7;")
+        layout.addWidget(info)
+
+        # Network share base path
+        share_layout = QHBoxLayout()
+        share_layout.addWidget(QLabel("Network Share Base:"))
+
+        self.network_share_input = QLineEdit()
+        self.network_share_input.setText(self._network_share_base)
+        self.network_share_input.setPlaceholderText(r"\\192.168.1.2\CTLSM1")
+        self.network_share_input.textChanged.connect(self._on_network_share_changed)
+        share_layout.addWidget(self.network_share_input)
+
+        layout.addLayout(share_layout)
+
+        # Optional: Local mount point (for browsing)
+        mount_layout = QHBoxLayout()
+        mount_layout.addWidget(QLabel("Local Mount Point (optional):"))
+
+        self.local_mount_input = QLineEdit()
+        self.local_mount_input.setPlaceholderText(r"D:\microscope_data or leave empty")
+        self.local_mount_input.textChanged.connect(self._on_local_mount_changed)
+        mount_layout.addWidget(self.local_mount_input)
+
+        browse_mount_btn = QPushButton("Browse...")
+        browse_mount_btn.clicked.connect(self._browse_local_mount)
+        mount_layout.addWidget(browse_mount_btn)
+
+        layout.addLayout(mount_layout)
+
+        group.setLayout(layout)
+        return group
+
     def _create_save_path_group(self) -> QGroupBox:
         """
         Create save path configuration group.
@@ -102,37 +160,52 @@ class SampleInfoView(QWidget):
         Returns:
             QGroupBox with save path input and browse button
         """
-        group = QGroupBox("Data Save Path")
+        group = QGroupBox("Data Subdirectory")
         layout = QVBoxLayout()
 
-        # Path input with browse button
+        # Subdirectory input
         path_layout = QHBoxLayout()
+        path_layout.addWidget(QLabel("Subdirectory:"))
 
         self.save_path_input = QLineEdit()
         self.save_path_input.setText(self._save_path)
-        self.save_path_input.setPlaceholderText("Path to save acquired images")
+        self.save_path_input.setPlaceholderText("data/experiment1 (relative to network share)")
         self.save_path_input.textChanged.connect(self._on_save_path_changed)
         path_layout.addWidget(self.save_path_input)
 
+        # Browse button (only works if local mount configured)
         browse_btn = QPushButton("Browse...")
         browse_btn.clicked.connect(self._browse_save_path)
         path_layout.addWidget(browse_btn)
 
         layout.addLayout(path_layout)
 
-        # Display absolute path
-        self.abs_path_display = QLabel(f"Full path: {Path(self._save_path).absolute()}")
-        self.abs_path_display.setStyleSheet("color: gray; font-size: 10pt;")
-        self.abs_path_display.setWordWrap(True)
-        layout.addWidget(self.abs_path_display)
+        # Display network path (what microscope will use)
+        self.network_path_display = QLabel()
+        self.network_path_display.setStyleSheet(
+            "color: #27ae60; font-weight: bold; font-size: 10pt; "
+            "padding: 5px; background-color: #eafaf1; border: 1px solid #27ae60;"
+        )
+        self.network_path_display.setWordWrap(True)
+        layout.addWidget(QLabel("Network Path (sent to microscope):"))
+        layout.addWidget(self.network_path_display)
+
+        # Display local path (if mount point configured)
+        self.local_path_display = QLabel()
+        self.local_path_display.setStyleSheet("color: gray; font-size: 10pt;")
+        self.local_path_display.setWordWrap(True)
+        layout.addWidget(self.local_path_display)
 
         # Create directory button
         create_dir_layout = QHBoxLayout()
-        self.create_dir_btn = QPushButton("Create Directory")
+        self.create_dir_btn = QPushButton("Create Directory (if mounted locally)")
         self.create_dir_btn.clicked.connect(self._create_directory)
         create_dir_layout.addWidget(self.create_dir_btn)
         create_dir_layout.addStretch()
         layout.addLayout(create_dir_layout)
+
+        # Initial update
+        self._update_path_displays()
 
         group.setLayout(layout)
         return group
@@ -148,14 +221,19 @@ class SampleInfoView(QWidget):
         layout = QVBoxLayout()
 
         info_text = QLabel(
-            "<b>Sample Name:</b> Used to identify and organize acquired images.<br>"
-            "<b>Save Path:</b> Directory where image files will be saved.<br><br>"
-            "Image files will be named using the pattern:<br>"
-            "<i>&lt;save_path&gt;/&lt;sample_name&gt;_&lt;timestamp&gt;.png</i><br><br>"
-            "<b>Note:</b> Make sure the save path exists and is writable before starting acquisition."
+            "<b>Network Share Base:</b> The base UNC path that the microscope PC can access.<br>"
+            "<b>Local Mount Point:</b> (Optional) Where the share is mounted on your PC for browsing.<br>"
+            "<b>Subdirectory:</b> Relative path appended to network share base.<br>"
+            "<b>Sample Name:</b> Used to identify and organize acquired images.<br><br>"
+            "<b>Example Configuration:</b><br>"
+            "• Network Share: <code>\\\\192.168.1.2\\CTLSM1</code><br>"
+            "• Local Mount: <code>D:\\microscope_data</code><br>"
+            "• Subdirectory: <code>data/sample1</code><br>"
+            "• Result: Microscope saves to <code>\\\\192.168.1.2\\CTLSM1\\data\\sample1</code><br><br>"
+            "<b>Note:</b> The microscope saves the data, so paths must be from its perspective!"
         )
         info_text.setWordWrap(True)
-        info_text.setStyleSheet("color: #555; font-size: 10pt; padding: 10px;")
+        info_text.setStyleSheet("color: #555; font-size: 9pt; padding: 10px;")
         layout.addWidget(info_text)
 
         group.setLayout(layout)
@@ -179,57 +257,162 @@ class SampleInfoView(QWidget):
         self.sample_name_changed.emit(name)
         self._logger.info(f"Sample name changed to: {name}")
 
-    def _on_save_path_changed(self, path: str):
+    def _on_network_share_changed(self, share_path: str):
         """
-        Handle save path change.
+        Handle network share base path change.
 
         Args:
-            path: New save path
+            share_path: New network share base path
+        """
+        self._network_share_base = share_path
+        self._update_path_displays()
+        self._logger.info(f"Network share base changed to: {share_path}")
+
+    def _on_local_mount_changed(self, mount_path: str):
+        """
+        Handle local mount point change.
+
+        Args:
+            mount_path: New local mount point
+        """
+        self._local_mount_point = mount_path if mount_path else None
+        self._update_path_displays()
+        self._logger.info(f"Local mount point changed to: {mount_path}")
+
+    def _on_save_path_changed(self, path: str):
+        """
+        Handle save path (subdirectory) change.
+
+        Args:
+            path: New subdirectory path
         """
         self._save_path = path
-        abs_path = Path(path).absolute()
-        self.abs_path_display.setText(f"Full path: {abs_path}")
+        self._update_path_displays()
 
-        # Check if path exists
-        if abs_path.exists():
-            self.abs_path_display.setStyleSheet("color: green; font-size: 10pt;")
+        # Emit the full network path that will be sent to microscope
+        full_network_path = self.get_network_path()
+        self.save_path_changed.emit(full_network_path)
+        self._logger.info(f"Subdirectory changed to: {path}")
+
+    def _update_path_displays(self):
+        """Update the path display labels with current configuration."""
+        # Get full network path
+        network_path = self.get_network_path()
+        self.network_path_display.setText(f"📡 {network_path}")
+
+        # Get local path if mount point configured
+        if self._local_mount_point:
+            local_path = self.get_local_path()
+            if local_path:
+                local_path_obj = Path(local_path)
+                exists = local_path_obj.exists()
+                status = "✓ exists" if exists else "⚠ does not exist"
+                color = "green" if exists else "orange"
+                self.local_path_display.setText(
+                    f"Local equivalent: {local_path} ({status})"
+                )
+                self.local_path_display.setStyleSheet(f"color: {color}; font-size: 10pt;")
+                self.create_dir_btn.setEnabled(True)
+            else:
+                self.local_path_display.setText("Local equivalent: <invalid configuration>")
+                self.local_path_display.setStyleSheet("color: red; font-size: 10pt;")
+                self.create_dir_btn.setEnabled(False)
         else:
-            self.abs_path_display.setStyleSheet("color: orange; font-size: 10pt;")
+            self.local_path_display.setText("Local equivalent: <no mount point configured>")
+            self.local_path_display.setStyleSheet("color: gray; font-size: 10pt;")
+            self.create_dir_btn.setEnabled(False)
 
-        self.save_path_changed.emit(path)
-        self._logger.info(f"Save path changed to: {path}")
-
-    def _browse_save_path(self):
-        """Open file dialog to browse for save path."""
-        current_path = self.save_path_input.text() or str(Path.cwd())
+    def _browse_local_mount(self):
+        """Open file dialog to browse for local mount point."""
+        current_path = self.local_mount_input.text() or str(Path.cwd())
 
         directory = QFileDialog.getExistingDirectory(
             self,
-            "Select Data Save Directory",
+            "Select Local Mount Point (where network share is mounted)",
             current_path,
             QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
         )
 
         if directory:
-            self.save_path_input.setText(directory)
-            self._logger.info(f"Save path selected: {directory}")
+            self.local_mount_input.setText(directory)
+            self._logger.info(f"Local mount point selected: {directory}")
+
+    def _browse_save_path(self):
+        """Open file dialog to browse for subdirectory (only if local mount configured)."""
+        if not self._local_mount_point:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "Mount Point Required",
+                "Configure the 'Local Mount Point' first to enable browsing.\n\n"
+                "Alternatively, type the subdirectory path directly."
+            )
+            return
+
+        # Start browsing from local mount point + current subdirectory
+        start_path = Path(self._local_mount_point)
+        if self._save_path:
+            start_path = start_path / self._save_path
+
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Data Subdirectory",
+            str(start_path),
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        )
+
+        if directory:
+            # Convert absolute path to relative path from mount point
+            try:
+                rel_path = Path(directory).relative_to(Path(self._local_mount_point))
+                # Use forward slashes for consistency
+                self.save_path_input.setText(str(rel_path).replace('\\', '/'))
+                self._logger.info(f"Subdirectory selected: {rel_path}")
+            except ValueError:
+                # Selected directory is not under mount point
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self,
+                    "Invalid Selection",
+                    f"Selected directory must be under the mount point:\n{self._local_mount_point}"
+                )
 
     def _create_directory(self):
-        """Create the save directory if it doesn't exist."""
-        path = Path(self.save_path_input.text())
+        """Create the save directory locally (if mount point configured)."""
+        if not self._local_mount_point:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Cannot Create Directory",
+                "No local mount point configured.\n\n"
+                "The directory must be created on the network share manually."
+            )
+            return
+
+        local_path = self.get_local_path()
+        if not local_path:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Invalid Configuration",
+                "Cannot determine local path. Check your configuration."
+            )
+            return
 
         try:
+            path = Path(local_path)
             path.mkdir(parents=True, exist_ok=True)
             self._logger.info(f"Directory created: {path}")
-            self.abs_path_display.setText(f"Full path: {path.absolute()} ✓")
-            self.abs_path_display.setStyleSheet("color: green; font-size: 10pt;")
+            self._update_path_displays()
 
-            # Show success message briefly
+            # Show success message
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.information(
                 self,
                 "Success",
-                f"Directory created successfully:\n{path.absolute()}"
+                f"Directory created successfully:\n\n"
+                f"Local: {path}\n"
+                f"Network: {self.get_network_path()}"
             )
 
         except Exception as e:
@@ -254,12 +437,52 @@ class SampleInfoView(QWidget):
 
     def get_save_path(self) -> str:
         """
-        Get current save path.
+        Get current subdirectory path (relative).
 
         Returns:
-            Current save path string
+            Current subdirectory path string
         """
         return self._save_path
+
+    def get_network_path(self) -> str:
+        """
+        Get full network path that will be sent to microscope.
+
+        This combines the network share base with the subdirectory.
+
+        Returns:
+            Full network path in UNC format (e.g., \\\\192.168.1.2\\CTLSM1\\data\\sample1)
+        """
+        if not self._network_share_base:
+            return ""
+
+        # Ensure we're using backslashes for UNC paths
+        base = self._network_share_base.rstrip('\\/')
+
+        if self._save_path:
+            # Convert forward slashes to backslashes for Windows UNC paths
+            subdir = self._save_path.strip('/\\').replace('/', '\\')
+            return f"{base}\\{subdir}"
+        else:
+            return base
+
+    def get_local_path(self) -> Optional[str]:
+        """
+        Get local path equivalent (if mount point configured).
+
+        Returns:
+            Local path string or None if no mount point configured
+        """
+        if not self._local_mount_point:
+            return None
+
+        base = Path(self._local_mount_point)
+
+        if self._save_path:
+            # Keep path separators consistent with OS
+            return str(base / self._save_path)
+        else:
+            return str(base)
 
     def set_sample_name(self, name: str):
         """
@@ -272,9 +495,27 @@ class SampleInfoView(QWidget):
 
     def set_save_path(self, path: str):
         """
-        Set save path programmatically.
+        Set subdirectory path programmatically.
 
         Args:
-            path: Save path to set
+            path: Subdirectory path to set
         """
         self.save_path_input.setText(path)
+
+    def set_network_share_base(self, share_path: str):
+        """
+        Set network share base path programmatically.
+
+        Args:
+            share_path: Network share base path (UNC format)
+        """
+        self.network_share_input.setText(share_path)
+
+    def set_local_mount_point(self, mount_path: str):
+        """
+        Set local mount point programmatically.
+
+        Args:
+            mount_path: Local mount point path
+        """
+        self.local_mount_input.setText(mount_path)
