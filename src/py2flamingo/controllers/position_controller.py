@@ -578,24 +578,28 @@ class PositionController:
                     data_tail_str = ack_text[-100:]
                     response_type = "Text Data"
 
-                # Handle additional data (the actual content)
+                # Handle the full response data
                 if len(additional_data) > 0:
+                    # We have both ack (128 bytes) and additional data
+                    # For text responses, both parts are text, so decode the COMPLETE response
                     try:
-                        full_data_str = additional_data.decode('utf-8', errors='replace')
+                        full_data_str = response_bytes.decode('utf-8', errors='replace')
                         # Strip any trailing binary garbage (protocol end markers, etc.)
-                        # Keep only printable characters at the end
                         full_data_str = full_data_str.rstrip('\x00\r\n')
                         # Find last '>' which should be the end of the XML-like structure
                         last_bracket = full_data_str.rfind('>')
                         if last_bracket != -1 and last_bracket > len(full_data_str) - 50:
                             # There's a '>' near the end, truncate any garbage after it
                             full_data_str = full_data_str[:last_bracket + 1]
-                        self.logger.info(f"Decoded additional data: {len(full_data_str)} chars")
+                        self.logger.info(f"Decoded complete response: {len(full_data_str)} chars")
                     except:
-                        full_data_str = f"<Could not decode {len(additional_data)} bytes as text>"
+                        full_data_str = f"<Could not decode {len(response_bytes)} bytes as text>"
                 elif not is_binary_protocol:
-                    # No additional data, ack itself was text
-                    full_data_str = ack_text
+                    # No additional data, ack itself was text (only 128 bytes total)
+                    try:
+                        full_data_str = ack_response.decode('utf-8', errors='replace').rstrip('\x00\r\n')
+                    except:
+                        full_data_str = ack_text
                 else:
                     # Binary protocol with no additional data
                     full_data_str = f"<Binary protocol, no additional data>\n\n{data_tail_str}"
@@ -649,29 +653,40 @@ class PositionController:
         interpretation_lines = []
 
         interpretation_lines.append("RESPONSE ANALYSIS:")
-        interpretation_lines.append(f"  Command Code: {parsed['command_code']} (expected: {self.COMMAND_CODES_STAGE_POSITION_GET})")
-        interpretation_lines.append(f"  Status: {parsed['status_code']} (0 = success)")
-        interpretation_lines.append(f"  Value field: {parsed['value']}")
-        interpretation_lines.append(f"  Params: {parsed['params']}")
+        interpretation_lines.append(f"  Command sent: STAGE_POSITION_GET (code {self.COMMAND_CODES_STAGE_POSITION_GET})")
 
-        # Check if we have full data from file
+        # Check if we have full data
         full_data = parsed.get('full_data', '')
-        data_tail = parsed.get('data_tail_string', '')
+        data_length = parsed.get('data_length', 0)
 
-        if full_data and not full_data.startswith('<No file found'):
-            interpretation_lines.append(f"\n  ✓ Full data retrieved from file ({parsed.get('data_length', 0)} chars)")
+        if full_data and data_length > 0 and not full_data.startswith('<'):
+            interpretation_lines.append(f"\n  ✓ Received text response: {data_length} characters")
             interpretation_lines.append(f"  Data preview: {repr(full_data[:100])}")
-            interpretation_lines.append("\n  ⚠ NOTE: This appears to be settings/configuration data,")
-            interpretation_lines.append("  ⚠       NOT current position coordinates!")
-        elif data_tail and len(data_tail.strip()) > 0:
-            interpretation_lines.append(f"\n  ⚠ Only partial data available (80-byte tail from protocol)")
-            interpretation_lines.append(f"  Data tail: {repr(data_tail[:100])}")
+
+            # Check if this looks like settings data
+            if '<Type>' in full_data or 'Filter wheel' in full_data or 'Stage limits' in full_data:
+                interpretation_lines.append("\n  ⚠ UNEXPECTED BEHAVIOR DETECTED:")
+                interpretation_lines.append("  ⚠ Command STAGE_POSITION_GET returned SETTINGS data!")
+                interpretation_lines.append(f"  ⚠ This is the same data returned by SCOPE_SETTINGS_LOAD (code 4105)")
+                interpretation_lines.append("\n  This response contains:")
+                if 'Filter wheel' in full_data:
+                    interpretation_lines.append("    - Filter wheel configuration")
+                if 'Stage limits' in full_data:
+                    interpretation_lines.append("    - Stage limits and home position")
+                if '<Type>' in full_data:
+                    interpretation_lines.append("    - Microscope type and name")
+                if 'LED settings' in full_data:
+                    interpretation_lines.append("    - LED settings")
+                interpretation_lines.append("\n  But it does NOT contain:")
+                interpretation_lines.append("    - Current X, Y, Z, R position coordinates")
+                interpretation_lines.append("    - Any real-time position feedback")
         else:
-            interpretation_lines.append("\n  Data section is empty or binary")
+            interpretation_lines.append(f"\n  Response type: {parsed.get('response_type', 'Unknown')}")
+            interpretation_lines.append(f"  Data available: {data_length} characters")
 
         interpretation_lines.append("\n  CONCLUSION:")
-        interpretation_lines.append("  This command does NOT return current stage position.")
-        interpretation_lines.append("  The microscope does not report actual position via this command.")
+        interpretation_lines.append("  STAGE_POSITION_GET does NOT return current stage position.")
+        interpretation_lines.append("  Instead, it returns microscope configuration settings.")
         interpretation_lines.append("\n  Without position feedback:")
         interpretation_lines.append("  - Software must track position locally (can drift)")
         interpretation_lines.append("  - Cannot detect manual stage movement")

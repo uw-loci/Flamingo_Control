@@ -410,10 +410,18 @@ class ConnectionView(QWidget):
             text += "\n" + "=" * 70 + "\n\n"
 
             text += "QUESTIONS FOR MAINTAINER:\n"
-            text += "1. Is there a command that returns CURRENT position?\n"
-            text += "2. Can the stage controller be queried for actual position?\n"
-            text += "3. What does STAGE_POSITION_GET actually return?\n"
-            text += "4. Is position feedback available through another method?\n"
+            text += "\n"
+            text += "1. Why does STAGE_POSITION_GET (24584) return settings data\n"
+            text += "   instead of position coordinates?\n"
+            text += "\n"
+            text += "2. Is there a different command that returns CURRENT position?\n"
+            text += "   We need: current X (mm), Y (mm), Z (mm), R (degrees)\n"
+            text += "\n"
+            text += "3. Does the stage controller support position feedback?\n"
+            text += "   Can encoders/sensors report actual position?\n"
+            text += "\n"
+            text += "4. If no position feedback exists, is this a known limitation?\n"
+            text += "   Should software track position locally only?\n"
 
         else:
             text = "ERROR:\n" + result.get('error', 'Unknown error')
