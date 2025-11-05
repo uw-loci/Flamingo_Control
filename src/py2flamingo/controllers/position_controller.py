@@ -633,6 +633,25 @@ class PositionController:
                     'raw_response': response_bytes
                 }
 
+        except (socket.timeout, TimeoutError) as e:
+            self.logger.error(f"Timeout waiting for response from STAGE_POSITION_GET")
+            return {
+                'success': False,
+                'error': 'timeout',
+                'timeout_explanation': (
+                    f"No response from microscope after sending STAGE_POSITION_GET (code {self.COMMAND_CODES_STAGE_POSITION_GET}).\n\n"
+                    "This likely means:\n"
+                    "1. Command is NOT IMPLEMENTED in microscope firmware\n"
+                    "2. Command is defined in CommandCodes.h but never used\n"
+                    "3. Microscope ignores unknown/unimplemented commands\n\n"
+                    "Evidence:\n"
+                    "- Old code never uses STAGE_POSITION_GET\n"
+                    "- No handler exists in command_listen_thread\n"
+                    "- Microscope does not respond (no ack, no data)\n\n"
+                    "Conclusion: STAGE_POSITION_GET is likely a placeholder that was\n"
+                    "never implemented. Position feedback is not available."
+                )
+            }
         except Exception as e:
             self.logger.error(f"Failed to query position: {e}", exc_info=True)
             return {

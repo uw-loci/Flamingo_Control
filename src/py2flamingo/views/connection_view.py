@@ -424,7 +424,27 @@ class ConnectionView(QWidget):
             text += "   Should software track position locally only?\n"
 
         else:
-            text = "ERROR:\n" + result.get('error', 'Unknown error')
+            error_type = result.get('error', 'Unknown error')
+
+            if error_type == 'timeout':
+                # Special handling for timeout - means command not implemented
+                text = "=" * 70 + "\n"
+                text += "COMMAND TIMEOUT - NO RESPONSE FROM MICROSCOPE\n"
+                text += "=" * 70 + "\n\n"
+                text += result.get('timeout_explanation', 'Timeout waiting for response')
+                text += "\n\n" + "=" * 70 + "\n"
+                text += "SAFE COMMANDS TO TEST:\n"
+                text += "=" * 70 + "\n"
+                text += "These commands query status without moving the stage:\n\n"
+                text += "1. SYSTEM_STATE_GET (40967)\n"
+                text += "   - Should return current system state (idle, busy, etc.)\n\n"
+                text += "2. STAGE_MOTION_STOPPED (24592)\n"
+                text += "   - Checks if stage motion has stopped\n\n"
+                text += "3. COMMON_SCOPE_SETTINGS (4103)\n"
+                text += "   - Different from LOAD, might query current settings\n\n"
+                text += "Ask maintainer which commands are actually implemented.\n"
+            else:
+                text = "ERROR:\n" + error_type
 
         text_edit.setPlainText(text)
         layout.addWidget(text_edit)
