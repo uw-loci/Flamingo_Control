@@ -59,20 +59,20 @@ class PositionController:
         self.logger = logging.getLogger(__name__)
         self.axis = AxisCode()
     
-    def go_to_position(self, position: Position, 
+    def go_to_position(self, position: Position,
                       validate: bool = True,
                       callback: Optional[Callable[[str], None]] = None) -> None:
         """
         Move microscope to specified position.
-        
+
         This method replaces the original go_to_position function with
         improved error handling and progress reporting.
-        
+
         Args:
             position: Target position
             validate: Whether to validate position before movement
             callback: Optional callback for progress updates
-            
+
         Raises:
             ValueError: If position is invalid
             RuntimeError: If not connected to microscope
@@ -80,22 +80,31 @@ class PositionController:
         # Check connection
         if not self.connection.is_connected():
             raise RuntimeError("Not connected to microscope")
-        
+
         # Validate position if requested
         if validate:
             self._validate_position(position)
-        
-        self.logger.info(f"Moving to position: {position}")
-        
+
+        self.logger.info(f"Moving to position: X={position.x:.3f}, Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.1f}°")
+
         # Original comment from go_to_position:
         # Look in the functions/command_list.txt file for other command codes, or add more
-        
+
         # Send movement commands for each axis
         self._move_axis(self.axis.X, position.x, "X-axis")
-        self._move_axis(self.axis.Z, position.z, "Z-axis")  
+        self._move_axis(self.axis.Z, position.z, "Z-axis")
         self._move_axis(self.axis.R, position.r, "Rotation")
         self._move_axis(self.axis.Y, position.y, "Y-axis")  # Y-axis last as in original
-        
+
+        # Request and log current position after movement
+        import time
+        time.sleep(0.3)  # Give microscope time to complete movement
+        actual_position = self.get_current_position()
+        if actual_position:
+            self.logger.info(f"Movement complete. Microscope reports position: X={actual_position.x:.3f}, Y={actual_position.y:.3f}, Z={actual_position.z:.3f}, R={actual_position.r:.1f}°")
+        else:
+            self.logger.info("Movement complete (position confirmation unavailable)")
+
         if callback:
             callback("Movement complete")
     
@@ -180,7 +189,7 @@ class PositionController:
     def get_current_position(self) -> Optional[Position]:
         """
         Get current position from microscope.
-        
+
         Returns:
             Optional[Position]: Current position or None if error
         """
@@ -188,12 +197,33 @@ class PositionController:
             # Send get position command
             self.queue_manager.put_nowait('command', self.COMMAND_CODES_STAGE_POSITION_GET)
             self.event_manager.set_event('send')
-            
-            # Wait for response (this would need proper implementation)
-            # For now, return None
-            self.logger.warning("Get position not fully implemented")
-            return None
-            
+
+            # Wait for response from 'other_data' queue
+            import time
+            time.sleep(0.2)  # Give microscope time to respond
+
+            try:
+                # Try to get position data from other_data queue
+                position_data = self.queue_manager.get_nowait('other_data')
+
+                # Position data should be [x, y, z, r]
+                if position_data and len(position_data) >= 4:
+                    position = Position(
+                        x=float(position_data[0]),
+                        y=float(position_data[1]),
+                        z=float(position_data[2]),
+                        r=float(position_data[3])
+                    )
+                    self.logger.info(f"Current position: X={position.x:.3f}, Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.1f}°")
+                    return position
+                else:
+                    self.logger.warning(f"Invalid position data received: {position_data}")
+                    return None
+
+            except Exception as e:
+                self.logger.debug(f"No position data in queue: {e}")
+                return None
+
         except Exception as e:
             self.logger.error(f"Failed to get position: {e}")
             return None

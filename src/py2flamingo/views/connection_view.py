@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QSpinBox, QComboBox, QGroupBox, QTextEdit
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 
 
 class ConnectionView(QWidget):
@@ -24,6 +24,9 @@ class ConnectionView(QWidget):
 
     The view is dumb - all logic is handled by the controller.
     """
+
+    # Signals
+    connection_established = pyqtSignal()  # Emitted when connection succeeds
 
     def __init__(self, controller, config_manager=None):
         """Initialize connection view with controller.
@@ -211,6 +214,9 @@ class ConnectionView(QWidget):
             # Pull and display microscope settings
             self._logger.info("ConnectionView: Calling _load_and_display_settings()")
             self._load_and_display_settings()
+            # Emit connection established signal
+            self.connection_established.emit()
+            self._logger.debug("ConnectionView: Emitted connection_established signal")
 
     def _on_disconnect_clicked(self) -> None:
         """Handle disconnect button click.

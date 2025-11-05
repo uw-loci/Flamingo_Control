@@ -25,7 +25,7 @@ from py2flamingo.services import (
     MVCConnectionService, MVCWorkflowService, StatusService, ConfigurationManager
 )
 from py2flamingo.controllers import ConnectionController, WorkflowController
-from py2flamingo.views import ConnectionView, WorkflowView
+from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView
 from py2flamingo.views.live_feed_view import LiveFeedView
 
 
@@ -88,6 +88,7 @@ class FlamingoApplication:
         # Views layer components
         self.connection_view: Optional[ConnectionView] = None
         self.workflow_view: Optional[WorkflowView] = None
+        self.sample_info_view: Optional[SampleInfoView] = None
         self.live_feed_view: Optional[LiveFeedView] = None
 
         # Setup logging
@@ -168,6 +169,10 @@ class FlamingoApplication:
         )
         self.workflow_view = WorkflowView(self.workflow_controller)
 
+        # Create sample info view
+        self.logger.debug("Creating sample info view...")
+        self.sample_info_view = SampleInfoView()
+
         # Create live feed view with visualize queue from connection service
         self.logger.debug("Creating live feed view...")
         visualize_queue = self.connection_service.queue_manager.get_queue('visualize')
@@ -183,7 +188,30 @@ class FlamingoApplication:
             self.logger.debug(f"Setting CLI defaults: {self.default_ip}:{self.default_port}")
             self.connection_view.set_connection_info(self.default_ip, self.default_port)
 
+        # Connect signals for position updates
+        # When connection is established, request position update from microscope
+        if hasattr(self.connection_view, 'connection_established'):
+            self.connection_view.connection_established.connect(
+                lambda: self._on_connection_established()
+            )
+            self.logger.debug("Connected connection_established signal to position update")
+
         self.logger.info("Application dependencies setup complete")
+
+    def _on_connection_established(self):
+        """Handle connection established event.
+
+        This method is called when connection to the microscope is successfully
+        established. It requests the current position from the microscope to
+        update the position display.
+        """
+        self.logger.info("Connection established, requesting position update...")
+        if self.live_feed_view and hasattr(self.live_feed_view, 'request_position_update'):
+            # Small delay to ensure connection is fully established
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(500, self.live_feed_view.request_position_update)
+        else:
+            self.logger.warning("Cannot request position: live_feed_view not available")
 
     def create_main_window(self):
         """Create main application window by composing views.
@@ -202,6 +230,7 @@ class FlamingoApplication:
         self.main_window = MainWindow(
             self.connection_view,
             self.workflow_view,
+            self.sample_info_view,
             self.live_feed_view
         )
         self.main_window.setWindowTitle("Flamingo Microscope Control")

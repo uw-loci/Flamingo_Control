@@ -693,6 +693,27 @@ class LiveFeedView(QWidget):
         self.r_spinbox.setValue(position.r)
         self._update_position_display()
 
+    def request_position_update(self) -> None:
+        """
+        Request position update from microscope.
+
+        This method should be called after connection is established
+        to initialize the position display with actual microscope position.
+        """
+        if self.position_controller is None:
+            self._logger.warning("Cannot request position: position_controller not available")
+            return
+
+        try:
+            position = self.position_controller.get_current_position()
+            if position:
+                self.update_position(position)
+                self._logger.info(f"Position updated from microscope: {position}")
+            else:
+                self._logger.warning("Could not retrieve position from microscope")
+        except Exception as e:
+            self._logger.error(f"Error requesting position update: {e}")
+
     # Laser control methods
     def _on_laser_changed(self, laser_channel: str) -> None:
         """
