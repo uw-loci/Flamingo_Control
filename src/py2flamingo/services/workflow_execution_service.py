@@ -34,8 +34,8 @@ class WorkflowExecutionService:
         logger: Logger instance
     """
 
-    # Command codes from CommandCodes.h
-    COMMAND_CODES_CAMERA_CHECK_STACK = 12335
+    # Command codes from CommandCodes.h (verified 2025-11-05)
+    COMMAND_CODES_CAMERA_CHECK_STACK = 12331  # Fixed: was 12335
     COMMAND_CODES_CAMERA_WORK_FLOW_START = 12292
     COMMAND_CODES_SYSTEM_STATE_GET = 40967
     COMMAND_CODES_SYSTEM_STATE_IDLE = 40962

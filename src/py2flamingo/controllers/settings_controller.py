@@ -32,9 +32,9 @@ class SettingsController:
         logger: Logger instance
     """
     
-    # Command codes from command_list.txt
+    # Command codes from CommandCodes.h (verified 2025-11-05)
     COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = 4105
-    COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE = 4107
+    COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE = 4104  # Fixed: was 4107 (CONTROL_SETTINGS_SAVE)
     
     def __init__(self,
                  connection_service: ConnectionService,

@@ -226,7 +226,7 @@ class ConnectionService:
         scope_settings = text_to_dict(str(settings_path))
         
         # Get pixel size
-        COMMAND_CODES_CAMERA_PIXEL_FIELD_OF_VIEW_GET = 12347
+        COMMAND_CODES_CAMERA_PIXEL_FIELD_OF_VIEW_GET = 12343  # Fixed: was 12347
         self.send_command(COMMAND_CODES_CAMERA_PIXEL_FIELD_OF_VIEW_GET)
         
         # Wait for response and get from queue
@@ -743,7 +743,7 @@ class MVCConnectionService:
             self.logger.info(f"Loaded {len(scope_settings)} setting sections")
 
             # Step 3: Get pixel size from microscope
-            COMMAND_CODES_CAMERA_PIXEL_FIELD_OF_VIEW_GET = 12347
+            COMMAND_CODES_CAMERA_PIXEL_FIELD_OF_VIEW_GET = 12343  # Fixed: was 12347
             cmd_pixel = Command(code=COMMAND_CODES_CAMERA_PIXEL_FIELD_OF_VIEW_GET)
 
             self.logger.debug("Sending PIXEL_FIELD_OF_VIEW_GET command")
