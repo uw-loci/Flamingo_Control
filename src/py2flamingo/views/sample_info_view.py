@@ -287,7 +287,7 @@ class SampleInfoView(QWidget):
             self.sample_name_display.setStyleSheet("color: gray; font-style: italic;")
 
         self.sample_name_changed.emit(name)
-        self._logger.info(f"Sample name changed to: {name}")
+        # Note: Don't log on every keystroke - logging done when used in actions
 
     def _on_network_share_changed(self, share_path: str):
         """
@@ -298,7 +298,7 @@ class SampleInfoView(QWidget):
         """
         self._network_share_base = share_path
         self._update_path_displays()
-        self._logger.info(f"Network share base changed to: {share_path}")
+        # Note: Don't log on every keystroke - logging done when used in actions
 
     def _on_local_mount_changed(self, mount_path: str):
         """
@@ -309,7 +309,7 @@ class SampleInfoView(QWidget):
         """
         self._local_mount_point = mount_path if mount_path else None
         self._update_path_displays()
-        self._logger.info(f"Local mount point changed to: {mount_path}")
+        # Note: Don't log on every keystroke - logging done when used in actions
 
     def _on_save_path_changed(self, path: str):
         """
@@ -324,7 +324,7 @@ class SampleInfoView(QWidget):
         # Emit the full network path that will be sent to microscope
         full_network_path = self.get_network_path()
         self.save_path_changed.emit(full_network_path)
-        self._logger.info(f"Subdirectory changed to: {path}")
+        # Note: Don't log on every keystroke - logging done when used in actions
 
     def _update_path_displays(self):
         """Update the path display labels with current configuration."""
