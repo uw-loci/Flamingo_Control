@@ -140,7 +140,7 @@ class SampleInfoView(QWidget):
         mount_layout.addWidget(QLabel("Local Mount Point (optional):"))
 
         self.local_mount_input = QLineEdit()
-        self.local_mount_input.setPlaceholderText(r"D:\microscope_data or leave empty")
+        self.local_mount_input.setPlaceholderText(r"Z:\ or D:\microscope_data (must be the network share)")
         self.local_mount_input.textChanged.connect(self._on_local_mount_changed)
         mount_layout.addWidget(self.local_mount_input)
 
@@ -149,6 +149,18 @@ class SampleInfoView(QWidget):
         mount_layout.addWidget(browse_mount_btn)
 
         layout.addLayout(mount_layout)
+
+        # Warning about mount point
+        mount_warning = QLabel(
+            "⚠ Local Mount Point must be where the network share is mounted/mapped on YOUR PC. "
+            "Example: If \\\\192.168.1.2\\CTLSM1 is mapped to Z:\\, enter Z:\\"
+        )
+        mount_warning.setWordWrap(True)
+        mount_warning.setStyleSheet(
+            "color: #d35400; font-size: 9pt; padding: 3px; "
+            "background-color: #fef5e7; border-left: 3px solid #d35400;"
+        )
+        layout.addWidget(mount_warning)
 
         group.setLayout(layout)
         return group
@@ -196,12 +208,28 @@ class SampleInfoView(QWidget):
         self.local_path_display.setWordWrap(True)
         layout.addWidget(self.local_path_display)
 
-        # Create directory button
-        create_dir_layout = QHBoxLayout()
-        self.create_dir_btn = QPushButton("Create Directory (if mounted locally)")
+        # Create directory button with warning
+        create_dir_layout = QVBoxLayout()
+
+        btn_layout = QHBoxLayout()
+        self.create_dir_btn = QPushButton("Create Directory Locally")
         self.create_dir_btn.clicked.connect(self._create_directory)
-        create_dir_layout.addWidget(self.create_dir_btn)
-        create_dir_layout.addStretch()
+        self.create_dir_btn.setToolTip(
+            "Creates directory at the local mount point.\n"
+            "Only works if mount point is properly configured as the network share."
+        )
+        btn_layout.addWidget(self.create_dir_btn)
+        btn_layout.addStretch()
+        create_dir_layout.addLayout(btn_layout)
+
+        # Warning label
+        create_warning = QLabel(
+            "⚠ Only creates locally! Directory must be within the network share to be accessible to microscope."
+        )
+        create_warning.setWordWrap(True)
+        create_warning.setStyleSheet("color: #d35400; font-size: 9pt; font-style: italic;")
+        create_dir_layout.addWidget(create_warning)
+
         layout.addLayout(create_dir_layout)
 
         # Initial update
@@ -222,15 +250,19 @@ class SampleInfoView(QWidget):
 
         info_text = QLabel(
             "<b>Network Share Base:</b> The base UNC path that the microscope PC can access.<br>"
-            "<b>Local Mount Point:</b> (Optional) Where the share is mounted on your PC for browsing.<br>"
+            "<b>Local Mount Point:</b> (Optional) Where the share is mounted/mapped on YOUR PC.<br>"
             "<b>Subdirectory:</b> Relative path appended to network share base.<br>"
             "<b>Sample Name:</b> Used to identify and organize acquired images.<br><br>"
             "<b>Example Configuration:</b><br>"
             "• Network Share: <code>\\\\192.168.1.2\\CTLSM1</code><br>"
-            "• Local Mount: <code>D:\\microscope_data</code><br>"
+            "• Local Mount: <code>Z:\\</code> (if share is mapped to Z: drive)<br>"
             "• Subdirectory: <code>data/sample1</code><br>"
             "• Result: Microscope saves to <code>\\\\192.168.1.2\\CTLSM1\\data\\sample1</code><br><br>"
-            "<b>Note:</b> The microscope saves the data, so paths must be from its perspective!"
+            "<b>⚠ Important:</b><br>"
+            "• The microscope saves the data, so paths must be from its perspective<br>"
+            "• Local Mount Point MUST be the actual network share (mapped or direct)<br>"
+            "• Creating directories locally only works if mount point is correctly configured<br>"
+            "• Directories created must be INSIDE the shared folder to be accessible"
         )
         info_text.setWordWrap(True)
         info_text.setStyleSheet("color: #555; font-size: 9pt; padding: 10px;")
@@ -385,7 +417,8 @@ class SampleInfoView(QWidget):
                 self,
                 "Cannot Create Directory",
                 "No local mount point configured.\n\n"
-                "The directory must be created on the network share manually."
+                "Configure the 'Local Mount Point' first, ensuring it points to "
+                "where the network share is mounted on your PC."
             )
             return
 
@@ -399,20 +432,40 @@ class SampleInfoView(QWidget):
             )
             return
 
+        # Confirmation dialog with warning
+        from PyQt5.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "Create Directory",
+            f"This will create the directory locally at:\n{local_path}\n\n"
+            f"⚠ IMPORTANT: This will only work if your 'Local Mount Point' "
+            f"is configured as the network share location.\n\n"
+            f"The microscope will access it via:\n{self.get_network_path()}\n\n"
+            f"Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply != QMessageBox.Yes:
+            return
+
         try:
             path = Path(local_path)
             path.mkdir(parents=True, exist_ok=True)
             self._logger.info(f"Directory created: {path}")
             self._update_path_displays()
 
-            # Show success message
+            # Show success message with reminder
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.information(
                 self,
-                "Success",
-                f"Directory created successfully:\n\n"
-                f"Local: {path}\n"
-                f"Network: {self.get_network_path()}"
+                "Directory Created",
+                f"Directory created locally:\n{path}\n\n"
+                f"Microscope will access via:\n{self.get_network_path()}\n\n"
+                f"✓ If your mount point is configured correctly, the microscope "
+                f"can now access this directory.\n\n"
+                f"⚠ If microscope cannot access it, verify that your Local Mount Point "
+                f"is actually the network share location."
             )
 
         except Exception as e:
