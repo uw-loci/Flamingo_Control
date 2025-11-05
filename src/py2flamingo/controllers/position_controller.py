@@ -40,22 +40,15 @@ class PositionController:
     # Command codes from command_list.txt
     COMMAND_CODES_STAGE_POSITION_SET = 24580
     COMMAND_CODES_STAGE_POSITION_GET = 24584
-    
-    def __init__(self, 
-                 connection_service: ConnectionService,
-                 queue_manager: QueueManager,
-                 event_manager: EventManager):
+
+    def __init__(self, connection_service):
         """
         Initialize the position controller.
-        
+
         Args:
-            connection_service: Service for microscope communication
-            queue_manager: Queue manager for commands
-            event_manager: Event manager for synchronization
+            connection_service: MVCConnectionService for microscope communication
         """
         self.connection = connection_service
-        self.queue_manager = queue_manager
-        self.event_manager = event_manager
         self.logger = logging.getLogger(__name__)
         self.axis = AxisCode()
     
@@ -129,9 +122,9 @@ class PositionController:
     def _move_axis(self, axis_code: int, value: float, axis_name: str) -> None:
         """
         Move a specific axis to the specified value.
-        
+
         This is the refactored version of move_axis from microscope_connect.py.
-        
+
         Args:
             axis_code: The code of the axis to move
             value: The value to move the axis to
@@ -141,15 +134,21 @@ class PositionController:
         self.logger.debug(f"Moving {axis_name} to {value}")
 
         try:
-            # Put command data in queue
-            command_data = [axis_code, 0, 0, value]
-            self.queue_manager.put_nowait('command_data', command_data)
+            # The old system sent [axis_code, 0, 0, value] as command_data
+            # In the protocol: params[0]=axis_code, value=position_value
+            from py2flamingo.models.command import Command
 
-            # Put command in queue
-            self.queue_manager.put_nowait('command', self.COMMAND_CODES_STAGE_POSITION_SET)
+            cmd = Command(
+                code=self.COMMAND_CODES_STAGE_POSITION_SET,
+                parameters={
+                    'params': [axis_code, 0, 0, 0, 0, 0, 0],  # 7 params, first is axis code
+                    'value': value  # Position value
+                }
+            )
 
-            # Trigger send event
-            self.event_manager.set_event('send')
+            response_bytes = self.connection.send_command(cmd)
+
+            self.logger.debug(f"Move {axis_name} to {value} command sent, got {len(response_bytes)} byte response")
 
         except Exception as e:
             self.logger.error(f"Failed to move {axis_name}: {e}")
@@ -190,40 +189,55 @@ class PositionController:
         """
         Get current position from microscope.
 
+        Sends STAGE_POSITION_GET command and parses the 128-byte response.
+
         Returns:
             Optional[Position]: Current position or None if error
         """
+        from py2flamingo.models.command import Command
+        from py2flamingo.core.tcp_protocol import ProtocolDecoder
+
         try:
-            # Send get position command
-            self.queue_manager.put_nowait('command', self.COMMAND_CODES_STAGE_POSITION_GET)
-            self.event_manager.set_event('send')
+            # Create position get command
+            cmd = Command(code=self.COMMAND_CODES_STAGE_POSITION_GET)
 
-            # Wait for response from 'other_data' queue
-            import time
-            time.sleep(0.2)  # Give microscope time to respond
+            self.logger.debug(f"Sending position get command (code={cmd.code})")
 
-            try:
-                # Try to get position data from other_data queue
-                position_data = self.queue_manager.get_nowait('other_data')
+            # Send command and get response via command socket
+            response_bytes = self.connection.send_command(cmd)
 
-                # Position data should be [x, y, z, r]
-                if position_data and len(position_data) >= 4:
-                    position = Position(
-                        x=float(position_data[0]),
-                        y=float(position_data[1]),
-                        z=float(position_data[2]),
-                        r=float(position_data[3])
-                    )
-                    self.logger.info(f"Current position: X={position.x:.3f}, Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.1f}°")
-                    return position
-                else:
-                    self.logger.warning(f"Invalid position data received: {position_data}")
-                    return None
+            self.logger.debug(f"Received {len(response_bytes)} bytes response for position request")
 
-            except Exception as e:
-                self.logger.debug(f"No position data in queue: {e}")
+            # Decode response
+            decoder = ProtocolDecoder()
+            response = decoder.decode_command(response_bytes)
+
+            # Check if response is valid
+            if not response.get('valid', False):
+                self.logger.error("Invalid response received (bad markers)")
                 return None
 
+            # Extract position from response params
+            # The microscope returns position in params[0:4] as [x, y, z, r]
+            params = response.get('params', [])
+
+            if len(params) >= 4:
+                position = Position(
+                    x=float(params[0]),
+                    y=float(params[1]),
+                    z=float(params[2]),
+                    r=float(params[3])
+                )
+                self.logger.info(f"Current position: X={position.x:.3f}, Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.1f}°")
+                return position
+            else:
+                self.logger.warning(f"Response has insufficient params: {len(params)} (expected >=4)")
+                self.logger.debug(f"Response params: {params}")
+                return None
+
+        except RuntimeError as e:
+            self.logger.error(f"Connection error getting position: {e}")
+            return None
         except Exception as e:
-            self.logger.error(f"Failed to get position: {e}")
+            self.logger.error(f"Failed to get position: {e}", exc_info=True)
             return None

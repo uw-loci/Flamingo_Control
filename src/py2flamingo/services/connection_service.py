@@ -485,11 +485,19 @@ class MVCConnectionService:
             raise RuntimeError("Not connected to microscope")
 
         try:
+            # Extract params and value from command parameters dict if present
+            params = cmd.parameters.get('params', None)
+            value = cmd.parameters.get('value', 0.0)
+            data = cmd.parameters.get('data', b'')
+
             # Encode command using ProtocolEncoder
-            # Note: params defaults to [0]*7 if not specified
+            # Note: params defaults to [0]*7 if not specified in encoder
             cmd_bytes = self.encoder.encode_command(
                 code=cmd.code,
-                status=0
+                status=0,
+                params=params,
+                value=value,
+                data=data
             )
 
             # Send via command socket
@@ -499,7 +507,7 @@ class MVCConnectionService:
                 # Receive response (128 bytes expected)
                 response = self._command_socket.recv(128)
 
-                self.logger.debug(f"Sent command {cmd.code}, got {len(response)} bytes response")
+                self.logger.debug(f"Sent command {cmd.code} (params={params}, value={value}), got {len(response)} bytes response")
                 return response
             else:
                 raise ConnectionError("Command socket not available")

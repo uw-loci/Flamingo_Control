@@ -24,7 +24,7 @@ from py2flamingo.models import (
 from py2flamingo.services import (
     MVCConnectionService, MVCWorkflowService, StatusService, ConfigurationManager
 )
-from py2flamingo.controllers import ConnectionController, WorkflowController
+from py2flamingo.controllers import ConnectionController, WorkflowController, PositionController
 from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView
 from py2flamingo.views.live_feed_view import LiveFeedView
 
@@ -161,6 +161,10 @@ class FlamingoApplication:
             self.workflow_model
         )
 
+        self.position_controller = PositionController(
+            self.connection_service
+        )
+
         # Views layer - UI components
         self.logger.debug("Creating views layer components...")
         self.connection_view = ConnectionView(
@@ -180,6 +184,7 @@ class FlamingoApplication:
             workflow_controller=self.workflow_controller,
             visualize_queue=visualize_queue,
             display_model=self.display_model,
+            position_controller=self.position_controller,
             update_interval_ms=500  # Poll every 500ms
         )
 
