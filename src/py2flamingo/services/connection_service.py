@@ -486,10 +486,10 @@ class MVCConnectionService:
 
         try:
             # Encode command using ProtocolEncoder
+            # Note: params defaults to [0]*7 if not specified
             cmd_bytes = self.encoder.encode_command(
                 code=cmd.code,
-                status=0,
-                parameters=cmd.parameters
+                status=0
             )
 
             # Send via command socket
