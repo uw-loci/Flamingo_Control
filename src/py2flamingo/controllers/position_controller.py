@@ -7,6 +7,7 @@ This controller handles all position-related operations including
 movement, validation, and position tracking.
 """
 import logging
+import socket
 from typing import List, Optional, Callable
 from dataclasses import dataclass
 
@@ -189,61 +190,135 @@ class PositionController:
         """
         Get current position from microscope.
 
-        Sends STAGE_POSITION_GET command and parses the 128-byte response.
+        Sends STAGE_POSITION_GET command and parses the text response.
+        Unlike binary commands, position queries return text data that needs
+        to be parsed.
 
         Returns:
             Optional[Position]: Current position or None if error
         """
+        import select
         from py2flamingo.models.command import Command
-        from py2flamingo.core.tcp_protocol import ProtocolDecoder
 
         try:
             # Create position get command
             cmd = Command(code=self.COMMAND_CODES_STAGE_POSITION_GET)
 
-            self.logger.debug(f"Sending position get command (code={cmd.code})")
+            self.logger.info(f"Sending position get command (code={cmd.code})")
 
-            # Send command and get response via command socket
+            # Send command via command socket
             response_bytes = self.connection.send_command(cmd)
 
-            self.logger.debug(f"Received {len(response_bytes)} bytes response for position request")
+            self.logger.info(f"Received {len(response_bytes)} bytes header response")
+            self.logger.info(f"Header (first 64 bytes hex): {response_bytes[:64].hex()}")
+            self.logger.info(f"Header (as text): {response_bytes.decode('utf-8', errors='replace')}")
 
-            # Log raw response for debugging
-            self.logger.debug(f"Raw response (first 32 bytes): {response_bytes[:32].hex()}")
+            # Check if there's additional text data waiting (like settings command does)
+            # Use select to check if data is available without blocking
+            import time
+            time.sleep(0.1)  # Give microscope time to send additional data
 
-            # Decode response
-            decoder = ProtocolDecoder()
-            response = decoder.decode_command(response_bytes)
+            # Get the command socket from connection service
+            if hasattr(self.connection, '_command_socket') and self.connection._command_socket:
+                sock = self.connection._command_socket
 
-            # Check if response is valid
-            if not response.get('valid', False):
-                self.logger.error("Invalid response received (bad markers)")
-                self.logger.error(f"Start marker: 0x{response.get('start_marker', 0):08X} (expected: 0xF321E654)")
-                self.logger.error(f"End marker: 0x{response.get('end_marker', 0):08X} (expected: 0xFEDC4321)")
-                self.logger.error(f"Full response data: {response}")
-                return None
+                # Check if there's more data waiting
+                ready, _, _ = select.select([sock], [], [], 0.5)
 
-            # Extract position from response params
-            # The microscope returns position in params[0:4] as [x, y, z, r]
-            params = response.get('params', [])
+                if ready:
+                    # Peek to see how much data is available
+                    sock.setblocking(0)
+                    peek_data = sock.recv(80000, socket.MSG_PEEK)
+                    bytes_available = len(peek_data)
+                    sock.setblocking(1)
 
-            if len(params) >= 4:
-                position = Position(
-                    x=float(params[0]),
-                    y=float(params[1]),
-                    z=float(params[2]),
-                    r=float(params[3])
-                )
-                self.logger.info(f"Current position: X={position.x:.3f}, Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.1f}°")
-                return position
+                    if bytes_available > 0:
+                        self.logger.info(f"Additional {bytes_available} bytes of text data available")
+                        text_data = sock.recv(bytes_available)
+                        self.logger.info(f"Text response: {text_data.decode('utf-8', errors='replace')}")
+
+                        # Try to parse position from text
+                        position = self._parse_position_from_text(text_data)
+                        if position:
+                            return position
+                    else:
+                        self.logger.info("No additional text data available")
+                else:
+                    self.logger.info("No additional data ready on socket")
             else:
-                self.logger.warning(f"Response has insufficient params: {len(params)} (expected >=4)")
-                self.logger.debug(f"Response params: {params}")
-                return None
+                self.logger.warning("Cannot access command socket for additional data")
+
+            # If we get here, we couldn't parse position from text
+            # Try to parse from the header response as fallback
+            self.logger.warning("Could not retrieve position from text response")
+            self.logger.warning("Position query may not be supported by this microscope version")
+            return None
 
         except RuntimeError as e:
             self.logger.error(f"Connection error getting position: {e}")
             return None
         except Exception as e:
             self.logger.error(f"Failed to get position: {e}", exc_info=True)
+            return None
+
+    def _parse_position_from_text(self, text_data: bytes) -> Optional[Position]:
+        """
+        Parse position from text response.
+
+        Args:
+            text_data: Raw text bytes from microscope
+
+        Returns:
+            Position if successfully parsed, None otherwise
+        """
+        try:
+            text = text_data.decode('utf-8', errors='replace')
+            self.logger.debug(f"Parsing position from text: {text[:200]}")
+
+            # Look for patterns like "X position = 10.5" or "Stage X = 10.5"
+            # This will depend on the actual format - we'll see from logs
+            import re
+
+            # Try various possible patterns
+            patterns = [
+                # Pattern: "X position = 10.5" or "X = 10.5"
+                r'[Xx]\s*(?:position\s*)?=\s*([-+]?\d+\.?\d*)',
+                r'[Yy]\s*(?:position\s*)?=\s*([-+]?\d+\.?\d*)',
+                r'[Zz]\s*(?:position\s*)?=\s*([-+]?\d+\.?\d*)',
+                r'[Rr]\s*(?:position\s*)?=\s*([-+]?\d+\.?\d*)',
+            ]
+
+            # Try to extract x, y, z, r values
+            x = y = z = r = None
+
+            # Look for stage position section
+            if 'stage' in text.lower() or 'position' in text.lower():
+                for line in text.split('\n'):
+                    if 'x' in line.lower() and '=' in line:
+                        match = re.search(patterns[0], line, re.IGNORECASE)
+                        if match:
+                            x = float(match.group(1))
+                    if 'y' in line.lower() and '=' in line:
+                        match = re.search(patterns[1], line, re.IGNORECASE)
+                        if match:
+                            y = float(match.group(1))
+                    if 'z' in line.lower() and '=' in line:
+                        match = re.search(patterns[2], line, re.IGNORECASE)
+                        if match:
+                            z = float(match.group(1))
+                    if 'r' in line.lower() and '=' in line:
+                        match = re.search(patterns[3], line, re.IGNORECASE)
+                        if match:
+                            r = float(match.group(1))
+
+            if all(v is not None for v in [x, y, z, r]):
+                position = Position(x=x, y=y, z=z, r=r)
+                self.logger.info(f"Parsed position: X={position.x:.3f}, Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.1f}°")
+                return position
+            else:
+                self.logger.warning(f"Could not extract all position values from text (x={x}, y={y}, z={z}, r={r})")
+                return None
+
+        except Exception as e:
+            self.logger.error(f"Error parsing position text: {e}", exc_info=True)
             return None
