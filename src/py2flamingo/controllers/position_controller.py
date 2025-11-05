@@ -374,6 +374,45 @@ class PositionController:
 
         return self._current_position
 
+    def _receive_full_bytes(self, sock: socket.socket, expected_size: int, timeout: float = 5.0) -> bytes:
+        """
+        Receive exact number of bytes from socket.
+
+        Args:
+            sock: Socket to read from
+            expected_size: Exact number of bytes to read
+            timeout: Timeout in seconds
+
+        Returns:
+            Bytes read from socket
+
+        Raises:
+            socket.timeout: If timeout expires
+            socket.error: If socket error occurs
+        """
+        import time
+        data = b''
+        start_time = time.time()
+        original_timeout = sock.gettimeout()
+
+        try:
+            sock.settimeout(timeout)
+
+            while len(data) < expected_size:
+                if time.time() - start_time > timeout:
+                    raise socket.timeout(f"Timeout reading {expected_size} bytes (got {len(data)})")
+
+                remaining = expected_size - len(data)
+                chunk = sock.recv(remaining)
+                if not chunk:
+                    raise socket.error(f"Connection closed after {len(data)}/{expected_size} bytes")
+                data += chunk
+
+        finally:
+            sock.settimeout(original_timeout)
+
+        return data
+
     def debug_query_position_response(self) -> dict:
         """
         Query STAGE_POSITION_GET and return parsed response for debugging.
@@ -394,6 +433,7 @@ class PositionController:
             return current position via this command - it returns settings.
         """
         import struct
+        import socket
 
         if not self.connection.is_connected():
             return {
@@ -406,18 +446,82 @@ class PositionController:
 
             self.logger.info("Sending STAGE_POSITION_GET for debug query...")
 
+            # For debug query, we need to read ALL data from socket,
+            # not just the standard 128 bytes
             cmd = Command(
                 code=self.COMMAND_CODES_STAGE_POSITION_GET,
                 parameters={'params': [0, 0, 0, 0, 0, 0, 0], 'value': 0.0}
             )
 
-            response_bytes = self.connection.send_command(cmd)
+            # Encode command
+            cmd_bytes = self.connection.encoder.encode_command(
+                code=cmd.code,
+                status=0,
+                params=cmd.parameters.get('params'),
+                value=cmd.parameters.get('value', 0.0),
+                data=b''
+            )
 
-            # Check response type
-            if len(response_bytes) < 4:
+            # Send command directly via socket
+            command_socket = self.connection._command_socket
+            if command_socket is None:
                 return {
                     'success': False,
-                    'error': f'Response too short: {len(response_bytes)} bytes',
+                    'error': 'Command socket not available'
+                }
+
+            command_socket.sendall(cmd_bytes)
+            self.logger.info("Command sent, reading response...")
+
+            # Pattern from old code: microscope sends data in two parts:
+            # 1. 128-byte binary acknowledgment
+            # 2. Additional text data (if any)
+
+            # Read 128-byte acknowledgment first
+            ack_response = self._receive_full_bytes(command_socket, 128, timeout=2.0)
+            self.logger.info(f"Received 128-byte acknowledgment")
+
+            # Check for additional data (like old code's bytes_waiting())
+            import time
+            import select
+
+            time.sleep(0.1)  # Brief wait for additional data to arrive
+
+            # Check if more data is waiting
+            ready = select.select([command_socket], [], [], 0.1)
+            additional_data = b''
+
+            if ready[0]:
+                # More data is available - read it all
+                command_socket.settimeout(0.5)
+                try:
+                    while True:
+                        chunk = command_socket.recv(4096)
+                        if not chunk:
+                            break
+                        additional_data += chunk
+                        self.logger.info(f"Received additional data chunk: {len(chunk)} bytes")
+                        # Check if more data is waiting
+                        ready = select.select([command_socket], [], [], 0.05)
+                        if not ready[0]:
+                            break
+                except socket.timeout:
+                    pass
+                finally:
+                    command_socket.settimeout(None)
+
+                self.logger.info(f"Total additional data: {len(additional_data)} bytes")
+
+            # Combine acknowledgment and additional data
+            response_bytes = ack_response + additional_data
+            self.logger.info(f"Total response: {len(response_bytes)} bytes (128 ack + {len(additional_data)} additional)")
+
+            # Parse response based on structure
+            # The 128-byte ack might be binary protocol, and additional_data might be text
+            if len(ack_response) < 4:
+                return {
+                    'success': False,
+                    'error': f'Acknowledgment too short: {len(ack_response)} bytes',
                     'raw_response': response_bytes
                 }
 
@@ -427,30 +531,31 @@ class PositionController:
                 import time
                 from pathlib import Path
 
-                # Check if this is a binary protocol response or text response
-                start_marker = struct.unpack('<I', response_bytes[0:4])[0]
+                # Check if the 128-byte ack is binary protocol
+                start_marker = struct.unpack('<I', ack_response[0:4])[0]
                 is_binary_protocol = (start_marker == 0xF321E654)
 
-                self.logger.info(f"Response type: {'Binary protocol' if is_binary_protocol else 'Text data'} (marker: 0x{start_marker:08X})")
+                self.logger.info(f"Ack type: {'Binary protocol' if is_binary_protocol else 'Text data'} (marker: 0x{start_marker:08X})")
+                self.logger.info(f"Additional data: {len(additional_data)} bytes")
 
-                # Parse based on response type
-                if is_binary_protocol and len(response_bytes) >= 128:
-                    # Binary protocol response
-                    command_code = struct.unpack('<I', response_bytes[4:8])[0]
-                    status_code = struct.unpack('<I', response_bytes[8:12])[0]
+                # Parse acknowledgment
+                if is_binary_protocol:
+                    # Binary protocol acknowledgment
+                    command_code = struct.unpack('<I', ack_response[4:8])[0]
+                    status_code = struct.unpack('<I', ack_response[8:12])[0]
 
                     # Unpack 7 parameters
                     params = []
                     for i in range(7):
                         offset = 12 + (i * 4)
-                        param = struct.unpack('<i', response_bytes[offset:offset+4])[0]
+                        param = struct.unpack('<i', ack_response[offset:offset+4])[0]
                         params.append(param)
 
                     # Unpack value (double)
-                    value = struct.unpack('<d', response_bytes[40:48])[0]
+                    value = struct.unpack('<d', ack_response[40:48])[0]
 
-                    # Get data section (80 bytes - this is only the TAIL of the full data!)
-                    data_tail = response_bytes[48:128]
+                    # Get data section (80 bytes from ack)
+                    data_tail = ack_response[48:128]
 
                     # Try to decode the tail as string
                     try:
@@ -460,31 +565,32 @@ class PositionController:
 
                     response_type = "Binary Protocol"
                 else:
-                    # Text response - decode entire response as text
+                    # Text acknowledgment
                     try:
-                        response_text = response_bytes.decode('utf-8', errors='replace')
-                        self.logger.info(f"Decoded text response: {len(response_text)} chars")
+                        ack_text = ack_response.decode('utf-8', errors='replace')
                     except:
-                        response_text = '<Could not decode as text>'
+                        ack_text = '<Could not decode as text>'
 
-                    # Set placeholder values for display
                     command_code = 0
                     status_code = 0
                     params = []
                     value = 0.0
-                    data_tail_str = response_text[-200:] if len(response_text) > 200 else response_text
+                    data_tail_str = ack_text[-100:]
                     response_type = "Text Data"
 
-                # For debug query, use the ACTUAL response data, not cached files
-                # (Files may contain stale data from previous operations)
-                if not is_binary_protocol:
-                    # Text response - use the actual response
-                    full_data_str = response_text
-                    self.logger.info(f"Using actual text response from microscope: {len(response_text)} chars")
+                # Handle additional data (the actual content)
+                if len(additional_data) > 0:
+                    try:
+                        full_data_str = additional_data.decode('utf-8', errors='replace')
+                        self.logger.info(f"Decoded additional data: {len(full_data_str)} chars")
+                    except:
+                        full_data_str = f"<Could not decode {len(additional_data)} bytes as text>"
+                elif not is_binary_protocol:
+                    # No additional data, ack itself was text
+                    full_data_str = ack_text
                 else:
-                    # Binary protocol - only have the 80-byte tail
-                    full_data_str = f"<Binary protocol response - only 80-byte tail available>\n\n{data_tail_str}"
-                    self.logger.info("Binary protocol response - no full data available")
+                    # Binary protocol with no additional data
+                    full_data_str = f"<Binary protocol, no additional data>\n\n{data_tail_str}"
 
                 parsed = {
                     'response_type': response_type,
