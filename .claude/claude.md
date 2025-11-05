@@ -1,5 +1,32 @@
 # Claude Code Project Guidelines
 
+## Development Workflow
+
+### Remote Testing Requirement
+
+**IMPORTANT**: This project is tested on a **remote computer** that is physically connected to the microscope hardware, NOT on the local development machine.
+
+**Workflow Requirements:**
+1. **Always commit changes** after making modifications
+2. **Always push to GitHub** immediately after committing
+3. **User tests on remote PC** - changes cannot be tested locally
+4. **Wait for test results** before proceeding with additional changes
+
+**Why This Matters:**
+- The microscope hardware is only accessible from the remote PC
+- Local testing is not possible for hardware-dependent features
+- Changes must be pushed to GitHub for the user to pull and test
+- Do not make multiple sets of changes without getting test feedback
+
+**Best Practice:**
+```
+1. Make focused changes to address specific issue
+2. git commit with clear description
+3. git push origin main
+4. STOP and wait for user feedback from remote testing
+5. Analyze test results before next iteration
+```
+
 ## Documentation Structure
 
 ### Root Directory - User-Facing Documentation ONLY
