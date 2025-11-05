@@ -683,6 +683,99 @@ class MVCConnectionService:
         """
         return self.model.status
 
+    def _send_command_with_text_response(self, cmd: 'Command', expected_min_size: int = 1000) -> str:
+        """
+        Send command and read complete text response from socket.
+
+        Some commands (like SCOPE_SETTINGS_LOAD) send:
+        1. 128-byte binary acknowledgment
+        2. Additional text data (could be several KB)
+
+        This method reads ALL data from socket, not just the 128-byte ack.
+
+        Args:
+            cmd: Command to send
+            expected_min_size: Minimum expected response size in bytes
+
+        Returns:
+            Complete text response decoded as UTF-8
+
+        Raises:
+            RuntimeError: If not connected
+            ConnectionError: If send/receive fails
+            ValueError: If response too small
+        """
+        import select
+
+        if not self.is_connected():
+            raise RuntimeError("Not connected to microscope")
+
+        try:
+            # Encode and send command
+            cmd_bytes = self.encoder.encode_command(
+                code=cmd.code,
+                status=0,
+                params=cmd.parameters.get('params', None) if hasattr(cmd, 'parameters') else None,
+                value=cmd.parameters.get('value', 0.0) if hasattr(cmd, 'parameters') else 0.0,
+                data=b''
+            )
+
+            self._command_socket.sendall(cmd_bytes)
+            self.logger.debug(f"Sent command {cmd.code}, reading text response...")
+
+            # Read 128-byte acknowledgment first
+            ack_data = self._receive_full_response(self._command_socket, 128, timeout=2.0)
+            self.logger.debug("Received 128-byte ack")
+
+            # Check for additional data using select (like old code's bytes_waiting)
+            import time
+            time.sleep(0.1)  # Brief wait for additional data
+
+            additional_data = b''
+            self._command_socket.settimeout(0.5)
+
+            try:
+                while True:
+                    ready = select.select([self._command_socket], [], [], 0.05)
+                    if not ready[0]:
+                        break
+
+                    chunk = self._command_socket.recv(4096)
+                    if not chunk:
+                        break
+                    additional_data += chunk
+                    self.logger.debug(f"Received {len(chunk)} bytes (total: {len(additional_data)})")
+
+            except socket.timeout:
+                pass
+            finally:
+                self._command_socket.settimeout(None)
+
+            # Combine all data
+            complete_response = ack_data + additional_data
+            self.logger.info(f"Received total: {len(complete_response)} bytes")
+
+            if len(complete_response) < expected_min_size:
+                raise ValueError(
+                    f"Response too small: {len(complete_response)} bytes "
+                    f"(expected at least {expected_min_size})"
+                )
+
+            # Decode as text and clean up
+            text_response = complete_response.decode('utf-8', errors='replace')
+            text_response = text_response.rstrip('\x00\r\n')
+
+            # Remove any binary garbage after last '>'
+            last_bracket = text_response.rfind('>')
+            if last_bracket != -1 and last_bracket > len(text_response) - 50:
+                text_response = text_response[:last_bracket + 1]
+
+            return text_response
+
+        except Exception as e:
+            self.logger.error(f"Failed to get text response: {e}")
+            raise ConnectionError(f"Failed to receive text response: {e}") from e
+
     def get_microscope_settings(self) -> Tuple[float, Dict[str, Any]]:
         """
         Retrieve comprehensive microscope settings and image pixel size.
@@ -726,13 +819,21 @@ class MVCConnectionService:
             cmd_load = Command(code=COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD)
 
             self.logger.debug("Sending SCOPE_SETTINGS_LOAD command")
-            self.send_command(cmd_load)
 
-            # Wait for settings to be saved to file
-            time.sleep(0.5)
+            # CRITICAL: This command sends 128-byte ack + additional text data
+            # We must read ALL data from socket and write to file
+            # Otherwise it stays on socket and interferes with next command
+            settings_data = self._send_command_with_text_response(
+                cmd_load,
+                expected_min_size=2000  # Settings are usually 2-3KB
+            )
 
-            # Step 2: Load settings from file
+            # Step 2: Write settings data to file
             settings_path = Path('microscope_settings') / 'ScopeSettings.txt'
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+            self.logger.debug(f"Writing {len(settings_data)} bytes to {settings_path}")
+            settings_path.write_text(settings_data, encoding='utf-8')
 
             if not settings_path.exists():
                 self.logger.error(f"Settings file not found: {settings_path}")
