@@ -172,6 +172,13 @@ class ConnectionView(QWidget):
         self.debug_query_btn.setEnabled(False)  # Enabled when connected
         debug_layout.addWidget(self.debug_query_btn)
 
+        # Save Settings Test button
+        self.save_settings_btn = QPushButton("Save Settings to Microscope")
+        self.save_settings_btn.setToolTip("Test SCOPE_SETTINGS_SAVE command - sends current settings back to microscope")
+        self.save_settings_btn.clicked.connect(self._on_save_settings_clicked)
+        self.save_settings_btn.setEnabled(False)  # Enabled when connected
+        debug_layout.addWidget(self.save_settings_btn)
+
         debug_layout.addStretch()
         layout.addLayout(debug_layout)
 
@@ -274,6 +281,7 @@ class ConnectionView(QWidget):
             self.port_input.setEnabled(False)
             self.debug_command_combo.setEnabled(True)  # Enable debug tools when connected
             self.debug_query_btn.setEnabled(True)
+            self.save_settings_btn.setEnabled(True)
         else:
             # Disconnected state
             self.status_label.setText("Status: Not connected")
@@ -284,6 +292,7 @@ class ConnectionView(QWidget):
             self.port_input.setEnabled(True)
             self.debug_command_combo.setEnabled(False)  # Disable debug tools when disconnected
             self.debug_query_btn.setEnabled(False)
+            self.save_settings_btn.setEnabled(False)
 
     def _show_message(self, message: str, is_error: bool = False) -> None:
         """Display feedback message with appropriate color coding.
@@ -490,6 +499,88 @@ class ConnectionView(QWidget):
         clipboard = QApplication.clipboard()
         clipboard.setText(text)
         self._show_message("Copied to clipboard", is_error=False)
+
+    def _on_save_settings_clicked(self) -> None:
+        """Handle save settings button click.
+
+        Tests SCOPE_SETTINGS_SAVE command by sending current settings file
+        back to microscope. This verifies the command is implemented.
+        """
+        from PyQt5.QtWidgets import QMessageBox
+        from pathlib import Path
+
+        self._logger.info("Save Settings button clicked")
+
+        # Check if position controller is available
+        if not self._position_controller:
+            self._show_message("Save settings feature not available", is_error=True)
+            return
+
+        # Check if settings file exists
+        settings_path = Path('microscope_settings') / 'ScopeSettings.txt'
+        if not settings_path.exists():
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Warning)
+            msg.setWindowTitle("Settings File Not Found")
+            msg.setText("Cannot find ScopeSettings.txt")
+            msg.setInformativeText(
+                "Please connect and load settings first.\n"
+                "The settings file will be created when you connect."
+            )
+            msg.exec_()
+            return
+
+        # Confirm with user
+        confirm = QMessageBox.question(
+            self,
+            "Confirm Save Settings",
+            "This will send the current settings file back to the microscope.\n\n"
+            "This tests the SCOPE_SETTINGS_SAVE command (4104).\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if confirm != QMessageBox.Yes:
+            return
+
+        # Read settings file
+        try:
+            with open(settings_path, 'rb') as f:
+                settings_data = f.read()
+            self._logger.info(f"Read {len(settings_data)} bytes from {settings_path}")
+        except Exception as e:
+            self._logger.error(f"Failed to read settings file: {e}")
+            self._show_message(f"Failed to read settings: {e}", is_error=True)
+            return
+
+        # Send command
+        try:
+            result = self._position_controller.debug_save_settings(settings_data)
+
+            # Show result dialog
+            msg = QMessageBox(self)
+            if result.get('success'):
+                msg.setIcon(QMessageBox.Information)
+                msg.setWindowTitle("Save Settings Success")
+                msg.setText("SCOPE_SETTINGS_SAVE command succeeded!")
+                msg.setInformativeText(
+                    f"Sent {len(settings_data)} bytes to microscope.\n\n"
+                    f"Response:\n{result.get('message', 'Command acknowledged')}"
+                )
+                self._logger.info("Settings saved successfully")
+            else:
+                msg.setIcon(QMessageBox.Critical)
+                msg.setWindowTitle("Save Settings Failed")
+                msg.setText("SCOPE_SETTINGS_SAVE command failed")
+                msg.setInformativeText(f"Error: {result.get('error', 'Unknown error')}")
+                self._logger.error(f"Save settings failed: {result.get('error')}")
+
+            msg.exec_()
+
+        except Exception as e:
+            self._logger.error(f"Error saving settings: {e}", exc_info=True)
+            self._show_message(f"Save failed: {e}", is_error=True)
 
     def _on_config_selected(self, config_name: str) -> None:
         """Handle configuration selection from dropdown.

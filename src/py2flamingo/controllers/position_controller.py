@@ -719,7 +719,41 @@ class PositionController:
         interpretation_lines.append("\n  CONCLUSION:")
 
         # Provide specific conclusions based on command type
-        if command_code == self.COMMAND_CODES_STAGE_POSITION_GET:
+        if command_code == 40967:  # SYSTEM_STATE_GET
+            status_code = parsed.get('status_code', 0)
+            params = parsed.get('params', [])
+
+            interpretation_lines.append(f"  ✓ SYSTEM_STATE_GET is IMPLEMENTED and working!")
+            interpretation_lines.append(f"\n  System State Interpretation:")
+            interpretation_lines.append(f"    Status Code: {status_code}")
+
+            if status_code == 1:
+                interpretation_lines.append(f"    → System is IDLE (ready for commands)")
+            elif status_code == 0:
+                interpretation_lines.append(f"    → System is BUSY (executing command)")
+            else:
+                interpretation_lines.append(f"    → Unknown status: {status_code}")
+
+            if len(params) > 3 and params[3] != 0:
+                state_code = params[3]
+                interpretation_lines.append(f"\n    State Code: {state_code}")
+                if state_code == 40962:
+                    interpretation_lines.append(f"    → SYSTEM_STATE_IDLE (40962)")
+                else:
+                    interpretation_lines.append(f"    → Unknown state code")
+
+            interpretation_lines.append("\n  This command successfully queries system state!")
+            interpretation_lines.append("  Use this to check if microscope is ready for commands.")
+
+        elif command_code == 24592:  # STAGE_MOTION_STOPPED
+            interpretation_lines.append(f"  Testing STAGE_MOTION_STOPPED command...")
+            interpretation_lines.append("  This should indicate if stage has finished moving.")
+
+        elif command_code == 4103:  # COMMON_SCOPE_SETTINGS
+            interpretation_lines.append(f"  Testing COMMON_SCOPE_SETTINGS command...")
+            interpretation_lines.append("  Different from _LOAD, might query without writing file.")
+
+        elif command_code == self.COMMAND_CODES_STAGE_POSITION_GET:
             interpretation_lines.append("  STAGE_POSITION_GET does NOT return current stage position.")
             interpretation_lines.append("  Instead, it returns microscope configuration settings.")
             interpretation_lines.append("\n  Without position feedback:")
@@ -737,3 +771,92 @@ class PositionController:
             interpretation_lines.append("  Check if command is implemented and what it should return.")
 
         return '\n'.join(interpretation_lines)
+
+    def debug_save_settings(self, settings_data: bytes) -> dict:
+        """
+        Test SCOPE_SETTINGS_SAVE command by sending settings file to microscope.
+
+        This replicates the old code's handle_scope_settings_save() function
+        which sends a settings file to the microscope using text_to_nuc pattern.
+
+        Args:
+            settings_data: Settings file content as bytes
+
+        Returns:
+            Dictionary with success status and message
+        """
+        if not self.connection.is_connected():
+            return {
+                'success': False,
+                'error': 'Not connected to microscope'
+            }
+
+        try:
+            from py2flamingo.models.command import Command
+
+            COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE = 4104
+
+            self.logger.info(f"Sending SCOPE_SETTINGS_SAVE with {len(settings_data)} bytes of data")
+
+            # Create command with file size in addDataBytes field
+            cmd_bytes = self.connection.encoder.encode_command(
+                code=COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE,
+                status=0,
+                params=[0, 0, 0, 0, 0, 0, 0],
+                value=0.0,
+                data=b'',  # Don't send data in command structure
+                additional_data_size=len(settings_data)  # Tell microscope data is coming
+            )
+
+            # Send command followed by file data
+            command_socket = self.connection._command_socket
+            if command_socket is None:
+                return {
+                    'success': False,
+                    'error': 'Command socket not available'
+                }
+
+            command_socket.sendall(cmd_bytes)
+            command_socket.sendall(settings_data)
+
+            self.logger.info("Command and data sent, waiting for acknowledgment...")
+
+            # Read 128-byte acknowledgment
+            try:
+                ack = self._receive_full_bytes(command_socket, 128, timeout=5.0)
+                self.logger.info("Received acknowledgment")
+
+                # Parse acknowledgment
+                import struct
+                start_marker = struct.unpack('<I', ack[0:4])[0]
+                response_code = struct.unpack('<I', ack[4:8])[0]
+                status_code = struct.unpack('<I', ack[8:12])[0]
+
+                self.logger.info(f"Acknowledgment: marker=0x{start_marker:08X}, "
+                               f"code={response_code}, status={status_code}")
+
+                if start_marker == 0xF321E654:
+                    return {
+                        'success': True,
+                        'message': f"Microscope acknowledged settings save.\n"
+                                 f"Status code: {status_code}\n"
+                                 f"Response code: {response_code}"
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'error': f'Invalid response marker: 0x{start_marker:08X}'
+                    }
+
+            except (socket.timeout, TimeoutError):
+                return {
+                    'success': False,
+                    'error': 'Timeout waiting for acknowledgment (command may not be implemented)'
+                }
+
+        except Exception as e:
+            self.logger.error(f"Failed to save settings: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e)
+            }

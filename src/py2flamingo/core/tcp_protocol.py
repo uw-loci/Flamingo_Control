@@ -69,7 +69,8 @@ class ProtocolEncoder:
         status: int = 0,
         params: Optional[List[int]] = None,
         value: float = 0.0,
-        data: bytes = b''
+        data: bytes = b'',
+        additional_data_size: int = 0
     ) -> bytes:
         """
         Encode a command into the binary protocol format.
@@ -80,6 +81,8 @@ class ProtocolEncoder:
             params: List of 7 parameter integers for cmdBits0-6 (default: [0]*7)
             value: Double precision floating point value (default: 0.0)
             data: Data payload, max 72 bytes (default: empty)
+            additional_data_size: Size of additional data to be sent after command
+                                 (used for file transfers, sets addDataBytes field)
 
         Returns:
             128-byte command structure as bytes
@@ -142,7 +145,7 @@ class ProtocolEncoder:
                 params[5],          # cmdBits5
                 params[6],          # cmdBits6
                 value,              # value (double)
-                0,                  # reserved (cmdDataBits0)
+                additional_data_size,  # addDataBytes (size of additional file data)
                 data,               # data (72 bytes)
                 self.END_MARKER     # End marker
             )
