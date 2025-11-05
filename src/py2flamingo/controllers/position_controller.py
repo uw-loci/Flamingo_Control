@@ -373,3 +373,141 @@ class PositionController:
             )
 
         return self._current_position
+
+    def debug_query_position_response(self) -> dict:
+        """
+        Query STAGE_POSITION_GET and return parsed response for debugging.
+
+        This method sends the STAGE_POSITION_GET command and parses the
+        full response to show what data the microscope actually returns.
+        Useful for demonstrating to maintainers what data is available.
+
+        Returns:
+            Dictionary containing parsed response:
+                - 'success': bool - Whether query succeeded
+                - 'raw_response': bytes - Raw response data
+                - 'parsed': dict - Parsed response structure
+                - 'error': str - Error message if failed
+
+        Note:
+            This is a diagnostic/debug method. The microscope does NOT
+            return current position via this command - it returns settings.
+        """
+        import struct
+
+        if not self.connection.is_connected():
+            return {
+                'success': False,
+                'error': 'Not connected to microscope'
+            }
+
+        try:
+            from py2flamingo.models.command import Command
+
+            self.logger.info("Sending STAGE_POSITION_GET for debug query...")
+
+            cmd = Command(
+                code=self.COMMAND_CODES_STAGE_POSITION_GET,
+                parameters={'params': [0, 0, 0, 0, 0, 0, 0], 'value': 0.0}
+            )
+
+            response_bytes = self.connection.send_command(cmd)
+
+            # Parse response structure
+            if len(response_bytes) < 128:
+                return {
+                    'success': False,
+                    'error': f'Response too short: {len(response_bytes)} bytes',
+                    'raw_response': response_bytes
+                }
+
+            # Protocol structure: START(4) + CODE(4) + STATUS(4) + PARAMS(28) + VALUE(8) + DATA(80)
+            try:
+                start_marker = struct.unpack('<I', response_bytes[0:4])[0]
+                command_code = struct.unpack('<I', response_bytes[4:8])[0]
+                status_code = struct.unpack('<I', response_bytes[8:12])[0]
+
+                # Unpack 7 parameters
+                params = []
+                for i in range(7):
+                    offset = 12 + (i * 4)
+                    param = struct.unpack('<i', response_bytes[offset:offset+4])[0]
+                    params.append(param)
+
+                # Unpack value (double)
+                value = struct.unpack('<d', response_bytes[40:48])[0]
+
+                # Get data section
+                data = response_bytes[48:128]
+
+                # Try to decode data as string
+                try:
+                    data_str = data.rstrip(b'\x00').decode('utf-8', errors='replace')
+                except:
+                    data_str = '<binary data>'
+
+                parsed = {
+                    'start_marker': f'0x{start_marker:08X}',
+                    'command_code': command_code,
+                    'status_code': status_code,
+                    'params': params,
+                    'value': value,
+                    'data_string': data_str,
+                    'data_hex': data[:40].hex() if len(data) > 0 else ''
+                }
+
+                self.logger.info(f"STAGE_POSITION_GET response parsed successfully")
+                self.logger.debug(f"Response: {parsed}")
+
+                return {
+                    'success': True,
+                    'raw_response': response_bytes,
+                    'parsed': parsed,
+                    'interpretation': self._interpret_position_response(parsed)
+                }
+
+            except Exception as e:
+                return {
+                    'success': False,
+                    'error': f'Failed to parse response: {e}',
+                    'raw_response': response_bytes
+                }
+
+        except Exception as e:
+            self.logger.error(f"Failed to query position: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def _interpret_position_response(self, parsed: dict) -> str:
+        """
+        Interpret what the position query response contains.
+
+        Args:
+            parsed: Parsed response dictionary
+
+        Returns:
+            Human-readable interpretation string
+        """
+        interpretation_lines = []
+
+        interpretation_lines.append("RESPONSE ANALYSIS:")
+        interpretation_lines.append(f"  Command Code: {parsed['command_code']} (expected: {self.COMMAND_CODES_STAGE_POSITION_GET})")
+        interpretation_lines.append(f"  Status: {parsed['status_code']} (0 = success)")
+        interpretation_lines.append(f"  Value field: {parsed['value']}")
+        interpretation_lines.append(f"  Params: {parsed['params']}")
+
+        data_str = parsed.get('data_string', '')
+        if data_str and len(data_str.strip()) > 0:
+            interpretation_lines.append(f"\n  Data contains: {repr(data_str[:100])}")
+            interpretation_lines.append("\n  ⚠ NOTE: This appears to be settings/configuration data,")
+            interpretation_lines.append("  ⚠       NOT current position coordinates!")
+        else:
+            interpretation_lines.append("\n  Data section is empty or binary")
+
+        interpretation_lines.append("\n  CONCLUSION:")
+        interpretation_lines.append("  This command does NOT return current stage position.")
+        interpretation_lines.append("  The microscope does not report actual position via this command.")
+
+        return '\n'.join(interpretation_lines)

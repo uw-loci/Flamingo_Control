@@ -169,7 +169,8 @@ class FlamingoApplication:
         self.logger.debug("Creating views layer components...")
         self.connection_view = ConnectionView(
             self.connection_controller,
-            config_manager=self.config_manager
+            config_manager=self.config_manager,
+            position_controller=self.position_controller  # For debug features
         )
         self.workflow_view = WorkflowView(self.workflow_controller)
 

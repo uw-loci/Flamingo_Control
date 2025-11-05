@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
     QLineEdit, QPushButton, QSpinBox, QComboBox, QGroupBox, QTextEdit
 )
 from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QFont
 
 
 class ConnectionView(QWidget):
@@ -28,16 +29,18 @@ class ConnectionView(QWidget):
     # Signals
     connection_established = pyqtSignal()  # Emitted when connection succeeds
 
-    def __init__(self, controller, config_manager=None):
+    def __init__(self, controller, config_manager=None, position_controller=None):
         """Initialize connection view with controller.
 
         Args:
             controller: ConnectionController for handling business logic
             config_manager: Optional ConfigurationManager for loading configs
+            position_controller: Optional PositionController for debug features
         """
         super().__init__()
         self._controller = controller
         self._config_manager = config_manager
+        self._position_controller = position_controller
         self._configurations = {}  # Map of name -> MicroscopeConfiguration
         self._logger = logging.getLogger(__name__)
         self.setup_ui()
@@ -148,6 +151,16 @@ class ConnectionView(QWidget):
 
         layout.addLayout(button_layout)
 
+        # Debug tools section (add after main buttons)
+        debug_layout = QHBoxLayout()
+        self.debug_position_btn = QPushButton("Debug Position Query")
+        self.debug_position_btn.setToolTip("Send STAGE_POSITION_GET and show raw response (for maintainer)")
+        self.debug_position_btn.clicked.connect(self._on_debug_position_clicked)
+        self.debug_position_btn.setEnabled(False)  # Enabled when connected
+        debug_layout.addWidget(self.debug_position_btn)
+        debug_layout.addStretch()
+        layout.addLayout(debug_layout)
+
         # Status display
         self.status_label = QLabel("Status: Not connected")
         self.status_label.setStyleSheet("color: gray; font-weight: bold;")
@@ -245,6 +258,7 @@ class ConnectionView(QWidget):
             self.disconnect_btn.setEnabled(True)
             self.ip_input.setEnabled(False)
             self.port_input.setEnabled(False)
+            self.debug_position_btn.setEnabled(True)  # Enable debug tools when connected
         else:
             # Disconnected state
             self.status_label.setText("Status: Not connected")
@@ -253,6 +267,7 @@ class ConnectionView(QWidget):
             self.disconnect_btn.setEnabled(False)
             self.ip_input.setEnabled(True)
             self.port_input.setEnabled(True)
+            self.debug_position_btn.setEnabled(False)  # Disable debug tools when disconnected
 
     def _show_message(self, message: str, is_error: bool = False) -> None:
         """Display feedback message with appropriate color coding.
@@ -310,6 +325,98 @@ class ConnectionView(QWidget):
             self._load_and_display_settings()
         else:
             self._logger.warning(f"ConnectionView: Test failed, not loading settings")
+
+    def _on_debug_position_clicked(self) -> None:
+        """Handle debug position query button click.
+
+        Sends STAGE_POSITION_GET command and displays the parsed response
+        in a dialog. Useful for showing maintainer what data is returned.
+        """
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QDialogButtonBox
+
+        self._logger.info("Debug position query button clicked")
+
+        # Check if position controller is available
+        if not self._position_controller:
+            self._show_message("Debug feature not available (position controller not provided)", is_error=True)
+            return
+
+        # Call debug query
+        try:
+            result = self._position_controller.debug_query_position_response()
+        except Exception as e:
+            self._logger.error(f"Error calling debug query: {e}", exc_info=True)
+            self._show_message(f"Debug query failed: {e}", is_error=True)
+            return
+
+        # Create dialog to show results
+        dialog = QDialog(self)
+        dialog.setWindowTitle("STAGE_POSITION_GET Debug Query")
+        dialog.resize(700, 500)
+
+        layout = QVBoxLayout()
+
+        # Add instruction text
+        instruction = QLabel("Raw response from STAGE_POSITION_GET command (code 24584):")
+        instruction.setWordWrap(True)
+        layout.addWidget(instruction)
+
+        # Text area for results
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        text_edit.setFont(QFont("Courier", 9))
+
+        # Format the results
+        if result.get('success'):
+            text = "=" * 70 + "\n"
+            text += "RESPONSE STRUCTURE\n"
+            text += "=" * 70 + "\n\n"
+
+            parsed = result.get('parsed', {})
+            text += f"Start Marker:    {parsed.get('start_marker', 'N/A')}\n"
+            text += f"Command Code:    {parsed.get('command_code', 'N/A')}\n"
+            text += f"Status Code:     {parsed.get('status_code', 'N/A')}\n"
+            text += f"Parameters:      {parsed.get('params', 'N/A')}\n"
+            text += f"Value Field:     {parsed.get('value', 'N/A')}\n"
+            text += f"\nData String:     {repr(parsed.get('data_string', '')[:200])}\n"
+
+            if parsed.get('data_hex'):
+                text += f"\nData (hex):      {parsed.get('data_hex', '')}\n"
+
+            text += "\n" + "=" * 70 + "\n"
+            text += result.get('interpretation', '')
+            text += "\n" + "=" * 70 + "\n\n"
+
+            text += "QUESTIONS FOR MAINTAINER:\n"
+            text += "1. Is there a command that returns CURRENT position?\n"
+            text += "2. Can the stage controller be queried for actual position?\n"
+            text += "3. What does STAGE_POSITION_GET actually return?\n"
+            text += "4. Is position feedback available through another method?\n"
+
+        else:
+            text = "ERROR:\n" + result.get('error', 'Unknown error')
+
+        text_edit.setPlainText(text)
+        layout.addWidget(text_edit)
+
+        # Add copy to clipboard button
+        button_box = QDialogButtonBox()
+        copy_btn = QPushButton("Copy to Clipboard")
+        copy_btn.clicked.connect(lambda: self._copy_to_clipboard(text))
+        button_box.addButton(copy_btn, QDialogButtonBox.ActionRole)
+        close_btn = button_box.addButton(QDialogButtonBox.Close)
+        close_btn.clicked.connect(dialog.close)
+        layout.addWidget(button_box)
+
+        dialog.setLayout(layout)
+        dialog.exec_()
+
+    def _copy_to_clipboard(self, text: str) -> None:
+        """Copy text to clipboard."""
+        from PyQt5.QtWidgets import QApplication
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
+        self._show_message("Copied to clipboard", is_error=False)
 
     def _on_config_selected(self, config_name: str) -> None:
         """Handle configuration selection from dropdown.
