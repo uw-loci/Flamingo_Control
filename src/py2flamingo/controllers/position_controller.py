@@ -413,24 +413,30 @@ class PositionController:
 
         return data
 
-    def debug_query_position_response(self) -> dict:
+    def debug_query_command(self, command_code: int, command_name: str) -> dict:
         """
-        Query STAGE_POSITION_GET and return parsed response for debugging.
+        Send a command and return parsed response for debugging.
 
-        This method sends the STAGE_POSITION_GET command and parses the
-        full response to show what data the microscope actually returns.
-        Useful for demonstrating to maintainers what data is available.
+        This method sends any command code and shows what data the microscope
+        returns. Useful for testing which commands are implemented and what
+        data they provide.
+
+        Args:
+            command_code: The command code to send
+            command_name: Human-readable name for logging/display
 
         Returns:
             Dictionary containing parsed response:
                 - 'success': bool - Whether query succeeded
+                - 'command_code': int - Command code sent
+                - 'command_name': str - Command name
                 - 'raw_response': bytes - Raw response data
                 - 'parsed': dict - Parsed response structure
                 - 'error': str - Error message if failed
+                - 'timeout_explanation': str - Explanation if timeout
 
         Note:
-            This is a diagnostic/debug method. The microscope does NOT
-            return current position via this command - it returns settings.
+            This is a diagnostic/debug method for testing command responses.
         """
         import struct
         import socket
@@ -438,18 +444,20 @@ class PositionController:
         if not self.connection.is_connected():
             return {
                 'success': False,
+                'command_code': command_code,
+                'command_name': command_name,
                 'error': 'Not connected to microscope'
             }
 
         try:
             from py2flamingo.models.command import Command
 
-            self.logger.info("Sending STAGE_POSITION_GET for debug query...")
+            self.logger.info(f"Sending {command_name} (code {command_code}) for debug query...")
 
             # For debug query, we need to read ALL data from socket,
             # not just the standard 128 bytes
             cmd = Command(
-                code=self.COMMAND_CODES_STAGE_POSITION_GET,
+                code=command_code,
                 parameters={'params': [0, 0, 0, 0, 0, 0, 0], 'value': 0.0}
             )
 
@@ -616,55 +624,60 @@ class PositionController:
                     'data_length': len(full_data_str) if full_data_str else 0
                 }
 
-                self.logger.info(f"STAGE_POSITION_GET response parsed successfully")
+                self.logger.info(f"{command_name} response parsed successfully")
                 self.logger.debug(f"Response: {parsed}")
 
                 return {
                     'success': True,
+                    'command_code': command_code,
+                    'command_name': command_name,
                     'raw_response': response_bytes,
                     'parsed': parsed,
-                    'interpretation': self._interpret_position_response(parsed)
+                    'interpretation': self._interpret_command_response(parsed, command_code, command_name)
                 }
 
             except Exception as e:
                 return {
                     'success': False,
+                    'command_code': command_code,
+                    'command_name': command_name,
                     'error': f'Failed to parse response: {e}',
                     'raw_response': response_bytes
                 }
 
         except (socket.timeout, TimeoutError) as e:
-            self.logger.error(f"Timeout waiting for response from STAGE_POSITION_GET")
+            self.logger.error(f"Timeout waiting for response from {command_name}")
             return {
                 'success': False,
+                'command_code': command_code,
+                'command_name': command_name,
                 'error': 'timeout',
                 'timeout_explanation': (
-                    f"No response from microscope after sending STAGE_POSITION_GET (code {self.COMMAND_CODES_STAGE_POSITION_GET}).\n\n"
+                    f"No response from microscope after sending {command_name} (code {command_code}).\n\n"
                     "This likely means:\n"
                     "1. Command is NOT IMPLEMENTED in microscope firmware\n"
                     "2. Command is defined in CommandCodes.h but never used\n"
                     "3. Microscope ignores unknown/unimplemented commands\n\n"
-                    "Evidence:\n"
-                    "- Old code never uses STAGE_POSITION_GET\n"
-                    "- No handler exists in command_listen_thread\n"
-                    "- Microscope does not respond (no ack, no data)\n\n"
-                    "Conclusion: STAGE_POSITION_GET is likely a placeholder that was\n"
-                    "never implemented. Position feedback is not available."
+                    "Try other commands to see which ones are actually implemented."
                 )
             }
         except Exception as e:
-            self.logger.error(f"Failed to query position: {e}", exc_info=True)
+            self.logger.error(f"Failed to query {command_name}: {e}", exc_info=True)
             return {
                 'success': False,
+                'command_code': command_code,
+                'command_name': command_name,
                 'error': str(e)
             }
 
-    def _interpret_position_response(self, parsed: dict) -> str:
+    def _interpret_command_response(self, parsed: dict, command_code: int, command_name: str) -> str:
         """
-        Interpret what the position query response contains.
+        Interpret what a command response contains.
 
         Args:
             parsed: Parsed response dictionary
+            command_code: Command code that was sent
+            command_name: Human-readable command name
 
         Returns:
             Human-readable interpretation string
@@ -672,7 +685,7 @@ class PositionController:
         interpretation_lines = []
 
         interpretation_lines.append("RESPONSE ANALYSIS:")
-        interpretation_lines.append(f"  Command sent: STAGE_POSITION_GET (code {self.COMMAND_CODES_STAGE_POSITION_GET})")
+        interpretation_lines.append(f"  Command sent: {command_name} (code {command_code})")
 
         # Check if we have full data
         full_data = parsed.get('full_data', '')
@@ -704,11 +717,23 @@ class PositionController:
             interpretation_lines.append(f"  Data available: {data_length} characters")
 
         interpretation_lines.append("\n  CONCLUSION:")
-        interpretation_lines.append("  STAGE_POSITION_GET does NOT return current stage position.")
-        interpretation_lines.append("  Instead, it returns microscope configuration settings.")
-        interpretation_lines.append("\n  Without position feedback:")
-        interpretation_lines.append("  - Software must track position locally (can drift)")
-        interpretation_lines.append("  - Cannot detect manual stage movement")
-        interpretation_lines.append("  - Cannot verify movements completed successfully")
+
+        # Provide specific conclusions based on command type
+        if command_code == self.COMMAND_CODES_STAGE_POSITION_GET:
+            interpretation_lines.append("  STAGE_POSITION_GET does NOT return current stage position.")
+            interpretation_lines.append("  Instead, it returns microscope configuration settings.")
+            interpretation_lines.append("\n  Without position feedback:")
+            interpretation_lines.append("  - Software must track position locally (can drift)")
+            interpretation_lines.append("  - Cannot detect manual stage movement")
+            interpretation_lines.append("  - Cannot verify movements completed successfully")
+        elif full_data and data_length > 0:
+            interpretation_lines.append(f"  {command_name} returned {data_length} characters of data.")
+            if '<Type>' in full_data or 'Filter wheel' in full_data:
+                interpretation_lines.append("  Response contains microscope configuration/settings data.")
+            else:
+                interpretation_lines.append("  Response type unclear - review full data above.")
+        else:
+            interpretation_lines.append(f"  {command_name} returned limited or no data.")
+            interpretation_lines.append("  Check if command is implemented and what it should return.")
 
         return '\n'.join(interpretation_lines)

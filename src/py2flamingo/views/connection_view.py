@@ -153,11 +153,25 @@ class ConnectionView(QWidget):
 
         # Debug tools section (add after main buttons)
         debug_layout = QHBoxLayout()
-        self.debug_position_btn = QPushButton("Debug Position Query")
-        self.debug_position_btn.setToolTip("Send STAGE_POSITION_GET and show raw response (for maintainer)")
-        self.debug_position_btn.clicked.connect(self._on_debug_position_clicked)
-        self.debug_position_btn.setEnabled(False)  # Enabled when connected
-        debug_layout.addWidget(self.debug_position_btn)
+
+        # Command selector
+        self.debug_command_combo = QComboBox()
+        self.debug_command_combo.addItem("STAGE_POSITION_GET (24584)", (24584, "STAGE_POSITION_GET"))
+        self.debug_command_combo.addItem("SYSTEM_STATE_GET (40967)", (40967, "SYSTEM_STATE_GET"))
+        self.debug_command_combo.addItem("STAGE_MOTION_STOPPED (24592)", (24592, "STAGE_MOTION_STOPPED"))
+        self.debug_command_combo.addItem("COMMON_SCOPE_SETTINGS (4103)", (4103, "COMMON_SCOPE_SETTINGS"))
+        self.debug_command_combo.setToolTip("Select command to test")
+        self.debug_command_combo.setEnabled(False)  # Enabled when connected
+        debug_layout.addWidget(QLabel("Test Command:"))
+        debug_layout.addWidget(self.debug_command_combo)
+
+        # Query button
+        self.debug_query_btn = QPushButton("Send Command")
+        self.debug_query_btn.setToolTip("Send selected command and show raw response (for maintainer)")
+        self.debug_query_btn.clicked.connect(self._on_debug_query_clicked)
+        self.debug_query_btn.setEnabled(False)  # Enabled when connected
+        debug_layout.addWidget(self.debug_query_btn)
+
         debug_layout.addStretch()
         layout.addLayout(debug_layout)
 
@@ -258,7 +272,8 @@ class ConnectionView(QWidget):
             self.disconnect_btn.setEnabled(True)
             self.ip_input.setEnabled(False)
             self.port_input.setEnabled(False)
-            self.debug_position_btn.setEnabled(True)  # Enable debug tools when connected
+            self.debug_command_combo.setEnabled(True)  # Enable debug tools when connected
+            self.debug_query_btn.setEnabled(True)
         else:
             # Disconnected state
             self.status_label.setText("Status: Not connected")
@@ -267,7 +282,8 @@ class ConnectionView(QWidget):
             self.disconnect_btn.setEnabled(False)
             self.ip_input.setEnabled(True)
             self.port_input.setEnabled(True)
-            self.debug_position_btn.setEnabled(False)  # Disable debug tools when disconnected
+            self.debug_command_combo.setEnabled(False)  # Disable debug tools when disconnected
+            self.debug_query_btn.setEnabled(False)
 
     def _show_message(self, message: str, is_error: bool = False) -> None:
         """Display feedback message with appropriate color coding.
@@ -326,24 +342,31 @@ class ConnectionView(QWidget):
         else:
             self._logger.warning(f"ConnectionView: Test failed, not loading settings")
 
-    def _on_debug_position_clicked(self) -> None:
-        """Handle debug position query button click.
+    def _on_debug_query_clicked(self) -> None:
+        """Handle debug query button click.
 
-        Sends STAGE_POSITION_GET command and displays the parsed response
-        in a dialog. Useful for showing maintainer what data is returned.
+        Sends selected command and displays the parsed response in a dialog.
+        Useful for testing which commands are implemented.
         """
         from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QDialogButtonBox
 
-        self._logger.info("Debug position query button clicked")
+        # Get selected command
+        selected_data = self.debug_command_combo.currentData()
+        if not selected_data:
+            self._show_message("No command selected", is_error=True)
+            return
+
+        command_code, command_name = selected_data
+        self._logger.info(f"Debug query button clicked for {command_name} ({command_code})")
 
         # Check if position controller is available
         if not self._position_controller:
             self._show_message("Debug feature not available (position controller not provided)", is_error=True)
             return
 
-        # Call debug query
+        # Call debug query with selected command
         try:
-            result = self._position_controller.debug_query_position_response()
+            result = self._position_controller.debug_query_command(command_code, command_name)
         except Exception as e:
             self._logger.error(f"Error calling debug query: {e}", exc_info=True)
             self._show_message(f"Debug query failed: {e}", is_error=True)
@@ -351,13 +374,13 @@ class ConnectionView(QWidget):
 
         # Create dialog to show results
         dialog = QDialog(self)
-        dialog.setWindowTitle("STAGE_POSITION_GET Debug Query")
+        dialog.setWindowTitle(f"{command_name} Debug Query")
         dialog.resize(700, 500)
 
         layout = QVBoxLayout()
 
         # Add instruction text
-        instruction = QLabel("Raw response from STAGE_POSITION_GET command (code 24584):")
+        instruction = QLabel(f"Raw response from {command_name} command (code {command_code}):")
         instruction.setWordWrap(True)
         layout.addWidget(instruction)
 
