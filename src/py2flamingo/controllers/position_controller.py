@@ -208,6 +208,9 @@ class PositionController:
 
             self.logger.debug(f"Received {len(response_bytes)} bytes response for position request")
 
+            # Log raw response for debugging
+            self.logger.debug(f"Raw response (first 32 bytes): {response_bytes[:32].hex()}")
+
             # Decode response
             decoder = ProtocolDecoder()
             response = decoder.decode_command(response_bytes)
@@ -215,6 +218,9 @@ class PositionController:
             # Check if response is valid
             if not response.get('valid', False):
                 self.logger.error("Invalid response received (bad markers)")
+                self.logger.error(f"Start marker: 0x{response.get('start_marker', 0):08X} (expected: 0xF321E654)")
+                self.logger.error(f"End marker: 0x{response.get('end_marker', 0):08X} (expected: 0xFEDC4321)")
+                self.logger.error(f"Full response data: {response}")
                 return None
 
             # Extract position from response params
