@@ -420,23 +420,58 @@ class ConnectionView(QWidget):
 
             # Only show protocol fields if binary protocol
             if response_type == "Binary Protocol":
-                text += f"Command Code:    {parsed.get('command_code', 'N/A')}\n"
-                text += f"Status Code:     {parsed.get('status_code', 'N/A')}\n"
-                text += f"Parameters:      {parsed.get('params', 'N/A')}\n"
-                text += f"Value Field:     {parsed.get('value', 'N/A')}\n"
-                text += f"\nData Tail (80 bytes from protocol response):\n"
-                text += f"  {repr(parsed.get('data_tail_string', '')[:100])}\n"
+                command_code_val = parsed.get('command_code', 0)
+
+                # For camera commands with simple value responses, show cleaner output
+                if command_code_val == 12343:  # CAMERA_PIXEL_FIELD_OF_VIEW_GET
+                    pixel_fov = parsed.get('value', 0.0)
+                    text += f"RESULT: Pixel Field of View = {pixel_fov} mm\n"
+                    text += f"        ({pixel_fov * 1000:.3f} micrometers per pixel)\n\n"
+                    text += "This value indicates the physical size represented by each camera pixel.\n"
+
+                # Show complete protocol structure breakdown
+                text += f"\n{'=' * 70}\n"
+                text += f"PROTOCOL STRUCTURE (128-byte binary format)\n"
+                text += f"{'=' * 70}\n\n"
+
+                params = parsed.get('params', [0]*7)
+
+                text += f"[Offset 0-3]   Start Marker:     {parsed.get('start_marker', 'N/A')}\n"
+                text += f"[Offset 4-7]   Command Code:     {parsed.get('command_code', 'N/A')}\n"
+                text += f"[Offset 8-11]  Status:           {parsed.get('status_code', 'N/A')}\n"
+                text += f"\n"
+                text += f"Command Parameters (7 x 4 bytes = 28 bytes):\n"
+                text += f"[Offset 12-15] cmdBits0/Param[0]: {params[0] if len(params) > 0 else 'N/A'}\n"
+                text += f"[Offset 16-19] cmdBits1/Param[1]: {params[1] if len(params) > 1 else 'N/A'}\n"
+                text += f"[Offset 20-23] cmdBits2/Param[2]: {params[2] if len(params) > 2 else 'N/A'}\n"
+                text += f"[Offset 24-27] cmdBits3/Param[3]: {params[3] if len(params) > 3 else 'N/A'}\n"
+                text += f"[Offset 28-31] cmdBits4/Param[4]: {params[4] if len(params) > 4 else 'N/A'}\n"
+                text += f"[Offset 32-35] cmdBits5/Param[5]: {params[5] if len(params) > 5 else 'N/A'}\n"
+                text += f"[Offset 36-39] cmdBits6/Param[6]: {params[6] if len(params) > 6 else 'N/A'}\n"
+                text += f"\n"
+                text += f"[Offset 40-47] Value (double):   {parsed.get('value', 'N/A')}\n"
+                text += f"[Offset 48-51] addDataBytes:     {parsed.get('reserved', 'N/A')} (size of additional data)\n"
+                text += f"[Offset 52-123] Data (72 bytes):  "
+
+                # Show data field content
+                data_tail = parsed.get('data_tail_string', '')
+                if data_tail and data_tail.strip('\x00'):
+                    text += f"'{data_tail[:50]}...'\n"
+                else:
+                    text += f"(all zeros/null)\n"
+
+                text += f"[Offset 124-127] End Marker:     0xFEDC4321\n"
             else:
                 text += f"\nNote: Microscope returned text data, not binary protocol.\n"
                 text += f"\nResponse preview (last 200 chars):\n"
                 text += f"  {repr(parsed.get('data_tail_string', '')[:200])}\n"
 
-            # Show full data if available from file
-            if parsed.get('full_data'):
+            # Show full data only if it's substantial text (not binary)
+            full_data = parsed.get('full_data', '')
+            if full_data and len(full_data) > 100 and not full_data.startswith('<Binary'):
                 text += f"\n{'=' * 70}\n"
                 text += f"FULL DATA ({parsed.get('data_length', 0)} characters)\n"
                 text += f"{'=' * 70}\n\n"
-                full_data = parsed.get('full_data', '')
                 # Show first 3000 chars (should be enough for most data)
                 display_length = min(len(full_data), 3000)
                 text += full_data[:display_length]
@@ -446,21 +481,7 @@ class ConnectionView(QWidget):
 
             text += "\n" + "=" * 70 + "\n"
             text += result.get('interpretation', '')
-            text += "\n" + "=" * 70 + "\n\n"
-
-            text += "QUESTIONS FOR MAINTAINER:\n"
-            text += "\n"
-            text += "1. Why does STAGE_POSITION_GET (24584) return settings data\n"
-            text += "   instead of position coordinates?\n"
-            text += "\n"
-            text += "2. Is there a different command that returns CURRENT position?\n"
-            text += "   We need: current X (mm), Y (mm), Z (mm), R (degrees)\n"
-            text += "\n"
-            text += "3. Does the stage controller support position feedback?\n"
-            text += "   Can encoders/sensors report actual position?\n"
-            text += "\n"
-            text += "4. If no position feedback exists, is this a known limitation?\n"
-            text += "   Should software track position locally only?\n"
+            text += "\n" + "=" * 70 + "\n"
 
         else:
             error_type = result.get('error', 'Unknown error')

@@ -120,6 +120,106 @@ When committing documentation:
 - Commits should reference the report file in the commit message
 - Keep user-facing docs (README, INSTALLATION) up to date with actual functionality
 
+## TCP Protocol Structure
+
+### Binary Command/Response Format
+
+The Flamingo microscope uses a **128-byte fixed binary protocol** for all TCP communication (both commands sent TO microscope and responses FROM microscope).
+
+#### Protocol Structure (128 bytes total)
+
+```
+Byte Offset | Size | Field Name      | Type    | Description
+------------|------|-----------------|---------|----------------------------------
+0-3         | 4    | Start Marker    | uint32  | 0xF321E654 (validates packet)
+4-7         | 4    | Command Code    | uint32  | Command identifier (see CommandCodes.h)
+8-11        | 4    | Status          | uint32  | Status code (1=IDLE, 0=BUSY, etc.)
+12-15       | 4    | cmdBits0        | int32   | Parameter 0 (usage varies by command)
+16-19       | 4    | cmdBits1        | int32   | Parameter 1
+20-23       | 4    | cmdBits2        | int32   | Parameter 2
+24-27       | 4    | cmdBits3        | int32   | Parameter 3
+28-31       | 4    | cmdBits4        | int32   | Parameter 4
+32-35       | 4    | cmdBits5        | int32   | Parameter 5
+36-39       | 4    | cmdBits6        | int32   | Parameter 6
+40-47       | 8    | Value           | double  | Floating-point value
+48-51       | 4    | addDataBytes    | uint32  | Size of additional data after packet
+52-123      | 72   | Data            | bytes   | Arbitrary data field (null-padded)
+124-127     | 4    | End Marker      | uint32  | 0xFEDC4321 (validates packet)
+```
+
+#### Python struct Format String
+
+```python
+struct.Struct("I I I I I I I I I I d I 72s I")
+#              │ │ │ │ │ │ │ │ │ │ │ │  │  │
+#              │ │ │ │ │ │ │ │ │ │ │ │  │  └─ End Marker
+#              │ │ │ │ │ │ │ │ │ │ │ │  └──── Data (72 bytes)
+#              │ │ │ │ │ │ │ │ │ │ │ └─────── addDataBytes
+#              │ │ │ │ │ │ │ │ │ │ └────────── Value (double)
+#              │ │ │ │ │ │ │ │ │ └──────────── cmdBits6 (Param[6])
+#              │ │ │ │ │ │ │ │ └────────────── cmdBits5 (Param[5])
+#              │ │ │ │ │ │ │ └──────────────── cmdBits4 (Param[4])
+#              │ │ │ │ │ │ └────────────────── cmdBits3 (Param[3])
+#              │ │ │ │ │ └──────────────────── cmdBits2 (Param[2])
+#              │ │ │ │ └────────────────────── cmdBits1 (Param[1])
+#              │ │ │ └──────────────────────── cmdBits0 (Param[0])
+#              │ │ └────────────────────────── Status
+#              │ └──────────────────────────── Command Code
+#              └────────────────────────────── Start Marker
+```
+
+#### Two-Part Responses
+
+Some commands send additional data after the 128-byte structure:
+
+1. **128-byte Binary Acknowledgment** - Standard protocol structure
+2. **Additional Data** - Variable-length data (size indicated by `addDataBytes`)
+
+**Examples:**
+- `SCOPE_SETTINGS_LOAD (4105)`: Sends 128-byte ack + ~2800 bytes of settings text
+- `SCOPE_SETTINGS_SAVE (4104)`: Receives 128-byte command + settings file data
+
+**IMPORTANT:** When reading these responses:
+- Always read the 128-byte ack first
+- Check `addDataBytes` field or use `select()` to detect additional data
+- Read additional data in chunks until socket is empty
+- Do NOT decode the 128-byte ack as UTF-8 text (it's binary protocol)
+- Only decode the additional data as text if it's a text response
+
+#### Field Usage by Command Type
+
+Different commands use the fields differently:
+
+**Position Commands (STAGE_POSITION_SET):**
+- `cmdBits0` (Param[0]): Axis code (1=X, 2=Y, 3=Z, 4=R)
+- `Value`: Position in millimeters or degrees
+
+**Camera Query Commands:**
+- `CAMERA_PIXEL_FIELD_OF_VIEW_GET`: Returns pixel size in `Value` field (mm/pixel)
+- `CAMERA_IMAGE_SIZE_GET`: Returns dimensions in parameter fields
+
+**System State:**
+- `SYSTEM_STATE_GET`: Returns state in `Status` field (1=IDLE, 0=BUSY)
+- `cmdBits3` (Param[3]): May contain state code (40962=IDLE)
+
+**File Transfer Commands:**
+- `addDataBytes`: Contains size of file being transferred
+- Command structure sent first, then file data
+
+#### Packet Validation
+
+Both start and end markers must be correct:
+- Start: `0xF321E654`
+- End: `0xFEDC4321`
+
+If markers don't match, packet is invalid/corrupted.
+
+#### Implementation
+
+See `src/py2flamingo/core/tcp_protocol.py`:
+- `ProtocolEncoder.encode_command()` - Creates 128-byte packets
+- `ProtocolDecoder.decode_command()` - Parses 128-byte packets
+
 ---
 
 **Last Updated:** 2024-11-05
