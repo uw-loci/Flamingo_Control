@@ -44,6 +44,7 @@ class WorkflowController:
         self._workflow_model = workflow_model
         self._logger = logging.getLogger(__name__)
         self._current_workflow_path: Optional[Path] = None
+        self._current_workflow_data: Optional[bytes] = None  # Cache workflow data
 
     def load_workflow(self, file_path: str) -> Tuple[bool, str]:
         """
@@ -74,9 +75,13 @@ class WorkflowController:
 
         # Attempt to load via service
         try:
-            self._service.load_workflow(str(path))
+            workflow_data = self._service.load_workflow(path)
+
+            # Cache workflow data and path
+            self._current_workflow_data = workflow_data
             self._current_workflow_path = path
-            self._logger.info(f"Loaded workflow: {path.name}")
+
+            self._logger.info(f"Loaded workflow: {path.name} ({len(workflow_data)} bytes)")
             return (True, f"Workflow loaded successfully: {path.name}")
 
         except FileNotFoundError:
@@ -109,12 +114,12 @@ class WorkflowController:
             return (False, "Must connect to server before starting workflow")
 
         # Check if workflow loaded
-        if not self._current_workflow_path:
+        if not self._current_workflow_path or not self._current_workflow_data:
             return (False, "No workflow loaded. Load a workflow file first.")
 
         # Attempt to start workflow
         try:
-            self._service.start_workflow()
+            self._service.start_workflow(self._current_workflow_data)
 
             # Mark workflow as started in model
             if self._workflow_model:

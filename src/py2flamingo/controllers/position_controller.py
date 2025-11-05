@@ -8,6 +8,7 @@ movement, validation, and position tracking.
 """
 import logging
 import socket
+import threading
 from typing import List, Optional, Callable
 from dataclasses import dataclass
 
@@ -27,20 +28,22 @@ class AxisCode:
 class PositionController:
     """
     Controller for managing microscope stage positions.
-    
-    This controller replaces the functionality from go_to_position.py
-    with a cleaner, more maintainable interface.
-    
+
+    This controller tracks position locally since the microscope hardware
+    does not report current position. Position is initialized from the
+    home position in settings and updated after each movement.
+
     Attributes:
         connection_service: Service for microscope communication
-        queue_manager: Manager for command queues
-        event_manager: Manager for synchronization events
         logger: Logger instance
+        axis: Axis codes for movement commands
+        _current_position: Tracked current position (not queried from hardware)
+        _movement_lock: Lock to prevent concurrent movement commands
     """
-    
+
     # Command codes from command_list.txt
     COMMAND_CODES_STAGE_POSITION_SET = 24580
-    COMMAND_CODES_STAGE_POSITION_GET = 24584
+    COMMAND_CODES_STAGE_POSITION_GET = 24584  # Note: Returns settings, not position
 
     def __init__(self, connection_service):
         """
@@ -52,15 +55,64 @@ class PositionController:
         self.connection = connection_service
         self.logger = logging.getLogger(__name__)
         self.axis = AxisCode()
-    
+
+        # Local position tracking (microscope doesn't report current position)
+        self._current_position: Optional[Position] = None
+        self._movement_lock = threading.Lock()
+
+        # Try to initialize position from microscope settings
+        self._initialize_position()
+
+    def _initialize_position(self) -> None:
+        """
+        Initialize tracked position from microscope home position in settings.
+
+        This queries the microscope settings and extracts the home position
+        to use as the initial tracked position. If settings are unavailable,
+        defaults to (0, 0, 0, 0).
+        """
+        try:
+            # Get settings from connection service if available
+            if self.connection.is_connected():
+                # Try to get settings - this may fail if not yet initialized
+                try:
+                    from py2flamingo.utils.file_handlers import text_to_dict
+                    from pathlib import Path
+
+                    settings_path = Path('microscope_settings') / 'ScopeSettings.txt'
+                    if settings_path.exists():
+                        settings = text_to_dict(str(settings_path))
+
+                        # Extract home position from Stage limits section
+                        if 'Stage limits' in settings:
+                            stage_limits = settings['Stage limits']
+                            x = float(stage_limits.get('Home x-axis', 0))
+                            y = float(stage_limits.get('Home y-axis', 0))
+                            z = float(stage_limits.get('Home z-axis', 0))
+                            r = float(stage_limits.get('Home r-axis', 0))
+
+                            self._current_position = Position(x=x, y=y, z=z, r=r)
+                            self.logger.info(f"Initialized position from home: X={x:.3f}, Y={y:.3f}, Z={z:.3f}, R={r:.1f}°")
+                            return
+                except Exception as e:
+                    self.logger.debug(f"Could not load home position from settings: {e}")
+
+            # Fallback to origin if settings unavailable
+            self._current_position = Position(x=0.0, y=0.0, z=0.0, r=0.0)
+            self.logger.warning("Position initialized to origin (0, 0, 0, 0) - settings unavailable")
+
+        except Exception as e:
+            self.logger.error(f"Error initializing position: {e}")
+            self._current_position = Position(x=0.0, y=0.0, z=0.0, r=0.0)
+
     def go_to_position(self, position: Position,
                       validate: bool = True,
                       callback: Optional[Callable[[str], None]] = None) -> None:
         """
         Move microscope to specified position.
 
-        This method replaces the original go_to_position function with
-        improved error handling and progress reporting.
+        This method uses a lock to prevent concurrent movement commands.
+        After successful movement, it updates the tracked position.
 
         Args:
             position: Target position
@@ -68,39 +120,106 @@ class PositionController:
             callback: Optional callback for progress updates
 
         Raises:
-            ValueError: If position is invalid
-            RuntimeError: If not connected to microscope
+            ValueError: If position is invalid or wrong type
+            RuntimeError: If not connected, movement in progress, or movement fails
         """
-        # Check connection
-        if not self.connection.is_connected():
-            raise RuntimeError("Not connected to microscope")
+        # Validate position parameter type
+        if not isinstance(position, Position):
+            error_msg = f"position must be Position instance, got {type(position)}"
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
 
-        # Validate position if requested
-        if validate:
-            self._validate_position(position)
+        # Try to acquire movement lock (non-blocking)
+        if not self._movement_lock.acquire(blocking=False):
+            error_msg = "Movement already in progress - cannot send concurrent position commands"
+            self.logger.warning(error_msg)
+            raise RuntimeError(error_msg)
 
-        self.logger.info(f"Moving to position: X={position.x:.3f}, Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.1f}°")
+        # Save original position for rollback
+        original_position = self._current_position
+        movement_started = False
 
-        # Original comment from go_to_position:
-        # Look in the functions/command_list.txt file for other command codes, or add more
+        try:
+            # Check connection
+            if not self.connection.is_connected():
+                error_msg = "Not connected to microscope"
+                self.logger.error(error_msg)
+                raise RuntimeError(error_msg)
 
-        # Send movement commands for each axis
-        self._move_axis(self.axis.X, position.x, "X-axis")
-        self._move_axis(self.axis.Z, position.z, "Z-axis")
-        self._move_axis(self.axis.R, position.r, "Rotation")
-        self._move_axis(self.axis.Y, position.y, "Y-axis")  # Y-axis last as in original
+            # Validate position if requested
+            if validate:
+                try:
+                    self._validate_position(position)
+                except ValueError as e:
+                    self.logger.error(f"Position validation failed: {e}")
+                    raise
 
-        # Request and log current position after movement
-        import time
-        time.sleep(0.3)  # Give microscope time to complete movement
-        actual_position = self.get_current_position()
-        if actual_position:
-            self.logger.info(f"Movement complete. Microscope reports position: X={actual_position.x:.3f}, Y={actual_position.y:.3f}, Z={actual_position.z:.3f}, R={actual_position.r:.1f}°")
-        else:
-            self.logger.info("Movement complete (position confirmation unavailable)")
+            self.logger.info(
+                f"Moving to position: X={position.x:.3f}, Y={position.y:.3f}, "
+                f"Z={position.z:.3f}, R={position.r:.1f}°"
+            )
 
-        if callback:
-            callback("Movement complete")
+            movement_started = True
+
+            # Send movement commands for each axis
+            # Track which axes succeeded for rollback
+            moved_axes = []
+            try:
+                self._move_axis(self.axis.X, position.x, "X-axis")
+                moved_axes.append('X')
+
+                self._move_axis(self.axis.Z, position.z, "Z-axis")
+                moved_axes.append('Z')
+
+                self._move_axis(self.axis.R, position.r, "Rotation")
+                moved_axes.append('R')
+
+                self._move_axis(self.axis.Y, position.y, "Y-axis")  # Y-axis last as in original
+                moved_axes.append('Y')
+
+            except Exception as e:
+                self.logger.error(
+                    f"Movement failed on or after {moved_axes[-1] if moved_axes else 'start'}: {e}"
+                )
+                self.logger.warning(
+                    f"Position tracking may be inconsistent. Successfully moved axes: {moved_axes}"
+                )
+                # Don't update position - leave at original or partially moved state
+                raise RuntimeError(f"Movement failed: {e}") from e
+
+            # Wait for movement to complete
+            # TODO: Replace with actual position confirmation from hardware
+            import time
+            time.sleep(0.5)
+
+            # Only update position if all movements succeeded
+            self._current_position = position
+            self.logger.info(
+                f"Movement complete. Position updated to: X={position.x:.3f}, "
+                f"Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.1f}°"
+            )
+
+            # Call callback if provided (catch errors to prevent lock issues)
+            if callback:
+                try:
+                    callback("Movement complete")
+                except Exception as e:
+                    self.logger.error(f"Callback error (movement still succeeded): {e}")
+
+        except Exception as e:
+            # Log the error with context
+            if movement_started:
+                self.logger.error(
+                    f"Movement error - position may be inconsistent: {e}",
+                    exc_info=True
+                )
+            else:
+                self.logger.error(f"Movement failed before starting: {e}")
+            raise
+
+        finally:
+            # Always release the lock
+            self._movement_lock.release()
     
     def go_to_xyzr(self, xyzr: List[float], **kwargs) -> None:
         """
@@ -127,12 +246,29 @@ class PositionController:
         This is the refactored version of move_axis from microscope_connect.py.
 
         Args:
-            axis_code: The code of the axis to move
-            value: The value to move the axis to
+            axis_code: The code of the axis to move (1-4)
+            value: The value to move the axis to (mm or degrees)
             axis_name: Human-readable axis name for logging
-        """
 
-        self.logger.debug(f"Moving {axis_name} to {value}")
+        Raises:
+            ValueError: If axis_code or value is invalid
+            RuntimeError: If command fails or response invalid
+            ConnectionError: If communication fails
+        """
+        # Validate inputs
+        if not isinstance(axis_code, int) or axis_code not in [1, 2, 3, 4]:
+            error_msg = f"Invalid axis_code {axis_code}, must be 1-4"
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        try:
+            value_float = float(value)
+        except (ValueError, TypeError) as e:
+            error_msg = f"Invalid value for {axis_name}: {value} - must be numeric"
+            self.logger.error(error_msg)
+            raise ValueError(error_msg) from e
+
+        self.logger.debug(f"Moving {axis_name} (axis {axis_code}) to {value_float}")
 
         try:
             # The old system sent [axis_code, 0, 0, value] as command_data
@@ -143,17 +279,42 @@ class PositionController:
                 code=self.COMMAND_CODES_STAGE_POSITION_SET,
                 parameters={
                     'params': [axis_code, 0, 0, 0, 0, 0, 0],  # 7 params, first is axis code
-                    'value': value  # Position value
+                    'value': value_float  # Position value
                 }
             )
 
             response_bytes = self.connection.send_command(cmd)
 
-            self.logger.debug(f"Move {axis_name} to {value} command sent, got {len(response_bytes)} byte response")
+            # Validate response
+            if response_bytes is None:
+                error_msg = f"No response received for {axis_name} movement"
+                self.logger.error(error_msg)
+                raise RuntimeError(error_msg)
+
+            if len(response_bytes) == 0:
+                error_msg = f"Empty response received for {axis_name} movement"
+                self.logger.error(error_msg)
+                raise RuntimeError(error_msg)
+
+            # TODO: Parse response_bytes for error codes
+            # For now, just verify we got a response
+            self.logger.debug(
+                f"{axis_name} move command completed - received {len(response_bytes)} byte response"
+            )
+
+        except ValueError as e:
+            self.logger.error(f"Invalid command parameters for {axis_name}: {e}")
+            raise
+
+        except socket.error as e:
+            error_msg = f"Communication error moving {axis_name}: {e}"
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
 
         except Exception as e:
-            self.logger.error(f"Failed to move {axis_name}: {e}")
-            raise
+            error_msg = f"Failed to move {axis_name}: {e}"
+            self.logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg) from e
 
     
     def _validate_position(self, position: Position) -> None:
@@ -188,137 +349,27 @@ class PositionController:
     
     def get_current_position(self) -> Optional[Position]:
         """
-        Get current position from microscope.
+        Get current tracked position.
 
-        Sends STAGE_POSITION_GET command and parses the text response.
-        Unlike binary commands, position queries return text data that needs
-        to be parsed.
-
-        Returns:
-            Optional[Position]: Current position or None if error
-        """
-        import select
-        from py2flamingo.models.command import Command
-
-        try:
-            # Create position get command
-            cmd = Command(code=self.COMMAND_CODES_STAGE_POSITION_GET)
-
-            self.logger.info(f"Sending position get command (code={cmd.code})")
-
-            # Send command via command socket
-            response_bytes = self.connection.send_command(cmd)
-
-            self.logger.info(f"Received {len(response_bytes)} bytes header response")
-            self.logger.info(f"Header (first 64 bytes hex): {response_bytes[:64].hex()}")
-            self.logger.info(f"Header (as text): {response_bytes.decode('utf-8', errors='replace')}")
-
-            # Check if there's additional text data waiting (like settings command does)
-            # Use select to check if data is available without blocking
-            import time
-            time.sleep(0.1)  # Give microscope time to send additional data
-
-            # Get the command socket from connection service
-            if hasattr(self.connection, '_command_socket') and self.connection._command_socket:
-                sock = self.connection._command_socket
-
-                # Check if there's more data waiting
-                ready, _, _ = select.select([sock], [], [], 0.5)
-
-                if ready:
-                    # Peek to see how much data is available
-                    sock.setblocking(0)
-                    peek_data = sock.recv(80000, socket.MSG_PEEK)
-                    bytes_available = len(peek_data)
-                    sock.setblocking(1)
-
-                    if bytes_available > 0:
-                        self.logger.info(f"Additional {bytes_available} bytes of text data available")
-                        text_data = sock.recv(bytes_available)
-                        self.logger.info(f"Text response: {text_data.decode('utf-8', errors='replace')}")
-
-                        # Try to parse position from text
-                        position = self._parse_position_from_text(text_data)
-                        if position:
-                            return position
-                    else:
-                        self.logger.info("No additional text data available")
-                else:
-                    self.logger.info("No additional data ready on socket")
-            else:
-                self.logger.warning("Cannot access command socket for additional data")
-
-            # If we get here, we couldn't parse position from text
-            # Try to parse from the header response as fallback
-            self.logger.warning("Could not retrieve position from text response")
-            self.logger.warning("Position query may not be supported by this microscope version")
-            return None
-
-        except RuntimeError as e:
-            self.logger.error(f"Connection error getting position: {e}")
-            return None
-        except Exception as e:
-            self.logger.error(f"Failed to get position: {e}", exc_info=True)
-            return None
-
-    def _parse_position_from_text(self, text_data: bytes) -> Optional[Position]:
-        """
-        Parse position from text response.
-
-        Args:
-            text_data: Raw text bytes from microscope
+        Note: The microscope hardware does not report current position.
+        This method returns the locally tracked position which is updated
+        after each successful movement command. Position is initialized from
+        the home position in microscope settings.
 
         Returns:
-            Position if successfully parsed, None otherwise
+            Optional[Position]: Current tracked position, or None if not initialized
         """
-        try:
-            text = text_data.decode('utf-8', errors='replace')
-            self.logger.debug(f"Parsing position from text: {text[:200]}")
+        if self._current_position is None:
+            self.logger.warning("Position not yet initialized")
+            # Try to initialize now
+            self._initialize_position()
 
-            # Look for patterns like "X position = 10.5" or "Stage X = 10.5"
-            # This will depend on the actual format - we'll see from logs
-            import re
+        if self._current_position:
+            self.logger.debug(
+                f"Current position: X={self._current_position.x:.3f}, "
+                f"Y={self._current_position.y:.3f}, "
+                f"Z={self._current_position.z:.3f}, "
+                f"R={self._current_position.r:.1f}°"
+            )
 
-            # Try various possible patterns
-            patterns = [
-                # Pattern: "X position = 10.5" or "X = 10.5"
-                r'[Xx]\s*(?:position\s*)?=\s*([-+]?\d+\.?\d*)',
-                r'[Yy]\s*(?:position\s*)?=\s*([-+]?\d+\.?\d*)',
-                r'[Zz]\s*(?:position\s*)?=\s*([-+]?\d+\.?\d*)',
-                r'[Rr]\s*(?:position\s*)?=\s*([-+]?\d+\.?\d*)',
-            ]
-
-            # Try to extract x, y, z, r values
-            x = y = z = r = None
-
-            # Look for stage position section
-            if 'stage' in text.lower() or 'position' in text.lower():
-                for line in text.split('\n'):
-                    if 'x' in line.lower() and '=' in line:
-                        match = re.search(patterns[0], line, re.IGNORECASE)
-                        if match:
-                            x = float(match.group(1))
-                    if 'y' in line.lower() and '=' in line:
-                        match = re.search(patterns[1], line, re.IGNORECASE)
-                        if match:
-                            y = float(match.group(1))
-                    if 'z' in line.lower() and '=' in line:
-                        match = re.search(patterns[2], line, re.IGNORECASE)
-                        if match:
-                            z = float(match.group(1))
-                    if 'r' in line.lower() and '=' in line:
-                        match = re.search(patterns[3], line, re.IGNORECASE)
-                        if match:
-                            r = float(match.group(1))
-
-            if all(v is not None for v in [x, y, z, r]):
-                position = Position(x=x, y=y, z=z, r=r)
-                self.logger.info(f"Parsed position: X={position.x:.3f}, Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.1f}°")
-                return position
-            else:
-                self.logger.warning(f"Could not extract all position values from text (x={x}, y={y}, z={z}, r={r})")
-                return None
-
-        except Exception as e:
-            self.logger.error(f"Error parsing position text: {e}", exc_info=True)
-            return None
+        return self._current_position

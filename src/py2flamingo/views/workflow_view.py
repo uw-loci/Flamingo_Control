@@ -4,6 +4,7 @@ Workflow view for managing workflow execution.
 This module provides the WorkflowView widget for workflow UI.
 """
 
+import logging
 from pathlib import Path
 from typing import Optional
 from PyQt5.QtWidgets import (
@@ -34,6 +35,8 @@ class WorkflowView(QWidget):
         super().__init__()
         self._controller = controller
         self._current_workflow_path: Optional[Path] = None
+        self._logger = logging.getLogger(__name__)
+        self._logger.info("WorkflowView initialized")
         self.setup_ui()
 
     def setup_ui(self) -> None:

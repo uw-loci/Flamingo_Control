@@ -467,56 +467,202 @@ class MVCConnectionService:
         from py2flamingo.models.connection import ConnectionState
         return self.model.status.state == ConnectionState.CONNECTED
 
-    def send_command(self, cmd: 'Command') -> bytes:
+    def send_command(self, cmd: 'Command', timeout: float = 5.0) -> bytes:
         """
         Send encoded command and get response.
 
         Args:
             cmd: Command object to send
+            timeout: Response timeout in seconds (default: 5.0)
 
         Returns:
             Response bytes from microscope
 
         Raises:
             RuntimeError: If not connected
+            ValueError: If command encoding fails or parameters invalid
             ConnectionError: If send fails
+            TimeoutError: If response timeout
         """
+        import time
+
         if not self.is_connected():
-            raise RuntimeError("Not connected to microscope")
+            error_msg = "Cannot send command - not connected to microscope"
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg)
 
         try:
-            # Extract params and value from command parameters dict if present
-            params = cmd.parameters.get('params', None)
-            value = cmd.parameters.get('value', 0.0)
-            data = cmd.parameters.get('data', b'')
+            # Validate command object
+            if not hasattr(cmd, 'code'):
+                raise ValueError("Invalid command object: missing 'code' attribute")
+
+            if not isinstance(cmd.code, int):
+                raise ValueError(f"Command code must be int, got {type(cmd.code)}")
+
+            # Extract params and value from command parameters dict with defaults
+            params = cmd.parameters.get('params', None) if hasattr(cmd, 'parameters') else None
+            value = cmd.parameters.get('value', 0.0) if hasattr(cmd, 'parameters') else 0.0
+            data = cmd.parameters.get('data', b'') if hasattr(cmd, 'parameters') else b''
+
+            # Validate parameter types
+            if value is not None and not isinstance(value, (int, float)):
+                raise ValueError(f"Command value must be numeric, got {type(value)}")
+
+            if data is not None and not isinstance(data, bytes):
+                raise ValueError(f"Command data must be bytes, got {type(data)}")
 
             # Encode command using ProtocolEncoder
-            # Note: params defaults to [0]*7 if not specified in encoder
-            cmd_bytes = self.encoder.encode_command(
-                code=cmd.code,
-                status=0,
-                params=params,
-                value=value,
-                data=data
-            )
+            try:
+                cmd_bytes = self.encoder.encode_command(
+                    code=cmd.code,
+                    status=0,
+                    params=params,
+                    value=value,
+                    data=data
+                )
+            except Exception as e:
+                error_msg = f"Command encoding failed: {e}"
+                self.logger.error(error_msg)
+                raise ValueError(error_msg) from e
+
+            # Validate encoded command
+            if not cmd_bytes or len(cmd_bytes) == 0:
+                raise ValueError("Encoder returned empty command bytes")
 
             # Send via command socket
-            if self._command_socket:
-                self._command_socket.sendall(cmd_bytes)
-
-                # Receive response (128 bytes expected)
-                response = self._command_socket.recv(128)
-
-                self.logger.debug(f"Sent command {cmd.code} (params={params}, value={value}), got {len(response)} bytes response")
-                return response
-            else:
+            if self._command_socket is None:
                 raise ConnectionError("Command socket not available")
 
-        except socket.error as e:
-            error_msg = f"Failed to send command: {e}"
-            self.logger.error(error_msg)
+            try:
+                self.logger.debug(
+                    f"Sending command {cmd.code} (params={params}, value={value}, "
+                    f"{len(cmd_bytes)} bytes)"
+                )
+                self._command_socket.sendall(cmd_bytes)
 
-            # Update model to ERROR state
+            except BrokenPipeError as e:
+                error_msg = f"Connection broken while sending command: {e}"
+                self.logger.error(error_msg)
+                self._update_error_state(error_msg)
+                raise ConnectionError(error_msg) from e
+
+            except socket.error as e:
+                error_msg = f"Socket error sending command: {e}"
+                self.logger.error(error_msg)
+                self._update_error_state(error_msg)
+                raise ConnectionError(error_msg) from e
+
+            # Receive response with timeout
+            try:
+                # Set timeout for receive
+                original_timeout = self._command_socket.gettimeout()
+                self._command_socket.settimeout(timeout)
+
+                # Receive response (expecting 128 bytes)
+                response = self._receive_full_response(
+                    self._command_socket,
+                    expected_size=128,
+                    timeout=timeout
+                )
+
+                # Restore original timeout
+                self._command_socket.settimeout(original_timeout)
+
+            except socket.timeout:
+                error_msg = f"Response timeout after {timeout}s for command {cmd.code}"
+                self.logger.error(error_msg)
+                # Try to restore timeout
+                try:
+                    self._command_socket.settimeout(original_timeout)
+                except:
+                    pass
+                self._update_error_state(error_msg)
+                raise TimeoutError(error_msg)
+
+            except socket.error as e:
+                error_msg = f"Socket error receiving response: {e}"
+                self.logger.error(error_msg)
+                self._update_error_state(error_msg)
+                raise ConnectionError(error_msg) from e
+
+            # Validate response
+            if not response:
+                error_msg = f"Empty response for command {cmd.code}"
+                self.logger.error(error_msg)
+                raise ConnectionError(error_msg)
+
+            if len(response) != 128:
+                self.logger.warning(
+                    f"Received {len(response)} bytes, expected 128 for command {cmd.code}"
+                )
+
+            self.logger.debug(
+                f"Command {cmd.code} completed successfully, "
+                f"received {len(response)} bytes"
+            )
+            return response
+
+        except (RuntimeError, ValueError, ConnectionError, TimeoutError):
+            # Re-raise expected exceptions
+            raise
+
+        except Exception as e:
+            error_msg = f"Unexpected error sending command {cmd.code}: {e}"
+            self.logger.exception(error_msg)
+            self._update_error_state(error_msg)
+            raise ConnectionError(error_msg) from e
+
+    def _receive_full_response(
+        self,
+        sock: socket.socket,
+        expected_size: int,
+        timeout: float
+    ) -> bytes:
+        """
+        Receive full response, handling partial receives.
+
+        Args:
+            sock: Socket to receive from
+            expected_size: Expected number of bytes
+            timeout: Maximum time to wait
+
+        Returns:
+            Complete response bytes
+
+        Raises:
+            socket.timeout: If timeout expires
+            socket.error: If receive fails
+        """
+        import time
+
+        data = b''
+        start_time = time.time()
+
+        while len(data) < expected_size:
+            # Check timeout
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                raise socket.timeout(
+                    f"Partial receive timeout: got {len(data)}/{expected_size} bytes"
+                )
+
+            # Receive chunk
+            remaining = expected_size - len(data)
+            chunk = sock.recv(remaining)
+
+            if not chunk:
+                # Connection closed
+                raise ConnectionError(
+                    f"Connection closed during receive: got {len(data)}/{expected_size} bytes"
+                )
+
+            data += chunk
+
+        return data
+
+    def _update_error_state(self, error_msg: str) -> None:
+        """Update model to ERROR state."""
+        try:
             from py2flamingo.models.connection import ConnectionStatus, ConnectionState
             self.model.status = ConnectionStatus(
                 state=ConnectionState.ERROR,
@@ -525,8 +671,8 @@ class MVCConnectionService:
                 connected_at=self.model.status.connected_at,
                 last_error=error_msg
             )
-
-            raise ConnectionError(error_msg) from e
+        except Exception as e:
+            self.logger.error(f"Failed to update error state: {e}")
 
     def get_status(self) -> 'ConnectionStatus':
         """
