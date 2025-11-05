@@ -413,8 +413,8 @@ class PositionController:
 
             response_bytes = self.connection.send_command(cmd)
 
-            # Parse response structure
-            if len(response_bytes) < 128:
+            # Check response type
+            if len(response_bytes) < 4:
                 return {
                     'success': False,
                     'error': f'Response too short: {len(response_bytes)} bytes',
@@ -422,70 +422,78 @@ class PositionController:
                 }
 
             # Protocol structure: START(4) + CODE(4) + STATUS(4) + PARAMS(28) + VALUE(8) + DATA(80)
+            # Expected start marker for binary protocol: 0xF321E654
             try:
-                start_marker = struct.unpack('<I', response_bytes[0:4])[0]
-                command_code = struct.unpack('<I', response_bytes[4:8])[0]
-                status_code = struct.unpack('<I', response_bytes[8:12])[0]
-
-                # Unpack 7 parameters
-                params = []
-                for i in range(7):
-                    offset = 12 + (i * 4)
-                    param = struct.unpack('<i', response_bytes[offset:offset+4])[0]
-                    params.append(param)
-
-                # Unpack value (double)
-                value = struct.unpack('<d', response_bytes[40:48])[0]
-
-                # Get data section (80 bytes - this is only the TAIL of the full data!)
-                data_tail = response_bytes[48:128]
-
-                # Try to decode the tail as string
-                try:
-                    data_tail_str = data_tail.rstrip(b'\x00').decode('utf-8', errors='replace')
-                except:
-                    data_tail_str = '<binary data>'
-
-                # Check if microscope wrote data to a file (like SCOPE_SETTINGS does)
-                full_data_str = None
                 import time
                 from pathlib import Path
-                from py2flamingo.utils.file_handlers import text_to_dict
 
-                # Wait a moment for file to be written
-                time.sleep(0.3)
+                # Check if this is a binary protocol response or text response
+                start_marker = struct.unpack('<I', response_bytes[0:4])[0]
+                is_binary_protocol = (start_marker == 0xF321E654)
 
-                # Check common locations for position/settings files
-                possible_files = [
-                    Path('microscope_settings') / 'StagePosition.txt',
-                    Path('microscope_settings') / 'ScopeSettings.txt',
-                    Path('microscope_settings') / 'PositionSettings.txt',
-                ]
+                self.logger.info(f"Response type: {'Binary protocol' if is_binary_protocol else 'Text data'} (marker: 0x{start_marker:08X})")
 
-                for file_path in possible_files:
-                    if file_path.exists():
-                        try:
-                            # Try to read as text
-                            with open(file_path, 'r') as f:
-                                full_data_str = f.read()
-                            self.logger.info(f"Found data file: {file_path} ({len(full_data_str)} chars)")
-                            break
-                        except Exception as e:
-                            self.logger.debug(f"Could not read {file_path}: {e}")
+                # Parse based on response type
+                if is_binary_protocol and len(response_bytes) >= 128:
+                    # Binary protocol response
+                    command_code = struct.unpack('<I', response_bytes[4:8])[0]
+                    status_code = struct.unpack('<I', response_bytes[8:12])[0]
 
-                if full_data_str is None:
-                    # No file found, use what we have
-                    full_data_str = f"<No file found - only header data available>\n\nLast 80 bytes from response:\n{data_tail_str}"
-                    self.logger.warning("STAGE_POSITION_GET did not write to expected file locations")
+                    # Unpack 7 parameters
+                    params = []
+                    for i in range(7):
+                        offset = 12 + (i * 4)
+                        param = struct.unpack('<i', response_bytes[offset:offset+4])[0]
+                        params.append(param)
+
+                    # Unpack value (double)
+                    value = struct.unpack('<d', response_bytes[40:48])[0]
+
+                    # Get data section (80 bytes - this is only the TAIL of the full data!)
+                    data_tail = response_bytes[48:128]
+
+                    # Try to decode the tail as string
+                    try:
+                        data_tail_str = data_tail.rstrip(b'\x00').decode('utf-8', errors='replace')
+                    except:
+                        data_tail_str = '<binary data>'
+
+                    response_type = "Binary Protocol"
+                else:
+                    # Text response - decode entire response as text
+                    try:
+                        response_text = response_bytes.decode('utf-8', errors='replace')
+                        self.logger.info(f"Decoded text response: {len(response_text)} chars")
+                    except:
+                        response_text = '<Could not decode as text>'
+
+                    # Set placeholder values for display
+                    command_code = 0
+                    status_code = 0
+                    params = []
+                    value = 0.0
+                    data_tail_str = response_text[-200:] if len(response_text) > 200 else response_text
+                    response_type = "Text Data"
+
+                # For debug query, use the ACTUAL response data, not cached files
+                # (Files may contain stale data from previous operations)
+                if not is_binary_protocol:
+                    # Text response - use the actual response
+                    full_data_str = response_text
+                    self.logger.info(f"Using actual text response from microscope: {len(response_text)} chars")
+                else:
+                    # Binary protocol - only have the 80-byte tail
+                    full_data_str = f"<Binary protocol response - only 80-byte tail available>\n\n{data_tail_str}"
+                    self.logger.info("Binary protocol response - no full data available")
 
                 parsed = {
+                    'response_type': response_type,
                     'start_marker': f'0x{start_marker:08X}',
                     'command_code': command_code,
                     'status_code': status_code,
                     'params': params,
                     'value': value,
                     'data_tail_string': data_tail_str,
-                    'data_tail_hex': data_tail[:40].hex() if len(data_tail) > 0 else '',
                     'full_data': full_data_str,
                     'data_length': len(full_data_str) if full_data_str else 0
                 }
