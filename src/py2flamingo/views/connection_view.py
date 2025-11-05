@@ -373,15 +373,24 @@ class ConnectionView(QWidget):
             text += "=" * 70 + "\n\n"
 
             parsed = result.get('parsed', {})
-            text += f"Start Marker:    {parsed.get('start_marker', 'N/A')}\n"
-            text += f"Command Code:    {parsed.get('command_code', 'N/A')}\n"
-            text += f"Status Code:     {parsed.get('status_code', 'N/A')}\n"
-            text += f"Parameters:      {parsed.get('params', 'N/A')}\n"
-            text += f"Value Field:     {parsed.get('value', 'N/A')}\n"
 
-            # Show data tail from protocol response (last 80 bytes)
-            text += f"\nData Tail (80 bytes from protocol response):\n"
-            text += f"  {repr(parsed.get('data_tail_string', '')[:100])}\n"
+            # Show response type
+            response_type = parsed.get('response_type', 'Unknown')
+            text += f"Response Type:   {response_type}\n"
+            text += f"Start Marker:    {parsed.get('start_marker', 'N/A')}\n"
+
+            # Only show protocol fields if binary protocol
+            if response_type == "Binary Protocol":
+                text += f"Command Code:    {parsed.get('command_code', 'N/A')}\n"
+                text += f"Status Code:     {parsed.get('status_code', 'N/A')}\n"
+                text += f"Parameters:      {parsed.get('params', 'N/A')}\n"
+                text += f"Value Field:     {parsed.get('value', 'N/A')}\n"
+                text += f"\nData Tail (80 bytes from protocol response):\n"
+                text += f"  {repr(parsed.get('data_tail_string', '')[:100])}\n"
+            else:
+                text += f"\nNote: Microscope returned text data, not binary protocol.\n"
+                text += f"\nResponse preview (last 200 chars):\n"
+                text += f"  {repr(parsed.get('data_tail_string', '')[:200])}\n"
 
             # Show full data if available from file
             if parsed.get('full_data'):

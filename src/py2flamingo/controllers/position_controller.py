@@ -582,6 +582,14 @@ class PositionController:
                 if len(additional_data) > 0:
                     try:
                         full_data_str = additional_data.decode('utf-8', errors='replace')
+                        # Strip any trailing binary garbage (protocol end markers, etc.)
+                        # Keep only printable characters at the end
+                        full_data_str = full_data_str.rstrip('\x00\r\n')
+                        # Find last '>' which should be the end of the XML-like structure
+                        last_bracket = full_data_str.rfind('>')
+                        if last_bracket != -1 and last_bracket > len(full_data_str) - 50:
+                            # There's a '>' near the end, truncate any garbage after it
+                            full_data_str = full_data_str[:last_bracket + 1]
                         self.logger.info(f"Decoded additional data: {len(full_data_str)} chars")
                     except:
                         full_data_str = f"<Could not decode {len(additional_data)} bytes as text>"
