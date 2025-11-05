@@ -220,28 +220,46 @@ See `src/py2flamingo/core/tcp_protocol.py`:
 - `ProtocolEncoder.encode_command()` - Creates 128-byte packets
 - `ProtocolDecoder.decode_command()` - Parses 128-byte packets
 
-### Known Issue: Socket Contention
+### Communication Architecture
 
-**Problem:** The connection system runs a background `command_listen_thread` that continuously reads from the command socket via `client.recv(128)`. When debug queries try to send a command and read the response directly on the same socket, there's a race condition:
+**Queue-Based Communication Pattern:**
 
-1. Debug query sends command
-2. Microscope sends response
-3. Background thread may consume the response
-4. Debug query times out
+The system uses a queue-based architecture to avoid socket contention between threads:
 
-**Symptoms:**
-- Debug queries time out even for commands known to work
-- CAMERA_PIXEL_FIELD_OF_VIEW_GET works sometimes (race condition)
-- CAMERA_IMAGE_SIZE_GET times out frequently
+```
+Application Code
+    ↓ (put command)
+Command Queue
+    ↓ (send thread reads)
+TCP Socket → Microscope
+    ↓ (response)
+Listener Thread
+    ↓ (parse & route)
+Other Data Queue
+    ↓ (get response)
+Application Code
+```
 
-**Temporary Workaround:**
-Debug queries include a warning about this limitation. This is a diagnostic feature, not production code.
+**Key Components:**
+- `command` queue: Commands to send to microscope
+- `send` event: Triggers send thread to process command queue
+- `other_data` queue: Responses from microscope (populated by listener)
+- `command_listen_thread`: Continuously reads socket, routes responses to queues
 
-**Proper Solutions (for future implementation):**
-1. Add socket lock/pause mechanism for exclusive access
-2. Route debug queries through the proper queue system
-3. Implement request-response correlation with unique IDs
-4. Temporarily stop listener thread during debug operations
+**Why This Pattern:**
+- Prevents race conditions (only listener thread reads from socket)
+- Multiple threads can send commands safely via queue
+- Listener routes responses based on command code
+- No blocking - uses event signaling
+
+**Implementation:**
+All command sending (including debug queries) uses this pattern:
+1. Clear `other_data` queue
+2. Put command on `command` queue
+3. Set `send` event
+4. Wait for response on `other_data` queue
+
+See `position_controller.py:debug_query_command()` for reference implementation.
 
 ---
 
