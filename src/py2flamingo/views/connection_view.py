@@ -156,11 +156,18 @@ class ConnectionView(QWidget):
 
         # Command selector
         self.debug_command_combo = QComboBox()
-        self.debug_command_combo.addItem("STAGE_POSITION_GET (24584)", (24584, "STAGE_POSITION_GET"))
-        self.debug_command_combo.addItem("SYSTEM_STATE_GET (40967)", (40967, "SYSTEM_STATE_GET"))
-        self.debug_command_combo.addItem("STAGE_MOTION_STOPPED (24592)", (24592, "STAGE_MOTION_STOPPED"))
-        self.debug_command_combo.addItem("COMMON_SCOPE_SETTINGS (4103)", (4103, "COMMON_SCOPE_SETTINGS"))
-        self.debug_command_combo.setToolTip("Select command to test")
+        # System commands
+        self.debug_command_combo.addItem("SYSTEM_STATE_GET (40967) ✓", (40967, "SYSTEM_STATE_GET"))
+        # Camera commands
+        self.debug_command_combo.addItem("CAMERA_IMAGE_SIZE_GET (12327)", (12327, "CAMERA_IMAGE_SIZE_GET"))
+        self.debug_command_combo.addItem("CAMERA_PIXEL_FIELD_OF_VIEW_GET (12343)", (12343, "CAMERA_PIXEL_FIELD_OF_VIEW_GET"))
+        self.debug_command_combo.addItem("CAMERA_WORK_FLOW_STOP (12293)", (12293, "CAMERA_WORK_FLOW_STOP"))
+        # Stage commands (likely not implemented)
+        self.debug_command_combo.addItem("STAGE_POSITION_GET (24584) [timeout]", (24584, "STAGE_POSITION_GET"))
+        self.debug_command_combo.addItem("STAGE_MOTION_STOPPED (24592) [timeout]", (24592, "STAGE_MOTION_STOPPED"))
+        # Settings commands
+        self.debug_command_combo.addItem("COMMON_SCOPE_SETTINGS (4103) [timeout]", (4103, "COMMON_SCOPE_SETTINGS"))
+        self.debug_command_combo.setToolTip("Select command to test - ✓ = known working, [timeout] = likely not implemented")
         self.debug_command_combo.setEnabled(False)  # Enabled when connected
         debug_layout.addWidget(QLabel("Test Command:"))
         debug_layout.addWidget(self.debug_command_combo)

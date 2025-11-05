@@ -745,6 +745,37 @@ class PositionController:
             interpretation_lines.append("\n  This command successfully queries system state!")
             interpretation_lines.append("  Use this to check if microscope is ready for commands.")
 
+        elif command_code == 12327:  # CAMERA_IMAGE_SIZE_GET
+            params = parsed.get('params', [])
+            interpretation_lines.append(f"  ✓ CAMERA_IMAGE_SIZE_GET query")
+            interpretation_lines.append(f"\n  Camera Image Size:")
+            if len(params) > 0 and params[0] != 0:
+                # Old code used received[7] which would be params[4]
+                # But let's check all params for non-zero values
+                interpretation_lines.append(f"    Parameters: {params}")
+                interpretation_lines.append(f"    → Image size info returned in parameters")
+            else:
+                interpretation_lines.append(f"    Parameters: {params}")
+                interpretation_lines.append(f"    Note: Check which parameter field contains image size")
+
+        elif command_code == 12343:  # CAMERA_PIXEL_FIELD_OF_VIEW_GET
+            value = parsed.get('value', 0.0)
+            interpretation_lines.append(f"  ✓ CAMERA_PIXEL_FIELD_OF_VIEW_GET query")
+            interpretation_lines.append(f"\n  Pixel Field of View:")
+            interpretation_lines.append(f"    Value: {value}")
+            if value > 0:
+                interpretation_lines.append(f"    → Pixel FOV = {value} (likely in micrometers)")
+            else:
+                interpretation_lines.append(f"    Note: Value is zero - check if command is implemented")
+
+        elif command_code == 12293:  # CAMERA_WORK_FLOW_STOP
+            status_code = parsed.get('status_code', 0)
+            interpretation_lines.append(f"  ✓ CAMERA_WORK_FLOW_STOP command")
+            interpretation_lines.append(f"\n  Workflow Stop:")
+            interpretation_lines.append(f"    Status: {status_code}")
+            interpretation_lines.append(f"    → Command sent to stop any running workflow")
+            interpretation_lines.append(f"    → Safe to test (stops acquisition if running)")
+
         elif command_code == 24592:  # STAGE_MOTION_STOPPED
             interpretation_lines.append(f"  Testing STAGE_MOTION_STOPPED command...")
             interpretation_lines.append("  This should indicate if stage has finished moving.")
