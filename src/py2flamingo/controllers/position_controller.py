@@ -417,9 +417,8 @@ class PositionController:
         """
         Send a command and return parsed response for debugging.
 
-        This method sends any command code and shows what data the microscope
-        returns. Useful for testing which commands are implemented and what
-        data they provide.
+        This method sends commands using the proper queue-based communication
+        system (like the old code), avoiding race conditions with the listener thread.
 
         Args:
             command_code: The command code to send
@@ -430,22 +429,19 @@ class PositionController:
                 - 'success': bool - Whether query succeeded
                 - 'command_code': int - Command code sent
                 - 'command_name': str - Command name
-                - 'raw_response': bytes - Raw response data
+                - 'raw_response': bytes/Any - Raw response data from queue
                 - 'parsed': dict - Parsed response structure
                 - 'error': str - Error message if failed
                 - 'timeout_explanation': str - Explanation if timeout
 
-        Warning:
-            This method directly accesses the command socket, which may race with
-            the background command_listen_thread. If timeouts occur, the background
-            thread may be consuming responses before we can read them. This is a
-            known limitation of the debug feature.
-
         Note:
-            This is a diagnostic/debug method for testing command responses.
+            This method uses the queue-based communication system. The command is
+            sent via the command queue, and the response is received via the
+            other_data queue (populated by the listener thread).
         """
         import struct
-        import socket
+        import time
+        from queue import Empty
 
         if not self.connection.is_connected():
             return {
@@ -456,224 +452,123 @@ class PositionController:
             }
 
         try:
-            from py2flamingo.models.command import Command
+            self.logger.info(f"Sending {command_name} (code {command_code}) via queue system...")
 
-            self.logger.info(f"Sending {command_name} (code {command_code}) for debug query...")
+            # Get queue and event managers from connection service
+            queue_manager = self.connection.queue_manager
+            event_manager = self.connection.event_manager
 
-            # For debug query, we need to read ALL data from socket,
-            # not just the standard 128 bytes
-            cmd = Command(
-                code=command_code,
-                parameters={'params': [0, 0, 0, 0, 0, 0, 0], 'value': 0.0}
-            )
+            # Clear other_data queue to remove any stale responses
+            queue_manager.clear_queue('other_data')
+            self.logger.debug("Cleared other_data queue")
 
-            # Encode command
-            cmd_bytes = self.connection.encoder.encode_command(
-                code=cmd.code,
-                status=0,
-                params=cmd.parameters.get('params'),
-                value=cmd.parameters.get('value', 0.0),
-                data=b''
-            )
+            # Put command on queue (like old code)
+            queue_manager.put_nowait('command', command_code)
+            self.logger.debug(f"Put command {command_code} on queue")
 
-            # Send command directly via socket
-            command_socket = self.connection._command_socket
-            if command_socket is None:
-                return {
-                    'success': False,
-                    'error': 'Command socket not available'
-                }
+            # Set send event to trigger send thread
+            event_manager.set_event('send')
+            self.logger.debug("Set send event")
 
-            command_socket.sendall(cmd_bytes)
-            self.logger.info("Command sent, reading response...")
+            # Wait briefly for command to be sent and response to arrive
+            time.sleep(0.2)
 
-            # Pattern from old code: microscope sends data in two parts:
-            # 1. 128-byte binary acknowledgment
-            # 2. Additional text data (if any)
+            # Try to get response from other_data queue (timeout after 3 seconds)
+            response_data = None
+            timeout = 3.0
+            start_time = time.time()
 
-            # Read 128-byte acknowledgment first
-            ack_response = self._receive_full_bytes(command_socket, 128, timeout=2.0)
-            self.logger.info(f"Received 128-byte acknowledgment")
+            while time.time() - start_time < timeout:
+                response_data = queue_manager.get_nowait('other_data')
+                if response_data is not None:
+                    self.logger.info(f"Received response from queue: {type(response_data)}")
+                    break
+                time.sleep(0.1)
 
-            # Check for additional data (like old code's bytes_waiting())
-            import time
-            import select
-
-            time.sleep(0.1)  # Brief wait for additional data to arrive
-
-            # Check if more data is waiting
-            ready = select.select([command_socket], [], [], 0.1)
-            additional_data = b''
-
-            if ready[0]:
-                # More data is available - read it all
-                command_socket.settimeout(0.5)
-                try:
-                    while True:
-                        chunk = command_socket.recv(4096)
-                        if not chunk:
-                            break
-                        additional_data += chunk
-                        self.logger.info(f"Received additional data chunk: {len(chunk)} bytes")
-                        # Check if more data is waiting
-                        ready = select.select([command_socket], [], [], 0.05)
-                        if not ready[0]:
-                            break
-                except socket.timeout:
-                    pass
-                finally:
-                    command_socket.settimeout(None)
-
-                self.logger.info(f"Total additional data: {len(additional_data)} bytes")
-
-            # Combine acknowledgment and additional data
-            response_bytes = ack_response + additional_data
-            self.logger.info(f"Total response: {len(response_bytes)} bytes (128 ack + {len(additional_data)} additional)")
-
-            # Parse response based on structure
-            # The 128-byte ack might be binary protocol, and additional_data might be text
-            if len(ack_response) < 4:
-                return {
-                    'success': False,
-                    'error': f'Acknowledgment too short: {len(ack_response)} bytes',
-                    'raw_response': response_bytes
-                }
-
-            # Protocol structure: START(4) + CODE(4) + STATUS(4) + PARAMS(28) + VALUE(8) + DATA(80)
-            # Expected start marker for binary protocol: 0xF321E654
-            try:
-                import time
-                from pathlib import Path
-
-                # Check if the 128-byte ack is binary protocol
-                start_marker = struct.unpack('<I', ack_response[0:4])[0]
-                is_binary_protocol = (start_marker == 0xF321E654)
-
-                self.logger.info(f"Ack type: {'Binary protocol' if is_binary_protocol else 'Text data'} (marker: 0x{start_marker:08X})")
-                self.logger.info(f"Additional data: {len(additional_data)} bytes")
-
-                # Parse acknowledgment
-                if is_binary_protocol:
-                    # Binary protocol acknowledgment
-                    command_code = struct.unpack('<I', ack_response[4:8])[0]
-                    status_code = struct.unpack('<I', ack_response[8:12])[0]
-
-                    # Unpack 7 parameters
-                    params = []
-                    for i in range(7):
-                        offset = 12 + (i * 4)
-                        param = struct.unpack('<i', ack_response[offset:offset+4])[0]
-                        params.append(param)
-
-                    # Unpack value (double)
-                    value = struct.unpack('<d', ack_response[40:48])[0]
-
-                    # Get data section (80 bytes from ack)
-                    data_tail = ack_response[48:128]
-
-                    # Try to decode the tail as string
-                    try:
-                        data_tail_str = data_tail.rstrip(b'\x00').decode('utf-8', errors='replace')
-                    except:
-                        data_tail_str = '<binary data>'
-
-                    response_type = "Binary Protocol"
-                else:
-                    # Text acknowledgment
-                    try:
-                        ack_text = ack_response.decode('utf-8', errors='replace')
-                    except:
-                        ack_text = '<Could not decode as text>'
-
-                    command_code = 0
-                    status_code = 0
-                    params = []
-                    value = 0.0
-                    data_tail_str = ack_text[-100:]
-                    response_type = "Text Data"
-
-                # Handle the full response data
-                if len(additional_data) > 0:
-                    # We have both ack (128 bytes) and additional data
-                    # For text responses, both parts are text, so decode the COMPLETE response
-                    try:
-                        full_data_str = response_bytes.decode('utf-8', errors='replace')
-                        # Strip any trailing binary garbage (protocol end markers, etc.)
-                        full_data_str = full_data_str.rstrip('\x00\r\n')
-                        # Find last '>' which should be the end of the XML-like structure
-                        last_bracket = full_data_str.rfind('>')
-                        if last_bracket != -1 and last_bracket > len(full_data_str) - 50:
-                            # There's a '>' near the end, truncate any garbage after it
-                            full_data_str = full_data_str[:last_bracket + 1]
-                        self.logger.info(f"Decoded complete response: {len(full_data_str)} chars")
-                    except:
-                        full_data_str = f"<Could not decode {len(response_bytes)} bytes as text>"
-                elif not is_binary_protocol:
-                    # No additional data, ack itself was text (only 128 bytes total)
-                    try:
-                        full_data_str = ack_response.decode('utf-8', errors='replace').rstrip('\x00\r\n')
-                    except:
-                        full_data_str = ack_text
-                else:
-                    # Binary protocol with no additional data
-                    full_data_str = f"<Binary protocol, no additional data>\n\n{data_tail_str}"
-
-                parsed = {
-                    'response_type': response_type,
-                    'start_marker': f'0x{start_marker:08X}',
-                    'command_code': command_code,
-                    'status_code': status_code,
-                    'params': params,
-                    'value': value,
-                    'data_tail_string': data_tail_str,
-                    'full_data': full_data_str,
-                    'data_length': len(full_data_str) if full_data_str else 0
-                }
-
-                self.logger.info(f"{command_name} response parsed successfully")
-                self.logger.debug(f"Response: {parsed}")
-
-                return {
-                    'success': True,
-                    'command_code': command_code,
-                    'command_name': command_name,
-                    'raw_response': response_bytes,
-                    'parsed': parsed,
-                    'interpretation': self._interpret_command_response(parsed, command_code, command_name)
-                }
-
-            except Exception as e:
+            if response_data is None:
+                self.logger.error(f"Timeout waiting for response from {command_name}")
                 return {
                     'success': False,
                     'command_code': command_code,
                     'command_name': command_name,
-                    'error': f'Failed to parse response: {e}',
-                    'raw_response': response_bytes
+                    'error': 'timeout',
+                    'timeout_explanation': (
+                        f"No response received within {timeout} seconds.\n\n"
+                        "Possible reasons:\n"
+                        "1. Command is NOT IMPLEMENTED in microscope firmware\n"
+                        "2. Listener thread doesn't have handler for this command\n"
+                        "3. Microscope is busy or not responding\n\n"
+                        "Check oldcodereference/threads.py to see if this command\n"
+                        "has a handler in command_listen_thread."
+                    )
                 }
 
-        except (socket.timeout, TimeoutError) as e:
-            self.logger.error(f"Timeout waiting for response from {command_name}")
-            return {
-                'success': False,
+            # The listener thread extracted the relevant data and put it in other_data queue
+            # Different commands return different types of data:
+            # - CAMERA_PIXEL_FIELD_OF_VIEW_GET: float (received[10] = value field)
+            # - CAMERA_IMAGE_SIZE_GET: int (received[7] = params[4])
+            # - check_stack: bytes (additional text data)
+
+            # Create parsed structure from the queue response
+            parsed = {
+                'response_type': 'Queue Data',
+                'data_type': type(response_data).__name__,
+                'raw_value': response_data,
                 'command_code': command_code,
-                'command_name': command_name,
-                'error': 'timeout',
-                'timeout_explanation': (
-                    f"No response from microscope after sending {command_name} (code {command_code}).\n\n"
-                    "This likely means:\n"
-                    "1. Command is NOT IMPLEMENTED in microscope firmware\n"
-                    "2. Command is defined in CommandCodes.h but never used\n"
-                    "3. Microscope ignores unknown/unimplemented commands\n\n"
-                    "Try other commands to see which ones are actually implemented."
-                )
+                'status_code': 'N/A',
+                'params': 'N/A',
+                'value': 'N/A',
+                'reserved': 'N/A',
+                'data_tail_string': '',
+                'full_data': '',
+                'data_length': 0
             }
+
+            # Format the data appropriately based on type
+            if isinstance(response_data, float):
+                # Likely from value field (offset 40-47)
+                parsed['value'] = response_data
+                parsed['full_data'] = f"Value field: {response_data}"
+                parsed['data_length'] = len(str(response_data))
+            elif isinstance(response_data, int):
+                # Likely from a parameter field
+                parsed['params'] = f"[extracted parameter = {response_data}]"
+                parsed['full_data'] = f"Parameter value: {response_data}"
+                parsed['data_length'] = len(str(response_data))
+            elif isinstance(response_data, bytes):
+                # Text data (like settings)
+                try:
+                    text_data = response_data.decode('utf-8', errors='replace')
+                    parsed['full_data'] = text_data
+                    parsed['data_length'] = len(text_data)
+                    parsed['data_tail_string'] = text_data[:100] + '...' if len(text_data) > 100 else text_data
+                except:
+                    parsed['full_data'] = f"<Could not decode {len(response_data)} bytes>"
+                    parsed['data_length'] = len(response_data)
+            else:
+                # Unknown type
+                parsed['full_data'] = f"Unknown data type: {type(response_data)}"
+                parsed['data_length'] = 0
+
+            self.logger.info(f"{command_name} response parsed from queue")
+            self.logger.debug(f"Parsed: {parsed}")
+
+            return {
+                'success': True,
+                'command_code': command_code,
+                'command_name': command_name,
+                'raw_response': response_data,
+                'parsed': parsed,
+                'interpretation': self._interpret_command_response(parsed, command_code, command_name)
+            }
+
         except Exception as e:
-            self.logger.error(f"Failed to query {command_name}: {e}", exc_info=True)
+            self.logger.error(f"Failed to query {command_name} via queue system: {e}", exc_info=True)
             return {
                 'success': False,
                 'command_code': command_code,
                 'command_name': command_name,
-                'error': str(e)
+                'error': f'Queue communication error: {str(e)}'
             }
 
     def _interpret_command_response(self, parsed: dict, command_code: int, command_name: str) -> str:
