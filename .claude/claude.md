@@ -206,6 +206,35 @@ Different commands use the fields differently:
 - `addDataBytes`: Contains size of file being transferred
 - Command structure sent first, then file data
 
+**CRITICAL: Query/GET Commands Require TRIGGER_CALL_BACK Flag:**
+- For query commands (e.g., `CAMERA_IMAGE_SIZE_GET`, `STAGE_POSITION_GET`), `cmdBits6` (Param[6]) **MUST** be set to `0x80000000`
+- This is the `COMMAND_DATA_BITS_TRIGGER_CALL_BACK` flag from `CommandCodes.h`
+- Without this flag, the microscope receives the command but **does not send a response**
+- Result: 3-second timeout waiting for response that never arrives
+- **Always set params[6] = 0x80000000 for any GET/query command**
+
+Example (correct):
+```python
+cmd_bytes = encoder.encode_command(
+    code=CAMERA_IMAGE_SIZE_GET,
+    status=0,
+    params=[0, 0, 0, 0, 0, 0, 0x80000000],  # TRIGGER_CALL_BACK flag
+    value=0.0,
+    data=b''
+)
+```
+
+Example (incorrect - will timeout):
+```python
+cmd_bytes = encoder.encode_command(
+    code=CAMERA_IMAGE_SIZE_GET,
+    status=0,
+    params=[0, 0, 0, 0, 0, 0, 0],  # Missing TRIGGER_CALL_BACK - no response!
+    value=0.0,
+    data=b''
+)
+```
+
 #### Packet Validation
 
 Both start and end markers must be correct:

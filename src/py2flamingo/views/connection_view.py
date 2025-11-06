@@ -6,6 +6,7 @@ This module provides the ConnectionView widget for handling connection UI.
 
 from typing import Tuple, Optional, List, Dict, Any
 import logging
+import struct
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QSpinBox, QComboBox, QGroupBox, QTextEdit
@@ -459,6 +460,51 @@ class ConnectionView(QWidget):
                     text += f"(all zeros/null)\n"
 
                 text += f"[Offset 124-127] End Marker:     0xFEDC4321\n"
+
+                # Show additional data if present (CRITICAL - often contains the key information)
+                add_data_bytes = parsed.get('reserved', 0)
+                if add_data_bytes > 0:
+                    text += f"\n{'=' * 70}\n"
+                    text += f"ADDITIONAL DATA ({add_data_bytes} bytes)\n"
+                    text += f"{'=' * 70}\n\n"
+
+                    additional_data = parsed.get('additional_data', b'')
+                    additional_data_str = parsed.get('additional_data_string', '')
+
+                    if additional_data:
+                        # Show as hex
+                        hex_str = ' '.join(f'{b:02X}' for b in additional_data)
+                        text += f"Hex: {hex_str}\n\n"
+
+                        # Try to interpret as different types
+                        text += "Possible interpretations:\n"
+
+                        # As string
+                        if additional_data_str and additional_data_str != '<binary data>':
+                            text += f"  String: '{additional_data_str}'\n"
+
+                        # As integers
+                        if len(additional_data) >= 4:
+                            try:
+                                int32_val = struct.unpack('<i', additional_data[:4])[0]
+                                uint32_val = struct.unpack('<I', additional_data[:4])[0]
+                                text += f"  First 4 bytes as int32: {int32_val}\n"
+                                text += f"  First 4 bytes as uint32: {uint32_val}\n"
+                            except:
+                                pass
+
+                        if len(additional_data) >= 2:
+                            try:
+                                int16_val = struct.unpack('<h', additional_data[:2])[0]
+                                uint16_val = struct.unpack('<H', additional_data[:2])[0]
+                                text += f"  First 2 bytes as int16: {int16_val}\n"
+                                text += f"  First 2 bytes as uint16: {uint16_val}\n"
+                            except:
+                                pass
+
+                        text += "\n"
+                    else:
+                        text += "  (Failed to read additional data from socket)\n\n"
             else:
                 text += f"\nNote: Microscope returned text data, not binary protocol.\n"
                 text += f"\nResponse preview (last 200 chars):\n"

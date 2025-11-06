@@ -32,6 +32,23 @@ class CommandCode:
     CMD_SYSTEM_STATE_IDLE = 40962
 
 
+class CommandDataBits:
+    """
+    Command data bits flags for the cmdBits6 parameter field.
+
+    These flags control command behavior, particularly response handling.
+    From CommandCodes.h enum COMMAND_DATA_BITS.
+    """
+
+    # Trigger callback/response from microscope (CRITICAL for query commands)
+    TRIGGER_CALL_BACK = 0x80000000
+
+    # Other flags from CommandCodes.h
+    EXPERIMENT_TIME_REMAINING = 0x00000001
+    STAGE_POSITIONS_IN_BUFFER = 0x00000002
+    MAX_PROJECTION = 0x00000004
+
+
 class ProtocolEncoder:
     """
     Encodes commands into the Flamingo microscope binary protocol format.

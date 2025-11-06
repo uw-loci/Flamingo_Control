@@ -16,6 +16,7 @@ from py2flamingo.models.microscope import Position, MicroscopeState
 from py2flamingo.services.connection_service import ConnectionService
 from py2flamingo.core.queue_manager import QueueManager
 from py2flamingo.core.events import EventManager
+from py2flamingo.core.tcp_protocol import CommandDataBits
 
 @dataclass
 class AxisCode:
@@ -455,11 +456,12 @@ class PositionController:
             self.logger.info(f"Sending {command_name} (code {command_code}) directly via socket...")
 
             # MVCConnectionService doesn't use background threads, so direct socket access is safe
-            # Encode command
+            # Encode command with TRIGGER_CALL_BACK flag to get response
+            # params[6] (cmdBits6) must be set to 0x80000000 to trigger microscope response
             cmd_bytes = self.connection.encoder.encode_command(
                 code=command_code,
                 status=0,
-                params=[0, 0, 0, 0, 0, 0, 0],
+                params=[0, 0, 0, 0, 0, 0, CommandDataBits.TRIGGER_CALL_BACK],
                 value=0.0,
                 data=b''
             )
@@ -509,6 +511,18 @@ class PositionController:
             # Get addDataBytes field
             add_data_bytes = struct.unpack('<I', ack_response[48:52])[0]
 
+            # Read additional data if specified (CRITICAL for buffer management)
+            additional_data = b''
+            if add_data_bytes > 0:
+                self.logger.info(f"Reading {add_data_bytes} additional bytes from socket...")
+                try:
+                    additional_data = self._receive_full_bytes(command_socket, add_data_bytes, timeout=3.0)
+                    self.logger.info(f"Successfully read {len(additional_data)} additional bytes")
+                except (socket.timeout, TimeoutError) as e:
+                    self.logger.warning(f"Timeout reading additional data: {e}")
+                except Exception as e:
+                    self.logger.error(f"Error reading additional data: {e}")
+
             # Get data section (72 bytes)
             data_field = ack_response[52:124]
 
@@ -518,7 +532,15 @@ class PositionController:
             except:
                 data_tail_str = '<binary data>'
 
-            self.logger.info(f"Parsed response: code={response_code}, status={status_code}, value={value}")
+            # Try to decode additional data as string
+            additional_data_str = ''
+            if additional_data:
+                try:
+                    additional_data_str = additional_data.rstrip(b'\x00').decode('utf-8', errors='replace')
+                except:
+                    additional_data_str = '<binary data>'
+
+            self.logger.info(f"Parsed response: code={response_code}, status={status_code}, value={value}, addDataBytes={add_data_bytes}")
 
             # Create parsed structure
             parsed = {
@@ -530,8 +552,10 @@ class PositionController:
                 'value': value,
                 'reserved': add_data_bytes,
                 'data_tail_string': data_tail_str,
+                'additional_data': additional_data,  # Raw bytes
+                'additional_data_string': additional_data_str,  # Decoded string
                 'full_data': f"Binary protocol response",
-                'data_length': 128
+                'data_length': 128 + len(additional_data)
             }
 
             return {
