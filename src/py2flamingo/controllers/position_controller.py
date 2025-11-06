@@ -61,6 +61,12 @@ class PositionController:
         self._current_position: Optional[Position] = None
         self._movement_lock = threading.Lock()
 
+        # Motion tracking for waiting for movement completion
+        self._motion_tracker: Optional['MotionTracker'] = None
+
+        # Callback for motion complete notifications
+        self._motion_complete_callback: Optional[Callable] = None
+
         # Try to initialize position from microscope settings
         self._initialize_position()
 
@@ -240,6 +246,15 @@ class PositionController:
         position = Position(x=float(x), y=float(y), z=float(z), r=float(r))
         self.go_to_position(position, **kwargs)
 
+    def set_motion_complete_callback(self, callback: Callable) -> None:
+        """
+        Register a callback to be called when motion completes.
+
+        Args:
+            callback: Callable that takes no arguments
+        """
+        self._motion_complete_callback = callback
+
     def move_rotation(self, rotation_degrees: float) -> None:
         """
         Move only the rotation axis to the specified angle.
@@ -247,6 +262,10 @@ class PositionController:
         This is the safest movement as rotation doesn't risk hitting
         the chamber walls. The stage must be within the chamber bounds
         in X, Y, Z before rotating.
+
+        This method sends the movement command and returns immediately.
+        Motion completion is tracked asynchronously and the callback
+        is fired when motion stops.
 
         Args:
             rotation_degrees: Target rotation angle in degrees (0-360)
@@ -279,19 +298,76 @@ class PositionController:
             # Move only the rotation axis
             self._move_axis(self.axis.R, rotation_degrees, "Rotation")
 
-            # Update tracked position
-            if self._current_position:
-                self._current_position = Position(
-                    x=self._current_position.x,
-                    y=self._current_position.y,
-                    z=self._current_position.z,
-                    r=rotation_degrees
-                )
-                self.logger.info(f"Position updated: Rotation = {rotation_degrees:.2f}°")
+            # Update tracked position (optimistically - actual position will be this)
+            target_position = Position(
+                x=self._current_position.x if self._current_position else 0.0,
+                y=self._current_position.y if self._current_position else 0.0,
+                z=self._current_position.z if self._current_position else 0.0,
+                r=rotation_degrees
+            )
 
-        finally:
-            # Always release the lock
+            # Wait for motion complete in background thread
+            self._wait_for_motion_complete_async(target_position)
+
+        except Exception as e:
+            # Release lock on error
             self._movement_lock.release()
+            raise
+
+    def _wait_for_motion_complete_async(self, target_position: Position) -> None:
+        """
+        Wait for motion complete in a background thread.
+
+        Args:
+            target_position: Position to update to when motion completes
+        """
+        def wait_thread():
+            try:
+                # Create motion tracker if needed
+                if self._motion_tracker is None:
+                    from py2flamingo.controllers.motion_tracker import MotionTracker
+                    command_socket = self.connection._command_socket
+                    if command_socket:
+                        self._motion_tracker = MotionTracker(command_socket)
+                    else:
+                        self.logger.error("No command socket available for motion tracking")
+                        self._movement_lock.release()
+                        return
+
+                # Wait for motion complete (blocks this thread, not GUI)
+                self.logger.info("Waiting for motion complete callback...")
+                completed = self._motion_tracker.wait_for_motion_complete(timeout=30.0)
+
+                if completed:
+                    self.logger.info("Motion completed successfully")
+                    # Update position
+                    self._current_position = target_position
+                    self.logger.info(
+                        f"Position confirmed: X={target_position.x:.3f}, "
+                        f"Y={target_position.y:.3f}, Z={target_position.z:.3f}, "
+                        f"R={target_position.r:.2f}°"
+                    )
+                else:
+                    self.logger.warning("Motion complete timeout - position may be uncertain")
+
+                # Fire callback if registered
+                if self._motion_complete_callback:
+                    try:
+                        self._motion_complete_callback()
+                    except Exception as e:
+                        self.logger.error(f"Error in motion complete callback: {e}")
+
+            except Exception as e:
+                self.logger.error(f"Error waiting for motion complete: {e}", exc_info=True)
+
+            finally:
+                # Always release movement lock
+                self._movement_lock.release()
+                self.logger.debug("Movement lock released")
+
+        # Start background thread
+        thread = threading.Thread(target=wait_thread, daemon=True, name="MotionWaiter")
+        thread.start()
 
     def _move_axis(self, axis_code: int, value: float, axis_name: str) -> None:
         """

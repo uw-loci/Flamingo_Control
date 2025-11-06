@@ -36,6 +36,10 @@ class StageControlView(QWidget):
         self._controller = controller
         self._logger = logging.getLogger(__name__)
         self._logger.info("StageControlView initialized")
+
+        # Register motion complete callback
+        self._controller.set_motion_complete_callback(self._on_motion_complete)
+
         self.setup_ui()
 
     def setup_ui(self) -> None:
@@ -157,21 +161,15 @@ class StageControlView(QWidget):
             self.set_moving(True, "Rotation")
             self.clear_message()
 
-            # Delegate to controller
+            # Delegate to controller (sends command and waits for callback in background)
             self._controller.move_rotation(rotation)
 
             # Movement command sent successfully
             self.show_success(f"Moving to rotation {rotation:.2f}°...")
+            self._logger.info(f"Movement command sent, waiting for motion complete callback...")
 
-            # Update position display
-            position = self._controller.get_current_position()
-            if position:
-                self.update_position(position.x, position.y, position.z, position.r)
-
-            # Reset moving status (note: actual movement is asynchronous)
-            # TODO: Implement motion-stopped callback to reset this properly
-            from PyQt5.QtCore import QTimer
-            QTimer.singleShot(2000, lambda: self.set_moving(False))
+            # Position will be updated when motion complete callback fires
+            # Controls will be re-enabled by _on_motion_complete()
 
         except ValueError as e:
             self.show_error(f"Invalid rotation value: {str(e)}")
@@ -261,3 +259,31 @@ class StageControlView(QWidget):
     def clear_message(self) -> None:
         """Clear any displayed message."""
         self.message_label.setText("")
+
+    def _on_motion_complete(self) -> None:
+        """
+        Handle motion complete callback from controller.
+
+        This is called from a background thread when the microscope
+        sends the motion-stopped callback.
+        """
+        # Must use QTimer to update GUI from background thread safely
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(0, self._update_after_motion_complete)
+
+    def _update_after_motion_complete(self) -> None:
+        """
+        Update GUI after motion complete (called on GUI thread).
+        """
+        self._logger.info("Motion complete - updating GUI")
+
+        # Re-enable controls
+        self.set_moving(False)
+
+        # Update position display
+        position = self._controller.get_current_position()
+        if position:
+            self.update_position(position.x, position.y, position.z, position.r)
+            self.show_success(f"Movement complete! Position: R={position.r:.2f}°")
+        else:
+            self.show_info("Movement complete")

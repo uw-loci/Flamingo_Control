@@ -8,7 +8,8 @@ provides a cleaner interface for connection management.
 import socket
 import logging
 import time
-from typing import Optional, Tuple, List, Dict, Any
+import threading
+from typing import Optional, Tuple, List, Dict, Any, Callable
 from threading import Thread
 from pathlib import Path
 
@@ -316,6 +317,10 @@ class MVCConnectionService:
 
         self._command_socket: Optional[socket.socket] = None
         self._live_socket: Optional[socket.socket] = None
+
+        # Callback listener for unsolicited messages (motion-stopped, etc.)
+        self._callback_listener: Optional['CallbackListener'] = None
+        self._socket_lock = threading.Lock()  # Coordinate send_command and callback listener
 
     def connect(self, config: 'ConnectionConfig') -> None:
         """
