@@ -5,7 +5,8 @@ Handles all stage-related commands including position queries,
 movement control, and motion monitoring.
 """
 
-from typing import Optional
+import socket
+from typing import Optional, Dict, Any
 
 from py2flamingo.services.microscope_command_service import MicroscopeCommandService
 from py2flamingo.models.microscope import Position
@@ -29,15 +30,16 @@ class AxisCode:
     """
     Stage axis codes for movement commands.
 
-    Based on microscope logs showing int32Data0 axis values.
+    From oldcodereference/microscope_connect.py lines 108-111:
+    - move_axis(..., 1, x)  # X-axis
+    - move_axis(..., 2, y)  # Y-axis
+    - move_axis(..., 3, z)  # Z-axis
+    - move_axis(..., 4, r)  # Rotation
     """
-    X_AXIS = 0
-    Y_AXIS = 1
-    Z_AXIS = 2  # or 3 based on logs?
-    ROTATION = 3  # or 2 based on logs?
-
-    # Note: Logs show movement with int32Data0=1 (Y) and int32Data0=3 (Z)
-    # Need to verify exact mapping with more testing
+    X_AXIS = 1
+    Y_AXIS = 2
+    Z_AXIS = 3
+    ROTATION = 4
 
 
 class StageService(MicroscopeCommandService):

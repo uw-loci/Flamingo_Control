@@ -25,7 +25,7 @@ from py2flamingo.services import (
     MVCConnectionService, MVCWorkflowService, StatusService, ConfigurationManager
 )
 from py2flamingo.controllers import ConnectionController, WorkflowController, PositionController
-from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView
+from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, StageControlView
 from py2flamingo.views.live_feed_view import LiveFeedView
 
 
@@ -90,6 +90,7 @@ class FlamingoApplication:
         self.workflow_view: Optional[WorkflowView] = None
         self.sample_info_view: Optional[SampleInfoView] = None
         self.live_feed_view: Optional[LiveFeedView] = None
+        self.stage_control_view: Optional[StageControlView] = None
 
         # Setup logging
         self.logger = logging.getLogger(__name__)
@@ -189,6 +190,12 @@ class FlamingoApplication:
             update_interval_ms=500  # Poll every 500ms
         )
 
+        # Create stage control view
+        self.logger.debug("Creating stage control view...")
+        self.stage_control_view = StageControlView(
+            controller=self.position_controller
+        )
+
         # Set default connection values in view if provided via CLI
         if self.default_ip is not None and self.default_port is not None:
             self.logger.debug(f"Setting CLI defaults: {self.default_ip}:{self.default_port}")
@@ -201,6 +208,16 @@ class FlamingoApplication:
                 lambda: self._on_connection_established()
             )
             self.logger.debug("Connected connection_established signal to position update")
+
+        # Connect connection status to stage control view
+        if hasattr(self.connection_view, 'connection_established'):
+            self.connection_view.connection_established.connect(
+                lambda: self._on_stage_connection_established()
+            )
+        if hasattr(self.connection_view, 'connection_closed'):
+            self.connection_view.connection_closed.connect(
+                lambda: self._on_stage_connection_closed()
+            )
 
         self.logger.info("Application dependencies setup complete")
 
@@ -218,6 +235,30 @@ class FlamingoApplication:
             QTimer.singleShot(500, self.live_feed_view.request_position_update)
         else:
             self.logger.warning("Cannot request position: live_feed_view not available")
+
+    def _on_stage_connection_established(self):
+        """Handle connection established event for stage control view.
+
+        Updates the stage control view to enable controls and display current position.
+        """
+        self.logger.info("Updating stage control view - connection established")
+        if self.stage_control_view:
+            self.stage_control_view.set_connected(True)
+            # Update position display
+            position = self.position_controller.get_current_position()
+            if position:
+                self.stage_control_view.update_position(
+                    position.x, position.y, position.z, position.r
+                )
+
+    def _on_stage_connection_closed(self):
+        """Handle connection closed event for stage control view.
+
+        Updates the stage control view to disable controls.
+        """
+        self.logger.info("Updating stage control view - connection closed")
+        if self.stage_control_view:
+            self.stage_control_view.set_connected(False)
 
     def create_main_window(self):
         """Create main application window by composing views.
@@ -237,7 +278,8 @@ class FlamingoApplication:
             self.connection_view,
             self.workflow_view,
             self.sample_info_view,
-            self.live_feed_view
+            self.live_feed_view,
+            self.stage_control_view
         )
         self.main_window.setWindowTitle("Flamingo Microscope Control")
         self.main_window.resize(1000, 700)  # Larger to accommodate live feed

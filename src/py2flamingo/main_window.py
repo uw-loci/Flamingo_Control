@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 
-from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView
+from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, StageControlView
 from py2flamingo.views.live_feed_view import LiveFeedView
 
 
@@ -44,7 +44,8 @@ class MainWindow(QMainWindow):
                  connection_view: ConnectionView,
                  workflow_view: WorkflowView,
                  sample_info_view: Optional[SampleInfoView] = None,
-                 live_feed_view: Optional[LiveFeedView] = None):
+                 live_feed_view: Optional[LiveFeedView] = None,
+                 stage_control_view: Optional[StageControlView] = None):
         """Initialize main window with view components.
 
         Args:
@@ -52,6 +53,7 @@ class MainWindow(QMainWindow):
             workflow_view: WorkflowView instance for workflow operations
             sample_info_view: Optional SampleInfoView instance for sample configuration
             live_feed_view: Optional LiveFeedView instance for live image display
+            stage_control_view: Optional StageControlView instance for stage control
         """
         super().__init__()
 
@@ -59,6 +61,7 @@ class MainWindow(QMainWindow):
         self.workflow_view = workflow_view
         self.sample_info_view = sample_info_view
         self.live_feed_view = live_feed_view
+        self.stage_control_view = stage_control_view
 
         self._setup_ui()
         self._setup_menu()
@@ -89,6 +92,10 @@ class MainWindow(QMainWindow):
         # Add sample info tab if available
         if self.sample_info_view is not None:
             self.tabs.addTab(self.sample_info_view, "Sample Info")
+
+        # Add stage control tab if available
+        if self.stage_control_view is not None:
+            self.tabs.addTab(self.stage_control_view, "Stage Control")
 
         # Add live feed tab if available
         if self.live_feed_view is not None:

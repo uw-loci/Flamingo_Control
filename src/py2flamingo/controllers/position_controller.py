@@ -225,10 +225,10 @@ class PositionController:
     def go_to_xyzr(self, xyzr: List[float], **kwargs) -> None:
         """
         Move to position specified as list (backward compatibility).
-        
+
         This method provides backward compatibility with the original
         go_to_XYZR function from microscope_connect.py.
-        
+
         Args:
             xyzr: List of [x, y, z, r] coordinates
             **kwargs: Additional arguments passed to go_to_position
@@ -236,10 +236,63 @@ class PositionController:
         # Original comment from microscope_connect.py:
         # Unpack the provided XYZR coordinates, r is in degrees, other values are in mm
         x, y, z, r = xyzr
-        
+
         position = Position(x=float(x), y=float(y), z=float(z), r=float(r))
         self.go_to_position(position, **kwargs)
-    
+
+    def move_rotation(self, rotation_degrees: float) -> None:
+        """
+        Move only the rotation axis to the specified angle.
+
+        This is the safest movement as rotation doesn't risk hitting
+        the chamber walls. The stage must be within the chamber bounds
+        in X, Y, Z before rotating.
+
+        Args:
+            rotation_degrees: Target rotation angle in degrees (0-360)
+
+        Raises:
+            ValueError: If rotation is out of bounds
+            RuntimeError: If not connected or movement fails
+        """
+        # Validate rotation bounds
+        if not 0 <= rotation_degrees <= 360:
+            error_msg = f"Rotation {rotation_degrees}° is outside valid range [0, 360]"
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        # Try to acquire movement lock (non-blocking)
+        if not self._movement_lock.acquire(blocking=False):
+            error_msg = "Movement already in progress"
+            self.logger.warning(error_msg)
+            raise RuntimeError(error_msg)
+
+        try:
+            # Check connection
+            if not self.connection.is_connected():
+                error_msg = "Not connected to microscope"
+                self.logger.error(error_msg)
+                raise RuntimeError(error_msg)
+
+            self.logger.info(f"Moving rotation to {rotation_degrees:.2f}°")
+
+            # Move only the rotation axis
+            self._move_axis(self.axis.R, rotation_degrees, "Rotation")
+
+            # Update tracked position
+            if self._current_position:
+                self._current_position = Position(
+                    x=self._current_position.x,
+                    y=self._current_position.y,
+                    z=self._current_position.z,
+                    r=rotation_degrees
+                )
+                self.logger.info(f"Position updated: Rotation = {rotation_degrees:.2f}°")
+
+        finally:
+            # Always release the lock
+            self._movement_lock.release()
+
     def _move_axis(self, axis_code: int, value: float, axis_name: str) -> None:
         """
         Move a specific axis to the specified value.
