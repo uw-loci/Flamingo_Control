@@ -327,13 +327,22 @@ class PositionController:
         try:
             # The old system sent [axis_code, 0, 0, value] as command_data
             # In the protocol: params[0]=axis_code, value=position_value
+            # CRITICAL: Must set TRIGGER_CALL_BACK flag in params[6] for response
             from py2flamingo.models.command import Command
 
             cmd = Command(
                 code=self.COMMAND_CODES_STAGE_POSITION_SET,
                 parameters={
-                    'params': [axis_code, 0, 0, 0, 0, 0, 0],  # 7 params, first is axis code
-                    'value': value_float  # Position value
+                    'params': [
+                        axis_code,  # Param[0] = axis (1=X, 2=Y, 3=Z, 4=R)
+                        0,          # Param[1] = unused
+                        0,          # Param[2] = unused
+                        0,          # Param[3] = unused
+                        0,          # Param[4] = unused
+                        0,          # Param[5] = unused
+                        CommandDataBits.TRIGGER_CALL_BACK  # Param[6] = 0x80000000 flag
+                    ],
+                    'value': value_float  # Position value in mm or degrees
                 }
             )
 
