@@ -9,7 +9,7 @@ movement, validation, and position tracking.
 import logging
 import socket
 import threading
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Dict
 from dataclasses import dataclass
 
 from py2flamingo.models.microscope import Position, MicroscopeState
@@ -66,6 +66,10 @@ class PositionController:
 
         # Callback for motion complete notifications
         self._motion_complete_callback: Optional[Callable] = None
+
+        # Cache configuration service for stage limits
+        from py2flamingo.services.configuration_service import ConfigurationService
+        self._config_service = ConfigurationService()
 
         # Try to initialize position from microscope settings
         self._initialize_position()
@@ -314,6 +318,186 @@ class PositionController:
             self._movement_lock.release()
             raise
 
+    def move_x(self, x_mm: float) -> None:
+        """
+        Move only the X axis to the specified position.
+
+        This method sends the movement command and returns immediately.
+        Motion completion is tracked asynchronously and the callback
+        is fired when motion stops.
+
+        Args:
+            x_mm: Target X position in millimeters
+
+        Raises:
+            ValueError: If position is out of bounds
+            RuntimeError: If not connected or movement fails
+        """
+        # Get stage limits
+        limits = self.get_stage_limits()
+        x_min, x_max = limits['x']['min'], limits['x']['max']
+
+        # Validate X bounds
+        if not (x_min <= x_mm <= x_max):
+            error_msg = f"X position {x_mm:.3f}mm is outside valid range [{x_min:.3f}, {x_max:.3f}]"
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        # Try to acquire movement lock (non-blocking)
+        if not self._movement_lock.acquire(blocking=False):
+            error_msg = "Movement already in progress"
+            self.logger.warning(error_msg)
+            raise RuntimeError(error_msg)
+
+        try:
+            # Check connection
+            if not self.connection.is_connected():
+                error_msg = "Not connected to microscope"
+                self.logger.error(error_msg)
+                raise RuntimeError(error_msg)
+
+            self.logger.info(f"Moving X axis to {x_mm:.3f}mm")
+
+            # Move only the X axis
+            self._move_axis(self.axis.X, x_mm, "X-axis")
+
+            # Update tracked position (optimistically)
+            target_position = Position(
+                x=x_mm,
+                y=self._current_position.y if self._current_position else 0.0,
+                z=self._current_position.z if self._current_position else 0.0,
+                r=self._current_position.r if self._current_position else 0.0
+            )
+
+            # Wait for motion complete in background thread
+            self._wait_for_motion_complete_async(target_position)
+
+        except Exception as e:
+            # Release lock on error
+            self._movement_lock.release()
+            raise
+
+    def move_y(self, y_mm: float) -> None:
+        """
+        Move only the Y axis to the specified position.
+
+        This method sends the movement command and returns immediately.
+        Motion completion is tracked asynchronously and the callback
+        is fired when motion stops.
+
+        Args:
+            y_mm: Target Y position in millimeters
+
+        Raises:
+            ValueError: If position is out of bounds
+            RuntimeError: If not connected or movement fails
+        """
+        # Get stage limits
+        limits = self.get_stage_limits()
+        y_min, y_max = limits['y']['min'], limits['y']['max']
+
+        # Validate Y bounds
+        if not (y_min <= y_mm <= y_max):
+            error_msg = f"Y position {y_mm:.3f}mm is outside valid range [{y_min:.3f}, {y_max:.3f}]"
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        # Try to acquire movement lock (non-blocking)
+        if not self._movement_lock.acquire(blocking=False):
+            error_msg = "Movement already in progress"
+            self.logger.warning(error_msg)
+            raise RuntimeError(error_msg)
+
+        try:
+            # Check connection
+            if not self.connection.is_connected():
+                error_msg = "Not connected to microscope"
+                self.logger.error(error_msg)
+                raise RuntimeError(error_msg)
+
+            self.logger.info(f"Moving Y axis to {y_mm:.3f}mm")
+
+            # Move only the Y axis
+            self._move_axis(self.axis.Y, y_mm, "Y-axis")
+
+            # Update tracked position (optimistically)
+            target_position = Position(
+                x=self._current_position.x if self._current_position else 0.0,
+                y=y_mm,
+                z=self._current_position.z if self._current_position else 0.0,
+                r=self._current_position.r if self._current_position else 0.0
+            )
+
+            # Wait for motion complete in background thread
+            self._wait_for_motion_complete_async(target_position)
+
+        except Exception as e:
+            # Release lock on error
+            self._movement_lock.release()
+            raise
+
+    def move_z(self, z_mm: float) -> None:
+        """
+        Move only the Z axis to the specified position.
+
+        WARNING: Z axis movement requires careful consideration of focus
+        and collision risks. Use with caution.
+
+        This method sends the movement command and returns immediately.
+        Motion completion is tracked asynchronously and the callback
+        is fired when motion stops.
+
+        Args:
+            z_mm: Target Z position in millimeters
+
+        Raises:
+            ValueError: If position is out of bounds
+            RuntimeError: If not connected or movement fails
+        """
+        # Get stage limits
+        limits = self.get_stage_limits()
+        z_min, z_max = limits['z']['min'], limits['z']['max']
+
+        # Validate Z bounds
+        if not (z_min <= z_mm <= z_max):
+            error_msg = f"Z position {z_mm:.3f}mm is outside valid range [{z_min:.3f}, {z_max:.3f}]"
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        # Try to acquire movement lock (non-blocking)
+        if not self._movement_lock.acquire(blocking=False):
+            error_msg = "Movement already in progress"
+            self.logger.warning(error_msg)
+            raise RuntimeError(error_msg)
+
+        try:
+            # Check connection
+            if not self.connection.is_connected():
+                error_msg = "Not connected to microscope"
+                self.logger.error(error_msg)
+                raise RuntimeError(error_msg)
+
+            self.logger.info(f"Moving Z axis to {z_mm:.3f}mm")
+
+            # Move only the Z axis
+            self._move_axis(self.axis.Z, z_mm, "Z-axis")
+
+            # Update tracked position (optimistically)
+            target_position = Position(
+                x=self._current_position.x if self._current_position else 0.0,
+                y=self._current_position.y if self._current_position else 0.0,
+                z=z_mm,
+                r=self._current_position.r if self._current_position else 0.0
+            )
+
+            # Wait for motion complete in background thread
+            self._wait_for_motion_complete_async(target_position)
+
+        except Exception as e:
+            # Release lock on error
+            self._movement_lock.release()
+            raise
+
     def _wait_for_motion_complete_async(self, target_position: Position) -> None:
         """
         Wait for motion complete in a background thread.
@@ -456,35 +640,66 @@ class PositionController:
             raise RuntimeError(error_msg) from e
 
     
+    def get_stage_limits(self) -> Dict[str, Dict[str, float]]:
+        """
+        Get stage movement limits for all axes.
+
+        Returns:
+            Dict with limits for each axis: {'x': {'min': ..., 'max': ...}, ...}
+        """
+        return self._config_service.get_stage_limits()
+
+    def is_position_within_bounds(self, position: Position) -> tuple[bool, List[str]]:
+        """
+        Check if position is within stage limits.
+
+        Args:
+            position: Position to check
+
+        Returns:
+            Tuple of (is_valid, list_of_errors)
+        """
+        limits = self.get_stage_limits()
+        errors = []
+
+        # Check each axis
+        if not (limits['x']['min'] <= position.x <= limits['x']['max']):
+            errors.append(
+                f"X={position.x:.3f} outside limits [{limits['x']['min']:.3f}, {limits['x']['max']:.3f}]"
+            )
+
+        if not (limits['y']['min'] <= position.y <= limits['y']['max']):
+            errors.append(
+                f"Y={position.y:.3f} outside limits [{limits['y']['min']:.3f}, {limits['y']['max']:.3f}]"
+            )
+
+        if not (limits['z']['min'] <= position.z <= limits['z']['max']):
+            errors.append(
+                f"Z={position.z:.3f} outside limits [{limits['z']['min']:.3f}, {limits['z']['max']:.3f}]"
+            )
+
+        if not (limits['r']['min'] <= position.r <= limits['r']['max']):
+            errors.append(
+                f"R={position.r:.1f}° outside limits [{limits['r']['min']:.1f}°, {limits['r']['max']:.1f}°]"
+            )
+
+        return (len(errors) == 0, errors)
+
     def _validate_position(self, position: Position) -> None:
         """
         Validate that position is within stage limits.
-        
+
         Args:
             position: Position to validate
-            
+
         Raises:
             ValueError: If position is outside limits
         """
-        # Get stage limits from configuration
-        from py2flamingo.services.configuration_service import ConfigurationService
-        config_service = ConfigurationService()
-        limits = config_service.get_stage_limits()
-        
-        # Check each axis
-        axes = [
-            ('x', position.x, limits['x']),
-            ('y', position.y, limits['y']),
-            ('z', position.z, limits['z']),
-            ('r', position.r, limits['r'])
-        ]
-        
-        for axis_name, value, axis_limits in axes:
-            if not (axis_limits['min'] <= value <= axis_limits['max']):
-                raise ValueError(
-                    f"{axis_name.upper()}-axis position {value} is outside limits "
-                    f"[{axis_limits['min']}, {axis_limits['max']}]"
-                )
+        is_valid, errors = self.is_position_within_bounds(position)
+
+        if not is_valid:
+            error_msg = "Position out of bounds:\n" + "\n".join(errors)
+            raise ValueError(error_msg)
     
     def get_current_position(self) -> Optional[Position]:
         """

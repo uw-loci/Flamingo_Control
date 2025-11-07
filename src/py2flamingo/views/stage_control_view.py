@@ -54,6 +54,10 @@ class StageControlView(QWidget):
         rotation_group = self._create_rotation_control()
         layout.addWidget(rotation_group)
 
+        # X, Y, Z Axis Controls
+        xyz_group = self._create_xyz_controls()
+        layout.addWidget(xyz_group)
+
         # Status Display
         self.status_label = QLabel("Status: Ready")
         self.status_label.setStyleSheet("color: gray; font-weight: bold;")
@@ -139,6 +143,103 @@ class StageControlView(QWidget):
         group.setLayout(layout)
         return group
 
+    def _create_xyz_controls(self) -> QGroupBox:
+        """Create X, Y, Z axis control group.
+
+        Returns:
+            QGroupBox containing X, Y, Z axis control widgets
+        """
+        group = QGroupBox("X, Y, Z Axis Control")
+        layout = QVBoxLayout()
+
+        # Get stage limits from controller
+        try:
+            limits = self._controller.get_stage_limits()
+        except Exception as e:
+            self._logger.warning(f"Could not load stage limits: {e}")
+            limits = {
+                'x': {'min': 0.0, 'max': 26.0},
+                'y': {'min': 0.0, 'max': 26.0},
+                'z': {'min': 0.0, 'max': 26.0}
+            }
+
+        # Input form
+        form_layout = QFormLayout()
+
+        # Store limits for validation
+        self._stage_limits = limits
+
+        # X axis input
+        x_layout = QHBoxLayout()
+        self.x_input = QLineEdit()
+        self.x_input.setPlaceholderText(f"{limits['x']['min']:.1f} - {limits['x']['max']:.1f}")
+        self.x_input.textChanged.connect(lambda: self._validate_input_bounds('x'))
+        x_layout.addWidget(self.x_input)
+        self.x_limits_label = QLabel(f"[{limits['x']['min']:.1f}, {limits['x']['max']:.1f}] mm")
+        self.x_limits_label.setStyleSheet("color: #666; font-size: 9pt;")
+        x_layout.addWidget(self.x_limits_label)
+        form_layout.addRow("X Position (mm):", x_layout)
+
+        # Y axis input
+        y_layout = QHBoxLayout()
+        self.y_input = QLineEdit()
+        self.y_input.setPlaceholderText(f"{limits['y']['min']:.1f} - {limits['y']['max']:.1f}")
+        self.y_input.textChanged.connect(lambda: self._validate_input_bounds('y'))
+        y_layout.addWidget(self.y_input)
+        self.y_limits_label = QLabel(f"[{limits['y']['min']:.1f}, {limits['y']['max']:.1f}] mm")
+        self.y_limits_label.setStyleSheet("color: #666; font-size: 9pt;")
+        y_layout.addWidget(self.y_limits_label)
+        form_layout.addRow("Y Position (mm):", y_layout)
+
+        # Z axis input
+        z_layout = QHBoxLayout()
+        self.z_input = QLineEdit()
+        self.z_input.setPlaceholderText(f"{limits['z']['min']:.1f} - {limits['z']['max']:.1f}")
+        self.z_input.textChanged.connect(lambda: self._validate_input_bounds('z'))
+        z_layout.addWidget(self.z_input)
+        self.z_limits_label = QLabel(f"[{limits['z']['min']:.1f}, {limits['z']['max']:.1f}] mm")
+        self.z_limits_label.setStyleSheet("color: #666; font-size: 9pt;")
+        z_layout.addWidget(self.z_limits_label)
+        form_layout.addRow("Z Position (mm):", z_layout)
+
+        layout.addLayout(form_layout)
+
+        # Move buttons in a horizontal layout
+        button_layout = QHBoxLayout()
+
+        self.move_x_btn = QPushButton("Move X")
+        self.move_x_btn.clicked.connect(self._on_move_x_clicked)
+        self.move_x_btn.setEnabled(False)
+        button_layout.addWidget(self.move_x_btn)
+
+        self.move_y_btn = QPushButton("Move Y")
+        self.move_y_btn.clicked.connect(self._on_move_y_clicked)
+        self.move_y_btn.setEnabled(False)
+        button_layout.addWidget(self.move_y_btn)
+
+        self.move_z_btn = QPushButton("Move Z")
+        self.move_z_btn.clicked.connect(self._on_move_z_clicked)
+        self.move_z_btn.setEnabled(False)
+        button_layout.addWidget(self.move_z_btn)
+
+        layout.addLayout(button_layout)
+
+        # Warning label
+        warning_label = QLabel(
+            "⚠️  WARNING: X, Y, Z movements can cause collisions!\n"
+            "Ensure stage position is safe before moving.\n"
+            "Rotation is the safest axis to move first."
+        )
+        warning_label.setWordWrap(True)
+        warning_label.setStyleSheet(
+            "color: #cc6600; font-style: italic; font-size: 9pt; "
+            "background-color: #fff3cd; padding: 8px; border: 1px solid #cc6600; border-radius: 4px;"
+        )
+        layout.addWidget(warning_label)
+
+        group.setLayout(layout)
+        return group
+
     def _on_move_rotation_clicked(self) -> None:
         """Handle move rotation button click.
 
@@ -181,6 +282,150 @@ class StageControlView(QWidget):
             self.show_error(f"Unexpected error: {str(e)}")
             self.set_moving(False)
 
+    def _on_move_x_clicked(self) -> None:
+        """Handle move X button click."""
+        try:
+            x_str = self.x_input.text().strip()
+            if not x_str:
+                self.show_error("Please enter an X position value")
+                return
+
+            x = float(x_str)
+
+            # Show moving status
+            self.set_moving(True, "X-axis")
+            self.clear_message()
+
+            # Delegate to controller (sends command and waits for callback in background)
+            self._controller.move_x(x)
+
+            # Movement command sent successfully
+            self.show_success(f"Moving to X={x:.3f}mm...")
+            self._logger.info(f"X movement command sent, waiting for motion complete callback...")
+
+        except ValueError as e:
+            # This catches both float conversion errors and bounds validation errors
+            self.show_error(f"Invalid X position: {str(e)}")
+            self.set_moving(False)
+        except RuntimeError as e:
+            self.show_error(str(e))
+            self.set_moving(False)
+        except Exception as e:
+            self.show_error(f"Unexpected error: {str(e)}")
+            self.set_moving(False)
+
+    def _on_move_y_clicked(self) -> None:
+        """Handle move Y button click."""
+        try:
+            y_str = self.y_input.text().strip()
+            if not y_str:
+                self.show_error("Please enter a Y position value")
+                return
+
+            y = float(y_str)
+
+            # Show moving status
+            self.set_moving(True, "Y-axis")
+            self.clear_message()
+
+            # Delegate to controller (sends command and waits for callback in background)
+            self._controller.move_y(y)
+
+            # Movement command sent successfully
+            self.show_success(f"Moving to Y={y:.3f}mm...")
+            self._logger.info(f"Y movement command sent, waiting for motion complete callback...")
+
+        except ValueError as e:
+            self.show_error(f"Invalid Y position: {str(e)}")
+            self.set_moving(False)
+        except RuntimeError as e:
+            self.show_error(str(e))
+            self.set_moving(False)
+        except Exception as e:
+            self.show_error(f"Unexpected error: {str(e)}")
+            self.set_moving(False)
+
+    def _on_move_z_clicked(self) -> None:
+        """Handle move Z button click."""
+        try:
+            z_str = self.z_input.text().strip()
+            if not z_str:
+                self.show_error("Please enter a Z position value")
+                return
+
+            z = float(z_str)
+
+            # Show moving status
+            self.set_moving(True, "Z-axis")
+            self.clear_message()
+
+            # Delegate to controller (sends command and waits for callback in background)
+            self._controller.move_z(z)
+
+            # Movement command sent successfully
+            self.show_success(f"Moving to Z={z:.3f}mm...")
+            self._logger.info(f"Z movement command sent, waiting for motion complete callback...")
+
+        except ValueError as e:
+            self.show_error(f"Invalid Z position: {str(e)}")
+            self.set_moving(False)
+        except RuntimeError as e:
+            self.show_error(str(e))
+            self.set_moving(False)
+        except Exception as e:
+            self.show_error(f"Unexpected error: {str(e)}")
+            self.set_moving(False)
+
+    def _validate_input_bounds(self, axis: str) -> None:
+        """
+        Validate input field value against stage limits and provide visual feedback.
+
+        Args:
+            axis: Axis to validate ('x', 'y', or 'z')
+        """
+        # Get the appropriate input field and limits
+        if axis == 'x':
+            input_field = self.x_input
+            limits = self._stage_limits['x']
+        elif axis == 'y':
+            input_field = self.y_input
+            limits = self._stage_limits['y']
+        elif axis == 'z':
+            input_field = self.z_input
+            limits = self._stage_limits['z']
+        else:
+            return
+
+        # Get the text value
+        text = input_field.text().strip()
+
+        # Clear styling if empty
+        if not text:
+            input_field.setStyleSheet("")
+            return
+
+        # Try to parse as float and check bounds
+        try:
+            value = float(text)
+            min_val = limits['min']
+            max_val = limits['max']
+
+            if min_val <= value <= max_val:
+                # Within bounds - green border
+                input_field.setStyleSheet(
+                    "border: 2px solid #28a745; background-color: #f0fff4;"
+                )
+            else:
+                # Out of bounds - red border
+                input_field.setStyleSheet(
+                    "border: 2px solid #dc3545; background-color: #fff5f5;"
+                )
+        except ValueError:
+            # Invalid number - yellow border
+            input_field.setStyleSheet(
+                "border: 2px solid #ffc107; background-color: #fffef0;"
+            )
+
     def update_position(self, x: float, y: float, z: float, r: float) -> None:
         """Update position display.
 
@@ -202,6 +447,10 @@ class StageControlView(QWidget):
             connected: True if connected to microscope
         """
         self.move_rotation_btn.setEnabled(connected)
+        self.move_x_btn.setEnabled(connected)
+        self.move_y_btn.setEnabled(connected)
+        self.move_z_btn.setEnabled(connected)
+
         if connected:
             self.status_label.setText("Status: Connected - Ready to move")
             self.status_label.setStyleSheet("color: green; font-weight: bold;")
@@ -216,7 +465,11 @@ class StageControlView(QWidget):
             moving: True if stage is currently moving
             axis: Optional name of axis that is moving
         """
+        # Disable all movement buttons during movement to prevent concurrent commands
         self.move_rotation_btn.setEnabled(not moving)
+        self.move_x_btn.setEnabled(not moving)
+        self.move_y_btn.setEnabled(not moving)
+        self.move_z_btn.setEnabled(not moving)
 
         if moving:
             axis_text = f" {axis}" if axis else ""
