@@ -38,11 +38,13 @@ The main `Flamingo_Control/` directory should contain **only** documentation tha
 **Do NOT place technical reports, implementation details, or development logs in the root directory.**
 
 ### Claude Reports Directory - Technical Documentation
-All technical reports, implementation details, session summaries, and development documentation should be placed in:
+All technical reports, implementation details, session summaries, and development documentation should be placed **OUTSIDE the repository** in:
 
 ```
-Flamingo_Control/claude-reports/
+/home/msnelson/LSControl/claude-reports/
 ```
+
+**IMPORTANT:** This directory is at the **same level** as `Flamingo_Control/`, NOT inside it. Reports should NOT be committed to GitHub.
 
 **Naming Convention:**
 All files in `claude-reports/` must follow this naming pattern:
@@ -93,12 +95,14 @@ When creating any technical or development documentation:
 ## Example Structure
 
 ```
-Flamingo_Control/
-├── README.md                    # User-facing project overview
-├── INSTALLATION.md              # User-facing setup guide
-├── .claude/
-│   └── claude.md               # This file
-└── claude-reports/
+LSControl/
+├── Flamingo_Control/             # Git repository (goes to GitHub)
+│   ├── README.md                # User-facing project overview
+│   ├── INSTALLATION.md          # User-facing setup guide
+│   ├── .claude/
+│   │   └── claude.md           # This file
+│   └── src/                     # Source code
+└── claude-reports/               # Technical docs (NOT in git)
     ├── 2024-11-04-mvc-refactor.md
     ├── 2024-11-05-position-fix.md
     ├── 2024-11-05-network-paths.md
@@ -116,9 +120,10 @@ Flamingo_Control/
 ## Commit Guidelines
 
 When committing documentation:
-- Commits that add technical reports should include the report in `claude-reports/`
-- Commits should reference the report file in the commit message
+- **DO NOT commit technical reports** - they belong in `claude-reports/` outside the repository
+- Commits should reference the report file in the commit message (e.g., "See claude-reports/2024-11-06-stage-control.md")
 - Keep user-facing docs (README, INSTALLATION) up to date with actual functionality
+- Only commit user-facing documentation in the repository root
 
 ## TCP Protocol Structure
 

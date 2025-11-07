@@ -10,7 +10,8 @@ from typing import Optional
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QGroupBox, QFormLayout,
-    QListWidget, QListWidgetItem, QComboBox, QInputDialog
+    QListWidget, QListWidgetItem, QComboBox, QInputDialog,
+    QScrollArea
 )
 from PyQt5.QtCore import Qt
 
@@ -48,51 +49,63 @@ class StageControlView(QWidget):
 
     def setup_ui(self) -> None:
         """Create and layout UI components."""
-        layout = QVBoxLayout()
+        # Create a container widget for all controls
+        container_widget = QWidget()
+        container_layout = QVBoxLayout(container_widget)
 
         # Current Position Display
         position_group = self._create_position_display()
-        layout.addWidget(position_group)
+        container_layout.addWidget(position_group)
 
         # Rotation Control Section
         rotation_group = self._create_rotation_control()
-        layout.addWidget(rotation_group)
+        container_layout.addWidget(rotation_group)
 
         # X, Y, Z Axis Controls
         xyz_group = self._create_xyz_controls()
-        layout.addWidget(xyz_group)
+        container_layout.addWidget(xyz_group)
 
         # Jog Controls
         jog_group = self._create_jog_controls()
-        layout.addWidget(jog_group)
+        container_layout.addWidget(jog_group)
 
         # Saved Presets
         preset_group = self._create_preset_controls()
-        layout.addWidget(preset_group)
+        container_layout.addWidget(preset_group)
 
         # Undo Control
         undo_layout = self._create_undo_control()
-        layout.addLayout(undo_layout)
+        container_layout.addLayout(undo_layout)
 
         # Home and Emergency Stop Controls
         safety_layout = self._create_safety_controls()
-        layout.addLayout(safety_layout)
+        container_layout.addLayout(safety_layout)
 
         # Status Display
         self.status_label = QLabel("Status: Ready")
         self.status_label.setStyleSheet("color: gray; font-weight: bold;")
-        layout.addWidget(self.status_label)
+        container_layout.addWidget(self.status_label)
 
         # Message Display
         self.message_label = QLabel("")
         self.message_label.setWordWrap(True)
         self.message_label.setMinimumHeight(40)
-        layout.addWidget(self.message_label)
+        container_layout.addWidget(self.message_label)
 
         # Add stretch to push everything to top
-        layout.addStretch()
+        container_layout.addStretch()
 
-        self.setLayout(layout)
+        # Create scroll area and add container widget
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(container_widget)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        # Set scroll area as main layout
+        main_layout = QVBoxLayout()
+        main_layout.addWidget(scroll_area)
+        self.setLayout(main_layout)
 
     def _create_position_display(self) -> QGroupBox:
         """Create current position display group.
