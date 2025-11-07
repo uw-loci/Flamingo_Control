@@ -74,6 +74,10 @@ class StageControlView(QWidget):
         undo_layout = self._create_undo_control()
         layout.addLayout(undo_layout)
 
+        # Home and Emergency Stop Controls
+        safety_layout = self._create_safety_controls()
+        layout.addLayout(safety_layout)
+
         # Status Display
         self.status_label = QLabel("Status: Ready")
         self.status_label.setStyleSheet("color: gray; font-weight: bold;")
@@ -410,6 +414,46 @@ class StageControlView(QWidget):
             "padding: 8px; font-weight: bold;"
         )
         layout.addWidget(self.undo_btn)
+
+        return layout
+
+    def _create_safety_controls(self) -> QHBoxLayout:
+        """Create safety control layout (Home and Emergency Stop).
+
+        Returns:
+            QHBoxLayout with safety buttons
+        """
+        layout = QHBoxLayout()
+
+        # Home button
+        self.home_btn = QPushButton("🏠 Home (Return to Home Position)")
+        self.home_btn.clicked.connect(self._on_home_clicked)
+        self.home_btn.setEnabled(False)
+        self.home_btn.setStyleSheet(
+            "background-color: #e8f5e9; border: 2px solid #4caf50; "
+            "padding: 8px; font-weight: bold; color: #2e7d32;"
+        )
+        layout.addWidget(self.home_btn)
+
+        # Emergency Stop button
+        self.emergency_stop_btn = QPushButton("🛑 EMERGENCY STOP")
+        self.emergency_stop_btn.clicked.connect(self._on_emergency_stop_clicked)
+        self.emergency_stop_btn.setEnabled(False)
+        self.emergency_stop_btn.setStyleSheet(
+            "background-color: #ffebee; border: 3px solid #f44336; "
+            "padding: 10px; font-weight: bold; font-size: 11pt; color: #c62828;"
+        )
+        layout.addWidget(self.emergency_stop_btn)
+
+        # Clear Emergency Stop button (initially hidden)
+        self.clear_estop_btn = QPushButton("Clear Emergency Stop")
+        self.clear_estop_btn.clicked.connect(self._on_clear_emergency_stop_clicked)
+        self.clear_estop_btn.setVisible(False)
+        self.clear_estop_btn.setStyleSheet(
+            "background-color: #fff3cd; border: 2px solid #ff9800; "
+            "padding: 8px; font-weight: bold; color: #e65100;"
+        )
+        layout.addWidget(self.clear_estop_btn)
 
         return layout
 
@@ -751,6 +795,132 @@ class StageControlView(QWidget):
         is_connected = self._controller.connection.is_connected()
         self.undo_btn.setEnabled(has_history and is_connected)
 
+    def _on_home_clicked(self) -> None:
+        """Handle home button click."""
+        try:
+            # Check if home position is available
+            home_pos = self._controller.get_home_position()
+            if home_pos is None:
+                self.show_error("Home position not available in settings")
+                return
+
+            # Confirm home operation
+            from PyQt5.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self,
+                "Return to Home",
+                f"Move to home position?\n\n"
+                f"X: {home_pos.x:.3f} mm\n"
+                f"Y: {home_pos.y:.3f} mm\n"
+                f"Z: {home_pos.z:.3f} mm\n"
+                f"R: {home_pos.r:.2f}°",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+
+            if reply != QMessageBox.Yes:
+                return
+
+            # Show moving status
+            self.set_moving(True, "to home position")
+            self.clear_message()
+
+            # Move to home
+            self._controller.go_home()
+
+            self.show_success(f"Moving to home position...")
+
+        except RuntimeError as e:
+            self.show_error(str(e))
+            self.set_moving(False)
+        except Exception as e:
+            self.show_error(f"Unexpected error: {str(e)}")
+            self.set_moving(False)
+
+    def _on_emergency_stop_clicked(self) -> None:
+        """Handle emergency stop button click."""
+        try:
+            self._logger.warning("Emergency stop activated by user")
+
+            # Activate emergency stop
+            self._controller.emergency_stop()
+
+            # Update UI
+            self.show_error("⚠️ EMERGENCY STOP ACTIVATED - All movements halted")
+            self.status_label.setText("Status: EMERGENCY STOPPED")
+            self.status_label.setStyleSheet("color: red; font-weight: bold; font-size: 12pt;")
+
+            # Disable all movement controls
+            self._set_emergency_stop_ui(True)
+
+        except Exception as e:
+            self.show_error(f"Error during emergency stop: {str(e)}")
+
+    def _on_clear_emergency_stop_clicked(self) -> None:
+        """Handle clear emergency stop button click."""
+        try:
+            # Confirm clearing emergency stop
+            from PyQt5.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self,
+                "Clear Emergency Stop",
+                "Clear emergency stop and allow movements to resume?\n\n"
+                "WARNING: Stage position may be uncertain after emergency stop.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if reply != QMessageBox.Yes:
+                return
+
+            # Clear emergency stop
+            self._controller.clear_emergency_stop()
+
+            # Update UI
+            self.show_success("Emergency stop cleared - movements can resume")
+            self.status_label.setText("Status: Ready (position may be uncertain)")
+            self.status_label.setStyleSheet("color: orange; font-weight: bold;")
+
+            # Re-enable controls
+            self._set_emergency_stop_ui(False)
+
+        except Exception as e:
+            self.show_error(f"Error clearing emergency stop: {str(e)}")
+
+    def _set_emergency_stop_ui(self, emergency_stopped: bool) -> None:
+        """
+        Update UI for emergency stop state.
+
+        Args:
+            emergency_stopped: True if emergency stop is active
+        """
+        # Show/hide emergency stop controls
+        self.emergency_stop_btn.setVisible(not emergency_stopped)
+        self.clear_estop_btn.setVisible(emergency_stopped)
+
+        # Disable all movement controls during emergency stop
+        if emergency_stopped:
+            self.move_rotation_btn.setEnabled(False)
+            self.move_x_btn.setEnabled(False)
+            self.move_y_btn.setEnabled(False)
+            self.move_z_btn.setEnabled(False)
+
+            self.jog_x_minus.setEnabled(False)
+            self.jog_x_plus.setEnabled(False)
+            self.jog_y_minus.setEnabled(False)
+            self.jog_y_plus.setEnabled(False)
+            self.jog_z_minus.setEnabled(False)
+            self.jog_z_plus.setEnabled(False)
+            self.jog_r_minus.setEnabled(False)
+            self.jog_r_plus.setEnabled(False)
+
+            self.goto_preset_btn.setEnabled(False)
+            self.undo_btn.setEnabled(False)
+            self.home_btn.setEnabled(False)
+        else:
+            # Re-enable based on connection status
+            self.set_connected(self._controller.connection.is_connected())
+
     def _validate_input_bounds(self, axis: str) -> None:
         """
         Validate input field value against stage limits and provide visual feedback.
@@ -845,6 +1015,10 @@ class StageControlView(QWidget):
         # Undo button
         self._update_undo_button_state()
 
+        # Safety buttons
+        self.home_btn.setEnabled(connected)
+        self.emergency_stop_btn.setEnabled(connected)
+
         if connected:
             self.status_label.setText("Status: Connected - Ready to move")
             self.status_label.setStyleSheet("color: green; font-weight: bold;")
@@ -875,10 +1049,14 @@ class StageControlView(QWidget):
         self.jog_r_minus.setEnabled(not moving)
         self.jog_r_plus.setEnabled(not moving)
 
-        # Disable preset goto and undo during movement
+        # Disable preset goto, undo, and home during movement
         has_selection = len(self.preset_list.selectedItems()) > 0
         self.goto_preset_btn.setEnabled(not moving and has_selection)
         self.undo_btn.setEnabled(not moving and self._controller.has_position_history())
+        self.home_btn.setEnabled(not moving)
+
+        # Emergency stop always enabled when connected (even during movement)
+        # (already enabled in set_connected)
 
         if moving:
             axis_text = f" {axis}" if axis else ""

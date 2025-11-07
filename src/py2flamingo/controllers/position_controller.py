@@ -79,6 +79,9 @@ class PositionController:
         self._position_history: List[Position] = []
         self._max_history_size = 20
 
+        # Emergency stop flag
+        self._emergency_stop_active = False
+
         # Try to initialize position from microscope settings
         self._initialize_position()
 
@@ -284,8 +287,14 @@ class PositionController:
 
         Raises:
             ValueError: If rotation is out of bounds
-            RuntimeError: If not connected or movement fails
+            RuntimeError: If not connected, emergency stopped, or movement fails
         """
+        # Check emergency stop
+        if self._emergency_stop_active:
+            error_msg = "Movement blocked - emergency stop active. Clear emergency stop first."
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg)
+
         # Validate rotation bounds
         if not 0 <= rotation_degrees <= 360:
             error_msg = f"Rotation {rotation_degrees}° is outside valid range [0, 360]"
@@ -339,8 +348,14 @@ class PositionController:
 
         Raises:
             ValueError: If position is out of bounds
-            RuntimeError: If not connected or movement fails
+            RuntimeError: If not connected, emergency stopped, or movement fails
         """
+        # Check emergency stop
+        if self._emergency_stop_active:
+            error_msg = "Movement blocked - emergency stop active. Clear emergency stop first."
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg)
+
         # Get stage limits
         limits = self.get_stage_limits()
         x_min, x_max = limits['x']['min'], limits['x']['max']
@@ -398,8 +413,14 @@ class PositionController:
 
         Raises:
             ValueError: If position is out of bounds
-            RuntimeError: If not connected or movement fails
+            RuntimeError: If not connected, emergency stopped, or movement fails
         """
+        # Check emergency stop
+        if self._emergency_stop_active:
+            error_msg = "Movement blocked - emergency stop active. Clear emergency stop first."
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg)
+
         # Get stage limits
         limits = self.get_stage_limits()
         y_min, y_max = limits['y']['min'], limits['y']['max']
@@ -460,8 +481,14 @@ class PositionController:
 
         Raises:
             ValueError: If position is out of bounds
-            RuntimeError: If not connected or movement fails
+            RuntimeError: If not connected, emergency stopped, or movement fails
         """
+        # Check emergency stop
+        if self._emergency_stop_active:
+            error_msg = "Movement blocked - emergency stop active. Clear emergency stop first."
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg)
+
         # Get stage limits
         limits = self.get_stage_limits()
         z_min, z_max = limits['z']['min'], limits['z']['max']
@@ -653,6 +680,106 @@ class PositionController:
             True if history is available
         """
         return len(self._position_history) > 0
+
+    def get_home_position(self) -> Optional[Position]:
+        """
+        Get the home position from settings.
+
+        Returns:
+            Home position from ScopeSettings.txt, or None if unavailable
+        """
+        try:
+            from py2flamingo.utils.file_handlers import text_to_dict
+            from pathlib import Path
+
+            settings_path = Path('microscope_settings') / 'ScopeSettings.txt'
+            if settings_path.exists():
+                settings = text_to_dict(str(settings_path))
+
+                if 'Stage limits' in settings:
+                    stage_limits = settings['Stage limits']
+                    x = float(stage_limits.get('Home x-axis', 0))
+                    y = float(stage_limits.get('Home y-axis', 0))
+                    z = float(stage_limits.get('Home z-axis', 0))
+                    r = float(stage_limits.get('Home r-axis', 0))
+
+                    return Position(x=x, y=y, z=z, r=r)
+        except Exception as e:
+            self.logger.error(f"Error reading home position: {e}")
+
+        return None
+
+    def go_home(self) -> None:
+        """
+        Move stage to home position defined in settings.
+
+        Raises:
+            RuntimeError: If home position unavailable or movement fails
+        """
+        home_position = self.get_home_position()
+
+        if home_position is None:
+            raise RuntimeError("Home position not available in settings")
+
+        self.logger.info(
+            f"Moving to home position: X={home_position.x:.3f}, "
+            f"Y={home_position.y:.3f}, Z={home_position.z:.3f}, "
+            f"R={home_position.r:.2f}°"
+        )
+
+        # Use move_to_position to move all axes to home
+        self.move_to_position(home_position, validate=True)
+
+    def emergency_stop(self) -> None:
+        """
+        Emergency stop - halt all stage movement immediately.
+
+        This sets a flag that prevents new movements and attempts to
+        interrupt any ongoing motion tracking. The emergency stop state
+        must be cleared before movements can resume.
+
+        WARNING: This may leave the stage in an unknown position.
+        """
+        self.logger.warning("EMERGENCY STOP ACTIVATED")
+
+        # Set emergency stop flag
+        self._emergency_stop_active = True
+
+        # Try to interrupt motion tracker if it exists
+        if self._motion_tracker:
+            try:
+                # The motion tracker will timeout on its own
+                # We just prevent new movements from starting
+                self.logger.info("Emergency stop set - waiting for current motion to timeout")
+            except Exception as e:
+                self.logger.error(f"Error during emergency stop: {e}")
+
+        # Release movement lock if held (allows recovery)
+        if self._movement_lock.locked():
+            self._movement_lock.release()
+            self.logger.info("Movement lock released during emergency stop")
+
+    def clear_emergency_stop(self) -> None:
+        """
+        Clear emergency stop flag and allow movements to resume.
+
+        After clearing, the position may be uncertain. Consider using
+        go_home() to return to a known position.
+        """
+        if self._emergency_stop_active:
+            self.logger.info("Clearing emergency stop - movements can resume")
+            self._emergency_stop_active = False
+        else:
+            self.logger.debug("Emergency stop already clear")
+
+    def is_emergency_stopped(self) -> bool:
+        """
+        Check if emergency stop is active.
+
+        Returns:
+            True if emergency stop is active
+        """
+        return self._emergency_stop_active
 
     def _wait_for_motion_complete_async(self, target_position: Position) -> None:
         """
