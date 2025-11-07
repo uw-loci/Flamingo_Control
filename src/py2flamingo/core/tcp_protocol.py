@@ -148,6 +148,16 @@ class ProtocolEncoder:
         else:
             data = data.ljust(72, b'\x00')
 
+        # DEBUG: Log command details for movement commands
+        import logging
+        logger = logging.getLogger(__name__)
+        if code in [24580, 24584]:  # STAGE_POSITION_SET or STAGE_POSITION_GET
+            logger.info(f"[PROTOCOL ENCODER] Encoding command {code}")
+            logger.info(f"[PROTOCOL ENCODER]   params array: {params}")
+            logger.info(f"[PROTOCOL ENCODER]   params[0] (cmdBits0): {params[0]} (0x{params[0]:08X})")
+            logger.info(f"[PROTOCOL ENCODER]   params[6] (cmdBits6): {params[6]} (0x{params[6]:08X})")
+            logger.info(f"[PROTOCOL ENCODER]   value: {value}")
+
         # Pack command structure
         try:
             command_bytes = self.COMMAND_STRUCT.pack(
@@ -168,6 +178,20 @@ class ProtocolEncoder:
             )
         except struct.error as e:
             raise ValueError(f"Failed to pack command structure: {e}")
+
+        # DEBUG: Log packed bytes for movement commands
+        if code in [24580, 24584]:  # STAGE_POSITION_SET or STAGE_POSITION_GET
+            # cmdBits0 is at bytes 12-15 (4th uint32 field)
+            cmdBits0_bytes = command_bytes[12:16]
+            cmdBits0_value = struct.unpack('I', cmdBits0_bytes)[0]
+
+            # cmdBits6 is at bytes 36-39 (10th uint32 field)
+            cmdBits6_bytes = command_bytes[36:40]
+            cmdBits6_value = struct.unpack('I', cmdBits6_bytes)[0]
+
+            logger.info(f"[PROTOCOL ENCODER] Packed bytes verification:")
+            logger.info(f"[PROTOCOL ENCODER]   cmdBits0 at bytes 12-15: 0x{cmdBits0_value:08X}")
+            logger.info(f"[PROTOCOL ENCODER]   cmdBits6 at bytes 36-39: 0x{cmdBits6_value:08X}")
 
         # Verify size
         if len(command_bytes) != self.COMMAND_SIZE:
