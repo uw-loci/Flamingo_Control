@@ -197,9 +197,11 @@ Different commands use the fields differently:
 
 **Position Commands (STAGE_POSITION_SET):**
 - `cmdBits0` (Param[0]): Axis code (1=X, 2=Y, 3=Z, 4=R)
+- `cmdBits6` (Param[6]): **MUST** be `0x80000000` (TRIGGER_CALL_BACK) for response
 - `Value`: Position in millimeters or degrees
 
 **Camera Query Commands:**
+- `cmdBits6` (Param[6]): **MUST** be `0x80000000` (TRIGGER_CALL_BACK) for response
 - `CAMERA_PIXEL_FIELD_OF_VIEW_GET`: Returns pixel size in `Value` field (mm/pixel)
 - `CAMERA_IMAGE_SIZE_GET`: Returns dimensions in parameter fields
 
@@ -211,12 +213,52 @@ Different commands use the fields differently:
 - `addDataBytes`: Contains size of file being transferred
 - Command structure sent first, then file data
 
+**Workflow Commands (WORKFLOW_START):**
+- `cmdBits6` (Param[6]): Workflow behavior flags (see below)
+- `addDataBytes`: Size of workflow file data
+- Old code used `0x00000001` (EXPERIMENT_TIME_REMAINING)
+
+#### Command Data Bits Flags (params[6] / cmdBits6)
+
+The `cmdBits6` field (params[6]) contains bit flags that control command behavior.
+These flags can be combined using bitwise OR (`|`). From `CommandCodes.h`:
+
+```
+enum COMMAND_DATA_BITS {
+    TRIGGER_CALL_BACK           = 0x80000000,  // Query commands - triggers response
+    EXPERIMENT_TIME_REMAINING   = 0x00000001,  // Timelapse/long experiments
+    STAGE_POSITIONS_IN_BUFFER   = 0x00000002,  // Multi-position workflows
+    MAX_PROJECTION              = 0x00000004,  // Z-stack MIP computation
+    SAVE_TO_DISK                = 0x00000008,  // Save images (vs. live view only)
+    STAGE_NOT_UPDATE_CLIENT     = 0x00000010,  // Suppress position updates
+    STAGE_ZSWEEP                = 0x00000020,  // Z-stack operation
+}
+```
+
+**Usage Examples:**
+
+Query command (MUST have response):
+```python
+params[6] = 0x80000000  # TRIGGER_CALL_BACK
+```
+
+Z-stack with MIP saved to disk:
+```python
+params[6] = 0x00000020 | 0x00000004 | 0x00000008  # ZSWEEP | MAX_PROJ | SAVE
+```
+
+Multi-position timelapse:
+```python
+params[6] = 0x00000002 | 0x00000008 | 0x00000001  # POSITIONS | SAVE | TIME
+```
+
 **CRITICAL: Query/GET Commands Require TRIGGER_CALL_BACK Flag:**
 - For query commands (e.g., `CAMERA_IMAGE_SIZE_GET`, `STAGE_POSITION_GET`), `cmdBits6` (Param[6]) **MUST** be set to `0x80000000`
 - This is the `COMMAND_DATA_BITS_TRIGGER_CALL_BACK` flag from `CommandCodes.h`
 - Without this flag, the microscope receives the command but **does not send a response**
 - Result: 3-second timeout waiting for response that never arrives
 - **Always set params[6] = 0x80000000 for any GET/query command**
+- **DO NOT use TRIGGER_CALL_BACK for workflow commands** - use workflow-specific flags
 
 Example (correct):
 ```python

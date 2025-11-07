@@ -34,19 +34,58 @@ class CommandCode:
 
 class CommandDataBits:
     """
-    Command data bits flags for the cmdBits6 parameter field.
+    Command data bits flags for the cmdBits6 (params[6]) parameter field.
 
-    These flags control command behavior, particularly response handling.
+    These are bit flags that can be combined using bitwise OR (|) operations.
     From CommandCodes.h enum COMMAND_DATA_BITS.
+
+    Usage Examples:
+        # For query commands that need a response:
+        params[6] = CommandDataBits.TRIGGER_CALL_BACK
+
+        # For Z-stack workflow with max projection saved to disk:
+        params[6] = (CommandDataBits.STAGE_ZSWEEP |
+                     CommandDataBits.MAX_PROJECTION |
+                     CommandDataBits.SAVE_TO_DISK)
+
+        # For multi-position timelapse with buffered positions:
+        params[6] = (CommandDataBits.STAGE_POSITIONS_IN_BUFFER |
+                     CommandDataBits.SAVE_TO_DISK |
+                     CommandDataBits.EXPERIMENT_TIME_REMAINING)
     """
 
-    # Trigger callback/response from microscope (CRITICAL for query commands)
+    # === Response Control ===
+    # Trigger callback/response from microscope (CRITICAL for query/GET commands)
+    # Without this flag, query commands receive no response and timeout
+    # USE FOR: All *_GET commands (STAGE_POSITION_GET, CAMERA_IMAGE_SIZE_GET, etc.)
     TRIGGER_CALL_BACK = 0x80000000
 
-    # Other flags from CommandCodes.h
+    # === Workflow/Experiment Flags ===
+    # Request/indicate experiment time remaining information
+    # USE FOR: Long-running workflows, timelapse experiments
     EXPERIMENT_TIME_REMAINING = 0x00000001
+
+    # Stage positions are buffered for multi-position acquisition
+    # USE FOR: Workflows with multiple XYZ positions (multi-well plates, tiles, etc.)
     STAGE_POSITIONS_IN_BUFFER = 0x00000002
+
+    # Compute Maximum Intensity Projection from Z-stack
+    # USE FOR: Z-stack workflows when you want MIP instead of full stack
+    # NOTE: Old code used this extensively for sample finding
     MAX_PROJECTION = 0x00000004
+
+    # Save acquired images to disk (vs. only sending to live view)
+    # USE FOR: Actual experiments/acquisitions (not live preview)
+    SAVE_TO_DISK = 0x00000008
+
+    # Don't send stage position updates to client during movement
+    # USE FOR: Rapid multi-position movements to reduce network traffic
+    STAGE_NOT_UPDATE_CLIENT = 0x00000010
+
+    # Indicates a Z-sweep/Z-stack operation
+    # USE FOR: Workflows that acquire multiple Z planes
+    # COMBINE WITH: MAX_PROJECTION for MIP, SAVE_TO_DISK for saving
+    STAGE_ZSWEEP = 0x00000020
 
 
 class ProtocolEncoder:

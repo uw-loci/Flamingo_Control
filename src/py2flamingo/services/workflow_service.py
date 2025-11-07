@@ -350,6 +350,44 @@ class MVCWorkflowService:
         Raises:
             RuntimeError: If not connected
             ConnectionError: If send fails
+
+        Note:
+            Command data bits (params[6]) should be set based on workflow type:
+
+            OLD REFERENCE CODE BEHAVIOR (oldcodereference/tcpip_nuc.py:55):
+            - Workflows used: cmdDataBits0 = 1 (EXPERIMENT_TIME_REMAINING)
+            - NOT 0x80000000 like query commands!
+
+            RECOMMENDED FLAGS FOR DIFFERENT WORKFLOW TYPES:
+
+            1. Snapshot (single image, live preview):
+               params[6] = 0  # No special flags needed
+
+            2. Z-Stack with MIP for live view only:
+               params[6] = (CommandDataBits.STAGE_ZSWEEP |
+                           CommandDataBits.MAX_PROJECTION)
+
+            3. Z-Stack saved to disk with MIP:
+               params[6] = (CommandDataBits.STAGE_ZSWEEP |
+                           CommandDataBits.MAX_PROJECTION |
+                           CommandDataBits.SAVE_TO_DISK)
+
+            4. Multi-position timelapse experiment:
+               params[6] = (CommandDataBits.STAGE_POSITIONS_IN_BUFFER |
+                           CommandDataBits.SAVE_TO_DISK |
+                           CommandDataBits.EXPERIMENT_TIME_REMAINING)
+
+            5. Tile/mosaic acquisition:
+               params[6] = (CommandDataBits.STAGE_POSITIONS_IN_BUFFER |
+                           CommandDataBits.SAVE_TO_DISK |
+                           CommandDataBits.STAGE_NOT_UPDATE_CLIENT)  # Reduce traffic
+
+            6. Z-stack full volume (not MIP) saved:
+               params[6] = (CommandDataBits.STAGE_ZSWEEP |
+                           CommandDataBits.SAVE_TO_DISK)
+
+            TODO: Implement workflow type detection and set params[6] appropriately
+                  Currently workflows may not set these flags at all!
         """
         from py2flamingo.models.command import WorkflowCommand
         from py2flamingo.core.tcp_protocol import CommandCode
@@ -358,6 +396,10 @@ class MVCWorkflowService:
             raise RuntimeError("Not connected to microscope")
 
         try:
+            # TODO: Parse workflow_data to determine type and set appropriate flags
+            # For now, using basic flag (EXPERIMENT_TIME_REMAINING like old code)
+            # params[6] = CommandDataBits.EXPERIMENT_TIME_REMAINING
+
             # Create workflow command
             cmd = WorkflowCommand(
                 code=CommandCode.CMD_WORKFLOW_START,
