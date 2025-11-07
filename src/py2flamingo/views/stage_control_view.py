@@ -9,7 +9,8 @@ import logging
 from typing import Optional
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QGroupBox, QFormLayout
+    QLineEdit, QPushButton, QGroupBox, QFormLayout,
+    QListWidget, QListWidgetItem, QComboBox, QInputDialog
 )
 from PyQt5.QtCore import Qt
 
@@ -42,6 +43,9 @@ class StageControlView(QWidget):
 
         self.setup_ui()
 
+        # Load saved presets into list
+        self._refresh_preset_list()
+
     def setup_ui(self) -> None:
         """Create and layout UI components."""
         layout = QVBoxLayout()
@@ -57,6 +61,18 @@ class StageControlView(QWidget):
         # X, Y, Z Axis Controls
         xyz_group = self._create_xyz_controls()
         layout.addWidget(xyz_group)
+
+        # Jog Controls
+        jog_group = self._create_jog_controls()
+        layout.addWidget(jog_group)
+
+        # Saved Presets
+        preset_group = self._create_preset_controls()
+        layout.addWidget(preset_group)
+
+        # Undo Control
+        undo_layout = self._create_undo_control()
+        layout.addLayout(undo_layout)
 
         # Status Display
         self.status_label = QLabel("Status: Ready")
@@ -240,6 +256,163 @@ class StageControlView(QWidget):
         group.setLayout(layout)
         return group
 
+    def _create_jog_controls(self) -> QGroupBox:
+        """Create incremental jog control group.
+
+        Returns:
+            QGroupBox containing jog control widgets
+        """
+        group = QGroupBox("Jog Controls (Incremental Movement)")
+        layout = QVBoxLayout()
+
+        # Step size selector
+        step_layout = QHBoxLayout()
+        step_layout.addWidget(QLabel("Step Size:"))
+
+        self.jog_step_combo = QComboBox()
+        self.jog_step_combo.addItems([
+            "0.01 mm / 1°",
+            "0.1 mm / 10°",
+            "1.0 mm / 45°",
+            "10.0 mm / 90°"
+        ])
+        self.jog_step_combo.setCurrentIndex(1)  # Default to 0.1mm / 10°
+        step_layout.addWidget(self.jog_step_combo)
+        step_layout.addStretch()
+        layout.addLayout(step_layout)
+
+        # Create jog buttons for each axis
+        # X axis jog
+        x_jog_layout = QHBoxLayout()
+        x_jog_layout.addWidget(QLabel("X:"))
+        self.jog_x_minus = QPushButton("-")
+        self.jog_x_minus.setMaximumWidth(40)
+        self.jog_x_minus.clicked.connect(lambda: self._on_jog_clicked('x', -1))
+        self.jog_x_minus.setEnabled(False)
+        x_jog_layout.addWidget(self.jog_x_minus)
+
+        self.jog_x_plus = QPushButton("+")
+        self.jog_x_plus.setMaximumWidth(40)
+        self.jog_x_plus.clicked.connect(lambda: self._on_jog_clicked('x', 1))
+        self.jog_x_plus.setEnabled(False)
+        x_jog_layout.addWidget(self.jog_x_plus)
+        x_jog_layout.addStretch()
+        layout.addLayout(x_jog_layout)
+
+        # Y axis jog
+        y_jog_layout = QHBoxLayout()
+        y_jog_layout.addWidget(QLabel("Y:"))
+        self.jog_y_minus = QPushButton("-")
+        self.jog_y_minus.setMaximumWidth(40)
+        self.jog_y_minus.clicked.connect(lambda: self._on_jog_clicked('y', -1))
+        self.jog_y_minus.setEnabled(False)
+        y_jog_layout.addWidget(self.jog_y_minus)
+
+        self.jog_y_plus = QPushButton("+")
+        self.jog_y_plus.setMaximumWidth(40)
+        self.jog_y_plus.clicked.connect(lambda: self._on_jog_clicked('y', 1))
+        self.jog_y_plus.setEnabled(False)
+        y_jog_layout.addWidget(self.jog_y_plus)
+        y_jog_layout.addStretch()
+        layout.addLayout(y_jog_layout)
+
+        # Z axis jog
+        z_jog_layout = QHBoxLayout()
+        z_jog_layout.addWidget(QLabel("Z:"))
+        self.jog_z_minus = QPushButton("-")
+        self.jog_z_minus.setMaximumWidth(40)
+        self.jog_z_minus.clicked.connect(lambda: self._on_jog_clicked('z', -1))
+        self.jog_z_minus.setEnabled(False)
+        z_jog_layout.addWidget(self.jog_z_minus)
+
+        self.jog_z_plus = QPushButton("+")
+        self.jog_z_plus.setMaximumWidth(40)
+        self.jog_z_plus.clicked.connect(lambda: self._on_jog_clicked('z', 1))
+        self.jog_z_plus.setEnabled(False)
+        z_jog_layout.addWidget(self.jog_z_plus)
+        z_jog_layout.addStretch()
+        layout.addLayout(z_jog_layout)
+
+        # Rotation jog
+        r_jog_layout = QHBoxLayout()
+        r_jog_layout.addWidget(QLabel("R:"))
+        self.jog_r_minus = QPushButton("-")
+        self.jog_r_minus.setMaximumWidth(40)
+        self.jog_r_minus.clicked.connect(lambda: self._on_jog_clicked('r', -1))
+        self.jog_r_minus.setEnabled(False)
+        r_jog_layout.addWidget(self.jog_r_minus)
+
+        self.jog_r_plus = QPushButton("+")
+        self.jog_r_plus.setMaximumWidth(40)
+        self.jog_r_plus.clicked.connect(lambda: self._on_jog_clicked('r', 1))
+        self.jog_r_plus.setEnabled(False)
+        r_jog_layout.addWidget(self.jog_r_plus)
+        r_jog_layout.addStretch()
+        layout.addLayout(r_jog_layout)
+
+        group.setLayout(layout)
+        return group
+
+    def _create_preset_controls(self) -> QGroupBox:
+        """Create saved preset control group.
+
+        Returns:
+            QGroupBox containing preset management widgets
+        """
+        group = QGroupBox("Saved Position Presets")
+        layout = QVBoxLayout()
+
+        # Preset list
+        self.preset_list = QListWidget()
+        self.preset_list.setMaximumHeight(100)
+        layout.addWidget(QLabel("Saved Positions:"))
+        layout.addWidget(self.preset_list)
+
+        # Preset action buttons
+        preset_button_layout = QHBoxLayout()
+
+        self.save_preset_btn = QPushButton("Save Current")
+        self.save_preset_btn.clicked.connect(self._on_save_preset_clicked)
+        self.save_preset_btn.setEnabled(False)
+        preset_button_layout.addWidget(self.save_preset_btn)
+
+        self.goto_preset_btn = QPushButton("Go To")
+        self.goto_preset_btn.clicked.connect(self._on_goto_preset_clicked)
+        self.goto_preset_btn.setEnabled(False)
+        preset_button_layout.addWidget(self.goto_preset_btn)
+
+        self.delete_preset_btn = QPushButton("Delete")
+        self.delete_preset_btn.clicked.connect(self._on_delete_preset_clicked)
+        self.delete_preset_btn.setEnabled(False)
+        preset_button_layout.addWidget(self.delete_preset_btn)
+
+        layout.addLayout(preset_button_layout)
+
+        # Enable/disable goto and delete based on selection
+        self.preset_list.itemSelectionChanged.connect(self._on_preset_selection_changed)
+
+        group.setLayout(layout)
+        return group
+
+    def _create_undo_control(self) -> QHBoxLayout:
+        """Create undo control layout.
+
+        Returns:
+            QHBoxLayout with undo button
+        """
+        layout = QHBoxLayout()
+
+        self.undo_btn = QPushButton("⟲ Undo (Return to Previous Position)")
+        self.undo_btn.clicked.connect(self._on_undo_clicked)
+        self.undo_btn.setEnabled(False)
+        self.undo_btn.setStyleSheet(
+            "background-color: #f8f9fa; border: 1px solid #6c757d; "
+            "padding: 8px; font-weight: bold;"
+        )
+        layout.addWidget(self.undo_btn)
+
+        return layout
+
     def _on_move_rotation_clicked(self) -> None:
         """Handle move rotation button click.
 
@@ -376,6 +549,208 @@ class StageControlView(QWidget):
             self.show_error(f"Unexpected error: {str(e)}")
             self.set_moving(False)
 
+    def _on_jog_clicked(self, axis: str, direction: int) -> None:
+        """Handle jog button click.
+
+        Args:
+            axis: Axis to jog ('x', 'y', 'z', or 'r')
+            direction: Direction (-1 for minus, +1 for plus)
+        """
+        try:
+            # Get step size from combo box
+            step_index = self.jog_step_combo.currentIndex()
+            step_sizes_mm = [0.01, 0.1, 1.0, 10.0]
+            step_sizes_deg = [1.0, 10.0, 45.0, 90.0]
+
+            # Calculate step based on axis
+            if axis == 'r':
+                step = step_sizes_deg[step_index] * direction
+            else:
+                step = step_sizes_mm[step_index] * direction
+
+            # Show moving status
+            self.set_moving(True, f"{axis.upper()}-axis jog")
+            self.clear_message()
+
+            # Delegate to controller
+            if axis == 'x':
+                self._controller.jog_x(step)
+            elif axis == 'y':
+                self._controller.jog_y(step)
+            elif axis == 'z':
+                self._controller.jog_z(step)
+            elif axis == 'r':
+                self._controller.jog_rotation(step)
+
+            sign = "+" if direction > 0 else ""
+            self.show_success(f"Jogging {axis.upper()} by {sign}{step:.3f}...")
+
+        except ValueError as e:
+            self.show_error(f"Jog failed: {str(e)}")
+            self.set_moving(False)
+        except RuntimeError as e:
+            self.show_error(str(e))
+            self.set_moving(False)
+        except Exception as e:
+            self.show_error(f"Unexpected error: {str(e)}")
+            self.set_moving(False)
+
+    def _on_save_preset_clicked(self) -> None:
+        """Handle save preset button click."""
+        try:
+            # Get current position
+            position = self._controller.get_current_position()
+            if position is None:
+                self.show_error("No current position available to save")
+                return
+
+            # Ask user for preset name
+            name, ok = QInputDialog.getText(
+                self,
+                "Save Position Preset",
+                "Enter name for this position:",
+                QLineEdit.Normal,
+                ""
+            )
+
+            if ok and name:
+                name = name.strip()
+                if not name:
+                    self.show_error("Preset name cannot be empty")
+                    return
+
+                # Check if preset already exists
+                if self._controller.preset_service.preset_exists(name):
+                    from PyQt5.QtWidgets import QMessageBox
+                    reply = QMessageBox.question(
+                        self,
+                        "Overwrite Preset",
+                        f"Preset '{name}' already exists. Overwrite?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
+                    if reply != QMessageBox.Yes:
+                        return
+
+                # Save preset
+                self._controller.preset_service.save_preset(name, position)
+                self.show_success(f"Saved preset '{name}'")
+                self._refresh_preset_list()
+
+        except Exception as e:
+            self.show_error(f"Failed to save preset: {str(e)}")
+
+    def _on_goto_preset_clicked(self) -> None:
+        """Handle go to preset button click."""
+        try:
+            # Get selected preset
+            selected_items = self.preset_list.selectedItems()
+            if not selected_items:
+                self.show_error("No preset selected")
+                return
+
+            preset_name = selected_items[0].text()
+            preset = self._controller.preset_service.get_preset(preset_name)
+
+            if preset is None:
+                self.show_error(f"Preset '{preset_name}' not found")
+                return
+
+            # Show moving status
+            self.set_moving(True, "to preset")
+            self.clear_message()
+
+            # Move to preset position
+            position = preset.to_position()
+            self._controller.move_to_position(position, validate=True)
+
+            self.show_success(f"Moving to preset '{preset_name}'...")
+
+        except ValueError as e:
+            self.show_error(f"Invalid preset position: {str(e)}")
+            self.set_moving(False)
+        except RuntimeError as e:
+            self.show_error(str(e))
+            self.set_moving(False)
+        except Exception as e:
+            self.show_error(f"Unexpected error: {str(e)}")
+            self.set_moving(False)
+
+    def _on_delete_preset_clicked(self) -> None:
+        """Handle delete preset button click."""
+        try:
+            # Get selected preset
+            selected_items = self.preset_list.selectedItems()
+            if not selected_items:
+                self.show_error("No preset selected")
+                return
+
+            preset_name = selected_items[0].text()
+
+            # Confirm deletion
+            from PyQt5.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self,
+                "Delete Preset",
+                f"Delete preset '{preset_name}'?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if reply == QMessageBox.Yes:
+                self._controller.preset_service.delete_preset(preset_name)
+                self.show_success(f"Deleted preset '{preset_name}'")
+                self._refresh_preset_list()
+
+        except Exception as e:
+            self.show_error(f"Failed to delete preset: {str(e)}")
+
+    def _on_preset_selection_changed(self) -> None:
+        """Handle preset list selection change."""
+        has_selection = len(self.preset_list.selectedItems()) > 0
+        self.goto_preset_btn.setEnabled(has_selection and self._controller.connection.is_connected())
+        self.delete_preset_btn.setEnabled(has_selection)
+
+    def _on_undo_clicked(self) -> None:
+        """Handle undo button click."""
+        try:
+            if not self._controller.has_position_history():
+                self.show_info("No position history available")
+                return
+
+            # Show moving status
+            self.set_moving(True, "to previous position")
+            self.clear_message()
+
+            # Undo to previous position
+            previous = self._controller.undo_position()
+
+            if previous:
+                self.show_success(f"Returning to previous position...")
+            else:
+                self.show_info("No position history available")
+                self.set_moving(False)
+
+        except RuntimeError as e:
+            self.show_error(str(e))
+            self.set_moving(False)
+        except Exception as e:
+            self.show_error(f"Unexpected error: {str(e)}")
+            self.set_moving(False)
+
+    def _refresh_preset_list(self) -> None:
+        """Refresh the preset list display."""
+        self.preset_list.clear()
+        presets = self._controller.preset_service.list_presets()
+        for preset in presets:
+            self.preset_list.addItem(preset.name)
+
+    def _update_undo_button_state(self) -> None:
+        """Update undo button enabled state based on history."""
+        has_history = self._controller.has_position_history()
+        is_connected = self._controller.connection.is_connected()
+        self.undo_btn.setEnabled(has_history and is_connected)
+
     def _validate_input_bounds(self, axis: str) -> None:
         """
         Validate input field value against stage limits and provide visual feedback.
@@ -446,10 +821,29 @@ class StageControlView(QWidget):
         Args:
             connected: True if connected to microscope
         """
+        # Movement buttons
         self.move_rotation_btn.setEnabled(connected)
         self.move_x_btn.setEnabled(connected)
         self.move_y_btn.setEnabled(connected)
         self.move_z_btn.setEnabled(connected)
+
+        # Jog buttons
+        self.jog_x_minus.setEnabled(connected)
+        self.jog_x_plus.setEnabled(connected)
+        self.jog_y_minus.setEnabled(connected)
+        self.jog_y_plus.setEnabled(connected)
+        self.jog_z_minus.setEnabled(connected)
+        self.jog_z_plus.setEnabled(connected)
+        self.jog_r_minus.setEnabled(connected)
+        self.jog_r_plus.setEnabled(connected)
+
+        # Preset buttons
+        self.save_preset_btn.setEnabled(connected)
+        has_selection = len(self.preset_list.selectedItems()) > 0
+        self.goto_preset_btn.setEnabled(connected and has_selection)
+
+        # Undo button
+        self._update_undo_button_state()
 
         if connected:
             self.status_label.setText("Status: Connected - Ready to move")
@@ -470,6 +864,21 @@ class StageControlView(QWidget):
         self.move_x_btn.setEnabled(not moving)
         self.move_y_btn.setEnabled(not moving)
         self.move_z_btn.setEnabled(not moving)
+
+        # Disable jog buttons during movement
+        self.jog_x_minus.setEnabled(not moving)
+        self.jog_x_plus.setEnabled(not moving)
+        self.jog_y_minus.setEnabled(not moving)
+        self.jog_y_plus.setEnabled(not moving)
+        self.jog_z_minus.setEnabled(not moving)
+        self.jog_z_plus.setEnabled(not moving)
+        self.jog_r_minus.setEnabled(not moving)
+        self.jog_r_plus.setEnabled(not moving)
+
+        # Disable preset goto and undo during movement
+        has_selection = len(self.preset_list.selectedItems()) > 0
+        self.goto_preset_btn.setEnabled(not moving and has_selection)
+        self.undo_btn.setEnabled(not moving and self._controller.has_position_history())
 
         if moving:
             axis_text = f" {axis}" if axis else ""
@@ -540,3 +949,6 @@ class StageControlView(QWidget):
             self.show_success(f"Movement complete! Position: R={position.r:.2f}°")
         else:
             self.show_info("Movement complete")
+
+        # Update undo button state (history may have changed)
+        self._update_undo_button_state()

@@ -71,6 +71,14 @@ class PositionController:
         from py2flamingo.services.configuration_service import ConfigurationService
         self._config_service = ConfigurationService()
 
+        # Position preset service for saved locations
+        from py2flamingo.services.position_preset_service import PositionPresetService
+        self.preset_service = PositionPresetService()
+
+        # Position history for undo functionality (store last 20 positions)
+        self._position_history: List[Position] = []
+        self._max_history_size = 20
+
         # Try to initialize position from microscope settings
         self._initialize_position()
 
@@ -498,6 +506,154 @@ class PositionController:
             self._movement_lock.release()
             raise
 
+    def jog_x(self, delta_mm: float) -> None:
+        """
+        Move X axis by relative amount (jog control).
+
+        Args:
+            delta_mm: Amount to move in mm (positive or negative)
+
+        Raises:
+            ValueError: If resulting position is out of bounds
+            RuntimeError: If not connected or no current position
+        """
+        if self._current_position is None:
+            raise RuntimeError("Cannot jog - current position unknown")
+
+        new_x = self._current_position.x + delta_mm
+        self.move_x(new_x)
+
+    def jog_y(self, delta_mm: float) -> None:
+        """
+        Move Y axis by relative amount (jog control).
+
+        Args:
+            delta_mm: Amount to move in mm (positive or negative)
+
+        Raises:
+            ValueError: If resulting position is out of bounds
+            RuntimeError: If not connected or no current position
+        """
+        if self._current_position is None:
+            raise RuntimeError("Cannot jog - current position unknown")
+
+        new_y = self._current_position.y + delta_mm
+        self.move_y(new_y)
+
+    def jog_z(self, delta_mm: float) -> None:
+        """
+        Move Z axis by relative amount (jog control).
+
+        Args:
+            delta_mm: Amount to move in mm (positive or negative)
+
+        Raises:
+            ValueError: If resulting position is out of bounds
+            RuntimeError: If not connected or no current position
+        """
+        if self._current_position is None:
+            raise RuntimeError("Cannot jog - current position unknown")
+
+        new_z = self._current_position.z + delta_mm
+        self.move_z(new_z)
+
+    def jog_rotation(self, delta_degrees: float) -> None:
+        """
+        Move rotation by relative amount (jog control).
+
+        Args:
+            delta_degrees: Amount to rotate in degrees (positive or negative)
+
+        Raises:
+            ValueError: If resulting rotation is out of bounds
+            RuntimeError: If not connected or no current position
+        """
+        if self._current_position is None:
+            raise RuntimeError("Cannot jog - current position unknown")
+
+        new_r = self._current_position.r + delta_degrees
+
+        # Wrap rotation to stay in 0-360 range
+        while new_r < 0:
+            new_r += 360
+        while new_r > 360:
+            new_r -= 360
+
+        self.move_rotation(new_r)
+
+    def _add_to_history(self, position: Position) -> None:
+        """
+        Add position to history for undo functionality.
+
+        Args:
+            position: Position to add to history
+        """
+        if position is None:
+            return
+
+        # Don't add if it's the same as the last position in history
+        if self._position_history and self._position_history[-1] == position:
+            return
+
+        self._position_history.append(position)
+
+        # Trim history if it exceeds max size
+        if len(self._position_history) > self._max_history_size:
+            self._position_history = self._position_history[-self._max_history_size:]
+
+        self.logger.debug(f"Added position to history (total: {len(self._position_history)})")
+
+    def undo_position(self) -> Optional[Position]:
+        """
+        Go back to previous position in history.
+
+        Returns:
+            The previous position we moved to, or None if no history
+
+        Raises:
+            RuntimeError: If not connected or movement fails
+        """
+        if not self._position_history:
+            self.logger.warning("No position history available for undo")
+            return None
+
+        # Get previous position (last item in history)
+        previous_position = self._position_history.pop()
+
+        self.logger.info(
+            f"Undoing to position: X={previous_position.x:.3f}, "
+            f"Y={previous_position.y:.3f}, Z={previous_position.z:.3f}, "
+            f"R={previous_position.r:.2f}"
+        )
+
+        # Move to previous position (without adding to history to avoid cycles)
+        # We'll use the full move_to_position method
+        try:
+            self.move_to_position(previous_position, validate=False)
+            return previous_position
+        except Exception as e:
+            # Put position back in history if move failed
+            self._position_history.append(previous_position)
+            raise
+
+    def get_position_history(self) -> List[Position]:
+        """
+        Get position history.
+
+        Returns:
+            List of positions in history (most recent last)
+        """
+        return list(self._position_history)
+
+    def has_position_history(self) -> bool:
+        """
+        Check if there is position history available for undo.
+
+        Returns:
+            True if history is available
+        """
+        return len(self._position_history) > 0
+
     def _wait_for_motion_complete_async(self, target_position: Position) -> None:
         """
         Wait for motion complete in a background thread.
@@ -524,6 +680,11 @@ class PositionController:
 
                 if completed:
                     self.logger.info("Motion completed successfully")
+
+                    # Add old position to history before updating
+                    if self._current_position is not None:
+                        self._add_to_history(self._current_position)
+
                     # Update position
                     self._current_position = target_position
                     self.logger.info(
