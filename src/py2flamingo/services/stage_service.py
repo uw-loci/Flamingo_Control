@@ -64,11 +64,11 @@ class StageService(MicroscopeCommandService):
         """
         Query position of a single axis from hardware.
 
-        IMPORTANT: Stage position queries require specifying which axis in params[0]:
-        - params[0] = 1 for X-axis
-        - params[0] = 2 for Y-axis
-        - params[0] = 3 for Z-axis
-        - params[0] = 4 for R-axis (rotation)
+        IMPORTANT: Stage position queries require specifying which axis in params[3]:
+        - params[3] = 1 for X-axis
+        - params[3] = 2 for Y-axis
+        - params[3] = 3 for Z-axis
+        - params[3] = 4 for R-axis (rotation)
 
         Args:
             axis: Axis code (AxisCode.X_AXIS, Y_AXIS, Z_AXIS, or ROTATION)
@@ -89,14 +89,17 @@ class StageService(MicroscopeCommandService):
 
         self.logger.info(f"Querying {axis_name}-axis position from hardware...")
 
-        # CRITICAL: params[0] must specify the axis to query
+        # CRITICAL: params[3] must specify the axis to query
         result = self._query_command(
             StageCommandCode.POSITION_GET,
             f"STAGE_POSITION_GET_{axis_name}",
             params=[
-                axis,  # params[0] = axis code (1=X, 2=Y, 3=Z, 4=R)
-                0,     # params[1-5] unused
-                0, 0, 0, 0,
+                0,     # params[0] (int32Data0)
+                0,     # params[1] (int32Data1)
+                0,     # params[2] (int32Data2)
+                axis,  # params[3] (hardwareID) = axis code (1=X, 2=Y, 3=Z, 4=R)
+                0,     # params[4] (subsystemID)
+                0,     # params[5] (clientID)
                 0      # params[6] will be set to TRIGGER_CALL_BACK by _query_command
             ]
         )
@@ -117,7 +120,7 @@ class StageService(MicroscopeCommandService):
         """
         Query current stage position from hardware for all axes.
 
-        Uses params[0] = 0xFF to query all four axes in a single command.
+        Uses params[3] = 0xFF to query all four axes in a single command.
 
         Returns:
             Position object if hardware supports position feedback, None if not implemented
@@ -134,14 +137,17 @@ class StageService(MicroscopeCommandService):
         """
         self.logger.info("Querying all axis positions from hardware...")
 
-        # IMPORTANT: params[0] = 0xFF queries all axes at once
+        # IMPORTANT: params[3] = 0xFF queries all axes at once
         result = self._query_command(
             StageCommandCode.POSITION_GET,
             "STAGE_POSITION_GET_ALL",
             params=[
-                0xFF,  # params[0] = 0xFF for all axes
-                0,     # params[1-5] unused
-                0, 0, 0, 0,
+                0,     # params[0] (int32Data0)
+                0,     # params[1] (int32Data1)
+                0,     # params[2] (int32Data2)
+                0xFF,  # params[3] (hardwareID) = 0xFF for all axes
+                0,     # params[4] (subsystemID)
+                0,     # params[5] (clientID)
                 0      # params[6] will be set to TRIGGER_CALL_BACK by _query_command
             ]
         )
