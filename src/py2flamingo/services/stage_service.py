@@ -110,17 +110,28 @@ class StageService(MicroscopeCommandService):
                 return None
             raise RuntimeError(f"Failed to get {axis_name} position: {result.get('error', 'Unknown error')}")
 
-        # Position is returned in params[0] of the response
-        position = result['parsed']['params'][0]
-        self.logger.info(f"{axis_name}-axis position: {position}")
-
-        return float(position)
+        # Position is returned in the 72-byte data buffer (bytes 52-123 of response)
+        # Try to parse as double (8 bytes)
+        import struct
+        raw_response = result.get('raw_response', b'')
+        if len(raw_response) >= 60:  # At least 52 + 8 bytes
+            try:
+                # Position at start of data buffer (offset 52)
+                position = struct.unpack('<d', raw_response[52:60])[0]
+                self.logger.info(f"{axis_name}-axis position: {position}")
+                return float(position)
+            except Exception as e:
+                self.logger.error(f"Failed to parse position from data buffer: {e}")
+                return None
+        else:
+            self.logger.error(f"Response too short to contain position data")
+            return None
 
     def get_position(self) -> Optional[Position]:
         """
         Query current stage position from hardware for all axes.
 
-        Uses params[3] (int32Data0) = 0xFF to query all four axes in a single command.
+        Queries each axis individually (X, Y, Z, R) as querying all at once (0xFF) doesn't work.
 
         Returns:
             Position object if hardware supports position feedback, None if not implemented
@@ -137,33 +148,22 @@ class StageService(MicroscopeCommandService):
         """
         self.logger.info("Querying all axis positions from hardware...")
 
-        # IMPORTANT: params[3] (int32Data0) = 0xFF queries all axes at once
-        result = self._query_command(
-            StageCommandCode.POSITION_GET,
-            "STAGE_POSITION_GET_ALL",
-            params=[
-                0,     # params[0] (hardwareID) - not used
-                0,     # params[1] (subsystemID) - not used
-                0,     # params[2] (clientID) - not used
-                0xFF,  # params[3] (int32Data0) = 0xFF for all axes
-                0,     # params[4] (int32Data1)
-                0,     # params[5] (int32Data2)
-                0      # params[6] will be set to TRIGGER_CALL_BACK by _query_command
-            ]
-        )
+        # Query each axis individually (0xFF doesn't work, must query one at a time)
+        x_pos = self.get_axis_position(AxisCode.X_AXIS)
+        if x_pos is None:
+            return None
 
-        if not result['success']:
-            if result.get('error') == 'timeout':
-                self.logger.warning("STAGE_POSITION_GET_ALL timed out - position feedback not available")
-                return None
-            raise RuntimeError(f"Failed to get position: {result.get('error', 'Unknown error')}")
+        y_pos = self.get_axis_position(AxisCode.Y_AXIS)
+        if y_pos is None:
+            return None
 
-        # All four positions returned in params[0-3] of response
-        params = result['parsed']['params']
-        x_pos = float(params[0])
-        y_pos = float(params[1])
-        z_pos = float(params[2])
-        r_pos = float(params[3])
+        z_pos = self.get_axis_position(AxisCode.Z_AXIS)
+        if z_pos is None:
+            return None
+
+        r_pos = self.get_axis_position(AxisCode.ROTATION)
+        if r_pos is None:
+            return None
 
         # Create Position object with all axes
         position = Position(x=x_pos, y=y_pos, z=z_pos, r=r_pos)

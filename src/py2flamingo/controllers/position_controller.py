@@ -1101,11 +1101,11 @@ class PositionController:
             # params[6] (cmdBits6) must be set to 0x80000000 to trigger microscope response
 
             # IMPORTANT: For STAGE_POSITION_GET, params[3] (int32Data0) must specify the axis
-            # Use 0xFF to query all axes at once
+            # Query single axis (1=X, 2=Y, 3=Z, 4=R)
             params = [0, 0, 0, 0, 0, 0, CommandDataBits.TRIGGER_CALL_BACK]
             if command_code == 24584:  # STAGE_POSITION_GET
-                params[3] = 0xFF  # Query all axes (returns X,Y,Z,R in params[0-3])
-                self.logger.info("STAGE_POSITION_GET: Setting params[3] (int32Data0) = 0xFF for all axes")
+                params[3] = 1  # Query X-axis (1=X, 2=Y, 3=Z, 4=R)
+                self.logger.info("STAGE_POSITION_GET: Setting params[3] (int32Data0) = 1 for X-axis")
 
             cmd_bytes = self.connection.encoder.encode_command(
                 code=command_code,

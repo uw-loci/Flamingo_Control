@@ -162,9 +162,9 @@ class ConnectionView(QWidget):
         self.debug_command_combo.addItem("✓ CAMERA_PIXEL_FIELD_OF_VIEW_GET (12343)", (12343, "CAMERA_PIXEL_FIELD_OF_VIEW_GET"))
         self.debug_command_combo.addItem("✓ CAMERA_IMAGE_SIZE_GET (12327)", (12327, "CAMERA_IMAGE_SIZE_GET"))
         self.debug_command_combo.addItem("✓ CAMERA_WORK_FLOW_STOP (12293)", (12293, "CAMERA_WORK_FLOW_STOP"))
-        # Now working with params[3] (int32Data0) = 0xFF for all axes!
-        self.debug_command_combo.addItem("✓ STAGE_POSITION_GET All Axes (24584)", (24584, "STAGE_POSITION_GET"))
-        self.debug_command_combo.setToolTip("✓ = Confirmed working\nNote: STAGE_POSITION_GET uses params[3] (int32Data0) = 0xFF for all axes (returns X,Y,Z,R in params[0-3])")
+        # Now working with params[3] (int32Data0) = 1 for X-axis
+        self.debug_command_combo.addItem("✓ STAGE_POSITION_GET X-axis (24584)", (24584, "STAGE_POSITION_GET"))
+        self.debug_command_combo.setToolTip("✓ = Confirmed working\nNote: STAGE_POSITION_GET uses params[3] (int32Data0) to specify axis (1=X, 2=Y, 3=Z, 4=R)\nPosition returned in 72-byte data buffer")
         self.debug_command_combo.setEnabled(False)  # Enabled when connected
         debug_layout.addWidget(QLabel("Test Command:"))
         debug_layout.addWidget(self.debug_command_combo)
@@ -450,12 +450,28 @@ class ConnectionView(QWidget):
                 text += f"[Offset 48-51] addDataBytes:     {parsed.get('reserved', 'N/A')} (size of additional data)\n"
                 text += f"[Offset 52-123] Data (72 bytes):  "
 
-                # Show data field content
-                data_tail = parsed.get('data_tail_string', '')
-                if data_tail and data_tail.strip('\x00'):
-                    text += f"'{data_tail[:50]}...'\n"
+                # Show data field content - check for binary data first
+                raw_response = result.get('raw_response', b'')
+                if len(raw_response) >= 124:
+                    data_field_bytes = raw_response[52:124]
+                    # Check if contains non-zero data
+                    if any(b != 0 for b in data_field_bytes):
+                        # Show first 32 bytes as hex
+                        hex_preview = ' '.join(f'{b:02X}' for b in data_field_bytes[:32])
+                        text += f"Hex: {hex_preview}...\n"
+                        # Try to show as string if printable
+                        data_tail = parsed.get('data_tail_string', '')
+                        if data_tail and data_tail.strip('\x00') and data_tail.isprintable():
+                            text += f"                         String: '{data_tail[:50]}'\n"
+                    else:
+                        text += f"(all zeros/null)\n"
                 else:
-                    text += f"(all zeros/null)\n"
+                    # Fallback to old behavior
+                    data_tail = parsed.get('data_tail_string', '')
+                    if data_tail and data_tail.strip('\x00'):
+                        text += f"'{data_tail[:50]}...'\n"
+                    else:
+                        text += f"(all zeros/null)\n"
 
                 text += f"[Offset 124-127] End Marker:     0xFEDC4321\n"
 
