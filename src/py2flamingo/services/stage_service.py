@@ -60,13 +60,65 @@ class StageService(MicroscopeCommandService):
         >>> # Wait for motion to complete
     """
 
+    def get_axis_position(self, axis: int) -> Optional[float]:
+        """
+        Query position of a single axis from hardware.
+
+        IMPORTANT: Stage position queries require specifying which axis in params[0]:
+        - params[0] = 1 for X-axis
+        - params[0] = 2 for Y-axis
+        - params[0] = 3 for Z-axis
+        - params[0] = 4 for R-axis (rotation)
+
+        Args:
+            axis: Axis code (AxisCode.X_AXIS, Y_AXIS, Z_AXIS, or ROTATION)
+
+        Returns:
+            Position value for the axis, or None if command fails/not implemented
+
+        Raises:
+            RuntimeError: If communication fails (not timeout)
+
+        Example:
+            >>> x_pos = stage_service.get_axis_position(AxisCode.X_AXIS)
+            >>> if x_pos is not None:
+            >>>     print(f"X position: {x_pos}")
+        """
+        axis_names = {1: 'X', 2: 'Y', 3: 'Z', 4: 'R'}
+        axis_name = axis_names.get(axis, f'Unknown({axis})')
+
+        self.logger.info(f"Querying {axis_name}-axis position from hardware...")
+
+        # CRITICAL: params[0] must specify the axis to query
+        result = self._query_command(
+            StageCommandCode.POSITION_GET,
+            f"STAGE_POSITION_GET_{axis_name}",
+            params=[
+                axis,  # params[0] = axis code (1=X, 2=Y, 3=Z, 4=R)
+                0,     # params[1-5] unused
+                0, 0, 0, 0,
+                0      # params[6] will be set to TRIGGER_CALL_BACK by _query_command
+            ]
+        )
+
+        if not result['success']:
+            if result.get('error') == 'timeout':
+                self.logger.warning(f"{axis_name}-axis POSITION_GET timed out - position feedback not available")
+                return None
+            raise RuntimeError(f"Failed to get {axis_name} position: {result.get('error', 'Unknown error')}")
+
+        # Position is returned in params[0] of the response
+        position = result['parsed']['params'][0]
+        self.logger.info(f"{axis_name}-axis position: {position}")
+
+        return float(position)
+
     def get_position(self) -> Optional[Position]:
         """
-        Query current stage position from hardware.
+        Query current stage position from hardware for all axes.
 
-        WARNING: This command may not be implemented in all microscope models.
-        Many microscopes do not provide position feedback and require software
-        to track position locally.
+        This method queries each axis individually (X, Y, Z, R) and combines
+        the results into a Position object.
 
         Returns:
             Position object if hardware supports position feedback, None if not implemented
@@ -77,31 +129,34 @@ class StageService(MicroscopeCommandService):
         Example:
             >>> pos = stage_service.get_position()
             >>> if pos:
-            >>>     print(f"Stage at X={pos.x}, Y={pos.y}, Z={pos.z}")
+            >>>     print(f"Stage at X={pos.x}, Y={pos.y}, Z={pos.z}, R={pos.r}")
             >>> else:
             >>>     print("Position feedback not available - using local tracking")
         """
-        self.logger.info("Querying stage position from hardware...")
+        self.logger.info("Querying all axis positions from hardware...")
 
-        result = self._query_command(
-            StageCommandCode.POSITION_GET,
-            "STAGE_POSITION_GET"
-        )
+        # Query each axis individually
+        x_pos = self.get_axis_position(AxisCode.X_AXIS)
+        if x_pos is None:
+            return None  # Position feedback not available
 
-        if not result['success']:
-            if result.get('error') == 'timeout':
-                self.logger.warning("STAGE_POSITION_GET timed out - position feedback not available")
-                return None
-            raise RuntimeError(f"Failed to get position: {result.get('error', 'Unknown error')}")
+        y_pos = self.get_axis_position(AxisCode.Y_AXIS)
+        if y_pos is None:
+            return None
 
-        # Parse position from response
-        # TODO: Determine which fields contain position data
-        # Based on logs, may be in params or additional data
-        params = result['parsed']['params']
-        self.logger.info(f"Position query response params: {params}")
+        z_pos = self.get_axis_position(AxisCode.Z_AXIS)
+        if z_pos is None:
+            return None
 
-        # For now, return None until we determine response format
-        return None
+        r_pos = self.get_axis_position(AxisCode.ROTATION)
+        if r_pos is None:
+            return None
+
+        # Create Position object with all axes
+        position = Position(x=x_pos, y=y_pos, z=z_pos, r=r_pos)
+        self.logger.info(f"Complete stage position: {position}")
+
+        return position
 
     def move_to_position(self, axis: int, position_mm: float) -> None:
         """

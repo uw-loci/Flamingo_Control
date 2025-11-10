@@ -1099,10 +1099,18 @@ class PositionController:
             # MVCConnectionService doesn't use background threads, so direct socket access is safe
             # Encode command with TRIGGER_CALL_BACK flag to get response
             # params[6] (cmdBits6) must be set to 0x80000000 to trigger microscope response
+
+            # IMPORTANT: For STAGE_POSITION_GET, params[0] must specify the axis
+            # Default to X-axis (1) for stage position queries
+            params = [0, 0, 0, 0, 0, 0, CommandDataBits.TRIGGER_CALL_BACK]
+            if command_code == 24584:  # STAGE_POSITION_GET
+                params[0] = 1  # Query X-axis by default
+                self.logger.info("STAGE_POSITION_GET: Setting params[0]=1 for X-axis")
+
             cmd_bytes = self.connection.encoder.encode_command(
                 code=command_code,
                 status=0,
-                params=[0, 0, 0, 0, 0, 0, CommandDataBits.TRIGGER_CALL_BACK],
+                params=params,
                 value=0.0,
                 data=b''
             )
