@@ -13,12 +13,15 @@ For **STAGE_POSITION_GET** and **ALL movement commands**, you MUST set `int32Dat
 
 | params[0] Value | Axis | Description |
 |-----------------|------|-------------|
-| 1 | X | X-axis position |
-| 2 | Y | Y-axis position |
-| 3 | Z | Z-axis (focus) position |
-| 4 | R | R-axis (rotation) position |
+| 1 | X | Query X-axis only |
+| 2 | Y | Query Y-axis only |
+| 3 | Z | Query Z-axis (focus) only |
+| 4 | R | Query R-axis (rotation) only |
+| 0xFF (255) | ALL | Query all four axes in single command |
 
 **Without setting params[0], the command will NOT return a response.**
+
+**Recommended:** Use `params[0] = 0xFF` to get all positions at once.
 
 ---
 
@@ -111,39 +114,50 @@ z_position = struct.unpack('<i', response[12:16])[0]
 print(f"Z position: {z_position}")
 ```
 
-### Example 3: Query All Axes (4 separate commands)
+### Example 3: Query All Axes (RECOMMENDED - Single Command)
 
 ```python
 def get_stage_position(command_socket):
-    """Query all four axes individually."""
-    axes = {1: 'X', 2: 'Y', 3: 'Z', 4: 'R'}
-    positions = {}
+    """Query all four axes at once using params[0] = 0xFF."""
 
-    for axis_num, axis_name in axes.items():
-        # Build command for this axis
-        params = [axis_num, 0, 0, 0, 0, 0, 0x80000000]
+    # Build command with params[0] = 0xFF for all axes
+    params = [0xFF, 0, 0, 0, 0, 0, 0x80000000]
 
-        cmd_bytes = struct.pack(
-            "I I I I I I I I I I d I 72s I",
-            0xF321E654, 24584, 0,
-            *params,
-            0.0, 0, b'\x00' * 72,
-            0xFEDC4321
-        )
+    cmd_bytes = struct.pack(
+        "I I I I I I I I I I d I 72s I",
+        0xF321E654,      # Start marker
+        24584,           # STAGE_POSITION_GET
+        0,               # Status
+        *params,         # params[0]=0xFF queries all axes
+        0.0,             # Value
+        0,               # addDataBytes
+        b'\x00' * 72,    # Data buffer
+        0xFEDC4321       # End marker
+    )
 
-        # Send and receive
-        command_socket.sendall(cmd_bytes)
-        response = receive_full(command_socket, 128)
+    # Send and receive
+    command_socket.sendall(cmd_bytes)
+    response = receive_full(command_socket, 128)
 
-        # Extract position from params[0] of response
-        position = struct.unpack('<i', response[12:16])[0]
-        positions[axis_name] = position
+    # All positions returned in params[0-3] of response
+    x_pos = struct.unpack('<i', response[12:16])[0]   # params[0]
+    y_pos = struct.unpack('<i', response[16:20])[0]   # params[1]
+    z_pos = struct.unpack('<i', response[20:24])[0]   # params[2]
+    r_pos = struct.unpack('<i', response[24:28])[0]   # params[3]
 
-    return positions
+    return {'X': x_pos, 'Y': y_pos, 'Z': z_pos, 'R': r_pos}
 
 # Usage
 pos = get_stage_position(command_socket)
 print(f"Stage position: X={pos['X']}, Y={pos['Y']}, Z={pos['Z']}, R={pos['R']}")
+```
+
+**Hex dump of command:**
+```
+Offset  00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F
+------  -----------------------------------------------
+0x0000  54 E6 21 F3 08 60 00 00 00 00 00 00 FF 00 00 00
+        ^Start Mark ^Cmd=24584   ^Status=0   ^params[0]=0xFF (ALL AXES!)
 ```
 
 ### Example 4: Move X-Axis (STAGE_POSITION_SET)

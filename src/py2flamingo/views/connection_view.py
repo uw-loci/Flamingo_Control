@@ -162,9 +162,9 @@ class ConnectionView(QWidget):
         self.debug_command_combo.addItem("✓ CAMERA_PIXEL_FIELD_OF_VIEW_GET (12343)", (12343, "CAMERA_PIXEL_FIELD_OF_VIEW_GET"))
         self.debug_command_combo.addItem("✓ CAMERA_IMAGE_SIZE_GET (12327)", (12327, "CAMERA_IMAGE_SIZE_GET"))
         self.debug_command_combo.addItem("✓ CAMERA_WORK_FLOW_STOP (12293)", (12293, "CAMERA_WORK_FLOW_STOP"))
-        # Now working with params[0] axis specification!
-        self.debug_command_combo.addItem("✓ STAGE_POSITION_GET X-axis (24584)", (24584, "STAGE_POSITION_GET"))
-        self.debug_command_combo.setToolTip("✓ = Confirmed working\nNote: STAGE_POSITION_GET requires axis in params[0] (1=X, 2=Y, 3=Z, 4=R)")
+        # Now working with params[0] = 0xFF for all axes!
+        self.debug_command_combo.addItem("✓ STAGE_POSITION_GET All Axes (24584)", (24584, "STAGE_POSITION_GET"))
+        self.debug_command_combo.setToolTip("✓ = Confirmed working\nNote: STAGE_POSITION_GET uses params[0]=0xFF for all axes (returns X,Y,Z,R in params[0-3])")
         self.debug_command_combo.setEnabled(False)  # Enabled when connected
         debug_layout.addWidget(QLabel("Test Command:"))
         debug_layout.addWidget(self.debug_command_combo)

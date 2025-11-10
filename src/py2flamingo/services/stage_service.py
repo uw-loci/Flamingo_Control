@@ -117,8 +117,7 @@ class StageService(MicroscopeCommandService):
         """
         Query current stage position from hardware for all axes.
 
-        This method queries each axis individually (X, Y, Z, R) and combines
-        the results into a Position object.
+        Uses params[0] = 0xFF to query all four axes in a single command.
 
         Returns:
             Position object if hardware supports position feedback, None if not implemented
@@ -135,22 +134,30 @@ class StageService(MicroscopeCommandService):
         """
         self.logger.info("Querying all axis positions from hardware...")
 
-        # Query each axis individually
-        x_pos = self.get_axis_position(AxisCode.X_AXIS)
-        if x_pos is None:
-            return None  # Position feedback not available
+        # IMPORTANT: params[0] = 0xFF queries all axes at once
+        result = self._query_command(
+            StageCommandCode.POSITION_GET,
+            "STAGE_POSITION_GET_ALL",
+            params=[
+                0xFF,  # params[0] = 0xFF for all axes
+                0,     # params[1-5] unused
+                0, 0, 0, 0,
+                0      # params[6] will be set to TRIGGER_CALL_BACK by _query_command
+            ]
+        )
 
-        y_pos = self.get_axis_position(AxisCode.Y_AXIS)
-        if y_pos is None:
-            return None
+        if not result['success']:
+            if result.get('error') == 'timeout':
+                self.logger.warning("STAGE_POSITION_GET_ALL timed out - position feedback not available")
+                return None
+            raise RuntimeError(f"Failed to get position: {result.get('error', 'Unknown error')}")
 
-        z_pos = self.get_axis_position(AxisCode.Z_AXIS)
-        if z_pos is None:
-            return None
-
-        r_pos = self.get_axis_position(AxisCode.ROTATION)
-        if r_pos is None:
-            return None
+        # All four positions returned in params[0-3] of response
+        params = result['parsed']['params']
+        x_pos = float(params[0])
+        y_pos = float(params[1])
+        z_pos = float(params[2])
+        r_pos = float(params[3])
 
         # Create Position object with all axes
         position = Position(x=x_pos, y=y_pos, z=z_pos, r=r_pos)

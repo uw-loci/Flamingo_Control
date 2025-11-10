@@ -736,12 +736,15 @@ while len(data) < expected_size:
 
 | params[0] | Axis | Description |
 |-----------|------|-------------|
-| 1 | X | X-axis position |
-| 2 | Y | Y-axis position |
-| 3 | Z | Z-axis (focus) position |
-| 4 | R | R-axis (rotation) position |
+| 1 | X | Query/move X-axis only |
+| 2 | Y | Query/move Y-axis only |
+| 3 | Z | Query/move Z-axis (focus) only |
+| 4 | R | Query/move R-axis (rotation) only |
+| 0xFF (255) | ALL | Query all axes (GET only) |
 
 **Without setting params[0], the command will NOT return a response!**
+
+**For STAGE_POSITION_GET:** Use `params[0] = 0xFF` to get all positions at once (returns X,Y,Z,R in params[0-3]).
 
 See [STAGE_POSITION_AXIS_PARAMETER.md](STAGE_POSITION_AXIS_PARAMETER.md) for detailed examples.
 
@@ -761,11 +764,12 @@ Different commands return data in different fields:
 |--------------------------------|------------------------------------|--------|
 | CAMERA_IMAGE_SIZE_GET          | params[3] = width, params[4] = height | int32 |
 | CAMERA_PIXEL_FIELD_OF_VIEW_GET | value = pixel_size_mm              | double |
-| STAGE_POSITION_GET             | params[0] = position (for axis specified in request params[0]) | int32  |
+| STAGE_POSITION_GET (single axis) | params[0] = position (for axis specified in request params[0]) | int32  |
+| STAGE_POSITION_GET (all axes, params[0]=0xFF) | params[0-3] = X,Y,Z,R positions | int32  |
 | SYSTEM_STATE_GET               | params[0] = state_code             | int32  |
 | SCOPE_SETTINGS_LOAD            | Additional text data after 128-byte ack | UTF-8 text |
 
-**Note:** STAGE_POSITION_GET queries ONE axis at a time. To get all positions, send 4 separate commands with params[0] = 1, 2, 3, 4.
+**Note:** STAGE_POSITION_GET can query one axis (params[0]=1,2,3,4) or all axes (params[0]=0xFF).
 
 ---
 
