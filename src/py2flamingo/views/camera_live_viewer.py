@@ -51,6 +51,13 @@ class CameraLiveViewer(QWidget):
         self._current_header: Optional[ImageHeader] = None
         self._display_scale = 1.0
 
+        # Image transformation state (controlled by Image Controls window)
+        self._rotation = 0  # 0, 90, 180, 270
+        self._flip_horizontal = False
+        self._flip_vertical = False
+        self._colormap = "Grayscale"
+        self._show_crosshair = False
+
         # Setup UI
         self._setup_ui()
 
@@ -424,13 +431,28 @@ class CameraLiveViewer(QWidget):
 
     def _display_image(self, image: np.ndarray, header: ImageHeader) -> None:
         """
-        Convert image to QPixmap and display.
+        Convert image to QPixmap and display with transformations.
 
         Args:
             image: Image array (uint16)
             header: Image metadata
         """
         try:
+            # Apply flips to raw image first (before intensity scaling)
+            transformed = image.copy()
+            if self._flip_horizontal:
+                transformed = np.fliplr(transformed)
+            if self._flip_vertical:
+                transformed = np.flipud(transformed)
+
+            # Apply rotation to raw image
+            if self._rotation == 90:
+                transformed = np.rot90(transformed, k=1)  # 90° counter-clockwise
+            elif self._rotation == 180:
+                transformed = np.rot90(transformed, k=2)
+            elif self._rotation == 270:
+                transformed = np.rot90(transformed, k=3)  # 270° = -90°
+
             # Get display range
             if self.camera_controller.is_auto_scale():
                 min_val = header.image_scale_min
@@ -440,20 +462,29 @@ class CameraLiveViewer(QWidget):
 
             # Normalize to 8-bit for display
             if max_val > min_val:
-                normalized = ((image.astype(np.float32) - min_val) /
+                normalized = ((transformed.astype(np.float32) - min_val) /
                             (max_val - min_val) * 255.0)
                 normalized = np.clip(normalized, 0, 255).astype(np.uint8)
             else:
-                normalized = np.zeros_like(image, dtype=np.uint8)
+                normalized = np.zeros_like(transformed, dtype=np.uint8)
 
-            # Convert to QImage
-            height, width = normalized.shape
-            bytes_per_line = width
-            qimage = QImage(normalized.data, width, height, bytes_per_line,
-                          QImage.Format_Grayscale8)
+            # Apply color map
+            if self._colormap != "Grayscale":
+                normalized = self._apply_colormap(normalized, self._colormap)
+                # Convert to QImage (RGB format)
+                height, width, channels = normalized.shape
+                bytes_per_line = width * channels
+                qimage = QImage(normalized.data, width, height, bytes_per_line,
+                              QImage.Format_RGB888)
+            else:
+                # Convert to QImage (grayscale)
+                height, width = normalized.shape
+                bytes_per_line = width
+                qimage = QImage(normalized.data, width, height, bytes_per_line,
+                              QImage.Format_Grayscale8)
 
-            # Add crosshair if enabled
-            if self.crosshair_checkbox.isChecked():
+            # Add crosshair if enabled (use internal state from Image Controls)
+            if self._show_crosshair:
                 qimage = self._add_crosshair(qimage)
 
             # Convert to pixmap
@@ -476,6 +507,110 @@ class CameraLiveViewer(QWidget):
 
         except Exception as e:
             self.logger.error(f"Error displaying image: {e}")
+
+    def _apply_colormap(self, grayscale: np.ndarray, colormap_name: str) -> np.ndarray:
+        """
+        Apply color map to grayscale image.
+
+        Args:
+            grayscale: Grayscale image (uint8)
+            colormap_name: Name of color map to apply
+
+        Returns:
+            RGB image (uint8) with shape (H, W, 3)
+        """
+        # Simple built-in color maps without matplotlib dependency
+        # Each is a 256x3 lookup table
+
+        if colormap_name == "Hot":
+            # Hot colormap: black -> red -> yellow -> white
+            lut = np.zeros((256, 3), dtype=np.uint8)
+            for i in range(256):
+                if i < 85:
+                    lut[i] = [i * 3, 0, 0]
+                elif i < 170:
+                    lut[i] = [255, (i - 85) * 3, 0]
+                else:
+                    lut[i] = [255, 255, (i - 170) * 3]
+
+        elif colormap_name == "Jet":
+            # Jet colormap: blue -> cyan -> green -> yellow -> red
+            lut = np.zeros((256, 3), dtype=np.uint8)
+            for i in range(256):
+                if i < 32:
+                    lut[i] = [0, 0, 128 + i * 4]
+                elif i < 96:
+                    lut[i] = [0, (i - 32) * 4, 255]
+                elif i < 160:
+                    lut[i] = [(i - 96) * 4, 255, 255 - (i - 96) * 4]
+                elif i < 224:
+                    lut[i] = [255, 255 - (i - 160) * 4, 0]
+                else:
+                    lut[i] = [255 - (i - 224) * 4, 0, 0]
+
+        elif colormap_name == "Viridis":
+            # Simplified Viridis: purple -> blue -> green -> yellow
+            lut = np.zeros((256, 3), dtype=np.uint8)
+            for i in range(256):
+                t = i / 255.0
+                lut[i] = [
+                    int(255 * (0.267 + 0.529 * t)),
+                    int(255 * (0.005 + 0.839 * t - 0.135 * t * t)),
+                    int(255 * (0.329 - 0.329 * t))
+                ]
+
+        elif colormap_name == "Plasma":
+            # Simplified Plasma: purple -> pink -> orange -> yellow
+            lut = np.zeros((256, 3), dtype=np.uint8)
+            for i in range(256):
+                t = i / 255.0
+                lut[i] = [
+                    int(255 * (0.5 + 0.5 * t)),
+                    int(255 * (0.0 + 0.8 * t * t)),
+                    int(255 * (0.8 - 0.8 * t))
+                ]
+
+        elif colormap_name == "Inferno":
+            # Simplified Inferno: black -> purple -> red -> yellow
+            lut = np.zeros((256, 3), dtype=np.uint8)
+            for i in range(256):
+                t = i / 255.0
+                lut[i] = [
+                    int(255 * t),
+                    int(255 * (t * t)),
+                    int(255 * max(0, 3 * t - 2))
+                ]
+
+        elif colormap_name == "Magma":
+            # Simplified Magma: black -> purple -> pink -> white
+            lut = np.zeros((256, 3), dtype=np.uint8)
+            for i in range(256):
+                t = i / 255.0
+                lut[i] = [
+                    int(255 * t),
+                    int(255 * (t * t * t)),
+                    int(255 * max(0, 4 * t - 3))
+                ]
+
+        elif colormap_name == "Turbo":
+            # Simplified Turbo: blue -> cyan -> green -> yellow -> red
+            lut = np.zeros((256, 3), dtype=np.uint8)
+            for i in range(256):
+                t = i / 255.0
+                lut[i] = [
+                    int(255 * min(1.0, max(0.0, 1.5 * t - 0.25))),
+                    int(255 * min(1.0, max(0.0, -abs(2 * t - 1) + 1))),
+                    int(255 * min(1.0, max(0.0, -1.5 * t + 1.25)))
+                ]
+
+        else:
+            # Default: grayscale
+            lut = np.stack([np.arange(256)] * 3, axis=1).astype(np.uint8)
+
+        # Apply LUT to image
+        rgb = lut[grayscale]
+
+        return rgb
 
     def _add_crosshair(self, qimage: QImage) -> QImage:
         """
@@ -511,6 +646,68 @@ class CameraLiveViewer(QWidget):
         painter.end()
 
         return result
+
+    # ===== Image transformation setters (called by Image Controls window) =====
+
+    def set_rotation(self, angle: int) -> None:
+        """Set image rotation angle (0, 90, 180, 270)."""
+        if angle in [0, 90, 180, 270]:
+            self._rotation = angle
+            self.logger.info(f"Image rotation set to {angle}°")
+            # Redisplay current image with new rotation
+            if self._current_image is not None:
+                self._display_image(self._current_image, self._current_header)
+
+    def set_flip_horizontal(self, enabled: bool) -> None:
+        """Set horizontal flip state."""
+        self._flip_horizontal = enabled
+        self.logger.info(f"Horizontal flip: {enabled}")
+        # Redisplay current image
+        if self._current_image is not None:
+            self._display_image(self._current_image, self._current_header)
+
+    def set_flip_vertical(self, enabled: bool) -> None:
+        """Set vertical flip state."""
+        self._flip_vertical = enabled
+        self.logger.info(f"Vertical flip: {enabled}")
+        # Redisplay current image
+        if self._current_image is not None:
+            self._display_image(self._current_image, self._current_header)
+
+    def set_colormap(self, colormap: str) -> None:
+        """Set color map for image display."""
+        self._colormap = colormap
+        self.logger.info(f"Color map set to: {colormap}")
+        # Redisplay current image with new colormap
+        if self._current_image is not None:
+            self._display_image(self._current_image, self._current_header)
+
+    def set_intensity_range(self, min_val: int, max_val: int) -> None:
+        """Set manual intensity range (pass through to camera controller)."""
+        self.camera_controller.set_display_range(min_val, max_val)
+        # Redisplay current image
+        if self._current_image is not None:
+            self._display_image(self._current_image, self._current_header)
+
+    def set_auto_scale(self, enabled: bool) -> None:
+        """Set auto-scale state (pass through to camera controller)."""
+        self.camera_controller.set_auto_scale(enabled)
+
+    def set_zoom(self, zoom_percentage: float) -> None:
+        """Set zoom as percentage (1.0 = 100%)."""
+        self._display_scale = zoom_percentage
+        self.logger.debug(f"Zoom set to {zoom_percentage * 100:.0f}%")
+        # Redisplay current image with new zoom
+        if self._current_image is not None:
+            self._display_image(self._current_image, self._current_header)
+
+    def set_crosshair(self, enabled: bool) -> None:
+        """Set crosshair visibility."""
+        self._show_crosshair = enabled
+        self.logger.debug(f"Crosshair: {enabled}")
+        # Redisplay current image
+        if self._current_image is not None:
+            self._display_image(self._current_image, self._current_header)
 
     def cleanup(self) -> None:
         """Cleanup resources when widget is closed."""

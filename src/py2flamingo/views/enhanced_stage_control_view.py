@@ -180,6 +180,7 @@ class EnhancedStageControlView(QWidget):
         self.x_target_spin.setSingleStep(0.1)
         self.x_target_spin.setSuffix(" mm")
         self.x_target_spin.setMinimumWidth(100)
+        self.x_target_spin.valueChanged.connect(lambda: self._update_position_label_colors())
         grid.addWidget(self.x_target_spin, row, 1)
 
         self.x_goto_btn = QPushButton("Go To X")
@@ -202,6 +203,7 @@ class EnhancedStageControlView(QWidget):
         self.y_target_spin.setSingleStep(0.1)
         self.y_target_spin.setSuffix(" mm")
         self.y_target_spin.setMinimumWidth(100)
+        self.y_target_spin.valueChanged.connect(lambda: self._update_position_label_colors())
         grid.addWidget(self.y_target_spin, row, 1)
 
         self.y_goto_btn = QPushButton("Go To Y")
@@ -224,6 +226,7 @@ class EnhancedStageControlView(QWidget):
         self.z_target_spin.setSingleStep(0.1)
         self.z_target_spin.setSuffix(" mm")
         self.z_target_spin.setMinimumWidth(100)
+        self.z_target_spin.valueChanged.connect(lambda: self._update_position_label_colors())
         grid.addWidget(self.z_target_spin, row, 1)
 
         self.z_goto_btn = QPushButton("Go To Z")
@@ -246,6 +249,7 @@ class EnhancedStageControlView(QWidget):
         self.r_target_spin.setSingleStep(1.0)
         self.r_target_spin.setSuffix("°")
         self.r_target_spin.setMinimumWidth(100)
+        self.r_target_spin.valueChanged.connect(lambda: self._update_position_label_colors())
         grid.addWidget(self.r_target_spin, row, 1)
 
         self.r_goto_btn = QPushButton("Go To R")
@@ -473,12 +477,18 @@ class EnhancedStageControlView(QWidget):
 
     def _on_goto_position_clicked(self) -> None:
         """Handle Go To Position button click - moves all 4 axes at once."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("Go To Position button clicked")
+
         try:
             # Read all target values from spin boxes
             target_x = self.x_target_spin.value()
             target_y = self.y_target_spin.value()
             target_z = self.z_target_spin.value()
             target_r = self.r_target_spin.value()
+
+            logger.info(f"Target position: X={target_x:.3f}, Y={target_y:.3f}, Z={target_z:.3f}, R={target_r:.2f}")
 
             # Show confirmation dialog
             reply = QMessageBox.question(
@@ -494,6 +504,8 @@ class EnhancedStageControlView(QWidget):
             )
 
             if reply == QMessageBox.Yes:
+                logger.info("User confirmed Go To Position movement")
+
                 # Create Position object
                 target_position = Position(
                     x=target_x,
@@ -503,13 +515,17 @@ class EnhancedStageControlView(QWidget):
                 )
 
                 # Move to position with validation
+                logger.info("Calling move_to_position...")
                 self.movement_controller.position_controller.move_to_position(
                     target_position,
                     validate=True
                 )
+                logger.info("move_to_position call completed")
 
                 self.message_label.setText("Moving to target position...")
                 self.message_label.setStyleSheet("color: blue; padding: 6px;")
+            else:
+                logger.info("User cancelled Go To Position movement")
 
         except Exception as e:
             QMessageBox.critical(self, "Movement Error", str(e))
@@ -661,6 +677,47 @@ class EnhancedStageControlView(QWidget):
     # Signal Slots
     # ============================================================================
 
+    def _update_position_label_colors(self) -> None:
+        """Update position label colors based on whether current differs from target."""
+        # Green style: position matches target
+        green_style = "background-color: #e8f5e9; padding: 8px; border: 2px solid #4caf50; border-radius: 4px; font-size: 11pt; font-weight: bold;"
+        # Orange style: position differs from target
+        orange_style = "background-color: #fff3e0; padding: 8px; border: 2px solid #ff9800; border-radius: 4px; font-size: 11pt; font-weight: bold;"
+
+        tolerance = 0.001  # 1 micron
+
+        # Check X axis
+        current_x = float(self.x_pos_label.text().replace(" mm", ""))
+        target_x = self.x_target_spin.value()
+        if abs(current_x - target_x) > tolerance:
+            self.x_pos_label.setStyleSheet(orange_style)
+        else:
+            self.x_pos_label.setStyleSheet(green_style)
+
+        # Check Y axis
+        current_y = float(self.y_pos_label.text().replace(" mm", ""))
+        target_y = self.y_target_spin.value()
+        if abs(current_y - target_y) > tolerance:
+            self.y_pos_label.setStyleSheet(orange_style)
+        else:
+            self.y_pos_label.setStyleSheet(green_style)
+
+        # Check Z axis
+        current_z = float(self.z_pos_label.text().replace(" mm", ""))
+        target_z = self.z_target_spin.value()
+        if abs(current_z - target_z) > tolerance:
+            self.z_pos_label.setStyleSheet(orange_style)
+        else:
+            self.z_pos_label.setStyleSheet(green_style)
+
+        # Check Rotation (larger tolerance)
+        current_r = float(self.r_pos_label.text().replace("°", ""))
+        target_r = self.r_target_spin.value()
+        if abs(current_r - target_r) > 0.01:  # 0.01 degree tolerance
+            self.r_pos_label.setStyleSheet(orange_style)
+        else:
+            self.r_pos_label.setStyleSheet(green_style)
+
     @pyqtSlot(float, float, float, float)
     def _on_position_changed(self, x: float, y: float, z: float, r: float) -> None:
         """Update position display and target fields when position changes."""
@@ -669,6 +726,9 @@ class EnhancedStageControlView(QWidget):
         self.y_pos_label.setText(f"{y:.3f} mm")
         self.z_pos_label.setText(f"{z:.3f} mm")
         self.r_pos_label.setText(f"{r:.2f}°")
+
+        # Update label colors based on target difference
+        self._update_position_label_colors()
 
         # Update "Go To Target" fields to match current position
         # This links the two sections so users always see current position in target fields

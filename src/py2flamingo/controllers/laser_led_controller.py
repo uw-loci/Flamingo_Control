@@ -162,7 +162,7 @@ class LaserLEDController(QObject):
                 self._led_intensities[led_color] = intensity_percent
                 self.led_intensity_changed.emit(intensity_percent)
                 color_names = ["Red", "Green", "Blue", "White"]
-                self.logger.info(f"{color_names[led_color]} LED intensity set to {intensity_percent:.1f}%")
+                self.logger.debug(f"{color_names[led_color]} LED intensity set to {intensity_percent:.1f}%")
             else:
                 error_msg = f"Failed to set LED intensity for color {led_color}"
                 self.logger.error(error_msg)

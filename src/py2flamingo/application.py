@@ -28,7 +28,7 @@ from py2flamingo.services import (
 from py2flamingo.controllers import ConnectionController, WorkflowController, PositionController
 from py2flamingo.controllers.movement_controller import MovementController
 from py2flamingo.controllers.camera_controller import CameraController
-from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, StageControlView
+from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, StageControlView, ImageControlsWindow
 from py2flamingo.views.live_feed_view import LiveFeedView
 from py2flamingo.views.enhanced_stage_control_view import EnhancedStageControlView
 from py2flamingo.views.camera_live_viewer import CameraLiveViewer
@@ -99,6 +99,7 @@ class FlamingoApplication:
         self.sample_info_view: Optional[SampleInfoView] = None
         self.live_feed_view: Optional[LiveFeedView] = None
         self.stage_control_view: Optional[StageControlView] = None
+        self.image_controls_window: Optional[ImageControlsWindow] = None
 
         # Setup logging
         self.logger = logging.getLogger(__name__)
@@ -248,6 +249,41 @@ class FlamingoApplication:
             camera_controller=self.camera_controller,
             laser_led_controller=self.laser_led_controller
         )
+
+        # Create independent image controls window
+        self.logger.debug("Creating image controls window...")
+        self.image_controls_window = ImageControlsWindow()
+        # Window starts hidden - user can open it via menu/button
+        self.image_controls_window.hide()
+
+        # Connect image controls to camera live viewer
+        if self.image_controls_window and self.camera_live_viewer:
+            # Connect display transformation signals
+            self.image_controls_window.rotation_changed.connect(
+                self.camera_live_viewer.set_rotation
+            )
+            self.image_controls_window.flip_horizontal_changed.connect(
+                self.camera_live_viewer.set_flip_horizontal
+            )
+            self.image_controls_window.flip_vertical_changed.connect(
+                self.camera_live_viewer.set_flip_vertical
+            )
+            self.image_controls_window.colormap_changed.connect(
+                self.camera_live_viewer.set_colormap
+            )
+            self.image_controls_window.intensity_range_changed.connect(
+                self.camera_live_viewer.set_intensity_range
+            )
+            self.image_controls_window.auto_scale_changed.connect(
+                self.camera_live_viewer.set_auto_scale
+            )
+            self.image_controls_window.zoom_changed.connect(
+                self.camera_live_viewer.set_zoom
+            )
+            self.image_controls_window.crosshair_changed.connect(
+                self.camera_live_viewer.set_crosshair
+            )
+            self.logger.debug("Connected image controls to camera live viewer")
 
         # Set default connection values in view if provided via CLI
         if self.default_ip is not None and self.default_port is not None:
@@ -409,7 +445,8 @@ class FlamingoApplication:
             self.stage_control_view,
             self.status_indicator_widget,
             enhanced_stage_control_view=self.enhanced_stage_control_view,
-            camera_live_viewer=self.camera_live_viewer
+            camera_live_viewer=self.camera_live_viewer,
+            image_controls_window=self.image_controls_window
         )
         self.main_window.setWindowTitle("Flamingo Microscope Control")
         # Window size is automatically set based on screen dimensions

@@ -291,8 +291,9 @@ class CameraService(MicroscopeCommandService):
         """
         Start live view with image data streaming.
 
-        Opens connection to data port, sends LIVE_VIEW_START command,
-        and begins receiving image frames in background thread.
+        Sends LIVE_VIEW_START command first, waits for microscope to open
+        data port, then connects and begins receiving image frames in
+        background thread.
 
         Args:
             data_port: Port for image data (default: 53718)
@@ -305,17 +306,33 @@ class CameraService(MicroscopeCommandService):
             >>> camera.start_live_view_streaming()
             >>> # Images will stream to callback
         """
+        import time
+
         with self._streaming_lock:
             if self._streaming:
                 raise RuntimeError("Live view streaming already active")
 
-            # Connect to data port
+            # Send START command on control port FIRST
+            # This tells the microscope to open the data port
+            try:
+                self.logger.info("Sending LIVE_VIEW_START command...")
+                self.start_live_view()
+            except Exception as e:
+                self.logger.error(f"Failed to start live view: {e}")
+                raise
+
+            # Wait for microscope to open data port (give it time to initialize)
+            self.logger.info("Waiting for microscope to open data port...")
+            time.sleep(0.5)
+
+            # Now connect to data port
             try:
                 self._data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self._data_socket.settimeout(5.0)
 
                 # Get IP from connection service
                 ip = self.connection.ip if hasattr(self.connection, 'ip') else '127.0.0.1'
+                self.logger.info(f"Connecting to image data port {ip}:{data_port}...")
                 self._data_socket.connect((ip, data_port))
 
                 self.logger.info(f"Connected to image data port {ip}:{data_port}")
@@ -325,16 +342,12 @@ class CameraService(MicroscopeCommandService):
                 if self._data_socket:
                     self._data_socket.close()
                     self._data_socket = None
+                # Try to stop live view on microscope since we can't receive data
+                try:
+                    self.stop_live_view()
+                except:
+                    pass
                 raise RuntimeError(f"Failed to connect to data port: {e}")
-
-            # Send START command on control port
-            try:
-                self.start_live_view()
-            except Exception as e:
-                self.logger.error(f"Failed to start live view: {e}")
-                self._data_socket.close()
-                self._data_socket = None
-                raise
 
             # Start streaming thread
             self._streaming = True

@@ -9,10 +9,12 @@ from .connection_view import ConnectionView
 from .workflow_view import WorkflowView
 from .sample_info_view import SampleInfoView
 from .stage_control_view import StageControlView
+from .image_controls_window import ImageControlsWindow
 
 __all__ = [
     'ConnectionView',
     'WorkflowView',
     'SampleInfoView',
     'StageControlView',
+    'ImageControlsWindow',
 ]

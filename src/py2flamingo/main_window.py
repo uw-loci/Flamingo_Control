@@ -50,7 +50,8 @@ class MainWindow(QMainWindow):
                  stage_control_view: Optional[StageControlView] = None,
                  status_indicator_widget=None,
                  enhanced_stage_control_view=None,
-                 camera_live_viewer=None):
+                 camera_live_viewer=None,
+                 image_controls_window=None):
         """Initialize main window with view components.
 
         Args:
@@ -62,6 +63,7 @@ class MainWindow(QMainWindow):
             status_indicator_widget: Optional status indicator widget
             enhanced_stage_control_view: Optional EnhancedStageControlView instance
             camera_live_viewer: Optional CameraLiveViewer instance
+            image_controls_window: Optional ImageControlsWindow instance
         """
         super().__init__()
 
@@ -73,6 +75,7 @@ class MainWindow(QMainWindow):
         self.status_indicator_widget = status_indicator_widget
         self.enhanced_stage_control_view = enhanced_stage_control_view
         self.camera_live_viewer = camera_live_viewer
+        self.image_controls_window = image_controls_window
 
         self._setup_ui()
         self._setup_menu()
@@ -115,6 +118,9 @@ class MainWindow(QMainWindow):
 
         # Add tabs to layout
         layout.addWidget(self.tabs)
+
+        # Connect tab change signal for logging
+        self.tabs.currentChanged.connect(self._on_tab_changed)
 
         # Create status bar with status indicator
         status_bar = self.statusBar()
@@ -170,10 +176,11 @@ class MainWindow(QMainWindow):
             self.move(x, y)
 
     def _setup_menu(self):
-        """Create menu bar with File and Help menus.
+        """Create menu bar with File, View, and Help menus.
 
         Creates:
         - File menu with Exit action
+        - View menu with Image Controls action
         - Help menu with About action
         """
         menubar = self.menuBar()
@@ -186,6 +193,17 @@ class MainWindow(QMainWindow):
         exit_action.setStatusTip("Exit application")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+        # View menu
+        view_menu = menubar.addMenu("&View")
+
+        # Image Controls action
+        if self.image_controls_window is not None:
+            image_controls_action = QAction("&Image Controls...", self)
+            image_controls_action.setShortcut("Ctrl+I")
+            image_controls_action.setStatusTip("Open Image Controls window")
+            image_controls_action.triggered.connect(self._show_image_controls)
+            view_menu.addAction(image_controls_action)
 
         # Help menu
         help_menu = menubar.addMenu("&Help")
@@ -205,6 +223,24 @@ class MainWindow(QMainWindow):
             "<p>Control software for Flamingo light sheet microscopes.</p>"
             "<p>Built with PyQt5 and Python.</p>"
         )
+
+    def _show_image_controls(self):
+        """Show Image Controls window."""
+        if self.image_controls_window is not None:
+            self.image_controls_window.show()
+            self.image_controls_window.raise_()  # Bring to front
+            self.image_controls_window.activateWindow()  # Give it focus
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Handle tab change event - log which tab user switched to.
+
+        Args:
+            index: Index of the newly selected tab
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        tab_name = self.tabs.tabText(index)
+        logger.info(f"User switched to tab: {tab_name}")
 
     def closeEvent(self, event):
         """Handle window close event.

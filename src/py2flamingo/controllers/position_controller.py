@@ -673,19 +673,55 @@ class PositionController:
                 f"Z={position.z:.3f}, R={position.r:.2f}°"
             )
 
-            # Move all 4 axes
-            self._move_axis(self.axis.X, position.x, "X-axis")
-            self._move_axis(self.axis.Y, position.y, "Y-axis")
-            self._move_axis(self.axis.Z, position.z, "Z-axis")
-            self._move_axis(self.axis.R, position.r, "Rotation")
+            # Determine which axes need to move (only move axes that changed)
+            moved_axes = []
+            tolerance = 0.001  # 1 micron for linear, will use 0.01 degree for rotation
+
+            if abs(position.x - self._current_position.x) > tolerance:
+                self.logger.info(f"Moving X axis: {self._current_position.x:.3f} -> {position.x:.3f} mm")
+                self._move_axis(self.axis.X, position.x, "X-axis")
+                from py2flamingo.services.stage_service import AxisCode
+                moved_axes.append(AxisCode.X_AXIS)
+            else:
+                self.logger.debug(f"X axis unchanged: {position.x:.3f} mm")
+
+            if abs(position.y - self._current_position.y) > tolerance:
+                self.logger.info(f"Moving Y axis: {self._current_position.y:.3f} -> {position.y:.3f} mm")
+                self._move_axis(self.axis.Y, position.y, "Y-axis")
+                from py2flamingo.services.stage_service import AxisCode
+                moved_axes.append(AxisCode.Y_AXIS)
+            else:
+                self.logger.debug(f"Y axis unchanged: {position.y:.3f} mm")
+
+            if abs(position.z - self._current_position.z) > tolerance:
+                self.logger.info(f"Moving Z axis: {self._current_position.z:.3f} -> {position.z:.3f} mm")
+                self._move_axis(self.axis.Z, position.z, "Z-axis")
+                from py2flamingo.services.stage_service import AxisCode
+                moved_axes.append(AxisCode.Z_AXIS)
+            else:
+                self.logger.debug(f"Z axis unchanged: {position.z:.3f} mm")
+
+            # Rotation uses larger tolerance (0.01 degrees)
+            if abs(position.r - self._current_position.r) > 0.01:
+                self.logger.info(f"Moving R axis: {self._current_position.r:.2f} -> {position.r:.2f}°")
+                self._move_axis(self.axis.R, position.r, "Rotation")
+                from py2flamingo.services.stage_service import AxisCode
+                moved_axes.append(AxisCode.ROTATION)
+            else:
+                self.logger.debug(f"Rotation unchanged: {position.r:.2f}°")
+
+            # If no axes moved, just update position and return
+            if not moved_axes:
+                self.logger.info("No axes needed to move - already at target position")
+                self._current_position = position
+                self._movement_lock.release()
+                return
+
+            self.logger.info(f"Moving {len(moved_axes)} axes: {[ax.name for ax in moved_axes]}")
 
             # Wait for motion complete in background thread
-            # Query all 4 axes after multi-axis movement
-            from py2flamingo.services.stage_service import AxisCode
-            self._wait_for_motion_complete_async(
-                position,
-                moved_axes=[AxisCode.X_AXIS, AxisCode.Y_AXIS, AxisCode.Z_AXIS, AxisCode.ROTATION]
-            )
+            # Only query the axes that actually moved
+            self._wait_for_motion_complete_async(position, moved_axes=moved_axes)
 
         except Exception as e:
             # Release lock on error

@@ -244,7 +244,7 @@ class LaserLEDService(MicroscopeCommandService):
             return False
 
         color_names = ["Red", "Green", "Blue", "White"]
-        self.logger.info(f"Setting {color_names[led_color]} LED intensity to {intensity_percent:.1f}%")
+        self.logger.debug(f"Setting {color_names[led_color]} LED intensity to {intensity_percent:.1f}%")
 
         # Convert percentage to DAC value range
         # Based on ScopeSettings.txt: min=3200000, max=6553500
