@@ -531,11 +531,19 @@ class EnhancedStageControlView(QWidget):
 
     @pyqtSlot(float, float, float, float)
     def _on_position_changed(self, x: float, y: float, z: float, r: float) -> None:
-        """Update position display when position changes."""
+        """Update position display and target fields when position changes."""
+        # Update current position display
         self.x_pos_label.setText(f"{x:.3f} mm")
         self.y_pos_label.setText(f"{y:.3f} mm")
         self.z_pos_label.setText(f"{z:.3f} mm")
         self.r_pos_label.setText(f"{r:.2f}°")
+
+        # Update "Go To Target" fields to match current position
+        # This links the two sections so users always see current position in target fields
+        self.x_target_spin.setValue(x)
+        self.y_target_spin.setValue(y)
+        self.z_target_spin.setValue(z)
+        self.r_target_spin.setValue(r)
 
     @pyqtSlot(str)
     def _on_motion_started(self, axis_name: str) -> None:
