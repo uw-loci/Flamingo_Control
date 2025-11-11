@@ -444,9 +444,11 @@ class MovementController(QObject):
         Callback when motion completes.
         Called by position_controller in background thread.
         """
-        if self._current_motion_axis:
-            self.motion_stopped.emit(self._current_motion_axis)
-            self._current_motion_axis = None
+        # Always emit motion_stopped, even if axis tracking wasn't set
+        # This ensures UI controls are re-enabled for all movement types
+        axis_name = self._current_motion_axis if self._current_motion_axis else "Movement"
+        self.motion_stopped.emit(axis_name)
+        self._current_motion_axis = None
 
         # Update position display
         pos = self.position_controller.get_current_position()
