@@ -49,15 +49,11 @@ class StageService(MicroscopeCommandService):
     Provides high-level methods for stage control including position
     queries and movement commands.
 
-    Note:
-        Position feedback may not be available from hardware. Many microscopes
-        require software-side position tracking. Use get_position() to check
-        if hardware position feedback is implemented.
-
     Example:
         >>> stage = StageService(connection)
         >>> stage.move_to_position(AxisCode.Y_AXIS, 10.5)  # Move Y to 10.5mm
-        >>> # Wait for motion to complete
+        >>> # Wait for motion to complete, then query position
+        >>> position = stage.get_position()
     """
 
     def get_axis_position(self, axis: int) -> Optional[float]:
@@ -74,10 +70,10 @@ class StageService(MicroscopeCommandService):
             axis: Axis code (AxisCode.X_AXIS, Y_AXIS, Z_AXIS, or ROTATION)
 
         Returns:
-            Position value for the axis, or None if command fails/not implemented
+            Position value for the axis in millimeters, or None if command times out
 
         Raises:
-            RuntimeError: If communication fails (not timeout)
+            RuntimeError: If communication fails
 
         Example:
             >>> x_pos = stage_service.get_axis_position(AxisCode.X_AXIS)
@@ -106,7 +102,7 @@ class StageService(MicroscopeCommandService):
 
         if not result['success']:
             if result.get('error') == 'timeout':
-                self.logger.warning(f"{axis_name}-axis POSITION_GET timed out - position feedback not available")
+                self.logger.warning(f"{axis_name}-axis POSITION_GET timed out")
                 return None
             raise RuntimeError(f"Failed to get {axis_name} position: {result.get('error', 'Unknown error')}")
 
@@ -134,17 +130,15 @@ class StageService(MicroscopeCommandService):
         Queries each axis individually (X, Y, Z, R) as querying all at once (0xFF) doesn't work.
 
         Returns:
-            Position object if hardware supports position feedback, None if not implemented
+            Position object with x, y, z, r coordinates in millimeters, or None if any axis query times out
 
         Raises:
-            RuntimeError: If communication fails (vs. command not implemented)
+            RuntimeError: If communication fails
 
         Example:
             >>> pos = stage_service.get_position()
             >>> if pos:
             >>>     print(f"Stage at X={pos.x}, Y={pos.y}, Z={pos.z}, R={pos.r}")
-            >>> else:
-            >>>     print("Position feedback not available - using local tracking")
         """
         self.logger.info("Querying all axis positions from hardware...")
 
@@ -209,20 +203,17 @@ class StageService(MicroscopeCommandService):
         """
         Query if stage motion has stopped.
 
-        WARNING: This command may not be implemented. The microscope may
-        send unsolicited motion-stopped callbacks instead.
+        Note: The microscope may also send unsolicited motion-stopped callbacks.
 
         Returns:
-            True if stopped, False if moving, None if command not implemented
+            True if stopped, False if moving, None if command times out
 
         Raises:
             RuntimeError: If communication fails
 
         Example:
             >>> stopped = stage_service.is_motion_stopped()
-            >>> if stopped is None:
-            >>>     print("Use motion callbacks instead of polling")
-            >>> elif stopped:
+            >>> if stopped:
             >>>     print("Stage has stopped")
         """
         self.logger.info("Querying motion stopped status...")
@@ -234,7 +225,7 @@ class StageService(MicroscopeCommandService):
 
         if not result['success']:
             if result.get('error') == 'timeout':
-                self.logger.warning("STAGE_MOTION_STOPPED timed out - use callbacks instead")
+                self.logger.warning("STAGE_MOTION_STOPPED timed out")
                 return None
             raise RuntimeError(f"Failed to query motion: {result.get('error', 'Unknown error')}")
 
@@ -264,18 +255,18 @@ class StageService(MicroscopeCommandService):
 
         try:
             # Encode command with movement parameters
-            # Based on logs: int32Data0 = axis, doubleData = position
+            # params[3] (int32Data0) = axis code, doubleData = position
             cmd_bytes = self.connection.encoder.encode_command(
                 code=command_code,
                 status=0,
                 params=[
-                    axis,  # Param[0] = axis (int32Data0 in logs)
-                    0,     # Param[1] = unused (int32Data1)
-                    0,     # Param[2] = unused (int32Data2)
-                    0,     # Param[3]
-                    0,     # Param[4]
-                    0,     # Param[5]
-                    CommandDataBits.TRIGGER_CALL_BACK  # Param[6] = flag
+                    0,     # params[0] (hardwareID) - not used
+                    0,     # params[1] (subsystemID) - not used
+                    0,     # params[2] (clientID) - not used
+                    axis,  # params[3] (int32Data0) = axis code (1=X, 2=Y, 3=Z, 4=R)
+                    0,     # params[4] (int32Data1)
+                    0,     # params[5] (int32Data2)
+                    CommandDataBits.TRIGGER_CALL_BACK  # params[6] = flag
                 ],
                 value=position_mm,  # doubleData = position in mm
                 data=b''

@@ -108,18 +108,28 @@ All inter-thread communication uses centralized queues/events managed via:
 1. **Connection Setup** (`FlamingoConnect.py`, `services/connection_manager.py`):
    - Dual TCP sockets: command port (e.g., 53717) + live imaging port (53718)
    - Four threads: command sender, command listener, image data listener, image processor
+   - **Protocol:** 128-byte binary structure (little-endian, see `core/tcp_protocol.py`)
+     - Start marker (0xF321E654), command code, status, 7 params, double value, 72-byte data buffer, end marker (0xFEDC4321)
+     - Critical: params[6] must be 0x80000000 (TRIGGER_CALL_BACK) for query commands
 
-2. **Workflow Execution**:
+2. **Stage Position System**:
+   - Hardware position queries supported via `STAGE_POSITION_GET` (0x6008)
+   - Single-axis movements query only moved axis (fast feedback)
+   - Multi-axis movements (home, presets) query all 4 axes (complete verification)
+   - Position verified from hardware after motion-stopped callback
+   - See `services/stage_service.py` and `controllers/position_controller.py`
+
+3. **Workflow Execution**:
    - Controllers create `WorkflowModel` via `services/workflow_service.py`
    - Workflow converted to text format and sent via `send_workflow()` command
    - If firmware doesn't support workflows, send stepwise commands instead
 
-3. **Image Display**:
+4. **Image Display**:
    - Images arrive on `image_queue` or `visualize_queue`
    - `views/widgets/viewer_widget.py` polls both queues
    - Forwards to active viewer (PyQt label or Napari layer)
 
-4. **Cancel/Terminate**:
+5. **Cancel/Terminate**:
    - User clicks Cancel → sets `terminate_event`
    - All long-running operations must check `terminate_event.is_set()`
    - Cleanup via `clear_all_events_queues()` from legacy adapter

@@ -26,6 +26,7 @@ except Exception:
 from .connection_service import MVCConnectionService
 from .workflow_service import MVCWorkflowService
 from .status_service import StatusService
+from .status_indicator_service import StatusIndicatorService, GlobalStatus
 from .configuration_manager import ConfigurationManager, MicroscopeConfiguration
 from .workflow_execution_service import WorkflowExecutionService
 from .initialization_service import MicroscopeInitializationService, InitializationData
@@ -52,6 +53,8 @@ __all__ = [
     'MVCConnectionService',
     'MVCWorkflowService',
     'StatusService',
+    'StatusIndicatorService',
+    'GlobalStatus',
     'ConfigurationManager',
     'MicroscopeConfiguration',
     'WorkflowExecutionService',

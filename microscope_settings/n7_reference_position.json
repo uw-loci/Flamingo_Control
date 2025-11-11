@@ -1,0 +1,12 @@
+{
+  "microscope": "N7",
+  "description": "Reference starting position for N7 microscope",
+  "timestamp": "2025-11-10T00:00:00Z",
+  "position": {
+    "x_mm": 0.0,
+    "y_mm": 0.0,
+    "z_mm": 0.0,
+    "r_degrees": 0.0
+  },
+  "notes": "This file stores the current/reference position of the N7 microscope. Update these values to match the actual microscope position when setting a new reference point."
+}

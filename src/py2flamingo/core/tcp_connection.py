@@ -286,6 +286,165 @@ class TCPConnection:
                 self._connected = False
                 raise
 
+    def receive_all_bytes(
+        self,
+        size: int,
+        socket_type: str = "command",
+        timeout: Optional[float] = None
+    ) -> bytes:
+        """
+        Receive exact number of bytes from the specified socket.
+
+        Unlike receive_bytes(), this method will continue receiving until
+        exactly 'size' bytes have been received, or timeout/error occurs.
+        This is critical for fixed-size protocol messages (e.g., 128-byte commands).
+
+        Args:
+            size: Exact number of bytes to receive
+            socket_type: Which socket to use - "command" or "live" (default: "command")
+            timeout: Optional timeout in seconds (None = blocking)
+
+        Returns:
+            Exactly 'size' bytes received
+
+        Raises:
+            ConnectionError: If not connected or connection closed prematurely
+            ValueError: If socket_type is invalid or size is invalid
+            socket.timeout: If timeout expires
+            OSError: If receive fails
+
+        Example:
+            >>> # Receive complete 128-byte command response
+            >>> response = connection.receive_all_bytes(128, timeout=2.0)
+        """
+        if not isinstance(size, int) or size <= 0:
+            raise ValueError(f"Size must be positive integer, got {size}")
+
+        with self._lock:
+            if not self._connected:
+                raise ConnectionError("Not connected to microscope")
+
+            # Select socket
+            if socket_type == "command":
+                sock = self._command_socket
+            elif socket_type == "live":
+                sock = self._live_socket
+            else:
+                raise ValueError(
+                    f"Invalid socket_type: {socket_type}. Must be 'command' or 'live'"
+                )
+
+            if sock is None:
+                raise ConnectionError(f"{socket_type} socket is not connected")
+
+            try:
+                # Set timeout if specified
+                if timeout is not None:
+                    sock.settimeout(timeout)
+
+                # Receive all bytes
+                received = b''
+                remaining = size
+
+                while remaining > 0:
+                    chunk = sock.recv(remaining)
+
+                    if len(chunk) == 0:
+                        # Connection closed
+                        self.logger.error(
+                            f"Connection closed while receiving data "
+                            f"(got {len(received)}/{size} bytes)"
+                        )
+                        self._connected = False
+                        raise ConnectionError(
+                            f"Connection closed after receiving {len(received)}/{size} bytes"
+                        )
+
+                    received += chunk
+                    remaining -= len(chunk)
+
+                # Clear timeout
+                if timeout is not None:
+                    sock.settimeout(None)
+
+                self.logger.debug(
+                    f"Received {len(received)} bytes from {socket_type} socket"
+                )
+                return received
+
+            except socket.timeout:
+                self.logger.debug(
+                    f"Receive timeout on {socket_type} socket "
+                    f"(got {len(received)}/{size} bytes)"
+                )
+                # Clear timeout and re-raise
+                if timeout is not None:
+                    sock.settimeout(None)
+                raise
+
+            except OSError as e:
+                self.logger.error(f"Failed to receive data: {e}")
+                # Connection likely broken
+                self._connected = False
+                raise
+
+    def check_for_unsolicited_message(
+        self,
+        socket_type: str = "command",
+        timeout: float = 0.0
+    ) -> Optional[bytes]:
+        """
+        Check for unsolicited messages (callbacks) from the microscope.
+
+        The microscope can send unsolicited messages for events like:
+        - Stage motion stopped (MOTION_STOPPED callback)
+        - Acquisition complete
+        - Error conditions
+
+        This method does a non-blocking check (default timeout=0.0) to see
+        if any data is available to read.
+
+        Args:
+            socket_type: Which socket to check - "command" or "live" (default: "command")
+            timeout: Timeout in seconds (default: 0.0 for non-blocking check)
+
+        Returns:
+            Bytes received if message available, None if no message
+
+        Raises:
+            ConnectionError: If not connected
+            ValueError: If socket_type is invalid
+            OSError: If receive fails
+
+        Example:
+            >>> # Check for callbacks during long operation
+            >>> import time
+            >>> while stage_is_moving:
+            ...     callback = connection.check_for_unsolicited_message(timeout=0.1)
+            ...     if callback:
+            ...         response = decoder.decode_command(callback)
+            ...         if response['code'] == StageCommands.MOTION_STOPPED:
+            ...             print("Stage motion completed")
+            ...             break
+            ...     time.sleep(0.1)
+        """
+        try:
+            # Try to receive with very short timeout
+            data = self.receive_bytes(
+                size=128,  # Standard command size
+                socket_type=socket_type,
+                timeout=timeout
+            )
+            return data
+
+        except socket.timeout:
+            # No data available - this is normal
+            return None
+
+        except (ConnectionError, OSError) as e:
+            # Real error - re-raise
+            raise
+
     def is_connected(self) -> bool:
         """
         Check if both sockets are connected.

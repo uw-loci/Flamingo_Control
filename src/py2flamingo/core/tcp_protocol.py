@@ -451,3 +451,188 @@ class ProtocolDecoder:
 
         except struct.error as e:
             return False, f"Failed to unpack: {e}"
+
+
+# Helper functions for common response patterns
+def extract_string_from_buffer(buffer: bytes) -> str:
+    """
+    Extract null-terminated string from buffer field.
+
+    Args:
+        buffer: 72-byte buffer from decoded command
+
+    Returns:
+        String with trailing nulls removed and decoded as UTF-8
+
+    Example:
+        >>> response = decoder.decode_command(data)
+        >>> laser_power = extract_string_from_buffer(response['data'])
+        >>> print(laser_power)  # "11.49"
+    """
+    # Find first null byte
+    null_index = buffer.find(b'\x00')
+    if null_index >= 0:
+        buffer = buffer[:null_index]
+
+    # Decode to string
+    return buffer.decode('utf-8', errors='replace').strip()
+
+
+def extract_position_from_double(response: Dict[str, Any]) -> float:
+    """
+    Extract stage position from doubleData field.
+
+    Stage position commands (POSITION_SET, POSITION_GET) return the
+    position value in the doubleData field.
+
+    Args:
+        response: Decoded command dictionary
+
+    Returns:
+        Position value in millimeters
+
+    Example:
+        >>> response = decoder.decode_command(data)
+        >>> position = extract_position_from_double(response)
+        >>> print(f"Stage at {position} mm")
+    """
+    return response['value']
+
+
+def extract_multi_axis_positions(buffer: bytes) -> Dict[int, float]:
+    """
+    Extract multi-axis positions from buffer field.
+
+    Some commands return positions for all axes in format:
+    "1=X\\n2=Y\\n3=Z\\n"
+
+    Args:
+        buffer: 72-byte buffer from decoded command
+
+    Returns:
+        Dictionary mapping axis number (1=X, 2=Y, 3=Z) to position value
+
+    Example:
+        >>> response = decoder.decode_command(data)
+        >>> positions = extract_multi_axis_positions(response['data'])
+        >>> print(f"X={positions[1]}, Y={positions[2]}, Z={positions[3]}")
+    """
+    positions = {}
+    text = extract_string_from_buffer(buffer)
+
+    for line in text.split('\n'):
+        line = line.strip()
+        if '=' in line:
+            try:
+                axis_str, pos_str = line.split('=', 1)
+                axis = int(axis_str.strip())
+                position = float(pos_str.strip())
+                positions[axis] = position
+            except (ValueError, IndexError):
+                # Skip malformed lines
+                continue
+
+    return positions
+
+
+def extract_system_state(response: Dict[str, Any]) -> int:
+    """
+    Extract system state from int32Data0 field.
+
+    System state values:
+        0 = IDLE (ready for commands)
+        1 = BUSY (processing)
+        2 = ERROR (error condition)
+
+    Args:
+        response: Decoded command dictionary
+
+    Returns:
+        System state value (0=IDLE, 1=BUSY, 2=ERROR)
+
+    Example:
+        >>> response = decoder.decode_command(data)
+        >>> state = extract_system_state(response)
+        >>> if state == 0:
+        ...     print("System is IDLE")
+        >>> elif state == 1:
+        ...     print("System is BUSY")
+        >>> elif state == 2:
+        ...     print("System has ERROR")
+    """
+    return response['params'][0]  # int32Data0
+
+
+def extract_camera_dimensions(response: Dict[str, Any]) -> tuple[int, int, int]:
+    """
+    Extract camera image dimensions from int32Data fields.
+
+    Camera dimension commands return:
+        int32Data0 = image width (pixels)
+        int32Data1 = image height (pixels)
+        int32Data2 = binning factor
+
+    Args:
+        response: Decoded command dictionary
+
+    Returns:
+        Tuple of (width, height, binning)
+
+    Example:
+        >>> response = decoder.decode_command(data)
+        >>> width, height, binning = extract_camera_dimensions(response)
+        >>> print(f"Camera: {width}x{height}, binning={binning}")
+    """
+    params = response['params']
+    width = params[0]   # int32Data0
+    height = params[1]  # int32Data1
+    binning = params[2] # int32Data2
+    return width, height, binning
+
+
+def extract_laser_power(response: Dict[str, Any]) -> float:
+    """
+    Extract laser power level from buffer field.
+
+    Laser level commands return the power as a string in the buffer
+    field (e.g., "11.49" for 11.49% power).
+
+    Args:
+        response: Decoded command dictionary
+
+    Returns:
+        Laser power level as percentage (0.0-100.0)
+
+    Example:
+        >>> response = decoder.decode_command(data)
+        >>> power = extract_laser_power(response)
+        >>> print(f"Laser at {power}% power")
+    """
+    power_str = extract_string_from_buffer(response['data'])
+    try:
+        return float(power_str)
+    except ValueError:
+        return 0.0
+
+
+def is_callback_response(response: Dict[str, Any]) -> bool:
+    """
+    Check if response has the callback flag set.
+
+    The callback flag (0x80000000 in cmdDataBits0) indicates this is
+    a response to a command that requested a callback.
+
+    Args:
+        response: Decoded command dictionary
+
+    Returns:
+        True if callback flag is set, False otherwise
+
+    Example:
+        >>> response = decoder.decode_command(data)
+        >>> if is_callback_response(response):
+        ...     print("This is a callback response")
+    """
+    cmdDataBits0 = response['params'][6]  # cmdDataBits0 is params[6]
+    CALLBACK_FLAG = 0x80000000
+    return (cmdDataBits0 & CALLBACK_FLAG) != 0

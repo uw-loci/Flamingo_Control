@@ -45,7 +45,10 @@ class MainWindow(QMainWindow):
                  workflow_view: WorkflowView,
                  sample_info_view: Optional[SampleInfoView] = None,
                  live_feed_view: Optional[LiveFeedView] = None,
-                 stage_control_view: Optional[StageControlView] = None):
+                 stage_control_view: Optional[StageControlView] = None,
+                 status_indicator_widget=None,
+                 enhanced_stage_control_view=None,
+                 camera_live_viewer=None):
         """Initialize main window with view components.
 
         Args:
@@ -54,6 +57,9 @@ class MainWindow(QMainWindow):
             sample_info_view: Optional SampleInfoView instance for sample configuration
             live_feed_view: Optional LiveFeedView instance for live image display
             stage_control_view: Optional StageControlView instance for stage control
+            status_indicator_widget: Optional status indicator widget
+            enhanced_stage_control_view: Optional EnhancedStageControlView instance
+            camera_live_viewer: Optional CameraLiveViewer instance
         """
         super().__init__()
 
@@ -62,6 +68,9 @@ class MainWindow(QMainWindow):
         self.sample_info_view = sample_info_view
         self.live_feed_view = live_feed_view
         self.stage_control_view = stage_control_view
+        self.status_indicator_widget = status_indicator_widget
+        self.enhanced_stage_control_view = enhanced_stage_control_view
+        self.camera_live_viewer = camera_live_viewer
 
         self._setup_ui()
         self._setup_menu()
@@ -93,19 +102,32 @@ class MainWindow(QMainWindow):
         if self.sample_info_view is not None:
             self.tabs.addTab(self.sample_info_view, "Sample Info")
 
-        # Add stage control tab if available
-        if self.stage_control_view is not None:
-            self.tabs.addTab(self.stage_control_view, "Stage Control")
+        # Add enhanced stage control tab if available (new implementation)
+        if self.enhanced_stage_control_view is not None:
+            self.tabs.addTab(self.enhanced_stage_control_view, "Stage Control")
+        # Fallback to old stage control tab if enhanced not available
+        elif self.stage_control_view is not None:
+            self.tabs.addTab(self.stage_control_view, "Stage Control (Legacy)")
 
-        # Add live feed tab if available
-        if self.live_feed_view is not None:
-            self.tabs.addTab(self.live_feed_view, "Live Feed")
+        # Add camera live viewer tab if available (new implementation)
+        if self.camera_live_viewer is not None:
+            self.tabs.addTab(self.camera_live_viewer, "Live Feed")
+        # Fallback to old live feed tab if new viewer not available
+        elif self.live_feed_view is not None:
+            self.tabs.addTab(self.live_feed_view, "Live Feed (Legacy)")
 
         # Add tabs to layout
         layout.addWidget(self.tabs)
 
-        # Create status bar
-        self.statusBar().showMessage("Ready")
+        # Create status bar with status indicator
+        status_bar = self.statusBar()
+
+        # Add status indicator widget to status bar if provided
+        if self.status_indicator_widget is not None:
+            # Add to left side of status bar (permanent widget)
+            status_bar.addPermanentWidget(self.status_indicator_widget)
+
+        status_bar.showMessage("Ready")
 
     def _setup_menu(self):
         """Create menu bar with File and Help menus.

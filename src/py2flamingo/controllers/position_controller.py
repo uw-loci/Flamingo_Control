@@ -30,21 +30,21 @@ class PositionController:
     """
     Controller for managing microscope stage positions.
 
-    This controller tracks position locally since the microscope hardware
-    does not report current position. Position is initialized from the
-    home position in settings and updated after each movement.
+    This controller tracks position locally and verifies it with hardware
+    after each movement. Position is initialized from the home position
+    in settings and updated from hardware feedback after movements.
 
     Attributes:
         connection_service: Service for microscope communication
         logger: Logger instance
         axis: Axis codes for movement commands
-        _current_position: Tracked current position (not queried from hardware)
+        _current_position: Current position (updated from hardware after movements)
         _movement_lock: Lock to prevent concurrent movement commands
     """
 
     # Command codes from command_list.txt
     COMMAND_CODES_STAGE_POSITION_SET = 24580
-    COMMAND_CODES_STAGE_POSITION_GET = 24584  # Note: Returns settings, not position
+    COMMAND_CODES_STAGE_POSITION_GET = 24584
 
     def __init__(self, connection_service):
         """
@@ -328,7 +328,8 @@ class PositionController:
             )
 
             # Wait for motion complete in background thread
-            self._wait_for_motion_complete_async(target_position)
+            from py2flamingo.services.stage_service import AxisCode
+            self._wait_for_motion_complete_async(target_position, moved_axes=[AxisCode.ROTATION])
 
         except Exception as e:
             # Release lock on error
@@ -393,7 +394,8 @@ class PositionController:
             )
 
             # Wait for motion complete in background thread
-            self._wait_for_motion_complete_async(target_position)
+            from py2flamingo.services.stage_service import AxisCode
+            self._wait_for_motion_complete_async(target_position, moved_axes=[AxisCode.X_AXIS])
 
         except Exception as e:
             # Release lock on error
@@ -458,7 +460,8 @@ class PositionController:
             )
 
             # Wait for motion complete in background thread
-            self._wait_for_motion_complete_async(target_position)
+            from py2flamingo.services.stage_service import AxisCode
+            self._wait_for_motion_complete_async(target_position, moved_axes=[AxisCode.Y_AXIS])
 
         except Exception as e:
             # Release lock on error
@@ -526,7 +529,8 @@ class PositionController:
             )
 
             # Wait for motion complete in background thread
-            self._wait_for_motion_complete_async(target_position)
+            from py2flamingo.services.stage_service import AxisCode
+            self._wait_for_motion_complete_async(target_position, moved_axes=[AxisCode.Z_AXIS])
 
         except Exception as e:
             # Release lock on error
@@ -607,6 +611,83 @@ class PositionController:
             new_r -= 360
 
         self.move_rotation(new_r)
+
+    def move_to_position(self, position: Position, validate: bool = True) -> None:
+        """
+        Move stage to specified position (all 4 axes).
+
+        This method moves all axes simultaneously to reach the target position.
+        Use this for multi-axis movements like returning home or moving to presets.
+
+        Args:
+            position: Target position with x, y, z, r coordinates
+            validate: Whether to validate position is within stage limits (default: True)
+
+        Raises:
+            ValueError: If position is out of bounds (when validate=True)
+            RuntimeError: If not connected, emergency stopped, or movement fails
+        """
+        # Check emergency stop
+        if self._emergency_stop_active:
+            error_msg = "Movement blocked - emergency stop active. Clear emergency stop first."
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg)
+
+        # Validate bounds if requested
+        if validate:
+            limits = self.get_stage_limits()
+
+            x_min, x_max = limits['x']['min'], limits['x']['max']
+            if not (x_min <= position.x <= x_max):
+                raise ValueError(f"X position {position.x:.3f}mm is outside valid range [{x_min:.3f}, {x_max:.3f}]")
+
+            y_min, y_max = limits['y']['min'], limits['y']['max']
+            if not (y_min <= position.y <= y_max):
+                raise ValueError(f"Y position {position.y:.3f}mm is outside valid range [{y_min:.3f}, {y_max:.3f}]")
+
+            z_min, z_max = limits['z']['min'], limits['z']['max']
+            if not (z_min <= position.z <= z_max):
+                raise ValueError(f"Z position {position.z:.3f}mm is outside valid range [{z_min:.3f}, {z_max:.3f}]")
+
+            if not (0 <= position.r <= 360):
+                raise ValueError(f"Rotation {position.r:.2f}° is outside valid range [0, 360]")
+
+        # Try to acquire movement lock (non-blocking)
+        if not self._movement_lock.acquire(blocking=False):
+            error_msg = "Movement already in progress"
+            self.logger.warning(error_msg)
+            raise RuntimeError(error_msg)
+
+        try:
+            # Check connection
+            if not self.connection.is_connected():
+                error_msg = "Not connected to microscope"
+                self.logger.error(error_msg)
+                raise RuntimeError(error_msg)
+
+            self.logger.info(
+                f"Moving to position: X={position.x:.3f}, Y={position.y:.3f}, "
+                f"Z={position.z:.3f}, R={position.r:.2f}°"
+            )
+
+            # Move all 4 axes
+            self._move_axis(self.axis.X, position.x, "X-axis")
+            self._move_axis(self.axis.Y, position.y, "Y-axis")
+            self._move_axis(self.axis.Z, position.z, "Z-axis")
+            self._move_axis(self.axis.R, position.r, "Rotation")
+
+            # Wait for motion complete in background thread
+            # Query all 4 axes after multi-axis movement
+            from py2flamingo.services.stage_service import AxisCode
+            self._wait_for_motion_complete_async(
+                position,
+                moved_axes=[AxisCode.X_AXIS, AxisCode.Y_AXIS, AxisCode.Z_AXIS, AxisCode.ROTATION]
+            )
+
+        except Exception as e:
+            # Release lock on error
+            self._movement_lock.release()
+            raise
 
     def _add_to_history(self, position: Position) -> None:
         """
@@ -781,12 +862,87 @@ class PositionController:
         """
         return self._emergency_stop_active
 
-    def _wait_for_motion_complete_async(self, target_position: Position) -> None:
+    def _query_position_after_move(self, moved_axes: Optional[List[int]], target_position: Position) -> Position:
         """
-        Wait for motion complete in a background thread.
+        Query actual position from hardware after a movement completes.
 
         Args:
-            target_position: Position to update to when motion completes
+            moved_axes: List of axis codes that were moved, or None for all axes
+            target_position: Target position (used for axes that weren't moved)
+
+        Returns:
+            Position with actual hardware values for moved axes, target values for unmoved axes
+        """
+        try:
+            # Get the stage service to query positions
+            from py2flamingo.services.stage_service import StageService, AxisCode
+            stage_service = StageService(self.connection)
+
+            # Start with current position (or target if no current)
+            base_position = self._current_position if self._current_position else target_position
+
+            # If no axes specified, query all axes
+            if moved_axes is None or len(moved_axes) == 4:
+                self.logger.info("Querying all axis positions from hardware...")
+                hardware_position = stage_service.get_position()
+                if hardware_position:
+                    return hardware_position
+                else:
+                    self.logger.warning("Failed to query all axes - using target position as fallback")
+                    return target_position
+
+            # Query only the moved axes
+            x = base_position.x
+            y = base_position.y
+            z = base_position.z
+            r = base_position.r
+
+            for axis_code in moved_axes:
+                if axis_code == AxisCode.X_AXIS:
+                    pos = stage_service.get_axis_position(AxisCode.X_AXIS)
+                    if pos is not None:
+                        x = pos
+                    else:
+                        self.logger.warning("Failed to query X position - using target")
+                        x = target_position.x
+
+                elif axis_code == AxisCode.Y_AXIS:
+                    pos = stage_service.get_axis_position(AxisCode.Y_AXIS)
+                    if pos is not None:
+                        y = pos
+                    else:
+                        self.logger.warning("Failed to query Y position - using target")
+                        y = target_position.y
+
+                elif axis_code == AxisCode.Z_AXIS:
+                    pos = stage_service.get_axis_position(AxisCode.Z_AXIS)
+                    if pos is not None:
+                        z = pos
+                    else:
+                        self.logger.warning("Failed to query Z position - using target")
+                        z = target_position.z
+
+                elif axis_code == AxisCode.ROTATION:
+                    pos = stage_service.get_axis_position(AxisCode.ROTATION)
+                    if pos is not None:
+                        r = pos
+                    else:
+                        self.logger.warning("Failed to query R position - using target")
+                        r = target_position.r
+
+            return Position(x=x, y=y, z=z, r=r)
+
+        except Exception as e:
+            self.logger.error(f"Error querying position from hardware: {e} - using target position", exc_info=True)
+            return target_position
+
+    def _wait_for_motion_complete_async(self, target_position: Position, moved_axes: Optional[List[int]] = None) -> None:
+        """
+        Wait for motion complete in a background thread and query actual position from hardware.
+
+        Args:
+            target_position: Expected target position (for fallback if query fails)
+            moved_axes: List of axis codes that were moved (AxisCode.X, Y, Z, R), or None for all axes
         """
         def wait_thread():
             try:
@@ -812,12 +968,15 @@ class PositionController:
                     if self._current_position is not None:
                         self._add_to_history(self._current_position)
 
-                    # Update position
-                    self._current_position = target_position
+                    # Query actual position from hardware
+                    actual_position = self._query_position_after_move(moved_axes, target_position)
+
+                    # Update current position with hardware-verified values
+                    self._current_position = actual_position
                     self.logger.info(
-                        f"Position confirmed: X={target_position.x:.3f}, "
-                        f"Y={target_position.y:.3f}, Z={target_position.z:.3f}, "
-                        f"R={target_position.r:.2f}°"
+                        f"Position confirmed from hardware: X={actual_position.x:.3f}, "
+                        f"Y={actual_position.y:.3f}, Z={actual_position.z:.3f}, "
+                        f"R={actual_position.r:.2f}°"
                     )
                 else:
                     self.logger.warning("Motion complete timeout - position may be uncertain")

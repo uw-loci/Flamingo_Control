@@ -22,11 +22,16 @@ from py2flamingo.models import (
     ConnectionModel, WorkflowModel, WorkflowType, Position, ImageDisplayModel
 )
 from py2flamingo.services import (
-    MVCConnectionService, MVCWorkflowService, StatusService, ConfigurationManager
+    MVCConnectionService, MVCWorkflowService, StatusService, ConfigurationManager,
+    StatusIndicatorService
 )
 from py2flamingo.controllers import ConnectionController, WorkflowController, PositionController
+from py2flamingo.controllers.movement_controller import MovementController
+from py2flamingo.controllers.camera_controller import CameraController
 from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, StageControlView
 from py2flamingo.views.live_feed_view import LiveFeedView
+from py2flamingo.views.enhanced_stage_control_view import EnhancedStageControlView
+from py2flamingo.views.camera_live_viewer import CameraLiveViewer
 
 
 class FlamingoApplication:
@@ -79,11 +84,14 @@ class FlamingoApplication:
         self.connection_service: Optional[MVCConnectionService] = None
         self.workflow_service: Optional[MVCWorkflowService] = None
         self.status_service: Optional[StatusService] = None
+        self.status_indicator_service: Optional[StatusIndicatorService] = None
         self.config_manager: Optional[ConfigurationManager] = None
 
         # Controllers layer components
         self.connection_controller: Optional[ConnectionController] = None
         self.workflow_controller: Optional[WorkflowController] = None
+        self.movement_controller: Optional[MovementController] = None
+        self.camera_controller: Optional[CameraController] = None
 
         # Views layer components
         self.connection_view: Optional[ConnectionView] = None
@@ -144,6 +152,10 @@ class FlamingoApplication:
             self.connection_service
         )
 
+        self.status_indicator_service = StatusIndicatorService(
+            self.connection_service
+        )
+
         self.config_manager = ConfigurationManager(
             config_file="saved_configurations.json"
         )
@@ -165,6 +177,22 @@ class FlamingoApplication:
         self.position_controller = PositionController(
             self.connection_service
         )
+
+        # Create enhanced movement controller for stage control
+        self.movement_controller = MovementController(
+            self.connection_service,
+            self.position_controller
+        )
+
+        # Create camera controller for live feed
+        from py2flamingo.services.camera_service import CameraService
+        self.camera_service = CameraService(self.connection_service)
+        self.camera_controller = CameraController(self.camera_service)
+        self.camera_controller.set_max_display_fps(30.0)
+
+        # Wire motion tracking to status indicator
+        from py2flamingo.controllers.position_controller_adapter import wire_motion_tracking
+        wire_motion_tracking(self.position_controller, self.status_indicator_service)
 
         # Views layer - UI components
         self.logger.debug("Creating views layer components...")
@@ -190,10 +218,21 @@ class FlamingoApplication:
             update_interval_ms=500  # Poll every 500ms
         )
 
-        # Create stage control view
-        self.logger.debug("Creating stage control view...")
+        # Create enhanced stage control view
+        self.logger.debug("Creating enhanced stage control view...")
+        self.enhanced_stage_control_view = EnhancedStageControlView(
+            controller=self.movement_controller
+        )
+
+        # Keep old stage control view for compatibility
         self.stage_control_view = StageControlView(
             controller=self.position_controller
+        )
+
+        # Create camera live viewer
+        self.logger.debug("Creating camera live viewer...")
+        self.camera_live_viewer = CameraLiveViewer(
+            controller=self.camera_controller
         )
 
         # Set default connection values in view if provided via CLI
@@ -218,6 +257,30 @@ class FlamingoApplication:
             self.connection_view.connection_closed.connect(
                 lambda: self._on_stage_connection_closed()
             )
+
+        # Connect connection status to status indicator service
+        if hasattr(self.connection_view, 'connection_established'):
+            self.connection_view.connection_established.connect(
+                lambda: self.status_indicator_service.on_connection_established()
+            )
+            self.logger.debug("Connected connection_established to status indicator service")
+        if hasattr(self.connection_view, 'connection_closed'):
+            self.connection_view.connection_closed.connect(
+                lambda: self.status_indicator_service.on_connection_closed()
+            )
+            self.logger.debug("Connected connection_closed to status indicator service")
+
+        # Connect workflow events to status indicator service
+        if hasattr(self.workflow_view, 'workflow_started'):
+            self.workflow_view.workflow_started.connect(
+                lambda: self.status_indicator_service.on_workflow_started()
+            )
+            self.logger.debug("Connected workflow_started to status indicator service")
+        if hasattr(self.workflow_view, 'workflow_stopped'):
+            self.workflow_view.workflow_stopped.connect(
+                lambda: self.status_indicator_service.on_workflow_stopped()
+            )
+            self.logger.debug("Connected workflow_stopped to status indicator service")
 
         self.logger.info("Application dependencies setup complete")
 
@@ -272,14 +335,30 @@ class FlamingoApplication:
         - Managing window lifecycle
         """
         from py2flamingo.main_window import MainWindow
+        from py2flamingo.views.widgets.status_indicator_widget import StatusIndicatorWidget
 
         self.logger.info("Creating main window...")
+
+        # Create status indicator widget
+        self.status_indicator_widget = StatusIndicatorWidget()
+
+        # Connect status indicator service to widget
+        if self.status_indicator_service:
+            self.status_indicator_service.status_changed.connect(
+                self.status_indicator_widget.update_status
+            )
+            self.logger.debug("Connected status indicator service to widget")
+
+        # Create main window with all views
         self.main_window = MainWindow(
             self.connection_view,
             self.workflow_view,
             self.sample_info_view,
             self.live_feed_view,
-            self.stage_control_view
+            self.stage_control_view,
+            self.status_indicator_widget,
+            enhanced_stage_control_view=self.enhanced_stage_control_view,
+            camera_live_viewer=self.camera_live_viewer
         )
         self.main_window.setWindowTitle("Flamingo Microscope Control")
         self.main_window.resize(1000, 700)  # Larger to accommodate live feed
