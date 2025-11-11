@@ -13,7 +13,7 @@ into a cohesive application window. The MainWindow is responsible for:
 from typing import Optional
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QTabWidget,
-    QAction, QMessageBox
+    QAction, QMessageBox, QScrollArea, QApplication
 )
 from PyQt5.QtCore import Qt
 
@@ -31,12 +31,14 @@ class MainWindow(QMainWindow):
     The window includes:
     - Menu bar (File → Exit, Help → About)
     - Tab widget with Connection, Workflow, Sample Info, and Live Feed tabs
+    - Scroll areas for each tab to handle content overflow
     - Status bar for application messages
+    - Intelligent auto-sizing based on screen dimensions (90% of screen height)
 
     Example:
         main_window = MainWindow(connection_view, workflow_view, sample_info_view, live_feed_view)
         main_window.setWindowTitle("Flamingo Microscope Control")
-        main_window.resize(800, 600)
+        # Window automatically sizes to 90% of screen height and centers itself
         main_window.show()
     """
 
@@ -81,6 +83,7 @@ class MainWindow(QMainWindow):
         This method creates:
         - Central widget with vertical layout
         - Tab widget with Connection, Workflow, Sample Info, and Live Feed tabs
+        - Scroll areas for each tab to handle content overflow
         - Status bar
         """
         # Create central widget
@@ -94,27 +97,27 @@ class MainWindow(QMainWindow):
         # Create tab widget
         self.tabs = QTabWidget()
 
-        # Add views as tabs
-        self.tabs.addTab(self.connection_view, "Connection")
-        self.tabs.addTab(self.workflow_view, "Workflow")
+        # Add views as tabs with scroll areas
+        self.tabs.addTab(self._wrap_in_scroll_area(self.connection_view), "Connection")
+        self.tabs.addTab(self._wrap_in_scroll_area(self.workflow_view), "Workflow")
 
         # Add sample info tab if available
         if self.sample_info_view is not None:
-            self.tabs.addTab(self.sample_info_view, "Sample Info")
+            self.tabs.addTab(self._wrap_in_scroll_area(self.sample_info_view), "Sample Info")
 
         # Add enhanced stage control tab if available (new implementation)
         if self.enhanced_stage_control_view is not None:
-            self.tabs.addTab(self.enhanced_stage_control_view, "Stage Control")
+            self.tabs.addTab(self._wrap_in_scroll_area(self.enhanced_stage_control_view), "Stage Control")
         # Fallback to old stage control tab if enhanced not available
         elif self.stage_control_view is not None:
-            self.tabs.addTab(self.stage_control_view, "Stage Control (Legacy)")
+            self.tabs.addTab(self._wrap_in_scroll_area(self.stage_control_view), "Stage Control (Legacy)")
 
         # Add camera live viewer tab if available (new implementation)
         if self.camera_live_viewer is not None:
-            self.tabs.addTab(self.camera_live_viewer, "Live Feed")
+            self.tabs.addTab(self._wrap_in_scroll_area(self.camera_live_viewer), "Live Feed")
         # Fallback to old live feed tab if new viewer not available
         elif self.live_feed_view is not None:
-            self.tabs.addTab(self.live_feed_view, "Live Feed (Legacy)")
+            self.tabs.addTab(self._wrap_in_scroll_area(self.live_feed_view), "Live Feed (Legacy)")
 
         # Add tabs to layout
         layout.addWidget(self.tabs)
@@ -128,6 +131,49 @@ class MainWindow(QMainWindow):
             status_bar.addPermanentWidget(self.status_indicator_widget)
 
         status_bar.showMessage("Ready")
+
+        # Set intelligent default window size based on screen dimensions
+        self._set_default_size()
+
+    def _wrap_in_scroll_area(self, widget: QWidget) -> QScrollArea:
+        """Wrap a widget in a scroll area for overflow handling.
+
+        Args:
+            widget: Widget to wrap in scroll area
+
+        Returns:
+            QScrollArea containing the widget
+        """
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(widget)
+        scroll_area.setWidgetResizable(True)  # Allow widget to resize with scroll area
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        return scroll_area
+
+    def _set_default_size(self):
+        """Set default window size based on available screen space.
+
+        Sets window to approximately 90% of screen height and a reasonable width,
+        ensuring the interface is visible without extending beyond screen boundaries.
+        """
+        # Get available screen geometry (excluding taskbar/dock)
+        screen = QApplication.primaryScreen()
+        if screen:
+            available_geometry = screen.availableGeometry()
+            screen_width = available_geometry.width()
+            screen_height = available_geometry.height()
+
+            # Set window to 90% of screen height and reasonable width
+            target_width = min(1200, int(screen_width * 0.8))  # Max 1200px or 80% width
+            target_height = int(screen_height * 0.9)  # 90% of screen height
+
+            self.resize(target_width, target_height)
+
+            # Center the window on screen
+            x = (screen_width - target_width) // 2
+            y = (screen_height - target_height) // 2
+            self.move(x, y)
 
     def _setup_menu(self):
         """Create menu bar with File and Help menus.

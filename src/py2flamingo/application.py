@@ -399,7 +399,7 @@ class FlamingoApplication:
             camera_live_viewer=self.camera_live_viewer
         )
         self.main_window.setWindowTitle("Flamingo Microscope Control")
-        self.main_window.resize(1000, 700)  # Larger to accommodate live feed
+        # Window size is automatically set based on screen dimensions
         self.logger.info("Main window created")
 
     def run(self) -> int:
