@@ -106,21 +106,22 @@ class StageService(MicroscopeCommandService):
                 return None
             raise RuntimeError(f"Failed to get {axis_name} position: {result.get('error', 'Unknown error')}")
 
-        # Position is returned in the 72-byte data buffer (bytes 52-123 of response)
-        # Try to parse as double (8 bytes)
+        # Position is returned in the doubleData field (bytes 40-47 of SCommand)
+        # NOT in the data buffer - that's a common mistake!
         import struct
         raw_response = result.get('raw_response', b'')
-        if len(raw_response) >= 60:  # At least 52 + 8 bytes
+        if len(raw_response) >= 48:  # Need at least 48 bytes to read doubleData field
             try:
-                # Position at start of data buffer (offset 52)
-                position = struct.unpack('<d', raw_response[52:60])[0]
-                self.logger.info(f"{axis_name}-axis position: {position}")
+                # Position in doubleData field (bytes 40-47)
+                # SCommand structure: [start(4) + cmd(4) + status(4) + params(28) + doubleData(8) + ...]
+                position = struct.unpack('<d', raw_response[40:48])[0]
+                self.logger.info(f"{axis_name}-axis position: {position} mm")
                 return float(position)
             except Exception as e:
-                self.logger.error(f"Failed to parse position from data buffer: {e}")
+                self.logger.error(f"Failed to parse position from doubleData field: {e}")
                 return None
         else:
-            self.logger.error(f"Response too short to contain position data")
+            self.logger.error(f"Response too short ({len(raw_response)} bytes) to contain doubleData field")
             return None
 
     def get_position(self) -> Optional[Position]:

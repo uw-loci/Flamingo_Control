@@ -326,23 +326,13 @@ class FlamingoApplication:
                     # Update position controller's cached position
                     self.position_controller._current_position = position
 
-                    # Update legacy stage control view (must use Qt signal for thread safety)
+                    # Enable legacy stage control view (thread-safe flag set)
                     if self.stage_control_view:
-                        # Set connected flag directly (simple bool, thread-safe)
                         self.stage_control_view.set_connected(True)
-                        # Schedule UI update on main thread via signal
-                        from PyQt5.QtCore import QMetaObject, Qt, Q_ARG
-                        QMetaObject.invokeMethod(
-                            self.stage_control_view,
-                            "update_position",
-                            Qt.QueuedConnection,
-                            Q_ARG(float, position.x),
-                            Q_ARG(float, position.y),
-                            Q_ARG(float, position.z),
-                            Q_ARG(float, position.r)
-                        )
+                        # Position will be updated by the monitoring thread
 
-                    # Update enhanced stage control view via signal (thread-safe)
+                    # Update enhanced stage control view via Qt signal (thread-safe)
+                    # This triggers immediate UI update
                     if self.enhanced_stage_control_view:
                         self.movement_controller.position_changed.emit(
                             position.x, position.y, position.z, position.r
