@@ -43,16 +43,18 @@ class CameraController(QObject):
     error_occurred = pyqtSignal(str)  # error message
     frame_rate_updated = pyqtSignal(float)  # FPS
 
-    def __init__(self, camera_service: CameraService):
+    def __init__(self, camera_service: CameraService, laser_led_controller=None):
         """
         Initialize camera controller.
 
         Args:
             camera_service: CameraService instance for hardware communication
+            laser_led_controller: Optional LaserLEDController for coordinating light sources
         """
         super().__init__()
 
         self.camera_service = camera_service
+        self.laser_led_controller = laser_led_controller
         self.logger = logging.getLogger(__name__)
 
         # State

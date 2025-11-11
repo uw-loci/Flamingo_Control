@@ -31,17 +31,19 @@ class CameraLiveViewer(QWidget):
     - Image information overlay
     """
 
-    def __init__(self, camera_controller: CameraController, parent=None):
+    def __init__(self, camera_controller: CameraController, laser_led_controller=None, parent=None):
         """
         Initialize camera live viewer.
 
         Args:
             camera_controller: CameraController instance
+            laser_led_controller: Optional LaserLEDController for light source control
             parent: Parent widget
         """
         super().__init__(parent)
 
         self.camera_controller = camera_controller
+        self.laser_led_controller = laser_led_controller
         self.logger = logging.getLogger(__name__)
 
         # Display state
@@ -61,6 +63,12 @@ class CameraLiveViewer(QWidget):
     def _setup_ui(self) -> None:
         """Create and layout UI components."""
         main_layout = QVBoxLayout()
+
+        # ===== Laser/LED Control Panel =====
+        if self.laser_led_controller:
+            from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
+            self.laser_led_panel = LaserLEDControlPanel(self.laser_led_controller)
+            main_layout.addWidget(self.laser_led_panel)
 
         # ===== Top: Controls Group =====
         controls_group = QGroupBox("Camera Controls")

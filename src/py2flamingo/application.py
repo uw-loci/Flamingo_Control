@@ -186,8 +186,20 @@ class FlamingoApplication:
 
         # Create camera controller for live feed
         from py2flamingo.services.camera_service import CameraService
+        from py2flamingo.services.configuration_service import ConfigurationService
+        from py2flamingo.services.laser_led_service import LaserLEDService
+        from py2flamingo.controllers.laser_led_controller import LaserLEDController
+
+        # Configuration service for laser/LED settings
+        self.config_service = ConfigurationService()
+
+        # Laser/LED service and controller
+        self.laser_led_service = LaserLEDService(self.connection_service, self.config_service)
+        self.laser_led_controller = LaserLEDController(self.laser_led_service)
+
+        # Camera service and controller with laser/LED coordination
         self.camera_service = CameraService(self.connection_service)
-        self.camera_controller = CameraController(self.camera_service)
+        self.camera_controller = CameraController(self.camera_service, self.laser_led_controller)
         self.camera_controller.set_max_display_fps(30.0)
 
         # Wire motion tracking from MovementController to status indicator
@@ -230,10 +242,11 @@ class FlamingoApplication:
             controller=self.position_controller
         )
 
-        # Create camera live viewer
+        # Create camera live viewer with laser/LED control
         self.logger.debug("Creating camera live viewer...")
         self.camera_live_viewer = CameraLiveViewer(
-            camera_controller=self.camera_controller
+            camera_controller=self.camera_controller,
+            laser_led_controller=self.laser_led_controller
         )
 
         # Set default connection values in view if provided via CLI
