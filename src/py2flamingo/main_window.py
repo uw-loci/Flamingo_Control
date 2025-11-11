@@ -17,8 +17,9 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 
-from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, StageControlView
-from py2flamingo.views.live_feed_view import LiveFeedView
+from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, ImageControlsWindow
+from py2flamingo.views.enhanced_stage_control_view import EnhancedStageControlView
+from py2flamingo.views.camera_live_viewer import CameraLiveViewer
 
 
 class MainWindow(QMainWindow):
@@ -46,8 +47,6 @@ class MainWindow(QMainWindow):
                  connection_view: ConnectionView,
                  workflow_view: WorkflowView,
                  sample_info_view: Optional[SampleInfoView] = None,
-                 live_feed_view: Optional[LiveFeedView] = None,
-                 stage_control_view: Optional[StageControlView] = None,
                  status_indicator_widget=None,
                  enhanced_stage_control_view=None,
                  camera_live_viewer=None,
@@ -58,8 +57,6 @@ class MainWindow(QMainWindow):
             connection_view: ConnectionView instance for connection management
             workflow_view: WorkflowView instance for workflow operations
             sample_info_view: Optional SampleInfoView instance for sample configuration
-            live_feed_view: Optional LiveFeedView instance for live image display
-            stage_control_view: Optional StageControlView instance for stage control
             status_indicator_widget: Optional status indicator widget
             enhanced_stage_control_view: Optional EnhancedStageControlView instance
             camera_live_viewer: Optional CameraLiveViewer instance
@@ -70,8 +67,6 @@ class MainWindow(QMainWindow):
         self.connection_view = connection_view
         self.workflow_view = workflow_view
         self.sample_info_view = sample_info_view
-        self.live_feed_view = live_feed_view
-        self.stage_control_view = stage_control_view
         self.status_indicator_widget = status_indicator_widget
         self.enhanced_stage_control_view = enhanced_stage_control_view
         self.camera_live_viewer = camera_live_viewer

@@ -28,8 +28,7 @@ from py2flamingo.services import (
 from py2flamingo.controllers import ConnectionController, WorkflowController, PositionController
 from py2flamingo.controllers.movement_controller import MovementController
 from py2flamingo.controllers.camera_controller import CameraController
-from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, StageControlView, ImageControlsWindow
-from py2flamingo.views.live_feed_view import LiveFeedView
+from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, ImageControlsWindow
 from py2flamingo.views.enhanced_stage_control_view import EnhancedStageControlView
 from py2flamingo.views.camera_live_viewer import CameraLiveViewer
 
@@ -97,8 +96,8 @@ class FlamingoApplication:
         self.connection_view: Optional[ConnectionView] = None
         self.workflow_view: Optional[WorkflowView] = None
         self.sample_info_view: Optional[SampleInfoView] = None
-        self.live_feed_view: Optional[LiveFeedView] = None
-        self.stage_control_view: Optional[StageControlView] = None
+        self.enhanced_stage_control_view: Optional[EnhancedStageControlView] = None
+        self.camera_live_viewer: Optional[CameraLiveViewer] = None
         self.image_controls_window: Optional[ImageControlsWindow] = None
 
         # Setup logging
@@ -221,26 +220,10 @@ class FlamingoApplication:
         self.logger.debug("Creating sample info view...")
         self.sample_info_view = SampleInfoView()
 
-        # Create live feed view with visualize queue from connection service
-        self.logger.debug("Creating live feed view...")
-        visualize_queue = self.connection_service.queue_manager.get_queue('visualize')
-        self.live_feed_view = LiveFeedView(
-            workflow_controller=self.workflow_controller,
-            visualize_queue=visualize_queue,
-            display_model=self.display_model,
-            position_controller=self.position_controller,
-            update_interval_ms=500  # Poll every 500ms
-        )
-
         # Create enhanced stage control view
         self.logger.debug("Creating enhanced stage control view...")
         self.enhanced_stage_control_view = EnhancedStageControlView(
             movement_controller=self.movement_controller
-        )
-
-        # Keep old stage control view for compatibility
-        self.stage_control_view = StageControlView(
-            controller=self.position_controller
         )
 
         # Create camera live viewer with laser/LED control
@@ -290,23 +273,17 @@ class FlamingoApplication:
             self.logger.debug(f"Setting CLI defaults: {self.default_ip}:{self.default_port}")
             self.connection_view.set_connection_info(self.default_ip, self.default_port)
 
-        # Connect signals for position updates
-        # When connection is established, request position update from microscope
-        if hasattr(self.connection_view, 'connection_established'):
-            self.connection_view.connection_established.connect(
-                lambda: self._on_connection_established()
-            )
-            self.logger.debug("Connected connection_established signal to position update")
-
-        # Connect connection status to stage control view
+        # Connect connection status to enhanced stage control view
         if hasattr(self.connection_view, 'connection_established'):
             self.connection_view.connection_established.connect(
                 lambda: self._on_stage_connection_established()
             )
+            self.logger.debug("Connected connection_established to enhanced stage control")
         if hasattr(self.connection_view, 'connection_closed'):
             self.connection_view.connection_closed.connect(
                 lambda: self._on_stage_connection_closed()
             )
+            self.logger.debug("Connected connection_closed to enhanced stage control")
 
         # Connect connection status to status indicator service
         if hasattr(self.connection_view, 'connection_established'):
@@ -334,34 +311,23 @@ class FlamingoApplication:
 
         self.logger.info("Application dependencies setup complete")
 
-    def _on_connection_established(self):
-        """Handle connection established event.
-
-        This method is called when connection to the microscope is successfully
-        established. It requests the current position from the microscope to
-        update the position display.
-        """
-        self.logger.info("Connection established, requesting position update...")
-        if self.live_feed_view and hasattr(self.live_feed_view, 'request_position_update'):
-            # Small delay to ensure connection is fully established
-            from PyQt5.QtCore import QTimer
-            QTimer.singleShot(500, self.live_feed_view.request_position_update)
-        else:
-            self.logger.warning("Cannot request position: live_feed_view not available")
 
     def _on_stage_connection_established(self):
-        """Handle connection established event for stage control view.
+        """Handle connection established event for enhanced stage control view.
 
-        Updates the stage control view to enable controls and display current position.
-        Queries position from hardware using blocking I/O in background thread to avoid
-        freezing the GUI.
+        Enables controls and queries initial position from hardware.
+        Queries position using blocking I/O in background thread to avoid freezing the GUI.
         """
-        self.logger.info("Updating stage control view - connection established")
+        self.logger.info("Connection established - enabling stage controls")
+
+        # Enable controls immediately (connection is established)
+        if self.enhanced_stage_control_view:
+            self.enhanced_stage_control_view._set_controls_enabled(True)
 
         # Query position in background thread to avoid blocking GUI
         # StageService.get_position() uses blocking socket I/O
         def query_and_update_position():
-            """Query position from hardware and update all views (runs in background thread)."""
+            """Query position from hardware and update views (runs in background thread)."""
             try:
                 from py2flamingo.services.stage_service import StageService
                 stage_service = StageService(self.connection_service)
@@ -374,11 +340,6 @@ class FlamingoApplication:
 
                     # Update position controller's cached position
                     self.position_controller._current_position = position
-
-                    # Enable legacy stage control view (thread-safe flag set)
-                    if self.stage_control_view:
-                        self.stage_control_view.set_connected(True)
-                        # Position will be updated by the monitoring thread
 
                     # Update enhanced stage control view via Qt signal (thread-safe)
                     # This triggers immediate UI update
@@ -402,13 +363,13 @@ class FlamingoApplication:
         query_thread.start()
 
     def _on_stage_connection_closed(self):
-        """Handle connection closed event for stage control view.
+        """Handle connection closed event for enhanced stage control view.
 
-        Updates the stage control view to disable controls.
+        Disables controls when disconnected from microscope.
         """
-        self.logger.info("Updating stage control view - connection closed")
-        if self.stage_control_view:
-            self.stage_control_view.set_connected(False)
+        self.logger.info("Connection closed - disabling stage controls")
+        if self.enhanced_stage_control_view:
+            self.enhanced_stage_control_view._set_controls_enabled(False)
 
     def create_main_window(self):
         """Create main application window by composing views.
@@ -417,7 +378,7 @@ class FlamingoApplication:
         window, passing in the views created during dependency setup.
 
         The MainWindow is responsible for:
-        - Composing ConnectionView, WorkflowView, and LiveFeedView
+        - Composing ConnectionView, WorkflowView, SampleInfoView, EnhancedStageControlView, and CameraLiveViewer
         - Creating menu bar and status bar
         - Managing window lifecycle
         """
@@ -438,12 +399,10 @@ class FlamingoApplication:
 
         # Create main window with all views
         self.main_window = MainWindow(
-            self.connection_view,
-            self.workflow_view,
-            self.sample_info_view,
-            self.live_feed_view,
-            self.stage_control_view,
-            self.status_indicator_widget,
+            connection_view=self.connection_view,
+            workflow_view=self.workflow_view,
+            sample_info_view=self.sample_info_view,
+            status_indicator_widget=self.status_indicator_widget,
             enhanced_stage_control_view=self.enhanced_stage_control_view,
             camera_live_viewer=self.camera_live_viewer,
             image_controls_window=self.image_controls_window
