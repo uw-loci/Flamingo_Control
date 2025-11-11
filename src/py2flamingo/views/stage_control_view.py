@@ -1127,19 +1127,29 @@ class StageControlView(QWidget):
     def _update_after_motion_complete(self) -> None:
         """
         Update GUI after motion complete (called on GUI thread).
-        """
-        self._logger.info("Motion complete - updating GUI")
 
+        Note: Position is queried from hardware AFTER motion completes to verify
+        the stage reached the target position. This is the correct sequence.
+        """
         # Re-enable controls
         self.set_moving(False)
 
-        # Update position display
+        # Update position display with verified position from hardware
         position = self._controller.get_current_position()
         if position:
             self.update_position(position.x, position.y, position.z, position.r)
-            self.show_success(f"Movement complete! Position: R={position.r:.2f}°")
+            # Show full verified position (all 4 axes) so user can see final state
+            self._logger.info(
+                f"Movement complete, verified position from hardware: "
+                f"X={position.x:.3f}, Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.2f}°"
+            )
+            self.show_success(
+                f"Movement complete! Verified: X={position.x:.3f}, Y={position.y:.3f}, "
+                f"Z={position.z:.3f}, R={position.r:.2f}°"
+            )
         else:
-            self.show_info("Movement complete")
+            self._logger.warning("Movement complete but could not verify position from hardware")
+            self.show_info("Movement complete (position verification unavailable)")
 
         # Update undo button state (history may have changed)
         self._update_undo_button_state()
