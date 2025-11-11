@@ -63,6 +63,10 @@ class EnhancedStageControlView(QWidget):
         self.movement_controller.start_position_monitoring(interval=0.5)
 
         self.setup_ui()
+
+        # Request initial position update immediately
+        self._request_initial_position()
+
         self.logger.info("EnhancedStageControlView initialized")
 
     def setup_ui(self) -> None:
@@ -102,7 +106,7 @@ class EnhancedStageControlView(QWidget):
 
     def _create_position_display(self) -> QGroupBox:
         """Create current position display group."""
-        group = QGroupBox("Current Position (Real-Time)")
+        group = QGroupBox("Current Position")
         layout = QFormLayout()
 
         # Position labels with status indicators
@@ -610,6 +614,20 @@ class EnhancedStageControlView(QWidget):
 
         # Emergency stop always enabled
         self.estop_btn.setEnabled(True)
+
+    def _request_initial_position(self) -> None:
+        """Request and display the initial position from the microscope immediately."""
+        try:
+            # Get current position from the controller
+            position = self.movement_controller.get_position()
+            if position:
+                # Update the display with the current position
+                self._on_position_changed(position.x, position.y, position.z, position.r)
+                self.logger.info(f"Initial position loaded: {position}")
+            else:
+                self.logger.warning("No initial position available")
+        except Exception as e:
+            self.logger.error(f"Error requesting initial position: {e}")
 
     def closeEvent(self, event) -> None:
         """Handle widget close event."""
