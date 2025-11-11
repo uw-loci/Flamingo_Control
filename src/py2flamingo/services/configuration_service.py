@@ -15,16 +15,32 @@ from py2flamingo.utils.file_handlers import text_to_dict, workflow_to_dict
 class ConfigurationService:
     """
     Service for managing application configuration.
-    
+
     This service replaces the file checking logic in FlamingoConnect
     and provides centralized configuration management.
-    
+
     Attributes:
         logger: Logger instance
         base_path: Base path for configuration files
         config: Loaded configuration dictionary
     """
-    
+
+    def __init__(self, base_path: Optional[Path] = None):
+        """
+        Initialize configuration service.
+
+        Args:
+            base_path: Base path for configuration files (defaults to current directory)
+        """
+        self.logger = logging.getLogger(__name__)
+        self.base_path = base_path or Path.cwd()
+
+        # Load configuration
+        self.config = {}
+        scope_settings = self._load_scope_settings()
+        if scope_settings:
+            self.config['scope_settings'] = scope_settings
+
     def _load_start_position(self, microscope_name: str) -> Dict[str, float]:
         """
         Load start position for the microscope if available.
@@ -71,48 +87,48 @@ class ConfigurationService:
                 return None
         
         return None
-    
-def _prompt_for_file(self, filename: str, title: str, message: str) -> Optional[Path]:
-    """
-    Prompt user to select a file using Qt dialog.
-    
-    Fixed to avoid QApplication conflicts.
-    """
-    try:
-        from PyQt5.QtWidgets import QFileDialog, QMessageBox, QApplication
-        
-        # Check if we're in a Qt environment
-        app = QApplication.instance()
-        if not app:
-            # Log error instead of creating app
-            self.logger.error("No QApplication instance available for file dialog")
+
+    def _prompt_for_file(self, filename: str, title: str, message: str) -> Optional[Path]:
+        """
+        Prompt user to select a file using Qt dialog.
+
+        Fixed to avoid QApplication conflicts.
+        """
+        try:
+            from PyQt5.QtWidgets import QFileDialog, QMessageBox, QApplication
+
+            # Check if we're in a Qt environment
+            app = QApplication.instance()
+            if not app:
+                # Log error instead of creating app
+                self.logger.error("No QApplication instance available for file dialog")
+                return None
+
+            # Show information message
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Information)
+            msg.setWindowTitle("File Required")
+            msg.setText(f"The file {filename} was not found.")
+            msg.setInformativeText(message)
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.exec_()
+
+            # Open file dialog
+            file_path, _ = QFileDialog.getOpenFileName(
+                None,
+                title,
+                str(self.base_path),
+                "Text files (*.txt);;All files (*.*)"
+            )
+
+            return Path(file_path) if file_path else None
+
+        except ImportError:
+            self.logger.error("Qt not available for file dialog")
             return None
-        
-        # Show information message
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Information)
-        msg.setWindowTitle("File Required")
-        msg.setText(f"The file {filename} was not found.")
-        msg.setInformativeText(message)
-        msg.setStandardButtons(QMessageBox.Ok)
-        msg.exec_()
-        
-        # Open file dialog
-        file_path, _ = QFileDialog.getOpenFileName(
-            None,
-            title,
-            str(self.base_path),
-            "Text files (*.txt);;All files (*.*)"
-        )
-        
-        return Path(file_path) if file_path else None
-        
-    except ImportError:
-        self.logger.error("Qt not available for file dialog")
-        return None
-    except Exception as e:
-        self.logger.error(f"Error showing file dialog: {e}")
-        return None
+        except Exception as e:
+            self.logger.error(f"Error showing file dialog: {e}")
+            return None
     
     def _copy_file_to_settings(self, source_path: Path, target_name: str) -> None:
         """
