@@ -551,7 +551,9 @@ class PositionController:
         if self._current_position is None:
             raise RuntimeError("Cannot jog - current position unknown")
 
+        self.logger.info(f"Jogging X by {delta_mm:+.3f} mm (current position: {self._current_position.x:.3f} mm)")
         new_x = self._current_position.x + delta_mm
+        self.logger.info(f"Target X position: {new_x:.3f} mm")
         self.move_x(new_x)
 
     def jog_y(self, delta_mm: float) -> None:
