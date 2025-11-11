@@ -753,6 +753,10 @@ class EnhancedStageControlView(QWidget):
     @pyqtSlot(str)
     def _on_motion_stopped(self, axis_name: str) -> None:
         """Update status when motion completes."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[EnhancedStageControlView] Received motion_stopped signal for: {axis_name}")
+
         self.motion_status_label.setText(f"{axis_name} motion complete - Ready")
         self.motion_status_label.setStyleSheet(
             "background-color: #e8f5e9; color: #2e7d32; padding: 8px; "
@@ -760,7 +764,9 @@ class EnhancedStageControlView(QWidget):
         )
 
         # Re-enable controls
+        logger.info("[EnhancedStageControlView] Re-enabling controls")
         self._set_controls_enabled(True)
+        logger.info("[EnhancedStageControlView] Controls re-enabled")
 
     @pyqtSlot(bool, str)
     def _on_position_verified(self, success: bool, message: str) -> None:

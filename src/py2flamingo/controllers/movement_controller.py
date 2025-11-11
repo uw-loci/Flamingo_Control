@@ -443,17 +443,28 @@ class MovementController(QObject):
         """
         Callback when motion completes.
         Called by position_controller in background thread.
+
+        Qt signals are thread-safe - they automatically queue to the receiver's thread.
         """
-        # Always emit motion_stopped, even if axis tracking wasn't set
-        # This ensures UI controls are re-enabled for all movement types
+        # Get axis name and position
         axis_name = self._current_motion_axis if self._current_motion_axis else "Movement"
-        self.motion_stopped.emit(axis_name)
+        pos = self.position_controller.get_current_position()
+
+        self.logger.info(f"[MovementController] Motion complete callback triggered for: {axis_name}")
+
+        # Clear motion tracking
         self._current_motion_axis = None
 
-        # Update position display
-        pos = self.position_controller.get_current_position()
+        # Emit motion_stopped signal (Qt handles cross-thread delivery automatically)
+        self.logger.info(f"[MovementController] Emitting motion_stopped signal for: {axis_name}")
+        self.motion_stopped.emit(axis_name)
+
+        # Emit position update
         if pos:
+            self.logger.info(f"[MovementController] Emitting position_changed: X={pos.x:.3f}, Y={pos.y:.3f}, Z={pos.z:.3f}, R={pos.r:.2f}")
             self.position_changed.emit(pos.x, pos.y, pos.z, pos.r)
+        else:
+            self.logger.warning("[MovementController] No position available to emit")
 
     # ============================================================================
     # Utility Methods
