@@ -204,8 +204,12 @@ class MovementController(QObject):
             return True
 
         except Exception as e:
+            # Emit motion_stopped to clear "Moving" state on error/timeout
+            if self._current_motion_axis:
+                self.motion_stopped.emit(self._current_motion_axis)
+                self._current_motion_axis = None
+
             self.error_occurred.emit(str(e))
-            self._current_motion_axis = None
             raise
 
     def move_relative(self, axis: str, delta_mm: float, verify: bool = True) -> bool:
@@ -246,8 +250,12 @@ class MovementController(QObject):
             return True
 
         except Exception as e:
+            # Emit motion_stopped to clear "Moving" state on error/timeout
+            if self._current_motion_axis:
+                self.motion_stopped.emit(self._current_motion_axis)
+                self._current_motion_axis = None
+
             self.error_occurred.emit(str(e))
-            self._current_motion_axis = None
             raise
 
     def get_position(self, axis: Optional[str] = None) -> Optional[float]:

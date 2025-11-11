@@ -1034,8 +1034,8 @@ class PositionController:
         self.logger.debug(f"Moving {axis_name} (axis {axis_code}) to {value_float}")
 
         try:
-            # The old system sent [axis_code, 0, 0, value] as command_data
-            # In the protocol: params[0]=axis_code, value=position_value
+            # Movement command protocol from working stage_service.py
+            # CRITICAL: Axis code must be in params[3] (int32Data0), NOT params[0]
             # CRITICAL: Must set TRIGGER_CALL_BACK flag in params[6] for response
             from py2flamingo.models.command import Command
 
@@ -1043,15 +1043,15 @@ class PositionController:
                 code=self.COMMAND_CODES_STAGE_POSITION_SET,
                 parameters={
                     'params': [
-                        axis_code,  # Param[0] = axis (1=X, 2=Y, 3=Z, 4=R)
-                        0,          # Param[1] = unused
-                        0,          # Param[2] = unused
-                        0,          # Param[3] = unused
-                        0,          # Param[4] = unused
-                        0,          # Param[5] = unused
+                        0,          # Param[0] (hardwareID) - not used
+                        0,          # Param[1] (subsystemID) - not used
+                        0,          # Param[2] (clientID) - not used
+                        axis_code,  # Param[3] (int32Data0) = axis (1=X, 2=Y, 3=Z, 4=R)
+                        0,          # Param[4] (int32Data1) - unused
+                        0,          # Param[5] (int32Data2) - unused
                         CommandDataBits.TRIGGER_CALL_BACK  # Param[6] = 0x80000000 flag
                     ],
-                    'value': value_float  # Position value in mm or degrees
+                    'value': value_float  # Position value in mm or degrees (doubleData field)
                 }
             )
 
