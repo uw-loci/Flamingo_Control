@@ -470,13 +470,43 @@ class EnhancedStageControlView(QWidget):
                 QMessageBox.critical(self, "Home Error", str(e))
 
     def _on_emergency_stop_clicked(self) -> None:
-        """Handle emergency stop button click."""
+        """Handle emergency stop button click.
+
+        Stops current motion immediately and automatically clears the stop
+        flag after 2 seconds so user can resume normal operation.
+        """
+        # Disable button to prevent multiple rapid clicks
+        self.estop_btn.setEnabled(False)
+
+        # Stop current motion
         self.movement_controller.halt_motion()
-        self.motion_status_label.setText("EMERGENCY STOPPED")
+
+        # Show emergency stop status
+        self.motion_status_label.setText("EMERGENCY STOPPED - Clearing in 2s...")
         self.motion_status_label.setStyleSheet(
             "background-color: #ffebee; color: #c62828; padding: 8px; "
             "border: 3px solid #f44336; font-weight: bold; font-size: 10pt;"
         )
+
+        # Automatically clear emergency stop after 2 seconds
+        # This allows the user to resume normal operation without manual intervention
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(2000, self._clear_emergency_stop)
+
+    def _clear_emergency_stop(self) -> None:
+        """Clear emergency stop flag and restore normal operation."""
+        self.movement_controller.position_controller.clear_emergency_stop()
+
+        # Re-enable emergency stop button
+        self.estop_btn.setEnabled(True)
+
+        # Show cleared status
+        self.motion_status_label.setText("Emergency stop cleared - Ready")
+        self.motion_status_label.setStyleSheet(
+            "background-color: #e8f5e9; color: #2e7d32; padding: 8px; "
+            "border: 2px solid #4caf50; font-weight: bold; font-size: 10pt;"
+        )
+        self.logger.info("Emergency stop cleared - normal operation resumed")
 
     def _jog(self, axis: str, delta: float) -> None:
         """Handle jog button click."""
