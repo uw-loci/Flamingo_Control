@@ -75,9 +75,9 @@ class PositionController:
         from py2flamingo.services.position_preset_service import PositionPresetService
         self.preset_service = PositionPresetService()
 
-        # Position history for undo functionality (store last 20 positions)
+        # Position history for undo functionality (store last 100 positions)
         self._position_history: List[Position] = []
-        self._max_history_size = 20
+        self._max_history_size = 100
 
         # Emergency stop flag
         self._emergency_stop_active = False

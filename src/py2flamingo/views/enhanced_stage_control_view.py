@@ -105,30 +105,50 @@ class EnhancedStageControlView(QWidget):
         self.setLayout(main_layout)
 
     def _create_position_display(self) -> QGroupBox:
-        """Create current position display group."""
+        """Create current position display group with action buttons."""
         group = QGroupBox("Current Position")
-        layout = QFormLayout()
+        main_layout = QHBoxLayout()
+
+        # Left side: Position display (compact)
+        position_layout = QFormLayout()
 
         # Position labels with status indicators
         label_style = "background-color: #e8f5e9; padding: 8px; border: 2px solid #4caf50; border-radius: 4px; font-size: 11pt; font-weight: bold;"
 
         self.x_pos_label = QLabel("0.000 mm")
         self.x_pos_label.setStyleSheet(label_style)
-        layout.addRow("X Position:", self.x_pos_label)
+        position_layout.addRow("X Position:", self.x_pos_label)
 
         self.y_pos_label = QLabel("0.000 mm")
         self.y_pos_label.setStyleSheet(label_style)
-        layout.addRow("Y Position:", self.y_pos_label)
+        position_layout.addRow("Y Position:", self.y_pos_label)
 
         self.z_pos_label = QLabel("0.000 mm")
         self.z_pos_label.setStyleSheet(label_style)
-        layout.addRow("Z Position:", self.z_pos_label)
+        position_layout.addRow("Z Position:", self.z_pos_label)
 
         self.r_pos_label = QLabel("0.00°")
         self.r_pos_label.setStyleSheet(label_style)
-        layout.addRow("Rotation:", self.r_pos_label)
+        position_layout.addRow("Rotation:", self.r_pos_label)
 
-        group.setLayout(layout)
+        main_layout.addLayout(position_layout)
+
+        # Right side: Action buttons
+        button_layout = QVBoxLayout()
+        button_layout.addStretch()
+
+        self.show_history_btn = QPushButton("Show Position History")
+        self.show_history_btn.clicked.connect(self._on_show_history_clicked)
+        self.show_history_btn.setStyleSheet(
+            "background-color: #2196f3; color: white; padding: 10px; "
+            "font-weight: bold; font-size: 10pt;"
+        )
+        button_layout.addWidget(self.show_history_btn)
+
+        button_layout.addStretch()
+        main_layout.addLayout(button_layout)
+
+        group.setLayout(main_layout)
         return group
 
     def _create_goto_controls(self) -> QGroupBox:
@@ -514,6 +534,14 @@ class EnhancedStageControlView(QWidget):
 
             except Exception as e:
                 QMessageBox.critical(self, "Movement Error", str(e))
+
+    def _on_show_history_clicked(self) -> None:
+        """Handle Show Position History button click."""
+        from py2flamingo.views.position_history_dialog import PositionHistoryDialog
+
+        # Create and show the position history dialog
+        dialog = PositionHistoryDialog(self.movement_controller, parent=self)
+        dialog.exec_()  # Modal dialog
 
     def _update_n7_reference_display(self) -> None:
         """Update N7 reference position display."""
