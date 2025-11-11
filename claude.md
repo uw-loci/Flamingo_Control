@@ -2,7 +2,33 @@
 
 ## Project Overview
 
-The Flamingo Control System is a Python-based GUI application for controlling a light-sheet fluorescence microscope. It provides a modern interface for:
+This document describes the **Flamingo Control System**, which is part of a larger two-repository project structure:
+
+### Repository Structure
+
+**1. Flamingo_Control (THIS REPOSITORY) - Microscope Control Software**
+- **Location:** `/home/msnelson/LSControl/Flamingo_Control/`
+- **Purpose:** Python-based GUI application for controlling a light-sheet fluorescence microscope
+- **GitHub:** Separate repository for microscope control software
+- **Status:** Active development
+
+**2. FlamingoCollagen - Image Analysis Pipeline**
+- **Location:** `/home/msnelson/LSControl/FlamingoCollagen/`
+- **Purpose:** Image analysis pipeline for processing data from the microscope
+- **GitHub:** Separate repository for image analysis
+- **Status:** Handles future data from microscope
+
+**3. Shared Documentation**
+- **Location:** `/home/msnelson/LSControl/claude-reports/`
+- **Purpose:** Analysis, reports, and documentation for BOTH repositories
+- **Important:** Reports go here, NOT in individual repo subdirectories
+- **Not committed to GitHub:** Local reference only
+
+---
+
+## Flamingo Control System Features
+
+This repository (Flamingo_Control) provides a modern interface for:
 
 - Stage positioning and movement control (X, Y, Z, rotation)
 - Camera control and live viewing
@@ -231,32 +257,42 @@ send_bytes(struct.pack(cmd) + workflow_settings.encode())
 ## Project Structure
 
 ```
-Flamingo_Control/
-├── src/py2flamingo/           # Python source code
-│   ├── core/                  # Core protocol and communication
-│   │   ├── tcp_connection.py  # TCP socket management
-│   │   ├── protocol_encoder.py # SCommand encoding/decoding
-│   │   └── command_codes.py   # Command code definitions
-│   ├── models/                # Data models
-│   ├── services/              # Business logic
-│   │   ├── configuration_manager.py
-│   │   └── connection_service.py
-│   ├── controllers/           # MVC controllers
-│   │   ├── connection_controller.py
-│   │   ├── movement_controller.py
-│   │   └── workflow_controller.py
-│   ├── views/                 # UI views (PySide6)
-│   │   ├── connection_view.py
-│   │   ├── movement_view.py
-│   │   ├── workflow_view.py
-│   │   └── live_viewer_view.py
-│   └── application.py         # Main application
-├── tests/                     # Unit and integration tests
-├── oldcodereference/          # C++ server reference (READ ONLY)
-│   └── serversidecode/
-│       └── Linux/ControlSystem/
-└── claude-reports/            # Analysis and documentation
-    └── server-side-protocol-reference.md
+LSControl/                           # Parent directory (not a repo)
+├── Flamingo_Control/               # THIS REPOSITORY - Microscope control
+│   ├── src/py2flamingo/           # Python source code
+│   │   ├── core/                  # Core protocol and communication
+│   │   │   ├── tcp_connection.py  # TCP socket management
+│   │   │   ├── protocol_encoder.py # SCommand encoding/decoding
+│   │   │   └── command_codes.py   # Command code definitions
+│   │   ├── models/                # Data models
+│   │   ├── services/              # Business logic
+│   │   │   ├── configuration_manager.py
+│   │   │   ├── connection_service.py
+│   │   │   ├── camera_service.py
+│   │   │   └── laser_led_service.py
+│   │   ├── controllers/           # MVC controllers
+│   │   │   ├── connection_controller.py
+│   │   │   ├── movement_controller.py
+│   │   │   ├── camera_controller.py
+│   │   │   ├── laser_led_controller.py
+│   │   │   └── workflow_controller.py
+│   │   ├── views/                 # UI views (PySide6)
+│   │   │   ├── connection_view.py
+│   │   │   ├── movement_view.py
+│   │   │   ├── workflow_view.py
+│   │   │   ├── camera_live_viewer.py
+│   │   │   └── laser_led_control_panel.py
+│   │   └── application.py         # Main application
+│   ├── tests/                     # Unit and integration tests
+│   └── oldcodereference/          # C++ server reference (READ ONLY)
+│       └── serversidecode/
+│           └── Linux/ControlSystem/
+├── FlamingoCollagen/              # SEPARATE REPO - Image analysis pipeline
+│   └── (image analysis code)
+└── claude-reports/                # SHARED - Reports for BOTH repos (NOT in git)
+    ├── server-side-protocol-reference.md
+    ├── stage-control-implementation-report.md
+    └── 2025-11-11_laser_led_snapshot_implementation.md
 ```
 
 ---
@@ -449,7 +485,8 @@ send_packet(cmd, settings)
 
 ## Resources
 
-- **Protocol Reference:** `claude-reports/server-side-protocol-reference.md`
+- **Protocol Reference:** `/home/msnelson/LSControl/claude-reports/server-side-protocol-reference.md`
+- **All Claude Reports:** `/home/msnelson/LSControl/claude-reports/` (NOT in git, shared across both repos)
 - **Server Code (READ ONLY):** `oldcodereference/serversidecode/`
 - **Test Suite:** `tests/`
 - **Metadata Files:** Server expects specific formats for hardware configuration

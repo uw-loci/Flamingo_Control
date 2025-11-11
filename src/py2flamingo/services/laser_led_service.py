@@ -159,11 +159,13 @@ class LaserLEDService(MicroscopeCommandService):
 
         self.logger.info(f"Setting laser {laser_index} power to {power_percent:.1f}%")
 
-        result = self._action_command(
+        # Convert percentage to DAC value (0-65535)
+        dac_value = int(655.35 * power_percent)
+
+        result = self._send_command(
             LaserLEDCommandCode.LASER_LEVEL_SET,
             f"LASER_{laser_index}_LEVEL_SET",
-            int32_data0=laser_index,
-            double_data=power_percent
+            params=[0, 0, 0, laser_index, dac_value, 0, 0]
         )
 
         return result['success']
@@ -190,10 +192,10 @@ class LaserLEDService(MicroscopeCommandService):
 
         self.logger.info(f"Enabling laser {laser_index} preview mode")
 
-        result = self._action_command(
+        result = self._send_command(
             LaserLEDCommandCode.LASER_ENABLE_PREVIEW,
             f"LASER_{laser_index}_ENABLE_PREVIEW",
-            int32_data0=laser_index
+            params=[0, 0, 0, laser_index, 0, 0, 0]
         )
 
         return result['success']
@@ -207,35 +209,42 @@ class LaserLEDService(MicroscopeCommandService):
         """
         self.logger.info("Disabling all lasers")
 
-        result = self._action_command(
+        result = self._send_command(
             LaserLEDCommandCode.LASER_DISABLE_ALL,
-            "LASER_DISABLE_ALL"
+            "LASER_DISABLE_ALL",
+            params=[0, 0, 0, 0, 0, 0, 0]
         )
 
         return result['success']
 
-    def set_led_intensity(self, intensity_percent: float) -> bool:
+    def set_led_intensity(self, led_color: int, intensity_percent: float) -> bool:
         """
-        Set LED intensity as percentage.
+        Set LED intensity as percentage for specified color.
 
         Args:
+            led_color: LED color (0=Red, 1=Green, 2=Blue, 3=White)
             intensity_percent: Intensity as percentage (0.0 - 100.0)
 
         Returns:
             True if successful, False otherwise
 
         Example:
-            >>> laser_led.set_led_intensity(50.0)  # Set LED to 50% intensity
+            >>> laser_led.set_led_intensity(1, 50.0)  # Set Green LED to 50% intensity
         """
         if not self._led_available:
             self.logger.error("LED not available on this microscope")
+            return False
+
+        if not (0 <= led_color <= 3):
+            self.logger.error(f"LED color must be 0-3 (Red/Green/Blue/White), got {led_color}")
             return False
 
         if not (0.0 <= intensity_percent <= 100.0):
             self.logger.error(f"Intensity must be 0-100%, got {intensity_percent}")
             return False
 
-        self.logger.info(f"Setting LED intensity to {intensity_percent:.1f}%")
+        color_names = ["Red", "Green", "Blue", "White"]
+        self.logger.info(f"Setting {color_names[led_color]} LED intensity to {intensity_percent:.1f}%")
 
         # Convert percentage to DAC value range
         # Based on ScopeSettings.txt: min=3200000, max=6553500
@@ -243,10 +252,13 @@ class LaserLEDService(MicroscopeCommandService):
         max_dac = 6553500
         dac_value = int(min_dac + (max_dac - min_dac) * (intensity_percent / 100.0))
 
-        result = self._action_command(
+        # LED_SET command:
+        # int32Data0 = led_color (0=Red, 1=Green, 2=Blue, 3=White)
+        # int32Data1 = dac_value (intensity)
+        result = self._send_command(
             LaserLEDCommandCode.LED_SET,
             "LED_SET",
-            int32_data0=dac_value
+            params=[0, 0, 0, led_color, dac_value, 0, 0]
         )
 
         return result['success']
@@ -264,9 +276,10 @@ class LaserLEDService(MicroscopeCommandService):
 
         self.logger.info("Enabling LED preview mode")
 
-        result = self._action_command(
+        result = self._send_command(
             LaserLEDCommandCode.LED_PREVIEW_ENABLE,
-            "LED_PREVIEW_ENABLE"
+            "LED_PREVIEW_ENABLE",
+            params=[0, 0, 0, 0, 0, 0, 0]
         )
 
         return result['success']
@@ -284,9 +297,10 @@ class LaserLEDService(MicroscopeCommandService):
 
         self.logger.info("Disabling LED preview mode")
 
-        result = self._action_command(
+        result = self._send_command(
             LaserLEDCommandCode.LED_PREVIEW_DISABLE,
-            "LED_PREVIEW_DISABLE"
+            "LED_PREVIEW_DISABLE",
+            params=[0, 0, 0, 0, 0, 0, 0]
         )
 
         return result['success']

@@ -44,9 +44,11 @@ class LaserLEDControlPanel(QWidget):
         self._laser_radios = {}  # laser_index -> QRadioButton
         self._laser_sliders = {}  # laser_index -> QSlider
         self._laser_labels = {}  # laser_index -> QLabel
-        self._led_radio = None
-        self._led_slider = None
-        self._led_label = None
+
+        # LED widgets - track by color (0=Red, 1=Green, 2=Blue, 3=White)
+        self._led_color_radios = {}  # color -> QRadioButton (for selecting active color)
+        self._led_sliders = {}  # color -> QSlider
+        self._led_labels = {}  # color -> QLabel
 
         # Button group for radio buttons
         self._source_button_group = QButtonGroup()
@@ -153,44 +155,61 @@ class LaserLEDControlPanel(QWidget):
         return group
 
     def _create_led_section(self) -> QGroupBox:
-        """Create LED control section."""
+        """Create LED RGB control section."""
         if not self.laser_led_controller.is_led_available():
             return None
 
-        group = QGroupBox("LED")
+        group = QGroupBox("LED (RGB)")
         layout = QGridLayout()
         layout.setSpacing(8)
 
         # Headers
         layout.addWidget(QLabel("<b>Select</b>"), 0, 0)
-        layout.addWidget(QLabel("<b>Source</b>"), 0, 1)
+        layout.addWidget(QLabel("<b>Color</b>"), 0, 1)
         layout.addWidget(QLabel("<b>Intensity (%)</b>"), 0, 2)
         layout.addWidget(QLabel("<b>Level</b>"), 0, 3)
 
-        # Radio button
-        self._led_radio = QRadioButton()
-        self._source_button_group.addButton(self._led_radio, -1)  # ID is -1 for LED
-        layout.addWidget(self._led_radio, 1, 0, Qt.AlignCenter)
+        # LED colors (0=Red, 1=Green, 2=Blue, 3=White)
+        colors = [
+            (0, "Red LED"),
+            (1, "Green LED"),
+            (2, "Blue LED"),
+            (3, "White LED")
+        ]
 
-        # LED label
-        led_label = QLabel("White LED")
-        layout.addWidget(led_label, 1, 1)
+        for i, (color_id, color_name) in enumerate(colors):
+            row = i + 1
 
-        # Intensity percentage label
-        intensity = self.laser_led_controller.get_led_intensity()
-        self._led_label = QLabel(f"{intensity:.1f}%")
-        self._led_label.setMinimumWidth(50)
-        self._led_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(self._led_label, 1, 2)
+            # Radio button for selecting this LED color
+            radio = QRadioButton()
+            self._led_color_radios[color_id] = radio
+            # Use negative IDs for LED: -1=Red, -2=Green, -3=Blue, -4=White
+            self._source_button_group.addButton(radio, -(color_id + 1))
+            layout.addWidget(radio, row, 0, Qt.AlignCenter)
 
-        # Intensity slider
-        self._led_slider = QSlider(Qt.Horizontal)
-        self._led_slider.setRange(0, 100)  # 0-100%
-        self._led_slider.setValue(int(intensity))
-        self._led_slider.setTickPosition(QSlider.TicksBelow)
-        self._led_slider.setTickInterval(10)
-        self._led_slider.valueChanged.connect(self._on_led_intensity_changed)
-        layout.addWidget(self._led_slider, 1, 3)
+            # Color name label
+            name_label = QLabel(color_name)
+            layout.addWidget(name_label, row, 1)
+
+            # Intensity percentage label
+            intensity = self.laser_led_controller.get_led_intensity(color_id)
+            intensity_label = QLabel(f"{intensity:.1f}%")
+            intensity_label.setMinimumWidth(50)
+            intensity_label.setStyleSheet("font-weight: bold;")
+            self._led_labels[color_id] = intensity_label
+            layout.addWidget(intensity_label, row, 2)
+
+            # Intensity slider
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(0, 100)  # 0-100%
+            slider.setValue(int(intensity))
+            slider.setTickPosition(QSlider.TicksBelow)
+            slider.setTickInterval(10)
+            slider.valueChanged.connect(
+                lambda val, color=color_id: self._on_led_intensity_changed(color, val)
+            )
+            self._led_sliders[color_id] = slider
+            layout.addWidget(slider, row, 3)
 
         group.setLayout(layout)
         return group
@@ -206,24 +225,26 @@ class LaserLEDControlPanel(QWidget):
         # Send to controller
         self.laser_led_controller.set_laser_power(laser_index, power_percent)
 
-    def _on_led_intensity_changed(self, value: int) -> None:
+    def _on_led_intensity_changed(self, led_color: int, value: int) -> None:
         """Handle LED intensity slider change."""
         intensity_percent = float(value)
 
         # Update label
-        if self._led_label:
-            self._led_label.setText(f"{intensity_percent:.1f}%")
+        if led_color in self._led_labels:
+            self._led_labels[led_color].setText(f"{intensity_percent:.1f}%")
 
         # Send to controller
-        self.laser_led_controller.set_led_intensity(intensity_percent)
+        self.laser_led_controller.set_led_intensity(led_color, intensity_percent)
 
     def _on_source_selected(self, button: QRadioButton) -> None:
         """Handle light source selection."""
         source_id = self._source_button_group.id(button)
 
-        if source_id == -1:  # LED
-            self.logger.info("LED selected for preview")
-            self.laser_led_controller.enable_led_for_preview()
+        if source_id < 0:  # LED (negative IDs: -1=Red, -2=Green, -3=Blue, -4=White)
+            led_color = -(source_id + 1)  # Convert back to 0-3
+            color_names = ["Red", "Green", "Blue", "White"]
+            self.logger.info(f"{color_names[led_color]} LED selected for preview")
+            self.laser_led_controller.enable_led_for_preview(led_color)
         elif source_id > 0:  # Laser
             self.logger.info(f"Laser {source_id} selected for preview")
             self.laser_led_controller.enable_laser_for_preview(source_id)
@@ -269,15 +290,17 @@ class LaserLEDControlPanel(QWidget):
         Get currently selected light source.
 
         Returns:
-            String like "laser_3" or "led" or "none"
+            String like "laser_3", "led_red", "led_green", "led_blue", "led_white", or "none"
         """
         checked_button = self._source_button_group.checkedButton()
         if not checked_button:
             return "none"
 
         source_id = self._source_button_group.id(checked_button)
-        if source_id == -1:
-            return "led"
+        if source_id < 0:  # LED (negative IDs: -1=Red, -2=Green, -3=Blue, -4=White)
+            led_color = -(source_id + 1)
+            color_names = ["red", "green", "blue", "white"]
+            return f"led_{color_names[led_color]}"
         else:
             return f"laser_{source_id}"
 

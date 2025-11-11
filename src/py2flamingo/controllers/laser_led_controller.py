@@ -49,10 +49,18 @@ class LaserLEDController(QObject):
         self.laser_led_service = laser_led_service
 
         # State tracking
-        self._active_source: Optional[str] = None  # "laser_N" or "led" or None
+        self._active_source: Optional[str] = None  # "laser_N" or "led_R/G/B/W" or None
         self._active_laser_index: Optional[int] = None
         self._laser_powers: dict = {}  # laser_index -> power_percent
-        self._led_intensity: float = 50.0  # Default LED intensity
+
+        # LED state - separate tracking for each color
+        self._led_color: int = 1  # Default to Green (0=Red, 1=Green, 2=Blue, 3=White)
+        self._led_intensities: dict = {  # color -> intensity_percent
+            0: 50.0,  # Red
+            1: 50.0,  # Green
+            2: 50.0,  # Blue
+            3: 50.0,  # White
+        }
 
         # Initialize laser powers to 5%
         for laser in self.get_available_lasers():
@@ -72,9 +80,23 @@ class LaserLEDController(QObject):
         """Get current laser power setting."""
         return self._laser_powers.get(laser_index, 5.0)
 
-    def get_led_intensity(self) -> float:
-        """Get current LED intensity setting."""
-        return self._led_intensity
+    def get_led_color(self) -> int:
+        """Get current LED color selection (0=Red, 1=Green, 2=Blue, 3=White)."""
+        return self._led_color
+
+    def get_led_intensity(self, led_color: Optional[int] = None) -> float:
+        """
+        Get LED intensity setting for specified color.
+
+        Args:
+            led_color: LED color (0=Red, 1=Green, 2=Blue, 3=White). If None, uses current selection.
+
+        Returns:
+            Intensity as percentage (0.0 - 100.0)
+        """
+        if led_color is None:
+            led_color = self._led_color
+        return self._led_intensities.get(led_color, 50.0)
 
     def get_active_source(self) -> Optional[str]:
         """Get currently active light source ("laser_N" or "led" or None)."""
@@ -111,25 +133,38 @@ class LaserLEDController(QObject):
             self.error_occurred.emit(error_msg)
             return False
 
-    def set_led_intensity(self, intensity_percent: float) -> bool:
+    def set_led_color(self, led_color: int) -> None:
         """
-        Set LED intensity level.
+        Set LED color selection.
 
         Args:
+            led_color: LED color (0=Red, 1=Green, 2=Blue, 3=White)
+        """
+        if 0 <= led_color <= 3:
+            self._led_color = led_color
+            self.logger.info(f"LED color set to {led_color}")
+
+    def set_led_intensity(self, led_color: int, intensity_percent: float) -> bool:
+        """
+        Set LED intensity level for specified color.
+
+        Args:
+            led_color: LED color (0=Red, 1=Green, 2=Blue, 3=White)
             intensity_percent: Intensity as percentage (0.0 - 100.0)
 
         Returns:
             True if successful
         """
         try:
-            success = self.laser_led_service.set_led_intensity(intensity_percent)
+            success = self.laser_led_service.set_led_intensity(led_color, intensity_percent)
 
             if success:
-                self._led_intensity = intensity_percent
+                self._led_intensities[led_color] = intensity_percent
                 self.led_intensity_changed.emit(intensity_percent)
-                self.logger.info(f"LED intensity set to {intensity_percent:.1f}%")
+                color_names = ["Red", "Green", "Blue", "White"]
+                self.logger.info(f"{color_names[led_color]} LED intensity set to {intensity_percent:.1f}%")
             else:
-                error_msg = "Failed to set LED intensity"
+                error_msg = f"Failed to set LED intensity for color {led_color}"
                 self.logger.error(error_msg)
                 self.error_occurred.emit(error_msg)
 
@@ -192,38 +227,51 @@ class LaserLEDController(QObject):
             self.error_occurred.emit(error_msg)
             return False
 
-    def enable_led_for_preview(self) -> bool:
+    def enable_led_for_preview(self, led_color: Optional[int] = None) -> bool:
         """
         Enable LED for preview/imaging.
 
         This method:
-        1. Sets the LED intensity (if not already set)
+        1. Sets the LED color (if specified) and intensity
         2. Disables all lasers
         3. Enables LED in preview mode
+
+        Args:
+            led_color: LED color (0=Red, 1=Green, 2=Blue, 3=White). If None, uses current selection.
 
         Returns:
             True if successful
         """
         try:
-            self.logger.info("Enabling LED for preview")
+            # Use specified color or current selection
+            if led_color is not None:
+                if not (0 <= led_color <= 3):
+                    raise ValueError(f"Invalid LED color: {led_color} (must be 0-3)")
+                self._led_color = led_color
+
+            color_names = ["Red", "Green", "Blue", "White"]
+            color_name = color_names[self._led_color]
+
+            self.logger.info(f"Enabling {color_name} LED for preview")
 
             # Disable all lasers
             self.laser_led_service.disable_all_lasers()
 
-            # Set intensity
-            if not self.laser_led_service.set_led_intensity(self._led_intensity):
-                raise RuntimeError("Failed to set LED intensity")
+            # Set intensity for selected color
+            intensity = self._led_intensities.get(self._led_color, 50.0)
+            if not self.laser_led_service.set_led_intensity(self._led_color, intensity):
+                raise RuntimeError(f"Failed to set {color_name} LED intensity")
 
             # Enable LED preview
             if not self.laser_led_service.enable_led_preview():
                 raise RuntimeError("Failed to enable LED preview")
 
             # Update state
-            self._active_source = "led"
+            self._active_source = f"led_{color_name[0]}"  # "led_R", "led_G", "led_B", or "led_W"
             self._active_laser_index = None
 
-            self.preview_enabled.emit("LED")
-            self.logger.info("LED enabled for preview")
+            self.preview_enabled.emit(f"{color_name} LED")
+            self.logger.info(f"{color_name} LED enabled for preview")
             return True
 
         except Exception as e:
