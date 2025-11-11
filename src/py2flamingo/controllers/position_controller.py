@@ -75,9 +75,10 @@ class PositionController:
         from py2flamingo.services.position_preset_service import PositionPresetService
         self.preset_service = PositionPresetService()
 
-        # Position history for undo functionality (store last 100 positions)
+        # Position history for undo functionality
+        # Max size is loaded from microscope-specific settings
         self._position_history: List[Position] = []
-        self._max_history_size = 100
+        self._max_history_size = self._config_service.get_position_history_max_size()
 
         # Emergency stop flag
         self._emergency_stop_active = False

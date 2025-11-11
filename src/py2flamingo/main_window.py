@@ -105,19 +105,13 @@ class MainWindow(QMainWindow):
         if self.sample_info_view is not None:
             self.tabs.addTab(self._wrap_in_scroll_area(self.sample_info_view), "Sample Info")
 
-        # Add enhanced stage control tab if available (new implementation)
+        # Add stage control tab (enhanced view only)
         if self.enhanced_stage_control_view is not None:
             self.tabs.addTab(self._wrap_in_scroll_area(self.enhanced_stage_control_view), "Stage Control")
-        # Fallback to old stage control tab if enhanced not available
-        elif self.stage_control_view is not None:
-            self.tabs.addTab(self._wrap_in_scroll_area(self.stage_control_view), "Stage Control (Legacy)")
 
-        # Add camera live viewer tab if available (new implementation)
+        # Add live feed tab (camera live viewer only)
         if self.camera_live_viewer is not None:
             self.tabs.addTab(self._wrap_in_scroll_area(self.camera_live_viewer), "Live Feed")
-        # Fallback to old live feed tab if new viewer not available
-        elif self.live_feed_view is not None:
-            self.tabs.addTab(self._wrap_in_scroll_area(self.live_feed_view), "Live Feed (Legacy)")
 
         # Add tabs to layout
         layout.addWidget(self.tabs)

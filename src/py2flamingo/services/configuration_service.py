@@ -41,6 +41,12 @@ class ConfigurationService:
         if scope_settings:
             self.config['scope_settings'] = scope_settings
 
+        # Load microscope-specific settings
+        microscope_name = self.get_microscope_name()
+        from py2flamingo.services.microscope_settings_service import MicroscopeSettingsService
+        self.microscope_settings = MicroscopeSettingsService(microscope_name, self.base_path)
+        self.logger.info(f"Loaded microscope-specific settings for '{microscope_name}'")
+
     def _load_start_position(self, microscope_name: str) -> Dict[str, float]:
         """
         Load start position for the microscope if available.
@@ -179,35 +185,49 @@ class ConfigurationService:
         """
         return self.config.get('data_storage_location', '/media/deploy/MSN_LS')
     
-    def get_stage_limits(self) -> Dict[str, Dict[str, float]]:
+    def get_microscope_name(self) -> str:
         """
-        Get stage movement limits from scope settings.
-        
+        Get microscope name from scope settings.
+
         Returns:
-            Dict: Stage limits for each axis
+            str: Microscope name (e.g., "zion")
         """
         scope_settings = self.config.get('scope_settings', {})
-        stage_limits = scope_settings.get('Stage limits', {})
-        
-        return {
-            'x': {
-                'min': float(stage_limits.get('Soft limit min x-axis', 0.0)),
-                'max': float(stage_limits.get('Soft limit max x-axis', 26.0))
-            },
-            'y': {
-                'min': float(stage_limits.get('Soft limit min y-axis', 0.0)),
-                'max': float(stage_limits.get('Soft limit max y-axis', 26.0))
-            },
-            'z': {
-                'min': float(stage_limits.get('Soft limit min z-axis', 0.0)),
-                'max': float(stage_limits.get('Soft limit max z-axis', 26.0))
-            },
-            'r': {
-                'min': float(stage_limits.get('Soft limit min r-axis', -720.0)),
-                'max': float(stage_limits.get('Soft limit max r-axis', 720.0))
-            }
-        }
-    
+        type_settings = scope_settings.get('Type', {})
+        microscope_name = type_settings.get('Microscope name', 'default')
+        return microscope_name.strip()
+
+    def get_stage_limits(self) -> Dict[str, Dict[str, float]]:
+        """
+        Get stage movement limits from microscope-specific settings.
+
+        These limits are loaded from {microscope_name}_settings.json
+        which allows per-microscope configuration without code changes.
+
+        Returns:
+            Dict: Stage limits for each axis with min/max values
+        """
+        # Use microscope-specific settings (loads from JSON file)
+        return self.microscope_settings.get_stage_limits()
+
+    def get_position_history_max_size(self) -> int:
+        """
+        Get maximum size for position history from microscope settings.
+
+        Returns:
+            int: Maximum number of positions to store
+        """
+        return self.microscope_settings.get_position_history_max_size()
+
+    def get_position_history_display_count(self) -> int:
+        """
+        Get number of positions to display in history dialog.
+
+        Returns:
+            int: Number of visible positions in list
+        """
+        return self.microscope_settings.get_position_history_display_count()
+
     def save_start_position(self, microscope_name: str, position: Dict[str, float]) -> None:
         """
         Save start position to file.
