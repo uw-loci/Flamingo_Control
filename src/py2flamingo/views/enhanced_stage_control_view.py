@@ -159,98 +159,129 @@ class EnhancedStageControlView(QWidget):
         # Get stage limits
         limits = self.movement_controller.get_stage_limits()
 
-        # Create form layout for inputs
-        form_layout = QFormLayout()
+        # Create grid layout for better column control
+        # Column 0: Label, Column 1: Input, Column 2: Go To, Column 3: Home
+        grid = QGridLayout()
+        grid.setSpacing(8)
 
-        # X-axis
-        x_layout = QHBoxLayout()
+        # Headers
+        grid.addWidget(QLabel("<b>Axis</b>"), 0, 0)
+        grid.addWidget(QLabel("<b>Target</b>"), 0, 1)
+        grid.addWidget(QLabel("<b>Go To Axis</b>"), 0, 2)
+        grid.addWidget(QLabel("<b>Home Axis</b>"), 0, 3)
+
+        # X-axis row
+        row = 1
+        grid.addWidget(QLabel("X:"), row, 0)
+
         self.x_target_spin = QDoubleSpinBox()
         self.x_target_spin.setRange(limits['x']['min'], limits['x']['max'])
         self.x_target_spin.setDecimals(3)
         self.x_target_spin.setSingleStep(0.1)
         self.x_target_spin.setSuffix(" mm")
-        self.x_target_spin.setMinimumWidth(120)
-        x_layout.addWidget(self.x_target_spin)
+        self.x_target_spin.setMinimumWidth(100)
+        grid.addWidget(self.x_target_spin, row, 1)
 
         self.x_goto_btn = QPushButton("Go To X")
         self.x_goto_btn.clicked.connect(lambda: self._on_goto_clicked('x'))
         self.x_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 6px; font-weight: bold;")
-        x_layout.addWidget(self.x_goto_btn)
+        grid.addWidget(self.x_goto_btn, row, 2)
 
         self.x_home_btn = QPushButton("Home X")
         self.x_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('x'))
         self.x_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 6px;")
-        x_layout.addWidget(self.x_home_btn)
+        grid.addWidget(self.x_home_btn, row, 3)
 
-        form_layout.addRow("X Target:", x_layout)
+        # Y-axis row
+        row = 2
+        grid.addWidget(QLabel("Y:"), row, 0)
 
-        # Y-axis
-        y_layout = QHBoxLayout()
         self.y_target_spin = QDoubleSpinBox()
         self.y_target_spin.setRange(limits['y']['min'], limits['y']['max'])
         self.y_target_spin.setDecimals(3)
         self.y_target_spin.setSingleStep(0.1)
         self.y_target_spin.setSuffix(" mm")
-        self.y_target_spin.setMinimumWidth(120)
-        y_layout.addWidget(self.y_target_spin)
+        self.y_target_spin.setMinimumWidth(100)
+        grid.addWidget(self.y_target_spin, row, 1)
 
         self.y_goto_btn = QPushButton("Go To Y")
         self.y_goto_btn.clicked.connect(lambda: self._on_goto_clicked('y'))
         self.y_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 6px; font-weight: bold;")
-        y_layout.addWidget(self.y_goto_btn)
+        grid.addWidget(self.y_goto_btn, row, 2)
 
         self.y_home_btn = QPushButton("Home Y")
         self.y_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('y'))
         self.y_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 6px;")
-        y_layout.addWidget(self.y_home_btn)
+        grid.addWidget(self.y_home_btn, row, 3)
 
-        form_layout.addRow("Y Target:", y_layout)
+        # Z-axis row
+        row = 3
+        grid.addWidget(QLabel("Z:"), row, 0)
 
-        # Z-axis
-        z_layout = QHBoxLayout()
         self.z_target_spin = QDoubleSpinBox()
         self.z_target_spin.setRange(limits['z']['min'], limits['z']['max'])
         self.z_target_spin.setDecimals(3)
         self.z_target_spin.setSingleStep(0.1)
         self.z_target_spin.setSuffix(" mm")
-        self.z_target_spin.setMinimumWidth(120)
-        z_layout.addWidget(self.z_target_spin)
+        self.z_target_spin.setMinimumWidth(100)
+        grid.addWidget(self.z_target_spin, row, 1)
 
         self.z_goto_btn = QPushButton("Go To Z")
         self.z_goto_btn.clicked.connect(lambda: self._on_goto_clicked('z'))
         self.z_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 6px; font-weight: bold;")
-        z_layout.addWidget(self.z_goto_btn)
+        grid.addWidget(self.z_goto_btn, row, 2)
 
         self.z_home_btn = QPushButton("Home Z")
         self.z_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('z'))
         self.z_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 6px;")
-        z_layout.addWidget(self.z_home_btn)
+        grid.addWidget(self.z_home_btn, row, 3)
 
-        form_layout.addRow("Z Target:", z_layout)
+        # R-axis row
+        row = 4
+        grid.addWidget(QLabel("R:"), row, 0)
 
-        # R-axis (Rotation)
-        r_layout = QHBoxLayout()
         self.r_target_spin = QDoubleSpinBox()
         self.r_target_spin.setRange(0, 360)
         self.r_target_spin.setDecimals(2)
         self.r_target_spin.setSingleStep(1.0)
         self.r_target_spin.setSuffix("°")
-        self.r_target_spin.setMinimumWidth(120)
-        r_layout.addWidget(self.r_target_spin)
+        self.r_target_spin.setMinimumWidth(100)
+        grid.addWidget(self.r_target_spin, row, 1)
 
         self.r_goto_btn = QPushButton("Go To R")
         self.r_goto_btn.clicked.connect(lambda: self._on_goto_clicked('r'))
         self.r_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 6px; font-weight: bold;")
-        r_layout.addWidget(self.r_goto_btn)
+        grid.addWidget(self.r_goto_btn, row, 2)
 
         self.r_home_btn = QPushButton("Home R")
         self.r_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('r'))
         self.r_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 6px;")
-        r_layout.addWidget(self.r_home_btn)
+        grid.addWidget(self.r_home_btn, row, 3)
 
-        form_layout.addRow("R Target:", r_layout)
+        layout.addLayout(grid)
 
-        layout.addLayout(form_layout)
+        # Add separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(separator)
+
+        # Add "Go To Position" button that moves all 4 axes at once
+        goto_position_layout = QHBoxLayout()
+        goto_position_layout.addStretch()
+
+        self.goto_position_btn = QPushButton("Go To Position (All 4 Axes)")
+        self.goto_position_btn.clicked.connect(self._on_goto_position_clicked)
+        self.goto_position_btn.setStyleSheet(
+            "background-color: #4caf50; color: white; padding: 10px; "
+            "font-weight: bold; font-size: 11pt; border-radius: 4px;"
+        )
+        self.goto_position_btn.setMinimumWidth(300)
+        goto_position_layout.addWidget(self.goto_position_btn)
+
+        goto_position_layout.addStretch()
+        layout.addLayout(goto_position_layout)
+
         group.setLayout(layout)
         return group
 
@@ -436,6 +467,49 @@ class EnhancedStageControlView(QWidget):
             self.movement_controller.move_absolute(axis, target, verify=True)
             self.message_label.setText(f"Moving {axis.upper()} to {target:.3f}...")
             self.message_label.setStyleSheet("color: blue; padding: 6px;")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Movement Error", str(e))
+
+    def _on_goto_position_clicked(self) -> None:
+        """Handle Go To Position button click - moves all 4 axes at once."""
+        try:
+            # Read all target values from spin boxes
+            target_x = self.x_target_spin.value()
+            target_y = self.y_target_spin.value()
+            target_z = self.z_target_spin.value()
+            target_r = self.r_target_spin.value()
+
+            # Show confirmation dialog
+            reply = QMessageBox.question(
+                self,
+                "Go To Position",
+                f"Move to the following position?\n\n"
+                f"X: {target_x:.3f} mm\n"
+                f"Y: {target_y:.3f} mm\n"
+                f"Z: {target_z:.3f} mm\n"
+                f"R: {target_r:.2f}°",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if reply == QMessageBox.Yes:
+                # Create Position object
+                target_position = Position(
+                    x=target_x,
+                    y=target_y,
+                    z=target_z,
+                    r=target_r
+                )
+
+                # Move to position with validation
+                self.movement_controller.position_controller.move_to_position(
+                    target_position,
+                    validate=True
+                )
+
+                self.message_label.setText("Moving to target position...")
+                self.message_label.setStyleSheet("color: blue; padding: 6px;")
 
         except Exception as e:
             QMessageBox.critical(self, "Movement Error", str(e))
@@ -666,6 +740,7 @@ class EnhancedStageControlView(QWidget):
         self.y_goto_btn.setEnabled(enabled)
         self.z_goto_btn.setEnabled(enabled)
         self.r_goto_btn.setEnabled(enabled)
+        self.goto_position_btn.setEnabled(enabled)  # All 4 axes at once
 
         # Home buttons
         self.x_home_btn.setEnabled(enabled)
