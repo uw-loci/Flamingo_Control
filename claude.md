@@ -284,6 +284,52 @@ Flamingo_Control/
 - `src/py2flamingo/views/live_viewer_view.py` - Camera live view
 - `src/py2flamingo/views/workflow_view.py` - Workflow builder
 
+### Threading and Asynchronous Operations
+
+**AVOID Hardcoded Delays:**
+- ❌ Never use `time.sleep()` or `QTimer.singleShot()` as workarounds
+- ❌ Don't add arbitrary delays to "wait for things to be ready"
+- ✅ Use proper synchronization: wait for actual responses/signals
+- ✅ Use background threads for blocking I/O operations
+
+**Thread Safety with Qt:**
+```python
+# ❌ WRONG - Calling GUI methods from background thread
+def background_task():
+    position = query_hardware()  # Blocking I/O
+    self.label.setText(str(position))  # CRASHES! GUI from wrong thread
+
+# ✅ CORRECT - Use Qt signals for thread-safe GUI updates
+def background_task():
+    position = query_hardware()  # Blocking I/O in background thread
+    self.position_changed.emit(position.x, position.y, position.z)  # Thread-safe signal
+
+# Connect signal in main thread
+self.position_changed.connect(self._update_display)
+```
+
+**Background Threads for Blocking I/O:**
+```python
+# Hardware queries use blocking socket I/O - run in background thread
+def query_position_on_connection():
+    def query_worker():
+        position = stage_service.get_position()  # Blocks until response
+        if position:
+            # Update via thread-safe Qt signal
+            self.movement_controller.position_changed.emit(
+                position.x, position.y, position.z, position.r
+            )
+
+    thread = threading.Thread(target=query_worker, daemon=True)
+    thread.start()
+```
+
+**Event-Driven Architecture:**
+- Use Qt signals/slots for component communication
+- Use callbacks for asynchronous operations
+- Let the protocol layer handle timeouts and retries
+- Trust that `get_position()` waits for the response internally
+
 ### Testing Strategy
 
 **Unit Tests:**

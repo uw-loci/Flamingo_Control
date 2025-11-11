@@ -304,54 +304,63 @@ class FlamingoApplication:
         """Handle connection established event for stage control view.
 
         Updates the stage control view to enable controls and display current position.
+        Queries position from hardware using blocking I/O in background thread to avoid
+        freezing the GUI.
         """
         self.logger.info("Updating stage control view - connection established")
 
-        # Query actual position from hardware (not cached value)
-        try:
-            # Import QTimer to delay position query slightly to ensure connection is ready
-            from PyQt5.QtCore import QTimer
+        # Query position in background thread to avoid blocking GUI
+        # StageService.get_position() uses blocking socket I/O
+        def query_and_update_position():
+            """Query position from hardware and update all views (runs in background thread)."""
+            try:
+                from py2flamingo.services.stage_service import StageService
+                stage_service = StageService(self.connection_service)
 
-            def query_and_update_position():
-                """Query position from hardware and update all views."""
-                try:
-                    # Use stage service to query all axes from hardware
-                    from py2flamingo.services.stage_service import StageService
-                    stage_service = StageService(self.connection_service)
+                # Query position from hardware (blocking call - queries all 4 axes)
+                position = stage_service.get_position()
 
-                    # Query position from hardware (queries all 4 axes)
-                    position = stage_service.get_position()
+                if position:
+                    self.logger.info(f"Queried position from hardware: {position}")
 
-                    if position:
-                        self.logger.info(f"Queried position from hardware: {position}")
+                    # Update position controller's cached position
+                    self.position_controller._current_position = position
 
-                        # Update position controller's cached position
-                        self.position_controller._current_position = position
+                    # Update legacy stage control view (must use Qt signal for thread safety)
+                    if self.stage_control_view:
+                        # Set connected flag directly (simple bool, thread-safe)
+                        self.stage_control_view.set_connected(True)
+                        # Schedule UI update on main thread via signal
+                        from PyQt5.QtCore import QMetaObject, Qt, Q_ARG
+                        QMetaObject.invokeMethod(
+                            self.stage_control_view,
+                            "update_position",
+                            Qt.QueuedConnection,
+                            Q_ARG(float, position.x),
+                            Q_ARG(float, position.y),
+                            Q_ARG(float, position.z),
+                            Q_ARG(float, position.r)
+                        )
 
-                        # Update legacy stage control view
-                        if self.stage_control_view:
-                            self.stage_control_view.set_connected(True)
-                            self.stage_control_view.update_position(
-                                position.x, position.y, position.z, position.r
-                            )
+                    # Update enhanced stage control view via signal (thread-safe)
+                    if self.enhanced_stage_control_view:
+                        self.movement_controller.position_changed.emit(
+                            position.x, position.y, position.z, position.r
+                        )
+                else:
+                    self.logger.warning("Failed to query position from hardware - no response")
 
-                        # Update enhanced stage control view via signal
-                        if self.enhanced_stage_control_view:
-                            # Trigger the position_changed signal which the view is listening to
-                            self.movement_controller.position_changed.emit(
-                                position.x, position.y, position.z, position.r
-                            )
-                    else:
-                        self.logger.warning("Failed to query position from hardware")
+            except Exception as e:
+                self.logger.error(f"Error querying position from hardware: {e}", exc_info=True)
 
-                except Exception as e:
-                    self.logger.error(f"Error querying position from hardware: {e}", exc_info=True)
-
-            # Delay query by 100ms to ensure connection is fully established
-            QTimer.singleShot(100, query_and_update_position)
-
-        except Exception as e:
-            self.logger.error(f"Error setting up position query: {e}")
+        # Run query in background thread to avoid blocking GUI during socket I/O
+        import threading
+        query_thread = threading.Thread(
+            target=query_and_update_position,
+            daemon=True,
+            name="PositionQuery"
+        )
+        query_thread.start()
 
     def _on_stage_connection_closed(self):
         """Handle connection closed event for stage control view.
