@@ -222,7 +222,7 @@ class FlamingoApplication:
         # Create enhanced stage control view
         self.logger.debug("Creating enhanced stage control view...")
         self.enhanced_stage_control_view = EnhancedStageControlView(
-            controller=self.movement_controller
+            movement_controller=self.movement_controller
         )
 
         # Keep old stage control view for compatibility
@@ -233,7 +233,7 @@ class FlamingoApplication:
         # Create camera live viewer
         self.logger.debug("Creating camera live viewer...")
         self.camera_live_viewer = CameraLiveViewer(
-            controller=self.camera_controller
+            camera_controller=self.camera_controller
         )
 
         # Set default connection values in view if provided via CLI
