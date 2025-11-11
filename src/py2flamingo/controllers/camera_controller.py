@@ -10,6 +10,8 @@ import numpy as np
 from collections import deque
 from typing import Optional, Callable
 from enum import Enum
+from pathlib import Path
+from datetime import datetime
 from PyQt5.QtCore import QObject, pyqtSignal
 
 from py2flamingo.services.camera_service import CameraService, ImageHeader
@@ -76,6 +78,10 @@ class CameraController(QObject):
         self._max_display_fps = 30.0
         self._last_display_time = 0
         self._min_display_interval = 1.0 / self._max_display_fps
+
+        # Snapshot capture
+        self._capture_next_frame = False
+        self._captured_snapshot: Optional[tuple] = None  # (image, header)
 
         # Connect camera service callback
         self.camera_service.set_image_callback(self._on_image_received)
@@ -253,12 +259,19 @@ class CameraController(QObject):
         Callback for when camera service receives a new image.
 
         Handles buffering, scaling, and rate limiting before emitting to view.
+        Also captures snapshots when requested.
 
         Args:
             image: Image array (uint16)
             header: Image metadata
         """
         import time
+
+        # Check if we're capturing a snapshot
+        if self._capture_next_frame:
+            self._captured_snapshot = (image.copy(), header)
+            self._capture_next_frame = False
+            self.logger.info("Snapshot captured from data stream")
 
         # Add to buffer
         self._frame_buffer.append((image.copy(), header))
@@ -311,3 +324,151 @@ class CameraController(QObject):
         if len(self._frame_buffer) > 0:
             return self._frame_buffer[-1]
         return None
+
+    def take_snapshot_and_save(self, sample_name: str, save_directory: str) -> Optional[str]:
+        """
+        Take a snapshot and save it with auto-incrementing filename.
+
+        This method reuses the existing data socket connection (if live view is active)
+        or temporarily connects to capture the snapshot. It does NOT duplicate any
+        communication infrastructure.
+
+        Args:
+            sample_name: Sample name for filename
+            save_directory: Directory to save snapshot
+
+        Returns:
+            Path to saved file, or None if failed
+
+        Example:
+            >>> path = controller.take_snapshot_and_save("sample_01", "/data/snapshots")
+            >>> print(f"Saved to {path}")
+        """
+        try:
+            # Check if we need to temporarily connect data socket
+            was_streaming = self._state == CameraState.LIVE_VIEW
+
+            if not was_streaming:
+                # Not in live view, need to connect data socket temporarily
+                self.logger.info("Connecting data socket for snapshot...")
+                self.camera_service.start_live_view_streaming()
+                import time
+                time.sleep(0.5)  # Give socket time to connect
+
+            # Set flag to capture next frame
+            self._capture_next_frame = True
+            self._captured_snapshot = None
+
+            # Send snapshot command (reuses existing communication)
+            self.logger.info("Sending snapshot command...")
+            self.camera_service.take_snapshot()
+
+            # Wait for image to arrive (via existing callback mechanism)
+            import time
+            timeout = 5.0  # 5 second timeout
+            start_time = time.time()
+
+            while self._captured_snapshot is None and (time.time() - start_time) < timeout:
+                time.sleep(0.1)
+
+            if self._captured_snapshot is None:
+                raise RuntimeError("Timeout waiting for snapshot image")
+
+            # Save the captured image
+            image, header = self._captured_snapshot
+            filename = self._generate_snapshot_filename(sample_name, save_directory)
+
+            self._save_image(image, filename)
+            self.logger.info(f"Snapshot saved to {filename}")
+
+            # Clean up temporary connection if needed
+            if not was_streaming:
+                self.logger.info("Disconnecting temporary data socket...")
+                self.camera_service.stop_live_view_streaming()
+
+            return filename
+
+        except Exception as e:
+            error_msg = f"Failed to capture snapshot: {e}"
+            self.logger.error(error_msg)
+            self.error_occurred.emit(error_msg)
+
+            # Clean up on error
+            if not was_streaming and self.camera_service._streaming:
+                try:
+                    self.camera_service.stop_live_view_streaming()
+                except:
+                    pass
+
+            return None
+
+    def _generate_snapshot_filename(self, sample_name: str, save_directory: str) -> str:
+        """
+        Generate snapshot filename with auto-incrementing number.
+
+        Format: {sample_name}_{YYYYMMDD}_{NNN}.tif
+        Where NNN is auto-incremented based on existing files.
+
+        Args:
+            sample_name: Sample name
+            save_directory: Directory to save in
+
+        Returns:
+            Full path to snapshot file
+        """
+        # Create directory if it doesn't exist
+        save_path = Path(save_directory)
+        save_path.mkdir(parents=True, exist_ok=True)
+
+        # Get current date
+        date_str = datetime.now().strftime("%Y%m%d")
+
+        # Find existing snapshots for this sample and date
+        pattern = f"{sample_name}_{date_str}_*.tif"
+        existing_files = list(save_path.glob(pattern))
+
+        # Determine next number
+        if not existing_files:
+            next_num = 1
+        else:
+            # Extract numbers from existing files
+            numbers = []
+            for file in existing_files:
+                try:
+                    # Extract number from filename: sample_20231115_005.tif -> 5
+                    parts = file.stem.split('_')
+                    if len(parts) >= 3:
+                        num = int(parts[-1])
+                        numbers.append(num)
+                except ValueError:
+                    continue
+
+            next_num = max(numbers) + 1 if numbers else 1
+
+        # Generate filename with zero-padded number
+        filename = f"{sample_name}_{date_str}_{next_num:03d}.tif"
+        full_path = save_path / filename
+
+        return str(full_path)
+
+    def _save_image(self, image: np.ndarray, filename: str) -> None:
+        """
+        Save image to TIFF file.
+
+        Args:
+            image: Image array (uint16)
+            filename: Path to save file
+        """
+        try:
+            from PIL import Image
+
+            # Convert to PIL Image and save as 16-bit TIFF
+            pil_image = Image.fromarray(image.astype(np.uint16), mode='I;16')
+            pil_image.save(filename, format='TIFF')
+
+            self.logger.info(f"Image saved: {filename}")
+
+        except ImportError:
+            # Fallback to numpy save if PIL not available
+            self.logger.warning("PIL not available, saving as numpy array")
+            np.save(filename.replace('.tif', '.npy'), image)

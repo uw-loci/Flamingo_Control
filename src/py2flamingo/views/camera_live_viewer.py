@@ -10,7 +10,7 @@ import numpy as np
 from typing import Optional
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QGroupBox, QSlider, QSpinBox, QCheckBox, QSizePolicy
+    QGroupBox, QSlider, QSpinBox, QCheckBox, QSizePolicy, QMessageBox
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer
 from PyQt5.QtGui import QPixmap, QImage
@@ -90,6 +90,13 @@ class CameraLiveViewer(QWidget):
         lv_layout.addWidget(self.stop_btn)
 
         lv_layout.addStretch()
+
+        # Snapshot button
+        self.snapshot_btn = QPushButton("Take Snapshot")
+        self.snapshot_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; padding: 8px;")
+        self.snapshot_btn.clicked.connect(self._on_snapshot_clicked)
+        lv_layout.addWidget(self.snapshot_btn)
+
         controls_layout.addLayout(lv_layout)
 
         # Exposure time control
@@ -318,6 +325,55 @@ class CameraLiveViewer(QWidget):
     def _on_stop_clicked(self) -> None:
         """Handle stop button click."""
         self.camera_controller.stop_live_view()
+
+    def _on_snapshot_clicked(self) -> None:
+        """Handle snapshot button click."""
+        try:
+            # Get sample name (could come from UI or config, using default for now)
+            sample_name = "sample"  # TODO: Get from sample info view or config
+
+            # Get save directory from config
+            from py2flamingo.services.configuration_service import ConfigurationService
+            config = ConfigurationService()
+            save_dir = config.get_data_storage_location()
+
+            # Ensure laser/LED is active
+            if self.laser_led_controller and not self.laser_led_controller.is_preview_active():
+                QMessageBox.warning(
+                    self,
+                    "No Light Source",
+                    "Please select and enable a laser or LED before taking a snapshot."
+                )
+                return
+
+            # Disable button during capture
+            self.snapshot_btn.setEnabled(False)
+            self.snapshot_btn.setText("Capturing...")
+
+            # Take snapshot (runs in background, reuses existing data socket)
+            from PyQt5.QtCore import QTimer
+            def do_snapshot():
+                filename = self.camera_controller.take_snapshot_and_save(sample_name, save_dir)
+                if filename:
+                    self.status_label.setText(f"Snapshot saved: {filename}")
+                    self.status_label.setStyleSheet("color: green; font-weight: bold;")
+                    self.logger.info(f"Snapshot saved to {filename}")
+                else:
+                    self.status_label.setText("Snapshot failed")
+                    self.status_label.setStyleSheet("color: red; font-weight: bold;")
+
+                # Re-enable button
+                self.snapshot_btn.setEnabled(True)
+                self.snapshot_btn.setText("Take Snapshot")
+
+            # Run snapshot in timer to avoid blocking UI
+            QTimer.singleShot(100, do_snapshot)
+
+        except Exception as e:
+            self.logger.error(f"Snapshot error: {e}")
+            QMessageBox.critical(self, "Snapshot Error", str(e))
+            self.snapshot_btn.setEnabled(True)
+            self.snapshot_btn.setText("Take Snapshot")
 
     def _on_exposure_changed(self, value: int) -> None:
         """Handle exposure time change."""
