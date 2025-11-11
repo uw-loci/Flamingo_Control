@@ -315,35 +315,37 @@ class FlamingoApplication:
             def query_and_update_position():
                 """Query position from hardware and update all views."""
                 try:
-                    # Use stage service to query each axis from hardware
-                    from py2flamingo.services.stage_service import StageService, AxisCode
+                    # Use stage service to query all axes from hardware
+                    from py2flamingo.services.stage_service import StageService
                     stage_service = StageService(self.connection_service)
 
-                    x = stage_service.query_axis_position(AxisCode.X_AXIS)
-                    y = stage_service.query_axis_position(AxisCode.Y_AXIS)
-                    z = stage_service.query_axis_position(AxisCode.Z_AXIS)
-                    r = stage_service.query_axis_position(AxisCode.ROTATION)
+                    # Query position from hardware (queries all 4 axes)
+                    position = stage_service.get_position()
 
-                    from py2flamingo.models.microscope import Position
-                    position = Position(x=x, y=y, z=z, r=r)
+                    if position:
+                        self.logger.info(f"Queried position from hardware: {position}")
 
-                    self.logger.info(f"Queried position from hardware: {position}")
+                        # Update position controller's cached position
+                        self.position_controller._current_position = position
 
-                    # Update position controller's cached position
-                    self.position_controller._current_position = position
+                        # Update legacy stage control view
+                        if self.stage_control_view:
+                            self.stage_control_view.set_connected(True)
+                            self.stage_control_view.update_position(
+                                position.x, position.y, position.z, position.r
+                            )
 
-                    # Update legacy stage control view
-                    if self.stage_control_view:
-                        self.stage_control_view.set_connected(True)
-                        self.stage_control_view.update_position(x, y, z, r)
-
-                    # Update enhanced stage control view via signal
-                    if self.enhanced_stage_control_view:
-                        # Trigger the position_changed signal which the view is listening to
-                        self.movement_controller.position_changed.emit(x, y, z, r)
+                        # Update enhanced stage control view via signal
+                        if self.enhanced_stage_control_view:
+                            # Trigger the position_changed signal which the view is listening to
+                            self.movement_controller.position_changed.emit(
+                                position.x, position.y, position.z, position.r
+                            )
+                    else:
+                        self.logger.warning("Failed to query position from hardware")
 
                 except Exception as e:
-                    self.logger.error(f"Error querying position from hardware: {e}")
+                    self.logger.error(f"Error querying position from hardware: {e}", exc_info=True)
 
             # Delay query by 100ms to ensure connection is fully established
             QTimer.singleShot(100, query_and_update_position)
