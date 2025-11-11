@@ -190,9 +190,10 @@ class FlamingoApplication:
         self.camera_controller = CameraController(self.camera_service)
         self.camera_controller.set_max_display_fps(30.0)
 
-        # Wire motion tracking to status indicator
+        # Wire motion tracking from MovementController to status indicator
+        # This connects the enhanced stage controller's motion signals to the global status indicator
         from py2flamingo.controllers.position_controller_adapter import wire_motion_tracking
-        wire_motion_tracking(self.position_controller, self.status_indicator_service)
+        wire_motion_tracking(self.movement_controller, self.status_indicator_service)
 
         # Views layer - UI components
         self.logger.debug("Creating views layer components...")

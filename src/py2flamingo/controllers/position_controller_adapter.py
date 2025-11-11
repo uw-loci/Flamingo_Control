@@ -153,3 +153,61 @@ def create_motion_tracking_adapter(position_controller: 'PositionController',
         logging.getLogger(__name__).info("Connected motion adapter to status indicator service")
 
     return adapter
+
+
+def wire_motion_tracking(controller, status_indicator_service: 'StatusIndicatorService') -> None:
+    """
+    Wire motion tracking from a controller to StatusIndicatorService.
+
+    This function intelligently connects motion tracking based on controller type:
+    - MovementController: Directly connects its Qt signals to status indicator
+    - PositionController: Creates an adapter to provide signal-based tracking
+
+    The function handles signal/slot parameter mismatches by using lambda adapters
+    to ignore the axis name parameter that MovementController emits.
+
+    Args:
+        controller: MovementController or PositionController instance
+        status_indicator_service: StatusIndicatorService instance
+
+    Usage:
+        >>> # With MovementController (preferred)
+        >>> wire_motion_tracking(movement_controller, status_indicator_service)
+        >>>
+        >>> # With PositionController (legacy compatibility)
+        >>> wire_motion_tracking(position_controller, status_indicator_service)
+
+    Type Handling:
+        MovementController has signals:
+            - motion_started = pyqtSignal(str)  # emits axis name
+            - motion_stopped = pyqtSignal(str)  # emits axis name
+
+        StatusIndicatorService has slots:
+            - on_motion_started()  # no parameters
+            - on_motion_stopped()  # no parameters
+
+        Lambda adapters are used to discard the axis name parameter.
+    """
+    logger = logging.getLogger(__name__)
+
+    # Check if controller is a MovementController (has Qt signals)
+    if hasattr(controller, 'motion_started') and hasattr(controller, 'motion_stopped'):
+        # MovementController - connect signals directly
+        # Use lambda to ignore axis name parameter that MovementController emits
+        controller.motion_started.connect(
+            lambda axis_name: status_indicator_service.on_motion_started()
+        )
+        controller.motion_stopped.connect(
+            lambda axis_name: status_indicator_service.on_motion_stopped()
+        )
+        logger.info("Connected MovementController signals to StatusIndicatorService")
+
+    else:
+        # PositionController - create adapter for signal-based tracking
+        # This provides backward compatibility for legacy code using PositionController
+        adapter = create_motion_tracking_adapter(controller, status_indicator_service)
+        logger.info("Created adapter for PositionController motion tracking")
+        logger.warning(
+            "Using PositionController for motion tracking. "
+            "Consider using MovementController for better integration."
+        )
