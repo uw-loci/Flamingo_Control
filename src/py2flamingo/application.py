@@ -306,14 +306,50 @@ class FlamingoApplication:
         Updates the stage control view to enable controls and display current position.
         """
         self.logger.info("Updating stage control view - connection established")
-        if self.stage_control_view:
-            self.stage_control_view.set_connected(True)
-            # Update position display
-            position = self.position_controller.get_current_position()
-            if position:
-                self.stage_control_view.update_position(
-                    position.x, position.y, position.z, position.r
-                )
+
+        # Query actual position from hardware (not cached value)
+        try:
+            # Import QTimer to delay position query slightly to ensure connection is ready
+            from PyQt5.QtCore import QTimer
+
+            def query_and_update_position():
+                """Query position from hardware and update all views."""
+                try:
+                    # Use stage service to query each axis from hardware
+                    from py2flamingo.services.stage_service import StageService, AxisCode
+                    stage_service = StageService(self.connection_service)
+
+                    x = stage_service.query_axis_position(AxisCode.X_AXIS)
+                    y = stage_service.query_axis_position(AxisCode.Y_AXIS)
+                    z = stage_service.query_axis_position(AxisCode.Z_AXIS)
+                    r = stage_service.query_axis_position(AxisCode.ROTATION)
+
+                    from py2flamingo.models.microscope import Position
+                    position = Position(x=x, y=y, z=z, r=r)
+
+                    self.logger.info(f"Queried position from hardware: {position}")
+
+                    # Update position controller's cached position
+                    self.position_controller._current_position = position
+
+                    # Update legacy stage control view
+                    if self.stage_control_view:
+                        self.stage_control_view.set_connected(True)
+                        self.stage_control_view.update_position(x, y, z, r)
+
+                    # Update enhanced stage control view via signal
+                    if self.enhanced_stage_control_view:
+                        # Trigger the position_changed signal which the view is listening to
+                        self.movement_controller.position_changed.emit(x, y, z, r)
+
+                except Exception as e:
+                    self.logger.error(f"Error querying position from hardware: {e}")
+
+            # Delay query by 100ms to ensure connection is fully established
+            QTimer.singleShot(100, query_and_update_position)
+
+        except Exception as e:
+            self.logger.error(f"Error setting up position query: {e}")
 
     def _on_stage_connection_closed(self):
         """Handle connection closed event for stage control view.
