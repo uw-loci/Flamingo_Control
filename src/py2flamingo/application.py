@@ -31,6 +31,7 @@ from py2flamingo.controllers.camera_controller import CameraController
 from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, ImageControlsWindow
 from py2flamingo.views.enhanced_stage_control_view import EnhancedStageControlView
 from py2flamingo.views.camera_live_viewer import CameraLiveViewer
+from py2flamingo.views.stage_chamber_visualization_window import StageChamberVisualizationWindow
 
 
 class FlamingoApplication:
@@ -99,6 +100,7 @@ class FlamingoApplication:
         self.enhanced_stage_control_view: Optional[EnhancedStageControlView] = None
         self.camera_live_viewer: Optional[CameraLiveViewer] = None
         self.image_controls_window: Optional[ImageControlsWindow] = None
+        self.stage_chamber_visualization_window: Optional[StageChamberVisualizationWindow] = None
 
         # Setup logging
         self.logger = logging.getLogger(__name__)
@@ -242,6 +244,14 @@ class FlamingoApplication:
 
         # Camera live viewer also starts hidden - user can open it via menu
         self.camera_live_viewer.hide()
+
+        # Create stage chamber visualization window
+        self.logger.debug("Creating stage chamber visualization window...")
+        self.stage_chamber_visualization_window = StageChamberVisualizationWindow(
+            movement_controller=self.movement_controller
+        )
+        # Window starts hidden - user can open it via menu
+        self.stage_chamber_visualization_window.hide()
 
         # Connect image controls to camera live viewer
         if self.image_controls_window and self.camera_live_viewer:
@@ -409,7 +419,8 @@ class FlamingoApplication:
             status_indicator_widget=self.status_indicator_widget,
             enhanced_stage_control_view=self.enhanced_stage_control_view,
             camera_live_viewer=self.camera_live_viewer,
-            image_controls_window=self.image_controls_window
+            image_controls_window=self.image_controls_window,
+            stage_chamber_visualization_window=self.stage_chamber_visualization_window
         )
         self.main_window.setWindowTitle("Flamingo Microscope Control")
         # Window size is automatically set based on screen dimensions

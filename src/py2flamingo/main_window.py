@@ -54,7 +54,8 @@ class MainWindow(QMainWindow):
                  status_indicator_widget=None,
                  enhanced_stage_control_view=None,
                  camera_live_viewer=None,
-                 image_controls_window=None):
+                 image_controls_window=None,
+                 stage_chamber_visualization_window=None):
         """Initialize main window with view components.
 
         Args:
@@ -65,6 +66,7 @@ class MainWindow(QMainWindow):
             enhanced_stage_control_view: Optional EnhancedStageControlView instance
             camera_live_viewer: Optional CameraLiveViewer instance
             image_controls_window: Optional ImageControlsWindow instance
+            stage_chamber_visualization_window: Optional StageChamberVisualizationWindow instance
         """
         super().__init__()
 
@@ -75,6 +77,7 @@ class MainWindow(QMainWindow):
         self.enhanced_stage_control_view = enhanced_stage_control_view
         self.camera_live_viewer = camera_live_viewer
         self.image_controls_window = image_controls_window
+        self.stage_chamber_visualization_window = stage_chamber_visualization_window
 
         self._setup_ui()
         self._setup_menu()
@@ -208,6 +211,14 @@ class MainWindow(QMainWindow):
             image_controls_action.triggered.connect(self._show_image_controls)
             view_menu.addAction(image_controls_action)
 
+        # Stage Chamber Visualization action
+        if self.stage_chamber_visualization_window is not None:
+            chamber_viz_action = QAction("&Stage Chamber Visualization...", self)
+            chamber_viz_action.setShortcut("Ctrl+M")
+            chamber_viz_action.setStatusTip("Open Stage Chamber Visualization window")
+            chamber_viz_action.triggered.connect(self._show_stage_chamber_visualization)
+            view_menu.addAction(chamber_viz_action)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -240,6 +251,13 @@ class MainWindow(QMainWindow):
             self.image_controls_window.show()
             self.image_controls_window.raise_()  # Bring to front
             self.image_controls_window.activateWindow()  # Give it focus
+
+    def _show_stage_chamber_visualization(self):
+        """Show Stage Chamber Visualization window."""
+        if self.stage_chamber_visualization_window is not None:
+            self.stage_chamber_visualization_window.show()
+            self.stage_chamber_visualization_window.raise_()  # Bring to front
+            self.stage_chamber_visualization_window.activateWindow()  # Give it focus
 
     def _on_tab_changed(self, index: int) -> None:
         """Handle tab change event - log which tab user switched to.
