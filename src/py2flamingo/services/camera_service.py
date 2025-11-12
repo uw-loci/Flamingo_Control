@@ -298,12 +298,11 @@ class CameraService(MicroscopeCommandService):
         """
         Start live view with image data streaming.
 
-        Sends LIVE_VIEW_START command first, waits for microscope to open
-        data port, then connects and begins receiving image frames in
-        background thread.
+        Uses the existing live socket (already connected to port 53718)
+        instead of creating a new connection.
 
         Args:
-            data_port: Port for image data (default: 53718)
+            data_port: Port for image data (default: 53718) - kept for compatibility but unused
 
         Raises:
             RuntimeError: If already streaming or connection fails
@@ -320,7 +319,7 @@ class CameraService(MicroscopeCommandService):
                 raise RuntimeError("Live view streaming already active")
 
             # Send START command on control port FIRST
-            # This tells the microscope to open the data port
+            # This tells the microscope to start streaming on the live socket
             try:
                 self.logger.info("Sending LIVE_VIEW_START command...")
                 self.start_live_view()
@@ -328,43 +327,41 @@ class CameraService(MicroscopeCommandService):
                 self.logger.error(f"Failed to start live view: {e}")
                 raise
 
-            # Wait for microscope to open data port (give it time to initialize)
-            self.logger.info("Waiting for microscope to open data port...")
+            # Wait for microscope to start streaming (give it time to initialize camera)
+            self.logger.info("Waiting for microscope to start streaming...")
             time.sleep(0.5)
 
-            # Now connect to data port
+            # Use the EXISTING live socket (already connected during initial connection)
             try:
-                self._data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self._data_socket.settimeout(5.0)
-
-                # Get IP from connection service (handle multiple connection types)
-                if hasattr(self.connection, 'ip'):
-                    # ConnectionService
-                    ip = self.connection.ip
-                elif hasattr(self.connection, 'tcp_connection') and hasattr(self.connection.tcp_connection, '_ip'):
+                # Get the live socket from the connection service
+                if hasattr(self.connection, 'tcp_connection') and hasattr(self.connection.tcp_connection, '_live_socket'):
                     # MVCConnectionService
+                    self._data_socket = self.connection.tcp_connection._live_socket
                     ip = self.connection.tcp_connection._ip
+                    port = 53718
+                elif hasattr(self.connection, 'live_client'):
+                    # ConnectionService
+                    self._data_socket = self.connection.live_client
+                    ip = self.connection.ip
+                    port = 53718
                 else:
-                    # Fallback
-                    ip = '127.0.0.1'
-                    self.logger.warning("Could not determine server IP from connection, using 127.0.0.1")
+                    raise RuntimeError("Cannot access live socket from connection service")
 
-                self.logger.info(f"Connecting to image data port {ip}:{data_port}...")
-                self._data_socket.connect((ip, data_port))
+                if self._data_socket is None:
+                    raise RuntimeError("Live socket is not connected")
 
-                self.logger.info(f"Connected to image data port {ip}:{data_port}")
+                self._data_socket.settimeout(5.0)
+                self.logger.info(f"Using existing live socket for image data ({ip}:{port})")
 
             except Exception as e:
-                self.logger.error(f"Failed to connect to data port: {e}")
-                if self._data_socket:
-                    self._data_socket.close()
-                    self._data_socket = None
+                self.logger.error(f"Failed to access live socket: {e}")
+                self._data_socket = None
                 # Try to stop live view on microscope since we can't receive data
                 try:
                     self.stop_live_view()
                 except:
                     pass
-                raise RuntimeError(f"Failed to connect to data port: {e}")
+                raise RuntimeError(f"Failed to access live socket: {e}")
 
             # Start streaming thread
             self._streaming = True
@@ -379,9 +376,10 @@ class CameraService(MicroscopeCommandService):
 
     def stop_live_view_streaming(self) -> None:
         """
-        Stop live view streaming and close data connection.
+        Stop live view streaming.
 
         Sends LIVE_VIEW_STOP command and stops background thread.
+        Note: Does NOT close the live socket as it's owned by tcp_connection.
 
         Example:
             >>> camera.stop_live_view_streaming()
@@ -404,13 +402,8 @@ class CameraService(MicroscopeCommandService):
         if self._data_thread and self._data_thread.is_alive():
             self._data_thread.join(timeout=2.0)
 
-        # Close data socket
-        if self._data_socket:
-            try:
-                self._data_socket.close()
-            except:
-                pass
-            self._data_socket = None
+        # Clear socket reference (but don't close it - tcp_connection owns it)
+        self._data_socket = None
 
         self.logger.info("Live view streaming stopped")
 
