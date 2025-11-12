@@ -70,18 +70,42 @@ class CameraLiveViewer(QWidget):
         # Configure as independent window
         self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint)
         self.setWindowTitle("Camera Live Viewer")
+        self.setMinimumSize(1000, 600)  # Wider window for horizontal layout
 
     def _setup_ui(self) -> None:
         """Create and layout UI components."""
-        main_layout = QVBoxLayout()
+        # Main horizontal layout: Image on left, controls on right
+        main_layout = QHBoxLayout()
+
+        # ===== LEFT SIDE: Image Display =====
+        left_layout = QVBoxLayout()
+
+        display_group = QGroupBox("Live Image")
+        display_layout = QVBoxLayout()
+
+        self.image_label = QLabel("No image - Click 'Start Live View'")
+        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setMinimumSize(640, 480)
+        self.image_label.setStyleSheet("QLabel { background-color: black; color: gray; border: 2px solid gray; }")
+        self.image_label.setScaledContents(False)
+        display_layout.addWidget(self.image_label)
+
+        display_group.setLayout(display_layout)
+        left_layout.addWidget(display_group, stretch=1)
+
+        # Add left side to main layout
+        main_layout.addLayout(left_layout, stretch=2)
+
+        # ===== RIGHT SIDE: Controls =====
+        right_layout = QVBoxLayout()
 
         # ===== Laser/LED Control Panel =====
         if self.laser_led_controller:
             from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
             self.laser_led_panel = LaserLEDControlPanel(self.laser_led_controller)
-            main_layout.addWidget(self.laser_led_panel)
+            right_layout.addWidget(self.laser_led_panel)
 
-        # ===== Top: Controls Group =====
+        # ===== Camera Controls Group =====
         controls_group = QGroupBox("Camera Controls")
         controls_layout = QVBoxLayout()
 
@@ -189,23 +213,9 @@ class CameraLiveViewer(QWidget):
         controls_layout.addLayout(overlay_layout)
 
         controls_group.setLayout(controls_layout)
-        main_layout.addWidget(controls_group)
+        right_layout.addWidget(controls_group)
 
-        # ===== Middle: Image Display =====
-        display_group = QGroupBox("Live Image")
-        display_layout = QVBoxLayout()
-
-        self.image_label = QLabel("No image - Click 'Start Live View'")
-        self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setMinimumSize(640, 480)
-        self.image_label.setStyleSheet("QLabel { background-color: black; color: gray; border: 2px solid gray; }")
-        self.image_label.setScaledContents(False)
-        display_layout.addWidget(self.image_label)
-
-        display_group.setLayout(display_layout)
-        main_layout.addWidget(display_group, stretch=1)
-
-        # ===== Bottom: Info Display =====
+        # ===== Info Display =====
         info_group = QGroupBox("Image Information")
         info_layout = QVBoxLayout()
 
@@ -250,7 +260,13 @@ class CameraLiveViewer(QWidget):
         info_layout.addLayout(intensity_layout)
 
         info_group.setLayout(info_layout)
-        main_layout.addWidget(info_group)
+        right_layout.addWidget(info_group)
+
+        # Add stretch to push everything to top
+        right_layout.addStretch()
+
+        # Add right side to main layout
+        main_layout.addLayout(right_layout, stretch=1)
 
         self.setLayout(main_layout)
 

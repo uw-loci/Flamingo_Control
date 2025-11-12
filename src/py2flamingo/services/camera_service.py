@@ -337,8 +337,18 @@ class CameraService(MicroscopeCommandService):
                 self._data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self._data_socket.settimeout(5.0)
 
-                # Get IP from connection service
-                ip = self.connection.ip if hasattr(self.connection, 'ip') else '127.0.0.1'
+                # Get IP from connection service (handle multiple connection types)
+                if hasattr(self.connection, 'ip'):
+                    # ConnectionService
+                    ip = self.connection.ip
+                elif hasattr(self.connection, 'tcp_connection') and hasattr(self.connection.tcp_connection, '_ip'):
+                    # MVCConnectionService
+                    ip = self.connection.tcp_connection._ip
+                else:
+                    # Fallback
+                    ip = '127.0.0.1'
+                    self.logger.warning("Could not determine server IP from connection, using 127.0.0.1")
+
                 self.logger.info(f"Connecting to image data port {ip}:{data_port}...")
                 self._data_socket.connect((ip, data_port))
 
