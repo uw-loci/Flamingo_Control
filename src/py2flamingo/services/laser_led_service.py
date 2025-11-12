@@ -42,6 +42,11 @@ class LaserLEDCommandCode:
     LED_PREVIEW_ENABLE = 0x4002  # 16386 - Enable LED preview
     LED_PREVIEW_DISABLE = 0x4003  # 16387 - Disable LED preview
 
+    # Illumination commands (0x7000 range)
+    # These control the illumination waveform for synchronized imaging
+    ILLUMINATION_LEFT_ENABLE = 0x7004  # 28676 - Enable left illumination
+    ILLUMINATION_LEFT_DISABLE = 0x7005  # 28677 - Disable left illumination
+
 
 class LaserLEDService(MicroscopeCommandService):
     """
@@ -300,6 +305,54 @@ class LaserLEDService(MicroscopeCommandService):
         result = self._send_command(
             LaserLEDCommandCode.LED_PREVIEW_DISABLE,
             "LED_PREVIEW_DISABLE",
+            params=[0, 0, 0, 0, 0, 0, 0]
+        )
+
+        return result['success']
+
+    def enable_illumination(self) -> bool:
+        """
+        Enable illumination waveform for synchronized imaging.
+
+        This must be called after enabling laser preview to configure
+        the illumination timing that coordinates with camera exposure.
+
+        From analysis of working system, this command:
+        - Sets illumination waveform (e.g., ILWAVE 200 1500 290 -1 -1)
+        - Coordinates camera exposure timing with light source
+
+        Returns:
+            True if successful, False otherwise
+
+        Example:
+            >>> # Proper sequence for laser live view:
+            >>> laser_led.disable_led_preview()  # 1. Disable LED
+            >>> laser_led.enable_laser_preview(2)  # 2. Enable laser 2
+            >>> laser_led.enable_illumination()  # 3. Enable illumination (CRITICAL!)
+            >>> camera.start_live_view()  # 4. Start imaging
+        """
+        self.logger.info("Enabling illumination for synchronized imaging")
+
+        result = self._send_command(
+            LaserLEDCommandCode.ILLUMINATION_LEFT_ENABLE,
+            "ILLUMINATION_LEFT_ENABLE",
+            params=[0, 0, 0, 0, 0, 0, 0]
+        )
+
+        return result['success']
+
+    def disable_illumination(self) -> bool:
+        """
+        Disable illumination waveform.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        self.logger.info("Disabling illumination")
+
+        result = self._send_command(
+            LaserLEDCommandCode.ILLUMINATION_LEFT_DISABLE,
+            "ILLUMINATION_LEFT_DISABLE",
             params=[0, 0, 0, 0, 0, 0, 0]
         )
 

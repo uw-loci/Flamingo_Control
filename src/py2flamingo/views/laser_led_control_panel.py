@@ -10,7 +10,7 @@ Provides UI controls for:
 import logging
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
-    QRadioButton, QButtonGroup, QGroupBox, QGridLayout
+    QRadioButton, QButtonGroup, QGroupBox, QGridLayout, QComboBox
 )
 from PyQt5.QtCore import Qt, pyqtSlot
 
@@ -45,10 +45,11 @@ class LaserLEDControlPanel(QWidget):
         self._laser_sliders = {}  # laser_index -> QSlider
         self._laser_labels = {}  # laser_index -> QLabel
 
-        # LED widgets - track by color (0=Red, 1=Green, 2=Blue, 3=White)
-        self._led_color_radios = {}  # color -> QRadioButton (for selecting active color)
-        self._led_sliders = {}  # color -> QSlider
-        self._led_labels = {}  # color -> QLabel
+        # LED widgets - single combobox and slider
+        self._led_radio = None  # Single radio button for LED
+        self._led_combobox = None  # Combobox for LED color selection
+        self._led_slider = None  # Single slider for LED intensity
+        self._led_label = None  # Single label for LED intensity display
 
         # Button group for radio buttons
         self._source_button_group = QButtonGroup()
@@ -90,7 +91,7 @@ class LaserLEDControlPanel(QWidget):
             main_layout.addWidget(led_group)
 
         # Status
-        self._status_label = QLabel("No light source active")
+        self._status_label = QLabel("Select a light source for live viewing")
         self._status_label.setStyleSheet(
             "background-color: #fff3cd; color: #856404; padding: 8px; "
             "border: 1px solid #ffc107; border-radius: 4px; font-weight: bold;"
@@ -155,7 +156,7 @@ class LaserLEDControlPanel(QWidget):
         return group
 
     def _create_led_section(self) -> QGroupBox:
-        """Create LED RGB control section."""
+        """Create LED RGB control section with single row and combobox."""
         if not self.laser_led_controller.is_led_available():
             return None
 
@@ -165,51 +166,41 @@ class LaserLEDControlPanel(QWidget):
 
         # Headers
         layout.addWidget(QLabel("<b>Select</b>"), 0, 0)
-        layout.addWidget(QLabel("<b>Color</b>"), 0, 1)
+        layout.addWidget(QLabel("<b>Type</b>"), 0, 1)
         layout.addWidget(QLabel("<b>Intensity (%)</b>"), 0, 2)
         layout.addWidget(QLabel("<b>Level</b>"), 0, 3)
 
-        # LED colors (0=Red, 1=Green, 2=Blue, 3=White)
-        colors = [
-            (0, "Red LED"),
-            (1, "Green LED"),
-            (2, "Blue LED"),
-            (3, "White LED")
-        ]
+        # Single LED row
+        row = 1
 
-        for i, (color_id, color_name) in enumerate(colors):
-            row = i + 1
+        # Radio button for selecting LED as light source
+        self._led_radio = QRadioButton()
+        # Use ID -1 for LED
+        self._source_button_group.addButton(self._led_radio, -1)
+        layout.addWidget(self._led_radio, row, 0, Qt.AlignCenter)
 
-            # Radio button for selecting this LED color
-            radio = QRadioButton()
-            self._led_color_radios[color_id] = radio
-            # Use negative IDs for LED: -1=Red, -2=Green, -3=Blue, -4=White
-            self._source_button_group.addButton(radio, -(color_id + 1))
-            layout.addWidget(radio, row, 0, Qt.AlignCenter)
+        # Combobox for LED color selection
+        self._led_combobox = QComboBox()
+        self._led_combobox.addItems(["Red", "Green", "Blue", "White"])
+        self._led_combobox.setCurrentIndex(0)  # Default to Red
+        self._led_combobox.currentIndexChanged.connect(self._on_led_color_changed)
+        layout.addWidget(self._led_combobox, row, 1)
 
-            # Color name label
-            name_label = QLabel(color_name)
-            layout.addWidget(name_label, row, 1)
+        # Intensity percentage label
+        intensity = self.laser_led_controller.get_led_intensity(0)  # Start with Red (0)
+        self._led_label = QLabel(f"{intensity:.1f}%")
+        self._led_label.setMinimumWidth(50)
+        self._led_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(self._led_label, row, 2)
 
-            # Intensity percentage label
-            intensity = self.laser_led_controller.get_led_intensity(color_id)
-            intensity_label = QLabel(f"{intensity:.1f}%")
-            intensity_label.setMinimumWidth(50)
-            intensity_label.setStyleSheet("font-weight: bold;")
-            self._led_labels[color_id] = intensity_label
-            layout.addWidget(intensity_label, row, 2)
-
-            # Intensity slider
-            slider = QSlider(Qt.Horizontal)
-            slider.setRange(0, 100)  # 0-100%
-            slider.setValue(int(intensity))
-            slider.setTickPosition(QSlider.TicksBelow)
-            slider.setTickInterval(10)
-            slider.valueChanged.connect(
-                lambda val, color=color_id: self._on_led_intensity_changed(color, val)
-            )
-            self._led_sliders[color_id] = slider
-            layout.addWidget(slider, row, 3)
+        # Intensity slider
+        self._led_slider = QSlider(Qt.Horizontal)
+        self._led_slider.setRange(0, 100)  # 0-100%
+        self._led_slider.setValue(int(intensity))
+        self._led_slider.setTickPosition(QSlider.TicksBelow)
+        self._led_slider.setTickInterval(10)
+        self._led_slider.valueChanged.connect(self._on_led_intensity_changed)
+        layout.addWidget(self._led_slider, row, 3)
 
         group.setLayout(layout)
         return group
@@ -225,23 +216,45 @@ class LaserLEDControlPanel(QWidget):
         # Send to controller
         self.laser_led_controller.set_laser_power(laser_index, power_percent)
 
-    def _on_led_intensity_changed(self, led_color: int, value: int) -> None:
+    def _on_led_intensity_changed(self, value: int) -> None:
         """Handle LED intensity slider change."""
         intensity_percent = float(value)
 
         # Update label
-        if led_color in self._led_labels:
-            self._led_labels[led_color].setText(f"{intensity_percent:.1f}%")
+        if self._led_label:
+            self._led_label.setText(f"{intensity_percent:.1f}%")
+
+        # Get current LED color from combobox
+        led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
 
         # Send to controller
         self.laser_led_controller.set_led_intensity(led_color, intensity_percent)
+
+    def _on_led_color_changed(self, index: int) -> None:
+        """Handle LED color combobox change."""
+        # Update slider and label to reflect the selected LED color's current intensity
+        intensity = self.laser_led_controller.get_led_intensity(index)
+
+        if self._led_slider:
+            self._led_slider.blockSignals(True)  # Prevent triggering intensity change
+            self._led_slider.setValue(int(intensity))
+            self._led_slider.blockSignals(False)
+
+        if self._led_label:
+            self._led_label.setText(f"{intensity:.1f}%")
+
+        # If LED is currently selected, re-enable preview with new color
+        if self._led_radio and self._led_radio.isChecked():
+            color_names = ["Red", "Green", "Blue", "White"]
+            self.logger.info(f"{color_names[index]} LED selected for preview")
+            self.laser_led_controller.enable_led_for_preview(index)
 
     def _on_source_selected(self, button: QRadioButton) -> None:
         """Handle light source selection."""
         source_id = self._source_button_group.id(button)
 
-        if source_id < 0:  # LED (negative IDs: -1=Red, -2=Green, -3=Blue, -4=White)
-            led_color = -(source_id + 1)  # Convert back to 0-3
+        if source_id == -1:  # LED (get color from combobox)
+            led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
             color_names = ["Red", "Green", "Blue", "White"]
             self.logger.info(f"{color_names[led_color]} LED selected for preview")
             self.laser_led_controller.enable_led_for_preview(led_color)
@@ -252,7 +265,7 @@ class LaserLEDControlPanel(QWidget):
     @pyqtSlot(str)
     def _on_preview_enabled(self, source_name: str) -> None:
         """Update UI when preview is enabled."""
-        self._status_label.setText(f"✓ Active: {source_name}")
+        self._status_label.setText(f"✓ Active: {source_name} (allows live viewing)")
         self._status_label.setStyleSheet(
             "background-color: #d4edda; color: #155724; padding: 8px; "
             "border: 1px solid #c3e6cb; border-radius: 4px; font-weight: bold;"
@@ -268,7 +281,7 @@ class LaserLEDControlPanel(QWidget):
             button.setChecked(False)
         self._source_button_group.setExclusive(True)
 
-        self._status_label.setText("No light source active")
+        self._status_label.setText("Select a light source for live viewing")
         self._status_label.setStyleSheet(
             "background-color: #fff3cd; color: #856404; padding: 8px; "
             "border: 1px solid #ffc107; border-radius: 4px; font-weight: bold;"
@@ -297,8 +310,8 @@ class LaserLEDControlPanel(QWidget):
             return "none"
 
         source_id = self._source_button_group.id(checked_button)
-        if source_id < 0:  # LED (negative IDs: -1=Red, -2=Green, -3=Blue, -4=White)
-            led_color = -(source_id + 1)
+        if source_id == -1:  # LED (get color from combobox)
+            led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
             color_names = ["red", "green", "blue", "white"]
             return f"led_{color_names[led_color]}"
         else:

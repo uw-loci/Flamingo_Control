@@ -180,10 +180,12 @@ class LaserLEDController(QObject):
         """
         Enable specific laser for preview/imaging.
 
-        This method:
-        1. Sets the laser power (if not already set)
-        2. Disables all other light sources
-        3. Enables the specified laser in preview mode
+        CRITICAL: Follows exact command sequence from working C++ implementation:
+        1. Disable LED if active (0x4003)
+        2. Set laser power
+        3. Enable laser preview mode (0x2004 with laser_index)
+        4. Enable illumination (0x7004) - coordinates exposure timing
+        5. Ready for snapshot/live view
 
         Args:
             laser_index: Laser index (1-4)
@@ -192,20 +194,28 @@ class LaserLEDController(QObject):
             True if successful
         """
         try:
-            self.logger.info(f"Enabling laser {laser_index} for preview")
+            self.logger.info(f"Enabling laser {laser_index} for preview (full sequence)")
 
-            # Disable LED if it was active
-            if self._active_source == "led":
+            # Step 1: Disable LED if it was active
+            if self._active_source and self._active_source.startswith("led"):
+                self.logger.info("Step 1: Disabling LED")
                 self.laser_led_service.disable_led_preview()
 
-            # Set power if not already set
+            # Step 2: Set laser power
             power = self._laser_powers.get(laser_index, 5.0)
+            self.logger.info(f"Step 2: Setting laser {laser_index} power to {power:.1f}%")
             if not self.laser_led_service.set_laser_power(laser_index, power):
                 raise RuntimeError(f"Failed to set laser {laser_index} power")
 
-            # Enable laser preview (this automatically disables other lasers)
+            # Step 3: Enable laser preview (automatically disables other lasers)
+            self.logger.info(f"Step 3: Enabling laser {laser_index} preview mode")
             if not self.laser_led_service.enable_laser_preview(laser_index):
                 raise RuntimeError(f"Failed to enable laser {laser_index} preview")
+
+            # Step 4: Enable illumination (CRITICAL - coordinates exposure timing)
+            self.logger.info("Step 4: Enabling illumination for synchronized imaging")
+            if not self.laser_led_service.enable_illumination():
+                raise RuntimeError("Failed to enable illumination")
 
             # Update state
             self._active_source = f"laser_{laser_index}"
@@ -218,7 +228,7 @@ class LaserLEDController(QObject):
                     break
 
             self.preview_enabled.emit(laser_name)
-            self.logger.info(f"Laser {laser_index} enabled for preview")
+            self.logger.info(f"Laser {laser_index} enabled for preview - ready for imaging")
             return True
 
         except Exception as e:
@@ -231,10 +241,11 @@ class LaserLEDController(QObject):
         """
         Enable LED for preview/imaging.
 
-        This method:
-        1. Sets the LED color (if specified) and intensity
-        2. Disables all lasers
-        3. Enables LED in preview mode
+        Command sequence for LED:
+        1. Disable all lasers
+        2. Set LED intensity for selected color
+        3. Enable LED preview mode
+        4. Enable illumination (for synchronized imaging)
 
         Args:
             led_color: LED color (0=Red, 1=Green, 2=Blue, 3=White). If None, uses current selection.
@@ -252,26 +263,34 @@ class LaserLEDController(QObject):
             color_names = ["Red", "Green", "Blue", "White"]
             color_name = color_names[self._led_color]
 
-            self.logger.info(f"Enabling {color_name} LED for preview")
+            self.logger.info(f"Enabling {color_name} LED for preview (full sequence)")
 
-            # Disable all lasers
+            # Step 1: Disable all lasers
+            self.logger.info("Step 1: Disabling all lasers")
             self.laser_led_service.disable_all_lasers()
 
-            # Set intensity for selected color
+            # Step 2: Set intensity for selected color
             intensity = self._led_intensities.get(self._led_color, 50.0)
+            self.logger.info(f"Step 2: Setting {color_name} LED intensity to {intensity:.1f}%")
             if not self.laser_led_service.set_led_intensity(self._led_color, intensity):
                 raise RuntimeError(f"Failed to set {color_name} LED intensity")
 
-            # Enable LED preview
+            # Step 3: Enable LED preview
+            self.logger.info("Step 3: Enabling LED preview mode")
             if not self.laser_led_service.enable_led_preview():
                 raise RuntimeError("Failed to enable LED preview")
+
+            # Step 4: Enable illumination (for synchronized imaging)
+            self.logger.info("Step 4: Enabling illumination for synchronized imaging")
+            if not self.laser_led_service.enable_illumination():
+                raise RuntimeError("Failed to enable illumination")
 
             # Update state
             self._active_source = f"led_{color_name[0]}"  # "led_R", "led_G", "led_B", or "led_W"
             self._active_laser_index = None
 
             self.preview_enabled.emit(f"{color_name} LED")
-            self.logger.info(f"{color_name} LED enabled for preview")
+            self.logger.info(f"{color_name} LED enabled for preview - ready for imaging")
             return True
 
         except Exception as e:

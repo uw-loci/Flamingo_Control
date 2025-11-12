@@ -129,6 +129,13 @@ class CameraService(MicroscopeCommandService):
         self._frame_times: list = []
         self._max_frame_history = 30
 
+        # Fast frame buffer (thread-safe queue)
+        # Camera sends frames fast -> buffer them ALL
+        # Downstream processing pulls and drops as needed
+        from collections import deque
+        self._frame_buffer_lock = threading.Lock()
+        self._frame_buffer = deque(maxlen=20)  # Keep last 20 frames max
+
     def get_image_size(self) -> Tuple[int, int]:
         """
         Get camera image dimensions in pixels.
@@ -429,15 +436,83 @@ class CameraService(MicroscopeCommandService):
             return 1.0 / avg_diff
         return 0.0
 
+    def get_latest_frame(self, clear_buffer: bool = True) -> Optional[tuple]:
+        """
+        Get the latest frame from buffer.
+
+        FRAME DROPPING STRATEGY:
+        When clear_buffer=True (default), this method:
+        1. Gets the most recent frame
+        2. Clears all older frames from buffer
+        3. Returns the latest frame for processing
+
+        This ensures processing always works on fresh data and never
+        gets stuck processing a backlog of old frames.
+
+        Args:
+            clear_buffer: If True, clear all accumulated frames after getting latest.
+                         This prevents processing backlog and ensures display updates.
+
+        Returns:
+            Tuple of (image_array, header) or None if buffer empty
+
+        Example:
+            >>> # Get latest and drop accumulated frames
+            >>> frame = camera.get_latest_frame(clear_buffer=True)
+            >>> if frame:
+            ...     image, header = frame
+            ...     # Process this frame
+            ...     # All older frames are now discarded
+        """
+        with self._frame_buffer_lock:
+            if len(self._frame_buffer) == 0:
+                return None
+
+            # Get the newest frame (rightmost in deque)
+            latest = self._frame_buffer[-1]
+
+            if clear_buffer:
+                # Clear the buffer to drop accumulated frames
+                # This prevents processing backlog
+                dropped_count = len(self._frame_buffer) - 1
+                self._frame_buffer.clear()
+                if dropped_count > 0:
+                    self.logger.debug(f"Dropped {dropped_count} accumulated frames")
+
+            return latest
+
+    def get_buffer_size(self) -> int:
+        """
+        Get current number of frames in buffer.
+
+        Returns:
+            Number of buffered frames
+        """
+        with self._frame_buffer_lock:
+            return len(self._frame_buffer)
+
+    def clear_frame_buffer(self) -> None:
+        """Clear all buffered frames."""
+        with self._frame_buffer_lock:
+            count = len(self._frame_buffer)
+            self._frame_buffer.clear()
+            if count > 0:
+                self.logger.info(f"Cleared {count} frames from buffer")
+
     def _data_receiver_loop(self) -> None:
         """
         Background thread that receives image data from data socket.
 
-        Continuously reads header + image data and delivers to callback.
+        CRITICAL DESIGN: This thread ONLY receives and buffers frames.
+        No processing, no callbacks, no delays - just fast acquisition.
+        Downstream consumers pull from buffer and drop frames as needed.
+
+        This ensures camera data is never blocked, preventing socket overflow.
         """
         import time
 
         self.logger.info("Data receiver thread started")
+        frames_received = 0
 
         while self._streaming:
             try:
@@ -466,9 +541,18 @@ class CameraService(MicroscopeCommandService):
                 if len(self._frame_times) > self._max_frame_history:
                     self._frame_times.pop(0)
 
-                # Deliver to callback
+                frames_received += 1
+
+                # Fast buffering: Just add to queue (deque handles overflow by dropping oldest)
+                with self._frame_buffer_lock:
+                    self._frame_buffer.append((image_array, header))
+
+                # Optional: Trigger callback for notification (but don't do work in it!)
+                # Callback should just signal that data is available, not process it
                 if self._image_callback:
                     try:
+                        # Pass notification that frame is ready
+                        # Controller should pull from buffer, not process here
                         self._image_callback(image_array, header)
                     except Exception as e:
                         self.logger.error(f"Error in image callback: {e}")
@@ -482,7 +566,7 @@ class CameraService(MicroscopeCommandService):
                     self.logger.error(f"Error in data receiver: {e}")
                 break
 
-        self.logger.info("Data receiver thread stopped")
+        self.logger.info(f"Data receiver thread stopped (received {frames_received} frames)")
 
     def _receive_exact(self, sock: socket.socket, num_bytes: int) -> Optional[bytes]:
         """

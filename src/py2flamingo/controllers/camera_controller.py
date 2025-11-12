@@ -12,7 +12,7 @@ from typing import Optional, Callable
 from enum import Enum
 from pathlib import Path
 from datetime import datetime
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 
 from py2flamingo.services.camera_service import CameraService, ImageHeader
 
@@ -83,7 +83,13 @@ class CameraController(QObject):
         self._capture_next_frame = False
         self._captured_snapshot: Optional[tuple] = None  # (image, header)
 
-        # Connect camera service callback
+        # Timer-based frame pulling (ensures display always updates)
+        # This timer pulls latest frame from buffer and discards accumulated frames
+        self._display_timer = QTimer()
+        self._display_timer.timeout.connect(self._pull_and_display_frame)
+        self._display_timer_interval_ms = int(1000 / self._max_display_fps)
+
+        # Connect camera service callback (lightweight notification only)
         self.camera_service.set_image_callback(self._on_image_received)
 
     @property
@@ -107,6 +113,8 @@ class CameraController(QObject):
         """
         Start live view mode.
 
+        Starts camera streaming and display timer that pulls frames at target FPS.
+
         Returns:
             True if started successfully, False otherwise
         """
@@ -116,7 +124,14 @@ class CameraController(QObject):
 
         try:
             self.logger.info("Starting live view...")
+
+            # Start camera streaming (fills buffer in background)
             self.camera_service.start_live_view_streaming()
+
+            # Start display timer (pulls and displays at target FPS)
+            self._display_timer.start(self._display_timer_interval_ms)
+            self.logger.info(f"Display timer started at {self._max_display_fps} FPS")
+
             self.set_state(CameraState.LIVE_VIEW)
             return True
 
@@ -131,6 +146,8 @@ class CameraController(QObject):
         """
         Stop live view mode.
 
+        Stops display timer and camera streaming.
+
         Returns:
             True if stopped successfully, False otherwise
         """
@@ -140,7 +157,14 @@ class CameraController(QObject):
 
         try:
             self.logger.info("Stopping live view...")
+
+            # Stop display timer
+            self._display_timer.stop()
+            self.logger.info("Display timer stopped")
+
+            # Stop camera streaming
             self.camera_service.stop_live_view_streaming()
+
             self.set_state(CameraState.IDLE)
             return True
 
@@ -229,6 +253,12 @@ class CameraController(QObject):
 
         self._max_display_fps = fps
         self._min_display_interval = 1.0 / fps
+        self._display_timer_interval_ms = int(1000 / fps)
+
+        # Update timer if running
+        if self._display_timer.isActive():
+            self._display_timer.setInterval(self._display_timer_interval_ms)
+
         self.logger.info(f"Max display FPS set to {fps}")
 
     def get_buffered_frames(self) -> list:
@@ -256,41 +286,59 @@ class CameraController(QObject):
 
     def _on_image_received(self, image: np.ndarray, header: ImageHeader) -> None:
         """
-        Callback for when camera service receives a new image.
+        Lightweight callback for when camera service receives a new image.
 
-        Handles buffering, scaling, and rate limiting before emitting to view.
-        Also captures snapshots when requested.
+        CRITICAL: This runs in the receiver thread and must be FAST.
+        No processing, no display - just snapshot capture check.
+        The actual display is handled by _pull_and_display_frame() timer.
 
         Args:
             image: Image array (uint16)
             header: Image metadata
         """
-        import time
-
-        # Check if we're capturing a snapshot
+        # ONLY handle snapshot capture (fast operation)
         if self._capture_next_frame:
             self._captured_snapshot = (image.copy(), header)
             self._capture_next_frame = False
             self.logger.info("Snapshot captured from data stream")
 
-        # Add to buffer
+        # Add to our own buffer for history
         self._frame_buffer.append((image.copy(), header))
 
-        # Apply frame rate limiting for display
-        current_time = time.time()
-        if current_time - self._last_display_time < self._min_display_interval:
-            return  # Skip this frame to maintain target FPS
+    def _pull_and_display_frame(self) -> None:
+        """
+        Timer callback that pulls latest frame and displays it.
 
-        self._last_display_time = current_time
+        FRAME DROPPING STRATEGY (as requested by user):
+        1. Pull the latest frame from camera service buffer
+        2. Camera service automatically discards all accumulated frames
+        3. Process and display this one frame
+        4. By next timer tick, camera has filled buffer with new frames
+        5. Pull latest again, discard accumulated, repeat
 
-        # Apply display scaling if auto-scale enabled
-        if self._auto_scale and header.image_scale_min != header.image_scale_max:
-            # Use header-provided scale values
-            self._display_min = header.image_scale_min
-            self._display_max = header.image_scale_max
-
-        # Emit to UI (Qt signal handles thread safety)
+        This ensures:
+        - Camera data is ALWAYS acquired (never blocked)
+        - Display ALWAYS updates (never stuck processing old frames)
+        - Frames are dropped intelligently (keep latest, drop old)
+        - Processing time doesn't cause lag accumulation
+        """
         try:
+            # Pull latest frame from service (automatically clears accumulated frames)
+            frame = self.camera_service.get_latest_frame(clear_buffer=True)
+
+            if frame is None:
+                # No frames available yet (startup condition)
+                return
+
+            image, header = frame
+
+            # Apply display scaling if auto-scale enabled
+            if self._auto_scale and header.image_scale_min != header.image_scale_max:
+                # Use header-provided scale values
+                self._display_min = header.image_scale_min
+                self._display_max = header.image_scale_max
+
+            # Emit to UI (Qt signal handles thread safety)
             self.new_image.emit(image, header)
 
             # Update frame rate every 10 frames
@@ -299,7 +347,7 @@ class CameraController(QObject):
                 self.frame_rate_updated.emit(fps)
 
         except Exception as e:
-            self.logger.error(f"Error emitting image: {e}")
+            self.logger.error(f"Error in display frame: {e}")
 
     def get_image_dimensions(self) -> Optional[tuple]:
         """
