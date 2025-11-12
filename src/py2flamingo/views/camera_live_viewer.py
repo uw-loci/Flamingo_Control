@@ -152,65 +152,13 @@ class CameraLiveViewer(QWidget):
         exp_layout.addStretch()
         controls_layout.addLayout(exp_layout)
 
-        # Display scaling controls
-        scale_layout = QVBoxLayout()
-
-        # Auto-scale checkbox
-        autoscale_layout = QHBoxLayout()
-        self.autoscale_checkbox = QCheckBox("Auto-scale Intensity")
-        self.autoscale_checkbox.setChecked(True)
-        self.autoscale_checkbox.stateChanged.connect(self._on_autoscale_changed)
-        autoscale_layout.addWidget(self.autoscale_checkbox)
-        autoscale_layout.addStretch()
-        scale_layout.addLayout(autoscale_layout)
-
-        # Min intensity slider
-        min_layout = QHBoxLayout()
-        min_layout.addWidget(QLabel("Min Intensity:"))
-        self.min_slider = QSlider(Qt.Horizontal)
-        self.min_slider.setRange(0, 65535)
-        self.min_slider.setValue(0)
-        self.min_slider.valueChanged.connect(self._on_min_changed)
-        self.min_slider.setEnabled(False)
-        min_layout.addWidget(self.min_slider)
-        self.min_label = QLabel("0")
-        self.min_label.setMinimumWidth(50)
-        min_layout.addWidget(self.min_label)
-        scale_layout.addLayout(min_layout)
-
-        # Max intensity slider
-        max_layout = QHBoxLayout()
-        max_layout.addWidget(QLabel("Max Intensity:"))
-        self.max_slider = QSlider(Qt.Horizontal)
-        self.max_slider.setRange(0, 65535)
-        self.max_slider.setValue(65535)
-        self.max_slider.valueChanged.connect(self._on_max_changed)
-        self.max_slider.setEnabled(False)
-        max_layout.addWidget(self.max_slider)
-        self.max_label = QLabel("65535")
-        self.max_label.setMinimumWidth(50)
-        max_layout.addWidget(self.max_label)
-        scale_layout.addLayout(max_layout)
-
-        controls_layout.addLayout(scale_layout)
-
-        # Crosshair and zoom controls
-        overlay_layout = QHBoxLayout()
-        self.crosshair_checkbox = QCheckBox("Show Crosshair")
-        self.crosshair_checkbox.stateChanged.connect(self._on_crosshair_changed)
-        overlay_layout.addWidget(self.crosshair_checkbox)
-
-        overlay_layout.addStretch()
-        overlay_layout.addWidget(QLabel("Zoom:"))
-        self.zoom_spinbox = QSpinBox()
-        self.zoom_spinbox.setRange(100, 400)  # 100% to 400%
-        self.zoom_spinbox.setValue(100)
-        self.zoom_spinbox.setSuffix("%")
-        self.zoom_spinbox.setSingleStep(25)
-        self.zoom_spinbox.valueChanged.connect(self._on_zoom_changed)
-        overlay_layout.addWidget(self.zoom_spinbox)
-
-        controls_layout.addLayout(overlay_layout)
+        # Note about Image Controls
+        note_layout = QHBoxLayout()
+        note_label = QLabel("<i>Use 'Image Controls' window for intensity scaling, rotation, zoom, etc.</i>")
+        note_label.setStyleSheet("color: #666; font-size: 9pt;")
+        note_label.setWordWrap(True)
+        note_layout.addWidget(note_label)
+        controls_layout.addLayout(note_layout)
 
         controls_group.setLayout(controls_layout)
         right_layout.addWidget(controls_group)
@@ -325,21 +273,6 @@ class CameraLiveViewer(QWidget):
             f"[{header.image_scale_min} - {header.image_scale_max}]"
         )
 
-        # Update sliders to reflect current auto-scale values (if auto-scale enabled)
-        if self.autoscale_checkbox.isChecked():
-            # Block signals to prevent triggering handlers
-            self.min_slider.blockSignals(True)
-            self.max_slider.blockSignals(True)
-
-            self.min_slider.setValue(header.image_scale_min)
-            self.min_label.setText(str(header.image_scale_min))
-
-            self.max_slider.setValue(header.image_scale_max)
-            self.max_label.setText(str(header.image_scale_max))
-
-            self.min_slider.blockSignals(False)
-            self.max_slider.blockSignals(False)
-
         # Convert and display image
         self._display_image(image, header)
 
@@ -422,35 +355,6 @@ class CameraLiveViewer(QWidget):
         self.camera_controller.set_exposure_time(value)
         self.exposure_ms_label.setText(f"{value/1000:.2f} ms")
 
-    def _on_autoscale_changed(self, state: int) -> None:
-        """Handle auto-scale checkbox change."""
-        enabled = state == Qt.Checked
-        self.camera_controller.set_auto_scale(enabled)
-
-        # Enable/disable manual sliders
-        self.min_slider.setEnabled(not enabled)
-        self.max_slider.setEnabled(not enabled)
-
-    def _on_min_changed(self, value: int) -> None:
-        """Handle min intensity slider change."""
-        self.min_label.setText(str(value))
-        if not self.camera_controller.is_auto_scale():
-            max_val = self.max_slider.value()
-            self.camera_controller.set_display_range(value, max_val)
-            # Redisplay current image if available
-            if self._current_image is not None:
-                self._display_image(self._current_image, self._current_header)
-
-    def _on_max_changed(self, value: int) -> None:
-        """Handle max intensity slider change."""
-        self.max_label.setText(str(value))
-        if not self.camera_controller.is_auto_scale():
-            min_val = self.min_slider.value()
-            self.camera_controller.set_display_range(min_val, value)
-            # Redisplay current image if available
-            if self._current_image is not None:
-                self._display_image(self._current_image, self._current_header)
-
     def _on_crosshair_changed(self, state: int) -> None:
         """Handle crosshair checkbox change."""
         # Update internal state
@@ -508,12 +412,18 @@ class CameraLiveViewer(QWidget):
             # Apply color map
             if self._colormap != "Grayscale":
                 normalized = self._apply_colormap(normalized, self._colormap)
+                # Ensure array is C-contiguous for QImage
+                if not normalized.flags['C_CONTIGUOUS']:
+                    normalized = np.ascontiguousarray(normalized)
                 # Convert to QImage (RGB format)
                 height, width, channels = normalized.shape
                 bytes_per_line = width * channels
                 qimage = QImage(normalized.data, width, height, bytes_per_line,
                               QImage.Format_RGB888)
             else:
+                # Ensure array is C-contiguous for QImage
+                if not normalized.flags['C_CONTIGUOUS']:
+                    normalized = np.ascontiguousarray(normalized)
                 # Convert to QImage (grayscale)
                 height, width = normalized.shape
                 bytes_per_line = width
