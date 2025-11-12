@@ -3,10 +3,15 @@ Stage Chamber Visualization Window - Standalone window for chamber visualization
 
 This window displays the StageChamberVisualizationWidget and connects it
 to real-time position updates from the movement controller.
+
+Includes synchronized sliders for direct stage control that are fully
+integrated with the Stage Control tab.
 """
 
 import logging
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QGroupBox, QGridLayout
+)
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QFont
 
@@ -15,10 +20,17 @@ from py2flamingo.views.widgets.stage_chamber_visualization import StageChamberVi
 
 class StageChamberVisualizationWindow(QWidget):
     """
-    Standalone window showing stage chamber visualization.
+    Standalone window showing stage chamber visualization with position control.
 
-    Displays dual XZ/XY views of the stage position within the sample chamber.
-    Updates in real-time as the stage moves.
+    Displays dual XZ/XY views of the stage position within the sample chamber
+    with synchronized sliders for direct position control. All controls are
+    fully synchronized with the Stage Control tab.
+
+    Features:
+    - Real-time 2D visualization (XZ top-down, XY side view)
+    - Position control sliders for X, Y, Z, R axes
+    - Bi-directional synchronization with Stage Control tab
+    - Automatic enable/disable based on motion state
     """
 
     def __init__(self, movement_controller, parent=None):
@@ -34,10 +46,16 @@ class StageChamberVisualizationWindow(QWidget):
         self.logger = logging.getLogger(__name__)
         self.movement_controller = movement_controller
 
+        # Get stage limits from movement controller
+        self.stage_limits = self.movement_controller.get_stage_limits()
+
+        # Track motion state for enabling/disabling controls
+        self._controls_enabled = True
+
         # Window configuration
-        self.setWindowTitle("Stage Chamber Visualization")
-        self.setMinimumSize(800, 450)
-        self.resize(900, 500)
+        self.setWindowTitle("Stage Chamber Visualization & Control")
+        self.setMinimumSize(900, 650)
+        self.resize(950, 700)
 
         self._setup_ui()
         self._connect_signals()
@@ -74,6 +92,9 @@ class StageChamberVisualizationWindow(QWidget):
         self.visualization_widget = StageChamberVisualizationWidget()
         layout.addWidget(self.visualization_widget)
 
+        # Position control sliders
+        layout.addWidget(self._create_position_sliders())
+
         # Position info label
         self.position_info = QLabel("Position: Waiting for update...")
         self.position_info.setStyleSheet(
@@ -85,14 +106,200 @@ class StageChamberVisualizationWindow(QWidget):
 
         self.setLayout(layout)
 
+    def _create_position_sliders(self) -> QGroupBox:
+        """Create position control sliders for all axes."""
+        group = QGroupBox("Position Control (Synchronized with Stage Control)")
+        grid = QGridLayout()
+        grid.setSpacing(10)
+
+        # Helper to create slider with labels
+        def create_axis_slider(axis_name: str, min_val: float, max_val: float,
+                              decimals: int, suffix: str) -> tuple:
+            """Create slider row with labels."""
+            # Axis label
+            axis_label = QLabel(f"<b>{axis_name}:</b>")
+            axis_label.setMinimumWidth(30)
+
+            # Min label
+            min_label = QLabel(f"{min_val:.{decimals}f}")
+            min_label.setStyleSheet("color: #666; font-size: 9pt;")
+            min_label.setAlignment(Qt.AlignRight)
+            min_label.setMinimumWidth(60)
+
+            # Slider (scaled to integer range for precision)
+            # Scale factor: 10^decimals to preserve decimal precision
+            scale_factor = 10 ** decimals
+            slider = QSlider(Qt.Horizontal)
+            slider.setMinimum(int(min_val * scale_factor))
+            slider.setMaximum(int(max_val * scale_factor))
+            slider.setSingleStep(1)  # Smallest step in scaled units
+            slider.setPageStep(scale_factor)  # 1.0 unit steps
+            slider.setTickPosition(QSlider.TicksBelow)
+            slider.setTickInterval(int((max_val - min_val) * scale_factor / 10))
+            slider.setMinimumWidth(400)
+
+            # Max label
+            max_label = QLabel(f"{max_val:.{decimals}f}")
+            max_label.setStyleSheet("color: #666; font-size: 9pt;")
+            max_label.setMinimumWidth(60)
+
+            # Value display label
+            value_label = QLabel(f"{min_val:.{decimals}f} {suffix}")
+            value_label.setStyleSheet(
+                "background-color: #e3f2fd; padding: 5px; "
+                "border: 1px solid #2196f3; border-radius: 3px; "
+                "font-weight: bold; min-width: 100px;"
+            )
+            value_label.setAlignment(Qt.AlignCenter)
+
+            return axis_label, min_label, slider, max_label, value_label, scale_factor
+
+        # X axis slider
+        row = 0
+        x_widgets = create_axis_slider("X", self.stage_limits['x']['min'],
+                                      self.stage_limits['x']['max'], 3, "mm")
+        self.x_slider = x_widgets[2]
+        self.x_value_label = x_widgets[4]
+        self.x_scale_factor = x_widgets[5]
+        grid.addWidget(x_widgets[0], row, 0)  # Label
+        grid.addWidget(x_widgets[1], row, 1)  # Min
+        grid.addWidget(x_widgets[2], row, 2)  # Slider
+        grid.addWidget(x_widgets[3], row, 3)  # Max
+        grid.addWidget(x_widgets[4], row, 4)  # Value
+
+        # Y axis slider
+        row = 1
+        y_widgets = create_axis_slider("Y", self.stage_limits['y']['min'],
+                                      self.stage_limits['y']['max'], 3, "mm")
+        self.y_slider = y_widgets[2]
+        self.y_value_label = y_widgets[4]
+        self.y_scale_factor = y_widgets[5]
+        grid.addWidget(y_widgets[0], row, 0)
+        grid.addWidget(y_widgets[1], row, 1)
+        grid.addWidget(y_widgets[2], row, 2)
+        grid.addWidget(y_widgets[3], row, 3)
+        grid.addWidget(y_widgets[4], row, 4)
+
+        # Z axis slider
+        row = 2
+        z_widgets = create_axis_slider("Z", self.stage_limits['z']['min'],
+                                      self.stage_limits['z']['max'], 3, "mm")
+        self.z_slider = z_widgets[2]
+        self.z_value_label = z_widgets[4]
+        self.z_scale_factor = z_widgets[5]
+        grid.addWidget(z_widgets[0], row, 0)
+        grid.addWidget(z_widgets[1], row, 1)
+        grid.addWidget(z_widgets[2], row, 2)
+        grid.addWidget(z_widgets[3], row, 3)
+        grid.addWidget(z_widgets[4], row, 4)
+
+        # R axis slider (rotation)
+        row = 3
+        r_widgets = create_axis_slider("R", self.stage_limits['r']['min'],
+                                      self.stage_limits['r']['max'], 2, "°")
+        self.r_slider = r_widgets[2]
+        self.r_value_label = r_widgets[4]
+        self.r_scale_factor = r_widgets[5]
+        grid.addWidget(r_widgets[0], row, 0)
+        grid.addWidget(r_widgets[1], row, 1)
+        grid.addWidget(r_widgets[2], row, 2)
+        grid.addWidget(r_widgets[3], row, 3)
+        grid.addWidget(r_widgets[4], row, 4)
+
+        # Connect slider signals
+        self.x_slider.valueChanged.connect(self._on_x_slider_changed)
+        self.y_slider.valueChanged.connect(self._on_y_slider_changed)
+        self.z_slider.valueChanged.connect(self._on_z_slider_changed)
+        self.r_slider.valueChanged.connect(self._on_r_slider_changed)
+
+        group.setLayout(grid)
+        return group
+
     def _connect_signals(self) -> None:
         """Connect to movement controller signals."""
-        # Connect position_changed signal to update visualization
+        # Connect position_changed signal to update visualization and sliders
         self.movement_controller.position_changed.connect(
             self._on_position_changed
         )
 
+        # Connect motion state signals for enable/disable synchronization
+        self.movement_controller.motion_started.connect(
+            self._on_motion_started
+        )
+        self.movement_controller.motion_stopped.connect(
+            self._on_motion_stopped
+        )
+
         self.logger.info("Connected to movement controller signals")
+
+    def _on_x_slider_changed(self, value: int) -> None:
+        """Handle X slider value change."""
+        x_value = value / self.x_scale_factor
+        self.x_value_label.setText(f"{x_value:.3f} mm")
+
+        # Only move stage if controls are enabled (not during position update)
+        if self._controls_enabled:
+            try:
+                self.movement_controller.move_absolute('x', x_value, verify=False)
+                self.logger.debug(f"X slider moved to {x_value:.3f} mm")
+            except Exception as e:
+                self.logger.error(f"Error moving X axis: {e}")
+
+    def _on_y_slider_changed(self, value: int) -> None:
+        """Handle Y slider value change."""
+        y_value = value / self.y_scale_factor
+        self.y_value_label.setText(f"{y_value:.3f} mm")
+
+        if self._controls_enabled:
+            try:
+                self.movement_controller.move_absolute('y', y_value, verify=False)
+                self.logger.debug(f"Y slider moved to {y_value:.3f} mm")
+            except Exception as e:
+                self.logger.error(f"Error moving Y axis: {e}")
+
+    def _on_z_slider_changed(self, value: int) -> None:
+        """Handle Z slider value change."""
+        z_value = value / self.z_scale_factor
+        self.z_value_label.setText(f"{z_value:.3f} mm")
+
+        if self._controls_enabled:
+            try:
+                self.movement_controller.move_absolute('z', z_value, verify=False)
+                self.logger.debug(f"Z slider moved to {z_value:.3f} mm")
+            except Exception as e:
+                self.logger.error(f"Error moving Z axis: {e}")
+
+    def _on_r_slider_changed(self, value: int) -> None:
+        """Handle R slider value change."""
+        r_value = value / self.r_scale_factor
+        self.r_value_label.setText(f"{r_value:.2f}°")
+
+        if self._controls_enabled:
+            try:
+                self.movement_controller.move_absolute('r', r_value, verify=False)
+                self.logger.debug(f"R slider moved to {r_value:.2f}°")
+            except Exception as e:
+                self.logger.error(f"Error moving R axis: {e}")
+
+    @pyqtSlot(str)
+    def _on_motion_started(self, axis_name: str) -> None:
+        """Disable sliders when motion starts."""
+        self._set_sliders_enabled(False)
+        self.logger.debug(f"Sliders disabled - motion started on {axis_name}")
+
+    @pyqtSlot(str)
+    def _on_motion_stopped(self, axis_name: str) -> None:
+        """Re-enable sliders when motion completes."""
+        self._set_sliders_enabled(True)
+        self.logger.debug(f"Sliders enabled - motion stopped on {axis_name}")
+
+    def _set_sliders_enabled(self, enabled: bool) -> None:
+        """Enable or disable all slider controls."""
+        self._controls_enabled = enabled
+        self.x_slider.setEnabled(enabled)
+        self.y_slider.setEnabled(enabled)
+        self.z_slider.setEnabled(enabled)
+        self.r_slider.setEnabled(enabled)
 
     def _request_initial_position(self) -> None:
         """Request and display initial position from the microscope."""
@@ -113,7 +320,9 @@ class StageChamberVisualizationWindow(QWidget):
     @pyqtSlot(float, float, float, float)
     def _on_position_changed(self, x: float, y: float, z: float, r: float) -> None:
         """
-        Handle position change signal.
+        Handle position change signal from movement controller.
+
+        Updates visualization and sliders without triggering feedback loops.
 
         Args:
             x: X position in mm
@@ -123,6 +332,28 @@ class StageChamberVisualizationWindow(QWidget):
         """
         # Update visualization widget
         self.visualization_widget.update_position(x, y, z, r)
+
+        # Update sliders WITHOUT triggering valueChanged signals (prevent feedback loop)
+        self.x_slider.blockSignals(True)
+        self.y_slider.blockSignals(True)
+        self.z_slider.blockSignals(True)
+        self.r_slider.blockSignals(True)
+
+        self.x_slider.setValue(int(x * self.x_scale_factor))
+        self.y_slider.setValue(int(y * self.y_scale_factor))
+        self.z_slider.setValue(int(z * self.z_scale_factor))
+        self.r_slider.setValue(int(r * self.r_scale_factor))
+
+        # Update value labels
+        self.x_value_label.setText(f"{x:.3f} mm")
+        self.y_value_label.setText(f"{y:.3f} mm")
+        self.z_value_label.setText(f"{z:.3f} mm")
+        self.r_value_label.setText(f"{r:.2f}°")
+
+        self.x_slider.blockSignals(False)
+        self.y_slider.blockSignals(False)
+        self.z_slider.blockSignals(False)
+        self.r_slider.blockSignals(False)
 
         # Update position info label
         self.position_info.setText(
