@@ -17,12 +17,15 @@ Color scheme is designed for red-green colorblind accessibility.
 import logging
 from typing import Optional
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel
-from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSlot
-from PyQt5.QtGui import QPainter, QPen, QBrush, QColor, QFont
+from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSlot, pyqtSignal
+from PyQt5.QtGui import QPainter, QPen, QBrush, QColor, QFont, QMouseEvent
 
 
 class ChamberViewPanel(QWidget):
     """Base class for chamber view panels (XZ and XY)."""
+
+    # Signal emitted when user clicks in the chamber (world coordinates in mm)
+    click_position = pyqtSignal(float, float)  # (x, other_axis_value)
 
     def __init__(self, title: str, x_min: float, x_max: float,
                  other_min: float, other_max: float, other_label: str, parent=None):
@@ -53,6 +56,10 @@ class ChamberViewPanel(QWidget):
         self.x_pos: Optional[float] = None
         self.other_pos: Optional[float] = None  # Z or Y
 
+        # Target position for click-to-move (mm)
+        self.target_x: Optional[float] = None
+        self.target_other: Optional[float] = None  # Z or Y
+
         # Widget appearance
         self.setMinimumSize(350, 350)
         self.setStyleSheet("background-color: white; border: 1px solid #ccc;")
@@ -68,6 +75,71 @@ class ChamberViewPanel(QWidget):
         self.x_pos = x
         self.other_pos = other
         self.update()  # Trigger repaint
+
+    def set_target_position(self, x: float, other: float) -> None:
+        """
+        Set target position for click-to-move visual feedback.
+
+        Args:
+            x: Target X position in mm
+            other: Target Z or Y position in mm
+        """
+        self.target_x = x
+        self.target_other = other
+        self.update()  # Trigger repaint
+
+    def clear_target_position(self) -> None:
+        """Clear target position marker."""
+        self.target_x = None
+        self.target_other = None
+        self.update()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        """Handle mouse click - convert to world coordinates and emit signal."""
+        if event.button() == Qt.LeftButton:
+            # Convert screen coordinates to world coordinates
+            x_world, other_world = self._screen_to_world(event.x(), event.y())
+
+            # Check if click is within chamber bounds
+            if (self.x_min <= x_world <= self.x_max and
+                self.other_min <= other_world <= self.other_max):
+
+                # Set target position for visual feedback
+                self.set_target_position(x_world, other_world)
+
+                # Emit signal with world coordinates
+                self.click_position.emit(x_world, other_world)
+                self.logger.debug(f"Click at: X={x_world:.3f}, {self.other_label}={other_world:.3f}")
+
+    def _screen_to_world(self, screen_x: int, screen_y: int) -> tuple:
+        """
+        Convert screen coordinates (pixels) to world coordinates (mm).
+
+        Args:
+            screen_x: Screen X coordinate in pixels
+            screen_y: Screen Y coordinate in pixels
+
+        Returns:
+            Tuple of (x_world, other_world) in mm
+        """
+        # Map bounds with padding (must match _world_to_screen)
+        padding = 50
+        title_offset = 30
+        map_width = self.width() - 2 * padding
+        map_height = self.height() - 2 * padding - title_offset
+
+        # Scale factors
+        x_range = self.x_max - self.x_min
+        other_range = self.other_max - self.other_min
+
+        # Convert from screen to world coordinates
+        # X axis: left to right
+        x_world = self.x_min + ((screen_x - padding) / map_width) * x_range
+
+        # Other axis: bottom to top (inverted Y screen coordinates)
+        other_world = self.other_max - ((screen_y - padding - title_offset) / map_height) * other_range
+
+        return x_world, other_world
 
     def _world_to_screen(self, x_world: float, other_world: float) -> tuple:
         """
@@ -196,6 +268,10 @@ class XZViewPanel(ChamberViewPanel):
         if self.x_pos is not None and self.z_pos is not None:
             self._draw_sample_circle(painter)
 
+        # Draw target position marker if set (click-to-move)
+        if self.target_x is not None and self.target_other is not None:
+            self._draw_target_marker(painter)
+
         # Draw position coordinates
         if self.x_pos is not None and self.z_pos is not None:
             self._draw_position_text(painter)
@@ -223,6 +299,41 @@ class XZViewPanel(ChamberViewPanel):
         # Draw center point
         painter.setBrush(QBrush(Qt.white))
         painter.drawEllipse(QPointF(screen_x, screen_y), 2, 2)
+
+    def _draw_target_marker(self, painter: QPainter) -> None:
+        """Draw target position marker (crosshair) for click-to-move."""
+        if self.target_x is None or self.target_other is None:
+            return
+
+        # Get screen coordinates for target
+        screen_x, screen_y = self._world_to_screen(self.target_x, self.target_other)
+
+        # Draw crosshair in orange/red (highly visible)
+        color = QColor(255, 100, 0)  # Orange-red
+        pen = QPen(color, 2)
+        painter.setPen(pen)
+
+        # Crosshair size
+        size = 15
+
+        # Draw horizontal line
+        painter.drawLine(int(screen_x - size), int(screen_y),
+                        int(screen_x + size), int(screen_y))
+
+        # Draw vertical line
+        painter.drawLine(int(screen_x), int(screen_y - size),
+                        int(screen_x), int(screen_y + size))
+
+        # Draw circle around crosshair
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(QPointF(screen_x, screen_y), size, size)
+
+        # Draw "TARGET" label
+        font = QFont()
+        font.setPointSize(7)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(int(screen_x) + size + 5, int(screen_y) - 5, "TARGET")
 
     def _draw_position_text(self, painter: QPainter) -> None:
         """Draw current position coordinates."""
@@ -272,11 +383,15 @@ class XYViewPanel(ChamberViewPanel):
         self._draw_axis_labels(painter)
 
         # Draw sample holder pole and nub if position is set
-        if self.x_pos is not None and self.y_pos is not None:
+        if self.x_pos is not None and self.other_pos is not None:
             self._draw_sample_holder(painter)
 
+        # Draw target position marker if set (click-to-move)
+        if self.target_x is not None and self.target_other is not None:
+            self._draw_target_marker(painter)
+
         # Draw position coordinates
-        if self.x_pos is not None and self.y_pos is not None:
+        if self.x_pos is not None and self.other_pos is not None:
             self._draw_position_text(painter)
 
         # TODO: Placeholder for future sample object below nub
@@ -378,6 +493,41 @@ class XYViewPanel(ChamberViewPanel):
         painter.setPen(QPen(marker_color, 2))
         painter.setBrush(QBrush(marker_color))
         painter.drawEllipse(QPointF(screen_x_pos, screen_y_tip), 4, 4)
+
+    def _draw_target_marker(self, painter: QPainter) -> None:
+        """Draw target position marker (crosshair) for click-to-move."""
+        if self.target_x is None or self.target_other is None:
+            return
+
+        # Get screen coordinates for target
+        screen_x, screen_y = self._world_to_screen(self.target_x, self.target_other)
+
+        # Draw crosshair in orange/red (highly visible)
+        color = QColor(255, 100, 0)  # Orange-red
+        pen = QPen(color, 2)
+        painter.setPen(pen)
+
+        # Crosshair size
+        size = 15
+
+        # Draw horizontal line
+        painter.drawLine(int(screen_x - size), int(screen_y),
+                        int(screen_x + size), int(screen_y))
+
+        # Draw vertical line
+        painter.drawLine(int(screen_x), int(screen_y - size),
+                        int(screen_x), int(screen_y + size))
+
+        # Draw circle around crosshair
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(QPointF(screen_x, screen_y), size, size)
+
+        # Draw "TARGET" label
+        font = QFont()
+        font.setPointSize(7)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(int(screen_x) + size + 5, int(screen_y) - 5, "TARGET")
 
     def _draw_position_text(self, painter: QPainter) -> None:
         """Draw current position coordinates."""

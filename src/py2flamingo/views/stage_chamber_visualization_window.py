@@ -9,8 +9,9 @@ integrated with the Stage Control tab.
 """
 
 import logging
+import math
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QGroupBox, QGridLayout
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QGroupBox, QGridLayout, QMessageBox
 )
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QFont
@@ -207,10 +208,17 @@ class StageChamberVisualizationWindow(QWidget):
         grid.addWidget(r_widgets[4], row, 4)
 
         # Connect slider signals
-        self.x_slider.valueChanged.connect(self._on_x_slider_changed)
-        self.y_slider.valueChanged.connect(self._on_y_slider_changed)
-        self.z_slider.valueChanged.connect(self._on_z_slider_changed)
-        self.r_slider.valueChanged.connect(self._on_r_slider_changed)
+        # Use valueChanged for live label updates, sliderReleased for actual movement
+        self.x_slider.valueChanged.connect(self._on_x_slider_value_changed)
+        self.y_slider.valueChanged.connect(self._on_y_slider_value_changed)
+        self.z_slider.valueChanged.connect(self._on_z_slider_value_changed)
+        self.r_slider.valueChanged.connect(self._on_r_slider_value_changed)
+
+        # Only send move command when user releases slider (prevents lag and greying out)
+        self.x_slider.sliderReleased.connect(self._on_x_slider_released)
+        self.y_slider.sliderReleased.connect(self._on_y_slider_released)
+        self.z_slider.sliderReleased.connect(self._on_z_slider_released)
+        self.r_slider.sliderReleased.connect(self._on_r_slider_released)
 
         group.setLayout(grid)
         return group
@@ -230,54 +238,73 @@ class StageChamberVisualizationWindow(QWidget):
             self._on_motion_stopped
         )
 
+        # Connect click-to-move signals from visualization panels
+        self.visualization_widget.xz_panel.click_position.connect(
+            self._on_xz_panel_clicked
+        )
+        self.visualization_widget.xy_panel.click_position.connect(
+            self._on_xy_panel_clicked
+        )
+
         self.logger.info("Connected to movement controller signals")
 
-    def _on_x_slider_changed(self, value: int) -> None:
-        """Handle X slider value change."""
+    def _on_x_slider_value_changed(self, value: int) -> None:
+        """Update X value label during slider drag (no movement)."""
         x_value = value / self.x_scale_factor
         self.x_value_label.setText(f"{x_value:.3f} mm")
 
-        # Only move stage if controls are enabled (not during position update)
-        if self._controls_enabled:
-            try:
-                self.movement_controller.move_absolute('x', x_value, verify=False)
-                self.logger.debug(f"X slider moved to {x_value:.3f} mm")
-            except Exception as e:
-                self.logger.error(f"Error moving X axis: {e}")
-
-    def _on_y_slider_changed(self, value: int) -> None:
-        """Handle Y slider value change."""
+    def _on_y_slider_value_changed(self, value: int) -> None:
+        """Update Y value label during slider drag (no movement)."""
         y_value = value / self.y_scale_factor
         self.y_value_label.setText(f"{y_value:.3f} mm")
 
-        if self._controls_enabled:
-            try:
-                self.movement_controller.move_absolute('y', y_value, verify=False)
-                self.logger.debug(f"Y slider moved to {y_value:.3f} mm")
-            except Exception as e:
-                self.logger.error(f"Error moving Y axis: {e}")
-
-    def _on_z_slider_changed(self, value: int) -> None:
-        """Handle Z slider value change."""
+    def _on_z_slider_value_changed(self, value: int) -> None:
+        """Update Z value label during slider drag (no movement)."""
         z_value = value / self.z_scale_factor
         self.z_value_label.setText(f"{z_value:.3f} mm")
 
-        if self._controls_enabled:
-            try:
-                self.movement_controller.move_absolute('z', z_value, verify=False)
-                self.logger.debug(f"Z slider moved to {z_value:.3f} mm")
-            except Exception as e:
-                self.logger.error(f"Error moving Z axis: {e}")
-
-    def _on_r_slider_changed(self, value: int) -> None:
-        """Handle R slider value change."""
+    def _on_r_slider_value_changed(self, value: int) -> None:
+        """Update R value label during slider drag (no movement)."""
         r_value = value / self.r_scale_factor
         self.r_value_label.setText(f"{r_value:.2f}°")
 
+    def _on_x_slider_released(self) -> None:
+        """Handle X slider release - send move command."""
         if self._controls_enabled:
+            x_value = self.x_slider.value() / self.x_scale_factor
+            try:
+                self.movement_controller.move_absolute('x', x_value, verify=False)
+                self.logger.debug(f"X slider released - moving to {x_value:.3f} mm")
+            except Exception as e:
+                self.logger.error(f"Error moving X axis: {e}")
+
+    def _on_y_slider_released(self) -> None:
+        """Handle Y slider release - send move command."""
+        if self._controls_enabled:
+            y_value = self.y_slider.value() / self.y_scale_factor
+            try:
+                self.movement_controller.move_absolute('y', y_value, verify=False)
+                self.logger.debug(f"Y slider released - moving to {y_value:.3f} mm")
+            except Exception as e:
+                self.logger.error(f"Error moving Y axis: {e}")
+
+    def _on_z_slider_released(self) -> None:
+        """Handle Z slider release - send move command."""
+        if self._controls_enabled:
+            z_value = self.z_slider.value() / self.z_scale_factor
+            try:
+                self.movement_controller.move_absolute('z', z_value, verify=False)
+                self.logger.debug(f"Z slider released - moving to {z_value:.3f} mm")
+            except Exception as e:
+                self.logger.error(f"Error moving Z axis: {e}")
+
+    def _on_r_slider_released(self) -> None:
+        """Handle R slider release - send move command."""
+        if self._controls_enabled:
+            r_value = self.r_slider.value() / self.r_scale_factor
             try:
                 self.movement_controller.move_absolute('r', r_value, verify=False)
-                self.logger.debug(f"R slider moved to {r_value:.2f}°")
+                self.logger.debug(f"R slider released - moving to {r_value:.2f}°")
             except Exception as e:
                 self.logger.error(f"Error moving R axis: {e}")
 
@@ -300,6 +327,124 @@ class StageChamberVisualizationWindow(QWidget):
         self.y_slider.setEnabled(enabled)
         self.z_slider.setEnabled(enabled)
         self.r_slider.setEnabled(enabled)
+
+    @pyqtSlot(float, float)
+    def _on_xz_panel_clicked(self, x_target: float, z_target: float) -> None:
+        """
+        Handle click in XZ panel - move X and Z axes.
+
+        Args:
+            x_target: Target X position in mm
+            z_target: Target Z position in mm
+        """
+        if not self._controls_enabled:
+            self.logger.warning("Controls disabled - ignoring XZ click")
+            return
+
+        try:
+            # Get current position
+            current_pos = self.movement_controller.get_position()
+            if not current_pos:
+                self.logger.error("Cannot get current position")
+                return
+
+            # Calculate distances as percentage of total range
+            x_range = self.stage_limits['x']['max'] - self.stage_limits['x']['min']
+            z_range = self.stage_limits['z']['max'] - self.stage_limits['z']['min']
+
+            x_distance = abs(x_target - current_pos.x)
+            z_distance = abs(z_target - current_pos.z)
+
+            x_percent = (x_distance / x_range) * 100
+            z_percent = (z_distance / z_range) * 100
+
+            # Check if either axis > 50% of range
+            if x_percent > 50 or z_percent > 50:
+                # Show confirmation dialog
+                reply = QMessageBox.question(
+                    self,
+                    "Confirm Large Move",
+                    f"This move is significant:\n\n"
+                    f"X: {current_pos.x:.2f} → {x_target:.2f} mm ({x_percent:.1f}% of range)\n"
+                    f"Z: {current_pos.z:.2f} → {z_target:.2f} mm ({z_percent:.1f}% of range)\n\n"
+                    f"Continue with move?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+
+                if reply == QMessageBox.No:
+                    # User cancelled - clear target marker
+                    self.visualization_widget.xz_panel.clear_target_position()
+                    self.logger.info("User cancelled large XZ move")
+                    return
+
+            # Send move commands
+            self.movement_controller.move_absolute('x', x_target, verify=False)
+            self.movement_controller.move_absolute('z', z_target, verify=False)
+            self.logger.info(f"Click-to-move XZ: X={x_target:.3f}, Z={z_target:.3f}")
+
+        except Exception as e:
+            self.logger.error(f"Error in XZ click-to-move: {e}")
+            self.visualization_widget.xz_panel.clear_target_position()
+
+    @pyqtSlot(float, float)
+    def _on_xy_panel_clicked(self, x_target: float, y_target: float) -> None:
+        """
+        Handle click in XY panel - move X and Y axes.
+
+        Args:
+            x_target: Target X position in mm
+            y_target: Target Y position in mm
+        """
+        if not self._controls_enabled:
+            self.logger.warning("Controls disabled - ignoring XY click")
+            return
+
+        try:
+            # Get current position
+            current_pos = self.movement_controller.get_position()
+            if not current_pos:
+                self.logger.error("Cannot get current position")
+                return
+
+            # Calculate distances as percentage of total range
+            x_range = self.stage_limits['x']['max'] - self.stage_limits['x']['min']
+            y_range = self.stage_limits['y']['max'] - self.stage_limits['y']['min']
+
+            x_distance = abs(x_target - current_pos.x)
+            y_distance = abs(y_target - current_pos.y)
+
+            x_percent = (x_distance / x_range) * 100
+            y_percent = (y_distance / y_range) * 100
+
+            # Check if either axis > 50% of range
+            if x_percent > 50 or y_percent > 50:
+                # Show confirmation dialog
+                reply = QMessageBox.question(
+                    self,
+                    "Confirm Large Move",
+                    f"This move is significant:\n\n"
+                    f"X: {current_pos.x:.2f} → {x_target:.2f} mm ({x_percent:.1f}% of range)\n"
+                    f"Y: {current_pos.y:.2f} → {y_target:.2f} mm ({y_percent:.1f}% of range)\n\n"
+                    f"Continue with move?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+
+                if reply == QMessageBox.No:
+                    # User cancelled - clear target marker
+                    self.visualization_widget.xy_panel.clear_target_position()
+                    self.logger.info("User cancelled large XY move")
+                    return
+
+            # Send move commands
+            self.movement_controller.move_absolute('x', x_target, verify=False)
+            self.movement_controller.move_absolute('y', y_target, verify=False)
+            self.logger.info(f"Click-to-move XY: X={x_target:.3f}, Y={y_target:.3f}")
+
+        except Exception as e:
+            self.logger.error(f"Error in XY click-to-move: {e}")
+            self.visualization_widget.xy_panel.clear_target_position()
 
     def _request_initial_position(self) -> None:
         """Request and display initial position from the microscope."""
