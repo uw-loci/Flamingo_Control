@@ -363,6 +363,7 @@ class LaserLEDControlPanel(QWidget):
     def _on_source_selected(self, button: QRadioButton) -> None:
         """Handle light source selection."""
         source_id = self._source_button_group.id(button)
+        self.logger.debug(f"Light source selected: button ID = {source_id}")
 
         if source_id == -1:  # LED (get color from combobox)
             led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
@@ -372,6 +373,8 @@ class LaserLEDControlPanel(QWidget):
         elif source_id > 0:  # Laser
             self.logger.info(f"Laser {source_id} selected for preview")
             self.laser_led_controller.enable_laser_for_preview(source_id)
+        else:
+            self.logger.warning(f"Unhandled source_id: {source_id}")
 
     @pyqtSlot(str)
     def _on_preview_enabled(self, source_name: str) -> None:

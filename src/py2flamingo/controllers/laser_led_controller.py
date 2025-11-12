@@ -265,9 +265,13 @@ class LaserLEDController(QObject):
 
             self.logger.info(f"Enabling {color_name} LED for preview (full sequence)")
 
-            # Step 1: Disable all lasers
+            # Step 1: Disable all lasers (non-fatal if fails)
             self.logger.info("Step 1: Disabling all lasers")
-            self.laser_led_service.disable_all_lasers()
+            try:
+                self.laser_led_service.disable_all_lasers()
+            except Exception as e:
+                # Non-fatal: laser disable may timeout if no lasers attached
+                self.logger.debug(f"Laser disable had error (non-fatal): {e}")
 
             # Step 2: Set intensity for selected color
             intensity = self._led_intensities.get(self._led_color, 50.0)
