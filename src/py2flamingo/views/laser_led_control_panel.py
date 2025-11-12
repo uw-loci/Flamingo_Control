@@ -365,16 +365,18 @@ class LaserLEDControlPanel(QWidget):
         source_id = self._source_button_group.id(button)
         self.logger.debug(f"Light source selected: button ID = {source_id}")
 
-        if source_id == -1:  # LED (get color from combobox)
+        # Check if this is the LED button directly (more robust than relying on ID)
+        if button == self._led_radio:
             led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
             color_names = ["Red", "Green", "Blue", "White"]
             self.logger.info(f"{color_names[led_color]} LED selected for preview")
             self.laser_led_controller.enable_led_for_preview(led_color)
-        elif source_id > 0:  # Laser
+        elif source_id >= 1:  # Laser (laser indices are typically 1, 2, 3, 4)
             self.logger.info(f"Laser {source_id} selected for preview")
             self.laser_led_controller.enable_laser_for_preview(source_id)
         else:
-            self.logger.warning(f"Unhandled source_id: {source_id}")
+            # This shouldn't happen, but log for debugging
+            self.logger.warning(f"Unhandled source button with ID {source_id}")
 
     @pyqtSlot(str)
     def _on_preview_enabled(self, source_name: str) -> None:
