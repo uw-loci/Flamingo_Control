@@ -226,18 +226,19 @@ class FlamingoApplication:
             movement_controller=self.movement_controller
         )
 
-        # Create camera live viewer with laser/LED control
-        self.logger.debug("Creating camera live viewer...")
-        self.camera_live_viewer = CameraLiveViewer(
-            camera_controller=self.camera_controller,
-            laser_led_controller=self.laser_led_controller
-        )
-
-        # Create independent image controls window
+        # Create independent image controls window FIRST
         self.logger.debug("Creating image controls window...")
         self.image_controls_window = ImageControlsWindow()
         # Window starts hidden - user can open it via menu
         self.image_controls_window.hide()
+
+        # Create camera live viewer with laser/LED control and image controls reference
+        self.logger.debug("Creating camera live viewer...")
+        self.camera_live_viewer = CameraLiveViewer(
+            camera_controller=self.camera_controller,
+            laser_led_controller=self.laser_led_controller,
+            image_controls_window=self.image_controls_window
+        )
 
         # Camera live viewer also starts hidden - user can open it via menu
         self.camera_live_viewer.hide()

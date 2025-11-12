@@ -31,19 +31,21 @@ class CameraLiveViewer(QWidget):
     - Image information overlay
     """
 
-    def __init__(self, camera_controller: CameraController, laser_led_controller=None, parent=None):
+    def __init__(self, camera_controller: CameraController, laser_led_controller=None, image_controls_window=None, parent=None):
         """
         Initialize camera live viewer.
 
         Args:
             camera_controller: CameraController instance
             laser_led_controller: Optional LaserLEDController for light source control
+            image_controls_window: Optional ImageControlsWindow for slider feedback
             parent: Parent widget
         """
         super().__init__(parent)
 
         self.camera_controller = camera_controller
         self.laser_led_controller = laser_led_controller
+        self.image_controls_window = image_controls_window
         self.logger = logging.getLogger(__name__)
 
         # Display state
@@ -152,13 +154,24 @@ class CameraLiveViewer(QWidget):
         exp_layout.addStretch()
         controls_layout.addLayout(exp_layout)
 
-        # Note about Image Controls
-        note_layout = QHBoxLayout()
-        note_label = QLabel("<i>Use 'Image Controls' window for intensity scaling, rotation, zoom, etc.</i>")
-        note_label.setStyleSheet("color: #666; font-size: 9pt;")
-        note_label.setWordWrap(True)
-        note_layout.addWidget(note_label)
-        controls_layout.addLayout(note_layout)
+        # Image Controls button
+        image_controls_layout = QVBoxLayout()
+
+        self.image_controls_btn = QPushButton("Open Image Controls")
+        self.image_controls_btn.setStyleSheet(
+            "background-color: #9C27B0; color: white; font-weight: bold; padding: 8px;"
+        )
+        self.image_controls_btn.clicked.connect(self._on_image_controls_clicked)
+        image_controls_layout.addWidget(self.image_controls_btn)
+
+        # Short description
+        desc_label = QLabel("<i>For image transformations, color, and display options</i>")
+        desc_label.setStyleSheet("color: #666; font-size: 9pt;")
+        desc_label.setWordWrap(True)
+        desc_label.setAlignment(Qt.AlignCenter)
+        image_controls_layout.addWidget(desc_label)
+
+        controls_layout.addLayout(image_controls_layout)
 
         controls_group.setLayout(controls_layout)
         right_layout.addWidget(controls_group)
@@ -273,6 +286,13 @@ class CameraLiveViewer(QWidget):
             f"[{header.image_scale_min} - {header.image_scale_max}]"
         )
 
+        # Update Image Controls Window sliders with auto-scale feedback
+        if self.image_controls_window and self.camera_controller.is_auto_scale():
+            self.image_controls_window.update_auto_scale_feedback(
+                header.image_scale_min,
+                header.image_scale_max
+            )
+
         # Convert and display image
         self._display_image(image, header)
 
@@ -354,6 +374,16 @@ class CameraLiveViewer(QWidget):
         """Handle exposure time change."""
         self.camera_controller.set_exposure_time(value)
         self.exposure_ms_label.setText(f"{value/1000:.2f} ms")
+
+    def _on_image_controls_clicked(self) -> None:
+        """Handle image controls button click - show the Image Controls window."""
+        if self.image_controls_window:
+            self.image_controls_window.show()
+            self.image_controls_window.raise_()  # Bring to front
+            self.image_controls_window.activateWindow()  # Give focus
+            self.logger.info("Image Controls window opened")
+        else:
+            self.logger.warning("Image Controls window not available")
 
     def _on_crosshair_changed(self, state: int) -> None:
         """Handle crosshair checkbox change."""

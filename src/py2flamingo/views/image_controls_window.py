@@ -395,6 +395,41 @@ class ImageControlsWindow(QWidget):
         self.min_slider.setValue(min_val)
         self.max_slider.setValue(max_val)
 
+    def update_auto_scale_feedback(self, min_val: int, max_val: int) -> None:
+        """
+        Update slider positions to show current auto-scale values.
+
+        This provides visual feedback to the user about what scaling is being applied
+        when auto-scale is active. The sliders remain disabled but their positions
+        update to reflect the current min/max values.
+
+        When the user unchecks auto-scale, the sliders will be at the last auto-scaled
+        position, allowing them to adjust from there instead of starting blind.
+
+        Args:
+            min_val: Current auto-scale minimum value
+            max_val: Current auto-scale maximum value
+        """
+        if self._auto_scale:
+            # Update slider positions WITHOUT triggering signals
+            # (we don't want to emit intensity_range_changed while auto-scaling)
+            self.min_slider.blockSignals(True)
+            self.max_slider.blockSignals(True)
+
+            self.min_slider.setValue(min_val)
+            self.max_slider.setValue(max_val)
+
+            # Update labels to show current values
+            self.min_label.setText(str(min_val))
+            self.max_label.setText(str(max_val))
+
+            # Update internal state
+            self._min_intensity = min_val
+            self._max_intensity = max_val
+
+            self.min_slider.blockSignals(False)
+            self.max_slider.blockSignals(False)
+
     def set_zoom(self, zoom_percentage: float) -> None:
         """Set zoom as percentage (1.0 = 100%)."""
         self.zoom_spinbox.setValue(int(zoom_percentage * 100))
