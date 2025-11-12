@@ -325,6 +325,21 @@ class CameraLiveViewer(QWidget):
             f"[{header.image_scale_min} - {header.image_scale_max}]"
         )
 
+        # Update sliders to reflect current auto-scale values (if auto-scale enabled)
+        if self.autoscale_checkbox.isChecked():
+            # Block signals to prevent triggering handlers
+            self.min_slider.blockSignals(True)
+            self.max_slider.blockSignals(True)
+
+            self.min_slider.setValue(header.image_scale_min)
+            self.min_label.setText(str(header.image_scale_min))
+
+            self.max_slider.setValue(header.image_scale_max)
+            self.max_label.setText(str(header.image_scale_max))
+
+            self.min_slider.blockSignals(False)
+            self.max_slider.blockSignals(False)
+
         # Convert and display image
         self._display_image(image, header)
 
@@ -438,6 +453,8 @@ class CameraLiveViewer(QWidget):
 
     def _on_crosshair_changed(self, state: int) -> None:
         """Handle crosshair checkbox change."""
+        # Update internal state
+        self._show_crosshair = (state == Qt.Checked)
         # Redisplay with/without crosshair
         if self._current_image is not None:
             self._display_image(self._current_image, self._current_header)

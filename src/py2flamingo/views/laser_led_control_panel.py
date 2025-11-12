@@ -10,9 +10,9 @@ Provides UI controls for:
 import logging
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
-    QRadioButton, QButtonGroup, QGroupBox, QGridLayout, QComboBox
+    QRadioButton, QButtonGroup, QGroupBox, QGridLayout, QComboBox, QDoubleSpinBox
 )
-from PyQt5.QtCore import Qt, pyqtSlot
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer
 
 from py2flamingo.controllers.laser_led_controller import LaserLEDController
 
@@ -43,13 +43,17 @@ class LaserLEDControlPanel(QWidget):
         # Track widgets
         self._laser_radios = {}  # laser_index -> QRadioButton
         self._laser_sliders = {}  # laser_index -> QSlider
-        self._laser_labels = {}  # laser_index -> QLabel
+        self._laser_spinboxes = {}  # laser_index -> QDoubleSpinBox
 
         # LED widgets - single combobox and slider
         self._led_radio = None  # Single radio button for LED
         self._led_combobox = None  # Combobox for LED color selection
         self._led_slider = None  # Single slider for LED intensity
-        self._led_label = None  # Single label for LED intensity display
+        self._led_spinbox = None  # Editable intensity spinbox
+
+        # Timers for delayed logging (reduce spam)
+        self._laser_log_timers = {}  # laser_index -> QTimer
+        self._led_log_timer = None
 
         # Button group for radio buttons
         self._source_button_group = QButtonGroup()
@@ -132,13 +136,20 @@ class LaserLEDControlPanel(QWidget):
             name_label = QLabel(laser.name)
             layout.addWidget(name_label, row, 1)
 
-            # Power percentage label
+            # Power percentage spinbox (editable)
             power = self.laser_led_controller.get_laser_power(laser.index)
-            power_label = QLabel(f"{power:.1f}%")
-            power_label.setMinimumWidth(50)
-            power_label.setStyleSheet("font-weight: bold;")
-            self._laser_labels[laser.index] = power_label
-            layout.addWidget(power_label, row, 2)
+            power_spinbox = QDoubleSpinBox()
+            power_spinbox.setRange(0.0, 100.0)
+            power_spinbox.setValue(power)
+            power_spinbox.setDecimals(1)
+            power_spinbox.setSuffix("%")
+            power_spinbox.setMinimumWidth(70)
+            power_spinbox.setStyleSheet("font-weight: bold;")
+            power_spinbox.valueChanged.connect(
+                lambda val, idx=laser.index: self._on_laser_power_spinbox_changed(idx, val)
+            )
+            self._laser_spinboxes[laser.index] = power_spinbox
+            layout.addWidget(power_spinbox, row, 2)
 
             # Power slider
             slider = QSlider(Qt.Horizontal)
@@ -147,10 +158,19 @@ class LaserLEDControlPanel(QWidget):
             slider.setTickPosition(QSlider.TicksBelow)
             slider.setTickInterval(10)
             slider.valueChanged.connect(
-                lambda val, idx=laser.index: self._on_laser_power_changed(idx, val)
+                lambda val, idx=laser.index: self._on_laser_power_slider_changed(idx, val)
+            )
+            slider.sliderReleased.connect(
+                lambda idx=laser.index: self._on_laser_slider_released(idx)
             )
             self._laser_sliders[laser.index] = slider
             layout.addWidget(slider, row, 3)
+
+            # Create log timer for this laser
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda idx=laser.index: self._log_laser_power(idx))
+            self._laser_log_timers[laser.index] = timer
 
         group.setLayout(layout)
         return group
@@ -186,12 +206,17 @@ class LaserLEDControlPanel(QWidget):
         self._led_combobox.currentIndexChanged.connect(self._on_led_color_changed)
         layout.addWidget(self._led_combobox, row, 1)
 
-        # Intensity percentage label
+        # Intensity percentage spinbox (editable)
         intensity = self.laser_led_controller.get_led_intensity(0)  # Start with Red (0)
-        self._led_label = QLabel(f"{intensity:.1f}%")
-        self._led_label.setMinimumWidth(50)
-        self._led_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(self._led_label, row, 2)
+        self._led_spinbox = QDoubleSpinBox()
+        self._led_spinbox.setRange(0.0, 100.0)
+        self._led_spinbox.setValue(intensity)
+        self._led_spinbox.setDecimals(1)
+        self._led_spinbox.setSuffix("%")
+        self._led_spinbox.setMinimumWidth(70)
+        self._led_spinbox.setStyleSheet("font-weight: bold;")
+        self._led_spinbox.valueChanged.connect(self._on_led_intensity_spinbox_changed)
+        layout.addWidget(self._led_spinbox, row, 2)
 
         # Intensity slider
         self._led_slider = QSlider(Qt.Horizontal)
@@ -199,30 +224,95 @@ class LaserLEDControlPanel(QWidget):
         self._led_slider.setValue(int(intensity))
         self._led_slider.setTickPosition(QSlider.TicksBelow)
         self._led_slider.setTickInterval(10)
-        self._led_slider.valueChanged.connect(self._on_led_intensity_changed)
+        self._led_slider.valueChanged.connect(self._on_led_intensity_slider_changed)
+        self._led_slider.sliderReleased.connect(self._on_led_slider_released)
         layout.addWidget(self._led_slider, row, 3)
+
+        # Create log timer for LED
+        self._led_log_timer = QTimer()
+        self._led_log_timer.setSingleShot(True)
+        self._led_log_timer.timeout.connect(self._log_led_intensity)
 
         group.setLayout(layout)
         return group
 
-    def _on_laser_power_changed(self, laser_index: int, value: int) -> None:
-        """Handle laser power slider change."""
+    def _on_laser_power_slider_changed(self, laser_index: int, value: int) -> None:
+        """Handle laser power slider change (while dragging)."""
         power_percent = float(value)
 
-        # Update label
-        if laser_index in self._laser_labels:
-            self._laser_labels[laser_index].setText(f"{power_percent:.1f}%")
+        # Update spinbox (block signals to prevent recursion)
+        if laser_index in self._laser_spinboxes:
+            self._laser_spinboxes[laser_index].blockSignals(True)
+            self._laser_spinboxes[laser_index].setValue(power_percent)
+            self._laser_spinboxes[laser_index].blockSignals(False)
+
+        # Send to controller immediately (for live feedback)
+        self.laser_led_controller.set_laser_power(laser_index, power_percent)
+
+        # Restart timer for delayed logging (1 second after last change)
+        if laser_index in self._laser_log_timers:
+            self._laser_log_timers[laser_index].stop()
+            self._laser_log_timers[laser_index].start(1000)  # 1 second delay
+
+    def _on_laser_power_spinbox_changed(self, laser_index: int, value: float) -> None:
+        """Handle laser power spinbox change (direct edit)."""
+        power_percent = value
+
+        # Update slider (block signals to prevent recursion)
+        if laser_index in self._laser_sliders:
+            self._laser_sliders[laser_index].blockSignals(True)
+            self._laser_sliders[laser_index].setValue(int(power_percent))
+            self._laser_sliders[laser_index].blockSignals(False)
 
         # Send to controller
         self.laser_led_controller.set_laser_power(laser_index, power_percent)
 
-    def _on_led_intensity_changed(self, value: int) -> None:
-        """Handle LED intensity slider change."""
+        # Log immediately for spinbox changes (user typed it in)
+        self.logger.info(f"Laser {laser_index} power set to {power_percent:.1f}%")
+
+    def _on_laser_slider_released(self, laser_index: int) -> None:
+        """Handle laser slider release - log final value immediately."""
+        if laser_index in self._laser_log_timers:
+            # Stop timer and log now
+            self._laser_log_timers[laser_index].stop()
+            self._log_laser_power(laser_index)
+
+    def _log_laser_power(self, laser_index: int) -> None:
+        """Log laser power value (called after delay or slider release)."""
+        if laser_index in self._laser_spinboxes:
+            power = self._laser_spinboxes[laser_index].value()
+            self.logger.info(f"Laser {laser_index} power set to {power:.1f}%")
+
+    def _on_led_intensity_slider_changed(self, value: int) -> None:
+        """Handle LED intensity slider change (while dragging)."""
         intensity_percent = float(value)
 
-        # Update label
-        if self._led_label:
-            self._led_label.setText(f"{intensity_percent:.1f}%")
+        # Update spinbox (block signals to prevent recursion)
+        if self._led_spinbox:
+            self._led_spinbox.blockSignals(True)
+            self._led_spinbox.setValue(intensity_percent)
+            self._led_spinbox.blockSignals(False)
+
+        # Get current LED color from combobox
+        led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
+
+        # Send to controller immediately (for live feedback)
+        self.laser_led_controller.set_led_intensity(led_color, intensity_percent)
+
+        # Restart timer for delayed logging (1 second after last change)
+        if self._led_log_timer:
+            self._led_log_timer.stop()
+            self._led_log_timer.start(1000)  # 1 second delay
+
+    def _on_led_intensity_spinbox_changed(self, value: float) -> None:
+        """Handle LED intensity spinbox change (direct edit)."""
+        intensity_percent = value
+
+        # Update slider (block signals to prevent recursion)
+        if self._led_slider:
+            self._led_slider.blockSignals(True)
+            self._led_slider.setValue(int(intensity_percent))
+            self._led_slider.blockSignals(False)
 
         # Get current LED color from combobox
         led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
@@ -230,9 +320,28 @@ class LaserLEDControlPanel(QWidget):
         # Send to controller
         self.laser_led_controller.set_led_intensity(led_color, intensity_percent)
 
+        # Log immediately for spinbox changes (user typed it in)
+        color_names = ["Red", "Green", "Blue", "White"]
+        self.logger.info(f"{color_names[led_color]} LED intensity set to {intensity_percent:.1f}%")
+
+    def _on_led_slider_released(self) -> None:
+        """Handle LED slider release - log final value immediately."""
+        if self._led_log_timer:
+            # Stop timer and log now
+            self._led_log_timer.stop()
+            self._log_led_intensity()
+
+    def _log_led_intensity(self) -> None:
+        """Log LED intensity value (called after delay or slider release)."""
+        if self._led_spinbox and self._led_combobox:
+            intensity = self._led_spinbox.value()
+            led_color = self._led_combobox.currentIndex()
+            color_names = ["Red", "Green", "Blue", "White"]
+            self.logger.info(f"{color_names[led_color]} LED intensity set to {intensity:.1f}%")
+
     def _on_led_color_changed(self, index: int) -> None:
         """Handle LED color combobox change."""
-        # Update slider and label to reflect the selected LED color's current intensity
+        # Update slider and spinbox to reflect the selected LED color's current intensity
         intensity = self.laser_led_controller.get_led_intensity(index)
 
         if self._led_slider:
@@ -240,8 +349,10 @@ class LaserLEDControlPanel(QWidget):
             self._led_slider.setValue(int(intensity))
             self._led_slider.blockSignals(False)
 
-        if self._led_label:
-            self._led_label.setText(f"{intensity:.1f}%")
+        if self._led_spinbox:
+            self._led_spinbox.blockSignals(True)
+            self._led_spinbox.setValue(intensity)
+            self._led_spinbox.blockSignals(False)
 
         # If LED is currently selected, re-enable preview with new color
         if self._led_radio and self._led_radio.isChecked():
