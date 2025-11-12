@@ -11,9 +11,134 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QGroupBox, QFormLayout,
     QListWidget, QListWidgetItem, QComboBox, QInputDialog,
-    QScrollArea
+    QScrollArea, QDialog, QDialogButtonBox, QDoubleSpinBox, QMessageBox
 )
 from PyQt5.QtCore import Qt
+
+
+class SetHomePositionDialog(QDialog):
+    """Dialog for setting home position with bounds validation."""
+
+    def __init__(self, current_position, stage_limits, parent=None):
+        """
+        Initialize set home position dialog.
+
+        Args:
+            current_position: Current stage position (Position object)
+            stage_limits: Stage limits dict from controller
+            parent: Parent widget
+        """
+        super().__init__(parent)
+        self.setWindowTitle("Set Home Position")
+        self.current_position = current_position
+        self.stage_limits = stage_limits
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        """Create dialog UI."""
+        layout = QVBoxLayout()
+
+        # Info label
+        info_label = QLabel(
+            "Set the home position for this microscope.\n"
+            "Default values are the current stage position.\n"
+            "Position must be within stage limits."
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #666; font-style: italic;")
+        layout.addWidget(info_label)
+
+        # Form for X, Y, Z, R inputs
+        form_layout = QFormLayout()
+
+        # X axis
+        self.x_spinbox = QDoubleSpinBox()
+        self.x_spinbox.setRange(
+            self.stage_limits['x']['min'],
+            self.stage_limits['x']['max']
+        )
+        self.x_spinbox.setDecimals(3)
+        self.x_spinbox.setSuffix(" mm")
+        self.x_spinbox.setValue(self.current_position.x)
+        self.x_spinbox.setSingleStep(0.1)
+        form_layout.addRow(
+            f"X (range: {self.stage_limits['x']['min']:.3f} to {self.stage_limits['x']['max']:.3f} mm):",
+            self.x_spinbox
+        )
+
+        # Y axis
+        self.y_spinbox = QDoubleSpinBox()
+        self.y_spinbox.setRange(
+            self.stage_limits['y']['min'],
+            self.stage_limits['y']['max']
+        )
+        self.y_spinbox.setDecimals(3)
+        self.y_spinbox.setSuffix(" mm")
+        self.y_spinbox.setValue(self.current_position.y)
+        self.y_spinbox.setSingleStep(0.1)
+        form_layout.addRow(
+            f"Y (range: {self.stage_limits['y']['min']:.3f} to {self.stage_limits['y']['max']:.3f} mm):",
+            self.y_spinbox
+        )
+
+        # Z axis
+        self.z_spinbox = QDoubleSpinBox()
+        self.z_spinbox.setRange(
+            self.stage_limits['z']['min'],
+            self.stage_limits['z']['max']
+        )
+        self.z_spinbox.setDecimals(3)
+        self.z_spinbox.setSuffix(" mm")
+        self.z_spinbox.setValue(self.current_position.z)
+        self.z_spinbox.setSingleStep(0.1)
+        form_layout.addRow(
+            f"Z (range: {self.stage_limits['z']['min']:.3f} to {self.stage_limits['z']['max']:.3f} mm):",
+            self.z_spinbox
+        )
+
+        # R axis
+        self.r_spinbox = QDoubleSpinBox()
+        self.r_spinbox.setRange(
+            self.stage_limits['r']['min'],
+            self.stage_limits['r']['max']
+        )
+        self.r_spinbox.setDecimals(2)
+        self.r_spinbox.setSuffix("°")
+        self.r_spinbox.setValue(self.current_position.r)
+        self.r_spinbox.setSingleStep(1.0)
+        form_layout.addRow(
+            f"R (range: {self.stage_limits['r']['min']:.1f} to {self.stage_limits['r']['max']:.1f}°):",
+            self.r_spinbox
+        )
+
+        layout.addLayout(form_layout)
+
+        # Buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+        self.setLayout(layout)
+        self.setMinimumWidth(500)
+
+    def get_position(self):
+        """
+        Get the position from the dialog.
+
+        Returns:
+            Position object with values from spinboxes
+        """
+        from py2flamingo.models.position import Position
+        return Position(
+            x=self.x_spinbox.value(),
+            y=self.y_spinbox.value(),
+            z=self.z_spinbox.value(),
+            r=self.r_spinbox.value()
+        )
 
 
 class StageControlView(QWidget):
@@ -438,8 +563,8 @@ class StageControlView(QWidget):
         """
         layout = QHBoxLayout()
 
-        # Home button
-        self.home_btn = QPushButton("🏠 Home (Return to Home Position)")
+        # Go to Home button
+        self.home_btn = QPushButton("🏠 Go to Home Position")
         self.home_btn.clicked.connect(self._on_home_clicked)
         self.home_btn.setEnabled(False)
         self.home_btn.setStyleSheet(
@@ -447,6 +572,16 @@ class StageControlView(QWidget):
             "padding: 8px; font-weight: bold; color: #2e7d32;"
         )
         layout.addWidget(self.home_btn)
+
+        # Set Home Position button
+        self.set_home_btn = QPushButton("📍 Set Home Position")
+        self.set_home_btn.clicked.connect(self._on_set_home_clicked)
+        self.set_home_btn.setEnabled(False)
+        self.set_home_btn.setStyleSheet(
+            "background-color: #e3f2fd; border: 2px solid #2196f3; "
+            "padding: 8px; font-weight: bold; color: #1565c0;"
+        )
+        layout.addWidget(self.set_home_btn)
 
         # Emergency Stop button
         self.emergency_stop_btn = QPushButton("🛑 EMERGENCY STOP")
@@ -850,6 +985,41 @@ class StageControlView(QWidget):
             self.show_error(f"Unexpected error: {str(e)}")
             self.set_moving(False)
 
+    def _on_set_home_clicked(self) -> None:
+        """Handle set home position button click."""
+        try:
+            # Get current position as default
+            current_pos = self._controller.get_current_position()
+            if current_pos is None:
+                self.show_error("Current position not available")
+                return
+
+            # Get stage limits for validation display
+            limits = self._controller.get_stage_limits()
+
+            # Create and show dialog
+            dialog = SetHomePositionDialog(current_pos, limits, self)
+            if dialog.exec_() == QDialog.Accepted:
+                new_home = dialog.get_position()
+
+                # Set the new home position
+                self._controller.set_home_position(new_home)
+
+                self.show_success(
+                    f"Home position set to:\n"
+                    f"X: {new_home.x:.3f} mm\n"
+                    f"Y: {new_home.y:.3f} mm\n"
+                    f"Z: {new_home.z:.3f} mm\n"
+                    f"R: {new_home.r:.2f}°"
+                )
+
+        except ValueError as e:
+            self.show_error(f"Invalid position: {str(e)}")
+        except RuntimeError as e:
+            self.show_error(f"Failed to set home: {str(e)}")
+        except Exception as e:
+            self.show_error(f"Unexpected error: {str(e)}")
+
     def _on_emergency_stop_clicked(self) -> None:
         """Handle emergency stop button click."""
         try:
@@ -930,6 +1100,7 @@ class StageControlView(QWidget):
             self.goto_preset_btn.setEnabled(False)
             self.undo_btn.setEnabled(False)
             self.home_btn.setEnabled(False)
+            self.set_home_btn.setEnabled(False)
         else:
             # Re-enable based on connection status
             self.set_connected(self._controller.connection.is_connected())
@@ -1030,6 +1201,7 @@ class StageControlView(QWidget):
 
         # Safety buttons
         self.home_btn.setEnabled(connected)
+        self.set_home_btn.setEnabled(connected)
         self.emergency_stop_btn.setEnabled(connected)
 
         if connected:
@@ -1067,6 +1239,7 @@ class StageControlView(QWidget):
         self.goto_preset_btn.setEnabled(not moving and has_selection)
         self.undo_btn.setEnabled(not moving and self._controller.has_position_history())
         self.home_btn.setEnabled(not moving)
+        self.set_home_btn.setEnabled(not moving)
 
         # Emergency stop always enabled when connected (even during movement)
         # (already enabled in set_connected)
