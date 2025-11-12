@@ -309,8 +309,13 @@ class XYViewPanel(ChamberViewPanel):
         Only shows portion inside chamber boundaries.
         Position is at tip of nub (bottom of 0.25mm extension).
         """
-        if self.x_pos is None or self.y_pos is None:
+        if self.x_pos is None or self.other_pos is None:
             return
+
+        # Y position is stored in other_pos (base class variable)
+        y_pos = self.other_pos
+        y_min = self.other_min
+        y_max = self.other_max
 
         # Calculate scale factor
         x_range = self.x_max - self.x_min
@@ -331,11 +336,11 @@ class XYViewPanel(ChamberViewPanel):
         # Nub extends from y_pos upward to y_pos + nub_length_mm
         # Column extends from top of nub upward to top of chamber
 
-        nub_top_y = self.y_pos + nub_length_mm
-        column_top_y = self.y_max  # Extends to top of chamber
+        nub_top_y = y_pos + nub_length_mm
+        column_top_y = y_max  # Extends to top of chamber
 
         # Get screen coordinates
-        screen_x_pos, screen_y_tip = self._world_to_screen(self.x_pos, self.y_pos)
+        screen_x_pos, screen_y_tip = self._world_to_screen(self.x_pos, y_pos)
         screen_x_pos, screen_y_nub_top = self._world_to_screen(self.x_pos, nub_top_y)
         screen_x_pos, screen_y_column_top = self._world_to_screen(self.x_pos, column_top_y)
 
@@ -344,7 +349,7 @@ class XYViewPanel(ChamberViewPanel):
 
         # Draw column (1mm wide, from top of chamber to top of nub)
         # Only draw portion inside chamber
-        if nub_top_y <= self.y_max:  # Top of nub is inside chamber
+        if nub_top_y <= y_max:  # Top of nub is inside chamber
             column_rect = QRectF(
                 screen_x_pos - column_width_px / 2,
                 screen_y_column_top,
@@ -357,7 +362,7 @@ class XYViewPanel(ChamberViewPanel):
 
         # Draw nub (0.25mm wide, extends 1mm down from top)
         # Only draw portion inside chamber
-        if self.y_pos >= self.y_min:  # Nub tip is inside chamber
+        if y_pos >= y_min:  # Nub tip is inside chamber
             nub_rect = QRectF(
                 screen_x_pos - nub_width_px / 2,
                 screen_y_nub_top,
@@ -381,8 +386,10 @@ class XYViewPanel(ChamberViewPanel):
         painter.setFont(font)
         painter.setPen(QPen(Qt.black))
 
-        screen_x, screen_y = self._world_to_screen(self.x_pos, self.y_pos)
-        text = f"({self.x_pos:.2f}, {self.y_pos:.2f})"
+        # Y position is stored in other_pos
+        y_pos = self.other_pos
+        screen_x, screen_y = self._world_to_screen(self.x_pos, y_pos)
+        text = f"({self.x_pos:.2f}, {y_pos:.2f})"
         painter.drawText(int(screen_x) + 15, int(screen_y) + 15, text)
 
     # TODO: Future implementation - sample object below nub
