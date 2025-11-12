@@ -837,6 +837,58 @@ class PositionController:
 
         return None
 
+    def set_home_position(self, position: Position) -> None:
+        """
+        Set the home position and save to settings.
+
+        Args:
+            position: Position to set as home
+
+        Raises:
+            ValueError: If position is outside stage limits
+            RuntimeError: If failed to save settings
+        """
+        # Validate position is within bounds
+        is_valid, errors = self.is_position_within_bounds(position)
+        if not is_valid:
+            error_msg = "Cannot set home position outside stage limits:\n" + "\n".join(errors)
+            raise ValueError(error_msg)
+
+        try:
+            from py2flamingo.utils.file_handlers import text_to_dict, dict_to_text
+            from pathlib import Path
+
+            settings_path = Path('microscope_settings') / 'ScopeSettings.txt'
+
+            if not settings_path.exists():
+                raise RuntimeError(f"Settings file not found: {settings_path}")
+
+            # Read current settings
+            settings = text_to_dict(str(settings_path))
+
+            # Update home position values
+            if 'Stage limits' not in settings:
+                settings['Stage limits'] = {}
+
+            settings['Stage limits']['Home x-axis'] = f"{position.x:.6f}"
+            settings['Stage limits']['Home y-axis'] = f"{position.y:.6f}"
+            settings['Stage limits']['Home z-axis'] = f"{position.z:.6f}"
+            settings['Stage limits']['Home r-axis'] = f"{position.r:.2f}"
+
+            # Write back to file
+            dict_to_text(settings, str(settings_path))
+
+            self.logger.info(
+                f"Home position updated: X={position.x:.3f}, "
+                f"Y={position.y:.3f}, Z={position.z:.3f}, "
+                f"R={position.r:.2f}°"
+            )
+
+        except Exception as e:
+            error_msg = f"Failed to save home position: {e}"
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg)
+
     def go_home(self) -> None:
         """
         Move stage to home position defined in settings.
@@ -862,30 +914,47 @@ class PositionController:
         """
         Emergency stop - halt all stage movement immediately.
 
-        This sets a flag that prevents new movements and attempts to
-        interrupt any ongoing motion tracking. The emergency stop state
+        This sends the HALT command to the hardware to physically stop motion,
+        then sets a flag that prevents new movements. The emergency stop state
         must be cleared before movements can resume.
 
         WARNING: This may leave the stage in an unknown position.
         """
-        self.logger.warning("EMERGENCY STOP ACTIVATED")
+        self.logger.warning("EMERGENCY STOP ACTIVATED - Sending HALT command to hardware")
 
-        # Set emergency stop flag
+        # CRITICAL: Send HALT command to hardware FIRST to stop physical motion
+        try:
+            from py2flamingo.core.command_codes import StageCommands
+            from py2flamingo.models.command import Command
+
+            # Send HALT command (0x6002) to stop stage motion immediately
+            halt_cmd = Command(
+                code=StageCommands.HALT,
+                parameters={
+                    'params': [0, 0, 0, 0, 0, 0, 0],
+                    'value': 0.0
+                }
+            )
+
+            if self.connection.is_connected():
+                self.logger.info("Sending HALT (0x6002) command to stop stage motion")
+                self.connection.send_command(halt_cmd)
+                self.logger.info("HALT command sent - stage motion should stop immediately")
+            else:
+                self.logger.warning("Not connected - cannot send HALT command to hardware")
+
+        except Exception as e:
+            self.logger.error(f"Error sending HALT command: {e}", exc_info=True)
+            # Continue with emergency stop flag even if HALT fails
+
+        # Set emergency stop flag to prevent new movements
         self._emergency_stop_active = True
 
-        # Try to interrupt motion tracker if it exists
-        if self._motion_tracker:
-            try:
-                # The motion tracker will timeout on its own
-                # We just prevent new movements from starting
-                self.logger.info("Emergency stop set - waiting for current motion to timeout")
-            except Exception as e:
-                self.logger.error(f"Error during emergency stop: {e}")
-
-        # Release movement lock if held (allows recovery)
-        if self._movement_lock.locked():
-            self._movement_lock.release()
-            self.logger.info("Movement lock released during emergency stop")
+        # DON'T manually release the lock here - let the background thread handle it
+        # The motion tracker will timeout/complete and release the lock properly
+        # Manually releasing it here causes "release unlocked lock" errors
+        self.logger.info("Emergency stop flag set - no new movements will be accepted")
+        self.logger.info("Waiting for background motion tracker to timeout and release lock...")
 
     def clear_emergency_stop(self) -> None:
         """
@@ -1039,9 +1108,15 @@ class PositionController:
                 self.logger.error(f"Error waiting for motion complete: {e}", exc_info=True)
 
             finally:
-                # Always release movement lock
-                self._movement_lock.release()
-                self.logger.debug("Movement lock released")
+                # Always release movement lock (check if locked first to avoid double-release)
+                try:
+                    if self._movement_lock.locked():
+                        self._movement_lock.release()
+                        self.logger.debug("Movement lock released")
+                    else:
+                        self.logger.warning("Movement lock was already released (possibly by emergency stop)")
+                except RuntimeError as e:
+                    self.logger.warning(f"Could not release movement lock: {e} (may have been released by emergency stop)")
 
         # Start background thread
         thread = threading.Thread(target=wait_thread, daemon=True, name="MotionWaiter")
