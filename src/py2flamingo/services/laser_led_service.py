@@ -44,8 +44,11 @@ class LaserLEDCommandCode:
 
     # Illumination commands (0x7000 range)
     # These control the illumination waveform for synchronized imaging
-    ILLUMINATION_LEFT_ENABLE = 0x7004  # 28676 - Enable left illumination
-    ILLUMINATION_LEFT_DISABLE = 0x7005  # 28677 - Disable left illumination
+    # For TSPIM systems, controls left and right light paths
+    ILLUMINATION_LEFT_ENABLE = 0x7004  # 28676 - Enable left illumination path
+    ILLUMINATION_LEFT_DISABLE = 0x7005  # 28677 - Disable left illumination path
+    ILLUMINATION_RIGHT_ENABLE = 0x7006  # 28678 - Enable right illumination path
+    ILLUMINATION_RIGHT_DISABLE = 0x7007  # 28679 - Disable right illumination path
 
 
 class LaserLEDService(MicroscopeCommandService):
@@ -251,19 +254,18 @@ class LaserLEDService(MicroscopeCommandService):
         color_names = ["Red", "Green", "Blue", "White"]
         self.logger.debug(f"Setting {color_names[led_color]} LED intensity to {intensity_percent:.1f}%")
 
-        # Convert percentage to DAC value range
-        # Based on ScopeSettings.txt: min=3200000, max=6553500
-        min_dac = 3200000
-        max_dac = 6553500
-        dac_value = int(min_dac + (max_dac - min_dac) * (intensity_percent / 100.0))
+        # Convert percentage to uint16 value range (0-65535)
+        # LED hardware expects 16-bit unsigned integer, NOT DAC range
+        # 0% = 0, 100% = 65535
+        led_value = int(65535 * (intensity_percent / 100.0))
 
-        # LED_SET command:
+        # LED_SET command (0x4001):
         # int32Data0 = led_color (0=Red, 1=Green, 2=Blue, 3=White)
-        # int32Data1 = dac_value (intensity)
+        # int32Data1 = led_value (0-65535 range)
         result = self._send_command(
             LaserLEDCommandCode.LED_SET,
             "LED_SET",
-            params=[0, 0, 0, led_color, dac_value, 0, 0]
+            params=[0, 0, 0, led_color, led_value, 0, 0]
         )
 
         return result['success']
@@ -310,36 +312,52 @@ class LaserLEDService(MicroscopeCommandService):
 
         return result['success']
 
-    def enable_illumination(self) -> bool:
+    def enable_illumination(self, left: bool = True, right: bool = False) -> bool:
         """
         Enable illumination waveform for synchronized imaging.
 
-        This must be called after enabling laser preview to configure
+        For TSPIM systems, this controls which light path(s) are active.
+        This must be called after enabling laser/LED preview to configure
         the illumination timing that coordinates with camera exposure.
 
-        From analysis of working system, this command:
-        - Sets illumination waveform (e.g., ILWAVE 200 1500 290 -1 -1)
-        - Coordinates camera exposure timing with light source
+        Args:
+            left: Enable left illumination path (default: True)
+            right: Enable right illumination path (default: False)
 
         Returns:
             True if successful, False otherwise
 
         Example:
-            >>> # Proper sequence for laser live view:
+            >>> # Proper sequence for laser live view on left path:
             >>> laser_led.disable_led_preview()  # 1. Disable LED
             >>> laser_led.enable_laser_preview(2)  # 2. Enable laser 2
-            >>> laser_led.enable_illumination()  # 3. Enable illumination (CRITICAL!)
+            >>> laser_led.enable_illumination(left=True)  # 3. Enable left path
             >>> camera.start_live_view()  # 4. Start imaging
         """
-        self.logger.info("Enabling illumination for synchronized imaging")
+        success = True
 
-        result = self._send_command(
-            LaserLEDCommandCode.ILLUMINATION_LEFT_ENABLE,
-            "ILLUMINATION_LEFT_ENABLE",
-            params=[0, 0, 0, 0, 0, 0, 0]
-        )
+        if left:
+            self.logger.info("Enabling LEFT illumination path for synchronized imaging")
+            result = self._send_command(
+                LaserLEDCommandCode.ILLUMINATION_LEFT_ENABLE,
+                "ILLUMINATION_LEFT_ENABLE",
+                params=[0, 0, 0, 0, 0, 0, 0]
+            )
+            success = success and result['success']
 
-        return result['success']
+        if right:
+            self.logger.info("Enabling RIGHT illumination path for synchronized imaging")
+            result = self._send_command(
+                LaserLEDCommandCode.ILLUMINATION_RIGHT_ENABLE,
+                "ILLUMINATION_RIGHT_ENABLE",
+                params=[0, 0, 0, 0, 0, 0, 0]
+            )
+            success = success and result['success']
+
+        if not left and not right:
+            self.logger.warning("enable_illumination called with both paths disabled")
+
+        return success
 
     def disable_illumination(self) -> bool:
         """

@@ -156,11 +156,14 @@ class IlluminationCommands:
     Illumination control commands.
 
     Controls the illumination waveform and timing for synchronized imaging.
+    For TSPIM systems, controls left and right light path selection.
     """
 
-    # Illumination control
-    LEFT_ENABLE = 0x7004  # 28676 - Enable left illumination
-    LEFT_DISABLE = 0x7005  # 28677 - Disable left illumination
+    # Illumination control (TSPIM left/right paths)
+    LEFT_ENABLE = 0x7004  # 28676 - Enable left illumination path
+    LEFT_DISABLE = 0x7005  # 28677 - Disable left illumination path
+    RIGHT_ENABLE = 0x7006  # 28678 - Enable right illumination path
+    RIGHT_DISABLE = 0x7007  # 28679 - Disable right illumination path (inferred)
 
 
 class FilterCommands:
