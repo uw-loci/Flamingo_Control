@@ -717,7 +717,15 @@ class PositionController:
                 self._movement_lock.release()
                 return
 
-            self.logger.info(f"Moving {len(moved_axes)} axes: {[ax.name for ax in moved_axes]}")
+            # Create axis name mapping for logging (AxisCode values are integers, not objects)
+            from py2flamingo.services.stage_service import AxisCode
+            axis_names = {
+                AxisCode.X_AXIS: "X",
+                AxisCode.Y_AXIS: "Y",
+                AxisCode.Z_AXIS: "Z",
+                AxisCode.ROTATION: "R"
+            }
+            self.logger.info(f"Moving {len(moved_axes)} axes: {[axis_names[ax] for ax in moved_axes]}")
 
             # Wait for motion complete in background thread
             # Only query the axes that actually moved

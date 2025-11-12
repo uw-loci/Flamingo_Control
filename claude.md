@@ -4,6 +4,35 @@
 
 This document describes the **Flamingo Control System**, which is part of a larger two-repository project structure:
 
+---
+
+## ⚠️ CRITICAL: Claude Report Location
+
+**IMPORTANT:** All Claude-generated reports, analysis documents, and session summaries MUST be saved to:
+
+```
+/home/msnelson/LSControl/claude-reports/
+```
+
+**DO NOT:**
+- ❌ Save claude reports to `/home/msnelson/LSControl/Flamingo_Control/` (this git repo)
+- ❌ Commit claude reports to the git repository
+- ❌ Create report subdirectories within individual repositories
+
+**WHY:**
+- The `claude-reports/` folder is shared documentation for BOTH repositories (Flamingo_Control and FlamingoCollagen)
+- Claude reports are local reference only, NOT for version control
+- Keeps git history clean and focused on code changes
+
+**Examples of files that belong in claude-reports/:**
+- Session summaries and analysis reports
+- Protocol reference documents
+- Implementation planning documents
+- Architecture analysis
+- Bug investigation reports
+
+---
+
 ### Repository Structure
 
 **1. Flamingo_Control (THIS REPOSITORY) - Microscope Control Software**
