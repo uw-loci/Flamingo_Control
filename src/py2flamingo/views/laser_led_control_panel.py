@@ -51,6 +51,12 @@ class LaserLEDControlPanel(QWidget):
         self._led_slider = None  # Single slider for LED intensity
         self._led_spinbox = None  # Editable intensity spinbox
 
+        # Light path selection (TSPIM - for lasers only)
+        self._path_group = None  # QGroupBox for path selection
+        self._left_path_radio = None  # Left path radio button
+        self._right_path_radio = None  # Right path radio button
+        self._laser_path = "left"  # Current path selection (default: left)
+
         # Timers for delayed logging (reduce spam)
         self._laser_log_timers = {}  # laser_index -> QTimer
         self._led_log_timer = None
@@ -93,6 +99,12 @@ class LaserLEDControlPanel(QWidget):
         led_group = self._create_led_section()
         if led_group:
             main_layout.addWidget(led_group)
+
+        # Light path selection (for lasers only)
+        self._path_group = self._create_path_selection_section()
+        main_layout.addWidget(self._path_group)
+        # Initially hidden until a laser is selected
+        self._path_group.setVisible(False)
 
         # Status
         self._status_label = QLabel("Select a light source for live viewing")
@@ -236,6 +248,60 @@ class LaserLEDControlPanel(QWidget):
         group.setLayout(layout)
         return group
 
+    def _create_path_selection_section(self) -> QGroupBox:
+        """
+        Create light path selection section (TSPIM - for lasers only).
+
+        This section allows selecting between left and right illumination paths.
+        It is only visible when a laser is selected (not for LED).
+        """
+        group = QGroupBox("Light Path Selection (Preview)")
+        layout = QHBoxLayout()
+        layout.setSpacing(15)
+
+        # Info label
+        info = QLabel("Select illumination path:")
+        layout.addWidget(info)
+
+        # Left path radio button
+        self._left_path_radio = QRadioButton("Left Path")
+        self._left_path_radio.setChecked(True)  # Default to left
+        self._left_path_radio.toggled.connect(self._on_path_selection_changed)
+        layout.addWidget(self._left_path_radio)
+
+        # Right path radio button
+        self._right_path_radio = QRadioButton("Right Path")
+        self._right_path_radio.toggled.connect(self._on_path_selection_changed)
+        layout.addWidget(self._right_path_radio)
+
+        layout.addStretch()
+
+        group.setLayout(layout)
+        return group
+
+    def _on_path_selection_changed(self) -> None:
+        """Handle light path selection change."""
+        # Determine which path is selected
+        if self._left_path_radio and self._left_path_radio.isChecked():
+            self._laser_path = "left"
+            path_name = "LEFT"
+        elif self._right_path_radio and self._right_path_radio.isChecked():
+            self._laser_path = "right"
+            path_name = "RIGHT"
+        else:
+            return
+
+        self.logger.info(f"Light path changed to {path_name}")
+
+        # If a laser is currently active, re-enable it with new path
+        checked_button = self._source_button_group.checkedButton()
+        if checked_button and checked_button != self._led_radio:
+            # This is a laser button
+            source_id = self._source_button_group.id(checked_button)
+            if source_id >= 1:  # Laser
+                self.logger.info(f"Re-enabling laser {source_id} with {path_name} path")
+                self.laser_led_controller.enable_laser_for_preview(source_id, self._laser_path)
+
     def _on_laser_power_slider_changed(self, laser_index: int, value: int) -> None:
         """Handle laser power slider change (while dragging)."""
         power_percent = float(value)
@@ -367,13 +433,24 @@ class LaserLEDControlPanel(QWidget):
 
         # Check if this is the LED button directly (more robust than relying on ID)
         if button == self._led_radio:
+            # LED selected - hide path selection (LED doesn't use paths)
+            if self._path_group:
+                self._path_group.setVisible(False)
+
             led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
             color_names = ["Red", "Green", "Blue", "White"]
             self.logger.info(f"{color_names[led_color]} LED selected for preview")
             self.laser_led_controller.enable_led_for_preview(led_color)
+
         elif source_id >= 1:  # Laser (laser indices are typically 1, 2, 3, 4)
-            self.logger.info(f"Laser {source_id} selected for preview")
-            self.laser_led_controller.enable_laser_for_preview(source_id)
+            # Laser selected - show path selection
+            if self._path_group:
+                self._path_group.setVisible(True)
+
+            # Enable laser with current path selection
+            self.logger.info(f"Laser {source_id} selected for preview on {self._laser_path.upper()} path")
+            self.laser_led_controller.enable_laser_for_preview(source_id, self._laser_path)
+
         else:
             # This shouldn't happen, but log for debugging
             self.logger.warning(f"Unhandled source button with ID {source_id}")

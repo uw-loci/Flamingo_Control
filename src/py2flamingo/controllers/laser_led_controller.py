@@ -176,7 +176,7 @@ class LaserLEDController(QObject):
             self.error_occurred.emit(error_msg)
             return False
 
-    def enable_laser_for_preview(self, laser_index: int) -> bool:
+    def enable_laser_for_preview(self, laser_index: int, path: str = "left") -> bool:
         """
         Enable specific laser for preview/imaging.
 
@@ -184,17 +184,19 @@ class LaserLEDController(QObject):
         1. Disable LED if active (0x4003)
         2. Set laser power
         3. Enable laser preview mode (0x2004 with laser_index)
-        4. Enable illumination (0x7004) - coordinates exposure timing
+        4. Enable illumination on selected path (0x7004 or 0x7006) - coordinates exposure timing
         5. Ready for snapshot/live view
 
         Args:
             laser_index: Laser index (1-4)
+            path: Light path selection - "left" or "right" (TSPIM only, default: "left")
 
         Returns:
             True if successful
         """
         try:
-            self.logger.info(f"Enabling laser {laser_index} for preview (full sequence)")
+            path_display = path.upper()
+            self.logger.info(f"Enabling laser {laser_index} for preview on {path_display} path (full sequence)")
 
             # Step 1: Disable LED if it was active
             if self._active_source and self._active_source.startswith("led"):
@@ -212,10 +214,12 @@ class LaserLEDController(QObject):
             if not self.laser_led_service.enable_laser_preview(laser_index):
                 raise RuntimeError(f"Failed to enable laser {laser_index} preview")
 
-            # Step 4: Enable illumination (CRITICAL - coordinates exposure timing)
-            self.logger.info("Step 4: Enabling illumination for synchronized imaging")
-            if not self.laser_led_service.enable_illumination():
-                raise RuntimeError("Failed to enable illumination")
+            # Step 4: Enable illumination on selected path (CRITICAL - coordinates exposure timing)
+            left_enabled = (path == "left")
+            right_enabled = (path == "right")
+            self.logger.info(f"Step 4: Enabling {path_display} illumination path for synchronized imaging")
+            if not self.laser_led_service.enable_illumination(left=left_enabled, right=right_enabled):
+                raise RuntimeError(f"Failed to enable {path_display} illumination")
 
             # Update state
             self._active_source = f"laser_{laser_index}"
@@ -227,8 +231,8 @@ class LaserLEDController(QObject):
                     laser_name = laser.name
                     break
 
-            self.preview_enabled.emit(laser_name)
-            self.logger.info(f"Laser {laser_index} enabled for preview - ready for imaging")
+            self.preview_enabled.emit(f"{laser_name} ({path_display} path)")
+            self.logger.info(f"Laser {laser_index} enabled on {path_display} path - ready for imaging")
             return True
 
         except Exception as e:
