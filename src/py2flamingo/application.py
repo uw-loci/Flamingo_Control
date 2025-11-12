@@ -236,8 +236,11 @@ class FlamingoApplication:
         # Create independent image controls window
         self.logger.debug("Creating image controls window...")
         self.image_controls_window = ImageControlsWindow()
-        # Window starts hidden - user can open it via menu/button
+        # Window starts hidden - user can open it via menu
         self.image_controls_window.hide()
+
+        # Camera live viewer also starts hidden - user can open it via menu
+        self.camera_live_viewer.hide()
 
         # Connect image controls to camera live viewer
         if self.image_controls_window and self.camera_live_viewer:

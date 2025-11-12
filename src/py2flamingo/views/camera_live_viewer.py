@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QGroupBox, QSlider, QSpinBox, QCheckBox, QSizePolicy, QMessageBox
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer
-from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtGui import QPixmap, QImage, QCloseEvent
 
 from py2flamingo.controllers.camera_controller import CameraController, CameraState
 from py2flamingo.services.camera_service import ImageHeader
@@ -66,6 +66,10 @@ class CameraLiveViewer(QWidget):
 
         # Update UI with initial state
         self._update_ui_state()
+
+        # Configure as independent window
+        self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint)
+        self.setWindowTitle("Camera Live Viewer")
 
     def _setup_ui(self) -> None:
         """Create and layout UI components."""
@@ -713,3 +717,16 @@ class CameraLiveViewer(QWidget):
         """Cleanup resources when widget is closed."""
         if self.camera_controller.state == CameraState.LIVE_VIEW:
             self.camera_controller.stop_live_view()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """
+        Handle window close event.
+
+        Hide the window instead of closing it so it can be reopened.
+
+        Args:
+            event: Close event
+        """
+        self.logger.info("Camera Live Viewer window hidden")
+        self.hide()
+        event.ignore()  # Don't actually close, just hide

@@ -27,17 +27,21 @@ class MainWindow(QMainWindow):
 
     This class creates the main window UI by composing views created
     in the Views layer. It uses a tab widget to organize the
-    ConnectionView, WorkflowView, SampleInfoView, and LiveFeedView into separate tabs.
+    ConnectionView, WorkflowView, SampleInfoView, and EnhancedStageControlView into separate tabs.
 
     The window includes:
-    - Menu bar (File → Exit, Help → About)
-    - Tab widget with Connection, Workflow, Sample Info, and Live Feed tabs
+    - Menu bar (File → Exit, View → Camera/Image Controls, Help → About)
+    - Tab widget with Connection, Workflow, Sample Info, and Stage Control tabs
     - Scroll areas for each tab to handle content overflow
     - Status bar for application messages
     - Intelligent auto-sizing based on screen dimensions (90% of screen height)
+    - Access to independent windows: Camera Live Viewer and Image Controls
 
     Example:
-        main_window = MainWindow(connection_view, workflow_view, sample_info_view, live_feed_view)
+        main_window = MainWindow(connection_view, workflow_view, sample_info_view,
+                                 enhanced_stage_control_view=stage_view,
+                                 camera_live_viewer=camera_viewer,
+                                 image_controls_window=image_controls)
         main_window.setWindowTitle("Flamingo Microscope Control")
         # Window automatically sizes to 90% of screen height and centers itself
         main_window.show()
@@ -106,10 +110,6 @@ class MainWindow(QMainWindow):
         # Add stage control tab (enhanced view only)
         if self.enhanced_stage_control_view is not None:
             self.tabs.addTab(self._wrap_in_scroll_area(self.enhanced_stage_control_view), "Stage Control")
-
-        # Add live feed tab (camera live viewer only)
-        if self.camera_live_viewer is not None:
-            self.tabs.addTab(self._wrap_in_scroll_area(self.camera_live_viewer), "Live Feed")
 
         # Add tabs to layout
         layout.addWidget(self.tabs)
@@ -192,6 +192,14 @@ class MainWindow(QMainWindow):
         # View menu
         view_menu = menubar.addMenu("&View")
 
+        # Camera Live Viewer action
+        if self.camera_live_viewer is not None:
+            camera_viewer_action = QAction("&Camera Live Viewer...", self)
+            camera_viewer_action.setShortcut("Ctrl+L")
+            camera_viewer_action.setStatusTip("Open Camera Live Viewer window")
+            camera_viewer_action.triggered.connect(self._show_camera_viewer)
+            view_menu.addAction(camera_viewer_action)
+
         # Image Controls action
         if self.image_controls_window is not None:
             image_controls_action = QAction("&Image Controls...", self)
@@ -218,6 +226,13 @@ class MainWindow(QMainWindow):
             "<p>Control software for Flamingo light sheet microscopes.</p>"
             "<p>Built with PyQt5 and Python.</p>"
         )
+
+    def _show_camera_viewer(self):
+        """Show Camera Live Viewer window."""
+        if self.camera_live_viewer is not None:
+            self.camera_live_viewer.show()
+            self.camera_live_viewer.raise_()  # Bring to front
+            self.camera_live_viewer.activateWindow()  # Give it focus
 
     def _show_image_controls(self):
         """Show Image Controls window."""
