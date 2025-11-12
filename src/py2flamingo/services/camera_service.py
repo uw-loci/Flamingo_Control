@@ -522,10 +522,18 @@ class CameraService(MicroscopeCommandService):
         import time
 
         self.logger.info("Data receiver thread started")
+        self.logger.info(f"Waiting for image data on socket (timeout={self._data_socket.gettimeout()}s)...")
         frames_received = 0
+        last_log_time = time.time()
 
         while self._streaming:
             try:
+                # Log every 2 seconds while waiting
+                current_time = time.time()
+                if current_time - last_log_time > 2.0:
+                    self.logger.debug(f"Still waiting for frames... (received {frames_received} so far)")
+                    last_log_time = current_time
+
                 # Read 40-byte header
                 header_bytes = self._receive_exact(self._data_socket, 40)
                 if not header_bytes:
@@ -534,6 +542,9 @@ class CameraService(MicroscopeCommandService):
 
                 # Parse header
                 header = ImageHeader.from_bytes(header_bytes)
+
+                if frames_received == 0:
+                    self.logger.info(f"First frame received! Size: {header.image_width}x{header.image_height}, {header.image_size} bytes")
 
                 # Read image data (16-bit pixels)
                 image_data_bytes = self._receive_exact(self._data_socket, header.image_size)
@@ -553,6 +564,10 @@ class CameraService(MicroscopeCommandService):
 
                 frames_received += 1
 
+                if frames_received % 10 == 0:
+                    self.logger.debug(f"Received {frames_received} frames")
+
+
                 # Fast buffering: Just add to queue (deque handles overflow by dropping oldest)
                 with self._frame_buffer_lock:
                     self._frame_buffer.append((image_array, header))
@@ -568,12 +583,16 @@ class CameraService(MicroscopeCommandService):
                         self.logger.error(f"Error in image callback: {e}")
 
             except socket.timeout:
-                # Normal timeout, continue loop
+                # Socket timeout - no data received within timeout period
+                # This is normal if server isn't sending data yet
+                self.logger.debug(f"Socket timeout while waiting for data (received {frames_received} frames so far)")
                 continue
 
             except Exception as e:
                 if self._streaming:  # Only log if we're supposed to be streaming
                     self.logger.error(f"Error in data receiver: {e}")
+                    import traceback
+                    self.logger.error(f"Traceback: {traceback.format_exc()}")
                 break
 
         self.logger.info(f"Data receiver thread stopped (received {frames_received} frames)")
