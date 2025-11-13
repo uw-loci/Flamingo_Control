@@ -12,8 +12,8 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGroupBox, QSlider, QSpinBox, QCheckBox, QSizePolicy, QMessageBox
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer
-from PyQt5.QtGui import QPixmap, QImage, QCloseEvent
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QEvent
+from PyQt5.QtGui import QPixmap, QImage, QCloseEvent, QShowEvent, QHideEvent
 
 from py2flamingo.controllers.camera_controller import CameraController, CameraState
 from py2flamingo.services.camera_service import ImageHeader
@@ -691,6 +691,24 @@ class CameraLiveViewer(QWidget):
         if self.camera_controller.state == CameraState.LIVE_VIEW:
             self.camera_controller.stop_live_view()
 
+    def showEvent(self, event: QShowEvent) -> None:
+        """Handle window show event - log when window is opened."""
+        super().showEvent(event)
+        self.logger.info("Camera Live Viewer window opened")
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        """Handle window hide event - log when window is hidden."""
+        super().hideEvent(event)
+        self.logger.info("Camera Live Viewer window hidden")
+
+    def changeEvent(self, event: QEvent) -> None:
+        """Handle window state changes - log when window is activated."""
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowActivate:
+            self.logger.info("Camera Live Viewer window activated (user clicked into window)")
+        elif event.type() == QEvent.WindowDeactivate:
+            self.logger.debug("Camera Live Viewer window deactivated")
+
     def closeEvent(self, event: QCloseEvent) -> None:
         """
         Handle window close event.
@@ -700,6 +718,6 @@ class CameraLiveViewer(QWidget):
         Args:
             event: Close event
         """
-        self.logger.info("Camera Live Viewer window hidden")
+        # hideEvent will log this, so no need to log here again
         self.hide()
         event.ignore()  # Don't actually close, just hide

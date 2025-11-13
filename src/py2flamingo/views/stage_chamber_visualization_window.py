@@ -13,8 +13,8 @@ import math
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QGroupBox, QGridLayout, QMessageBox
 )
-from PyQt5.QtCore import Qt, pyqtSlot
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt, pyqtSlot, QEvent
+from PyQt5.QtGui import QFont, QShowEvent, QHideEvent
 
 from py2flamingo.views.widgets.stage_chamber_visualization import StageChamberVisualizationWidget
 from py2flamingo.models import Position
@@ -581,6 +581,24 @@ class StageChamberVisualizationWindow(QWidget):
         )
 
         self.logger.debug(f"Position updated: X={x:.2f}, Y={y:.2f}, Z={z:.2f}, R={r:.2f}")
+
+    def showEvent(self, event: QShowEvent) -> None:
+        """Handle window show event - log when window is opened."""
+        super().showEvent(event)
+        self.logger.info("Stage chamber visualization window opened")
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        """Handle window hide event - log when window is hidden."""
+        super().hideEvent(event)
+        self.logger.info("Stage chamber visualization window hidden")
+
+    def changeEvent(self, event: QEvent) -> None:
+        """Handle window state changes - log when window is activated."""
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowActivate:
+            self.logger.info("Stage chamber visualization window activated (user clicked into window)")
+        elif event.type() == QEvent.WindowDeactivate:
+            self.logger.debug("Stage chamber visualization window deactivated")
 
     def closeEvent(self, event) -> None:
         """Handle window close event."""

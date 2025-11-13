@@ -13,8 +13,8 @@ from PyQt5.QtWidgets import (
     QGroupBox, QSlider, QCheckBox, QComboBox, QButtonGroup,
     QRadioButton, QSpinBox
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QCloseEvent
+from PyQt5.QtCore import Qt, pyqtSignal, QEvent
+from PyQt5.QtGui import QCloseEvent, QShowEvent, QHideEvent
 
 
 class ImageControlsWindow(QWidget):
@@ -472,6 +472,24 @@ class ImageControlsWindow(QWidget):
         """Get crosshair visibility."""
         return self._show_crosshair
 
+    def showEvent(self, event: QShowEvent) -> None:
+        """Handle window show event - log when window is opened."""
+        super().showEvent(event)
+        self.logger.info("Image Controls window opened")
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        """Handle window hide event - log when window is hidden."""
+        super().hideEvent(event)
+        self.logger.info("Image Controls window hidden")
+
+    def changeEvent(self, event: QEvent) -> None:
+        """Handle window state changes - log when window is activated."""
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowActivate:
+            self.logger.info("Image Controls window activated (user clicked into window)")
+        elif event.type() == QEvent.WindowDeactivate:
+            self.logger.debug("Image Controls window deactivated")
+
     def closeEvent(self, event: QCloseEvent) -> None:
         """
         Handle window close event.
@@ -481,6 +499,6 @@ class ImageControlsWindow(QWidget):
         Args:
             event: Close event
         """
-        self.logger.info("Image Controls window hidden")
+        # hideEvent will log this, so no need to log here again
         self.hide()
         event.ignore()  # Don't actually close, just hide
