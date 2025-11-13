@@ -61,8 +61,17 @@ class ChamberViewPanel(QWidget):
         self.target_other: Optional[float] = None  # Z or Y
         self.target_active: bool = True  # True = active (orange), False = stale (purple)
 
-        # Widget appearance
-        self.setMinimumSize(350, 350)
+        # Widget appearance - size proportional to actual chamber dimensions
+        # Calculate aspect ratio from actual physical dimensions
+        x_range = x_max - x_min  # mm
+        other_range = other_max - other_min  # mm
+        aspect_ratio = x_range / other_range  # width / height
+
+        # Use consistent base height, calculate width from aspect ratio
+        base_height = 450
+        calculated_width = int(base_height * aspect_ratio)
+
+        self.setMinimumSize(calculated_width, base_height)
         self.setStyleSheet("background-color: white; border: 1px solid #ccc;")
 
     def set_position(self, x: float, other: float) -> None:
@@ -611,19 +620,34 @@ class StageChamberVisualizationWidget(QWidget):
     The visualization updates in real-time as the stage moves.
     """
 
-    def __init__(self, parent=None):
-        """Initialize stage chamber visualization widget."""
+    def __init__(self, stage_limits: dict = None, parent=None):
+        """Initialize stage chamber visualization widget.
+
+        Args:
+            stage_limits: Dictionary with stage limits {'x': {'min': ..., 'max': ...}, ...}
+                         If None, uses default hardcoded values
+            parent: Parent widget
+        """
         super().__init__(parent)
 
         self.logger = logging.getLogger(__name__)
 
-        # Stage limits (corrected values)
-        self.x_min = 1.0
-        self.x_max = 12.31
-        self.z_min = 12.5
-        self.z_max = 26.0
-        self.y_min = 5.0   # Lowest safe position
-        self.y_max = 20.0  # Estimated maximum
+        # Stage limits - use provided or default to hardcoded values
+        if stage_limits:
+            self.x_min = stage_limits['x']['min']
+            self.x_max = stage_limits['x']['max']
+            self.z_min = stage_limits['z']['min']
+            self.z_max = stage_limits['z']['max']
+            self.y_min = stage_limits['y']['min']
+            self.y_max = stage_limits['y']['max']
+        else:
+            # Fallback to hardcoded values if not provided
+            self.x_min = 1.0
+            self.x_max = 12.31
+            self.z_min = 12.5
+            self.z_max = 26.0
+            self.y_min = 5.0
+            self.y_max = 20.0
 
         self._setup_ui()
 

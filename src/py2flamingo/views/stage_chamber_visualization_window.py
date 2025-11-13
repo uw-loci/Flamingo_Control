@@ -90,8 +90,10 @@ class StageChamberVisualizationWindow(QWidget):
         subtitle.setAlignment(Qt.AlignCenter)
         layout.addWidget(subtitle)
 
-        # Create visualization widget
-        self.visualization_widget = StageChamberVisualizationWidget()
+        # Create visualization widget with actual stage limits
+        self.visualization_widget = StageChamberVisualizationWidget(
+            stage_limits=self.stage_limits
+        )
         layout.addWidget(self.visualization_widget)
 
         # Position control sliders
