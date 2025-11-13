@@ -62,8 +62,8 @@ class StageChamberVisualizationWindow(QWidget):
 
         # Window configuration
         self.setWindowTitle("Stage Chamber Visualization & Control")
-        self.setMinimumSize(900, 650)
-        self.resize(950, 700)
+        self.setMinimumSize(850, 580)
+        self.resize(900, 620)
 
         self._setup_ui()
         self._connect_signals()
@@ -76,23 +76,21 @@ class StageChamberVisualizationWindow(QWidget):
     def _setup_ui(self) -> None:
         """Create and layout UI components."""
         layout = QVBoxLayout()
-        layout.setSpacing(10)
+        layout.setSpacing(5)
+        layout.setContentsMargins(10, 10, 10, 10)
 
         # Title label
         title = QLabel("Stage Position within Sample Chamber")
         title_font = QFont()
-        title_font.setPointSize(12)
+        title_font.setPointSize(11)
         title_font.setBold(True)
         title.setFont(title_font)
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        # Subtitle with instructions
-        subtitle = QLabel(
-            "XZ View (Left): Top-down perspective  |  "
-            "XY View (Right): Side view with objective (faded circles below sample)"
-        )
-        subtitle.setStyleSheet("color: #666; font-style: italic;")
+        # Subtitle with instructions (more compact)
+        subtitle = QLabel("XZ View (Left): Top-down  |  XY View (Right): Side view")
+        subtitle.setStyleSheet("color: #666; font-style: italic; font-size: 9pt;")
         subtitle.setAlignment(Qt.AlignCenter)
         layout.addWidget(subtitle)
 

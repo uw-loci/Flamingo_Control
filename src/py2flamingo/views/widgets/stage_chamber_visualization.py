@@ -68,7 +68,7 @@ class ChamberViewPanel(QWidget):
         aspect_ratio = x_range / other_range  # width / height
 
         # Use consistent base height, calculate width from aspect ratio
-        base_height = 450
+        base_height = 380
         calculated_width = int(base_height * aspect_ratio)
 
         self.setMinimumSize(calculated_width, base_height)
@@ -657,7 +657,8 @@ class StageChamberVisualizationWidget(QWidget):
         """Create and layout UI components."""
         # Main layout - horizontal dual panel
         layout = QHBoxLayout()
-        layout.setSpacing(10)
+        layout.setSpacing(8)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         # Create XZ view panel (left)
         self.xz_panel = XZViewPanel(
