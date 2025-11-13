@@ -51,6 +51,12 @@ class StageChamberVisualizationWindow(QWidget):
         # Get stage limits from movement controller
         self.stage_limits = self.movement_controller.get_stage_limits()
 
+        # Log stage limits for debugging
+        self.logger.info(f"Stage limits: X={self.stage_limits['x']['min']:.2f}-{self.stage_limits['x']['max']:.2f}, "
+                        f"Y={self.stage_limits['y']['min']:.2f}-{self.stage_limits['y']['max']:.2f}, "
+                        f"Z={self.stage_limits['z']['min']:.2f}-{self.stage_limits['z']['max']:.2f}, "
+                        f"R={self.stage_limits['r']['min']:.1f}-{self.stage_limits['r']['max']:.1f}")
+
         # Track motion state for enabling/disabling controls
         self._controls_enabled = True
 
@@ -351,6 +357,25 @@ class StageChamberVisualizationWindow(QWidget):
                 self.logger.error("Cannot get current position")
                 return
 
+            # Validate target coordinates are within stage limits (double-check)
+            if not (self.stage_limits['x']['min'] <= x_target <= self.stage_limits['x']['max']):
+                self.logger.error(
+                    f"Click X={x_target:.3f} is outside valid range "
+                    f"[{self.stage_limits['x']['min']:.3f}, {self.stage_limits['x']['max']:.3f}] - "
+                    f"Visualization widget may have wrong limits!"
+                )
+                self.visualization_widget.xz_panel.clear_target_position()
+                return
+
+            if not (self.stage_limits['z']['min'] <= z_target <= self.stage_limits['z']['max']):
+                self.logger.error(
+                    f"Click Z={z_target:.3f} is outside valid range "
+                    f"[{self.stage_limits['z']['min']:.3f}, {self.stage_limits['z']['max']:.3f}] - "
+                    f"Visualization widget may have wrong limits!"
+                )
+                self.visualization_widget.xz_panel.clear_target_position()
+                return
+
             # Calculate distances as percentage of total range
             x_range = self.stage_limits['x']['max'] - self.stage_limits['x']['min']
             z_range = self.stage_limits['z']['max'] - self.stage_limits['z']['min']
@@ -422,6 +447,25 @@ class StageChamberVisualizationWindow(QWidget):
             current_pos = self.movement_controller.get_position()
             if not current_pos:
                 self.logger.error("Cannot get current position")
+                return
+
+            # Validate target coordinates are within stage limits (double-check)
+            if not (self.stage_limits['x']['min'] <= x_target <= self.stage_limits['x']['max']):
+                self.logger.error(
+                    f"Click X={x_target:.3f} is outside valid range "
+                    f"[{self.stage_limits['x']['min']:.3f}, {self.stage_limits['x']['max']:.3f}] - "
+                    f"Visualization widget may have wrong limits!"
+                )
+                self.visualization_widget.xy_panel.clear_target_position()
+                return
+
+            if not (self.stage_limits['y']['min'] <= y_target <= self.stage_limits['y']['max']):
+                self.logger.error(
+                    f"Click Y={y_target:.3f} is outside valid range "
+                    f"[{self.stage_limits['y']['min']:.3f}, {self.stage_limits['y']['max']:.3f}] - "
+                    f"Visualization widget may have wrong limits!"
+                )
+                self.visualization_widget.xy_panel.clear_target_position()
                 return
 
             # Calculate distances as percentage of total range
