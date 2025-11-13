@@ -2,6 +2,10 @@
 
 Control software for Flamingo light sheet microscope systems. Communicates with microscope over TCP/IP, manages acquisition workflows, and displays images via PyQt5 GUI or Napari integration.
 
+## About the Flamingo Microscope
+
+The Flamingo light sheet microscope was originally designed and developed by the [Huisken Lab](https://huiskenlab.com/flamingo/). This repository provides a Python-based control system for Flamingo microscopes, building upon the hardware and software architecture developed by the Huisken Lab. For more information about the microscope design, sample data, and scientific applications, visit the [Huisken Lab Flamingo page](https://huiskenlab.com/flamingo/).
+
 ---
 
 ## Quick Start
