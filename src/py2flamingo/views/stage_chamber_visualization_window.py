@@ -395,6 +395,9 @@ class StageChamberVisualizationWindow(QWidget):
             )
             self.logger.info(f"Click-to-move XZ: X={x_target:.3f}, Z={z_target:.3f}")
 
+            # Mark XY panel's target as stale (if it exists)
+            self.visualization_widget.xy_panel.set_target_stale()
+
         except Exception as e:
             self.logger.error(f"Error in XZ click-to-move: {e}")
             self.visualization_widget.xz_panel.clear_target_position()
@@ -464,6 +467,9 @@ class StageChamberVisualizationWindow(QWidget):
                 validate=True
             )
             self.logger.info(f"Click-to-move XY: X={x_target:.3f}, Y={y_target:.3f}")
+
+            # Mark XZ panel's target as stale (if it exists)
+            self.visualization_widget.xz_panel.set_target_stale()
 
         except Exception as e:
             self.logger.error(f"Error in XY click-to-move: {e}")

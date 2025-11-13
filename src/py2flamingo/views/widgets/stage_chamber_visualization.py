@@ -59,6 +59,7 @@ class ChamberViewPanel(QWidget):
         # Target position for click-to-move (mm)
         self.target_x: Optional[float] = None
         self.target_other: Optional[float] = None  # Z or Y
+        self.target_active: bool = True  # True = active (orange), False = stale (purple)
 
         # Widget appearance
         self.setMinimumSize(350, 350)
@@ -76,22 +77,31 @@ class ChamberViewPanel(QWidget):
         self.other_pos = other
         self.update()  # Trigger repaint
 
-    def set_target_position(self, x: float, other: float) -> None:
+    def set_target_position(self, x: float, other: float, active: bool = True) -> None:
         """
         Set target position for click-to-move visual feedback.
 
         Args:
             x: Target X position in mm
             other: Target Z or Y position in mm
+            active: True for active target (orange), False for stale target (purple)
         """
         self.target_x = x
         self.target_other = other
+        self.target_active = active
         self.update()  # Trigger repaint
+
+    def set_target_stale(self) -> None:
+        """Mark existing target as stale (changes color to purple)."""
+        if self.target_x is not None and self.target_other is not None:
+            self.target_active = False
+            self.update()
 
     def clear_target_position(self) -> None:
         """Clear target position marker."""
         self.target_x = None
         self.target_other = None
+        self.target_active = True
         self.update()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -229,13 +239,34 @@ class ChamberViewPanel(QWidget):
         painter.restore()
 
     def _draw_title(self, painter: QPainter) -> None:
-        """Draw panel title."""
+        """Draw panel title with color legend."""
+        # Draw main title
         font = QFont()
         font.setPointSize(10)
         font.setBold(True)
         painter.setFont(font)
         painter.setPen(QPen(Qt.black))
         painter.drawText(10, 20, self.title)
+
+        # Draw color legend for target markers
+        legend_y = 35
+        legend_font = QFont()
+        legend_font.setPointSize(7)
+        painter.setFont(legend_font)
+
+        # Active target legend (orange)
+        painter.setPen(QPen(QColor(255, 100, 0), 2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(QPointF(15, legend_y), 5, 5)
+        painter.setPen(QPen(Qt.black))
+        painter.drawText(25, legend_y + 4, "Active Target")
+
+        # Stale target legend (purple)
+        painter.setPen(QPen(QColor(150, 120, 180, 128), 2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(QPointF(110, legend_y), 5, 5)
+        painter.setPen(QPen(Qt.black))
+        painter.drawText(120, legend_y + 4, "Stale Target")
 
 
 class XZViewPanel(ChamberViewPanel):
@@ -308,8 +339,16 @@ class XZViewPanel(ChamberViewPanel):
         # Get screen coordinates for target
         screen_x, screen_y = self._world_to_screen(self.target_x, self.target_other)
 
-        # Draw crosshair in orange/red (highly visible)
-        color = QColor(255, 100, 0)  # Orange-red
+        # Choose color based on active state
+        if self.target_active:
+            # Active target: orange-red (highly visible)
+            color = QColor(255, 100, 0)
+            label = "TARGET"
+        else:
+            # Stale target: dim faded purple
+            color = QColor(150, 120, 180, 128)  # Purple with alpha for faded look
+            label = "STALE"
+
         pen = QPen(color, 2)
         painter.setPen(pen)
 
@@ -328,12 +367,12 @@ class XZViewPanel(ChamberViewPanel):
         painter.setBrush(Qt.NoBrush)
         painter.drawEllipse(QPointF(screen_x, screen_y), size, size)
 
-        # Draw "TARGET" label
+        # Draw label
         font = QFont()
         font.setPointSize(7)
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(int(screen_x) + size + 5, int(screen_y) - 5, "TARGET")
+        painter.drawText(int(screen_x) + size + 5, int(screen_y) - 5, label)
 
     def _draw_position_text(self, painter: QPainter) -> None:
         """Draw current position coordinates."""
@@ -502,8 +541,16 @@ class XYViewPanel(ChamberViewPanel):
         # Get screen coordinates for target
         screen_x, screen_y = self._world_to_screen(self.target_x, self.target_other)
 
-        # Draw crosshair in orange/red (highly visible)
-        color = QColor(255, 100, 0)  # Orange-red
+        # Choose color based on active state
+        if self.target_active:
+            # Active target: orange-red (highly visible)
+            color = QColor(255, 100, 0)
+            label = "TARGET"
+        else:
+            # Stale target: dim faded purple
+            color = QColor(150, 120, 180, 128)  # Purple with alpha for faded look
+            label = "STALE"
+
         pen = QPen(color, 2)
         painter.setPen(pen)
 
@@ -522,12 +569,12 @@ class XYViewPanel(ChamberViewPanel):
         painter.setBrush(Qt.NoBrush)
         painter.drawEllipse(QPointF(screen_x, screen_y), size, size)
 
-        # Draw "TARGET" label
+        # Draw label
         font = QFont()
         font.setPointSize(7)
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(int(screen_x) + size + 5, int(screen_y) - 5, "TARGET")
+        painter.drawText(int(screen_x) + size + 5, int(screen_y) - 5, label)
 
     def _draw_position_text(self, painter: QPainter) -> None:
         """Draw current position coordinates."""
