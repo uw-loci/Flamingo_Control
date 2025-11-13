@@ -378,8 +378,9 @@ class StageChamberVisualizationWindow(QWidget):
                     self.logger.info("User cancelled large XZ move")
                     return
 
-            # Send move commands
-            self.movement_controller.move_absolute('x', x_target, verify=False)
+            # Send move commands sequentially (first move waits for completion)
+            # This prevents "Movement already in progress" error on second axis
+            self.movement_controller.move_absolute('x', x_target, verify=True)
             self.movement_controller.move_absolute('z', z_target, verify=False)
             self.logger.info(f"Click-to-move XZ: X={x_target:.3f}, Z={z_target:.3f}")
 
@@ -437,8 +438,9 @@ class StageChamberVisualizationWindow(QWidget):
                     self.logger.info("User cancelled large XY move")
                     return
 
-            # Send move commands
-            self.movement_controller.move_absolute('x', x_target, verify=False)
+            # Send move commands sequentially (first move waits for completion)
+            # This prevents "Movement already in progress" error on second axis
+            self.movement_controller.move_absolute('x', x_target, verify=True)
             self.movement_controller.move_absolute('y', y_target, verify=False)
             self.logger.info(f"Click-to-move XY: X={x_target:.3f}, Y={y_target:.3f}")
 
