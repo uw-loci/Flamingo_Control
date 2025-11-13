@@ -7,10 +7,12 @@ intensity scaling, and performance monitoring.
 
 import logging
 import numpy as np
+from pathlib import Path
+from datetime import datetime
 from typing import Optional
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QGroupBox, QSlider, QSpinBox, QCheckBox, QSizePolicy, QMessageBox
+    QGroupBox, QSlider, QSpinBox, QCheckBox, QSizePolicy, QMessageBox, QFileDialog
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QEvent
 from PyQt5.QtGui import QPixmap, QImage, QCloseEvent, QShowEvent, QHideEvent
@@ -30,6 +32,9 @@ class CameraLiveViewer(QWidget):
     - Frame rate monitoring
     - Image information overlay
     """
+
+    # Class variable to remember last snapshot directory across instances
+    _last_snapshot_directory: Optional[str] = None
 
     def __init__(self, camera_controller: CameraController, laser_led_controller=None, image_controls_window=None, parent=None):
         """
@@ -322,16 +327,8 @@ class CameraLiveViewer(QWidget):
         self.camera_controller.stop_live_view()
 
     def _on_snapshot_clicked(self) -> None:
-        """Handle snapshot button click."""
+        """Handle snapshot button click with file save dialog."""
         try:
-            # Get sample name (could come from UI or config, using default for now)
-            sample_name = "sample"  # TODO: Get from sample info view or config
-
-            # Get save directory from config
-            from py2flamingo.services.configuration_service import ConfigurationService
-            config = ConfigurationService()
-            save_dir = config.get_data_storage_location()
-
             # Ensure laser/LED is active
             if self.laser_led_controller and not self.laser_led_controller.is_preview_active():
                 QMessageBox.warning(
@@ -341,16 +338,48 @@ class CameraLiveViewer(QWidget):
                 )
                 return
 
+            # Determine default save directory
+            if CameraLiveViewer._last_snapshot_directory:
+                default_dir = CameraLiveViewer._last_snapshot_directory
+            else:
+                # Try to get from config, otherwise use home directory
+                try:
+                    from py2flamingo.services.configuration_service import ConfigurationService
+                    config = ConfigurationService()
+                    default_dir = config.get_data_storage_location()
+                except:
+                    default_dir = str(Path.home())
+
+            # Generate suggested filename with auto-increment
+            suggested_filename = self._generate_snapshot_filename(default_dir)
+
+            # Show save file dialog
+            filename, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Snapshot",
+                suggested_filename,
+                "TIFF Images (*.tif *.tiff);;PNG Images (*.png);;All Files (*.*)",
+                options=QFileDialog.DontConfirmOverwrite  # We handle auto-increment, so no overwrite prompt
+            )
+
+            # User cancelled
+            if not filename:
+                self.logger.info("Snapshot cancelled by user")
+                return
+
+            # Remember directory for next time
+            CameraLiveViewer._last_snapshot_directory = str(Path(filename).parent)
+
             # Disable button during capture
             self.snapshot_btn.setEnabled(False)
             self.snapshot_btn.setText("Capturing...")
 
-            # Take snapshot (runs in background, reuses existing data socket)
-            from PyQt5.QtCore import QTimer
+            # Take snapshot and save (runs in background, reuses existing data socket)
             def do_snapshot():
-                filename = self.camera_controller.take_snapshot_and_save(sample_name, save_dir)
-                if filename:
-                    self.status_label.setText(f"Snapshot saved: {filename}")
+                success = self._capture_and_save_snapshot(filename)
+
+                if success:
+                    self.status_label.setText(f"Snapshot saved: {Path(filename).name}")
                     self.status_label.setStyleSheet("color: green; font-weight: bold;")
                     self.logger.info(f"Snapshot saved to {filename}")
                 else:
@@ -369,6 +398,152 @@ class CameraLiveViewer(QWidget):
             QMessageBox.critical(self, "Snapshot Error", str(e))
             self.snapshot_btn.setEnabled(True)
             self.snapshot_btn.setText("Take Snapshot")
+
+    def _generate_snapshot_filename(self, directory: str) -> str:
+        """
+        Generate snapshot filename with auto-incrementing number.
+
+        Format: snapshot_{YYYYMMDD}_{NNN}.tif
+        Where NNN is auto-incremented based on existing files.
+
+        Args:
+            directory: Directory to save in
+
+        Returns:
+            Full path to suggested snapshot filename
+        """
+        save_path = Path(directory)
+        save_path.mkdir(parents=True, exist_ok=True)
+
+        # Get current date
+        date_str = datetime.now().strftime("%Y%m%d")
+
+        # Find existing snapshots for today
+        pattern = f"snapshot_{date_str}_*.tif"
+        existing_files = list(save_path.glob(pattern))
+
+        # Determine next number
+        if not existing_files:
+            next_num = 1
+        else:
+            # Extract numbers from existing files
+            numbers = []
+            for file in existing_files:
+                try:
+                    # Extract number from filename: snapshot_20231115_005.tif -> 5
+                    parts = file.stem.split('_')
+                    if len(parts) >= 3:
+                        num = int(parts[-1])
+                        numbers.append(num)
+                except ValueError:
+                    continue
+
+            next_num = max(numbers) + 1 if numbers else 1
+
+        # Generate filename with zero-padded number
+        filename = f"snapshot_{date_str}_{next_num:03d}.tif"
+        full_path = save_path / filename
+
+        return str(full_path)
+
+    def _capture_and_save_snapshot(self, filename: str) -> bool:
+        """
+        Capture snapshot and save to specified file.
+
+        Args:
+            filename: Full path to save file
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Check if we need to temporarily connect data socket
+            was_streaming = self.camera_controller._state == CameraState.LIVE_VIEW
+
+            if not was_streaming:
+                # Not in live view, need to connect data socket temporarily
+                self.logger.info("Connecting data socket for snapshot...")
+                self.camera_controller.camera_service.start_live_view_streaming()
+                import time
+                time.sleep(0.5)  # Give socket time to connect
+
+            # Set flag to capture next frame
+            self.camera_controller._capture_next_frame = True
+            self.camera_controller._captured_snapshot = None
+
+            # Send snapshot command (reuses existing communication)
+            self.logger.info("Sending snapshot command...")
+            self.camera_controller.camera_service.take_snapshot()
+
+            # Wait for image to arrive (via existing callback mechanism)
+            import time
+            timeout = 5.0  # 5 second timeout
+            start_time = time.time()
+
+            while self.camera_controller._captured_snapshot is None and (time.time() - start_time) < timeout:
+                time.sleep(0.1)
+
+            if self.camera_controller._captured_snapshot is None:
+                raise RuntimeError("Timeout waiting for snapshot image")
+
+            # Save the captured image
+            image, header = self.camera_controller._captured_snapshot
+            self._save_image_to_file(image, filename)
+            self.logger.info(f"Snapshot saved to {filename}")
+
+            # Clean up temporary connection if needed
+            if not was_streaming:
+                self.logger.info("Disconnecting temporary data socket...")
+                self.camera_controller.camera_service.stop_live_view_streaming()
+
+            return True
+
+        except Exception as e:
+            error_msg = f"Failed to capture snapshot: {e}"
+            self.logger.error(error_msg)
+
+            # Clean up on error
+            if not was_streaming and self.camera_controller.camera_service._streaming:
+                try:
+                    self.camera_controller.camera_service.stop_live_view_streaming()
+                except:
+                    pass
+
+            return False
+
+    def _save_image_to_file(self, image: np.ndarray, filename: str) -> None:
+        """
+        Save image to file (TIFF or PNG).
+
+        Args:
+            image: Image array (uint16)
+            filename: Path to save file
+        """
+        try:
+            from PIL import Image
+
+            file_path = Path(filename)
+
+            # Save based on extension
+            if file_path.suffix.lower() in ['.tif', '.tiff']:
+                # Save as 16-bit TIFF
+                pil_image = Image.fromarray(image.astype(np.uint16), mode='I;16')
+                pil_image.save(filename, format='TIFF')
+            elif file_path.suffix.lower() == '.png':
+                # Save as 16-bit PNG
+                pil_image = Image.fromarray(image.astype(np.uint16), mode='I;16')
+                pil_image.save(filename, format='PNG')
+            else:
+                # Default to TIFF
+                pil_image = Image.fromarray(image.astype(np.uint16), mode='I;16')
+                pil_image.save(filename, format='TIFF')
+
+            self.logger.info(f"Image saved: {filename}")
+
+        except ImportError:
+            # Fallback to numpy save if PIL not available
+            self.logger.warning("PIL not available, saving as numpy array")
+            np.save(filename.replace('.tif', '.npy').replace('.png', '.npy'), image)
 
     def _on_exposure_changed(self, value: int) -> None:
         """Handle exposure time change."""
