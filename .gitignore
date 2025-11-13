@@ -154,3 +154,13 @@ cython_debug/
 
 # Old code reference - not to be pushed to GitHub
 oldcodereference/
+
+# Output directories (generated at runtime)
+output_png/
+sample_txt/
+
+# IDE workspace files (personal configuration)
+*.code-workspace
+
+# Temporary screenshots in root only
+/Capture.PNG

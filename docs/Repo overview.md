@@ -31,8 +31,6 @@ Once all of this is done, the GUI is displayed for the user.
 ### The GUI
 -----------
 
-![Current status of GUI](https://github.com/uw-loci/Flamingo_Control/blob/main/images/GUI.png?raw=true)
-
 The GUI is populated with some initial data based on the provided workflow file, inlcuding the laser (lasers?) used, laser power, information about the microscope connection, and a default search range along the Z axis. In most cases, the beige set of coordinates will be blank when the program is first run, as they indicate the tip of the sample holder and need to be added at least once. Once they are included and "Find Sample" is run, a file `[microscope]_start_position.txt` will be created in the `microscope_settings` folder.
 
 The cyan coordinate fields are associated with the similarly colored buttons, and can be used to perform a few manual tasks, like moving the microscope to set coordinates, taking a snapshot with the current settings at the cyan location, or setting the Home position within the true GUI software on the Mac. 
@@ -55,7 +53,7 @@ Find sample is a first simple test of the system, where:
 ## Other information about the program
 ----------------------
 
- ![Overall control flow](https://github.com/uw-loci/Flamingo_Control/blob/main/images/workflow.PNG?raw=true)
+ ![Overall control flow](https://github.com/uw-loci/Flamingo_Control/blob/main/docs/images/workflow.PNG?raw=true)
 -------------------
 
 **Communicating with the Flamingo**  
