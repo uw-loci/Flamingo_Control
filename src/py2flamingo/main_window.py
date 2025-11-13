@@ -274,11 +274,52 @@ class MainWindow(QMainWindow):
         """Handle window close event.
 
         This method is called when the user closes the main window.
-        It accepts the close event, allowing the window to close.
+        It properly closes all child windows and stops background threads
+        before exiting the application.
 
         Args:
             event: QCloseEvent instance
         """
-        # Could add confirmation dialog here if desired
-        # For now, just accept the close event
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("Main window closing - cleaning up...")
+
+        # Stop camera acquisition if running
+        if self.camera_live_viewer is not None:
+            try:
+                # Stop live view to terminate background acquisition thread
+                if hasattr(self.camera_live_viewer, 'camera_controller'):
+                    self.camera_live_viewer.camera_controller.stop_live_view()
+                    logger.info("Stopped camera acquisition")
+            except Exception as e:
+                logger.error(f"Error stopping camera acquisition: {e}")
+
+        # Close all child windows properly (not just hide)
+        # Set a flag to force actual closure instead of hiding
+        if self.camera_live_viewer is not None:
+            try:
+                # Directly close without triggering closeEvent's hide logic
+                self.camera_live_viewer.destroy()
+                logger.info("Closed camera live viewer")
+            except Exception as e:
+                logger.error(f"Error closing camera live viewer: {e}")
+
+        if self.image_controls_window is not None:
+            try:
+                self.image_controls_window.destroy()
+                logger.info("Closed image controls window")
+            except Exception as e:
+                logger.error(f"Error closing image controls window: {e}")
+
+        if self.stage_chamber_visualization_window is not None:
+            try:
+                self.stage_chamber_visualization_window.close()
+                logger.info("Closed stage chamber visualization window")
+            except Exception as e:
+                logger.error(f"Error closing stage chamber visualization: {e}")
+
+        # Accept the close event
         event.accept()
+
+        # Quit the application to ensure clean exit
+        QApplication.quit()
