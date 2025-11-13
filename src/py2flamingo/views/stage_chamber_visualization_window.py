@@ -17,6 +17,7 @@ from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QFont
 
 from py2flamingo.views.widgets.stage_chamber_visualization import StageChamberVisualizationWidget
+from py2flamingo.models import Position
 
 
 class StageChamberVisualizationWindow(QWidget):
@@ -378,10 +379,20 @@ class StageChamberVisualizationWindow(QWidget):
                     self.logger.info("User cancelled large XZ move")
                     return
 
-            # Send move commands sequentially (first move waits for completion)
-            # This prevents "Movement already in progress" error on second axis
-            self.movement_controller.move_absolute('x', x_target, verify=True)
-            self.movement_controller.move_absolute('z', z_target, verify=False)
+            # Create Position object with target X and Z, keeping Y and R unchanged
+            # Use the same approach as "Go To Position" for multi-axis moves
+            target_position = Position(
+                x=x_target,
+                y=current_pos.y,  # Keep Y at current position
+                z=z_target,
+                r=current_pos.r   # Keep R at current position
+            )
+
+            # Use move_to_position which handles multi-axis moves with a single lock
+            self.movement_controller.position_controller.move_to_position(
+                target_position,
+                validate=True
+            )
             self.logger.info(f"Click-to-move XZ: X={x_target:.3f}, Z={z_target:.3f}")
 
         except Exception as e:
@@ -438,10 +449,20 @@ class StageChamberVisualizationWindow(QWidget):
                     self.logger.info("User cancelled large XY move")
                     return
 
-            # Send move commands sequentially (first move waits for completion)
-            # This prevents "Movement already in progress" error on second axis
-            self.movement_controller.move_absolute('x', x_target, verify=True)
-            self.movement_controller.move_absolute('y', y_target, verify=False)
+            # Create Position object with target X and Y, keeping Z and R unchanged
+            # Use the same approach as "Go To Position" for multi-axis moves
+            target_position = Position(
+                x=x_target,
+                y=y_target,
+                z=current_pos.z,  # Keep Z at current position
+                r=current_pos.r   # Keep R at current position
+            )
+
+            # Use move_to_position which handles multi-axis moves with a single lock
+            self.movement_controller.position_controller.move_to_position(
+                target_position,
+                validate=True
+            )
             self.logger.info(f"Click-to-move XY: X={x_target:.3f}, Y={y_target:.3f}")
 
         except Exception as e:
