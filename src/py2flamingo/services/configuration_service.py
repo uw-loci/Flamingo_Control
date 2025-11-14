@@ -35,19 +35,30 @@ class ConfigurationService:
         self.logger = logging.getLogger(__name__)
         if base_path:
             self.base_path = base_path
+            print(f"[ConfigurationService] Using provided base_path: {self.base_path}")
+            self.logger.info(f"[ConfigurationService] Using provided base_path: {self.base_path}")
         else:
             # Find project root by looking for microscope_settings directory
             # Start from current working directory and walk up until we find it
             current = Path.cwd()
+            print(f"[ConfigurationService] Searching for project root, starting from: {current}")
+            self.logger.info(f"[ConfigurationService] Searching for project root, starting from: {current}")
+
+            search_count = 0
             while current != current.parent:  # Stop at filesystem root
-                if (current / "microscope_settings").exists():
+                search_count += 1
+                check_path = current / "microscope_settings"
+                print(f"[ConfigurationService]   Check #{search_count}: {check_path}")
+                if check_path.exists():
                     self.base_path = current
-                    self.logger.debug(f"[ConfigurationService] Found project root: {self.base_path}")
+                    print(f"[ConfigurationService] ✓ FOUND project root: {self.base_path}")
+                    self.logger.info(f"[ConfigurationService] Found project root: {self.base_path}")
                     break
                 current = current.parent
             else:
                 # Fallback to cwd if microscope_settings not found
                 self.base_path = Path.cwd()
+                print(f"[ConfigurationService] ✗ Could not find microscope_settings, using cwd: {self.base_path}")
                 self.logger.warning(
                     f"[ConfigurationService] Could not find microscope_settings directory, "
                     f"using current directory: {self.base_path}"
@@ -61,11 +72,20 @@ class ConfigurationService:
 
         # Load microscope-specific settings
         microscope_name = self.get_microscope_name()
+        print(f"[ConfigurationService] Detected microscope name: '{microscope_name}' from ScopeSettings.txt")
         self.logger.info(f"[ConfigurationService] Detected microscope name: '{microscope_name}' from ScopeSettings.txt")
+
         from py2flamingo.services.microscope_settings_service import MicroscopeSettingsService
         self.microscope_settings = MicroscopeSettingsService(microscope_name, self.base_path)
+
         # Log the actual stage limits being loaded
         limits = self.microscope_settings.get_stage_limits()
+        print(f"[ConfigurationService] Final stage limits loaded:")
+        print(f"  X: {limits['x']['min']:.2f} to {limits['x']['max']:.2f} mm")
+        print(f"  Y: {limits['y']['min']:.2f} to {limits['y']['max']:.2f} mm")
+        print(f"  Z: {limits['z']['min']:.2f} to {limits['z']['max']:.2f} mm")
+        print(f"  R: {limits['r']['min']:.1f} to {limits['r']['max']:.1f} degrees")
+
         self.logger.info(f"[ConfigurationService] Loaded stage limits: X={limits['x']['min']:.2f}-{limits['x']['max']:.2f}, "
                         f"Y={limits['y']['min']:.2f}-{limits['y']['max']:.2f}, "
                         f"Z={limits['z']['min']:.2f}-{limits['z']['max']:.2f}, "

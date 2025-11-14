@@ -43,6 +43,11 @@ class MicroscopeSettingsService:
             self.base_path / "microscope_settings" / f"{microscope_name}_settings.json"
         )
 
+        print(f"[MicroscopeSettingsService] Initializing for microscope: '{microscope_name}'")
+        print(f"[MicroscopeSettingsService] Base path: {self.base_path}")
+        print(f"[MicroscopeSettingsService] Looking for settings file: {self.settings_file}")
+        print(f"[MicroscopeSettingsService] Settings file exists: {self.settings_file.exists()}")
+
         self.settings = self._load_settings()
 
     def _load_settings(self) -> Dict[str, Any]:
@@ -55,6 +60,12 @@ class MicroscopeSettingsService:
             FileNotFoundError: If settings file doesn't exist
         """
         if not self.settings_file.exists():
+            print(f"[MicroscopeSettingsService] ✗ Settings file NOT FOUND!")
+            print(f"[MicroscopeSettingsService]   Expected: {self.settings_file}")
+            print(f"[MicroscopeSettingsService]   Base path: {self.base_path}")
+            print(f"[MicroscopeSettingsService]   Microscope name: '{self.microscope_name}'")
+            print(f"[MicroscopeSettingsService] ⚠ Falling back to DEFAULT settings (stage limits will be 0-26)")
+
             self.logger.warning(
                 f"[MicroscopeSettingsService] Settings file NOT FOUND: {self.settings_file}"
             )
@@ -69,6 +80,7 @@ class MicroscopeSettingsService:
         try:
             with open(self.settings_file, 'r') as f:
                 settings = json.load(f)
+                print(f"[MicroscopeSettingsService] ✓ Successfully loaded settings from: {self.settings_file}")
                 self.logger.info(
                     f"[MicroscopeSettingsService] Successfully loaded settings for microscope '{self.microscope_name}' "
                     f"from {self.settings_file}"
@@ -76,6 +88,10 @@ class MicroscopeSettingsService:
                 # Log stage limits to verify correct file was loaded
                 if 'stage_limits' in settings:
                     limits = settings['stage_limits']
+                    print(f"[MicroscopeSettingsService] Settings file contains stage limits:")
+                    print(f"  X: {limits['x']['min']} to {limits['x']['max']} mm")
+                    print(f"  Y: {limits['y']['min']} to {limits['y']['max']} mm")
+                    print(f"  Z: {limits['z']['min']} to {limits['z']['max']} mm")
                     self.logger.info(
                         f"[MicroscopeSettingsService] File contains stage limits: "
                         f"X={limits['x']['min']}-{limits['x']['max']}, "
@@ -84,6 +100,7 @@ class MicroscopeSettingsService:
                     )
                 return settings
         except Exception as e:
+            print(f"[MicroscopeSettingsService] ✗ Error loading settings file: {e}")
             self.logger.error(f"[MicroscopeSettingsService] Error loading settings file: {e}")
             return self._get_default_settings()
 
