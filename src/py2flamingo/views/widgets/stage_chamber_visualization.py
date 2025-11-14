@@ -28,7 +28,8 @@ class ChamberViewPanel(QWidget):
     click_position = pyqtSignal(float, float)  # (x, other_axis_value)
 
     def __init__(self, title: str, x_min: float, x_max: float,
-                 other_min: float, other_max: float, other_label: str, parent=None):
+                 other_min: float, other_max: float, other_label: str,
+                 pixels_per_mm: float = None, parent=None):
         """
         Initialize chamber view panel.
 
@@ -39,6 +40,8 @@ class ChamberViewPanel(QWidget):
             other_min: Minimum position for other axis (Z or Y) in mm
             other_max: Maximum position for other axis (Z or Y) in mm
             other_label: Label for other axis ("Z" or "Y")
+            pixels_per_mm: Consistent scale factor (pixels per mm) for proportional sizing
+            parent: Parent widget
         """
         super().__init__(parent)
 
@@ -61,17 +64,30 @@ class ChamberViewPanel(QWidget):
         self.target_other: Optional[float] = None  # Z or Y
         self.target_active: bool = True  # True = active (orange), False = stale (purple)
 
-        # Widget appearance - size proportional to actual chamber dimensions
-        # Calculate aspect ratio from actual physical dimensions
+        # Proportional sizing - 1mm = same pixel size across all views
+        # Padding for labels and margins
+        self.padding_left = 60  # Space for Y/Z axis label
+        self.padding_right = 30
+        self.padding_top = 50  # Space for title and legend
+        self.padding_bottom = 60  # INCREASED - Space for X axis label
+
+        # Calculate widget size based on chamber dimensions and scale
+        if pixels_per_mm is None:
+            pixels_per_mm = 25.0  # Default: 25 pixels per mm
+
         x_range = x_max - x_min  # mm
         other_range = other_max - other_min  # mm
-        aspect_ratio = x_range / other_range  # width / height
 
-        # Use consistent base height, calculate width from aspect ratio
-        base_height = 380
-        calculated_width = int(base_height * aspect_ratio)
+        # Map area size (excluding padding)
+        map_width = int(x_range * pixels_per_mm)
+        map_height = int(other_range * pixels_per_mm)
 
-        self.setMinimumSize(calculated_width, base_height)
+        # Total widget size (map + padding)
+        widget_width = map_width + self.padding_left + self.padding_right
+        widget_height = map_height + self.padding_top + self.padding_bottom
+
+        self.setMinimumSize(widget_width, widget_height)
+        self.setMaximumSize(widget_width, widget_height)  # Fixed size for consistent scale
         self.setStyleSheet("background-color: white; border: 1px solid #ccc;")
 
     def set_position(self, x: float, other: float) -> None:
@@ -141,11 +157,9 @@ class ChamberViewPanel(QWidget):
         Returns:
             Tuple of (x_world, other_world) in mm
         """
-        # Map bounds with padding (must match _world_to_screen)
-        padding = 50
-        title_offset = 30
-        map_width = self.width() - 2 * padding
-        map_height = self.height() - 2 * padding - title_offset
+        # Map bounds with padding
+        map_width = self.width() - self.padding_left - self.padding_right
+        map_height = self.height() - self.padding_top - self.padding_bottom
 
         # Scale factors
         x_range = self.x_max - self.x_min
@@ -153,10 +167,10 @@ class ChamberViewPanel(QWidget):
 
         # Convert from screen to world coordinates
         # X axis: left to right
-        x_world = self.x_min + ((screen_x - padding) / map_width) * x_range
+        x_world = self.x_min + ((screen_x - self.padding_left) / map_width) * x_range
 
         # Other axis: bottom to top (inverted Y screen coordinates)
-        other_world = self.other_max - ((screen_y - padding - title_offset) / map_height) * other_range
+        other_world = self.other_max - ((screen_y - self.padding_top) / map_height) * other_range
 
         return x_world, other_world
 
@@ -172,10 +186,8 @@ class ChamberViewPanel(QWidget):
             Tuple of (screen_x, screen_y) in pixels
         """
         # Map bounds with padding
-        padding = 50
-        title_offset = 30
-        map_width = self.width() - 2 * padding
-        map_height = self.height() - 2 * padding - title_offset
+        map_width = self.width() - self.padding_left - self.padding_right
+        map_height = self.height() - self.padding_top - self.padding_bottom
 
         # Scale factors
         x_range = self.x_max - self.x_min
@@ -183,10 +195,10 @@ class ChamberViewPanel(QWidget):
 
         # Convert to screen coordinates
         # X axis: left to right
-        screen_x = padding + ((x_world - self.x_min) / x_range) * map_width
+        screen_x = self.padding_left + ((x_world - self.x_min) / x_range) * map_width
 
         # Other axis: bottom to top (inverted Y screen coordinates)
-        screen_y = padding + title_offset + ((self.other_max - other_world) / other_range) * map_height
+        screen_y = self.padding_top + ((self.other_max - other_world) / other_range) * map_height
 
         return screen_x, screen_y
 
@@ -281,9 +293,11 @@ class ChamberViewPanel(QWidget):
 class XZViewPanel(ChamberViewPanel):
     """XZ View Panel - Top-down view showing X and Z axes."""
 
-    def __init__(self, x_min: float, x_max: float, z_min: float, z_max: float, parent=None):
+    def __init__(self, x_min: float, x_max: float, z_min: float, z_max: float,
+                 pixels_per_mm: float = None, parent=None):
         """Initialize XZ view panel."""
-        super().__init__("XZ View (Top-Down)", x_min, x_max, z_min, z_max, "Z", parent)
+        super().__init__("XZ View (Top-Down)", x_min, x_max, z_min, z_max, "Z",
+                        pixels_per_mm, parent)
         self.z_pos = None
 
     def set_position(self, x: float, z: float) -> None:
@@ -398,9 +412,11 @@ class XZViewPanel(ChamberViewPanel):
 class XYViewPanel(ChamberViewPanel):
     """XY View Panel - Side view showing X and Y axes with pole/nub sample holder."""
 
-    def __init__(self, x_min: float, x_max: float, y_min: float, y_max: float, parent=None):
+    def __init__(self, x_min: float, x_max: float, y_min: float, y_max: float,
+                 pixels_per_mm: float = None, parent=None):
         """Initialize XY view panel."""
-        super().__init__("XY View (Side View)", x_min, x_max, y_min, y_max, "Y", parent)
+        super().__init__("XY View (Side View)", x_min, x_max, y_min, y_max, "Y",
+                        pixels_per_mm, parent)
         self.y_pos = None
 
         # Objective position (rough estimate - inside chamber)
@@ -655,22 +671,41 @@ class StageChamberVisualizationWidget(QWidget):
 
     def _setup_ui(self) -> None:
         """Create and layout UI components."""
+        # Calculate consistent scale factor (pixels per mm) for proportional sizing
+        # Use the largest range to determine scale, ensuring all views fit reasonably
+        x_range = self.x_max - self.x_min
+        y_range = self.y_max - self.y_min
+        z_range = self.z_max - self.z_min
+
+        # Find the largest dimension
+        max_range = max(x_range, y_range, z_range)
+
+        # Target: largest dimension should be ~350 pixels (reasonable size)
+        # This gives us a consistent pixels-per-mm scale for all views
+        target_pixels = 350
+        pixels_per_mm = target_pixels / max_range
+
+        self.logger.info(f"Chamber visualization scale: {pixels_per_mm:.2f} pixels/mm "
+                        f"(based on max range {max_range:.2f} mm)")
+
         # Main layout - horizontal dual panel
         layout = QHBoxLayout()
         layout.setSpacing(8)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Create XZ view panel (left)
+        # Create XZ view panel (left) with consistent scale
         self.xz_panel = XZViewPanel(
             self.x_min, self.x_max,
-            self.z_min, self.z_max
+            self.z_min, self.z_max,
+            pixels_per_mm
         )
         layout.addWidget(self.xz_panel)
 
-        # Create XY view panel (right)
+        # Create XY view panel (right) with same scale
         self.xy_panel = XYViewPanel(
             self.x_min, self.x_max,
-            self.y_min, self.y_max
+            self.y_min, self.y_max,
+            pixels_per_mm
         )
         layout.addWidget(self.xy_panel)
 
