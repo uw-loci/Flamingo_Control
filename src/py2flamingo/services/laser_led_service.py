@@ -271,17 +271,24 @@ class LaserLEDService(MicroscopeCommandService):
         # UI 50% → Server    0% → 0
         # UI 100% → Server +100% → +65535
         server_percent = (intensity_percent - 50.0) * 2.0  # Map 0-100 to -100 to +100
-        led_value = int(65535 * (server_percent / 100.0))  # Map to -65535 to +65535
+        led_value_signed = int(65535 * (server_percent / 100.0))  # Map to -65535 to +65535
 
-        self.logger.debug(f"LED value mapping: UI {intensity_percent:.1f}% → Server {server_percent:.1f}% → Value {led_value}")
+        # Convert signed to unsigned 32-bit (protocol uses unsigned integers)
+        # Negative values use two's complement representation
+        if led_value_signed < 0:
+            led_value_unsigned = led_value_signed + 0x100000000  # Add 2^32
+        else:
+            led_value_unsigned = led_value_signed
+
+        self.logger.debug(f"LED value mapping: UI {intensity_percent:.1f}% → Server {server_percent:.1f}% → Signed {led_value_signed} → Unsigned {led_value_unsigned}")
 
         # LED_SET command (0x4001):
         # int32Data0 = led_color (0=Red, 1=Green, 2=Blue, 3=White)
-        # int32Data1 = led_value (signed int32: -65535 to +65535)
+        # int32Data1 = led_value (as unsigned 32-bit representing signed value)
         result = self._send_command(
             LaserLEDCommandCode.LED_SET,
             "LED_SET",
-            params=[0, 0, 0, led_color, led_value, 0, 0]
+            params=[0, 0, 0, led_color, led_value_unsigned, 0, 0]
         )
 
         return result['success']
