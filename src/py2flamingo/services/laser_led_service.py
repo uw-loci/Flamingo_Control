@@ -167,39 +167,27 @@ class LaserLEDService(MicroscopeCommandService):
 
         self.logger.info(f"Setting laser {laser_index} power to {power_percent:.1f}%")
 
-        # Send percentage as string in buffer field (protocol requirement)
-        # Format: "XX.XX" (e.g., "5.00", "11.49")
+        # CRITICAL: Server expects percentage as STRING in buffer field
+        # NOT as DAC value in params!
+        # From logs: buffer = "5.00", "11.49", etc.
         power_str = f"{power_percent:.2f}"
 
-        # Try sending without waiting for response - laser commands may be fire-and-forget
-        try:
-            if not self.connection.is_connected():
-                self.logger.error("Not connected to microscope")
-                return False
+        self.logger.info(f"DEBUG: Sending LASER_LEVEL_SET with int32Data0={laser_index}, buffer='{power_str}'")
 
-            # Encode command
-            cmd_bytes = self.connection.encoder.encode_command(
-                code=LaserLEDCommandCode.LASER_LEVEL_SET,
-                status=0,
-                params=[laser_index, 0, 0, 0, 0, 0, 0],
-                value=0.0,
-                data=power_str,
-                additional_data_size=0
-            )
+        # Send command and wait for response
+        result = self._send_command(
+            LaserLEDCommandCode.LASER_LEVEL_SET,
+            f"LASER_{laser_index}_LEVEL_SET",
+            params=[laser_index, 0, 0, 0, 0, 0, 0],  # params[6] will be set to CALLBACK_FLAG by _send_command
+            data=power_str
+        )
 
-            # Send without waiting for response
-            command_socket = self.connection._command_socket
-            if command_socket is None:
-                self.logger.error("Command socket not available")
-                return False
+        if result['success']:
+            self.logger.info(f"DEBUG: Laser {laser_index} power set to {power_str}% - SUCCESS")
+        else:
+            self.logger.error(f"DEBUG: Laser {laser_index} power set FAILED: {result.get('error', 'unknown error')}")
 
-            command_socket.sendall(cmd_bytes)
-            self.logger.debug(f"Sent LASER_{laser_index}_LEVEL_SET command (fire-and-forget)")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Error sending laser power command: {e}", exc_info=True)
-            return False
+        return result['success']
 
     def enable_laser_preview(self, laser_index: int) -> bool:
         """
@@ -222,12 +210,15 @@ class LaserLEDService(MicroscopeCommandService):
             return False
 
         self.logger.info(f"Enabling laser {laser_index} preview mode")
+        self.logger.info(f"DEBUG: Sending LASER_ENABLE_PREVIEW command with int32Data0={laser_index}")
 
         result = self._send_command(
             LaserLEDCommandCode.LASER_ENABLE_PREVIEW,
             f"LASER_{laser_index}_ENABLE_PREVIEW",
             params=[laser_index, 0, 0, 0, 0, 0, 0]
         )
+
+        self.logger.info(f"DEBUG: LASER_ENABLE_PREVIEW result: success={result.get('success')}, error={result.get('error', 'none')}")
 
         return result['success']
 
