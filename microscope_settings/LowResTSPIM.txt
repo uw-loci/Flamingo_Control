@@ -1,0 +1,6 @@
+<Instrument>
+<Type>
+Microscope name = LowResTSPIM
+Microscope address = 192.168.1.1 53717
+</Type>
+</Instrument>
