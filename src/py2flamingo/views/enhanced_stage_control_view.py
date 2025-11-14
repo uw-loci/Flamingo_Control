@@ -17,13 +17,138 @@ from typing import Optional
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QGroupBox, QFormLayout, QDoubleSpinBox,
-    QGridLayout, QFrame, QMessageBox, QComboBox
+    QGridLayout, QFrame, QMessageBox, QComboBox, QListWidget,
+    QLineEdit, QInputDialog, QDialog, QDialogButtonBox
 )
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QFont
 
 from py2flamingo.controllers.movement_controller import MovementController
 from py2flamingo.models.microscope import Position
+
+
+class SetHomePositionDialog(QDialog):
+    """Dialog for setting home position with bounds validation."""
+
+    def __init__(self, current_position, stage_limits, parent=None):
+        """
+        Initialize set home position dialog.
+
+        Args:
+            current_position: Current stage position (Position object)
+            stage_limits: Stage limits dict from controller
+            parent: Parent widget
+        """
+        super().__init__(parent)
+        self.setWindowTitle("Set Home Position")
+        self.current_position = current_position
+        self.stage_limits = stage_limits
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        """Create dialog UI."""
+        layout = QVBoxLayout()
+
+        # Info label
+        info_label = QLabel(
+            "Set the home position for this microscope.\n"
+            "Default values are the current stage position.\n"
+            "Position must be within stage limits."
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #666; font-style: italic;")
+        layout.addWidget(info_label)
+
+        # Form for X, Y, Z, R inputs
+        form_layout = QFormLayout()
+
+        # X axis
+        self.x_spinbox = QDoubleSpinBox()
+        self.x_spinbox.setRange(
+            self.stage_limits['x']['min'],
+            self.stage_limits['x']['max']
+        )
+        self.x_spinbox.setDecimals(3)
+        self.x_spinbox.setSuffix(" mm")
+        self.x_spinbox.setValue(self.current_position.x)
+        self.x_spinbox.setSingleStep(0.1)
+        form_layout.addRow(
+            f"X ({self.stage_limits['x']['min']:.2f} to {self.stage_limits['x']['max']:.2f} mm):",
+            self.x_spinbox
+        )
+
+        # Y axis
+        self.y_spinbox = QDoubleSpinBox()
+        self.y_spinbox.setRange(
+            self.stage_limits['y']['min'],
+            self.stage_limits['y']['max']
+        )
+        self.y_spinbox.setDecimals(3)
+        self.y_spinbox.setSuffix(" mm")
+        self.y_spinbox.setValue(self.current_position.y)
+        self.y_spinbox.setSingleStep(0.1)
+        form_layout.addRow(
+            f"Y ({self.stage_limits['y']['min']:.2f} to {self.stage_limits['y']['max']:.2f} mm):",
+            self.y_spinbox
+        )
+
+        # Z axis
+        self.z_spinbox = QDoubleSpinBox()
+        self.z_spinbox.setRange(
+            self.stage_limits['z']['min'],
+            self.stage_limits['z']['max']
+        )
+        self.z_spinbox.setDecimals(3)
+        self.z_spinbox.setSuffix(" mm")
+        self.z_spinbox.setValue(self.current_position.z)
+        self.z_spinbox.setSingleStep(0.1)
+        form_layout.addRow(
+            f"Z ({self.stage_limits['z']['min']:.2f} to {self.stage_limits['z']['max']:.2f} mm):",
+            self.z_spinbox
+        )
+
+        # R axis
+        self.r_spinbox = QDoubleSpinBox()
+        self.r_spinbox.setRange(
+            self.stage_limits['r']['min'],
+            self.stage_limits['r']['max']
+        )
+        self.r_spinbox.setDecimals(2)
+        self.r_spinbox.setSuffix("°")
+        self.r_spinbox.setValue(self.current_position.r)
+        self.r_spinbox.setSingleStep(1.0)
+        form_layout.addRow(
+            f"R ({self.stage_limits['r']['min']:.1f} to {self.stage_limits['r']['max']:.1f}°):",
+            self.r_spinbox
+        )
+
+        layout.addLayout(form_layout)
+
+        # Buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+        self.setLayout(layout)
+        self.setMinimumWidth(450)
+
+    def get_position(self):
+        """
+        Get the position from the dialog.
+
+        Returns:
+            Position object with values from spinboxes
+        """
+        return Position(
+            x=self.x_spinbox.value(),
+            y=self.y_spinbox.value(),
+            z=self.z_spinbox.value(),
+            r=self.r_spinbox.value()
+        )
 
 
 class EnhancedStageControlView(QWidget):
@@ -87,8 +212,8 @@ class EnhancedStageControlView(QWidget):
         # Home & Stop Controls
         main_layout.addWidget(self._create_safety_controls())
 
-        # N7 Reference Position
-        main_layout.addWidget(self._create_n7_reference_controls())
+        # Saved Position Presets
+        main_layout.addWidget(self._create_preset_controls())
 
         # Status Display
         main_layout.addWidget(self._create_status_display())
@@ -356,10 +481,19 @@ class EnhancedStageControlView(QWidget):
         self.home_all_btn = QPushButton("🏠 Home All Axes")
         self.home_all_btn.clicked.connect(self._on_home_all_clicked)
         self.home_all_btn.setStyleSheet(
-            "background-color: #4caf50; color: white; padding: 12px; "
-            "font-weight: bold; font-size: 11pt; border-radius: 6px;"
+            "background-color: #4caf50; color: white; padding: 10px; "
+            "font-weight: bold; font-size: 10pt; border-radius: 4px;"
         )
         layout.addWidget(self.home_all_btn)
+
+        # Set Home Position button
+        self.set_home_btn = QPushButton("📍 Set Home Position")
+        self.set_home_btn.clicked.connect(self._on_set_home_clicked)
+        self.set_home_btn.setStyleSheet(
+            "background-color: #2196f3; color: white; padding: 10px; "
+            "font-weight: bold; font-size: 10pt; border-radius: 4px;"
+        )
+        layout.addWidget(self.set_home_btn)
 
         # Emergency Stop button
         self.estop_btn = QPushButton("🛑 EMERGENCY STOP")
@@ -373,34 +507,42 @@ class EnhancedStageControlView(QWidget):
         group.setLayout(layout)
         return group
 
-    def _create_n7_reference_controls(self) -> QGroupBox:
-        """Create N7 reference position controls."""
-        group = QGroupBox("N7 Reference Position")
+    def _create_preset_controls(self) -> QGroupBox:
+        """Create saved position preset controls."""
+        group = QGroupBox("Saved Position Presets")
         layout = QVBoxLayout()
 
-        # Display current N7 reference
-        self.n7_ref_label = QLabel("Not set")
-        self.n7_ref_label.setStyleSheet("background-color: #fff3cd; padding: 6px; border: 1px solid #ff9800;")
-        layout.addWidget(QLabel("Current N7 Reference:"))
-        layout.addWidget(self.n7_ref_label)
+        # Preset list
+        self.preset_list = QListWidget()
+        self.preset_list.setMaximumHeight(100)
+        layout.addWidget(QLabel("Saved Positions:"))
+        layout.addWidget(self.preset_list)
 
-        # Update display
-        self._update_n7_reference_display()
+        # Preset action buttons
+        preset_button_layout = QHBoxLayout()
 
-        # Buttons
-        btn_layout = QHBoxLayout()
+        self.save_preset_btn = QPushButton("Save Current")
+        self.save_preset_btn.clicked.connect(self._on_save_preset_clicked)
+        self.save_preset_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 6px; font-size: 9pt;")
+        preset_button_layout.addWidget(self.save_preset_btn)
 
-        self.save_n7_btn = QPushButton("Set Current as N7 Reference")
-        self.save_n7_btn.clicked.connect(self._on_save_n7_clicked)
-        self.save_n7_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 8px;")
-        btn_layout.addWidget(self.save_n7_btn)
+        self.goto_preset_btn = QPushButton("Go To")
+        self.goto_preset_btn.clicked.connect(self._on_goto_preset_clicked)
+        self.goto_preset_btn.setStyleSheet("background-color: #4caf50; color: white; padding: 6px; font-size: 9pt;")
+        self.goto_preset_btn.setEnabled(False)
+        preset_button_layout.addWidget(self.goto_preset_btn)
 
-        self.goto_n7_btn = QPushButton("Go To N7 Reference")
-        self.goto_n7_btn.clicked.connect(self._on_goto_n7_clicked)
-        self.goto_n7_btn.setStyleSheet("background-color: #4caf50; color: white; padding: 8px;")
-        btn_layout.addWidget(self.goto_n7_btn)
+        self.delete_preset_btn = QPushButton("Delete")
+        self.delete_preset_btn.clicked.connect(self._on_delete_preset_clicked)
+        self.delete_preset_btn.setStyleSheet("background-color: #f44336; color: white; padding: 6px; font-size: 9pt;")
+        self.delete_preset_btn.setEnabled(False)
+        preset_button_layout.addWidget(self.delete_preset_btn)
 
-        layout.addLayout(btn_layout)
+        layout.addLayout(preset_button_layout)
+
+        # Enable/disable goto and delete based on selection
+        self.preset_list.itemSelectionChanged.connect(self._on_preset_selection_changed)
+
         group.setLayout(layout)
         return group
 
@@ -607,51 +749,145 @@ class EnhancedStageControlView(QWidget):
         delta = increment * direction
         self._jog('r', delta)
 
-    def _on_save_n7_clicked(self) -> None:
-        """Handle Set N7 Reference button click."""
-        reply = QMessageBox.question(
-            self,
-            "Save N7 Reference",
-            "Save current position as N7 reference?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
+    def _on_save_preset_clicked(self) -> None:
+        """Handle save preset button click."""
+        try:
+            # Get current position
+            position = self.movement_controller.position_controller.get_current_position()
+            if position is None:
+                QMessageBox.warning(self, "No Position", "No current position available to save")
+                return
 
-        if reply == QMessageBox.Yes:
-            if self.movement_controller.save_n7_reference():
-                self._update_n7_reference_display()
-                QMessageBox.information(self, "Success", "N7 reference position saved")
-            else:
-                QMessageBox.critical(self, "Error", "Failed to save N7 reference")
+            # Ask user for preset name
+            name, ok = QInputDialog.getText(
+                self,
+                "Save Position Preset",
+                "Enter name for this position:",
+                QLineEdit.Normal,
+                ""
+            )
 
-    def _on_goto_n7_clicked(self) -> None:
-        """Handle Go To N7 Reference button click."""
-        n7_ref = self.movement_controller.get_n7_reference()
+            if ok and name:
+                name = name.strip()
+                if not name:
+                    QMessageBox.warning(self, "Invalid Name", "Preset name cannot be empty")
+                    return
 
-        if n7_ref is None:
-            QMessageBox.warning(self, "No Reference", "N7 reference position not set")
-            return
+                # Check if preset already exists
+                if self.movement_controller.position_controller.preset_service.preset_exists(name):
+                    reply = QMessageBox.question(
+                        self,
+                        "Overwrite Preset",
+                        f"Preset '{name}' already exists. Overwrite?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
+                    if reply != QMessageBox.Yes:
+                        return
 
-        reply = QMessageBox.question(
-            self,
-            "Go To N7 Reference",
-            f"Move to N7 reference position?\n\n"
-            f"X: {n7_ref.x:.3f} mm\n"
-            f"Y: {n7_ref.y:.3f} mm\n"
-            f"Z: {n7_ref.z:.3f} mm\n"
-            f"R: {n7_ref.r:.2f}°",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
+                # Save preset
+                self.movement_controller.position_controller.preset_service.save_preset(name, position)
+                self.message_label.setText(f"Saved preset '{name}'")
+                self.message_label.setStyleSheet("color: green; padding: 6px;")
+                self._refresh_preset_list()
 
-        if reply == QMessageBox.Yes:
-            try:
-                self.movement_controller.position_controller.move_to_position(n7_ref, validate=True)
-                self.message_label.setText("Moving to N7 reference position...")
-                self.message_label.setStyleSheet("color: blue; padding: 6px;")
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", f"Failed to save preset: {str(e)}")
 
-            except Exception as e:
-                QMessageBox.critical(self, "Movement Error", str(e))
+    def _on_goto_preset_clicked(self) -> None:
+        """Handle go to preset button click."""
+        try:
+            # Get selected preset
+            selected_items = self.preset_list.selectedItems()
+            if not selected_items:
+                QMessageBox.warning(self, "No Selection", "No preset selected")
+                return
+
+            preset_name = selected_items[0].text()
+            preset = self.movement_controller.position_controller.preset_service.get_preset(preset_name)
+
+            if preset is None:
+                QMessageBox.warning(self, "Not Found", f"Preset '{preset_name}' not found")
+                return
+
+            # Move to preset position
+            position = preset.to_position()
+            self.movement_controller.position_controller.move_to_position(position, validate=True)
+            self.message_label.setText(f"Moving to preset '{preset_name}'...")
+            self.message_label.setStyleSheet("color: blue; padding: 6px;")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Movement Error", f"Failed to move to preset: {str(e)}")
+
+    def _on_delete_preset_clicked(self) -> None:
+        """Handle delete preset button click."""
+        try:
+            # Get selected preset
+            selected_items = self.preset_list.selectedItems()
+            if not selected_items:
+                QMessageBox.warning(self, "No Selection", "No preset selected")
+                return
+
+            preset_name = selected_items[0].text()
+
+            # Confirm deletion
+            reply = QMessageBox.question(
+                self,
+                "Delete Preset",
+                f"Delete preset '{preset_name}'?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if reply == QMessageBox.Yes:
+                self.movement_controller.position_controller.preset_service.delete_preset(preset_name)
+                self.message_label.setText(f"Deleted preset '{preset_name}'")
+                self.message_label.setStyleSheet("color: gray; padding: 6px;")
+                self._refresh_preset_list()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Delete Error", f"Failed to delete preset: {str(e)}")
+
+    def _on_preset_selection_changed(self) -> None:
+        """Handle preset list selection change."""
+        has_selection = len(self.preset_list.selectedItems()) > 0
+        self.goto_preset_btn.setEnabled(has_selection)
+        self.delete_preset_btn.setEnabled(has_selection)
+
+    def _refresh_preset_list(self) -> None:
+        """Refresh the preset list display."""
+        self.preset_list.clear()
+        presets = self.movement_controller.position_controller.preset_service.list_presets()
+        for preset in presets:
+            self.preset_list.addItem(preset.name)
+
+    def _on_set_home_clicked(self) -> None:
+        """Handle Set Home Position button click."""
+        try:
+            # Get current position
+            current_pos = self.movement_controller.position_controller.get_current_position()
+            if current_pos is None:
+                QMessageBox.warning(self, "No Position", "Cannot get current position")
+                return
+
+            # Get stage limits
+            stage_limits = self.movement_controller.get_stage_limits()
+
+            # Show dialog
+            dialog = SetHomePositionDialog(current_pos, stage_limits, self)
+            if dialog.exec_() == QDialog.Accepted:
+                new_home = dialog.get_position()
+
+                # Save home position
+                if self.movement_controller.position_controller.set_home_position(new_home):
+                    QMessageBox.information(self, "Success", "Home position updated")
+                    self.message_label.setText("Home position updated")
+                    self.message_label.setStyleSheet("color: green; padding: 6px;")
+                else:
+                    QMessageBox.critical(self, "Error", "Failed to save home position")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to set home position: {str(e)}")
 
     def _on_show_history_clicked(self) -> None:
         """Handle Show Position History button click."""
@@ -661,15 +897,9 @@ class EnhancedStageControlView(QWidget):
         dialog = PositionHistoryDialog(self.movement_controller, parent=self)
         dialog.exec_()  # Modal dialog
 
-    def _update_n7_reference_display(self) -> None:
-        """Update N7 reference position display."""
-        n7_ref = self.movement_controller.get_n7_reference()
-
-        if n7_ref:
-            text = f"X={n7_ref.x:.3f}, Y={n7_ref.y:.3f}, Z={n7_ref.z:.3f}, R={n7_ref.r:.2f}°"
-            self.n7_ref_label.setText(text)
-        else:
-            self.n7_ref_label.setText("Not set")
+        # NOTE: Future enhancement - consider adding a quick "Undo" button
+        # to return to previous position without opening the full history dialog.
+        # This would be similar to a simple back button functionality.
 
     # ============================================================================
     # Signal Slots
@@ -833,6 +1063,12 @@ class EnhancedStageControlView(QWidget):
                 self.logger.warning("No initial position available")
         except Exception as e:
             self.logger.error(f"Error requesting initial position: {e}")
+
+        # Load saved position presets
+        try:
+            self._refresh_preset_list()
+        except Exception as e:
+            self.logger.error(f"Error loading preset list: {e}")
 
     def closeEvent(self, event) -> None:
         """Handle widget close event."""
