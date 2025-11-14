@@ -28,8 +28,7 @@ from py2flamingo.services import (
 from py2flamingo.controllers import ConnectionController, WorkflowController, PositionController
 from py2flamingo.controllers.movement_controller import MovementController
 from py2flamingo.controllers.camera_controller import CameraController
-from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, ImageControlsWindow
-from py2flamingo.views.enhanced_stage_control_view import EnhancedStageControlView
+from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, ImageControlsWindow, StageControlView
 from py2flamingo.views.camera_live_viewer import CameraLiveViewer
 from py2flamingo.views.stage_chamber_visualization_window import StageChamberVisualizationWindow
 
@@ -97,7 +96,7 @@ class FlamingoApplication:
         self.connection_view: Optional[ConnectionView] = None
         self.workflow_view: Optional[WorkflowView] = None
         self.sample_info_view: Optional[SampleInfoView] = None
-        self.enhanced_stage_control_view: Optional[EnhancedStageControlView] = None
+        self.stage_control_view: Optional[StageControlView] = None
         self.camera_live_viewer: Optional[CameraLiveViewer] = None
         self.image_controls_window: Optional[ImageControlsWindow] = None
         self.stage_chamber_visualization_window: Optional[StageChamberVisualizationWindow] = None
@@ -222,9 +221,9 @@ class FlamingoApplication:
         self.logger.debug("Creating sample info view...")
         self.sample_info_view = SampleInfoView()
 
-        # Create enhanced stage control view
-        self.logger.debug("Creating enhanced stage control view...")
-        self.enhanced_stage_control_view = EnhancedStageControlView(
+        # Create stage control view
+        self.logger.debug("Creating stage control view...")
+        self.stage_control_view = StageControlView(
             movement_controller=self.movement_controller
         )
 
@@ -335,8 +334,8 @@ class FlamingoApplication:
         self.logger.info("Connection established - enabling stage controls")
 
         # Enable controls immediately (connection is established)
-        if self.enhanced_stage_control_view:
-            self.enhanced_stage_control_view._set_controls_enabled(True)
+        if self.stage_control_view:
+            self.stage_control_view._set_controls_enabled(True)
 
         # Query position in background thread to avoid blocking GUI
         # StageService.get_position() uses blocking socket I/O
@@ -357,7 +356,7 @@ class FlamingoApplication:
 
                     # Update enhanced stage control view via Qt signal (thread-safe)
                     # This triggers immediate UI update
-                    if self.enhanced_stage_control_view:
+                    if self.stage_control_view:
                         self.movement_controller.position_changed.emit(
                             position.x, position.y, position.z, position.r
                         )
@@ -382,8 +381,8 @@ class FlamingoApplication:
         Disables controls when disconnected from microscope.
         """
         self.logger.info("Connection closed - disabling stage controls")
-        if self.enhanced_stage_control_view:
-            self.enhanced_stage_control_view._set_controls_enabled(False)
+        if self.stage_control_view:
+            self.stage_control_view._set_controls_enabled(False)
 
     def create_main_window(self):
         """Create main application window by composing views.
@@ -392,7 +391,7 @@ class FlamingoApplication:
         window, passing in the views created during dependency setup.
 
         The MainWindow is responsible for:
-        - Composing ConnectionView, WorkflowView, SampleInfoView, EnhancedStageControlView, and CameraLiveViewer
+        - Composing ConnectionView, WorkflowView, SampleInfoView, StageControlView, and CameraLiveViewer
         - Creating menu bar and status bar
         - Managing window lifecycle
         """
@@ -417,7 +416,7 @@ class FlamingoApplication:
             workflow_view=self.workflow_view,
             sample_info_view=self.sample_info_view,
             status_indicator_widget=self.status_indicator_widget,
-            enhanced_stage_control_view=self.enhanced_stage_control_view,
+            stage_control_view=self.stage_control_view,
             camera_live_viewer=self.camera_live_viewer,
             image_controls_window=self.image_controls_window,
             stage_chamber_visualization_window=self.stage_chamber_visualization_window

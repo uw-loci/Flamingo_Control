@@ -17,8 +17,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 
-from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, ImageControlsWindow
-from py2flamingo.views.enhanced_stage_control_view import EnhancedStageControlView
+from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, ImageControlsWindow, StageControlView
 from py2flamingo.views.camera_live_viewer import CameraLiveViewer
 
 
@@ -27,7 +26,7 @@ class MainWindow(QMainWindow):
 
     This class creates the main window UI by composing views created
     in the Views layer. It uses a tab widget to organize the
-    ConnectionView, WorkflowView, SampleInfoView, and EnhancedStageControlView into separate tabs.
+    ConnectionView, WorkflowView, SampleInfoView, and StageControlView into separate tabs.
 
     The window includes:
     - Menu bar (File → Exit, View → Camera/Image Controls, Help → About)
@@ -39,7 +38,7 @@ class MainWindow(QMainWindow):
 
     Example:
         main_window = MainWindow(connection_view, workflow_view, sample_info_view,
-                                 enhanced_stage_control_view=stage_view,
+                                 stage_control_view=stage_view,
                                  camera_live_viewer=camera_viewer,
                                  image_controls_window=image_controls)
         main_window.setWindowTitle("Flamingo Microscope Control")
@@ -52,7 +51,7 @@ class MainWindow(QMainWindow):
                  workflow_view: WorkflowView,
                  sample_info_view: Optional[SampleInfoView] = None,
                  status_indicator_widget=None,
-                 enhanced_stage_control_view=None,
+                 stage_control_view=None,
                  camera_live_viewer=None,
                  image_controls_window=None,
                  stage_chamber_visualization_window=None):
@@ -63,7 +62,7 @@ class MainWindow(QMainWindow):
             workflow_view: WorkflowView instance for workflow operations
             sample_info_view: Optional SampleInfoView instance for sample configuration
             status_indicator_widget: Optional status indicator widget
-            enhanced_stage_control_view: Optional EnhancedStageControlView instance
+            stage_control_view: Optional StageControlView instance
             camera_live_viewer: Optional CameraLiveViewer instance
             image_controls_window: Optional ImageControlsWindow instance
             stage_chamber_visualization_window: Optional StageChamberVisualizationWindow instance
@@ -74,7 +73,7 @@ class MainWindow(QMainWindow):
         self.workflow_view = workflow_view
         self.sample_info_view = sample_info_view
         self.status_indicator_widget = status_indicator_widget
-        self.enhanced_stage_control_view = enhanced_stage_control_view
+        self.stage_control_view = stage_control_view
         self.camera_live_viewer = camera_live_viewer
         self.image_controls_window = image_controls_window
         self.stage_chamber_visualization_window = stage_chamber_visualization_window
@@ -111,8 +110,8 @@ class MainWindow(QMainWindow):
             self.tabs.addTab(self._wrap_in_scroll_area(self.sample_info_view), "Sample Info")
 
         # Add stage control tab (enhanced view only)
-        if self.enhanced_stage_control_view is not None:
-            self.tabs.addTab(self._wrap_in_scroll_area(self.enhanced_stage_control_view), "Stage Control")
+        if self.stage_control_view is not None:
+            self.tabs.addTab(self._wrap_in_scroll_area(self.stage_control_view), "Stage Control")
 
         # Add tabs to layout
         layout.addWidget(self.tabs)
