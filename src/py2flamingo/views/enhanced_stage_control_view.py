@@ -17,7 +17,7 @@ from typing import Optional
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QGroupBox, QFormLayout, QDoubleSpinBox,
-    QGridLayout, QFrame, QMessageBox
+    QGridLayout, QFrame, QMessageBox, QComboBox
 )
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QFont
@@ -72,25 +72,17 @@ class EnhancedStageControlView(QWidget):
     def setup_ui(self) -> None:
         """Create and layout all UI components."""
         main_layout = QVBoxLayout()
-        main_layout.setSpacing(10)
+        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(10, 10, 10, 10)
 
-        # Title
-        title = QLabel("Stage Control - Complete Movement Interface")
-        title_font = QFont()
-        title_font.setPointSize(14)
-        title_font.setBold(True)
-        title.setFont(title_font)
-        title.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(title)
-
-        # Current Position Display
-        main_layout.addWidget(self._create_position_display())
+        # Top section: Current Position and Jog Controls side-by-side
+        top_layout = QHBoxLayout()
+        top_layout.addWidget(self._create_position_display())
+        top_layout.addWidget(self._create_relative_controls())
+        main_layout.addLayout(top_layout)
 
         # Target Position & Go To Controls
         main_layout.addWidget(self._create_goto_controls())
-
-        # Relative Movement Controls
-        main_layout.addWidget(self._create_relative_controls())
 
         # Home & Stop Controls
         main_layout.addWidget(self._create_safety_controls())
@@ -105,15 +97,14 @@ class EnhancedStageControlView(QWidget):
         self.setLayout(main_layout)
 
     def _create_position_display(self) -> QGroupBox:
-        """Create current position display group with action buttons."""
+        """Create current position display group (compact)."""
         group = QGroupBox("Current Position")
-        main_layout = QHBoxLayout()
-
-        # Left side: Position display (compact)
         position_layout = QFormLayout()
+        position_layout.setFieldGrowthPolicy(QFormLayout.FieldsStayAtSizeHint)
+        position_layout.setLabelAlignment(Qt.AlignRight)
 
-        # Position labels with status indicators
-        label_style = "background-color: #e8f5e9; padding: 8px; border: 2px solid #4caf50; border-radius: 4px; font-size: 11pt; font-weight: bold;"
+        # Position labels with status indicators (more compact)
+        label_style = "background-color: #e8f5e9; padding: 5px; border: 1px solid #4caf50; border-radius: 3px; font-size: 10pt; font-weight: bold; min-width: 80px;"
 
         self.x_pos_label = QLabel("0.000 mm")
         self.x_pos_label.setStyleSheet(label_style)
@@ -131,24 +122,7 @@ class EnhancedStageControlView(QWidget):
         self.r_pos_label.setStyleSheet(label_style)
         position_layout.addRow("Rotation:", self.r_pos_label)
 
-        main_layout.addLayout(position_layout)
-
-        # Right side: Action buttons
-        button_layout = QVBoxLayout()
-        button_layout.addStretch()
-
-        self.show_history_btn = QPushButton("Show Position History")
-        self.show_history_btn.clicked.connect(self._on_show_history_clicked)
-        self.show_history_btn.setStyleSheet(
-            "background-color: #2196f3; color: white; padding: 10px; "
-            "font-weight: bold; font-size: 10pt;"
-        )
-        button_layout.addWidget(self.show_history_btn)
-
-        button_layout.addStretch()
-        main_layout.addLayout(button_layout)
-
-        group.setLayout(main_layout)
+        group.setLayout(position_layout)
         return group
 
     def _create_goto_controls(self) -> QGroupBox:
@@ -290,79 +264,82 @@ class EnhancedStageControlView(QWidget):
         return group
 
     def _create_relative_controls(self) -> QGroupBox:
-        """Create relative movement (jog) controls."""
-        group = QGroupBox("Relative Movement Controls (Jog)")
+        """Create relative movement (jog) controls with dropdown increment selector."""
+        group = QGroupBox("Jog Controls")
         layout = QVBoxLayout()
+        layout.setSpacing(8)
 
-        info = QLabel("Click buttons to move by the specified increment")
-        info.setStyleSheet("color: #666; font-style: italic;")
-        layout.addWidget(info)
+        # Increment selector dropdown
+        increment_layout = QHBoxLayout()
+        increment_layout.addWidget(QLabel("Increment:"))
 
-        # Create grid for jog buttons
+        self.jog_increment_combo = QComboBox()
+        self.jog_increment_combo.addItems(["0.1 mm", "1.0 mm", "10.0 mm"])
+        self.jog_increment_combo.setCurrentIndex(1)  # Default to 1.0 mm
+        self.jog_increment_combo.setStyleSheet("padding: 4px; font-weight: bold;")
+        increment_layout.addWidget(self.jog_increment_combo)
+        increment_layout.addStretch()
+        layout.addLayout(increment_layout)
+
+        # Create compact grid for jog buttons (just - and + for each axis)
         grid = QGridLayout()
-        grid.setSpacing(5)
+        grid.setSpacing(4)
 
         # Headers
-        grid.addWidget(QLabel("Axis"), 0, 0)
-        grid.addWidget(QLabel("±0.1"), 0, 1, 1, 2, Qt.AlignCenter)
-        grid.addWidget(QLabel("±1.0"), 0, 3, 1, 2, Qt.AlignCenter)
-        grid.addWidget(QLabel("±10.0"), 0, 5, 1, 2, Qt.AlignCenter)
+        grid.addWidget(QLabel("<b>Axis</b>"), 0, 0)
+        grid.addWidget(QLabel("<b>−</b>"), 0, 1, Qt.AlignCenter)
+        grid.addWidget(QLabel("<b>+</b>"), 0, 2, Qt.AlignCenter)
 
         # X-axis jog buttons
         row = 1
-        grid.addWidget(QLabel("<b>X (mm)</b>"), row, 0)
-        grid.addWidget(self._create_jog_button("−0.1", lambda: self._jog('x', -0.1)), row, 1)
-        grid.addWidget(self._create_jog_button("+0.1", lambda: self._jog('x', 0.1)), row, 2)
-        grid.addWidget(self._create_jog_button("−1.0", lambda: self._jog('x', -1.0)), row, 3)
-        grid.addWidget(self._create_jog_button("+1.0", lambda: self._jog('x', 1.0)), row, 4)
-        grid.addWidget(self._create_jog_button("−10.0", lambda: self._jog('x', -10.0)), row, 5)
-        grid.addWidget(self._create_jog_button("+10.0", lambda: self._jog('x', 10.0)), row, 6)
+        grid.addWidget(QLabel("X (mm):"), row, 0)
+        grid.addWidget(self._create_jog_button("−", lambda: self._jog_with_increment('x', -1)), row, 1)
+        grid.addWidget(self._create_jog_button("+", lambda: self._jog_with_increment('x', 1)), row, 2)
 
         # Y-axis jog buttons
         row = 2
-        grid.addWidget(QLabel("<b>Y (mm)</b>"), row, 0)
-        grid.addWidget(self._create_jog_button("−0.1", lambda: self._jog('y', -0.1)), row, 1)
-        grid.addWidget(self._create_jog_button("+0.1", lambda: self._jog('y', 0.1)), row, 2)
-        grid.addWidget(self._create_jog_button("−1.0", lambda: self._jog('y', -1.0)), row, 3)
-        grid.addWidget(self._create_jog_button("+1.0", lambda: self._jog('y', 1.0)), row, 4)
-        grid.addWidget(self._create_jog_button("−10.0", lambda: self._jog('y', -10.0)), row, 5)
-        grid.addWidget(self._create_jog_button("+10.0", lambda: self._jog('y', 10.0)), row, 6)
+        grid.addWidget(QLabel("Y (mm):"), row, 0)
+        grid.addWidget(self._create_jog_button("−", lambda: self._jog_with_increment('y', -1)), row, 1)
+        grid.addWidget(self._create_jog_button("+", lambda: self._jog_with_increment('y', 1)), row, 2)
 
         # Z-axis jog buttons
         row = 3
-        grid.addWidget(QLabel("<b>Z (mm)</b>"), row, 0)
-        grid.addWidget(self._create_jog_button("−0.1", lambda: self._jog('z', -0.1)), row, 1)
-        grid.addWidget(self._create_jog_button("+0.1", lambda: self._jog('z', 0.1)), row, 2)
-        grid.addWidget(self._create_jog_button("−1.0", lambda: self._jog('z', -1.0)), row, 3)
-        grid.addWidget(self._create_jog_button("+1.0", lambda: self._jog('z', 1.0)), row, 4)
-        grid.addWidget(self._create_jog_button("−10.0", lambda: self._jog('z', -10.0)), row, 5)
-        grid.addWidget(self._create_jog_button("+10.0", lambda: self._jog('z', 10.0)), row, 6)
+        grid.addWidget(QLabel("Z (mm):"), row, 0)
+        grid.addWidget(self._create_jog_button("−", lambda: self._jog_with_increment('z', -1)), row, 1)
+        grid.addWidget(self._create_jog_button("+", lambda: self._jog_with_increment('z', 1)), row, 2)
 
-        # R-axis jog buttons (different increments: 1°, 10°, 45°)
+        # R-axis jog buttons (uses different increments: 1°, 10°, 45°)
         row = 4
-        grid.addWidget(QLabel("<b>R (°)</b>"), row, 0)
-        grid.addWidget(self._create_jog_button("−1°", lambda: self._jog('r', -1.0)), row, 1)
-        grid.addWidget(self._create_jog_button("+1°", lambda: self._jog('r', 1.0)), row, 2)
-        grid.addWidget(self._create_jog_button("−10°", lambda: self._jog('r', -10.0)), row, 3)
-        grid.addWidget(self._create_jog_button("+10°", lambda: self._jog('r', 10.0)), row, 4)
-        grid.addWidget(self._create_jog_button("−45°", lambda: self._jog('r', -45.0)), row, 5)
-        grid.addWidget(self._create_jog_button("+45°", lambda: self._jog('r', 45.0)), row, 6)
+        grid.addWidget(QLabel("R (°):"), row, 0)
+        grid.addWidget(self._create_jog_button("−", lambda: self._jog_with_rotation_increment(-1)), row, 1)
+        grid.addWidget(self._create_jog_button("+", lambda: self._jog_with_rotation_increment(1)), row, 2)
 
         layout.addLayout(grid)
+
+        # Show Position History button
+        self.show_history_btn = QPushButton("Show Position History")
+        self.show_history_btn.clicked.connect(self._on_show_history_clicked)
+        self.show_history_btn.setStyleSheet(
+            "background-color: #2196f3; color: white; padding: 8px; "
+            "font-weight: bold; font-size: 9pt;"
+        )
+        layout.addWidget(self.show_history_btn)
+
         group.setLayout(layout)
         return group
 
     def _create_jog_button(self, text: str, callback) -> QPushButton:
-        """Create a jog button with consistent styling."""
+        """Create a compact jog button with consistent styling."""
         btn = QPushButton(text)
-        btn.setMinimumWidth(60)
+        btn.setMinimumWidth(50)
+        btn.setMaximumWidth(50)
         btn.clicked.connect(callback)
 
         # Style based on direction
-        if text.startswith('−') or text.startswith('-'):
-            btn.setStyleSheet("background-color: #ffccbc; padding: 5px; font-weight: bold;")
+        if text.startswith('−') or text.startswith('-') or text == '−':
+            btn.setStyleSheet("background-color: #ffccbc; padding: 6px; font-weight: bold; font-size: 11pt;")
         else:
-            btn.setStyleSheet("background-color: #c8e6c9; padding: 5px; font-weight: bold;")
+            btn.setStyleSheet("background-color: #c8e6c9; padding: 6px; font-weight: bold; font-size: 11pt;")
 
         return btn
 
@@ -608,6 +585,23 @@ class EnhancedStageControlView(QWidget):
 
         except Exception as e:
             QMessageBox.warning(self, "Jog Error", str(e))
+
+    def _jog_with_increment(self, axis: str, direction: int) -> None:
+        """Handle jog with increment from dropdown."""
+        # Get increment from dropdown (e.g., "1.0 mm" -> 1.0)
+        increment_text = self.jog_increment_combo.currentText()
+        increment = float(increment_text.split()[0])  # Extract number from "1.0 mm"
+        delta = increment * direction
+        self._jog(axis, delta)
+
+    def _jog_with_rotation_increment(self, direction: int) -> None:
+        """Handle rotation jog with special increments mapped from dropdown."""
+        # Map dropdown index to rotation increments
+        increment_index = self.jog_increment_combo.currentIndex()
+        rotation_increments = [1.0, 10.0, 45.0]  # Maps to 0.1mm, 1mm, 10mm
+        increment = rotation_increments[increment_index]
+        delta = increment * direction
+        self._jog('r', delta)
 
     def _on_save_n7_clicked(self) -> None:
         """Handle Set N7 Reference button click."""
