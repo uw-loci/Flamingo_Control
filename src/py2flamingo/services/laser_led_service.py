@@ -180,7 +180,7 @@ class LaserLEDService(MicroscopeCommandService):
         result = self._send_command(
             LaserLEDCommandCode.LASER_LEVEL_SET,
             f"LASER_{laser_index}_LEVEL_SET",
-            params=[server_laser_index, 0, 0, 0, 0, 0, self._encoder.CALLBACK_FLAG],
+            params=[server_laser_index, 0, 0, 0, 0, 0, 0],
             data=power_str
         )
 

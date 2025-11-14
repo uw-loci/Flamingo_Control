@@ -150,9 +150,81 @@ class MicroscopeCommandService:
         Returns:
             Dict with 'success' and optional 'error'
         """
-        # For now, action commands use same logic as queries
-        # Both need TRIGGER_CALL_BACK flag and response handling
-        return self._query_command(command_code, command_name, params, value)
+        if not self.connection.is_connected():
+            return {
+                'success': False,
+                'error': 'Not connected to microscope'
+            }
+
+        try:
+            # Ensure params[6] has TRIGGER_CALL_BACK flag
+            if params is None:
+                params = [0] * 7
+            elif len(params) < 7:
+                params = list(params) + [0] * (7 - len(params))
+            else:
+                params = list(params)
+
+            # Always set TRIGGER_CALL_BACK flag in params[6]
+            params[6] = CommandDataBits.TRIGGER_CALL_BACK
+
+            # Convert string data to bytes if needed
+            if isinstance(data, str):
+                data = data.encode('utf-8')
+
+            # Encode command with data
+            cmd_bytes = self.connection.encoder.encode_command(
+                code=command_code,
+                status=0,
+                params=params,
+                value=value,
+                data=data,
+                additional_data_size=additional_data_size
+            )
+
+            # Get command socket
+            command_socket = self.connection._command_socket
+            if command_socket is None:
+                return {
+                    'success': False,
+                    'error': 'Command socket not available'
+                }
+
+            # Send command
+            command_socket.sendall(cmd_bytes)
+            self.logger.debug(f"Sent {command_name} (code {command_code})")
+
+            # Read 128-byte response
+            ack_response = self._receive_full_bytes(command_socket, 128, timeout=3.0)
+
+            # Parse response
+            parsed = self._parse_response(ack_response)
+
+            # Read additional data if present
+            add_data_bytes = parsed['reserved']
+            if add_data_bytes > 0:
+                self.logger.debug(f"Reading {add_data_bytes} additional bytes...")
+                additional_data = self._receive_full_bytes(command_socket, add_data_bytes, timeout=3.0)
+                parsed['additional_data'] = additional_data
+
+            return {
+                'success': True,
+                'parsed': parsed,
+                'raw_response': ack_response
+            }
+
+        except (socket.timeout, TimeoutError) as e:
+            self.logger.error(f"Timeout waiting for {command_name} response")
+            return {
+                'success': False,
+                'error': 'timeout'
+            }
+        except Exception as e:
+            self.logger.error(f"Error in {command_name}: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e)
+            }
 
     def _receive_full_bytes(self, sock: socket.socket, num_bytes: int, timeout: float = 3.0) -> bytes:
         """
