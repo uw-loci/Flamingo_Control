@@ -257,26 +257,34 @@ class StageControlView(QWidget):
 
     def _create_goto_controls(self) -> QGroupBox:
         """Create target position and Go To button controls."""
-        group = QGroupBox("Absolute Positioning - Go To Target")
+        group = QGroupBox("Position Control")
         layout = QVBoxLayout()
 
         # Get stage limits
         limits = self.movement_controller.get_stage_limits()
 
         # Create grid layout for better column control
-        # Column 0: Label, Column 1: Input, Column 2: Go To, Column 3: Home
+        # Column 0: Label (narrow), Column 1: Input, Column 2: Go To, Column 3: Home
         grid = QGridLayout()
         grid.setSpacing(8)
+        grid.setColumnStretch(0, 0)  # Labels: minimum width
+        grid.setColumnStretch(1, 1)  # Input fields: some stretch
+        grid.setColumnStretch(2, 0)  # Go To buttons: no stretch
+        grid.setColumnStretch(3, 1)  # Home buttons: more space for longer labels
 
         # Headers
-        grid.addWidget(QLabel("<b>Axis</b>"), 0, 0)
+        axis_header = QLabel("<b>Axis</b>")
+        axis_header.setMaximumWidth(30)
+        grid.addWidget(axis_header, 0, 0)
         grid.addWidget(QLabel("<b>Target</b>"), 0, 1)
         grid.addWidget(QLabel("<b>Go To Axis</b>"), 0, 2)
         grid.addWidget(QLabel("<b>Home Axis</b>"), 0, 3)
 
         # X-axis row
         row = 1
-        grid.addWidget(QLabel("X:"), row, 0)
+        x_label = QLabel("X:")
+        x_label.setMaximumWidth(20)
+        grid.addWidget(x_label, row, 0)
 
         self.x_target_spin = QDoubleSpinBox()
         self.x_target_spin.setRange(limits['x']['min'], limits['x']['max'])
@@ -293,15 +301,16 @@ class StageControlView(QWidget):
         self.x_goto_btn.setMaximumWidth(60)
         grid.addWidget(self.x_goto_btn, row, 2)
 
-        self.x_home_btn = QPushButton("Home X")
+        self.x_home_btn = QPushButton("Go to X Home")
         self.x_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('x'))
         self.x_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;")
-        self.x_home_btn.setMaximumWidth(70)
         grid.addWidget(self.x_home_btn, row, 3)
 
         # Y-axis row
         row = 2
-        grid.addWidget(QLabel("Y:"), row, 0)
+        y_label = QLabel("Y:")
+        y_label.setMaximumWidth(20)
+        grid.addWidget(y_label, row, 0)
 
         self.y_target_spin = QDoubleSpinBox()
         self.y_target_spin.setRange(limits['y']['min'], limits['y']['max'])
@@ -318,15 +327,16 @@ class StageControlView(QWidget):
         self.y_goto_btn.setMaximumWidth(60)
         grid.addWidget(self.y_goto_btn, row, 2)
 
-        self.y_home_btn = QPushButton("Home Y")
+        self.y_home_btn = QPushButton("Go to Y Home")
         self.y_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('y'))
         self.y_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;")
-        self.y_home_btn.setMaximumWidth(70)
         grid.addWidget(self.y_home_btn, row, 3)
 
         # Z-axis row
         row = 3
-        grid.addWidget(QLabel("Z:"), row, 0)
+        z_label = QLabel("Z:")
+        z_label.setMaximumWidth(20)
+        grid.addWidget(z_label, row, 0)
 
         self.z_target_spin = QDoubleSpinBox()
         self.z_target_spin.setRange(limits['z']['min'], limits['z']['max'])
@@ -343,18 +353,19 @@ class StageControlView(QWidget):
         self.z_goto_btn.setMaximumWidth(60)
         grid.addWidget(self.z_goto_btn, row, 2)
 
-        self.z_home_btn = QPushButton("Home Z")
+        self.z_home_btn = QPushButton("Go to Z Home")
         self.z_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('z'))
         self.z_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;")
-        self.z_home_btn.setMaximumWidth(70)
         grid.addWidget(self.z_home_btn, row, 3)
 
         # R-axis row
         row = 4
-        grid.addWidget(QLabel("R:"), row, 0)
+        r_label = QLabel("R:")
+        r_label.setMaximumWidth(20)
+        grid.addWidget(r_label, row, 0)
 
         self.r_target_spin = QDoubleSpinBox()
-        self.r_target_spin.setRange(0, 360)
+        self.r_target_spin.setRange(limits['r']['min'], limits['r']['max'])
         self.r_target_spin.setDecimals(2)
         self.r_target_spin.setSingleStep(1.0)
         self.r_target_spin.setSuffix("°")
@@ -368,10 +379,9 @@ class StageControlView(QWidget):
         self.r_goto_btn.setMaximumWidth(60)
         grid.addWidget(self.r_goto_btn, row, 2)
 
-        self.r_home_btn = QPushButton("Home R")
+        self.r_home_btn = QPushButton("Go to R Home")
         self.r_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('r'))
         self.r_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;")
-        self.r_home_btn.setMaximumWidth(70)
         grid.addWidget(self.r_home_btn, row, 3)
 
         layout.addLayout(grid)
