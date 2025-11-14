@@ -123,6 +123,7 @@ class EnhancedStageControlView(QWidget):
         position_layout.addRow("Rotation:", self.r_pos_label)
 
         group.setLayout(position_layout)
+        group.setMaximumWidth(220)
         return group
 
     def _create_goto_controls(self) -> QGroupBox:
@@ -153,18 +154,20 @@ class EnhancedStageControlView(QWidget):
         self.x_target_spin.setDecimals(3)
         self.x_target_spin.setSingleStep(0.1)
         self.x_target_spin.setSuffix(" mm")
-        self.x_target_spin.setMinimumWidth(100)
+        self.x_target_spin.setMaximumWidth(110)
         self.x_target_spin.valueChanged.connect(lambda: self._update_position_label_colors())
         grid.addWidget(self.x_target_spin, row, 1)
 
-        self.x_goto_btn = QPushButton("Go To X")
+        self.x_goto_btn = QPushButton("Go X")
         self.x_goto_btn.clicked.connect(lambda: self._on_goto_clicked('x'))
-        self.x_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 6px; font-weight: bold;")
+        self.x_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 5px; font-weight: bold; font-size: 9pt;")
+        self.x_goto_btn.setMaximumWidth(60)
         grid.addWidget(self.x_goto_btn, row, 2)
 
         self.x_home_btn = QPushButton("Home X")
         self.x_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('x'))
-        self.x_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 6px;")
+        self.x_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;")
+        self.x_home_btn.setMaximumWidth(70)
         grid.addWidget(self.x_home_btn, row, 3)
 
         # Y-axis row
@@ -176,18 +179,20 @@ class EnhancedStageControlView(QWidget):
         self.y_target_spin.setDecimals(3)
         self.y_target_spin.setSingleStep(0.1)
         self.y_target_spin.setSuffix(" mm")
-        self.y_target_spin.setMinimumWidth(100)
+        self.y_target_spin.setMaximumWidth(110)
         self.y_target_spin.valueChanged.connect(lambda: self._update_position_label_colors())
         grid.addWidget(self.y_target_spin, row, 1)
 
-        self.y_goto_btn = QPushButton("Go To Y")
+        self.y_goto_btn = QPushButton("Go Y")
         self.y_goto_btn.clicked.connect(lambda: self._on_goto_clicked('y'))
-        self.y_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 6px; font-weight: bold;")
+        self.y_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 5px; font-weight: bold; font-size: 9pt;")
+        self.y_goto_btn.setMaximumWidth(60)
         grid.addWidget(self.y_goto_btn, row, 2)
 
         self.y_home_btn = QPushButton("Home Y")
         self.y_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('y'))
-        self.y_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 6px;")
+        self.y_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;")
+        self.y_home_btn.setMaximumWidth(70)
         grid.addWidget(self.y_home_btn, row, 3)
 
         # Z-axis row
@@ -199,18 +204,20 @@ class EnhancedStageControlView(QWidget):
         self.z_target_spin.setDecimals(3)
         self.z_target_spin.setSingleStep(0.1)
         self.z_target_spin.setSuffix(" mm")
-        self.z_target_spin.setMinimumWidth(100)
+        self.z_target_spin.setMaximumWidth(110)
         self.z_target_spin.valueChanged.connect(lambda: self._update_position_label_colors())
         grid.addWidget(self.z_target_spin, row, 1)
 
-        self.z_goto_btn = QPushButton("Go To Z")
+        self.z_goto_btn = QPushButton("Go Z")
         self.z_goto_btn.clicked.connect(lambda: self._on_goto_clicked('z'))
-        self.z_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 6px; font-weight: bold;")
+        self.z_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 5px; font-weight: bold; font-size: 9pt;")
+        self.z_goto_btn.setMaximumWidth(60)
         grid.addWidget(self.z_goto_btn, row, 2)
 
         self.z_home_btn = QPushButton("Home Z")
         self.z_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('z'))
-        self.z_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 6px;")
+        self.z_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;")
+        self.z_home_btn.setMaximumWidth(70)
         grid.addWidget(self.z_home_btn, row, 3)
 
         # R-axis row
@@ -222,18 +229,20 @@ class EnhancedStageControlView(QWidget):
         self.r_target_spin.setDecimals(2)
         self.r_target_spin.setSingleStep(1.0)
         self.r_target_spin.setSuffix("°")
-        self.r_target_spin.setMinimumWidth(100)
+        self.r_target_spin.setMaximumWidth(110)
         self.r_target_spin.valueChanged.connect(lambda: self._update_position_label_colors())
         grid.addWidget(self.r_target_spin, row, 1)
 
-        self.r_goto_btn = QPushButton("Go To R")
+        self.r_goto_btn = QPushButton("Go R")
         self.r_goto_btn.clicked.connect(lambda: self._on_goto_clicked('r'))
-        self.r_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 6px; font-weight: bold;")
+        self.r_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 5px; font-weight: bold; font-size: 9pt;")
+        self.r_goto_btn.setMaximumWidth(60)
         grid.addWidget(self.r_goto_btn, row, 2)
 
         self.r_home_btn = QPushButton("Home R")
         self.r_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('r'))
-        self.r_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 6px;")
+        self.r_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;")
+        self.r_home_btn.setMaximumWidth(70)
         grid.addWidget(self.r_home_btn, row, 3)
 
         layout.addLayout(grid)
@@ -245,22 +254,16 @@ class EnhancedStageControlView(QWidget):
         layout.addWidget(separator)
 
         # Add "Go To Position" button that moves all 4 axes at once
-        goto_position_layout = QHBoxLayout()
-        goto_position_layout.addStretch()
-
         self.goto_position_btn = QPushButton("Go To Position (All 4 Axes)")
         self.goto_position_btn.clicked.connect(self._on_goto_position_clicked)
         self.goto_position_btn.setStyleSheet(
-            "background-color: #4caf50; color: white; padding: 10px; "
-            "font-weight: bold; font-size: 11pt; border-radius: 4px;"
+            "background-color: #4caf50; color: white; padding: 8px; "
+            "font-weight: bold; font-size: 10pt; border-radius: 4px;"
         )
-        self.goto_position_btn.setMinimumWidth(300)
-        goto_position_layout.addWidget(self.goto_position_btn)
-
-        goto_position_layout.addStretch()
-        layout.addLayout(goto_position_layout)
+        layout.addWidget(self.goto_position_btn)
 
         group.setLayout(layout)
+        group.setMaximumWidth(400)
         return group
 
     def _create_relative_controls(self) -> QGroupBox:
@@ -326,6 +329,7 @@ class EnhancedStageControlView(QWidget):
         layout.addWidget(self.show_history_btn)
 
         group.setLayout(layout)
+        group.setMaximumWidth(220)
         return group
 
     def _create_jog_button(self, text: str, callback) -> QPushButton:
