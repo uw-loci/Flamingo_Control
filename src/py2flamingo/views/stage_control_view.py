@@ -1,7 +1,7 @@
 """
-Enhanced Stage Control View with complete movement controls.
+Stage Control View with movement controls.
 
-This view provides comprehensive stage control including:
+This view provides stage control including:
 - Real-time position display
 - Target position input fields with "Go To" buttons
 - Relative movement controls (±0.1, ±1.0, ±10.0 mm)
@@ -153,7 +153,7 @@ class SetHomePositionDialog(QDialog):
 
 class StageControlView(QWidget):
     """
-    UI view for stage control with complete movement functionality.
+    UI view for stage control and movement.
 
     Features:
     - Real-time position display for X, Y, Z, R
