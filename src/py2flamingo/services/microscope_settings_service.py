@@ -56,7 +56,13 @@ class MicroscopeSettingsService:
         """
         if not self.settings_file.exists():
             self.logger.warning(
-                f"Settings file not found: {self.settings_file}. Using defaults."
+                f"[MicroscopeSettingsService] Settings file NOT FOUND: {self.settings_file}"
+            )
+            self.logger.warning(
+                f"[MicroscopeSettingsService] Base path: {self.base_path}, Microscope name: '{self.microscope_name}'"
+            )
+            self.logger.warning(
+                f"[MicroscopeSettingsService] Falling back to DEFAULT settings (stage limits will be 0-26)"
             )
             return self._get_default_settings()
 
@@ -64,12 +70,21 @@ class MicroscopeSettingsService:
             with open(self.settings_file, 'r') as f:
                 settings = json.load(f)
                 self.logger.info(
-                    f"Loaded settings for microscope '{self.microscope_name}' "
+                    f"[MicroscopeSettingsService] Successfully loaded settings for microscope '{self.microscope_name}' "
                     f"from {self.settings_file}"
                 )
+                # Log stage limits to verify correct file was loaded
+                if 'stage_limits' in settings:
+                    limits = settings['stage_limits']
+                    self.logger.info(
+                        f"[MicroscopeSettingsService] File contains stage limits: "
+                        f"X={limits['x']['min']}-{limits['x']['max']}, "
+                        f"Y={limits['y']['min']}-{limits['y']['max']}, "
+                        f"Z={limits['z']['min']}-{limits['z']['max']}"
+                    )
                 return settings
         except Exception as e:
-            self.logger.error(f"Error loading settings file: {e}")
+            self.logger.error(f"[MicroscopeSettingsService] Error loading settings file: {e}")
             return self._get_default_settings()
 
     def _get_default_settings(self) -> Dict[str, Any]:
@@ -78,7 +93,10 @@ class MicroscopeSettingsService:
         Returns:
             Dict with safe default values
         """
-        self.logger.info("Using default settings")
+        self.logger.warning(
+            f"[MicroscopeSettingsService] Using DEFAULT settings for '{self.microscope_name}' "
+            f"(stage limits will be 0-26 for all axes). Expected file: {self.settings_file}"
+        )
         return {
             "microscope_name": self.microscope_name,
             "position_history": {

@@ -1216,7 +1216,13 @@ class PositionController:
         Returns:
             Dict with limits for each axis: {'x': {'min': ..., 'max': ...}, ...}
         """
-        return self._config_service.get_stage_limits()
+        limits = self._config_service.get_stage_limits()
+        self.logger.debug(
+            f"[PositionController] Returning stage limits from ConfigurationService: "
+            f"X={limits['x']['min']:.2f}-{limits['x']['max']:.2f}, "
+            f"Y={limits['y']['min']:.2f}-{limits['y']['max']:.2f}"
+        )
+        return limits
 
     def is_position_within_bounds(self, position: Position) -> tuple[bool, List[str]]:
         """

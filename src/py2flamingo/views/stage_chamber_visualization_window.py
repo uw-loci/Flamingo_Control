@@ -52,7 +52,8 @@ class StageChamberVisualizationWindow(QWidget):
         self.stage_limits = self.movement_controller.get_stage_limits()
 
         # Log stage limits for debugging
-        self.logger.info(f"Stage limits: X={self.stage_limits['x']['min']:.2f}-{self.stage_limits['x']['max']:.2f}, "
+        self.logger.info(f"[StageChamberVisualizationWindow] Received stage limits from MovementController:")
+        self.logger.info(f"  X={self.stage_limits['x']['min']:.2f}-{self.stage_limits['x']['max']:.2f}, "
                         f"Y={self.stage_limits['y']['min']:.2f}-{self.stage_limits['y']['max']:.2f}, "
                         f"Z={self.stage_limits['z']['min']:.2f}-{self.stage_limits['z']['max']:.2f}, "
                         f"R={self.stage_limits['r']['min']:.1f}-{self.stage_limits['r']['max']:.1f}")

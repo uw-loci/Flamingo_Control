@@ -30,10 +30,28 @@ class ConfigurationService:
         Initialize configuration service.
 
         Args:
-            base_path: Base path for configuration files (defaults to current directory)
+            base_path: Base path for configuration files (defaults to project root)
         """
         self.logger = logging.getLogger(__name__)
-        self.base_path = base_path or Path.cwd()
+        if base_path:
+            self.base_path = base_path
+        else:
+            # Find project root by looking for microscope_settings directory
+            # Start from current working directory and walk up until we find it
+            current = Path.cwd()
+            while current != current.parent:  # Stop at filesystem root
+                if (current / "microscope_settings").exists():
+                    self.base_path = current
+                    self.logger.debug(f"[ConfigurationService] Found project root: {self.base_path}")
+                    break
+                current = current.parent
+            else:
+                # Fallback to cwd if microscope_settings not found
+                self.base_path = Path.cwd()
+                self.logger.warning(
+                    f"[ConfigurationService] Could not find microscope_settings directory, "
+                    f"using current directory: {self.base_path}"
+                )
 
         # Load configuration
         self.config = {}
@@ -43,8 +61,15 @@ class ConfigurationService:
 
         # Load microscope-specific settings
         microscope_name = self.get_microscope_name()
+        self.logger.info(f"[ConfigurationService] Detected microscope name: '{microscope_name}' from ScopeSettings.txt")
         from py2flamingo.services.microscope_settings_service import MicroscopeSettingsService
         self.microscope_settings = MicroscopeSettingsService(microscope_name, self.base_path)
+        # Log the actual stage limits being loaded
+        limits = self.microscope_settings.get_stage_limits()
+        self.logger.info(f"[ConfigurationService] Loaded stage limits: X={limits['x']['min']:.2f}-{limits['x']['max']:.2f}, "
+                        f"Y={limits['y']['min']:.2f}-{limits['y']['max']:.2f}, "
+                        f"Z={limits['z']['min']:.2f}-{limits['z']['max']:.2f}, "
+                        f"R={limits['r']['min']:.1f}-{limits['r']['max']:.1f}")
         self.logger.info(f"Loaded microscope-specific settings for '{microscope_name}'")
 
     def _load_start_position(self, microscope_name: str) -> Dict[str, float]:

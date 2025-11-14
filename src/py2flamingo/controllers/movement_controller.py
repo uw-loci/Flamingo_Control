@@ -476,4 +476,10 @@ class MovementController(QObject):
 
     def get_stage_limits(self) -> Dict[str, Dict[str, float]]:
         """Get stage movement limits."""
-        return self.position_controller.get_stage_limits()
+        limits = self.position_controller.get_stage_limits()
+        self.logger.debug(
+            f"[MovementController] Returning stage limits from PositionController: "
+            f"X={limits['x']['min']:.2f}-{limits['x']['max']:.2f}, "
+            f"Y={limits['y']['min']:.2f}-{limits['y']['max']:.2f}"
+        )
+        return limits
