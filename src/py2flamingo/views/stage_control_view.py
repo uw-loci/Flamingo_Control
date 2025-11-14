@@ -412,9 +412,9 @@ class StageControlView(QWidget):
         layout = QVBoxLayout()
         layout.setSpacing(8)
 
-        # Increment selector dropdown
+        # Linear increment selector dropdown
         increment_layout = QHBoxLayout()
-        increment_layout.addWidget(QLabel("Increment:"))
+        increment_layout.addWidget(QLabel("Linear:"))
 
         self.jog_increment_combo = QComboBox()
         self.jog_increment_combo.addItems(["0.1 mm", "1.0 mm", "10.0 mm"])
@@ -423,6 +423,18 @@ class StageControlView(QWidget):
         increment_layout.addWidget(self.jog_increment_combo)
         increment_layout.addStretch()
         layout.addLayout(increment_layout)
+
+        # Rotation increment selector dropdown
+        rotation_layout = QHBoxLayout()
+        rotation_layout.addWidget(QLabel("Rotation:"))
+
+        self.rotation_increment_combo = QComboBox()
+        self.rotation_increment_combo.addItems(["1 deg", "10 deg", "45 deg", "90 deg", "180 deg"])
+        self.rotation_increment_combo.setCurrentIndex(1)  # Default to 10 deg
+        self.rotation_increment_combo.setStyleSheet("padding: 4px; font-weight: bold;")
+        rotation_layout.addWidget(self.rotation_increment_combo)
+        rotation_layout.addStretch()
+        layout.addLayout(rotation_layout)
 
         # Create compact grid for jog buttons (just - and + for each axis)
         grid = QGridLayout()
@@ -618,6 +630,7 @@ class StageControlView(QWidget):
             self.message_label.setStyleSheet("color: blue; padding: 6px;")
 
         except Exception as e:
+            self.logger.error(f"Movement error for axis {axis}: {e}", exc_info=True)
             QMessageBox.critical(self, "Movement Error", str(e))
 
     def _on_goto_position_clicked(self) -> None:
@@ -673,6 +686,7 @@ class StageControlView(QWidget):
                 logger.info("User cancelled Go To Position movement")
 
         except Exception as e:
+            self.logger.error(f"Failed to move to position: {e}", exc_info=True)
             QMessageBox.critical(self, "Movement Error", str(e))
 
     def _on_home_axis_clicked(self, axis: str) -> None:
@@ -683,6 +697,7 @@ class StageControlView(QWidget):
             self.message_label.setStyleSheet("color: blue; padding: 6px;")
 
         except Exception as e:
+            self.logger.error(f"Failed to home {axis} axis: {e}", exc_info=True)
             QMessageBox.critical(self, "Home Error", str(e))
 
     def _on_home_all_clicked(self) -> None:
@@ -702,6 +717,7 @@ class StageControlView(QWidget):
                 self.message_label.setStyleSheet("color: blue; padding: 6px;")
 
             except Exception as e:
+                self.logger.error(f"Failed to home all axes: {e}", exc_info=True)
                 QMessageBox.critical(self, "Home Error", str(e))
 
     def _on_emergency_stop_clicked(self) -> None:
@@ -752,6 +768,7 @@ class StageControlView(QWidget):
             self.message_label.setStyleSheet("color: blue; padding: 6px;")
 
         except Exception as e:
+            self.logger.warning(f"Jog error for axis {axis} delta {delta}: {e}")
             QMessageBox.warning(self, "Jog Error", str(e))
 
     def _jog_with_increment(self, axis: str, direction: int) -> None:
@@ -763,11 +780,10 @@ class StageControlView(QWidget):
         self._jog(axis, delta)
 
     def _jog_with_rotation_increment(self, direction: int) -> None:
-        """Handle rotation jog with special increments mapped from dropdown."""
-        # Map dropdown index to rotation increments
-        increment_index = self.jog_increment_combo.currentIndex()
-        rotation_increments = [1.0, 10.0, 45.0]  # Maps to 0.1mm, 1mm, 10mm
-        increment = rotation_increments[increment_index]
+        """Handle rotation jog using the rotation increment dropdown."""
+        # Get increment from rotation dropdown (e.g., "10 deg" -> 10.0)
+        increment_text = self.rotation_increment_combo.currentText()
+        increment = float(increment_text.split()[0])  # Extract number from "10 deg"
         delta = increment * direction
         self._jog('r', delta)
 
@@ -777,6 +793,7 @@ class StageControlView(QWidget):
             # Get current position
             position = self.movement_controller.position_controller.get_current_position()
             if position is None:
+                self.logger.warning("Cannot save preset: no current position available")
                 QMessageBox.warning(self, "No Position", "No current position available to save")
                 return
 
@@ -792,6 +809,7 @@ class StageControlView(QWidget):
             if ok and name:
                 name = name.strip()
                 if not name:
+                    self.logger.warning("User attempted to save preset with empty name")
                     QMessageBox.warning(self, "Invalid Name", "Preset name cannot be empty")
                     return
 
@@ -814,6 +832,7 @@ class StageControlView(QWidget):
                 self._refresh_preset_list()
 
         except Exception as e:
+            self.logger.error(f"Failed to save preset '{name if 'name' in locals() else 'unknown'}': {e}", exc_info=True)
             QMessageBox.critical(self, "Save Error", f"Failed to save preset: {str(e)}")
 
     def _on_goto_preset_clicked(self) -> None:
@@ -822,6 +841,7 @@ class StageControlView(QWidget):
             # Get selected preset
             selected_items = self.preset_list.selectedItems()
             if not selected_items:
+                self.logger.warning("Go to preset failed: no preset selected")
                 QMessageBox.warning(self, "No Selection", "No preset selected")
                 return
 
@@ -829,6 +849,7 @@ class StageControlView(QWidget):
             preset = self.movement_controller.position_controller.preset_service.get_preset(preset_name)
 
             if preset is None:
+                self.logger.warning(f"Preset '{preset_name}' not found in preset service")
                 QMessageBox.warning(self, "Not Found", f"Preset '{preset_name}' not found")
                 return
 
@@ -839,6 +860,8 @@ class StageControlView(QWidget):
             self.message_label.setStyleSheet("color: blue; padding: 6px;")
 
         except Exception as e:
+            preset_name_for_log = preset_name if 'preset_name' in locals() else 'unknown'
+            self.logger.error(f"Failed to move to preset '{preset_name_for_log}': {e}", exc_info=True)
             QMessageBox.critical(self, "Movement Error", f"Failed to move to preset: {str(e)}")
 
     def _on_delete_preset_clicked(self) -> None:
@@ -847,6 +870,7 @@ class StageControlView(QWidget):
             # Get selected preset
             selected_items = self.preset_list.selectedItems()
             if not selected_items:
+                self.logger.warning("Delete preset failed: no preset selected")
                 QMessageBox.warning(self, "No Selection", "No preset selected")
                 return
 
@@ -868,6 +892,8 @@ class StageControlView(QWidget):
                 self._refresh_preset_list()
 
         except Exception as e:
+            preset_name_for_log = preset_name if 'preset_name' in locals() else 'unknown'
+            self.logger.error(f"Failed to delete preset '{preset_name_for_log}': {e}", exc_info=True)
             QMessageBox.critical(self, "Delete Error", f"Failed to delete preset: {str(e)}")
 
     def _on_preset_selection_changed(self) -> None:
@@ -889,6 +915,7 @@ class StageControlView(QWidget):
             # Get current position
             current_pos = self.movement_controller.position_controller.get_current_position()
             if current_pos is None:
+                self.logger.warning("Cannot set home position: cannot get current position")
                 QMessageBox.warning(self, "No Position", "Cannot get current position")
                 return
 
@@ -906,9 +933,11 @@ class StageControlView(QWidget):
                     self.message_label.setText("Home position updated")
                     self.message_label.setStyleSheet("color: green; padding: 6px;")
                 else:
+                    self.logger.error("Failed to save home position")
                     QMessageBox.critical(self, "Error", "Failed to save home position")
 
         except Exception as e:
+            self.logger.error(f"Failed to set home position: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to set home position: {str(e)}")
 
     def _on_show_history_clicked(self) -> None:

@@ -296,9 +296,11 @@ class PositionController:
             self.logger.error(error_msg)
             raise RuntimeError(error_msg)
 
-        # Validate rotation bounds
-        if not 0 <= rotation_degrees <= 360:
-            error_msg = f"Rotation {rotation_degrees}° is outside valid range [0, 360]"
+        # Validate rotation bounds using stage limits
+        limits = self.get_stage_limits()
+        r_min, r_max = limits['r']['min'], limits['r']['max']
+        if not (r_min <= rotation_degrees <= r_max):
+            error_msg = f"Rotation {rotation_degrees}° is outside valid range [{r_min}, {r_max}]"
             self.logger.error(error_msg)
             raise ValueError(error_msg)
 
@@ -652,8 +654,9 @@ class PositionController:
             if not (z_min <= position.z <= z_max):
                 raise ValueError(f"Z position {position.z:.3f}mm is outside valid range [{z_min:.3f}, {z_max:.3f}]")
 
-            if not (0 <= position.r <= 360):
-                raise ValueError(f"Rotation {position.r:.2f}° is outside valid range [0, 360]")
+            r_min, r_max = limits['r']['min'], limits['r']['max']
+            if not (r_min <= position.r <= r_max):
+                raise ValueError(f"Rotation {position.r:.2f}° is outside valid range [{r_min}, {r_max}]")
 
         # Try to acquire movement lock (non-blocking)
         if not self._movement_lock.acquire(blocking=False):

@@ -165,15 +165,23 @@ class LaserLEDService(MicroscopeCommandService):
             self.logger.error(f"Power must be 0-100%, got {power_percent}")
             return False
 
-        self.logger.info(f"Setting laser {laser_index} power to {power_percent:.1f}%")
+        # LASER ORDER FIX: Reverse laser index mapping for server
+        # Config: Laser 1=640nm, 2=561nm, 3=488nm, 4=405nm
+        # Server expects reversed order, so we reverse the index
+        num_lasers = len(self._lasers)
+        server_laser_index = (num_lasers + 1) - laser_index
 
-        # Convert percentage to DAC value (0-65535)
-        dac_value = int(655.35 * power_percent)
+        self.logger.info(f"Setting laser {laser_index} (server index {server_laser_index}) power to {power_percent:.1f}%")
+
+        # Send percentage as string in buffer field (protocol requirement)
+        # Format: "XX.XX" (e.g., "5.00", "11.49")
+        power_str = f"{power_percent:.2f}"
 
         result = self._send_command(
             LaserLEDCommandCode.LASER_LEVEL_SET,
             f"LASER_{laser_index}_LEVEL_SET",
-            params=[0, 0, 0, laser_index, dac_value, 0, 0]
+            params=[server_laser_index, 0, 0, 0, 0, 0, self._encoder.CALLBACK_FLAG],
+            data=power_str
         )
 
         return result['success']
@@ -198,12 +206,16 @@ class LaserLEDService(MicroscopeCommandService):
             self.logger.error(f"Invalid laser index: {laser_index}")
             return False
 
-        self.logger.info(f"Enabling laser {laser_index} preview mode")
+        # LASER ORDER FIX: Reverse laser index mapping for server
+        num_lasers = len(self._lasers)
+        server_laser_index = (num_lasers + 1) - laser_index
+
+        self.logger.info(f"Enabling laser {laser_index} (server index {server_laser_index}) preview mode")
 
         result = self._send_command(
             LaserLEDCommandCode.LASER_ENABLE_PREVIEW,
             f"LASER_{laser_index}_ENABLE_PREVIEW",
-            params=[0, 0, 0, laser_index, 0, 0, 0]
+            params=[server_laser_index, 0, 0, 0, 0, 0, 0]
         )
 
         return result['success']
@@ -254,14 +266,18 @@ class LaserLEDService(MicroscopeCommandService):
         color_names = ["Red", "Green", "Blue", "White"]
         self.logger.debug(f"Setting {color_names[led_color]} LED intensity to {intensity_percent:.1f}%")
 
-        # Convert percentage to uint16 value range (0-65535)
-        # LED hardware expects 16-bit unsigned integer, NOT DAC range
-        # 0% = 0, 100% = 65535
-        led_value = int(65535 * (intensity_percent / 100.0))
+        # LED RANGE FIX: Map UI range 0-100% to server range -100% to +100%
+        # UI  0% → Server -100% → -65535
+        # UI 50% → Server    0% → 0
+        # UI 100% → Server +100% → +65535
+        server_percent = (intensity_percent - 50.0) * 2.0  # Map 0-100 to -100 to +100
+        led_value = int(65535 * (server_percent / 100.0))  # Map to -65535 to +65535
+
+        self.logger.debug(f"LED value mapping: UI {intensity_percent:.1f}% → Server {server_percent:.1f}% → Value {led_value}")
 
         # LED_SET command (0x4001):
         # int32Data0 = led_color (0=Red, 1=Green, 2=Blue, 3=White)
-        # int32Data1 = led_value (0-65535 range)
+        # int32Data1 = led_value (signed int32: -65535 to +65535)
         result = self._send_command(
             LaserLEDCommandCode.LED_SET,
             "LED_SET",
