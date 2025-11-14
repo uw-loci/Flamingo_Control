@@ -69,8 +69,8 @@ class StageChamberVisualizationWindow(QWidget):
 
         # Window configuration
         self.setWindowTitle("Stage Chamber Visualization & Control")
-        self.setMinimumSize(850, 580)
-        self.resize(900, 620)
+        # Window size determined by panel content (proportionally sized based on stage limits)
+        # No fixed size - automatically fits the visualization panels and controls
 
         self._setup_ui()
         self._connect_signals()
