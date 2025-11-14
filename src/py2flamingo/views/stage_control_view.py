@@ -18,7 +18,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QGroupBox, QFormLayout, QDoubleSpinBox,
     QGridLayout, QFrame, QMessageBox, QComboBox, QListWidget,
-    QLineEdit, QInputDialog, QDialog, QDialogButtonBox
+    QLineEdit, QInputDialog, QDialog, QDialogButtonBox, QSizePolicy
 )
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QFont
@@ -206,6 +206,7 @@ class StageControlView(QWidget):
         top_layout = QHBoxLayout()
         top_layout.addWidget(self._create_position_display())
         top_layout.addWidget(self._create_relative_controls())
+        top_layout.addStretch()  # Push widgets to the left
         main_layout.addLayout(top_layout)
 
         # Target Position & Go To Controls
@@ -251,6 +252,7 @@ class StageControlView(QWidget):
 
         group.setLayout(position_layout)
         group.setMaximumWidth(220)
+        group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         return group
 
     def _create_goto_controls(self) -> QGroupBox:
@@ -391,6 +393,7 @@ class StageControlView(QWidget):
 
         group.setLayout(layout)
         group.setMaximumWidth(400)
+        group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         return group
 
     def _create_relative_controls(self) -> QGroupBox:
@@ -457,6 +460,7 @@ class StageControlView(QWidget):
 
         group.setLayout(layout)
         group.setMaximumWidth(220)
+        group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         return group
 
     def _create_jog_button(self, text: str, callback) -> QPushButton:
@@ -507,6 +511,8 @@ class StageControlView(QWidget):
         layout.addWidget(self.estop_btn)
 
         group.setLayout(layout)
+        group.setMaximumWidth(600)
+        group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         return group
 
     def _create_preset_controls(self) -> QGroupBox:
@@ -546,6 +552,8 @@ class StageControlView(QWidget):
         self.preset_list.itemSelectionChanged.connect(self._on_preset_selection_changed)
 
         group.setLayout(layout)
+        group.setMaximumWidth(500)
+        group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         return group
 
     def _create_status_display(self) -> QGroupBox:
@@ -573,6 +581,8 @@ class StageControlView(QWidget):
         layout.addWidget(self.message_label)
 
         group.setLayout(layout)
+        group.setMaximumWidth(600)
+        group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         return group
 
     # ============================================================================
