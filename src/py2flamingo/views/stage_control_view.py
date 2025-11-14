@@ -995,7 +995,7 @@ class StageControlView(QWidget):
         """Update status when motion completes."""
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"[EnhancedStageControlView] Received motion_stopped signal for: {axis_name}")
+        logger.info(f"[StageControlView] Received motion_stopped signal for: {axis_name}")
 
         self.motion_status_label.setText(f"{axis_name} motion complete - Ready")
         self.motion_status_label.setStyleSheet(
@@ -1004,9 +1004,9 @@ class StageControlView(QWidget):
         )
 
         # Re-enable controls
-        logger.info("[EnhancedStageControlView] Re-enabling controls")
+        logger.info("[StageControlView] Re-enabling controls")
         self._set_controls_enabled(True)
-        logger.info("[EnhancedStageControlView] Controls re-enabled")
+        logger.info("[StageControlView] Controls re-enabled")
 
     @pyqtSlot(bool, str)
     def _on_position_verified(self, success: bool, message: str) -> None:
@@ -1054,10 +1054,15 @@ class StageControlView(QWidget):
         self.z_home_btn.setEnabled(enabled)
         self.r_home_btn.setEnabled(enabled)
         self.home_all_btn.setEnabled(enabled)
+        self.set_home_btn.setEnabled(enabled)
 
-        # N7 buttons
-        self.save_n7_btn.setEnabled(enabled)
-        self.goto_n7_btn.setEnabled(enabled)
+        # Preset buttons
+        self.save_preset_btn.setEnabled(enabled)
+        # goto_preset_btn and delete_preset_btn are managed by selection state
+
+        # Jog controls
+        # Note: Individual jog buttons are in a grid, we enable/disable via button references
+        # stored during creation - they follow the general enabled state
 
         # Emergency stop always enabled
         self.estop_btn.setEnabled(True)
