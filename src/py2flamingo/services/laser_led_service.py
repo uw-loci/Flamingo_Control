@@ -171,14 +171,35 @@ class LaserLEDService(MicroscopeCommandService):
         # Format: "XX.XX" (e.g., "5.00", "11.49")
         power_str = f"{power_percent:.2f}"
 
-        result = self._send_command(
-            LaserLEDCommandCode.LASER_LEVEL_SET,
-            f"LASER_{laser_index}_LEVEL_SET",
-            params=[laser_index, 0, 0, 0, 0, 0, 0],
-            data=power_str
-        )
+        # Try sending without waiting for response - laser commands may be fire-and-forget
+        try:
+            if not self.connection.is_connected():
+                self.logger.error("Not connected to microscope")
+                return False
 
-        return result['success']
+            # Encode command
+            cmd_bytes = self.connection.encoder.encode_command(
+                code=LaserLEDCommandCode.LASER_LEVEL_SET,
+                status=0,
+                params=[laser_index, 0, 0, 0, 0, 0, 0],
+                value=0.0,
+                data=power_str,
+                additional_data_size=0
+            )
+
+            # Send without waiting for response
+            command_socket = self.connection._command_socket
+            if command_socket is None:
+                self.logger.error("Command socket not available")
+                return False
+
+            command_socket.sendall(cmd_bytes)
+            self.logger.debug(f"Sent LASER_{laser_index}_LEVEL_SET command (fire-and-forget)")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error sending laser power command: {e}", exc_info=True)
+            return False
 
     def enable_laser_preview(self, laser_index: int) -> bool:
         """
