@@ -268,18 +268,20 @@ class LaserLEDService(MicroscopeCommandService):
         color_names = ["Red", "Green", "Blue", "White"]
         self.logger.debug(f"Setting {color_names[led_color]} LED intensity to {intensity_percent:.1f}%")
 
-        # LED RANGE FIX: Map UI range 0-100% to full LED range 0-131070
-        # The LED range appears to be double the standard 16-bit range
-        # UI  0% → 0
-        # UI 50% → 65535
-        # UI 100% → 131070
-        led_value = int(131070 * (intensity_percent / 100.0))
+        # LED RANGE FIX: Map UI 0-100% to second half of 16-bit range (positive percentages)
+        # LED uses signed percentage system: -100% to +100% mapped to unsigned 16-bit (0-65535)
+        # First half (0-32767): -100% to 0% (negative percentages, LED off/dark)
+        # Second half (32768-65535): 0% to +100% (positive percentages, LED brightness)
+        # UI  0% → 32768 (server 0%, LED off)
+        # UI 50% → 49152 (server +50%, half brightness)
+        # UI 100% → 65535 (server +100%, full brightness)
+        led_value = 32768 + int(32767 * (intensity_percent / 100.0))
 
-        self.logger.debug(f"LED value mapping: UI {intensity_percent:.1f}% → LED value {led_value}")
+        self.logger.debug(f"LED value mapping: UI {intensity_percent:.1f}% → LED value {led_value} (server +{intensity_percent:.1f}%)")
 
         # LED_SET command (0x4001):
         # int32Data0 = led_color (0=Red, 1=Green, 2=Blue, 3=White)
-        # int32Data1 = led_value (0-131070 range)
+        # int32Data1 = led_value (32768-65535 range, positive half of signed percentage)
         result = self._send_command(
             LaserLEDCommandCode.LED_SET,
             "LED_SET",
