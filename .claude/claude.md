@@ -290,6 +290,39 @@ Both start and end markers must be correct:
 
 If markers don't match, packet is invalid/corrupted.
 
+#### Log File Analysis - Client ID Identification
+
+**IMPORTANT:** When analyzing server log files to debug command issues:
+
+- **Working C++ GUI commands**: `clientID ≠ 0` (typically `clientID = 24` or other non-zero values)
+- **Python GUI commands**: `clientID = 0`
+
+This distinction helps identify which GUI sent which command when both are running simultaneously for comparison debugging.
+
+**Example from log file:**
+```
+# Working C++ GUI command:
+[2025-11-14 17:14:57.558524] [info] clientID = 24
+cmd = 0x00002004, 8196, laser preview enable
+int32Data0 = 3
+
+# Python GUI command:
+[2025-11-14 17:16:06.892240] [info] clientID = 0
+cmd = 0x00002001, 8193, set laser level
+int32Data0 = 0  # (issue: should be 3)
+```
+
+**Field Name Mapping for Log Analysis:**
+```
+cmdBits0 → int32Data0 (params[0])
+cmdBits1 → int32Data1 (params[1])
+cmdBits2 → int32Data2 (params[2])
+cmdBits3 → hardwareID  (params[3])
+cmdBits4 → subsystemID (params[4])
+cmdBits5 → clientID    (params[5])
+cmdBits6 → cmdDataBits0 (params[6])
+```
+
 #### Implementation
 
 See `src/py2flamingo/core/tcp_protocol.py`:
