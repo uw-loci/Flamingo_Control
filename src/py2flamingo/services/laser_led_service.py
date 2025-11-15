@@ -167,27 +167,23 @@ class LaserLEDService(MicroscopeCommandService):
 
         self.logger.info(f"Setting laser {laser_index} power to {power_percent:.1f}%")
 
-        # LASER POWER FIX: Server expects percentage STRING in buffer, laser index in int32Data0!
-        # Correct format from working C++ GUI logs:
-        #   params[0] (int32Data0) = laser_index
-        #   params[1-5] = 0
-        #   params[6] = CALLBACK_FLAG
-        #   buffer = percentage string (e.g., "15.06")
+        # CRITICAL: Server expects percentage as STRING in buffer field
+        # NOT as DAC value in params!
+        # From logs: buffer = "5.00", "11.49", etc.
         power_str = f"{power_percent:.2f}"
 
         self.logger.info(f"DEBUG: Sending LASER_LEVEL_SET with int32Data0={laser_index}, buffer='{power_str}'")
 
         # Send command and wait for response
-        # CRITICAL: params[0] = int32Data0 (NOT params[3]!)
         result = self._send_command(
             LaserLEDCommandCode.LASER_LEVEL_SET,
             f"LASER_{laser_index}_LEVEL_SET",
-            params=[laser_index, 0, 0, 0, 0, 0, 0],  # params[0]=int32Data0, params[6] set by _send_command
-            data=power_str  # Percentage string in buffer
+            params=[laser_index, 0, 0, 0, 0, 0, 0],  # params[6] will be set to CALLBACK_FLAG by _send_command
+            data=power_str
         )
 
         if result['success']:
-            self.logger.info(f"DEBUG: Laser {laser_index} power set to {power_percent:.1f}% - SUCCESS")
+            self.logger.info(f"DEBUG: Laser {laser_index} power set to {power_str}% - SUCCESS")
         else:
             self.logger.error(f"DEBUG: Laser {laser_index} power set FAILED: {result.get('error', 'unknown error')}")
 
@@ -272,26 +268,22 @@ class LaserLEDService(MicroscopeCommandService):
         color_names = ["Red", "Green", "Blue", "White"]
         self.logger.debug(f"Setting {color_names[led_color]} LED intensity to {intensity_percent:.1f}%")
 
-        # LED RANGE FIX: Map UI range 0-100% to server range 0% to +100%
-        # Server uses signed percentage: -100% to +100% (unsigned 16-bit: 0 to 65535)
-        # First half (0-32767): -100% to 0% (negative, LED off)
-        # Second half (32768-65535): 0% to +100% (positive, LED on)
-        # UI 0% → server 0% → unsigned 32768
-        # UI 50% → server +50% → unsigned 49152
-        # UI 100% → server +100% → unsigned 65535
-        led_value = 32768 + int(32767 * (intensity_percent / 100.0))
+        # LED RANGE FIX: Map UI range 0-100% to full LED range 0-131070
+        # The LED range appears to be double the standard 16-bit range
+        # UI  0% → 0
+        # UI 50% → 65535
+        # UI 100% → 131070
+        led_value = int(131070 * (intensity_percent / 100.0))
 
-        self.logger.debug(f"LED value mapping: UI {intensity_percent:.1f}% → LED value {led_value} (server +{intensity_percent:.1f}%)")
+        self.logger.debug(f"LED value mapping: UI {intensity_percent:.1f}% → LED value {led_value}")
 
         # LED_SET command (0x4001):
-        # CORRECT format from working C++ GUI:
-        # params[0] (int32Data0) = led_color (0=Red, 1=Green, 2=Blue, 3=White)
-        # params[1] (int32Data1) = led_value (0-131070 range)
-        # params[2-6] = 0
+        # int32Data0 = led_color (0=Red, 1=Green, 2=Blue, 3=White)
+        # int32Data1 = led_value (0-131070 range)
         result = self._send_command(
             LaserLEDCommandCode.LED_SET,
             "LED_SET",
-            params=[led_color, led_value, 0, 0, 0, 0, 0]  # FIXED: color and value in params[0] and params[1]
+            params=[0, 0, 0, led_color, led_value, 0, 0]
         )
 
         return result['success']
