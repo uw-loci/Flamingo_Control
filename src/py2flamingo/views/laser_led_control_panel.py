@@ -10,7 +10,7 @@ Provides UI controls for:
 import logging
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
-    QRadioButton, QButtonGroup, QGroupBox, QGridLayout, QComboBox, QDoubleSpinBox
+    QRadioButton, QCheckBox, QButtonGroup, QGroupBox, QGridLayout, QComboBox, QDoubleSpinBox
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer
 
@@ -61,9 +61,10 @@ class LaserLEDControlPanel(QWidget):
         self._laser_log_timers = {}  # laser_index -> QTimer
         self._led_log_timer = None
 
-        # Button group for radio buttons
+        # Button group for checkboxes (with manual mutual exclusivity)
         self._source_button_group = QButtonGroup()
-        self._source_button_group.buttonClicked.connect(self._on_source_selected)
+        self._source_button_group.setExclusive(False)  # Allow unchecking all
+        self._source_button_group.buttonClicked.connect(self._on_source_clicked)
 
         # Connect controller signals
         self.laser_led_controller.preview_enabled.connect(self._on_preview_enabled)
@@ -138,11 +139,11 @@ class LaserLEDControlPanel(QWidget):
         for i, laser in enumerate(lasers):
             row = i + 1
 
-            # Radio button
-            radio = QRadioButton()
-            self._laser_radios[laser.index] = radio
-            self._source_button_group.addButton(radio, laser.index)  # ID is laser index
-            layout.addWidget(radio, row, 0, Qt.AlignCenter)
+            # Checkbox (with mutual exclusivity managed manually)
+            checkbox = QCheckBox()
+            self._laser_radios[laser.index] = checkbox
+            self._source_button_group.addButton(checkbox, laser.index)  # ID is laser index
+            layout.addWidget(checkbox, row, 0, Qt.AlignCenter)
 
             # Laser name
             name_label = QLabel(laser.name)
@@ -205,8 +206,8 @@ class LaserLEDControlPanel(QWidget):
         # Single LED row
         row = 1
 
-        # Radio button for selecting LED as light source
-        self._led_radio = QRadioButton()
+        # Checkbox for selecting LED as light source (with mutual exclusivity managed manually)
+        self._led_radio = QCheckBox()
         # Use ID -1 for LED
         self._source_button_group.addButton(self._led_radio, -1)
         layout.addWidget(self._led_radio, row, 0, Qt.AlignCenter)
@@ -426,34 +427,54 @@ class LaserLEDControlPanel(QWidget):
             self.logger.info(f"{color_names[index]} LED selected for preview")
             self.laser_led_controller.enable_led_for_preview(index)
 
-    def _on_source_selected(self, button: QRadioButton) -> None:
-        """Handle light source selection."""
+    def _on_source_clicked(self, button: QCheckBox) -> None:
+        """
+        Handle light source checkbox clicks with manual mutual exclusivity.
+
+        Allows only one checkbox to be checked at a time, but permits unchecking all
+        (unlike radio buttons which always have one selected).
+        """
         source_id = self._source_button_group.id(button)
-        self.logger.debug(f"Light source selected: button ID = {source_id}")
+        is_checked = button.isChecked()
 
-        # Check if this is the LED button directly (more robust than relying on ID)
-        if button == self._led_radio:
-            # LED selected - hide path selection (LED doesn't use paths)
-            if self._path_group:
-                self._path_group.setVisible(False)
+        self.logger.debug(f"Light source clicked: button ID = {source_id}, checked = {is_checked}")
 
-            led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
-            color_names = ["Red", "Green", "Blue", "White"]
-            self.logger.info(f"{color_names[led_color]} LED selected for preview")
-            self.laser_led_controller.enable_led_for_preview(led_color)
+        if is_checked:
+            # Checkbox was just checked - uncheck all others (manual mutual exclusivity)
+            for other_button in self._source_button_group.buttons():
+                if other_button != button and other_button.isChecked():
+                    other_button.setChecked(False)
 
-        elif source_id >= 1:  # Laser (laser indices are typically 1, 2, 3, 4)
-            # Laser selected - show path selection
-            if self._path_group:
-                self._path_group.setVisible(True)
+            # Now enable the selected source
+            if button == self._led_radio:
+                # LED selected - hide path selection (LED doesn't use paths)
+                if self._path_group:
+                    self._path_group.setVisible(False)
 
-            # Enable laser with current path selection
-            self.logger.info(f"Laser {source_id} selected for preview on {self._laser_path.upper()} path")
-            self.laser_led_controller.enable_laser_for_preview(source_id, self._laser_path)
+                led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
+                color_names = ["Red", "Green", "Blue", "White"]
+                self.logger.info(f"{color_names[led_color]} LED selected for preview")
+                self.laser_led_controller.enable_led_for_preview(led_color)
+
+            elif source_id >= 1:  # Laser (laser indices are typically 1, 2, 3, 4)
+                # Laser selected - show path selection
+                if self._path_group:
+                    self._path_group.setVisible(True)
+
+                # Enable laser with current path selection
+                self.logger.info(f"Laser {source_id} selected for preview on {self._laser_path.upper()} path")
+                self.laser_led_controller.enable_laser_for_preview(source_id, self._laser_path)
+
+            else:
+                # This shouldn't happen, but log for debugging
+                self.logger.warning(f"Unhandled source button with ID {source_id}")
 
         else:
-            # This shouldn't happen, but log for debugging
-            self.logger.warning(f"Unhandled source button with ID {source_id}")
+            # Checkbox was unchecked - disable all sources
+            self.logger.info("All light sources unchecked - disabling preview")
+            if self._path_group:
+                self._path_group.setVisible(False)
+            self.laser_led_controller.disable_all_light_sources()
 
     @pyqtSlot(str)
     def _on_preview_enabled(self, source_name: str) -> None:
@@ -468,11 +489,13 @@ class LaserLEDControlPanel(QWidget):
     @pyqtSlot()
     def _on_preview_disabled(self) -> None:
         """Update UI when preview is disabled."""
-        # Uncheck all radio buttons
-        self._source_button_group.setExclusive(False)
+        # Uncheck all checkboxes (no need to toggle exclusive mode with checkboxes)
         for button in self._source_button_group.buttons():
             button.setChecked(False)
-        self._source_button_group.setExclusive(True)
+
+        # Hide path selection when nothing is selected
+        if self._path_group:
+            self._path_group.setVisible(False)
 
         self._status_label.setText("Select a light source for live viewing")
         self._status_label.setStyleSheet(
