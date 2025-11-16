@@ -182,8 +182,8 @@ class LaserLEDController(QObject):
 
         CRITICAL: Follows exact command sequence from working C++ implementation:
         1. Disable LED if active (0x4003)
-        2. Set laser power
-        3. Enable laser preview mode (0x2004 with laser_index)
+        2. Enable laser preview mode (0x2004 with laser_index) - MUST come first!
+        3. Set laser power (0x2001) - server only responds if laser enabled first
         4. Enable illumination on selected path (0x7004 or 0x7006) - coordinates exposure timing
         5. Ready for snapshot/live view
 
@@ -203,16 +203,17 @@ class LaserLEDController(QObject):
                 self.logger.info("Step 1: Disabling LED")
                 self.laser_led_service.disable_led_preview()
 
-            # Step 2: Set laser power
-            power = self._laser_powers.get(laser_index, 5.0)
-            self.logger.info(f"Step 2: Setting laser {laser_index} power to {power:.1f}%")
-            if not self.laser_led_service.set_laser_power(laser_index, power):
-                raise RuntimeError(f"Failed to set laser {laser_index} power")
-
-            # Step 3: Enable laser preview (automatically disables other lasers)
-            self.logger.info(f"Step 3: Enabling laser {laser_index} preview mode")
+            # Step 2: Enable laser preview FIRST (prerequisite for power setting)
+            # Server requires laser to be enabled before it responds to power commands
+            self.logger.info(f"Step 2: Enabling laser {laser_index} preview mode")
             if not self.laser_led_service.enable_laser_preview(laser_index):
                 raise RuntimeError(f"Failed to enable laser {laser_index} preview")
+
+            # Step 3: Set laser power (must come AFTER enable_laser_preview)
+            power = self._laser_powers.get(laser_index, 5.0)
+            self.logger.info(f"Step 3: Setting laser {laser_index} power to {power:.1f}%")
+            if not self.laser_led_service.set_laser_power(laser_index, power):
+                raise RuntimeError(f"Failed to set laser {laser_index} power")
 
             # Step 4: Enable illumination on selected path (CRITICAL - coordinates exposure timing)
             left_enabled = (path == "left")
