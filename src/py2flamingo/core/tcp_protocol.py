@@ -191,11 +191,14 @@ class ProtocolEncoder:
         import logging
         logger = logging.getLogger(__name__)
 
-        # List of commands to log in detail (stage, camera, system queries)
+        # List of commands to log in detail (stage, camera, system, laser, LED)
         debug_commands = [
             24580, 24584,  # STAGE_POSITION_SET, STAGE_POSITION_GET
             12327, 12343,  # CAMERA_IMAGE_SIZE_GET, CAMERA_PIXEL_FIELD_OF_VIEW_GET
             40967,         # SYSTEM_STATE_GET
+            8193, 8196, 8199,  # LASER_LEVEL_SET, LASER_ENABLE_PREVIEW, LASER_DISABLE_ALL
+            16385, 16386, 16387,  # LED_SET, LED_PREVIEW_ENABLE, LED_PREVIEW_DISABLE
+            28676, 28678,  # ILLUMINATION_LEFT_ENABLE, ILLUMINATION_RIGHT_ENABLE
         ]
 
         if code in debug_commands:
@@ -353,12 +356,15 @@ class ProtocolDecoder:
         import logging
         logger = logging.getLogger(__name__)
 
-        # List of commands to log in detail (stage, camera, system queries)
+        # List of commands to log in detail (stage, camera, system, laser, LED)
         debug_commands = [
             24580, 24584,  # STAGE_POSITION_SET, STAGE_POSITION_GET
             12327, 12343,  # CAMERA_IMAGE_SIZE_GET, CAMERA_PIXEL_FIELD_OF_VIEW_GET
             40967, 40962,  # SYSTEM_STATE_GET, SYSTEM_STATE_IDLE
             24592,         # STAGE_MOTION_STOPPED
+            8193, 8196, 8199,  # LASER_LEVEL_SET, LASER_ENABLE_PREVIEW, LASER_DISABLE_ALL
+            16385, 16386, 16387,  # LED_SET, LED_PREVIEW_ENABLE, LED_PREVIEW_DISABLE
+            28676, 28678,  # ILLUMINATION_LEFT_ENABLE, ILLUMINATION_RIGHT_ENABLE
         ]
 
         if code in debug_commands:
