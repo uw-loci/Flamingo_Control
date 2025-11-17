@@ -62,9 +62,17 @@ class LaserLEDController(QObject):
             3: 50.0,  # White
         }
 
-        # Initialize laser powers to 5%
+        # Initialize laser powers by querying hardware (fall back to 5% if query fails)
         for laser in self.get_available_lasers():
-            self._laser_powers[laser.index] = 5.0
+            # Query actual power from hardware
+            actual_power = self.laser_led_service.query_laser_power(laser.index)
+            if actual_power >= 0:
+                self._laser_powers[laser.index] = actual_power
+                self.logger.info(f"Laser {laser.index} ({laser.wavelength}nm): loaded power {actual_power:.2f}%")
+            else:
+                # Query failed - use default
+                self._laser_powers[laser.index] = 5.0
+                self.logger.warning(f"Laser {laser.index} ({laser.wavelength}nm): failed to query power, defaulting to 5%")
 
         self.logger.info("LaserLEDController initialized")
 
