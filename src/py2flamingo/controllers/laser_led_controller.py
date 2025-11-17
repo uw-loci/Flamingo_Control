@@ -267,10 +267,9 @@ class LaserLEDController(QObject):
             path_display = path.upper()
             self.logger.info(f"Enabling laser {laser_index} for preview on {path_display} path (full sequence)")
 
-            # Step 1: Disable LED if it was active
-            if self._active_source and self._active_source.startswith("led"):
-                self.logger.info("Step 1: Disabling LED")
-                self.laser_led_service.disable_led_preview()
+            # Step 1: Disable ALL light sources first (LED + all lasers)
+            self.logger.info("Step 1: Disabling all light sources (ensures clean state)")
+            self.disable_all_light_sources()
 
             # Step 2: Set laser power
             power = self._laser_powers.get(laser_index, 5.0)
@@ -341,13 +340,9 @@ class LaserLEDController(QObject):
 
             self.logger.info(f"Enabling {color_name} LED for preview (full sequence)")
 
-            # Step 1: Disable all lasers (non-fatal if fails)
-            self.logger.info("Step 1: Disabling all lasers")
-            try:
-                self.laser_led_service.disable_all_lasers()
-            except Exception as e:
-                # Non-fatal: laser disable may timeout if no lasers attached
-                self.logger.debug(f"Laser disable had error (non-fatal): {e}")
+            # Step 1: Disable ALL light sources first (all lasers + LED)
+            self.logger.info("Step 1: Disabling all light sources (ensures clean state)")
+            self.disable_all_light_sources()
 
             # Step 2: Set intensity for selected color
             intensity = self._led_intensities.get(self._led_color, 50.0)

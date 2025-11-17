@@ -165,6 +165,11 @@ class CameraController(QObject):
             # Stop camera streaming
             self.camera_service.stop_live_view_streaming()
 
+            # Disable all light sources (lasers and LED) when stopping live view
+            if self.laser_led_controller:
+                self.logger.info("Disabling all light sources (live view stopped)")
+                self.laser_led_controller.disable_all_light_sources()
+
             self.set_state(CameraState.IDLE)
             return True
 
