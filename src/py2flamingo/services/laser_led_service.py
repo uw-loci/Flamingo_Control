@@ -178,25 +178,34 @@ class LaserLEDService(MicroscopeCommandService):
             self.logger.error(f"Failed to query laser {laser_index} power: {result.get('error', 'unknown')}")
             return -1.0
 
-        # Parse response - power is returned as string in buffer field
+        # Parse response - power is returned as string in the 72-byte data field
         parsed = result.get('parsed', {})
-        buffer_data = parsed.get('additional_data', b'')
 
-        if buffer_data:
-            # Power is in additional data as string
-            power_str = buffer_data.decode('utf-8', errors='ignore').strip().rstrip('\x00')
-        else:
-            # Try parsing from main buffer field (72 bytes in response)
-            # Note: The response structure might have power in the data field
-            self.logger.warning(f"No additional data in LASER_LEVEL_GET response for laser {laser_index}")
+        # The power string is in the main 'data' field (72 bytes), not additional_data
+        buffer_data = parsed.get('data', b'')
+
+        if not buffer_data:
+            self.logger.error(f"No data field in LASER_LEVEL_GET response for laser {laser_index}")
             return -1.0
 
+        # Extract null-terminated string from buffer
         try:
+            # Find first null byte and decode
+            if b'\x00' in buffer_data:
+                buffer_data = buffer_data[:buffer_data.index(b'\x00')]
+
+            power_str = buffer_data.decode('utf-8', errors='ignore').strip()
+
+            if not power_str:
+                self.logger.error(f"Empty power string in response for laser {laser_index}")
+                return -1.0
+
             actual_power = float(power_str)
-            self.logger.debug(f"Laser {laser_index} actual power: {actual_power:.2f}%")
+            self.logger.info(f"Laser {laser_index} actual power: {actual_power:.2f}%")
             return actual_power
-        except (ValueError, AttributeError) as e:
-            self.logger.error(f"Failed to parse laser power from response: {power_str}, error: {e}")
+
+        except (ValueError, UnicodeDecodeError) as e:
+            self.logger.error(f"Failed to parse laser power from response: buffer={buffer_data!r}, error={e}")
             return -1.0
 
     def set_laser_power(self, laser_index: int, power_percent: float, verify: bool = True) -> tuple[bool, float]:
