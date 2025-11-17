@@ -86,6 +86,31 @@ class PositionController:
         # Try to initialize position from microscope settings
         self._initialize_position()
 
+        # Initialize motion tracker eagerly to avoid race condition on first move
+        self._initialize_motion_tracker()
+
+    def _initialize_motion_tracker(self) -> None:
+        """
+        Initialize motion tracker immediately when controller is created.
+
+        This ensures the tracker is ready to listen for motion-stopped callbacks
+        BEFORE any movement commands are sent, avoiding a race condition where
+        the first move would miss callbacks because the tracker wasn't listening yet.
+        """
+        try:
+            if self.connection.is_connected():
+                from py2flamingo.controllers.motion_tracker import MotionTracker
+                command_socket = self.connection._command_socket
+                if command_socket:
+                    self._motion_tracker = MotionTracker(command_socket)
+                    self.logger.info("Motion tracker initialized and ready")
+                else:
+                    self.logger.warning("Command socket not available - motion tracker cannot be initialized")
+            else:
+                self.logger.debug("Not connected - motion tracker will be initialized when connection is established")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize motion tracker: {e}", exc_info=True)
+
     def _initialize_position(self) -> None:
         """
         Initialize tracked position from microscope home position in settings.
@@ -1065,16 +1090,11 @@ class PositionController:
         """
         def wait_thread():
             try:
-                # Create motion tracker if needed
+                # Motion tracker should already be initialized in __init__
                 if self._motion_tracker is None:
-                    from py2flamingo.controllers.motion_tracker import MotionTracker
-                    command_socket = self.connection._command_socket
-                    if command_socket:
-                        self._motion_tracker = MotionTracker(command_socket)
-                    else:
-                        self.logger.error("No command socket available for motion tracking")
-                        self._movement_lock.release()
-                        return
+                    self.logger.error("Motion tracker not initialized - cannot wait for motion complete")
+                    self._movement_lock.release()
+                    return
 
                 # Wait for motion complete (blocks this thread, not GUI)
                 self.logger.info("Waiting for motion complete callback...")

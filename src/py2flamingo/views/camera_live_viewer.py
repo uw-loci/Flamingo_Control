@@ -867,18 +867,65 @@ class CameraLiveViewer(QWidget):
             self.camera_controller.stop_live_view()
 
     def showEvent(self, event: QShowEvent) -> None:
-        """Handle window show event - load laser powers from hardware."""
+        """
+        Handle window show event.
+
+        Unblock laser/LED signals and load actual powers from hardware.
+        """
         super().showEvent(event)
-        self.logger.info("Camera Live Viewer window opened")
+
+        # Unblock signals that may have been blocked during hide
+        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+            # Unblock LED slider and spinbox signals
+            if hasattr(self.laser_led_panel, '_led_slider') and self.laser_led_panel._led_slider:
+                self.laser_led_panel._led_slider.blockSignals(False)
+            if hasattr(self.laser_led_panel, '_led_spinbox') and self.laser_led_panel._led_spinbox:
+                self.laser_led_panel._led_spinbox.blockSignals(False)
+
+            # Unblock all laser sliders
+            if hasattr(self.laser_led_panel, '_laser_sliders'):
+                for slider in self.laser_led_panel._laser_sliders.values():
+                    slider.blockSignals(False)
+
+            # Unblock all laser spinboxes
+            if hasattr(self.laser_led_panel, '_laser_spinboxes'):
+                for spinbox in self.laser_led_panel._laser_spinboxes.values():
+                    spinbox.blockSignals(False)
+
+        self.logger.info("Camera Live Viewer window opened (signals unblocked)")
 
         # Load actual laser powers from hardware (now that connection is established)
         if self.laser_led_controller:
             self.laser_led_controller.load_laser_powers_from_hardware()
 
     def hideEvent(self, event: QHideEvent) -> None:
-        """Handle window hide event - log when window is hidden."""
+        """
+        Handle window hide event.
+
+        Block all laser/LED control signals to prevent spurious commands
+        during Qt widget cleanup/state management.
+        """
+        # Block ALL signals from laser/LED control panel widgets to prevent
+        # Qt widget state changes from triggering unwanted LED_SET commands
+        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+            # Block LED slider and spinbox signals
+            if hasattr(self.laser_led_panel, '_led_slider') and self.laser_led_panel._led_slider:
+                self.laser_led_panel._led_slider.blockSignals(True)
+            if hasattr(self.laser_led_panel, '_led_spinbox') and self.laser_led_panel._led_spinbox:
+                self.laser_led_panel._led_spinbox.blockSignals(True)
+
+            # Block all laser sliders
+            if hasattr(self.laser_led_panel, '_laser_sliders'):
+                for slider in self.laser_led_panel._laser_sliders.values():
+                    slider.blockSignals(True)
+
+            # Block all laser spinboxes
+            if hasattr(self.laser_led_panel, '_laser_spinboxes'):
+                for spinbox in self.laser_led_panel._laser_spinboxes.values():
+                    spinbox.blockSignals(True)
+
         super().hideEvent(event)
-        self.logger.info("Camera Live Viewer window hidden")
+        self.logger.info("Camera Live Viewer window hidden (laser/LED signals blocked)")
 
     def changeEvent(self, event: QEvent) -> None:
         """Handle window state changes - log when window is activated."""
