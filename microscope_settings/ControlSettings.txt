@@ -1,14 +1,14 @@
   <Laser parameters>
-  Laser 1 wave length (nm) = 640
+  Laser 1 wave length (nm) = 405
   Laser 1 max power (mw) = 20
   Laser 1 max current (A) = 0
-  Laser 2 wave length (nm) = 561
+  Laser 2 wave length (nm) = 488
   Laser 2 max power (mw) = 20
   Laser 2 max current (A) = 0
-  Laser 3 wave length (nm) = 488
+  Laser 3 wave length (nm) = 561
   Laser 3 max power (mw) = 20
   Laser 3 max current (A) = 0
-  Laser 4 wave length (nm) = 405
+  Laser 4 wave length (nm) = 640
   Laser 4 max power (mw) = 20
   Laser 4 max current (A) = 0
   Laser lines = 4

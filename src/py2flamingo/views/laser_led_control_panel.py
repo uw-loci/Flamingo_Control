@@ -315,8 +315,9 @@ class LaserLEDControlPanel(QWidget):
             self._laser_spinboxes[laser_index].setValue(power_percent)
             self._laser_spinboxes[laser_index].blockSignals(False)
 
-        # Send to controller immediately (for live feedback)
-        self.laser_led_controller.set_laser_power(laser_index, power_percent)
+        # IMPORTANT: Don't verify during drag for performance - will verify on release
+        # Just update the cached value for now
+        self.laser_led_controller._laser_powers[laser_index] = power_percent
 
         # Restart timer for delayed logging (1 second after last change)
         if laser_index in self._laser_log_timers:
@@ -329,25 +330,63 @@ class LaserLEDControlPanel(QWidget):
         if laser_index not in self._laser_spinboxes:
             return
 
-        power_percent = self._laser_spinboxes[laser_index].value()
+        requested_power = self._laser_spinboxes[laser_index].value()
 
-        # Update slider (block signals to prevent recursion)
-        if laser_index in self._laser_sliders:
-            self._laser_sliders[laser_index].blockSignals(True)
-            self._laser_sliders[laser_index].setValue(int(power_percent))
-            self._laser_sliders[laser_index].blockSignals(False)
+        # Send to controller and get actual power from hardware
+        success, actual_power = self.laser_led_controller.set_laser_power(laser_index, requested_power)
 
-        # Send to controller
-        self.laser_led_controller.set_laser_power(laser_index, power_percent)
+        if success:
+            # Update GUI with actual power from hardware (may differ due to DAC quantization)
+            if abs(actual_power - requested_power) > 0.1:
+                # Power was adjusted by hardware - update spinbox and slider
+                self._laser_spinboxes[laser_index].blockSignals(True)
+                self._laser_spinboxes[laser_index].setValue(actual_power)
+                self._laser_spinboxes[laser_index].blockSignals(False)
 
-        # Log immediately for spinbox changes (user typed it in)
-        self.logger.info(f"Laser {laser_index} power set to {power_percent:.1f}%")
+                self.logger.info(f"Laser {laser_index}: requested {requested_power:.1f}%, "
+                               f"actual {actual_power:.1f}% (hardware quantization)")
+
+            # Update slider with actual power (block signals to prevent recursion)
+            if laser_index in self._laser_sliders:
+                self._laser_sliders[laser_index].blockSignals(True)
+                self._laser_sliders[laser_index].setValue(int(actual_power))
+                self._laser_sliders[laser_index].blockSignals(False)
+        else:
+            self.logger.error(f"Failed to set laser {laser_index} power")
 
     def _on_laser_slider_released(self, laser_index: int) -> None:
-        """Handle laser slider release - log final value immediately."""
+        """Handle laser slider release - send command and verify actual power."""
+        # Stop logging timer
         if laser_index in self._laser_log_timers:
-            # Stop timer and log now
             self._laser_log_timers[laser_index].stop()
+
+        # Get current slider value
+        if laser_index not in self._laser_sliders:
+            return
+
+        requested_power = float(self._laser_sliders[laser_index].value())
+
+        # Send to controller and get actual power from hardware
+        success, actual_power = self.laser_led_controller.set_laser_power(laser_index, requested_power)
+
+        if success:
+            # Update GUI with actual power from hardware (may differ due to DAC quantization)
+            if abs(actual_power - requested_power) > 0.1:
+                # Power was adjusted by hardware - update spinbox and slider
+                self._laser_spinboxes[laser_index].blockSignals(True)
+                self._laser_spinboxes[laser_index].setValue(actual_power)
+                self._laser_spinboxes[laser_index].blockSignals(False)
+
+                self._laser_sliders[laser_index].blockSignals(True)
+                self._laser_sliders[laser_index].setValue(int(actual_power))
+                self._laser_sliders[laser_index].blockSignals(False)
+
+                self.logger.info(f"Laser {laser_index}: requested {requested_power:.1f}%, "
+                               f"actual {actual_power:.1f}% (hardware quantization)")
+            else:
+                self.logger.info(f"Laser {laser_index} power set to {actual_power:.1f}%")
+        else:
+            self.logger.error(f"Failed to set laser {laser_index} power")
             self._log_laser_power(laser_index)
 
     def _log_laser_power(self, laser_index: int) -> None:

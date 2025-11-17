@@ -143,27 +143,91 @@ class LaserLEDService(MicroscopeCommandService):
         """Check if LED is available."""
         return self._led_available
 
-    def set_laser_power(self, laser_index: int, power_percent: float) -> bool:
+    def query_laser_power(self, laser_index: int) -> float:
         """
-        Set laser power level as percentage.
+        Query actual laser power level from hardware.
+
+        The laser hardware (Coherent OBIS) quantizes power based on DAC resolution,
+        so the actual power may differ slightly from the requested power.
+        This method reads back the actual power the laser is set to.
+
+        Args:
+            laser_index: Laser index (1-4)
+
+        Returns:
+            Actual laser power as percentage (0.0 - 100.0), or -1.0 on error
+
+        Example:
+            >>> laser_led.set_laser_power(3, 10.0)
+            >>> actual = laser_led.query_laser_power(3)  # Might return 10.7%
+        """
+        if not (1 <= laser_index <= len(self._lasers)):
+            self.logger.error(f"Invalid laser index: {laser_index}")
+            return -1.0
+
+        self.logger.debug(f"Querying laser {laser_index} actual power")
+
+        # Send LASER_LEVEL_GET query command
+        result = self._query_command(
+            LaserLEDCommandCode.LASER_LEVEL_GET,
+            f"LASER_{laser_index}_LEVEL_GET",
+            params=[laser_index, 0, 0, 0, 0, 0, 0]  # params[6] will be set to TRIGGER_CALL_BACK
+        )
+
+        if not result['success']:
+            self.logger.error(f"Failed to query laser {laser_index} power: {result.get('error', 'unknown')}")
+            return -1.0
+
+        # Parse response - power is returned as string in buffer field
+        parsed = result.get('parsed', {})
+        buffer_data = parsed.get('additional_data', b'')
+
+        if buffer_data:
+            # Power is in additional data as string
+            power_str = buffer_data.decode('utf-8', errors='ignore').strip().rstrip('\x00')
+        else:
+            # Try parsing from main buffer field (72 bytes in response)
+            # Note: The response structure might have power in the data field
+            self.logger.warning(f"No additional data in LASER_LEVEL_GET response for laser {laser_index}")
+            return -1.0
+
+        try:
+            actual_power = float(power_str)
+            self.logger.debug(f"Laser {laser_index} actual power: {actual_power:.2f}%")
+            return actual_power
+        except (ValueError, AttributeError) as e:
+            self.logger.error(f"Failed to parse laser power from response: {power_str}, error: {e}")
+            return -1.0
+
+    def set_laser_power(self, laser_index: int, power_percent: float, verify: bool = True) -> tuple[bool, float]:
+        """
+        Set laser power level as percentage and optionally verify actual power.
+
+        The laser hardware (Coherent OBIS) quantizes power based on DAC resolution,
+        so the actual power may differ slightly from requested power (e.g., 10.0% → 10.7%).
+        This method can automatically query the actual power after setting.
 
         Args:
             laser_index: Laser index (1-4)
             power_percent: Power as percentage (0.0 - 100.0)
+            verify: If True, query actual power after setting (default: True)
 
         Returns:
-            True if successful, False otherwise
+            Tuple of (success: bool, actual_power: float)
+            - success: True if set command succeeded
+            - actual_power: Actual power from hardware (if verify=True), otherwise requested power
 
         Example:
-            >>> laser_led.set_laser_power(3, 5.0)  # Set laser 3 to 5% power
+            >>> success, actual = laser_led.set_laser_power(3, 10.0)
+            >>> print(f"Requested 10.0%, actual: {actual:.2f}%")  # Might print "actual: 10.7%"
         """
         if not (1 <= laser_index <= len(self._lasers)):
             self.logger.error(f"Invalid laser index: {laser_index}")
-            return False
+            return False, power_percent
 
         if not (0.0 <= power_percent <= 100.0):
             self.logger.error(f"Power must be 0-100%, got {power_percent}")
-            return False
+            return False, power_percent
 
         self.logger.info(f"Setting laser {laser_index} power to {power_percent:.1f}%")
 
@@ -182,12 +246,26 @@ class LaserLEDService(MicroscopeCommandService):
             data=power_str
         )
 
-        if result['success']:
-            self.logger.info(f"DEBUG: Laser {laser_index} power set to {power_str}% - SUCCESS")
-        else:
+        if not result['success']:
             self.logger.error(f"DEBUG: Laser {laser_index} power set FAILED: {result.get('error', 'unknown error')}")
+            return False, power_percent
 
-        return result['success']
+        self.logger.info(f"DEBUG: Laser {laser_index} power set to {power_str}% - SUCCESS")
+
+        # Query actual power from hardware (mimics C++ GUI behavior)
+        if verify:
+            actual_power = self.query_laser_power(laser_index)
+            if actual_power >= 0:
+                if abs(actual_power - power_percent) > 0.5:
+                    self.logger.info(f"Laser {laser_index}: Requested {power_percent:.2f}%, "
+                                   f"actual {actual_power:.2f}% (hardware quantization)")
+                return True, actual_power
+            else:
+                # Query failed, return requested power
+                self.logger.warning(f"Failed to verify laser {laser_index} power, using requested value")
+                return True, power_percent
+        else:
+            return True, power_percent
 
     def enable_laser_preview(self, laser_index: int) -> bool:
         """

@@ -102,36 +102,43 @@ class LaserLEDController(QObject):
         """Get currently active light source ("laser_N" or "led" or None)."""
         return self._active_source
 
-    def set_laser_power(self, laser_index: int, power_percent: float) -> bool:
+    def set_laser_power(self, laser_index: int, power_percent: float) -> tuple[bool, float]:
         """
-        Set laser power level.
+        Set laser power level and return actual power from hardware.
+
+        Due to DAC quantization in the laser hardware, the actual power may differ
+        slightly from the requested power (e.g., 10.0% → 10.7%).
 
         Args:
             laser_index: Laser index (1-4)
             power_percent: Power as percentage (0.0 - 100.0)
 
         Returns:
-            True if successful
+            Tuple of (success, actual_power)
         """
         try:
-            success = self.laser_led_service.set_laser_power(laser_index, power_percent)
+            success, actual_power = self.laser_led_service.set_laser_power(laser_index, power_percent)
 
             if success:
-                self._laser_powers[laser_index] = power_percent
-                self.laser_power_changed.emit(laser_index, power_percent)
-                self.logger.info(f"Laser {laser_index} power set to {power_percent:.1f}%")
+                self._laser_powers[laser_index] = actual_power  # Store actual power
+                self.laser_power_changed.emit(laser_index, actual_power)  # Emit actual power
+                if abs(actual_power - power_percent) > 0.1:
+                    self.logger.info(f"Laser {laser_index} power: requested {power_percent:.1f}%, "
+                                   f"actual {actual_power:.1f}% (hardware quantization)")
+                else:
+                    self.logger.info(f"Laser {laser_index} power set to {actual_power:.1f}%")
             else:
                 error_msg = f"Failed to set laser {laser_index} power"
                 self.logger.error(error_msg)
                 self.error_occurred.emit(error_msg)
 
-            return success
+            return success, actual_power
 
         except Exception as e:
             error_msg = f"Error setting laser {laser_index} power: {e}"
             self.logger.error(error_msg)
             self.error_occurred.emit(error_msg)
-            return False
+            return False, power_percent
 
     def set_led_color(self, led_color: int) -> None:
         """
@@ -206,8 +213,11 @@ class LaserLEDController(QObject):
             # Step 2: Set laser power
             power = self._laser_powers.get(laser_index, 5.0)
             self.logger.info(f"Step 2: Setting laser {laser_index} power to {power:.1f}%")
-            if not self.laser_led_service.set_laser_power(laser_index, power):
+            success, actual_power = self.laser_led_service.set_laser_power(laser_index, power)
+            if not success:
                 raise RuntimeError(f"Failed to set laser {laser_index} power")
+            # Update cached power with actual value from hardware
+            self._laser_powers[laser_index] = actual_power
 
             # Step 3: Enable laser preview (automatically disables other lasers)
             self.logger.info(f"Step 3: Enabling laser {laser_index} preview mode")
