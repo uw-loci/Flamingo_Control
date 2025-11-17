@@ -269,6 +269,7 @@ class MicroscopeCommandService:
                 - params: list of 7 int32 values
                 - value: double
                 - reserved: uint32 (addDataBytes field)
+                - data: bytes (72-byte buffer field, may contain response strings)
                 - end_marker: uint32
         """
         if len(response) != 128:
@@ -290,6 +291,10 @@ class MicroscopeCommandService:
 
         # Get addDataBytes field
         add_data_bytes = struct.unpack('<I', response[48:52])[0]
+
+        # Extract 72-byte data buffer (bytes 52-123)
+        # This is where responses like laser power strings are stored
+        data_buffer = response[52:124]
 
         # Get end marker
         end_marker = struct.unpack('<I', response[124:128])[0]
@@ -315,5 +320,6 @@ class MicroscopeCommandService:
             'params': params,
             'value': value,
             'reserved': add_data_bytes,
+            'data': data_buffer,  # ADDED: 72-byte buffer field
             'end_marker': end_marker
         }
