@@ -156,9 +156,9 @@ class LaserLEDControlPanel(QWidget):
             power_spinbox = QDoubleSpinBox()
             power_spinbox.setRange(0.0, 100.0)
             power_spinbox.setValue(power)
-            power_spinbox.setDecimals(1)
+            power_spinbox.setDecimals(2)  # Show 2 decimals for scientific precision
             power_spinbox.setSuffix("%")
-            power_spinbox.setMinimumWidth(70)
+            power_spinbox.setMinimumWidth(80)  # Wider for 2 decimals
             power_spinbox.setStyleSheet("font-weight: bold;")
             # Use editingFinished to only update when user presses Enter or clicks away
             power_spinbox.editingFinished.connect(

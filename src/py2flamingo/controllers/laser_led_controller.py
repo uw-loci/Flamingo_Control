@@ -183,22 +183,19 @@ class LaserLEDController(QObject):
             actual_power = self.laser_led_service.query_laser_power(laser_index)
 
             if actual_power >= 0:
-                # Update cache
+                # Update cache with exact value from hardware
                 self._laser_powers[laser_index] = actual_power
 
-                # Round both to 1 decimal place (GUI precision) to avoid update loops
-                requested_rounded = round(requested_power, 1)
-                actual_rounded = round(actual_power, 1)
-
-                if abs(actual_rounded - requested_rounded) >= 0.1:
-                    # Hardware quantized to different value (visible at 1 decimal precision)
-                    # Update GUI with the rounded value to match spinbox precision
-                    self.laser_power_changed.emit(laser_index, actual_rounded)
-                    self.logger.info(f"Laser {laser_index}: requested {requested_power:.1f}%, "
-                                   f"actual {actual_power:.2f}%, displaying {actual_rounded:.1f}% (hardware quantization)")
+                # Check if hardware quantized to a different value
+                # Use 0.01% threshold to catch meaningful differences while avoiding float rounding errors
+                if abs(actual_power - requested_power) > 0.01:
+                    # Hardware quantized to different value - update GUI with exact 2-decimal precision
+                    self.laser_power_changed.emit(laser_index, actual_power)
+                    self.logger.info(f"Laser {laser_index}: requested {requested_power:.2f}%, "
+                                   f"actual {actual_power:.2f}% (hardware quantization)")
                 else:
-                    # Actual matches requested at GUI precision - no update needed
-                    self.logger.debug(f"Laser {laser_index} verified at {actual_power:.2f}% (displays as {actual_rounded:.1f}%)")
+                    # Actual matches requested - no GUI update needed
+                    self.logger.debug(f"Laser {laser_index} verified at {actual_power:.2f}%")
             else:
                 self.logger.warning(f"Failed to verify laser {laser_index} power")
 
