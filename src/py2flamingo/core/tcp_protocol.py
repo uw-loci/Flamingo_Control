@@ -9,7 +9,13 @@ Protocol Structure (128 bytes total):
     - Start marker: 0xF321E654 (4 bytes, uint32)
     - Command code: (4 bytes, uint32)
     - Status: (4 bytes, uint32)
-    - Command bits 0-6: (7 x 4 bytes, uint32)
+    - Hardware ID: (4 bytes, int32) - params[3]
+    - Subsystem ID: (4 bytes, int32) - params[4]
+    - Client ID: (4 bytes, int32) - params[5]
+    - int32Data0: (4 bytes, int32) - params[0]
+    - int32Data1: (4 bytes, int32) - params[1]
+    - int32Data2: (4 bytes, int32) - params[2]
+    - cmdDataBits0: (4 bytes, int32) - params[6]
     - Value: (8 bytes, double)
     - Reserved: (4 bytes, uint32)
     - Data: (72 bytes, padded with null bytes)
@@ -206,13 +212,13 @@ class ProtocolEncoder:
             logger.info(f"[TX] Command Code: {code} (0x{code:04X})")
             logger.info(f"[TX] Status: {status}")
             logger.info(f"[TX] Parameters:")
-            logger.info(f"[TX]   params[0] (cmdBits0/int32Data0): {params[0]} (0x{params[0]:08X})")
-            logger.info(f"[TX]   params[1] (cmdBits1/int32Data1): {params[1]} (0x{params[1]:08X})")
-            logger.info(f"[TX]   params[2] (cmdBits2/int32Data2): {params[2]} (0x{params[2]:08X})")
-            logger.info(f"[TX]   params[3] (cmdBits3/hardwareID): {params[3]} (0x{params[3]:08X})")
-            logger.info(f"[TX]   params[4] (cmdBits4/subsystemID): {params[4]} (0x{params[4]:08X})")
-            logger.info(f"[TX]   params[5] (cmdBits5/clientID): {params[5]} (0x{params[5]:08X})")
-            logger.info(f"[TX]   params[6] (cmdBits6/cmdDataBits0): {params[6]} (0x{params[6]:08X})")
+            logger.info(f"[TX]   params[0] (int32Data0): {params[0]} (0x{params[0]:08X}) [bytes 24-27]")
+            logger.info(f"[TX]   params[1] (int32Data1): {params[1]} (0x{params[1]:08X}) [bytes 28-31]")
+            logger.info(f"[TX]   params[2] (int32Data2): {params[2]} (0x{params[2]:08X}) [bytes 32-35]")
+            logger.info(f"[TX]   params[3] (hardwareID): {params[3]} (0x{params[3]:08X}) [bytes 12-15]")
+            logger.info(f"[TX]   params[4] (subsystemID): {params[4]} (0x{params[4]:08X}) [bytes 16-19]")
+            logger.info(f"[TX]   params[5] (clientID): {params[5]} (0x{params[5]:08X}) [bytes 20-23]")
+            logger.info(f"[TX]   params[6] (cmdDataBits0): {params[6]} (0x{params[6]:08X}) [bytes 36-39]")
             logger.info(f"[TX] Value (double): {value}")
             logger.info(f"[TX] Additional Data Size: {additional_data_size}")
             # Show first 32 bytes of data field if non-zero
@@ -223,18 +229,21 @@ class ProtocolEncoder:
             logger.info(f"[TX] End Marker: 0x{self.END_MARKER:08X}")
 
         # Pack command structure
+        # CRITICAL: Field order must match C++ SCommand struct!
+        # Order: start, code, status, hardwareID, subsystemID, clientID,
+        #        int32Data0, int32Data1, int32Data2, cmdDataBits0, value, addDataBytes, buffer, end
         try:
             command_bytes = self.COMMAND_STRUCT.pack(
                 self.START_MARKER,  # Start marker
                 code,               # Command code
                 status,             # Status
-                params[0],          # cmdBits0
-                params[1],          # cmdBits1
-                params[2],          # cmdBits2
-                params[3],          # cmdBits3
-                params[4],          # cmdBits4
-                params[5],          # cmdBits5
-                params[6],          # cmdBits6
+                params[3],          # hardwareID (was params[0])
+                params[4],          # subsystemID (was params[1])
+                params[5],          # clientID (was params[2])
+                params[0],          # int32Data0 (was params[3]) - LASER INDEX GOES HERE!
+                params[1],          # int32Data1 (was params[4])
+                params[2],          # int32Data2 (was params[5])
+                params[6],          # cmdDataBits0 (unchanged)
                 value,              # value (double)
                 additional_data_size,  # addDataBytes (size of additional file data)
                 data,               # data (72 bytes)
@@ -249,13 +258,13 @@ class ProtocolEncoder:
             logger.info(f"[TX] Bytes 0-3 (Start): 0x{struct.unpack('I', command_bytes[0:4])[0]:08X}")
             logger.info(f"[TX] Bytes 4-7 (Code): {struct.unpack('I', command_bytes[4:8])[0]} (0x{struct.unpack('I', command_bytes[4:8])[0]:04X})")
             logger.info(f"[TX] Bytes 8-11 (Status): {struct.unpack('I', command_bytes[8:12])[0]}")
-            logger.info(f"[TX] Bytes 12-15 (params[0]): {struct.unpack('I', command_bytes[12:16])[0]} (0x{struct.unpack('I', command_bytes[12:16])[0]:08X})")
-            logger.info(f"[TX] Bytes 16-19 (params[1]): {struct.unpack('I', command_bytes[16:20])[0]} (0x{struct.unpack('I', command_bytes[16:20])[0]:08X})")
-            logger.info(f"[TX] Bytes 20-23 (params[2]): {struct.unpack('I', command_bytes[20:24])[0]} (0x{struct.unpack('I', command_bytes[20:24])[0]:08X})")
-            logger.info(f"[TX] Bytes 24-27 (params[3]): {struct.unpack('I', command_bytes[24:28])[0]} (0x{struct.unpack('I', command_bytes[24:28])[0]:08X})")
-            logger.info(f"[TX] Bytes 28-31 (params[4]): {struct.unpack('I', command_bytes[28:32])[0]} (0x{struct.unpack('I', command_bytes[28:32])[0]:08X})")
-            logger.info(f"[TX] Bytes 32-35 (params[5]): {struct.unpack('I', command_bytes[32:36])[0]} (0x{struct.unpack('I', command_bytes[32:36])[0]:08X})")
-            logger.info(f"[TX] Bytes 36-39 (params[6]): {struct.unpack('I', command_bytes[36:40])[0]} (0x{struct.unpack('I', command_bytes[36:40])[0]:08X})")
+            logger.info(f"[TX] Bytes 12-15 (hardwareID): {struct.unpack('I', command_bytes[12:16])[0]} (0x{struct.unpack('I', command_bytes[12:16])[0]:08X})")
+            logger.info(f"[TX] Bytes 16-19 (subsystemID): {struct.unpack('I', command_bytes[16:20])[0]} (0x{struct.unpack('I', command_bytes[16:20])[0]:08X})")
+            logger.info(f"[TX] Bytes 20-23 (clientID): {struct.unpack('I', command_bytes[20:24])[0]} (0x{struct.unpack('I', command_bytes[20:24])[0]:08X})")
+            logger.info(f"[TX] Bytes 24-27 (int32Data0): {struct.unpack('I', command_bytes[24:28])[0]} (0x{struct.unpack('I', command_bytes[24:28])[0]:08X})")
+            logger.info(f"[TX] Bytes 28-31 (int32Data1): {struct.unpack('I', command_bytes[28:32])[0]} (0x{struct.unpack('I', command_bytes[28:32])[0]:08X})")
+            logger.info(f"[TX] Bytes 32-35 (int32Data2): {struct.unpack('I', command_bytes[32:36])[0]} (0x{struct.unpack('I', command_bytes[32:36])[0]:08X})")
+            logger.info(f"[TX] Bytes 36-39 (cmdDataBits0): {struct.unpack('I', command_bytes[36:40])[0]} (0x{struct.unpack('I', command_bytes[36:40])[0]:08X})")
             logger.info(f"[TX] Bytes 40-47 (Value): {struct.unpack('d', command_bytes[40:48])[0]}")
             logger.info(f"[TX] Bytes 48-51 (addDataBytes): {struct.unpack('I', command_bytes[48:52])[0]}")
             logger.info(f"[TX] Bytes 124-127 (End): 0x{struct.unpack('I', command_bytes[124:128])[0]:08X}")
@@ -371,14 +380,14 @@ class ProtocolDecoder:
             logger.info(f"[RX] ========== RECEIVED RESPONSE ==========")
             logger.info(f"[RX] Command Code: {code} (0x{code:04X})")
             logger.info(f"[RX] Status: {status}")
-            logger.info(f"[RX] Parameters:")
-            logger.info(f"[RX]   params[0] (cmdBits0/int32Data0): {params[0]} (0x{params[0]:08X})")
-            logger.info(f"[RX]   params[1] (cmdBits1/int32Data1): {params[1]} (0x{params[1]:08X})")
-            logger.info(f"[RX]   params[2] (cmdBits2/int32Data2): {params[2]} (0x{params[2]:08X})")
-            logger.info(f"[RX]   params[3] (cmdBits3/hardwareID): {params[3]} (0x{params[3]:08X})")
-            logger.info(f"[RX]   params[4] (cmdBits4/subsystemID): {params[4]} (0x{params[4]:08X})")
-            logger.info(f"[RX]   params[5] (cmdBits5/clientID): {params[5]} (0x{params[5]:08X})")
-            logger.info(f"[RX]   params[6] (cmdBits6/cmdDataBits0): {params[6]} (0x{params[6]:08X})")
+            logger.info(f"[RX] Parameters (RAW from bytes, not yet re-mapped):")
+            logger.info(f"[RX]   params[0] (bytes 12-15): {params[0]} (0x{params[0]:08X}) = hardwareID")
+            logger.info(f"[RX]   params[1] (bytes 16-19): {params[1]} (0x{params[1]:08X}) = subsystemID")
+            logger.info(f"[RX]   params[2] (bytes 20-23): {params[2]} (0x{params[2]:08X}) = clientID")
+            logger.info(f"[RX]   params[3] (bytes 24-27): {params[3]} (0x{params[3]:08X}) = int32Data0")
+            logger.info(f"[RX]   params[4] (bytes 28-31): {params[4]} (0x{params[4]:08X}) = int32Data1")
+            logger.info(f"[RX]   params[5] (bytes 32-35): {params[5]} (0x{params[5]:08X}) = int32Data2")
+            logger.info(f"[RX]   params[6] (bytes 36-39): {params[6]} (0x{params[6]:08X}) = cmdDataBits0")
             logger.info(f"[RX] Value (double): {value}")
             logger.info(f"[RX] Reserved Field (addDataBytes): {reserved}")
             # Show first 32 bytes of data field
@@ -397,13 +406,13 @@ class ProtocolDecoder:
             logger.info(f"[RX] Bytes 0-3 (Start): 0x{struct.unpack('I', data[0:4])[0]:08X}")
             logger.info(f"[RX] Bytes 4-7 (Code): {struct.unpack('I', data[4:8])[0]} (0x{struct.unpack('I', data[4:8])[0]:04X})")
             logger.info(f"[RX] Bytes 8-11 (Status): {struct.unpack('I', data[8:12])[0]}")
-            logger.info(f"[RX] Bytes 12-15 (params[0]): {struct.unpack('I', data[12:16])[0]} (0x{struct.unpack('I', data[12:16])[0]:08X})")
-            logger.info(f"[RX] Bytes 16-19 (params[1]): {struct.unpack('I', data[16:20])[0]} (0x{struct.unpack('I', data[16:20])[0]:08X})")
-            logger.info(f"[RX] Bytes 20-23 (params[2]): {struct.unpack('I', data[20:24])[0]} (0x{struct.unpack('I', data[20:24])[0]:08X})")
-            logger.info(f"[RX] Bytes 24-27 (params[3]): {struct.unpack('I', data[24:28])[0]} (0x{struct.unpack('I', data[24:28])[0]:08X})")
-            logger.info(f"[RX] Bytes 28-31 (params[4]): {struct.unpack('I', data[28:32])[0]} (0x{struct.unpack('I', data[28:32])[0]:08X})")
-            logger.info(f"[RX] Bytes 32-35 (params[5]): {struct.unpack('I', data[32:36])[0]} (0x{struct.unpack('I', data[32:36])[0]:08X})")
-            logger.info(f"[RX] Bytes 36-39 (params[6]): {struct.unpack('I', data[36:40])[0]} (0x{struct.unpack('I', data[36:40])[0]:08X})")
+            logger.info(f"[RX] Bytes 12-15 (hardwareID): {struct.unpack('I', data[12:16])[0]} (0x{struct.unpack('I', data[12:16])[0]:08X})")
+            logger.info(f"[RX] Bytes 16-19 (subsystemID): {struct.unpack('I', data[16:20])[0]} (0x{struct.unpack('I', data[16:20])[0]:08X})")
+            logger.info(f"[RX] Bytes 20-23 (clientID): {struct.unpack('I', data[20:24])[0]} (0x{struct.unpack('I', data[20:24])[0]:08X})")
+            logger.info(f"[RX] Bytes 24-27 (int32Data0): {struct.unpack('I', data[24:28])[0]} (0x{struct.unpack('I', data[24:28])[0]:08X})")
+            logger.info(f"[RX] Bytes 28-31 (int32Data1): {struct.unpack('I', data[28:32])[0]} (0x{struct.unpack('I', data[28:32])[0]:08X})")
+            logger.info(f"[RX] Bytes 32-35 (int32Data2): {struct.unpack('I', data[32:36])[0]} (0x{struct.unpack('I', data[32:36])[0]:08X})")
+            logger.info(f"[RX] Bytes 36-39 (cmdDataBits0): {struct.unpack('I', data[36:40])[0]} (0x{struct.unpack('I', data[36:40])[0]:08X})")
             logger.info(f"[RX] Bytes 40-47 (Value): {struct.unpack('d', data[40:48])[0]}")
             logger.info(f"[RX] Bytes 48-51 (addDataBytes): {struct.unpack('I', data[48:52])[0]}")
             logger.info(f"[RX] Bytes 124-127 (End): 0x{struct.unpack('I', data[124:128])[0]:08X}")

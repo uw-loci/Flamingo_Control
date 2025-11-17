@@ -290,6 +290,50 @@ Both start and end markers must be correct:
 
 If markers don't match, packet is invalid/corrupted.
 
+#### Log File Analysis - Client ID Identification
+
+**IMPORTANT:** When analyzing server log files to debug command issues:
+
+- **Working C++ GUI commands**: `clientID ≠ 0` (typically `clientID = 24` or other non-zero values)
+- **Python GUI commands**: `clientID = 0`
+
+#### Field Name Mapping - C++ Server Logs vs Python params Array
+
+**CRITICAL:** The C++ `SCommand` struct has hardwareID/subsystemID/clientID BEFORE int32Data0/int32Data1/int32Data2!
+
+```
+C++ SCommand Struct Field Order (128 bytes):
+  Bytes 0-3:   cmdStart (start marker 0xF321E654)
+  Bytes 4-7:   cmd (command code)
+  Bytes 8-11:  status
+  Bytes 12-15: hardwareID         ← Server logs call this "hardwareID"
+  Bytes 16-19: subsystemID        ← Server logs call this "subsystemID"
+  Bytes 20-23: clientID           ← Server logs call this "clientID"
+  Bytes 24-27: int32Data0         ← Server logs call this "int32Data0" (LASER INDEX here!)
+  Bytes 28-31: int32Data1         ← Server logs call this "int32Data1"
+  Bytes 32-35: int32Data2         ← Server logs call this "int32Data2"
+  Bytes 36-39: cmdDataBits0       ← Server logs call this "cmdDataBits0"
+  Bytes 40-47: doubleData
+  Bytes 48-51: additionalDataBytes
+  Bytes 52-123: buffer[72]
+  Bytes 124-127: cmdEnd (end marker 0xFEDC4321)
+
+Python params Array Usage (logical grouping):
+  params[0] = int32Data0     (e.g., laser_index for laser commands) → byte offset 24-27
+  params[1] = int32Data1                                            → byte offset 28-31
+  params[2] = int32Data2                                            → byte offset 32-35
+  params[3] = hardwareID     (typically 0)                          → byte offset 12-15
+  params[4] = subsystemID    (typically 0)                          → byte offset 16-19
+  params[5] = clientID       (0 for Python GUI, non-zero for C++)  → byte offset 20-23
+  params[6] = cmdDataBits0   (typically 0x80000000 for queries)    → byte offset 36-39
+```
+
+**Why This Matters:**
+When calling `encode_command(params=[laser_index, 0, 0, 0, 0, 0, TRIGGER_CALL_BACK])`:
+- The encoder remaps params[0] → byte offset 24 (int32Data0) ✓
+- The encoder remaps params[3] → byte offset 12 (hardwareID) ✓
+- Server receives laser_index in int32Data0 field as expected ✓
+
 #### Implementation
 
 See `src/py2flamingo/core/tcp_protocol.py`:

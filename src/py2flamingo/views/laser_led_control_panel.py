@@ -158,8 +158,9 @@ class LaserLEDControlPanel(QWidget):
             power_spinbox.setSuffix("%")
             power_spinbox.setMinimumWidth(70)
             power_spinbox.setStyleSheet("font-weight: bold;")
-            power_spinbox.valueChanged.connect(
-                lambda val, idx=laser.index: self._on_laser_power_spinbox_changed(idx, val)
+            # Use editingFinished to only update when user presses Enter or clicks away
+            power_spinbox.editingFinished.connect(
+                lambda idx=laser.index: self._on_laser_power_spinbox_finished(idx)
             )
             self._laser_spinboxes[laser.index] = power_spinbox
             layout.addWidget(power_spinbox, row, 2)
@@ -228,7 +229,8 @@ class LaserLEDControlPanel(QWidget):
         self._led_spinbox.setSuffix("%")
         self._led_spinbox.setMinimumWidth(70)
         self._led_spinbox.setStyleSheet("font-weight: bold;")
-        self._led_spinbox.valueChanged.connect(self._on_led_intensity_spinbox_changed)
+        # Use editingFinished to only update when user presses Enter or clicks away
+        self._led_spinbox.editingFinished.connect(self._on_led_intensity_spinbox_finished)
         layout.addWidget(self._led_spinbox, row, 2)
 
         # Intensity slider
@@ -321,9 +323,13 @@ class LaserLEDControlPanel(QWidget):
             self._laser_log_timers[laser_index].stop()
             self._laser_log_timers[laser_index].start(1000)  # 1 second delay
 
-    def _on_laser_power_spinbox_changed(self, laser_index: int, value: float) -> None:
-        """Handle laser power spinbox change (direct edit)."""
-        power_percent = value
+    def _on_laser_power_spinbox_finished(self, laser_index: int) -> None:
+        """Handle laser power spinbox editing finished (Enter or focus loss)."""
+        # Get current value from spinbox
+        if laser_index not in self._laser_spinboxes:
+            return
+
+        power_percent = self._laser_spinboxes[laser_index].value()
 
         # Update slider (block signals to prevent recursion)
         if laser_index in self._laser_sliders:
@@ -371,9 +377,13 @@ class LaserLEDControlPanel(QWidget):
             self._led_log_timer.stop()
             self._led_log_timer.start(1000)  # 1 second delay
 
-    def _on_led_intensity_spinbox_changed(self, value: float) -> None:
-        """Handle LED intensity spinbox change (direct edit)."""
-        intensity_percent = value
+    def _on_led_intensity_spinbox_finished(self) -> None:
+        """Handle LED intensity spinbox editing finished (Enter or focus loss)."""
+        # Get current value from spinbox
+        if not self._led_spinbox:
+            return
+
+        intensity_percent = self._led_spinbox.value()
 
         # Update slider (block signals to prevent recursion)
         if self._led_slider:
