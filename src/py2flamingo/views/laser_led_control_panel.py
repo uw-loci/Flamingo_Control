@@ -70,6 +70,8 @@ class LaserLEDControlPanel(QWidget):
         self.laser_led_controller.preview_enabled.connect(self._on_preview_enabled)
         self.laser_led_controller.preview_disabled.connect(self._on_preview_disabled)
         self.laser_led_controller.error_occurred.connect(self._on_error)
+        self.laser_led_controller.laser_power_changed.connect(self._on_laser_power_updated)
+        self.laser_led_controller.led_intensity_changed.connect(self._on_led_intensity_updated)
 
         self._setup_ui()
 
@@ -524,6 +526,48 @@ class LaserLEDControlPanel(QWidget):
             if self._path_group:
                 self._path_group.setVisible(False)
             self.laser_led_controller.disable_all_light_sources()
+
+    @pyqtSlot(int, float)
+    def _on_laser_power_updated(self, laser_index: int, power_percent: float) -> None:
+        """
+        Update laser power widgets when controller reports power change.
+
+        This is called when the controller queries hardware or sets power.
+        """
+        # Update spinbox
+        if laser_index in self._laser_spinboxes:
+            self._laser_spinboxes[laser_index].blockSignals(True)
+            self._laser_spinboxes[laser_index].setValue(power_percent)
+            self._laser_spinboxes[laser_index].blockSignals(False)
+
+        # Update slider
+        if laser_index in self._laser_sliders:
+            self._laser_sliders[laser_index].blockSignals(True)
+            self._laser_sliders[laser_index].setValue(int(power_percent))
+            self._laser_sliders[laser_index].blockSignals(False)
+
+        self.logger.debug(f"GUI updated: Laser {laser_index} power = {power_percent:.1f}%")
+
+    @pyqtSlot(float)
+    def _on_led_intensity_updated(self, intensity_percent: float) -> None:
+        """
+        Update LED intensity widgets when controller reports intensity change.
+
+        This is called when the controller sets LED intensity.
+        """
+        # Update spinbox
+        if self._led_spinbox:
+            self._led_spinbox.blockSignals(True)
+            self._led_spinbox.setValue(intensity_percent)
+            self._led_spinbox.blockSignals(False)
+
+        # Update slider
+        if self._led_slider:
+            self._led_slider.blockSignals(True)
+            self._led_slider.setValue(int(intensity_percent))
+            self._led_slider.blockSignals(False)
+
+        self.logger.debug(f"GUI updated: LED intensity = {intensity_percent:.1f}%")
 
     @pyqtSlot(str)
     def _on_preview_enabled(self, source_name: str) -> None:
