@@ -212,12 +212,12 @@ class ProtocolEncoder:
             logger.info(f"[TX] Command Code: {code} (0x{code:04X})")
             logger.info(f"[TX] Status: {status}")
             logger.info(f"[TX] Parameters:")
-            logger.info(f"[TX]   params[0] (int32Data0): {params[0]} (0x{params[0]:08X}) [bytes 24-27]")
-            logger.info(f"[TX]   params[1] (int32Data1): {params[1]} (0x{params[1]:08X}) [bytes 28-31]")
-            logger.info(f"[TX]   params[2] (int32Data2): {params[2]} (0x{params[2]:08X}) [bytes 32-35]")
-            logger.info(f"[TX]   params[3] (hardwareID): {params[3]} (0x{params[3]:08X}) [bytes 12-15]")
-            logger.info(f"[TX]   params[4] (subsystemID): {params[4]} (0x{params[4]:08X}) [bytes 16-19]")
-            logger.info(f"[TX]   params[5] (clientID): {params[5]} (0x{params[5]:08X}) [bytes 20-23]")
+            logger.info(f"[TX]   params[0] (hardwareID): {params[0]} (0x{params[0]:08X}) [bytes 12-15]")
+            logger.info(f"[TX]   params[1] (subsystemID): {params[1]} (0x{params[1]:08X}) [bytes 16-19]")
+            logger.info(f"[TX]   params[2] (clientID): {params[2]} (0x{params[2]:08X}) [bytes 20-23]")
+            logger.info(f"[TX]   params[3] (int32Data0): {params[3]} (0x{params[3]:08X}) [bytes 24-27] ← AXIS/LASER")
+            logger.info(f"[TX]   params[4] (int32Data1): {params[4]} (0x{params[4]:08X}) [bytes 28-31]")
+            logger.info(f"[TX]   params[5] (int32Data2): {params[5]} (0x{params[5]:08X}) [bytes 32-35]")
             logger.info(f"[TX]   params[6] (cmdDataBits0): {params[6]} (0x{params[6]:08X}) [bytes 36-39]")
             logger.info(f"[TX] Value (double): {value}")
             logger.info(f"[TX] Additional Data Size: {additional_data_size}")
@@ -229,21 +229,30 @@ class ProtocolEncoder:
             logger.info(f"[TX] End Marker: 0x{self.END_MARKER:08X}")
 
         # Pack command structure
-        # CRITICAL: Field order must match C++ SCommand struct!
-        # Order: start, code, status, hardwareID, subsystemID, clientID,
-        #        int32Data0, int32Data1, int32Data2, cmdDataBits0, value, addDataBytes, buffer, end
+        # C++ SCommand struct field order (bytes 0-127):
+        # start, code, status, hardwareID, subsystemID, clientID,
+        # int32Data0, int32Data1, int32Data2, cmdDataBits0, value, addDataBytes, buffer, end
+        #
+        # Python params array maps DIRECTLY to C++ struct fields:
+        # params[0] → hardwareID (byte 12)
+        # params[1] → subsystemID (byte 16)
+        # params[2] → clientID (byte 20)
+        # params[3] → int32Data0 (byte 24) - AXIS/LASER INDEX GOES HERE!
+        # params[4] → int32Data1 (byte 28)
+        # params[5] → int32Data2 (byte 32)
+        # params[6] → cmdDataBits0 (byte 36)
         try:
             command_bytes = self.COMMAND_STRUCT.pack(
                 self.START_MARKER,  # Start marker
                 code,               # Command code
                 status,             # Status
-                params[3],          # hardwareID (was params[0])
-                params[4],          # subsystemID (was params[1])
-                params[5],          # clientID (was params[2])
-                params[0],          # int32Data0 (was params[3]) - LASER INDEX GOES HERE!
-                params[1],          # int32Data1 (was params[4])
-                params[2],          # int32Data2 (was params[5])
-                params[6],          # cmdDataBits0 (unchanged)
+                params[0],          # hardwareID
+                params[1],          # subsystemID
+                params[2],          # clientID
+                params[3],          # int32Data0 (AXIS for stage, LASER INDEX for laser!)
+                params[4],          # int32Data1
+                params[5],          # int32Data2
+                params[6],          # cmdDataBits0
                 value,              # value (double)
                 additional_data_size,  # addDataBytes (size of additional file data)
                 data,               # data (72 bytes)
@@ -380,14 +389,14 @@ class ProtocolDecoder:
             logger.info(f"[RX] ========== RECEIVED RESPONSE ==========")
             logger.info(f"[RX] Command Code: {code} (0x{code:04X})")
             logger.info(f"[RX] Status: {status}")
-            logger.info(f"[RX] Parameters (RAW from bytes, not yet re-mapped):")
-            logger.info(f"[RX]   params[0] (bytes 12-15): {params[0]} (0x{params[0]:08X}) = hardwareID")
-            logger.info(f"[RX]   params[1] (bytes 16-19): {params[1]} (0x{params[1]:08X}) = subsystemID")
-            logger.info(f"[RX]   params[2] (bytes 20-23): {params[2]} (0x{params[2]:08X}) = clientID")
-            logger.info(f"[RX]   params[3] (bytes 24-27): {params[3]} (0x{params[3]:08X}) = int32Data0")
-            logger.info(f"[RX]   params[4] (bytes 28-31): {params[4]} (0x{params[4]:08X}) = int32Data1")
-            logger.info(f"[RX]   params[5] (bytes 32-35): {params[5]} (0x{params[5]:08X}) = int32Data2")
-            logger.info(f"[RX]   params[6] (bytes 36-39): {params[6]} (0x{params[6]:08X}) = cmdDataBits0")
+            logger.info(f"[RX] Parameters:")
+            logger.info(f"[RX]   params[0] (hardwareID): {params[0]} (0x{params[0]:08X}) [bytes 12-15]")
+            logger.info(f"[RX]   params[1] (subsystemID): {params[1]} (0x{params[1]:08X}) [bytes 16-19]")
+            logger.info(f"[RX]   params[2] (clientID): {params[2]} (0x{params[2]:08X}) [bytes 20-23]")
+            logger.info(f"[RX]   params[3] (int32Data0): {params[3]} (0x{params[3]:08X}) [bytes 24-27] ← AXIS/LASER")
+            logger.info(f"[RX]   params[4] (int32Data1): {params[4]} (0x{params[4]:08X}) [bytes 28-31]")
+            logger.info(f"[RX]   params[5] (int32Data2): {params[5]} (0x{params[5]:08X}) [bytes 32-35]")
+            logger.info(f"[RX]   params[6] (cmdDataBits0): {params[6]} (0x{params[6]:08X}) [bytes 36-39]")
             logger.info(f"[RX] Value (double): {value}")
             logger.info(f"[RX] Reserved Field (addDataBytes): {reserved}")
             # Show first 32 bytes of data field

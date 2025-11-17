@@ -62,17 +62,9 @@ class LaserLEDController(QObject):
             3: 50.0,  # White
         }
 
-        # Initialize laser powers by querying hardware (fall back to 5% if query fails)
+        # Initialize laser powers to 5% (will be updated from hardware when Camera Live Viewer opens)
         for laser in self.get_available_lasers():
-            # Query actual power from hardware
-            actual_power = self.laser_led_service.query_laser_power(laser.index)
-            if actual_power >= 0:
-                self._laser_powers[laser.index] = actual_power
-                self.logger.info(f"Laser {laser.index} ({laser.wavelength}nm): loaded power {actual_power:.2f}%")
-            else:
-                # Query failed - use default
-                self._laser_powers[laser.index] = 5.0
-                self.logger.warning(f"Laser {laser.index} ({laser.wavelength}nm): failed to query power, defaulting to 5%")
+            self._laser_powers[laser.index] = 5.0
 
         self.logger.info("LaserLEDController initialized")
 
@@ -87,6 +79,26 @@ class LaserLEDController(QObject):
     def get_laser_power(self, laser_index: int) -> float:
         """Get current laser power setting."""
         return self._laser_powers.get(laser_index, 5.0)
+
+    def load_laser_powers_from_hardware(self) -> None:
+        """
+        Load actual laser power settings from hardware.
+
+        This should be called when the Camera Live Viewer opens to ensure
+        the GUI displays the actual hardware state rather than defaults.
+        Queries each laser and updates the cached power values.
+        """
+        self.logger.info("Loading laser powers from hardware...")
+        for laser in self.get_available_lasers():
+            actual_power = self.laser_led_service.query_laser_power(laser.index)
+            if actual_power >= 0:
+                old_power = self._laser_powers.get(laser.index, 5.0)
+                self._laser_powers[laser.index] = actual_power
+                self.laser_power_changed.emit(laser.index, actual_power)
+                self.logger.info(f"Laser {laser.index} ({laser.wavelength}nm): {actual_power:.2f}% "
+                               f"(was {old_power:.2f}%)")
+            else:
+                self.logger.warning(f"Laser {laser.index} ({laser.wavelength}nm): failed to query power")
 
     def get_led_color(self) -> int:
         """Get current LED color selection (0=Red, 1=Green, 2=Blue, 3=White)."""

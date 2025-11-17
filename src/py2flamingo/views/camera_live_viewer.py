@@ -867,9 +867,13 @@ class CameraLiveViewer(QWidget):
             self.camera_controller.stop_live_view()
 
     def showEvent(self, event: QShowEvent) -> None:
-        """Handle window show event - log when window is opened."""
+        """Handle window show event - load laser powers from hardware."""
         super().showEvent(event)
         self.logger.info("Camera Live Viewer window opened")
+
+        # Load actual laser powers from hardware (now that connection is established)
+        if self.laser_led_controller:
+            self.laser_led_controller.load_laser_powers_from_hardware()
 
     def hideEvent(self, event: QHideEvent) -> None:
         """Handle window hide event - log when window is hidden."""

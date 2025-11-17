@@ -318,21 +318,32 @@ C++ SCommand Struct Field Order (128 bytes):
   Bytes 52-123: buffer[72]
   Bytes 124-127: cmdEnd (end marker 0xFEDC4321)
 
-Python params Array Usage (logical grouping):
-  params[0] = int32Data0     (e.g., laser_index for laser commands) → byte offset 24-27
-  params[1] = int32Data1                                            → byte offset 28-31
-  params[2] = int32Data2                                            → byte offset 32-35
-  params[3] = hardwareID     (typically 0)                          → byte offset 12-15
-  params[4] = subsystemID    (typically 0)                          → byte offset 16-19
-  params[5] = clientID       (0 for Python GUI, non-zero for C++)  → byte offset 20-23
+Python params Array Usage (MATCHES C++ struct order directly):
+  params[0] = hardwareID     (typically 0)                          → byte offset 12-15
+  params[1] = subsystemID    (typically 0)                          → byte offset 16-19
+  params[2] = clientID       (0 for Python GUI, non-zero for C++)  → byte offset 20-23
+  params[3] = int32Data0     (axis/laser_index)                    → byte offset 24-27 ← CRITICAL!
+  params[4] = int32Data1                                            → byte offset 28-31
+  params[5] = int32Data2                                            → byte offset 32-35
   params[6] = cmdDataBits0   (typically 0x80000000 for queries)    → byte offset 36-39
 ```
 
+**Example Usage:**
+
+Stage position query (X-axis):
+```python
+params = [0, 0, 0, 1, 0, 0, 0x80000000]  # axis=1 in params[3]
+```
+
+Laser enable (laser 3):
+```python
+params = [0, 0, 0, 3, 0, 0, 0x80000000]  # laser_index=3 in params[3]
+```
+
 **Why This Matters:**
-When calling `encode_command(params=[laser_index, 0, 0, 0, 0, 0, TRIGGER_CALL_BACK])`:
-- The encoder remaps params[0] → byte offset 24 (int32Data0) ✓
-- The encoder remaps params[3] → byte offset 12 (hardwareID) ✓
-- Server receives laser_index in int32Data0 field as expected ✓
+The params array is packed DIRECTLY into the C++ struct - no remapping!
+- params[0] → hardwareID at byte offset 12
+- params[3] → int32Data0 at byte offset 24 (where axis/laser index goes)
 
 #### Implementation
 

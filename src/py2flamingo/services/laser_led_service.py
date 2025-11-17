@@ -171,7 +171,7 @@ class LaserLEDService(MicroscopeCommandService):
         result = self._query_command(
             LaserLEDCommandCode.LASER_LEVEL_GET,
             f"LASER_{laser_index}_LEVEL_GET",
-            params=[laser_index, 0, 0, 0, 0, 0, 0]  # params[6] will be set to TRIGGER_CALL_BACK
+            params=[0, 0, 0, laser_index, 0, 0, 0]  # laser_index in params[3] (int32Data0)
         )
 
         if not result['success']:
@@ -242,7 +242,7 @@ class LaserLEDService(MicroscopeCommandService):
         result = self._send_command(
             LaserLEDCommandCode.LASER_LEVEL_SET,
             f"LASER_{laser_index}_LEVEL_SET",
-            params=[laser_index, 0, 0, 0, 0, 0, 0],  # params[6] will be set to CALLBACK_FLAG by _send_command
+            params=[0, 0, 0, laser_index, 0, 0, 0],  # laser_index in params[3] (int32Data0)
             data=power_str
         )
 
@@ -293,7 +293,7 @@ class LaserLEDService(MicroscopeCommandService):
         result = self._send_command(
             LaserLEDCommandCode.LASER_ENABLE_PREVIEW,
             f"LASER_{laser_index}_ENABLE_PREVIEW",
-            params=[laser_index, 0, 0, 0, 0, 0, 0]
+            params=[0, 0, 0, laser_index, 0, 0, 0]  # laser_index in params[3] (int32Data0)
         )
 
         self.logger.info(f"DEBUG: LASER_ENABLE_PREVIEW result: success={result.get('success')}, error={result.get('error', 'none')}")
