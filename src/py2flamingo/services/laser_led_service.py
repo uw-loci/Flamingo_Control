@@ -259,49 +259,12 @@ class LaserLEDService(MicroscopeCommandService):
             self.logger.error(f"DEBUG: Laser {laser_index} power set FAILED: {result.get('error', 'unknown error')}")
             return False, power_percent
 
-        self.logger.info(f"DEBUG: Laser 1 power set to {power_str}% - SUCCESS")
+        self.logger.info(f"DEBUG: Laser {laser_index} power set to {power_str}% - SUCCESS")
 
-        # CRITICAL: Server sends TWO responses for SET command:
-        # 1. SET acknowledgment (already read by _send_command above)
-        # 2. GET response (from server's internal getLevelImpl call)
-        # We need to read the second response to get actual power and clear socket
-        if verify:
-            # Read the GET response that server automatically sends after SET
-            # This is already in the socket buffer from the server's internal getLevelImpl call
-            try:
-                command_socket = self.connection._command_socket
-                if command_socket:
-                    # Read the second 128-byte response (GET response with actual power)
-                    get_response = self._receive_full_bytes(command_socket, 128, timeout=3.0)
-                    parsed_get = self._parse_response(get_response)
-
-                    # Extract power from the GET response's data buffer
-                    buffer_data = parsed_get.get('data', b'')
-                    if buffer_data and b'\x00' in buffer_data:
-                        buffer_data = buffer_data[:buffer_data.index(b'\x00')]
-
-                    power_str_response = buffer_data.decode('utf-8', errors='ignore').strip()
-
-                    if power_str_response:
-                        actual_power = float(power_str_response)
-                        self.logger.info(f"Laser {laser_index} actual power from SET response: {actual_power:.2f}%")
-
-                        if abs(actual_power - power_percent) > 0.5:
-                            self.logger.info(f"Laser {laser_index}: Requested {power_percent:.2f}%, "
-                                           f"actual {actual_power:.2f}% (hardware quantization)")
-                        return True, actual_power
-                    else:
-                        self.logger.warning(f"Empty power in SET's GET response, using requested value")
-                        return True, power_percent
-                else:
-                    self.logger.warning("No command socket available for reading GET response")
-                    return True, power_percent
-
-            except Exception as e:
-                self.logger.warning(f"Failed to read SET's GET response: {e}, using requested value")
-                return True, power_percent
-        else:
-            return True, power_percent
+        # Return success with requested power
+        # Note: Hardware may quantize to slightly different value (e.g., 10.0% → 10.7%)
+        # but SET command succeeded. User can check actual power via separate query if needed.
+        return True, power_percent
 
     def enable_laser_preview(self, laser_index: int) -> bool:
         """
