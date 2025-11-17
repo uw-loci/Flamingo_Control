@@ -10,7 +10,7 @@ This controller handles:
 
 import logging
 from typing import Optional, List
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 
 from py2flamingo.services.laser_led_service import LaserLEDService, LaserInfo
 
@@ -124,7 +124,12 @@ class LaserLEDController(QObject):
 
     def set_laser_power(self, laser_index: int, power_percent: float) -> tuple[bool, float]:
         """
-        Set laser power level and return actual power from hardware.
+        Set laser power level with async verification of actual power.
+
+        This method returns immediately for responsive GUI, then verifies actual
+        power from hardware in the background. The GUI updates twice:
+        1. Immediately with requested power (no lag)
+        2. After ~200ms with actual power from hardware (handles quantization)
 
         Due to DAC quantization in the laser hardware, the actual power may differ
         slightly from the requested power (e.g., 10.0% → 10.7%).
@@ -134,31 +139,66 @@ class LaserLEDController(QObject):
             power_percent: Power as percentage (0.0 - 100.0)
 
         Returns:
-            Tuple of (success, actual_power)
+            Tuple of (success, requested_power) - actual power verified async
         """
         try:
-            success, actual_power = self.laser_led_service.set_laser_power(laser_index, power_percent)
+            # Send SET command (returns immediately)
+            success, requested_power = self.laser_led_service.set_laser_power(laser_index, power_percent)
 
             if success:
-                self._laser_powers[laser_index] = actual_power  # Store actual power
-                self.laser_power_changed.emit(laser_index, actual_power)  # Emit actual power
-                if abs(actual_power - power_percent) > 0.1:
-                    self.logger.info(f"Laser {laser_index} power: requested {power_percent:.1f}%, "
-                                   f"actual {actual_power:.1f}% (hardware quantization)")
-                else:
-                    self.logger.info(f"Laser {laser_index} power set to {actual_power:.1f}%")
+                # Update GUI immediately with requested power (responsive, no lag)
+                self._laser_powers[laser_index] = requested_power
+                self.laser_power_changed.emit(laser_index, requested_power)
+                self.logger.debug(f"Laser {laser_index} power set to {requested_power:.1f}% (verifying...)")
+
+                # Schedule async verification to get actual power from hardware
+                # Uses QTimer to avoid blocking GUI
+                QTimer.singleShot(200, lambda: self._verify_laser_power(laser_index, requested_power))
             else:
                 error_msg = f"Failed to set laser {laser_index} power"
                 self.logger.error(error_msg)
                 self.error_occurred.emit(error_msg)
 
-            return success, actual_power
+            return success, requested_power
 
         except Exception as e:
             error_msg = f"Error setting laser {laser_index} power: {e}"
             self.logger.error(error_msg)
             self.error_occurred.emit(error_msg)
             return False, power_percent
+
+    def _verify_laser_power(self, laser_index: int, requested_power: float) -> None:
+        """
+        Verify actual laser power from hardware (called async after SET).
+
+        This runs in background to query the actual power without blocking GUI.
+        If actual power differs from requested (due to hardware quantization),
+        emits signal to update GUI.
+
+        Args:
+            laser_index: Laser index to verify
+            requested_power: The power that was requested
+        """
+        try:
+            actual_power = self.laser_led_service.query_laser_power(laser_index)
+
+            if actual_power >= 0:
+                # Update cache and GUI if actual power differs
+                self._laser_powers[laser_index] = actual_power
+
+                if abs(actual_power - requested_power) > 0.1:
+                    # Hardware quantized to different value - update GUI
+                    self.laser_power_changed.emit(laser_index, actual_power)
+                    self.logger.info(f"Laser {laser_index}: requested {requested_power:.1f}%, "
+                                   f"actual {actual_power:.1f}% (hardware quantization)")
+                else:
+                    # Actual matches requested - no GUI update needed
+                    self.logger.debug(f"Laser {laser_index} verified at {actual_power:.1f}%")
+            else:
+                self.logger.warning(f"Failed to verify laser {laser_index} power")
+
+        except Exception as e:
+            self.logger.warning(f"Error verifying laser {laser_index} power: {e}")
 
     def set_led_color(self, led_color: int) -> None:
         """

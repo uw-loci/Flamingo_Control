@@ -261,9 +261,8 @@ class LaserLEDService(MicroscopeCommandService):
 
         self.logger.info(f"DEBUG: Laser {laser_index} power set to {power_str}% - SUCCESS")
 
-        # Return success with requested power
-        # Note: Hardware may quantize to slightly different value (e.g., 10.0% → 10.7%)
-        # but SET command succeeded. User can check actual power via separate query if needed.
+        # Return immediately with requested power for responsive GUI
+        # Note: Caller should verify actual power asynchronously if needed
         return True, power_percent
 
     def enable_laser_preview(self, laser_index: int) -> bool:
