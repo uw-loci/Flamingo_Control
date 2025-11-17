@@ -63,6 +63,7 @@ class StageCommands:
     """
 
     # Position commands
+    POSITION_SET_MOVE = 0x6004  # 24580 - Set stage position with motion (Python GUI uses this)
     POSITION_SET = 0x6005  # 24581 - Set stage position (slide control)
     POSITION_GET = 0x6008  # 24584 - Get current stage position
 

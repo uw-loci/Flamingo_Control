@@ -25,6 +25,12 @@ Protocol Structure (128 bytes total):
 import struct
 from typing import List, Dict, Any, Optional
 
+# Import all command code classes for name lookup
+from py2flamingo.core.command_codes import (
+    SystemCommands, StageCommands, LaserCommands, LEDCommands,
+    CameraCommands, IlluminationCommands, FilterCommands
+)
+
 
 class CommandCode:
     """Command codes for microscope operations."""
@@ -92,6 +98,37 @@ class CommandDataBits:
     # USE FOR: Workflows that acquire multiple Z planes
     # COMBINE WITH: MAX_PROJECTION for MIP, SAVE_TO_DISK for saving
     STAGE_ZSWEEP = 0x00000020
+
+
+def get_command_name(code: int) -> str:
+    """
+    Get human-readable command name from command code.
+
+    Args:
+        code: Command code (numeric)
+
+    Returns:
+        Command name string (e.g., "STAGE_POSITION_SET" or "Unknown (12345)")
+    """
+    # Build reverse mapping from all command classes
+    command_classes = [
+        ('System', SystemCommands),
+        ('Stage', StageCommands),
+        ('Laser', LaserCommands),
+        ('LED', LEDCommands),
+        ('Camera', CameraCommands),
+        ('Illumination', IlluminationCommands),
+        ('Filter', FilterCommands)
+    ]
+
+    for category, cmd_class in command_classes:
+        for attr_name in dir(cmd_class):
+            if not attr_name.startswith('_'):
+                attr_value = getattr(cmd_class, attr_name)
+                if isinstance(attr_value, int) and attr_value == code:
+                    return f"{attr_name}"
+
+    return f"Unknown"
 
 
 class ProtocolEncoder:
@@ -208,7 +245,9 @@ class ProtocolEncoder:
         ]
 
         if code in debug_commands:
+            cmd_name = get_command_name(code)
             logger.info(f"[TX] ========== SENDING COMMAND ==========")
+            logger.info(f"[TX] Command: {cmd_name}")
             logger.info(f"[TX] Command Code: {code} (0x{code:04X})")
             logger.info(f"[TX] Status: {status}")
             logger.info(f"[TX] Parameters:")
