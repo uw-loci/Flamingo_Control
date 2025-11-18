@@ -101,7 +101,9 @@ class ConfigMigrationService:
                 self.logger.info("Dry run completed - no files written")
 
         except Exception as e:
+            import traceback
             self.logger.error(f"Migration failed: {e}")
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             report['errors'].append(str(e))
 
         return report
@@ -146,16 +148,22 @@ class ConfigMigrationService:
         # Read ScopeSettings.txt
         scope_settings_path = self.microscope_settings_dir / "ScopeSettings.txt"
         if scope_settings_path.exists():
-            scope_settings = text_to_dict(str(scope_settings_path))
-            self._extract_scope_settings(scope_settings, hardware)
+            try:
+                scope_settings = text_to_dict(str(scope_settings_path))
+                self._extract_scope_settings(scope_settings, hardware)
+            except Exception as e:
+                self.logger.warning(f"Error reading ScopeSettings.txt: {e}")
         else:
             self.logger.warning("ScopeSettings.txt not found")
 
         # Read ControlSettings.txt
         control_settings_path = self.microscope_settings_dir / "ControlSettings.txt"
         if control_settings_path.exists():
-            control_settings = text_to_dict(str(control_settings_path))
-            self._extract_control_settings(control_settings, hardware)
+            try:
+                control_settings = text_to_dict(str(control_settings_path))
+                self._extract_control_settings(control_settings, hardware)
+            except Exception as e:
+                self.logger.warning(f"Error reading ControlSettings.txt: {e}")
         else:
             self.logger.warning("ControlSettings.txt not found")
 
@@ -176,6 +184,11 @@ class ConfigMigrationService:
 
     def _extract_scope_settings(self, data: Dict, hardware: Dict):
         """Extract hardware settings from ScopeSettings.txt data."""
+
+        # Handle empty or invalid data
+        if not data:
+            self.logger.warning("No data found in ScopeSettings.txt")
+            return
 
         # Extract microscope info
         if 'Microscope type' in data:

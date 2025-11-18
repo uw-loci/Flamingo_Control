@@ -363,9 +363,9 @@ class DualResolutionVoxelStorage:
     def get_memory_usage(self) -> Dict[str, float]:
         """Report memory usage statistics."""
         storage_bytes = sum(
-            len(self.storage_data[ch]) * 2 +  # uint16
-            len(self.storage_timestamps[ch]) * 4 +  # float32
-            len(self.storage_confidence[ch])  # uint8
+            self.storage_data[ch].nnz * 2 +  # uint16, nnz = number of non-zero elements
+            self.storage_timestamps[ch].nnz * 4 +  # float32
+            self.storage_confidence[ch].nnz  # uint8
             for ch in range(self.num_channels)
         )
 
@@ -378,6 +378,6 @@ class DualResolutionVoxelStorage:
             'storage_mb': storage_bytes / (1024 * 1024),
             'display_mb': display_bytes / (1024 * 1024),
             'total_mb': (storage_bytes + display_bytes) / (1024 * 1024),
-            'storage_voxels': sum(len(self.storage_data[ch]) for ch in range(self.num_channels)),
+            'storage_voxels': sum(self.storage_data[ch].nnz for ch in range(self.num_channels)),
             'display_voxels': np.prod(self.display_dims) * self.num_channels
         }

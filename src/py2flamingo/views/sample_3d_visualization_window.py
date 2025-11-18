@@ -69,6 +69,10 @@ class Sample3DVisualizationWindow(QWidget):
         self.current_z = 0
         self.is_streaming = False
 
+        # Sample holder position (will be initialized in _add_sample_holder)
+        self.holder_position = {'x': 0, 'y': 0, 'z': 0}
+        self.rotation_indicator_length = 0
+
         # Setup UI
         self._setup_ui()
         self._connect_signals()
@@ -489,7 +493,7 @@ class Sample3DVisualizationWindow(QWidget):
             self.viewer = None
 
     def _setup_chamber_visualization(self):
-        """Setup the fixed chamber wireframe and objective indicator."""
+        """Setup the fixed chamber wireframe, sample holder, and objective indicator."""
         if not self.viewer:
             return
 
@@ -502,6 +506,12 @@ class Sample3DVisualizationWindow(QWidget):
             rendering='translucent'
         )
 
+        # Add sample holder (cylinder coming down from top)
+        self._add_sample_holder()
+
+        # Add rotation indicator (extends from sample holder at 0 degrees)
+        self._add_rotation_indicator()
+
         # Add objective position indicator
         objective_pos = np.array([[100, 100, 0]])  # Default position
         self.viewer.add_points(
@@ -509,7 +519,7 @@ class Sample3DVisualizationWindow(QWidget):
             name='Objective',
             size=20,
             face_color='yellow',
-            edge_color='orange',
+            edge_width=2,  # Use edge_width instead of edge_color
             opacity=0.8
         )
 
@@ -554,6 +564,144 @@ class Sample3DVisualizationWindow(QWidget):
             wireframe[-thickness:, -thickness:, i] = 1
 
         return wireframe
+
+    def _add_sample_holder(self):
+        """Add sample holder as a cylinder coming down from the top of the chamber."""
+        if not self.viewer:
+            return
+
+        # Sample holder dimensions (in voxels)
+        # Convert from mm to voxels based on display resolution
+        holder_diameter_mm = 1.0  # 1mm diameter cylinder
+        voxel_size_um = self.config['display']['voxel_size_um'][0]  # Assume isotropic
+        holder_radius_voxels = int((holder_diameter_mm * 1000 / 2) / voxel_size_um)
+
+        # Get chamber dimensions
+        dims = self.voxel_storage.display_dims
+
+        # Sample holder extends from top to current Z position
+        # Default to center of chamber in X and Y
+        self.holder_position = {
+            'x': dims[0] // 2,
+            'y': dims[1] // 2,
+            'z': dims[2] // 2  # Default Z position
+        }
+
+        # Create cylinder as a series of circles (points)
+        holder_points = []
+
+        # Generate cylinder from top of chamber down to holder position
+        z_top = dims[2] - 1
+        z_bottom = self.holder_position['z']
+
+        # Create vertical line of points for cylinder axis
+        for z in range(z_bottom, z_top, 2):  # Sample every 2 voxels for performance
+            holder_points.append([self.holder_position['x'], self.holder_position['y'], z])
+
+        if holder_points:
+            holder_array = np.array(holder_points)
+            self.viewer.add_points(
+                holder_array,
+                name='Sample Holder',
+                size=holder_radius_voxels * 2,  # Diameter for point size
+                face_color='gray',
+                opacity=0.6,
+                shading='spherical'
+            )
+
+    def _add_rotation_indicator(self):
+        """Add rotation indicator extending from sample holder at 0 degrees."""
+        if not self.viewer:
+            return
+
+        # Indicator dimensions
+        dims = self.voxel_storage.display_dims
+        indicator_length = dims[0] // 10  # 1/10th of chamber width
+
+        # Position: extends from holder position along X-axis (0 degrees)
+        # Always at the top of the displayed holder
+        z_position = dims[2] - 10  # Near top of chamber
+
+        indicator_start = np.array([
+            self.holder_position['x'],
+            self.holder_position['y'],
+            z_position
+        ])
+
+        indicator_end = np.array([
+            self.holder_position['x'] + indicator_length,
+            self.holder_position['y'],
+            z_position
+        ])
+
+        # Add as a line (using shapes layer for better control)
+        self.viewer.add_shapes(
+            data=[[indicator_start[:2], indicator_end[:2]]],  # 2D line in XY plane
+            shape_type='line',
+            name='Rotation Indicator',
+            edge_color='red',
+            edge_width=3,
+            opacity=0.8
+        )
+
+        # Store for updates during rotation
+        self.rotation_indicator_base = indicator_start.copy()
+        self.rotation_indicator_length = indicator_length
+
+    def _update_sample_holder_position(self, x_pos=None, y_pos=None, z_pos=None):
+        """Update sample holder position when stage moves."""
+        if not self.viewer or 'Sample Holder' not in self.viewer.layers:
+            return
+
+        # Update position
+        if x_pos is not None:
+            self.holder_position['x'] = int(x_pos / self.config['display']['voxel_size_um'][0])
+        if y_pos is not None:
+            self.holder_position['y'] = int(y_pos / self.config['display']['voxel_size_um'][1])
+        if z_pos is not None:
+            self.holder_position['z'] = int(z_pos / self.config['display']['voxel_size_um'][2])
+
+        # Regenerate holder points
+        dims = self.voxel_storage.display_dims
+        holder_points = []
+
+        z_top = dims[2] - 1
+        z_bottom = max(0, self.holder_position['z'])
+
+        for z in range(z_bottom, z_top, 2):
+            holder_points.append([self.holder_position['x'], self.holder_position['y'], z])
+
+        if holder_points:
+            self.viewer.layers['Sample Holder'].data = np.array(holder_points)
+
+        # Update rotation indicator position (stays at top)
+        self._update_rotation_indicator()
+
+    def _update_rotation_indicator(self):
+        """Update rotation indicator based on current rotation and holder position."""
+        if not self.viewer or 'Rotation Indicator' not in self.viewer.layers:
+            return
+
+        # Calculate rotated position of indicator
+        angle_rad = np.radians(self.current_rotation.get('rz', 0))
+
+        # Indicator extends from holder center
+        dims = self.voxel_storage.display_dims
+        z_position = dims[2] - 10  # Always near top
+
+        start = np.array([
+            self.holder_position['x'],
+            self.holder_position['y']
+        ])
+
+        # Calculate end point based on rotation
+        dx = self.rotation_indicator_length * np.cos(angle_rad)
+        dy = self.rotation_indicator_length * np.sin(angle_rad)
+
+        end = start + np.array([dx, dy])
+
+        # Update the line
+        self.viewer.layers['Rotation Indicator'].data = [[start, end]]
 
     def _setup_data_layers(self):
         """Setup napari layers for multi-channel data."""
@@ -636,11 +784,14 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Update visualization
         self._update_rotation_axes()
+        self._update_rotation_indicator()  # Update rotation indicator
 
     def _on_z_changed(self, value: int):
         """Handle Z position changes."""
         self.current_z = value
         self.z_position_changed.emit(value)
+        # Update sample holder to show it moving with stage
+        self._update_sample_holder_position(z_pos=value)
 
     def _on_channel_visibility_changed(self, channel_id: int, visible: bool):
         """Handle channel visibility changes."""
