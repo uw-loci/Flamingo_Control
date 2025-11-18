@@ -3,14 +3,18 @@ Base service class for microscope command operations.
 
 Provides common command sending, receiving, and parsing logic
 shared across all subsystem services (Camera, Stage, Laser, etc.).
+
+ENHANCED: This is now the single source of truth for ALL command operations,
+providing compatibility methods for legacy code while maintaining a consistent
+command sending implementation.
 """
 
 import logging
 import struct
 import socket
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 
-from py2flamingo.core.tcp_protocol import CommandDataBits
+from py2flamingo.core.tcp_protocol import CommandDataBits, get_command_name
 
 
 class MicroscopeCommandService:
@@ -90,7 +94,10 @@ class MicroscopeCommandService:
 
             # Send command
             command_socket.sendall(cmd_bytes)
-            self.logger.debug(f"Sent {command_name} (code {command_code})")
+            # Use get_command_name for better logging if command_name is generic
+            if command_name == str(command_code) or 'COMMAND' in command_name.upper():
+                command_name = get_command_name(command_code)
+            self.logger.debug(f"Sent {command_name} (code {command_code:#06x})")
 
             # Read 128-byte response
             ack_response = self._receive_full_bytes(command_socket, 128, timeout=3.0)
@@ -192,7 +199,10 @@ class MicroscopeCommandService:
 
             # Send command
             command_socket.sendall(cmd_bytes)
-            self.logger.debug(f"Sent {command_name} (code {command_code})")
+            # Use get_command_name for better logging if command_name is generic
+            if command_name == str(command_code) or 'COMMAND' in command_name.upper():
+                command_name = get_command_name(command_code)
+            self.logger.debug(f"Sent {command_name} (code {command_code:#06x})")
 
             # Read 128-byte response
             ack_response = self._receive_full_bytes(command_socket, 128, timeout=3.0)
@@ -323,3 +333,233 @@ class MicroscopeCommandService:
             'data': data_buffer,  # ADDED: 72-byte buffer field
             'end_marker': end_marker
         }
+
+    # ============================================================================
+    # COMPATIBILITY METHODS - For consolidating all send_command implementations
+    # ============================================================================
+
+    def send_command_raw(
+        self,
+        command_code: int,
+        command_data: Optional[List] = None,
+        wait_response: bool = False,
+        timeout: float = 5.0
+    ) -> Optional[bytes]:
+        """
+        Legacy compatibility method for direct command sending.
+
+        This method provides backward compatibility for code that uses the
+        old TCPClient.send_command() interface with a list of command data.
+
+        Args:
+            command_code: Command code to send
+            command_data: Optional list with up to 10 elements:
+                [0]: status (ignored, always 0)
+                [1-7]: params (7 int32 values)
+                [8]: value (double)
+                [9]: data (string or bytes, up to 72 bytes)
+            wait_response: If True, wait for and return response (default: False for legacy)
+            timeout: Timeout in seconds if waiting for response
+
+        Returns:
+            None if not waiting for response (fire-and-forget mode)
+            bytes (128-byte response) if wait_response=True
+
+        Example:
+            # Legacy usage
+            service.send_command_raw(0x2001, [0,0,0,1,0,0,0,0,10.5,b""])
+        """
+        # Parse legacy command_data format
+        if command_data:
+            # Extract components from legacy format
+            status = command_data[0] if len(command_data) > 0 else 0
+            params = command_data[1:8] if len(command_data) > 7 else command_data[1:] if len(command_data) > 1 else []
+            value = command_data[8] if len(command_data) > 8 else 0.0
+            data = command_data[9] if len(command_data) > 9 else b''
+        else:
+            status = 0
+            params = []
+            value = 0.0
+            data = b''
+
+        # Convert data to bytes if it's a string
+        if isinstance(data, str):
+            data = data.encode('utf-8')
+
+        # Get human-readable command name for logging
+        cmd_name = get_command_name(command_code)
+        self.logger.debug(f"send_command_raw: {cmd_name} ({command_code:#06x})")
+
+        if wait_response:
+            # Use existing _send_command for response handling
+            result = self._send_command(
+                command_code,
+                cmd_name,
+                params=params,
+                value=value,
+                data=data
+            )
+            return result['raw_response'] if result['success'] else None
+        else:
+            # Fire-and-forget mode - send without waiting for response
+            try:
+                # Ensure params is properly formatted
+                if params is None:
+                    params = [0] * 7
+                elif len(params) < 7:
+                    params = list(params) + [0] * (7 - len(params))
+                else:
+                    params = list(params[:7])  # Take only first 7
+
+                # Encode command
+                cmd_bytes = self.connection.encoder.encode_command(
+                    code=command_code,
+                    status=0,  # Always 0 for sending
+                    params=params,
+                    value=value,
+                    data=data
+                )
+
+                # Get command socket
+                command_socket = self.connection._command_socket
+                if command_socket is None:
+                    self.logger.error("Command socket not available")
+                    return None
+
+                # Send command (fire-and-forget)
+                command_socket.sendall(cmd_bytes)
+                self.logger.debug(f"Sent {cmd_name} (fire-and-forget)")
+                return None
+
+            except Exception as e:
+                self.logger.error(f"Error sending {cmd_name}: {e}")
+                return None
+
+    def send_command(
+        self,
+        cmd: Union['Command', int],
+        timeout: float = 5.0,
+        command_data: Optional[List] = None
+    ) -> bytes:
+        """
+        MVC-compatible command sending method.
+
+        This method accepts either:
+        1. A Command object (for MVC pattern)
+        2. A command code int with optional command_data (for backward compatibility)
+
+        Args:
+            cmd: Command object or command code integer
+            timeout: Response timeout in seconds
+            command_data: Optional command data (only used if cmd is an int)
+
+        Returns:
+            128-byte response from microscope
+
+        Raises:
+            RuntimeError: If not connected
+            ValueError: If command is invalid
+            TimeoutError: If response timeout
+
+        Example:
+            # MVC usage with Command object
+            from py2flamingo.models.command import Command
+            response = service.send_command(Command(code=0x2001, parameters={'value': 10.5}))
+
+            # Legacy usage with int
+            response = service.send_command(0x2001, command_data=[0,0,0,1,0,0,0,0,10.5,b""])
+        """
+        # Handle Command object
+        if hasattr(cmd, 'code'):
+            # Extract from Command object
+            command_code = cmd.code
+            params = cmd.parameters.get('params', [])
+            value = cmd.parameters.get('value', 0.0)
+            data = cmd.parameters.get('data', b'')
+
+            # Get command name
+            cmd_name = get_command_name(command_code)
+            self.logger.debug(f"send_command (Command): {cmd_name} ({command_code:#06x})")
+
+        # Handle integer command code
+        elif isinstance(cmd, int):
+            command_code = cmd
+
+            # Parse legacy command_data if provided
+            if command_data:
+                params = command_data[1:8] if len(command_data) > 7 else command_data[1:] if len(command_data) > 1 else []
+                value = command_data[8] if len(command_data) > 8 else 0.0
+                data = command_data[9] if len(command_data) > 9 else b''
+            else:
+                params = []
+                value = 0.0
+                data = b''
+
+            # Get command name
+            cmd_name = get_command_name(command_code)
+            self.logger.debug(f"send_command (int): {cmd_name} ({command_code:#06x})")
+
+        else:
+            raise ValueError(f"Invalid command type: {type(cmd)}")
+
+        # Use existing _send_command for actual sending
+        result = self._send_command(
+            command_code,
+            cmd_name,
+            params=params,
+            value=value,
+            data=data if isinstance(data, bytes) else data.encode('utf-8') if isinstance(data, str) else b''
+        )
+
+        if result['success']:
+            return result['raw_response']
+        else:
+            error_msg = result.get('error', 'Unknown error')
+            if error_msg == 'timeout':
+                raise TimeoutError(f"Timeout waiting for {cmd_name} response")
+            elif error_msg == 'Not connected to microscope':
+                raise RuntimeError(error_msg)
+            else:
+                raise ValueError(f"Command {cmd_name} failed: {error_msg}")
+
+    def send_command_queued(
+        self,
+        command_code: int,
+        command_data: Optional[List] = None
+    ) -> None:
+        """
+        Queue-based command sending for asynchronous operation.
+
+        This method is for backward compatibility with ConnectionService
+        that uses queue-based command sending.
+
+        Args:
+            command_code: Command code to send
+            command_data: Optional command data list
+
+        Note:
+            This requires the connection to have queue_manager and event_manager
+            attributes for queue-based operation.
+        """
+        if hasattr(self.connection, 'queue_manager') and hasattr(self.connection, 'event_manager'):
+            # Queue-based sending (for ConnectionService compatibility)
+            queue_manager = self.connection.queue_manager
+            event_manager = self.connection.event_manager
+
+            # Put command in queue
+            queue_manager.get_queue('command').put(command_code)
+
+            # Put data if provided
+            if command_data:
+                queue_manager.get_queue('command_data').put(command_data)
+
+            # Set send event
+            event_manager.get_event('send').set()
+
+            # Log the queued command
+            cmd_name = get_command_name(command_code)
+            self.logger.debug(f"Queued command: {cmd_name} ({command_code:#06x})")
+        else:
+            # Fall back to direct sending if no queue manager
+            self.logger.warning("No queue manager available, using direct send")
+            self.send_command_raw(command_code, command_data, wait_response=False)

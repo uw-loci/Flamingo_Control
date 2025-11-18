@@ -59,6 +59,10 @@ class TCPClient:
 
         self.logger = logging.getLogger(__name__)
 
+        # MicroscopeCommandService for centralized command handling
+        # Will be initialized when connected
+        self._command_service = None
+
     def connect(self) -> Tuple[Optional[socket.socket], Optional[socket.socket]]:
         """
         Connect to microscope on both command and live imaging ports.
@@ -82,6 +86,22 @@ class TCPClient:
             self.live_socket.connect((self.ip_address, self.live_port))
             self.live_socket.settimeout(None)
             self.logger.info("Connected to live imaging port")
+
+            # Initialize MicroscopeCommandService for centralized command handling
+            from py2flamingo.services.microscope_command_service import MicroscopeCommandService
+            from py2flamingo.core.protocol_encoder import ProtocolEncoder
+
+            # Create a minimal connection wrapper
+            class ConnectionWrapper:
+                def __init__(wrapper_self):
+                    wrapper_self.encoder = ProtocolEncoder()
+                    wrapper_self._command_socket = self.nuc_socket
+
+                def is_connected(wrapper_self):
+                    return self.nuc_socket is not None
+
+            self._command_service = MicroscopeCommandService(ConnectionWrapper())
+            self.logger.info("MicroscopeCommandService initialized")
 
             return self.nuc_socket, self.live_socket
 
@@ -114,6 +134,10 @@ class TCPClient:
         """
         Send a command to the microscope.
 
+        ENHANCED: Now delegates to MicroscopeCommandService for centralized
+        command handling. This ensures consistent behavior across all
+        command sending implementations.
+
         Args:
             command_code: Command code from CommandCodes
             command_data: List of parameters [status, cmdBits0-6, value, data_string]
@@ -122,53 +146,59 @@ class TCPClient:
         if not self.nuc_socket:
             raise ConnectionError("Not connected to microscope")
 
-        # Default command data if not provided
-        if command_data is None:
-            command_data = [0, 0, 0, 0, 0, 0, 0, 0, 0.0, b'']
-
-        # Pad command_data to required length (10 elements)
-        while len(command_data) < 10:
-            command_data.append(0)
-
-        # Extract data string (last element)
-        data_string = command_data[9]
-        if isinstance(data_string, str):
-            data_string = data_string.encode('utf-8')
-        elif isinstance(data_string, int):
-            data_string = b''
-
-        # Pad to 72 bytes
-        if isinstance(data_string, bytes):
-            data_string = data_string[:72].ljust(72, b'\x00')
+        # Use MicroscopeCommandService if available
+        if self._command_service:
+            # Delegate to centralized service (fire-and-forget mode for legacy compatibility)
+            self._command_service.send_command_raw(command_code, command_data, wait_response=False)
         else:
-            data_string = b'\x00' * 72
+            # Fallback to original implementation if service not initialized
+            # Default command data if not provided
+            if command_data is None:
+                command_data = [0, 0, 0, 0, 0, 0, 0, 0, 0.0, b'']
 
-        # Ensure value is a float
-        value = command_data[8]
-        if not isinstance(value, float):
-            value = float(value)
+            # Pad command_data to required length (10 elements)
+            while len(command_data) < 10:
+                command_data.append(0)
 
-        # Pack command structure
-        command_bytes = self.COMMAND_STRUCT.pack(
-            self.START_MARKER,      # Start marker
-            command_code,           # Command
-            int(command_data[0]),   # Status
-            int(command_data[1]),   # cmdBits0
-            int(command_data[2]),   # cmdBits1
-            int(command_data[3]),   # cmdBits2
-            int(command_data[4]),   # cmdBits3
-            int(command_data[5]),   # cmdBits4
-            int(command_data[6]),   # cmdBits5
-            int(command_data[7]),   # cmdBits6
-            value,                  # value (double)
-            0,                      # cmdDataBits0 (reserved)
-            data_string,            # data (72 bytes)
-            self.END_MARKER         # End marker
-        )
+            # Extract data string (last element)
+            data_string = command_data[9]
+            if isinstance(data_string, str):
+                data_string = data_string.encode('utf-8')
+            elif isinstance(data_string, int):
+                data_string = b''
 
-        # Send command
-        self.nuc_socket.send(command_bytes)
-        self.logger.debug(f"Sent command {command_code}")
+            # Pad to 72 bytes
+            if isinstance(data_string, bytes):
+                data_string = data_string[:72].ljust(72, b'\x00')
+            else:
+                data_string = b'\x00' * 72
+
+            # Ensure value is a float
+            value = command_data[8]
+            if not isinstance(value, float):
+                value = float(value)
+
+            # Pack command structure
+            command_bytes = self.COMMAND_STRUCT.pack(
+                self.START_MARKER,      # Start marker
+                command_code,           # Command
+                int(command_data[0]),   # Status
+                int(command_data[1]),   # cmdBits0
+                int(command_data[2]),   # cmdBits1
+                int(command_data[3]),   # cmdBits2
+                int(command_data[4]),   # cmdBits3
+                int(command_data[5]),   # cmdBits4
+                int(command_data[6]),   # cmdBits5
+                int(command_data[7]),   # cmdBits6
+                value,                  # value (double)
+                0,                      # cmdDataBits0 (reserved)
+                data_string,            # data (72 bytes)
+                self.END_MARKER         # End marker
+            )
+
+            # Send command
+            self.nuc_socket.send(command_bytes)
+            self.logger.debug(f"Sent command {command_code}")
 
     def send_workflow(self, workflow_file: str, command_code: int = None):
         """

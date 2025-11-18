@@ -1,0 +1,151 @@
+# 3D Visualization Configuration
+# This file defines all parameters for the 3D sample chamber visualization
+# avoiding hardcoded values in the implementation
+
+display:
+  # Display resolution (what the user sees in napari)
+  voxel_size_um: [15, 15, 15]  # micrometers per display voxel
+
+  # Rendering settings
+  fps_target: 30
+  downsample_factor: 4  # Downsample live camera feed by this factor
+  max_channels: 4
+  rendering_backend: "napari"  # future: could be "vispy", "vtk"
+
+  # Visual appearance
+  chamber_wireframe_thickness: 2  # voxels
+  objective_indicator_size: 20  # pixels
+  rotation_axes_length: 30  # voxels
+
+storage:
+  # High-resolution storage (2-3x display resolution)
+  # This preserves data quality during rotations
+  voxel_size_um: [5, 5, 5]  # micrometers per storage voxel (3x finer than display)
+
+  # Storage backend settings
+  backend: "sparse"  # "sparse", "zarr", "hdf5"
+  compression: "zstd"  # "none", "gzip", "zstd", "lz4"
+  compression_level: 3
+
+  # Memory management
+  max_memory_mb: 2000
+  cache_size_mb: 500
+  use_memory_mapping: true
+
+  # Chunking for efficient access
+  chunk_size_voxels: [64, 64, 32]
+
+sample_chamber:
+  # Default chamber dimensions (can be overridden per system)
+  outer_dimensions_mm: [12, 12, 45]
+  inner_dimensions_mm: [10, 10, 43]
+  wall_thickness_mm: 1.0
+
+  # Material properties
+  material: "glass"
+  refractive_index: 1.52
+
+  # Sample region (where high-res data is stored)
+  sample_region_radius_um: 3000  # Radius around center for high-res storage
+  sample_region_center_um: [5000, 5000, 21500]  # Default center position
+
+channels:
+  # Default channel configurations
+  - id: 0
+    name: "DAPI"
+    default_colormap: "cyan"
+    default_visible: true
+    update_strategy: "latest"  # "latest", "maximum", "average", "additive"
+    blend_mode: "additive"
+    opacity: 0.8
+
+  - id: 1
+    name: "GFP"
+    default_colormap: "green"
+    default_visible: true
+    update_strategy: "latest"
+    blend_mode: "additive"
+    opacity: 0.8
+
+  - id: 2
+    name: "RFP"
+    default_colormap: "red"
+    default_visible: true
+    update_strategy: "latest"
+    blend_mode: "additive"
+    opacity: 0.8
+
+  - id: 3
+    name: "Brightfield"
+    default_colormap: "gray"
+    default_visible: false
+    update_strategy: "average"  # Average to reduce noise
+    blend_mode: "translucent"
+    opacity: 0.5
+
+rotation:
+  # Rotation handling parameters
+  interpolation_method: "linear"  # "nearest", "linear", "cubic"
+
+  # Anti-aliasing during rotation
+  enable_antialiasing: true
+  antialias_kernel_size: 3
+
+  # Rotation limits (degrees)
+  limits:
+    rx: [-180, 180]
+    ry: [-180, 180]
+    rz: [0, 360]  # Full rotation around Z
+
+  # Default rotation center (can be calibrated)
+  rotation_center_um: [5000, 5000, 21500]
+
+coordinate_system:
+  # Define coordinate system conventions
+  axes_orientation: "right_handed"  # or "left_handed"
+
+  # Axis definitions relative to microscope
+  x_axis: "stage_left_right"
+  y_axis: "stage_front_back"
+  z_axis: "vertical_up"
+
+  # Origin location
+  origin: "chamber_bottom_center"
+
+performance:
+  # Performance optimization settings
+  enable_gpu_acceleration: false  # Future: CUDA/OpenCL acceleration
+
+  # Level of detail (LOD) for zooming
+  enable_lod: true
+  lod_levels: 3
+  lod_distance_thresholds: [100, 500, 1000]  # voxels
+
+  # Update throttling
+  min_update_interval_ms: 33  # ~30 FPS max
+  batch_update_size: 1000  # Max voxels per update batch
+
+  # Background processing
+  use_threading: true
+  num_worker_threads: 2
+
+data_persistence:
+  # Auto-save settings
+  enable_autosave: false
+  autosave_interval_minutes: 10
+  autosave_directory: "~/flamingo_3d_sessions"
+
+  # Session management
+  max_session_history: 10
+  compress_saved_sessions: true
+
+  # Export formats
+  supported_export_formats: ["tiff", "hdf5", "zarr", "npy"]
+  default_export_format: "tiff"
+
+# Future multicamera support placeholder
+multicamera:
+  enabled: false  # Set to true when implementing X-SPIM support
+  max_cameras: 2
+  view_fusion_method: "weighted_average"  # "maximum", "deconvolution"
+  registration_method: "fiducial"  # "fiducial", "correlation", "manual"

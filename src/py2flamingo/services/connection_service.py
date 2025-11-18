@@ -60,15 +60,19 @@ class ConnectionService:
         self.live_client = None
         self.thread_manager = None
         self._connected = False
-        
+
         # Connection data for backward compatibility
         self.connection_data = None
         self.threads = None
-        
+
         # Default settings
         self.wf_zstack = "ZStack.txt"
         self.LED_on = "50.0 1"
         self.LED_off = "0.00 0"
+
+        # MicroscopeCommandService for centralized command handling
+        # Will be initialized when connected
+        self._command_service = None
     
     def connect(self, ip: str | None = None, port: int | None = None) -> bool:
         """
@@ -102,16 +106,35 @@ class ConnectionService:
             
             # Store connection data for backward compatibility
             self.connection_data = [
-                self.nuc_client, 
-                self.live_client, 
-                self.wf_zstack, 
-                self.LED_on, 
+                self.nuc_client,
+                self.live_client,
+                self.wf_zstack,
+                self.LED_on,
                 self.LED_off
             ]
-            
+
+            # Initialize MicroscopeCommandService with connection
+            # Create a minimal connection wrapper that provides required interfaces
+            from py2flamingo.services.microscope_command_service import MicroscopeCommandService
+            from py2flamingo.core.protocol_encoder import ProtocolEncoder
+
+            # Create a connection wrapper for MicroscopeCommandService
+            class ConnectionWrapper:
+                def __init__(wrapper_self, service):
+                    wrapper_self._service = service
+                    wrapper_self.encoder = ProtocolEncoder()
+                    wrapper_self._command_socket = service.nuc_client
+                    wrapper_self.queue_manager = service.queue_manager
+                    wrapper_self.event_manager = service.event_manager
+
+                def is_connected(wrapper_self):
+                    return wrapper_self._service._connected
+
+            self._command_service = MicroscopeCommandService(ConnectionWrapper(self))
+
             # Start communication threads
             self._start_threads()
-            
+
             self._connected = True
             self.logger.info("Connection established successfully")
             return True
@@ -166,18 +189,26 @@ class ConnectionService:
     def send_command(self, command: int, data: Optional[List] = None) -> None:
         """
         Send a command to the microscope.
-        
+
+        ENHANCED: Now delegates to MicroscopeCommandService for centralized
+        command handling while maintaining queue-based operation.
+
         Args:
             command: Command code
             data: Optional command data
         """
         if not self._connected:
             raise RuntimeError("Not connected to microscope")
-        
-        self.queue_manager.put_nowait('command', command)
-        if data:
-            self.queue_manager.put_nowait('command_data', data)
-        self.event_manager.set_event('send')
+
+        # Use MicroscopeCommandService for centralized handling
+        if self._command_service:
+            self._command_service.send_command_queued(command, data)
+        else:
+            # Fallback to direct queue operation if service not initialized
+            self.queue_manager.put_nowait('command', command)
+            if data:
+                self.queue_manager.put_nowait('command_data', data)
+            self.event_manager.set_event('send')
     
     def send_workflow(self, workflow_dict: dict) -> None:
         """
@@ -308,6 +339,7 @@ class MVCConnectionService:
             queue_manager: Optional queue manager for data flow
         """
         from py2flamingo.models.connection import ConnectionModel
+        from py2flamingo.services.microscope_command_service import MicroscopeCommandService
 
         self.tcp_connection = tcp_connection
         self.encoder = encoder
@@ -321,6 +353,10 @@ class MVCConnectionService:
         # Callback listener for unsolicited messages (motion-stopped, etc.)
         self._callback_listener: Optional['CallbackListener'] = None
         self._socket_lock = threading.Lock()  # Coordinate send_command and callback listener
+
+        # Create MicroscopeCommandService for centralized command handling
+        # Note: We pass 'self' as the connection to provide access to encoder and sockets
+        self._command_service = MicroscopeCommandService(self)
 
     def connect(self, config: 'ConnectionConfig') -> None:
         """
@@ -476,6 +512,10 @@ class MVCConnectionService:
         """
         Send encoded command and get response.
 
+        ENHANCED: Now delegates to MicroscopeCommandService for centralized
+        command handling. This ensures consistent behavior across all
+        command sending paths.
+
         Args:
             cmd: Command object to send
             timeout: Response timeout in seconds (default: 5.0)
@@ -489,133 +529,14 @@ class MVCConnectionService:
             ConnectionError: If send fails
             TimeoutError: If response timeout
         """
-        import time
-
-        if not self.is_connected():
-            error_msg = "Cannot send command - not connected to microscope"
-            self.logger.error(error_msg)
-            raise RuntimeError(error_msg)
-
+        # Delegate to MicroscopeCommandService for centralized handling
         try:
-            # Validate command object
-            if not hasattr(cmd, 'code'):
-                raise ValueError("Invalid command object: missing 'code' attribute")
-
-            if not isinstance(cmd.code, int):
-                raise ValueError(f"Command code must be int, got {type(cmd.code)}")
-
-            # Extract params and value from command parameters dict with defaults
-            params = cmd.parameters.get('params', None) if hasattr(cmd, 'parameters') else None
-            value = cmd.parameters.get('value', 0.0) if hasattr(cmd, 'parameters') else 0.0
-            data = cmd.parameters.get('data', b'') if hasattr(cmd, 'parameters') else b''
-
-            # Validate parameter types
-            if value is not None and not isinstance(value, (int, float)):
-                raise ValueError(f"Command value must be numeric, got {type(value)}")
-
-            if data is not None and not isinstance(data, bytes):
-                raise ValueError(f"Command data must be bytes, got {type(data)}")
-
-            # Encode command using ProtocolEncoder
-            try:
-                cmd_bytes = self.encoder.encode_command(
-                    code=cmd.code,
-                    status=0,
-                    params=params,
-                    value=value,
-                    data=data
-                )
-            except Exception as e:
-                error_msg = f"Command encoding failed: {e}"
-                self.logger.error(error_msg)
-                raise ValueError(error_msg) from e
-
-            # Validate encoded command
-            if not cmd_bytes or len(cmd_bytes) == 0:
-                raise ValueError("Encoder returned empty command bytes")
-
-            # Send via command socket
-            if self._command_socket is None:
-                raise ConnectionError("Command socket not available")
-
-            try:
-                self.logger.debug(
-                    f"Sending command {cmd.code} (params={params}, value={value}, "
-                    f"{len(cmd_bytes)} bytes)"
-                )
-                self._command_socket.sendall(cmd_bytes)
-
-            except BrokenPipeError as e:
-                error_msg = f"Connection broken while sending command: {e}"
-                self.logger.error(error_msg)
-                self._update_error_state(error_msg)
-                raise ConnectionError(error_msg) from e
-
-            except socket.error as e:
-                error_msg = f"Socket error sending command: {e}"
-                self.logger.error(error_msg)
-                self._update_error_state(error_msg)
-                raise ConnectionError(error_msg) from e
-
-            # Receive response with timeout
-            try:
-                # Set timeout for receive
-                original_timeout = self._command_socket.gettimeout()
-                self._command_socket.settimeout(timeout)
-
-                # Receive response (expecting 128 bytes)
-                response = self._receive_full_response(
-                    self._command_socket,
-                    expected_size=128,
-                    timeout=timeout
-                )
-
-                # Restore original timeout
-                self._command_socket.settimeout(original_timeout)
-
-            except socket.timeout:
-                error_msg = f"Response timeout after {timeout}s for command {cmd.code}"
-                self.logger.error(error_msg)
-                # Try to restore timeout
-                try:
-                    self._command_socket.settimeout(original_timeout)
-                except:
-                    pass
-                self._update_error_state(error_msg)
-                raise TimeoutError(error_msg)
-
-            except socket.error as e:
-                error_msg = f"Socket error receiving response: {e}"
-                self.logger.error(error_msg)
-                self._update_error_state(error_msg)
-                raise ConnectionError(error_msg) from e
-
-            # Validate response
-            if not response:
-                error_msg = f"Empty response for command {cmd.code}"
-                self.logger.error(error_msg)
-                raise ConnectionError(error_msg)
-
-            if len(response) != 128:
-                self.logger.warning(
-                    f"Received {len(response)} bytes, expected 128 for command {cmd.code}"
-                )
-
-            self.logger.debug(
-                f"Command {cmd.code} completed successfully, "
-                f"received {len(response)} bytes"
-            )
-            return response
-
-        except (RuntimeError, ValueError, ConnectionError, TimeoutError):
-            # Re-raise expected exceptions
-            raise
-
+            return self._command_service.send_command(cmd, timeout)
         except Exception as e:
-            error_msg = f"Unexpected error sending command {cmd.code}: {e}"
-            self.logger.exception(error_msg)
-            self._update_error_state(error_msg)
-            raise ConnectionError(error_msg) from e
+            # Update error state if needed
+            if isinstance(e, (ConnectionError, TimeoutError)):
+                self._update_error_state(str(e))
+            raise
 
     def _receive_full_response(
         self,

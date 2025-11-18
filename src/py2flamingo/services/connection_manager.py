@@ -2,6 +2,8 @@
 # src/py2flamingo/services/communication/connection_manager.py
 """
 Service for managing microscope communication.
+
+ENHANCED: Now uses EnhancedThreadManager for consistent thread management.
 """
 
 import socket
@@ -13,20 +15,24 @@ import time
 import numpy as np
 
 from ..models.microscope import Position
+from .communication.enhanced_thread_manager import EnhancedThreadManager
 
 
 class ConnectionManager:
     """
     Manages TCP/IP communication with the microscope.
-    
+
     This service handles all low-level communication including
     command sending, response handling, and data streaming.
+
+    ENHANCED: Now uses centralized thread management for better control
+    and monitoring of communication threads.
     """
-    
+
     def __init__(self, ip_address: str, port: int):
         """
         Initialize connection manager.
-        
+
         Args:
             ip_address: Microscope IP address
             port: Communication port
@@ -34,23 +40,22 @@ class ConnectionManager:
         self.ip_address = ip_address
         self.port = port
         self.logger = logging.getLogger(__name__)
-        
+
         # Socket and connection state
         self.socket: Optional[socket.socket] = None
         self.connected = False
-        
+
         # Command queues
         self.command_queue = Queue()
         self.response_queue = Queue()
-        
+
         # Data callbacks
         self.position_callbacks: List[Callable] = []
         self.image_callbacks: List[Callable] = []
-        
-        # Thread management
-        self.threads = []
-        self.stop_event = threading.Event()
-        
+
+        # ENHANCED: Use centralized thread manager
+        self.thread_manager = EnhancedThreadManager(logger_name=__name__)
+
         # Command labels (from global_objects)
         self.command_labels = self._init_command_labels()
     
@@ -85,50 +90,62 @@ class ConnectionManager:
     
     def disconnect(self):
         """Disconnect from microscope."""
-        self.stop_event.set()
-        
-        # Wait for threads to stop
-        for thread in self.threads:
-            thread.join(timeout=1.0)
-        
+        # ENHANCED: Use thread manager for graceful shutdown
+        stop_results = self.thread_manager.stop_all(timeout=3.0)
+
+        for name, stopped in stop_results.items():
+            if not stopped:
+                self.logger.warning(f"Thread '{name}' did not stop gracefully")
+
         if self.socket:
             try:
                 self.socket.close()
             except:
                 pass
-        
+
         self.connected = False
         self.logger.info("Disconnected from microscope")
     
     def _start_threads(self):
-        """Start communication threads."""
-        # Command sender thread
-        sender_thread = threading.Thread(
+        """Start communication threads using enhanced thread manager."""
+        # ENHANCED: Use thread manager for all thread operations
+
+        # Start command sender thread
+        if not self.thread_manager.start_thread(
+            name="command-sender",
             target=self._command_sender_loop,
             daemon=True
-        )
-        sender_thread.start()
-        self.threads.append(sender_thread)
-        
-        # Response receiver thread
-        receiver_thread = threading.Thread(
+        ):
+            self.logger.error("Failed to start command sender thread")
+            raise RuntimeError("Failed to start communication threads")
+
+        # Start response receiver thread
+        if not self.thread_manager.start_thread(
+            name="response-receiver",
             target=self._response_receiver_loop,
             daemon=True
-        )
-        receiver_thread.start()
-        self.threads.append(receiver_thread)
-        
-        # Data processor thread
-        processor_thread = threading.Thread(
-            target=self._data_processor_loop,
-            daemon=True
-        )
-        processor_thread.start()
-        self.threads.append(processor_thread)
+        ):
+            self.logger.error("Failed to start response receiver thread")
+            raise RuntimeError("Failed to start communication threads")
+
+        # Start data processor thread using queue processor helper
+        # This demonstrates the enhanced pattern
+        if not self.thread_manager.start_queue_processor(
+            name="data-processor",
+            input_queue=self.response_queue,
+            processor=self._process_response_batch,
+            batch_size=1,  # Process one at a time for now
+            timeout=0.1
+        ):
+            self.logger.error("Failed to start data processor thread")
+            raise RuntimeError("Failed to start communication threads")
+
+        self.logger.info("All communication threads started successfully")
     
     def _command_sender_loop(self):
         """Send commands from queue to microscope."""
-        while not self.stop_event.is_set():
+        # ENHANCED: Use thread manager's stop checking
+        while not self.thread_manager.is_stopped():
             try:
                 command = self.command_queue.get(timeout=0.1)
                 if self.socket and self.connected:
@@ -138,14 +155,17 @@ class ConnectionManager:
                 continue
             except Exception as e:
                 self.logger.error(f"Error sending command: {e}")
-    
+
     def _response_receiver_loop(self):
         """Receive responses from microscope."""
-        while not self.stop_event.is_set():
+        # ENHANCED: Use thread manager's stop checking
+        while not self.thread_manager.is_stopped():
             if not self.socket or not self.connected:
-                time.sleep(0.1)
+                # Use thread manager's wait for better shutdown response
+                if self.thread_manager.wait_for_stop(0.1):
+                    break
                 continue
-            
+
             try:
                 self.socket.settimeout(0.1)
                 data = self.socket.recv(4096)
@@ -156,17 +176,21 @@ class ConnectionManager:
                 continue
             except Exception as e:
                 self.logger.error(f"Error receiving response: {e}")
-    
-    def _data_processor_loop(self):
-        """Process received data and trigger callbacks."""
-        while not self.stop_event.is_set():
+
+    def _process_response_batch(self, batch: List[bytes]) -> None:
+        """
+        Process a batch of responses (used by queue processor).
+
+        ENHANCED: New method for batch processing pattern.
+
+        Args:
+            batch: List of response data bytes
+        """
+        for data in batch:
             try:
-                data = self.response_queue.get(timeout=0.1)
                 self._process_response(data)
-            except Empty:
-                continue
             except Exception as e:
-                self.logger.error(f"Error processing data: {e}")
+                self.logger.error(f"Error processing response batch: {e}")
     
     def _process_response(self, data: bytes):
         """Process response data and trigger appropriate callbacks."""
@@ -305,3 +329,34 @@ class ConnectionManager:
     def stop_workflow(self):
         """Stop current workflow."""
         self.send_command("STOP_WORKFLOW\n")
+
+    def get_thread_status(self) -> Dict[str, Any]:
+        """
+        Get status of all communication threads.
+
+        ENHANCED: New method for thread health monitoring.
+
+        Returns:
+            Dictionary with thread status information
+        """
+        return self.thread_manager.get_all_status()
+
+    def is_healthy(self) -> bool:
+        """
+        Check if all communication threads are healthy.
+
+        ENHANCED: New health check method.
+
+        Returns:
+            True if all threads are running properly
+        """
+        if not self.connected:
+            return False
+
+        status = self.get_thread_status()
+        for thread_name, thread_info in status.items():
+            if thread_info.get('state') != 'running':
+                self.logger.warning(f"Thread '{thread_name}' is not running: {thread_info.get('state')}")
+                return False
+
+        return True

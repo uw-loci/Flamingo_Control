@@ -392,7 +392,223 @@ All command sending (including debug queries) uses this pattern:
 
 See `position_controller.py:debug_query_command()` for reference implementation.
 
+## Error Handling Guidelines
+
+### Unified Error Format Requirements
+
+**IMPORTANT:** All new code and refactored code MUST use the unified error handling framework defined in `src/py2flamingo/core/errors.py`. This ensures consistent error reporting, better debugging, and a professional user experience.
+
+### Error Handling Principles
+
+1. **Use FlamingoError and Subclasses**: Never raise generic Python exceptions (ValueError, RuntimeError, etc.) directly
+2. **Include Rich Context**: Every error MUST include WHERE, WHAT, and WHY information
+3. **Separate User vs Technical Messages**: User-friendly messages for UI, technical details for logs
+4. **Use Error Codes**: Enable programmatic error handling with specific error codes
+5. **Log at Appropriate Levels**: Use severity levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+
+### Required Error Components
+
+Every error MUST include:
+
+```python
+from py2flamingo.core.errors import (
+    FlamingoError, ErrorCode, ErrorContext, ErrorSeverity,
+    ConnectionError, HardwareError, ValidationError, TimeoutError
+)
+
+# Create context for WHERE and WHAT
+context = ErrorContext(
+    module="module_name",           # Which module
+    function="function_name",       # Which function
+    operation="what_was_attempted", # What operation
+    component="affected_component", # Which component (e.g., "Y-axis")
+    attempted_value=value,          # What value caused the error
+    valid_range="0.0-12.0mm"       # What the valid range is
+)
+
+# Raise appropriate error type
+raise HardwareError(
+    code=ErrorCode.HARDWARE_STAGE_LIMIT_EXCEEDED,
+    message="Position out of range",  # User-friendly
+    technical_details=f"Y={value}mm exceeds max 12.0mm",  # Technical
+    context=context,
+    severity=ErrorSeverity.ERROR
+)
+```
+
+### Error Categories and When to Use Them
+
+| Category | Use For | Example Codes |
+|----------|---------|---------------|
+| **ConnectionError** | Network/socket issues | CONNECTION_TIMEOUT, CONNECTION_REFUSED |
+| **HardwareError** | Microscope hardware problems | HARDWARE_STAGE_MOVEMENT_FAILED |
+| **ValidationError** | Input validation failures | VALIDATION_OUT_OF_RANGE |
+| **TimeoutError** | Operation timeouts | TIMEOUT_MOTION_COMPLETE |
+
+### Service Layer Pattern
+
+```python
+class ServiceClass:
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        self.error_logger = ErrorLogger(self.logger)
+
+    def method(self, param):
+        context = ErrorContext(
+            module="service_name",
+            function="method",
+            operation="operation_description"
+        )
+
+        try:
+            # Operation
+            result = self._do_something()
+            if not result.success:
+                # Use the error from result
+                self.error_logger.log_error(result.error)
+                raise result.error
+
+        except socket.timeout as e:
+            # Wrap standard exceptions
+            error = self.error_logger.wrap_and_log(
+                e,
+                ErrorCode.TIMEOUT_COMMAND_RESPONSE,
+                "Operation timed out",
+                context=context
+            )
+            raise error from e
+```
+
+### Controller Layer Pattern
+
+Controllers can either:
+
+1. **Return tuples with error objects** (for backward compatibility):
+```python
+def connect(self, ip: str, port: int) -> Tuple[bool, str, Optional[FlamingoError]]:
+    try:
+        self._service.connect(ip, port)
+        return (True, f"Connected to {ip}:{port}", None)
+    except FlamingoError as e:
+        self.error_logger.log_error(e)
+        return (False, e.get_user_message(), e)
+```
+
+2. **Raise exceptions** (preferred for new code):
+```python
+def connect(self, ip: str, port: int) -> None:
+    # Let FlamingoError propagate to view layer
+    self._service.connect(ip, port)
+```
+
+### View Layer Pattern
+
+```python
+try:
+    self.controller.operation()
+    self.show_success("Operation completed")
+
+except FlamingoError as e:
+    # Error already logged by lower layers
+    formatter = ErrorFormatter()
+
+    # Show appropriate dialog based on severity
+    if e.severity in [ErrorSeverity.ERROR, ErrorSeverity.CRITICAL]:
+        QMessageBox.critical(
+            self,
+            f"{e.category.value.title()} Error",
+            formatter.format_for_user(e)
+        )
+    else:
+        QMessageBox.warning(
+            self,
+            f"{e.category.value.title()}",
+            formatter.format_for_user(e)
+        )
+
+except Exception as e:
+    # Unexpected error - should be rare
+    self.logger.exception("Unexpected error")
+    QMessageBox.critical(
+        self,
+        "Unexpected Error",
+        "An unexpected error occurred. Check the log file for details."
+    )
+```
+
+### DO NOT Do This
+
+```python
+# BAD: Generic exception with string message
+raise ValueError("Position out of range")
+
+# BAD: Logging without context
+self.logger.error("Failed")
+
+# BAD: Returning None on error
+if error:
+    return None
+
+# BAD: Catching all exceptions
+except Exception as e:
+    print(str(e))
+
+# BAD: Tuple returns without error object
+return (False, "Connection failed")
+```
+
+### Error Code Ranges
+
+Error codes are organized by category:
+
+- **1000-1999**: Connection errors
+- **2000-2999**: Hardware errors
+- **3000-3999**: Validation errors
+- **4000-4999**: Timeout errors
+- **5000-5999**: Filesystem errors
+- **6000-6999**: Configuration errors
+- **7000-7999**: State errors
+- **8000-8999**: Protocol errors
+- **9000-9999**: System errors
+
+When adding new error codes, add them to the appropriate range in `src/py2flamingo/core/errors.py`.
+
+### Migration from Old Patterns
+
+When refactoring existing code:
+
+1. **Replace generic exceptions** with FlamingoError subclasses
+2. **Add ErrorContext** with complete WHERE/WHAT/WHY information
+3. **Use ErrorLogger** for consistent logging
+4. **Preserve backward compatibility** during transition (can return error objects in tuples)
+5. **Update tests** to expect FlamingoError types
+
+### Testing Error Handling
+
+```python
+def test_invalid_position():
+    """Test that invalid position raises appropriate error."""
+    controller = StageController()
+
+    with pytest.raises(HardwareError) as exc_info:
+        controller.move_to_position(y=15.0)  # Max is 12.0
+
+    error = exc_info.value
+    assert error.code == ErrorCode.HARDWARE_STAGE_LIMIT_EXCEEDED
+    assert error.context.component == "Y-axis"
+    assert error.context.attempted_value == 15.0
+    assert "12.0" in error.context.valid_range
+```
+
+### Benefits of Unified Error Handling
+
+1. **Consistent User Experience**: All errors look and behave the same way
+2. **Better Debugging**: Rich context shows exactly what went wrong and why
+3. **Programmatic Handling**: Error codes enable specific error recovery
+4. **Professional Logs**: Structured logging with appropriate severity levels
+5. **Maintainable Code**: Clear patterns for error handling throughout codebase
+
 ---
 
-**Last Updated:** 2024-11-05
+**Last Updated:** 2024-11-17
 **Maintained By:** Claude Code assistant

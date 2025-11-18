@@ -7,7 +7,7 @@ import tempfile
 import os
 
 from py2flamingo.services.connection_service import ConnectionService
-from py2flamingo.services.communication.tcp_client import TCPClient
+from py2flamingo.tcp_client import TCPClient  # Use main TCPClient, not test version
 from tests.test_utils import NoOpThreadManager
 
 from unittest.mock import patch, MagicMock
