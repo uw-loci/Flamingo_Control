@@ -1,5 +1,34 @@
 # Claude Code Project Guidelines
 
+## Environment Setup
+
+### Python Virtual Environment
+
+This project uses a Python virtual environment located at `.venv/` in the project root.
+
+**To activate the virtual environment:**
+```bash
+source .venv/bin/activate
+```
+
+**To install/update dependencies:**
+```bash
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+**To run tests or scripts:**
+```bash
+source .venv/bin/activate
+python test_3d_visualization.py  # or any other script
+```
+
+**Important Notes:**
+- Always activate the virtual environment before running Python commands
+- The `.venv/` directory is already configured with project dependencies
+- Use `requirements.txt` for production dependencies
+- Use `requirements-minimal-3d.txt` for minimal 3D visualization setup
+
 ## Development Workflow
 
 ### Remote Testing Requirement
