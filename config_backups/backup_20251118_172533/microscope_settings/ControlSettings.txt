@@ -1,0 +1,56 @@
+  <Laser parameters>
+  Laser 1 wave length (nm) = 405
+  Laser 1 max power (mw) = 20
+  Laser 1 max current (A) = 0
+  Laser 2 wave length (nm) = 488
+  Laser 2 max power (mw) = 20
+  Laser 2 max current (A) = 0
+  Laser 3 wave length (nm) = 561
+  Laser 3 max power (mw) = 20
+  Laser 3 max current (A) = 0
+  Laser 4 wave length (nm) = 640
+  Laser 4 max power (mw) = 20
+  Laser 4 max current (A) = 0
+  Laser lines = 4
+  </Laser parameters>
+  <Stage parameters>
+  Stage min x-axis (mm) = 0.00000
+  Stage max x-axis (mm) = 26.00000
+  Stage min y-axis (mm) = 0.00000
+  Stage max y-axis (mm) = 26.00000
+  Stage min z-axis (mm) = 0.00000
+  Stage max z-axis (mm) = 26.00000
+  Stage min r-axis (mm) = -3600.0000
+  Stage max r-axis (mm) = 3600.0000
+  </Stage parameters>
+  <Attached devices>
+  Attached stage x-axis = 1
+  Stage type X model = PI C-884 stage controller
+  Stage type X software version = FW_ARM: V01.017 FW_DSP: V0027 FW_FPGA: V0117
+  Attached stage y-axis = 1
+  Stage type Y model = PI C-884 stage controller
+  Stage type Y software version = FW_ARM: V01.017 FW_DSP: V0027 FW_FPGA: V0117
+  Attached stage z-axis = 1
+  Stage type Z model = PI C-884 stage controller
+  Stage type Z software version = FW_ARM: V01.017 FW_DSP: V0027 FW_FPGA: V0117
+  Attached stage r-axis = 1
+  Stage type r model = PI C-867 stage controller
+  Stage type r software version = FW_DSP: V02.005 FW_FPGA: V0107
+  Attached laser line 1 = 1
+  Attached laser line 2 = 1
+  Attached laser line 3 = 1
+  Attached laser line 4 = 1
+  Laser type = CLE
+  Attached camera 1 = 1
+  Name camera 1 = PCO Panda
+  Type camera 1 = 5632
+  SN camera 1 = 14402101
+  Attached camera 2 = 0
+  Name camera 2 = 0
+  Type camera 2 = 0
+  SN camera 2 = 0
+  Attached LED = 1
+  Attached galvo = 1
+  Attached MEMS mirror = 0
+  Attached filter wheel = 1
+  </Attached devices>

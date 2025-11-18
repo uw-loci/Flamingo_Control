@@ -367,11 +367,11 @@ class ConfigMigrationService:
         config_path = self.base_path / "saved_configurations.json"
         if config_path.exists():
             with open(config_path) as f:
-                saved_configs = json.load(f)
-                # Extract last used microscope
-                if saved_configs:
+                config_data = json.load(f)
+                # Extract last used microscope from configurations list
+                if 'configurations' in config_data and config_data['configurations']:
                     app_settings['application']['startup']['last_microscope'] = \
-                        saved_configs[0].get('name', 'unknown')
+                        config_data['configurations'][0].get('name', 'unknown')
 
         # Read microscope-specific output directories from workflow files
         self._extract_workflow_directories(app_settings)

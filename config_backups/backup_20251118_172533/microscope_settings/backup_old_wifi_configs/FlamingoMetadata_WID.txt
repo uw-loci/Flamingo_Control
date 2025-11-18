@@ -1,0 +1,112 @@
+<MetaData>
+  <Experiment>
+    Name = 
+    Active = true
+    Image file location = 
+    Purpose = 
+    Dynamic parameter = 
+    Experiment log file = 
+  </Experiment>
+  <Project>
+    Creator(s) = 
+    Collaborator(s) = 
+    Funding reference = 
+  </Project>
+  <Sample>
+    Species = 
+    Global ID for line, strain, genotype = 
+    Local ID = 
+    Protocol(s) husbandry, straining, mounting = 
+    Experiment type = 
+    Orientation display = 
+    Orientation sheet = 
+  </Sample>
+  <Image>
+    <Size>
+      Size = 
+      StepSizeX = 
+      StepSizeY = 
+      StepSizeZ = 
+      StepSizeT = 
+      Channels = 
+      Slices = 
+      TSize = 
+      XSize = 
+      YSize = 
+      Gbytes = 
+      Files = 
+      Dimension order = 
+    </Size>
+    <Channel>
+      Channel = 
+      Channel number = 
+      Fluorophore = 
+      Representation = 
+    </Channel>
+    <Image Type>
+      Bit depth = 
+      Byte order = 
+      Offset = 
+    </Image Type>
+  </Image>
+  <Light Sheet Parameters>
+    <Illumination>
+      Illumination lens(es) = 
+      Illumination wavelength(s) = 
+      Zoom = 
+      Beam type = 
+      Multi-sided = 
+      Waist thickness = 
+      Raleigh length = 
+      Waist position = 
+      Axial step size = 
+      Waist focusing = 
+      De-striping method = 
+    </Illumination>
+    <Detection>
+      Detection lens(es) = 
+      Detection wavelength(s) = 
+      Detector type = 
+      Detector model = 
+      Shutter = 
+      Pixel size = 
+      Exposure time = 
+      Multi-view = 
+      Image rotation/flip = 
+      POV tiling = 
+      PSF = 
+    </Detection>
+  </Light Sheet Parameters>
+  <Data State>
+    Stitching = 
+    Stitching software = 
+    Image adjustments = 
+  </Data State>
+  <Analysis>
+    Analysis = 
+  </Analysis>
+</MetaData>
+<Instrument>
+  <Type>
+    Microscope type = T, X, L, V SPIM
+    Microscope name = zion
+    Microscope address = 10.129.37.20 53717
+    Microscope builder = Builder
+    Objective lens magnification = 10
+    Tube lens design focal length (mm) = 200
+    Tube lens length (mm) = 200
+  </Type>
+  <Hardware>
+    Stage XYZ ID = 
+    Stage rotational ID = 
+    Filter wheel ID = 
+    Galvo ID = 
+    MEMS mirror ID = 
+    Laser ID = 
+    Camera 1 ID = 
+    Camera 2 ID = 
+  </Hardware>
+  <Sample>
+    Sample temperature = 
+  </Sample>
+</Instrument>

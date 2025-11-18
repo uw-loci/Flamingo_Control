@@ -469,13 +469,8 @@ class Sample3DVisualizationWindow(QWidget):
             # Create napari viewer
             self.viewer = napari.Viewer(ndisplay=3, show=False)
 
-            # Setup chamber visualization
-            self._setup_chamber_visualization()
-
-            # Setup data layers
-            self._setup_data_layers()
-
-            # Embed viewer in our widget
+            # Embed viewer in our widget FIRST before adding layers
+            # This ensures the viewer is properly initialized
             from napari.qt import Window
             napari_window = self.viewer.window
             viewer_widget = napari_window._qt_viewer
@@ -485,6 +480,17 @@ class Sample3DVisualizationWindow(QWidget):
                 layout = self.viewer_placeholder.parent().layout()
                 layout.replaceWidget(self.viewer_placeholder, viewer_widget)
                 self.viewer_placeholder.deleteLater()
+
+            # Now setup visualization components
+            try:
+                self._setup_chamber_visualization()
+            except Exception as e:
+                logger.warning(f"Failed to setup chamber visualization: {e}")
+
+            try:
+                self._setup_data_layers()
+            except Exception as e:
+                logger.warning(f"Failed to setup data layers: {e}")
 
             logger.info("napari viewer initialized successfully")
 
@@ -519,16 +525,20 @@ class Sample3DVisualizationWindow(QWidget):
             name='Objective',
             size=20,
             face_color='yellow',
-            edge_width=2,  # Use edge_width instead of edge_color
+            border_color='orange',  # napari >= 0.5.0 uses border_* parameters
+            border_width=0.1,  # Relative to point size
             opacity=0.8
         )
 
         # Add rotation axes (will be updated dynamically)
+        # Initialize with dummy data since napari requires non-None data
+        dummy_vectors = np.zeros((3, 2, 3))  # 3 vectors, 2 points (start, direction), 3D
         self.viewer.add_vectors(
-            data=None,
+            dummy_vectors,
             name='Rotation Axes',
             edge_color=['red', 'green', 'blue'],
-            edge_width=3
+            edge_width=3,
+            visible=False  # Hide initially until we have real data
         )
 
     def _generate_chamber_wireframe(self) -> np.ndarray:
@@ -605,6 +615,8 @@ class Sample3DVisualizationWindow(QWidget):
                 name='Sample Holder',
                 size=holder_radius_voxels * 2,  # Diameter for point size
                 face_color='gray',
+                border_color='darkgray',
+                border_width=0.05,  # Small border
                 opacity=0.6,
                 shading='spherical'
             )
@@ -829,15 +841,16 @@ class Sample3DVisualizationWindow(QWidget):
         # Apply rotation
         rotated_axes = axes @ self.transformer.rotation_matrix.T
 
-        # Create vector data for napari
+        # Create vector data for napari (n, 2, d) format
+        # n=3 vectors, 2 components (position, direction), d=3 dimensions
         origin = np.array([100, 100, 50])
-        vectors = np.array([
-            [origin, rotated_axes[0]],
-            [origin, rotated_axes[1]],
-            [origin, rotated_axes[2]]
-        ])
+        vectors = np.zeros((3, 2, 3))
+        for i in range(3):
+            vectors[i, 0, :] = origin  # Starting position
+            vectors[i, 1, :] = rotated_axes[i]  # Direction vector
 
         self.viewer.layers['Rotation Axes'].data = vectors
+        self.viewer.layers['Rotation Axes'].visible = True  # Make visible
 
     def _update_visualization(self):
         """Update the visualization with latest data."""

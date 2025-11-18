@@ -1,0 +1,33 @@
+{
+  "microscope_name": "localhost",
+  "position_history": {
+    "max_size": 100,
+    "display_count": 20
+  },
+  "stage_limits": {
+    "x": {
+      "min": 1.0,
+      "max": 12.31,
+      "unit": "mm"
+    },
+    "y": {
+      "min": 5.0,
+      "max": 20.0,
+      "unit": "mm",
+      "note": "Sample-dependent. Min 5.0 (lowest sample can go with high mount, centered). Max 20.0 but could be anything the stage allows."
+    },
+    "z": {
+      "min": 12.5,
+      "max": 26.0,
+      "unit": "mm"
+    },
+    "r": {
+      "min": -720.0,
+      "max": 720.0,
+      "unit": "degrees"
+    }
+  },
+  "version": "1.0",
+  "last_updated": "2025-11-13",
+  "notes": "Settings file for mock/test server (localhost). Uses same stage limits as zion for realistic testing."
+}
