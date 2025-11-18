@@ -1,0 +1,396 @@
+# Application Settings Configuration
+# This file contains all software and GUI-related settings
+# These are user preferences and application behavior settings
+# that can be modified without affecting hardware operation
+#
+# Format: YAML
+# Version: 1.0
+# Last Updated: 2024-11-18
+
+# =============================================================================
+# GENERAL APPLICATION SETTINGS
+# =============================================================================
+application:
+  # Application identification
+  name: "Flamingo Control"
+  version: "2.0.0"
+  environment: "production"  # Options: development, testing, production
+
+  # Startup behavior
+  startup:
+    auto_connect: false  # Automatically connect to last microscope
+    last_microscope: "n7"  # Last connected microscope
+    restore_window_positions: true  # Remember window layouts
+    check_for_updates: true  # Check for software updates
+    splash_screen: true  # Show splash screen on startup
+    startup_delay_ms: 500  # Delay before main window appears
+
+  # Shutdown behavior
+  shutdown:
+    confirm_exit: true  # Ask for confirmation before exiting
+    save_session: true  # Save current session state
+    emergency_stop_on_exit: true  # Send emergency stop to microscope
+
+# =============================================================================
+# USER INTERFACE SETTINGS
+# =============================================================================
+user_interface:
+  # Theme and appearance
+  appearance:
+    theme: "dark"  # Options: dark, light, auto (follow system)
+    color_scheme: "blue"  # Options: blue, green, purple, orange
+    font_family: "Segoe UI"  # Default font
+    font_size: 10  # Base font size in points
+    icon_size: 24  # Toolbar icon size in pixels
+
+  # Window management
+  windows:
+    # Main window
+    main_window:
+      default_width: 1920
+      default_height: 1080
+      start_maximized: false
+      remember_size: true
+      remember_position: true
+
+    # Dockable panels
+    panels:
+      control_panel:
+        visible: true
+        docked: true
+        position: "left"  # Options: left, right, top, bottom, floating
+        width: 300
+
+      status_panel:
+        visible: true
+        docked: true
+        position: "bottom"
+        height: 150
+
+      image_viewer:
+        visible: true
+        docked: true
+        position: "center"
+
+  # Display preferences
+  display:
+    # Image display settings
+    image_display:
+      auto_scale: true  # Auto-scale images to fit window
+      interpolation: "bilinear"  # Options: nearest, bilinear, bicubic
+      colormap: "gray"  # Default colormap for single channel
+      show_scale_bar: true
+      show_crosshair: false
+      show_grid: false
+      grid_spacing_um: 100
+
+    # Multi-channel display
+    channels:
+      merge_channels: true  # Show merged view by default
+      channel_colors:
+        405nm: "#00FFFF"  # Cyan for DAPI
+        488nm: "#00FF00"  # Green for GFP
+        561nm: "#FF0000"  # Red for RFP
+        640nm: "#FF00FF"  # Magenta for far red
+
+    # Histogram settings
+    histogram:
+      auto_contrast: true  # Auto-adjust contrast
+      percentile_low: 0.1  # Lower percentile for auto-contrast
+      percentile_high: 99.9  # Upper percentile for auto-contrast
+      bit_depth_display: 16  # Display bit depth
+
+# =============================================================================
+# WORKFLOW SETTINGS
+# =============================================================================
+workflow:
+  # Workflow execution
+  execution:
+    auto_save_workflows: true  # Save workflows before execution
+    confirm_overwrite: true  # Confirm before overwriting workflows
+    pause_between_positions: false  # Pause at each position
+    continue_on_error: false  # Continue workflow if error occurs
+
+  # Default directories
+  directories:
+    workflows_dir: "workflows/"  # Workflow templates directory
+    output_base_dir: "/data/microscopy/"  # Base directory for data output
+    temp_dir: "/tmp/flamingo/"  # Temporary files directory
+
+    # Per-microscope output directories
+    # These override the base directory for specific microscopes
+    microscope_output_dirs:
+      n7: "/media/deploy/MSN_LS/"
+      zion: "/media/deploy/ctlsm1/"
+      localhost: "/tmp/test_data/"
+
+  # File naming
+  file_naming:
+    # Pattern for output files
+    # Variables: {date}, {time}, {microscope}, {sample}, {channel}, {position}, {z}
+    pattern: "{date}_{microscope}_{sample}_{channel}_pos{position}_z{z:04d}.tiff"
+    date_format: "%Y%m%d"  # Format for {date}
+    time_format: "%H%M%S"  # Format for {time}
+
+  # Auto-save settings
+  auto_save:
+    enabled: true
+    interval_minutes: 10  # Save workflow progress every N minutes
+    keep_versions: 5  # Number of auto-save versions to keep
+
+# =============================================================================
+# POSITION MANAGEMENT
+# =============================================================================
+positions:
+  # Position history
+  history:
+    max_positions: 100  # Maximum positions to remember
+    display_count: 20  # Number to display in quick-access list
+    auto_save: true  # Automatically save position history
+    group_by_session: true  # Group positions by session
+
+  # Position presets
+  presets:
+    show_in_toolbar: true  # Show preset buttons in toolbar
+    confirm_move: true  # Confirm before moving to preset
+    max_presets: 20  # Maximum number of presets
+
+  # Movement settings
+  movement:
+    jog_mode: "continuous"  # Options: continuous, step
+    step_size_um: 10  # Step size for step mode
+    slow_speed_factor: 0.1  # Speed reduction for fine control
+    acceleration_curve: "smooth"  # Options: linear, smooth, quick
+
+  # Position display
+  display:
+    decimal_places: 3  # Decimal places for position display
+    units: "mm"  # Options: mm, um
+    show_relative: false  # Show relative to reference position
+    update_rate_hz: 10  # Position display update rate
+
+# =============================================================================
+# IMAGE ACQUISITION
+# =============================================================================
+acquisition:
+  # Live view settings
+  live_view:
+    enabled: true
+    frame_rate_limit: 30  # Maximum FPS for live view
+    auto_exposure: true  # Auto-adjust exposure
+    binning: 2  # Binning for live view (1, 2, or 4)
+    reduced_resolution: true  # Use reduced resolution for performance
+
+  # Snapshot settings
+  snapshot:
+    auto_save: false  # Automatically save snapshots
+    file_format: "tiff"  # Options: tiff, png, jpeg, hdf5
+    compression: "lzw"  # Options: none, lzw, deflate (for TIFF)
+    include_metadata: true  # Embed metadata in image files
+
+  # Z-stack settings
+  z_stack:
+    preview_projection: true  # Show maximum projection preview
+    step_optimization: true  # Optimize step size based on NA
+    drift_correction: false  # Enable drift correction
+    auto_focus_interval: 10  # Auto-focus every N slices
+
+  # Time-lapse settings
+  time_lapse:
+    min_interval_seconds: 1.0
+    max_interval_seconds: 3600.0
+    keep_shutter_open: false  # Keep shutter open between frames
+
+# =============================================================================
+# DATA PROCESSING
+# =============================================================================
+processing:
+  # Image processing
+  image:
+    auto_background_subtract: false  # Subtract background automatically
+    auto_deconvolve: false  # Apply deconvolution
+    auto_denoise: false  # Apply denoising
+    flat_field_correction: false  # Apply flat-field correction
+
+  # Real-time processing
+  realtime:
+    enabled: false  # Enable real-time processing
+    gpu_acceleration: false  # Use GPU if available
+    max_threads: 4  # Maximum processing threads
+
+  # Post-processing
+  post_processing:
+    auto_stitch: false  # Automatically stitch tiles
+    auto_fuse: false  # Fuse multi-view data
+    auto_project: false  # Create projections
+    projection_type: "maximum"  # Options: maximum, average, minimum
+
+# =============================================================================
+# LOGGING AND DEBUGGING
+# =============================================================================
+logging:
+  # Log levels
+  level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  console_output: true  # Show logs in console
+  file_output: true  # Save logs to file
+
+  # Log files
+  files:
+    directory: "logs/"  # Log directory
+    filename_pattern: "flamingo_{date}.log"
+    max_file_size_mb: 100  # Maximum log file size
+    backup_count: 10  # Number of backup logs to keep
+    rotation: "daily"  # Options: daily, weekly, size
+
+  # Performance logging
+  performance:
+    enabled: false  # Log performance metrics
+    sample_rate: 1.0  # Fraction of operations to profile
+    include_memory: false  # Include memory usage
+
+# =============================================================================
+# COMMUNICATION SETTINGS
+# =============================================================================
+communication:
+  # Connection settings
+  connection:
+    timeout_seconds: 5.0  # Connection timeout
+    retry_attempts: 3  # Number of connection retries
+    retry_delay_seconds: 1.0  # Delay between retries
+    keepalive_interval_seconds: 30.0  # Keepalive ping interval
+
+  # Command queue
+  command_queue:
+    max_size: 1000  # Maximum commands in queue
+    priority_enabled: true  # Enable command priorities
+    batch_commands: true  # Batch compatible commands
+
+  # Response handling
+  response:
+    timeout_seconds: 2.0  # Response timeout
+    buffer_size_bytes: 4096  # Response buffer size
+    error_retry: true  # Retry on error responses
+
+# =============================================================================
+# SAFETY AND LIMITS
+# =============================================================================
+safety:
+  # User confirmation
+  confirmations:
+    high_laser_power: true  # Confirm laser >50% power
+    long_acquisition: true  # Confirm acquisition >1 hour
+    large_dataset: true  # Confirm dataset >10GB
+    stage_limits: true  # Confirm moving near limits
+
+  # Soft limits (additional safety margins)
+  soft_limits:
+    laser_power_max_percent: 80  # Maximum laser power
+    exposure_max_ms: 5000  # Maximum exposure time
+    z_stack_max_slices: 10000  # Maximum Z-stack size
+    time_lapse_max_frames: 100000  # Maximum time-lapse frames
+
+  # Warnings
+  warnings:
+    show_temperature_warnings: true  # Show temperature warnings
+    show_memory_warnings: true  # Show low memory warnings
+    show_disk_space_warnings: true  # Show low disk space warnings
+    warning_threshold_gb: 10  # Disk space warning threshold
+
+# =============================================================================
+# ADVANCED SETTINGS
+# =============================================================================
+advanced:
+  # Developer options
+  developer:
+    debug_mode: false  # Enable debug features
+    show_developer_menu: false  # Show developer menu
+    enable_console: false  # Enable Python console
+    mock_hardware: false  # Use mock hardware for testing
+
+  # Performance tuning
+  performance:
+    image_cache_size_mb: 500  # Image cache size
+    undo_levels: 10  # Number of undo levels
+    parallel_downloads: 2  # Parallel file transfers
+    lazy_loading: true  # Lazy load large datasets
+
+  # Network
+  network:
+    use_compression: true  # Compress network data
+    compression_level: 6  # Compression level (1-9)
+    multicast_enabled: false  # Enable multicast discovery
+    upnp_enabled: false  # Enable UPnP for NAT traversal
+
+  # Plugins
+  plugins:
+    enabled: false  # Enable plugin system
+    directory: "plugins/"  # Plugin directory
+    auto_load: false  # Auto-load plugins at startup
+    check_signatures: true  # Verify plugin signatures
+
+# =============================================================================
+# USER PREFERENCES
+# =============================================================================
+preferences:
+  # User identity
+  user:
+    name: ""  # User name for metadata
+    email: ""  # User email for metadata
+    organization: ""  # Organization name
+
+  # Regional settings
+  regional:
+    language: "en"  # Interface language
+    date_format: "ISO"  # Options: ISO, US, EU
+    decimal_separator: "."  # Decimal separator
+    thousands_separator: ","  # Thousands separator
+    timezone: "local"  # Timezone for timestamps
+
+  # Accessibility
+  accessibility:
+    high_contrast: false  # High contrast mode
+    large_fonts: false  # Use larger fonts
+    screen_reader: false  # Screen reader support
+    reduced_motion: false  # Reduce animations
+
+  # Notifications
+  notifications:
+    desktop_notifications: true  # Show desktop notifications
+    sound_enabled: true  # Play notification sounds
+    email_notifications: false  # Send email notifications
+    notification_email: ""  # Email for notifications
+
+# =============================================================================
+# EXPERIMENTAL FEATURES
+# =============================================================================
+experimental:
+  # Features in development
+  features:
+    ai_autofocus: false  # AI-powered autofocus
+    smart_acquisition: false  # ML-guided acquisition
+    cloud_sync: false  # Cloud data sync
+    remote_control: false  # Remote control via web
+
+  # Beta testing
+  beta:
+    enabled: false  # Enable beta features
+    report_usage: false  # Send usage statistics
+    auto_update_beta: false  # Auto-update to beta versions
+
+# =============================================================================
+# METADATA
+# =============================================================================
+metadata:
+  # Configuration metadata
+  config_version: "1.0"
+  schema_version: "2024.11.18"
+  created_date: "2024-11-18"
+  modified_date: "2024-11-18"
+  modified_by: "user"
+
+  # Session info
+  session:
+    last_session_id: ""
+    last_session_date: ""
+    total_sessions: 0
+    total_runtime_hours: 0.0

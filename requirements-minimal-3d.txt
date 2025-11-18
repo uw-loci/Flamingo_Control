@@ -1,0 +1,21 @@
+# Minimal requirements for 3D visualization
+# For a lighter installation without all napari plugins
+# Install with: pip install -r requirements-minimal-3d.txt
+
+# Core dependencies (must have)
+PyQt5>=5.15.0
+numpy>=1.21.0
+scipy>=1.8.0
+
+# 3D Visualization essentials
+napari>=0.4.17  # Core napari without extra plugins
+sparse>=0.13.0  # Sparse array support
+PyYAML>=6.0  # Configuration files
+
+# Note: This minimal setup may have reduced functionality:
+# - No TIFF export/import (add tifffile if needed)
+# - No HDF5 support (add h5py if needed)
+# - No Zarr support (add zarr and numcodecs if needed)
+# - Fewer napari plugins
+
+# To get full functionality, use requirements.txt instead

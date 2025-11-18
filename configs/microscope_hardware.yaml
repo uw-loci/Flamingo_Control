@@ -1,0 +1,384 @@
+# Microscope Hardware Configuration
+# This file contains all hardware-specific settings for the microscope
+# These values are typically retrieved from the microscope server and should
+# match the physical hardware configuration
+#
+# Format: YAML
+# Version: 1.0
+# Last Updated: 2024-11-18
+
+# =============================================================================
+# MICROSCOPE IDENTIFICATION
+# =============================================================================
+microscope:
+  # Unique identifier for this microscope
+  name: "n7"
+  type: "Light Sheet"
+  model: "Custom SPIM"
+  serial_number: "N7-2024"
+
+  # Network configuration for connecting to this microscope
+  connection:
+    ip_address: "192.168.1.1"  # Primary IP address
+    command_port: 53717         # Command/control port
+    live_port: 53718           # Live streaming port (typically command_port + 1)
+    timeout_seconds: 5.0       # Connection timeout
+
+# =============================================================================
+# LASER CONFIGURATION
+# =============================================================================
+lasers:
+  # Each laser is identified by wavelength (nm)
+  # Power values are in percentage (0-100)
+  # Current values are in milliamps
+
+  405nm:
+    enabled: true
+    wavelength: 405
+    color_name: "DAPI"
+    max_power_percent: 100
+    default_power_percent: 10
+    max_current_ma: 100
+    warmup_time_seconds: 2.0
+    filter_wheel_position: 1  # Which filter position for this laser
+
+  488nm:
+    enabled: true
+    wavelength: 488
+    color_name: "GFP"
+    max_power_percent: 100
+    default_power_percent: 15
+    max_current_ma: 150
+    warmup_time_seconds: 2.0
+    filter_wheel_position: 2
+
+  561nm:
+    enabled: true
+    wavelength: 561
+    color_name: "RFP"
+    max_power_percent: 100
+    default_power_percent: 20
+    max_current_ma: 200
+    warmup_time_seconds: 2.0
+    filter_wheel_position: 3
+
+  640nm:
+    enabled: true
+    wavelength: 640
+    color_name: "Far Red"
+    max_power_percent: 100
+    default_power_percent: 25
+    max_current_ma: 250
+    warmup_time_seconds: 2.0
+    filter_wheel_position: 4
+
+# =============================================================================
+# STAGE CONFIGURATION
+# =============================================================================
+stage:
+  # Stage model and specifications
+  model: "ASI MS-2000"
+  serial_number: "MS2000-1234"
+
+  # Stage limits in millimeters
+  # Note: These are hardware limits - software may impose stricter limits
+  # based on sample holder or safety considerations
+  limits:
+    x_axis:
+      min_mm: 1.0      # Hardware minimum
+      max_mm: 12.31    # Hardware maximum
+      soft_min_mm: 1.5  # Software-enforced minimum (safety margin)
+      soft_max_mm: 12.0 # Software-enforced maximum (safety margin)
+      resolution_um: 0.1  # Position resolution in micrometers
+      speed_mm_per_sec: 7.0  # Maximum movement speed
+
+    y_axis:
+      min_mm: 5.0      # Sample-dependent minimum
+      max_mm: 20.0     # Sample-dependent maximum
+      soft_min_mm: 5.5
+      soft_max_mm: 19.5
+      resolution_um: 0.1
+      speed_mm_per_sec: 7.0
+
+    z_axis:
+      min_mm: 12.5
+      max_mm: 26.0
+      soft_min_mm: 13.0
+      soft_max_mm: 25.5
+      resolution_um: 0.1
+      speed_mm_per_sec: 2.0  # Z typically slower for precision
+
+    r_axis:  # Rotation axis
+      min_degrees: -720.0  # Two full rotations CCW
+      max_degrees: 720.0   # Two full rotations CW
+      soft_min_degrees: -360.0
+      soft_max_degrees: 360.0
+      resolution_degrees: 0.001
+      speed_degrees_per_sec: 45.0
+
+  # Homing configuration
+  homing:
+    enabled: true
+    sequence: ["z", "x", "y", "r"]  # Order to home axes
+    timeout_seconds: 30.0
+
+# =============================================================================
+# CAMERA CONFIGURATION
+# =============================================================================
+camera:
+  # Camera identification
+  manufacturer: "PCO"
+  model: "Panda 4.2"
+  serial_number: "14402101"
+  type_code: 5632
+
+  # Sensor specifications
+  sensor:
+    width_pixels: 2048
+    height_pixels: 2048
+    pixel_size_um: 6.5  # Physical pixel size in micrometers
+    bit_depth: 16      # 16-bit images
+    max_frame_rate_fps: 40.0
+
+  # Acquisition settings
+  acquisition:
+    default_exposure_ms: 50.0
+    min_exposure_ms: 1.0
+    max_exposure_ms: 10000.0
+    default_binning: 1  # 1x1 binning
+    supported_binning: [1, 2, 4]
+
+  # Region of Interest (ROI) settings
+  roi:
+    # Default full frame
+    default_x: 0
+    default_y: 0
+    default_width: 2048
+    default_height: 2048
+    # Minimum ROI size
+    min_width: 128
+    min_height: 128
+
+# =============================================================================
+# FILTER WHEEL CONFIGURATION
+# =============================================================================
+filter_wheel:
+  # Filter wheel model
+  model: "Sutter Lambda 10-3"
+  positions: 8  # Number of filter positions
+
+  # Filter position definitions
+  # Position numbers are 0-indexed internally but displayed as 1-8 to users
+  filters:
+    - position: 0
+      name: "Empty"
+      description: "No filter"
+      encoder_count: 30720
+      wavelength_nm: null
+
+    - position: 1
+      name: "DAPI"
+      description: "DAPI emission filter"
+      encoder_count: 34816
+      wavelength_nm: 460
+      bandwidth_nm: 50
+
+    - position: 2
+      name: "GFP"
+      description: "GFP emission filter"
+      encoder_count: 3072
+      wavelength_nm: 525
+      bandwidth_nm: 50
+
+    - position: 3
+      name: "RFP"
+      description: "RFP emission filter"
+      encoder_count: 7168
+      wavelength_nm: 600
+      bandwidth_nm: 50
+
+    - position: 4
+      name: "Far Red"
+      description: "Far red emission filter"
+      encoder_count: 11264
+      wavelength_nm: 700
+      bandwidth_nm: 50
+
+    - position: 5
+      name: "Multiband"
+      description: "Quad band emission filter"
+      encoder_count: 15360
+      wavelength_nm: null  # Multiple wavelengths
+
+    - position: 6
+      name: "Brightfield"
+      description: "Brightfield/white light"
+      encoder_count: 19456
+      wavelength_nm: null
+
+    - position: 7
+      name: "Custom"
+      description: "User-defined filter"
+      encoder_count: 23552
+      wavelength_nm: null
+
+# =============================================================================
+# ILLUMINATION CONFIGURATION
+# =============================================================================
+illumination:
+  # Light sheet illumination settings
+  light_sheet:
+    # Left and right illumination paths
+    left_path:
+      enabled: true
+      x_offset_um: -50.0  # Calibration offset
+      y_offset_um: 10.0
+      amplitude: 1.0      # Modulation amplitude
+      frequency_hz: 100.0 # Scanning frequency
+
+    right_path:
+      enabled: true
+      x_offset_um: 50.0
+      y_offset_um: -10.0
+      amplitude: 1.0
+      frequency_hz: 100.0
+
+  # LED illumination (for brightfield/widefield)
+  led:
+    # RGB LED configuration
+    red:
+      enabled: true
+      min_intensity_dac: 3200000   # Minimum DAC value
+      max_intensity_dac: 6553500   # Maximum DAC value
+      default_percent: 50
+      wavelength_nm: 625
+
+    green:
+      enabled: true
+      min_intensity_dac: 3200000
+      max_intensity_dac: 6553500
+      default_percent: 50
+      wavelength_nm: 525
+
+    blue:
+      enabled: true
+      min_intensity_dac: 3200000
+      max_intensity_dac: 6553500
+      default_percent: 50
+      wavelength_nm: 470
+
+# =============================================================================
+# OBJECTIVE LENSES
+# =============================================================================
+objectives:
+  # Detection objective
+  detection:
+    manufacturer: "Olympus"
+    model: "XLUMPLFLN 20XW"
+    magnification: 20.0
+    numerical_aperture: 1.0
+    working_distance_mm: 2.0
+    immersion_medium: "water"
+
+  # Illumination objectives (left and right)
+  illumination_left:
+    manufacturer: "Olympus"
+    model: "UMPLFLN 10XW"
+    magnification: 10.0
+    numerical_aperture: 0.3
+    working_distance_mm: 3.5
+    immersion_medium: "water"
+
+  illumination_right:
+    manufacturer: "Olympus"
+    model: "UMPLFLN 10XW"
+    magnification: 10.0
+    numerical_aperture: 0.3
+    working_distance_mm: 3.5
+    immersion_medium: "water"
+
+# =============================================================================
+# SAMPLE CHAMBER
+# =============================================================================
+sample_chamber:
+  # Physical dimensions in millimeters
+  outer_dimensions:
+    width_mm: 12.0
+    depth_mm: 12.0
+    height_mm: 45.0
+
+  inner_dimensions:
+    width_mm: 10.0
+    depth_mm: 10.0
+    height_mm: 43.0
+
+  wall_thickness_mm: 1.0
+
+  # Sample mounting
+  sample_holder:
+    type: "FEP tube"  # Fluorinated ethylene propylene
+    diameter_mm: 2.0
+    usable_length_mm: 40.0
+
+  # Imaging region (sphere around sample)
+  imaging_region:
+    center_x_mm: 5.0    # Center of chamber
+    center_y_mm: 5.0
+    center_z_mm: 21.5   # Midpoint of chamber height
+    radius_mm: 3.0      # Spherical imaging region
+
+# =============================================================================
+# CALIBRATION DATA
+# =============================================================================
+calibration:
+  # Pixel to world coordinate calibration
+  pixel_calibration:
+    um_per_pixel_x: 0.325  # After magnification
+    um_per_pixel_y: 0.325
+
+  # Stage position to image correlation
+  stage_correlation:
+    flip_x: false  # Image X corresponds to stage X direction
+    flip_y: true   # Image Y is inverted relative to stage Y
+    rotation_degrees: 0.0  # No rotation between stage and camera
+
+  # Last calibration date
+  last_calibrated: "2024-11-01"
+  calibration_due: "2025-02-01"  # Recalibrate every 3 months
+
+# =============================================================================
+# SAFETY LIMITS
+# =============================================================================
+safety:
+  # Emergency stop configuration
+  emergency_stop:
+    enabled: true
+    gpio_pin: 17  # Physical E-stop button GPIO
+
+  # Laser safety interlocks
+  laser_interlock:
+    enabled: true
+    door_sensor_gpio: 27
+    override_password_hash: null  # Set to SHA256 hash of override password
+
+  # Temperature monitoring
+  temperature_limits:
+    laser_max_celsius: 40.0
+    camera_max_celsius: 35.0
+    stage_max_celsius: 35.0
+    shutdown_threshold_celsius: 45.0
+
+# =============================================================================
+# METADATA
+# =============================================================================
+metadata:
+  # Configuration metadata
+  config_version: "1.0"
+  schema_version: "2024.11.18"
+  created_date: "2024-11-18"
+  modified_date: "2024-11-18"
+  modified_by: "system"
+
+  # Validation
+  checksum: null  # Will be computed on save
+  validated: false  # Will be set true after validation
