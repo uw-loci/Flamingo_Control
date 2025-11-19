@@ -1228,51 +1228,63 @@ class Sample3DVisualizationWindow(QWidget):
         sample_size_voxels = int(self.test_sample_size_mm / voxel_size_mm)
 
         # Create 4-channel test data (raw, unrotated)
+        # Make Y dimension 2x larger to test out-of-bounds behavior
         self.test_sample_data_raw = {}
+        data_shape = (sample_size_voxels * 2, sample_size_voxels, sample_size_voxels)  # (Y, X, Z) - Y doubled
 
         for ch_id in range(4):
             # Create a 3D volume for this channel
-            data = np.zeros((sample_size_voxels, sample_size_voxels, sample_size_voxels), dtype=np.uint16)
+            data = np.zeros(data_shape, dtype=np.uint16)
 
             if ch_id == 0:  # DAPI - small spheres (nuclei)
                 # Create 3-5 nuclei
                 for _ in range(4):
-                    cx, cy, cz = np.random.randint(10, sample_size_voxels-10, 3)
+                    cx = np.random.randint(10, data_shape[1]-10)
+                    cy = np.random.randint(10, data_shape[0]-10)
+                    cz = np.random.randint(10, data_shape[2]-10)
                     radius = np.random.randint(3, 6)
-                    y, x, z = np.ogrid[:sample_size_voxels, :sample_size_voxels, :sample_size_voxels]
+                    y, x, z = np.ogrid[:data_shape[0], :data_shape[1], :data_shape[2]]
                     mask = (x-cx)**2 + (y-cy)**2 + (z-cz)**2 <= radius**2
                     data[mask] = np.random.randint(30000, 50000)
 
             elif ch_id == 1:  # GFP - diffuse signal
-                # Create diffuse cloud
-                center = sample_size_voxels // 2
-                y, x, z = np.ogrid[:sample_size_voxels, :sample_size_voxels, :sample_size_voxels]
-                dist = np.sqrt((x-center)**2 + (y-center)**2 + (z-center)**2)
-                data = np.clip(20000 * np.exp(-dist/(sample_size_voxels/4)), 0, 65535).astype(np.uint16)
+                # Create diffuse cloud (elongated in Y)
+                center_x = data_shape[1] // 2
+                center_y = data_shape[0] // 2
+                center_z = data_shape[2] // 2
+                y, x, z = np.ogrid[:data_shape[0], :data_shape[1], :data_shape[2]]
+                dist = np.sqrt((x-center_x)**2 + ((y-center_y)*0.5)**2 + (z-center_z)**2)
+                data = np.clip(20000 * np.exp(-dist/(data_shape[1]/4)), 0, 65535).astype(np.uint16)
 
             elif ch_id == 2:  # RFP - linear structures
                 # Create some "fibers"
                 for _ in range(3):
-                    start = np.random.randint(0, sample_size_voxels, 3)
+                    start = np.array([np.random.randint(0, data_shape[0]),
+                                     np.random.randint(0, data_shape[1]),
+                                     np.random.randint(0, data_shape[2])])
                     direction = np.random.randn(3)
                     direction /= np.linalg.norm(direction)
-                    for t in range(sample_size_voxels//2):
+                    for t in range(data_shape[0]//2):
                         pos = start + t * direction
-                        px, py, pz = np.clip(pos.astype(int), 0, sample_size_voxels-1)
+                        py, px, pz = np.clip(pos.astype(int),
+                                            [0, 0, 0],
+                                            [data_shape[0]-1, data_shape[1]-1, data_shape[2]-1])
                         # Add thickness
                         for dx in range(-1, 2):
                             for dy in range(-1, 2):
                                 for dz in range(-1, 2):
                                     x, y, z = px+dx, py+dy, pz+dz
-                                    if 0 <= x < sample_size_voxels and 0 <= y < sample_size_voxels and 0 <= z < sample_size_voxels:
+                                    if 0 <= x < data_shape[1] and 0 <= y < data_shape[0] and 0 <= z < data_shape[2]:
                                         data[y, x, z] = max(data[y, x, z], 25000)
 
             elif ch_id == 3:  # Far-Red - sparse bright spots
                 # Random bright spots
                 for _ in range(5):
-                    cx, cy, cz = np.random.randint(5, sample_size_voxels-5, 3)
+                    cx = np.random.randint(5, data_shape[1]-5)
+                    cy = np.random.randint(5, data_shape[0]-5)
+                    cz = np.random.randint(5, data_shape[2]-5)
                     radius = np.random.randint(2, 4)
-                    y, x, z = np.ogrid[:sample_size_voxels, :sample_size_voxels, :sample_size_voxels]
+                    y, x, z = np.ogrid[:data_shape[0], :data_shape[1], :data_shape[2]]
                     mask = (x-cx)**2 + (y-cy)**2 + (z-cz)**2 <= radius**2
                     data[mask] = np.random.randint(35000, 55000)
 
@@ -1284,7 +1296,7 @@ class Sample3DVisualizationWindow(QWidget):
             max_val = np.max(data)
             logger.info(f"Channel {ch_id}: {nonzero_count} non-zero voxels, max intensity: {max_val}")
 
-        logger.info(f"Generated test sample data: {sample_size_voxels}x{sample_size_voxels}x{sample_size_voxels} voxels per channel")
+        logger.info(f"Generated test sample data: {data_shape} voxels per channel (Y dimension 2x for testing)")
 
     def _update_sample_data_visualization(self):
         """Update the sample data visualization with position and rotation transforms."""
@@ -1326,6 +1338,11 @@ class Sample3DVisualizationWindow(QWidget):
         voxel_size_mm = self.coord_mapper.voxel_size_mm
         sample_size_voxels = int(self.test_sample_size_mm / voxel_size_mm)
 
+        # Get actual data shape (Y dimension is 2x)
+        first_data = next(iter(self.test_sample_data_raw.values()))
+        data_y_size, data_x_size, data_z_size = first_data.shape  # (Y, X, Z) order
+
+        print(f"DEBUG: Sample data shape (Y,X,Z): {first_data.shape}")
         print(f"DEBUG: Starting channel updates, {len(self.test_sample_data_raw)} channels, rotation={rotation_deg}°")
 
         # Update each channel
@@ -1346,34 +1363,59 @@ class Sample3DVisualizationWindow(QWidget):
             logger.info(f"Ch{ch_id} rotation: {nonzero_before} → {nonzero_after} non-zero voxels")
 
             # Transpose to (Z, Y, X) for napari
-            rotated_transposed = np.transpose(rotated_data, (2, 0, 1))
+            rotated_transposed = np.transpose(rotated_data, (2, 0, 1))  # Now (Z, Y, X)
 
-            # Calculate bounds in napari coordinates
-            half_size = sample_size_voxels // 2
-            z_start = max(0, sample_z - half_size)
-            z_end = min(self.voxel_storage.display_dims[0], sample_z + half_size)
-            y_start = max(0, sample_y - half_size)
-            y_end = min(self.voxel_storage.display_dims[1], sample_y + half_size)
-            x_start = max(0, sample_x - half_size)
-            x_end = min(self.voxel_storage.display_dims[2], sample_x + half_size)
+            # Get rotated data dimensions
+            rot_z_size, rot_y_size, rot_x_size = rotated_transposed.shape
 
-            bounds = (z_start, z_end, y_start, y_end, x_start, x_end)
+            # Calculate half sizes for centering
+            half_z = rot_z_size // 2
+            half_y = rot_y_size // 2
+            half_x = rot_x_size // 2
 
-            # Extract the portion that fits in bounds
-            data_z_size = z_end - z_start
-            data_y_size = y_end - y_start
-            data_x_size = x_end - x_start
+            # Calculate data position in napari space (may be out of bounds!)
+            data_z_start = sample_z - half_z
+            data_z_end = sample_z + half_z
+            data_y_start = sample_y - half_y
+            data_y_end = sample_y + half_y
+            data_x_start = sample_x - half_x
+            data_x_end = sample_x + half_x
 
-            # Get corresponding region from rotated data
-            src_z_start = max(0, half_size - (sample_z - z_start))
-            src_y_start = max(0, half_size - (sample_y - y_start))
-            src_x_start = max(0, half_size - (sample_x - x_start))
+            print(f"DEBUG: Data position before clipping: Z=[{data_z_start},{data_z_end}], Y=[{data_y_start},{data_y_end}], X=[{data_x_start},{data_x_end}]")
 
+            # Calculate intersection with visible volume (clip to bounds)
+            visible_z_start = max(0, data_z_start)
+            visible_z_end = min(self.voxel_storage.display_dims[0], data_z_end)
+            visible_y_start = max(0, data_y_start)
+            visible_y_end = min(self.voxel_storage.display_dims[1], data_y_end)
+            visible_x_start = max(0, data_x_start)
+            visible_x_end = min(self.voxel_storage.display_dims[2], data_x_end)
+
+            # Check if any part is visible
+            if (visible_z_start >= visible_z_end or
+                visible_y_start >= visible_y_end or
+                visible_x_start >= visible_x_end):
+                print(f"DEBUG: Ch{ch_id} completely outside visible volume, skipping")
+                continue
+
+            bounds = (visible_z_start, visible_z_end, visible_y_start, visible_y_end, visible_x_start, visible_x_end)
+
+            # Calculate corresponding region in rotated data
+            src_z_start = visible_z_start - data_z_start
+            src_z_end = src_z_start + (visible_z_end - visible_z_start)
+            src_y_start = visible_y_start - data_y_start
+            src_y_end = src_y_start + (visible_y_end - visible_y_start)
+            src_x_start = visible_x_start - data_x_start
+            src_x_end = src_x_start + (visible_x_end - visible_x_start)
+
+            # Extract visible portion
             data_to_place = rotated_transposed[
-                src_z_start:src_z_start + data_z_size,
-                src_y_start:src_y_start + data_y_size,
-                src_x_start:src_x_start + data_x_size
+                src_z_start:src_z_end,
+                src_y_start:src_y_end,
+                src_x_start:src_x_end
             ]
+
+            print(f"DEBUG: Visible portion: {data_to_place.shape}, non-zero: {np.count_nonzero(data_to_place)}")
 
             # Log what we're placing
             logger.info(f"Ch{ch_id}: placing {data_to_place.shape} at bounds {bounds}")
