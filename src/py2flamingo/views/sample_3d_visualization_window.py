@@ -154,7 +154,10 @@ class Sample3DVisualizationWindow(QWidget):
         )
 
         self.voxel_storage = DualResolutionVoxelStorage(storage_config)
-        logger.info(f"Initialized dual-resolution voxel storage: {chamber_dims_um} µm")
+        logger.info(f"Initialized dual-resolution voxel storage")
+        logger.info(f"  Chamber dimensions (µm): {chamber_dims_um}")
+        logger.info(f"  Display dimensions (voxels): {self.voxel_storage.display_dims}")
+        logger.info(f"  Voxel size (µm): {self.config['display']['voxel_size_um']}")
 
     def _setup_ui(self):
         """Setup the user interface."""
@@ -485,8 +488,13 @@ class Sample3DVisualizationWindow(QWidget):
             return
 
         try:
-            # Create napari viewer
+            # Create napari viewer with axis display for debugging
             self.viewer = napari.Viewer(ndisplay=3, show=False)
+
+            # Enable axis display to show coordinate orientation
+            self.viewer.axes.visible = True
+            self.viewer.axes.labels = True
+            self.viewer.axes.colored = True
 
             # Embed viewer in our widget FIRST before adding layers
             # This ensures the viewer is properly initialized
