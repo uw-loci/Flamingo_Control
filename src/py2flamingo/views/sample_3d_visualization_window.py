@@ -845,6 +845,13 @@ class Sample3DVisualizationWindow(QWidget):
 
             logger.info("napari viewer initialized successfully")
 
+            # Now that viewer is fully initialized, update sample data visualization
+            try:
+                self._update_sample_data_visualization()
+                logger.info("Initial sample data visualization complete")
+            except Exception as e:
+                logger.error(f"Failed to update sample data visualization: {e}")
+
         except Exception as e:
             logger.error(f"Failed to initialize napari viewer: {e}")
             self.viewer = None
@@ -1207,9 +1214,8 @@ class Sample3DVisualizationWindow(QWidget):
                 self.channel_layers = {}
             self.channel_layers[ch_id] = layer
 
-        # Generate and add test sample data
+        # Generate test sample data (but don't visualize yet - viewer not ready)
         self._generate_test_sample_data()
-        self._update_sample_data_visualization()
 
     def _generate_test_sample_data(self):
         """Generate test sample data for visualization testing."""

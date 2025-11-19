@@ -145,6 +145,17 @@ def test_window():
     print("  • Cyan wireframe: Chamber boundaries")
     print()
     print("=" * 60)
+    print()
+
+    # Manually trigger sample data visualization update
+    # (in case it wasn't called during init)
+    print("Updating sample data visualization...")
+    if hasattr(window, '_update_sample_data_visualization'):
+        window._update_sample_data_visualization()
+        print("✓ Sample data visualization updated")
+
+    # Force a GUI update
+    app.processEvents()
 
     # Optionally enable streaming for simulated data
     # (commented out by default - user can test manually with sliders)
