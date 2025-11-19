@@ -7,6 +7,13 @@ This tests the window in standalone mode without requiring a full connection.
 import sys
 import numpy as np
 from pathlib import Path
+import logging
+
+# Configure logging to show INFO messages
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s: %(message)s'
+)
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
