@@ -961,13 +961,13 @@ class Sample3DVisualizationWindow(QWidget):
         # Circle varies in Y and X dimensions (Axes 1 and 2)
         z_objective = 0  # Back wall - OBJECTIVE LOCATION (Axis 0)
 
-        # Objective centered at Y=0mm (anchor point) in chamber coordinates
-        # Convert chamber Y=0mm to napari coordinates
-        y_chamber_anchor_mm = 0.0
-        napari_y_anchor = int((self.coord_mapper.y_range_mm[1] - y_chamber_anchor_mm) /
+        # Objective centered in the chamber (middle of Y range)
+        # Chamber extends from y_range_mm[0] to y_range_mm[1]
+        y_chamber_center_mm = (self.coord_mapper.y_range_mm[0] + self.coord_mapper.y_range_mm[1]) / 2
+        napari_y_center = int((self.coord_mapper.y_range_mm[1] - y_chamber_center_mm) /
                               (self.coord_mapper.voxel_size_mm))
 
-        center_y = napari_y_anchor  # Y at anchor point (Axis 1)
+        center_y = napari_y_center  # Y at chamber center (Axis 1)
         center_x = dims[2] // 2  # X center (Axis 2)
 
         # Circle radius (about 1/6 of the smaller dimension for visibility)
