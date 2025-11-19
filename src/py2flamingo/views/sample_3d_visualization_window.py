@@ -667,10 +667,14 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Store chamber offsets for position updates from controls
         chamber_config = self.config['sample_chamber']
+        # Y offset is: Y_anchor - chamber_below_anchor = 5mm - 10mm = -5mm
+        y_anchor_mm = chamber_config['y_min_anchor_mm']
+        y_offset_mm = y_anchor_mm - chamber_config['chamber_below_anchor_mm']
+
         self.chamber_offset_um = {
-            'x': chamber_config['chamber_x_offset_mm'] * 1000,  # 1.0mm
-            'y': -chamber_config['chamber_below_anchor_mm'] * 1000,  # -10mm (below anchor)
-            'z': chamber_config['chamber_z_offset_mm'] * 1000  # 12.5mm
+            'x': chamber_config['chamber_x_offset_mm'] * 1000,  # 1.0mm (X minimum)
+            'y': y_offset_mm * 1000,  # -5mm (chamber bottom: anchor - 10mm)
+            'z': chamber_config['chamber_z_offset_mm'] * 1000  # 12.5mm (Z minimum)
         }
 
         logger.info(f"Chamber offsets (µm): {self.chamber_offset_um}")
