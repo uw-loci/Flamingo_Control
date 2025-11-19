@@ -111,6 +111,16 @@ class PositionController:
         except Exception as e:
             self.logger.error(f"Failed to initialize motion tracker: {e}", exc_info=True)
 
+    def reinitialize_motion_tracker(self) -> None:
+        """
+        Public method to reinitialize motion tracker after connection is established.
+
+        This should be called by the connection controller or view after a successful
+        connection to ensure the motion tracker is ready for movement operations.
+        """
+        self.logger.info("Reinitializing motion tracker...")
+        self._initialize_motion_tracker()
+
     def _initialize_position(self) -> None:
         """
         Initialize tracked position from microscope home position in settings.

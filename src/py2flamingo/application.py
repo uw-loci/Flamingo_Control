@@ -344,6 +344,10 @@ class FlamingoApplication:
         """
         self.logger.info("Connection established - enabling stage controls")
 
+        # Reinitialize motion tracker now that connection is established
+        if self.position_controller:
+            self.position_controller.reinitialize_motion_tracker()
+
         # Enable controls immediately (connection is established)
         if self.stage_control_view:
             self.stage_control_view._set_controls_enabled(True)
