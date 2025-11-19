@@ -73,6 +73,48 @@ sample_chamber:
   sample_region_radius_um: 3000  # Radius around center for high-res storage
   sample_region_center_um: [6000, 6000, 18000]  # Default center position (updated for new dimensions)
 
+stage_control:
+  # Physical stage ranges (in mm) - these define the napari visualization bounds
+  # These should match the microscope's physical stage limits
+  x_range_mm: [1.0, 12.31]    # X axis: left-right
+  y_range_mm: [0.0, 15.0]     # Y axis: vertical (0-15mm, with 5mm anchor)
+  z_range_mm: [12.5, 26.0]    # Z axis: depth (toward objective)
+
+  # Default positions (mm) - starting position for visualization
+  x_default_mm: 6.655         # Center of X range
+  y_default_mm: 7.5           # Mid-height (above anchor)
+  z_default_mm: 19.25         # Center of Z range
+
+  # Axis inversion defaults (user preferences for stage control)
+  # Set these based on your microscope's stage configuration
+  invert_x_default: false     # If true, moving slider right moves stage left
+  invert_z_default: false     # If true, moving slider right moves stage backward
+
+  # Y-axis rotation configuration
+  rotation_angle_offset_deg: 0.0    # Physical stage angle for "0 degrees" reference
+  rotation_range_deg: [-180, 180]   # Allowed rotation range
+  rotation_default_deg: 0.0         # Starting rotation angle
+
+coordinate_mapping:
+  # Napari origin definition (internal pixel coordinate system)
+  napari_origin: "back_upper_left"  # (0,0,0) position in napari viewer
+
+  # Axis mapping to napari display
+  # Napari axes: Axis 0 (yellow), Axis 1 (magenta), Axis 2 (cyan)
+  napari_axis_mapping:
+    z: 0  # Z maps to napari Axis 0 (yellow) - depth slices
+    y: 1  # Y maps to napari Axis 1 (magenta) - vertical
+    x: 2  # X maps to napari Axis 2 (cyan) - horizontal
+
+  # Axis inversions for user-friendly display
+  invert_y_display: true  # Y increases "up" for user (internally inverted)
+
+  # Slider colors matching napari axes (for GUI)
+  axis_colors:
+    x: "#00FFFF"  # Cyan (napari Axis 2)
+    y: "#FF00FF"  # Magenta (napari Axis 1)
+    z: "#FFD700"  # Gold/Yellow (napari Axis 0)
+
 channels:
   # Laser line channel configurations
   # These represent fluorescent signals excited by different laser wavelengths

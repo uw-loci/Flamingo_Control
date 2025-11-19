@@ -64,75 +64,121 @@ def simulate_frame_data(z_index=0, num_z_planes=20):
 
 
 def test_window():
-    """Test the 3D visualization window with simulated data."""
+    """Test the 3D visualization window with the new coordinate system."""
     app = QApplication(sys.argv)
 
     # Create the visualization window
     window = Sample3DVisualizationWindow()
     window.show()
 
-    # Simulate some frames with different Z positions and rotations
-    print("Simulating frame data...")
+    print("=" * 60)
+    print("3D VISUALIZATION TEST - New Coordinate System")
+    print("=" * 60)
+    print()
+    print("KEY FEATURES:")
+    print("  ✓ Color-coded sliders matching napari axes")
+    print("    - Z (Yellow): Napari Axis 0")
+    print("    - Y (Magenta): Napari Axis 1")
+    print("    - X (Cyan): Napari Axis 2")
+    print("  ✓ Physical mm coordinates (user-facing)")
+    print("  ✓ Napari pixel coordinates (internal)")
+    print("  ✓ Y-axis inverted for intuitive 'up' direction")
+    print("  ✓ Objective at Z=0 (back wall)")
+    print("  ✓ Rotation indicator at Y=0 (top, XZ plane)")
+    print("  ✓ X/Z invert checkboxes for stage configuration")
+    print()
+    print("=" * 60)
+    print()
 
-    # Enable streaming
-    window.is_streaming = True
+    # Test coordinate transformation
+    print("Testing coordinate transformation...")
+    print()
 
-    # Simulate scanning through Z with rotation
-    # Using smaller region in the middle of the chamber for visibility
-    chamber_height_um = 36000  # 36mm chamber
-    scan_start_um = chamber_height_um * 0.3  # Start at 30% height
-    scan_end_um = chamber_height_um * 0.7    # End at 70% height
-    num_z_planes = 20
+    # Get config ranges
+    config = window.config['stage_control']
+    x_range = config['x_range_mm']
+    y_range = config['y_range_mm']
+    z_range = config['z_range_mm']
 
-    z_positions = np.linspace(scan_start_um, scan_end_um, num_z_planes)
-
-    # Start with just no rotation for simplicity
-    rotations = [
-        {'rx': 0, 'ry': 0, 'rz': 0},      # No rotation
+    # Test corner positions
+    test_positions = [
+        ("Bottom-Back-Left", x_range[0], y_range[0], z_range[0]),
+        ("Bottom-Back-Right", x_range[1], y_range[0], z_range[0]),
+        ("Top-Back-Left", x_range[0], y_range[1], z_range[0]),
+        ("Top-Front-Right", x_range[1], y_range[1], z_range[1]),
+        ("Center", (x_range[0] + x_range[1])/2, (y_range[0] + y_range[1])/2, (z_range[0] + z_range[1])/2)
     ]
 
-    frame_count = 0
-    for rotation_idx, rotation in enumerate(rotations):
-        print(f"\nProcessing rotation {rotation_idx + 1}/{len(rotations)}: {rotation}")
-        for z_idx, z in enumerate(z_positions):
-            # Generate frame with Z-dependent features
+    print("Coordinate Transformation Tests:")
+    print("-" * 60)
+    for name, x_mm, y_mm, z_mm in test_positions:
+        napari_coords = window.coord_mapper.physical_to_napari(x_mm, y_mm, z_mm)
+        back_to_physical = window.coord_mapper.napari_to_physical(*napari_coords)
+        round_trip_ok = window.coord_mapper.test_round_trip(x_mm, y_mm, z_mm)
+
+        print(f"{name}:")
+        print(f"  Physical: ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm")
+        print(f"  Napari:   ({napari_coords[0]}, {napari_coords[1]}, {napari_coords[2]}) pixels")
+        print(f"  Round-trip: {'✓ PASS' if round_trip_ok else '✗ FAIL'}")
+        print()
+
+    print("=" * 60)
+    print()
+    print("INTERACTIVE TEST:")
+    print("  1. Use the color-coded sliders to move the sample holder")
+    print("  2. Observe the holder position change in napari viewer")
+    print("  3. Try the X/Z invert checkboxes")
+    print("  4. Rotate the stage with the rotation slider")
+    print("  5. Watch the red rotation indicator rotate in the XZ plane")
+    print()
+    print("VISUALIZATION FEATURES:")
+    print("  • Yellow circle at Z=0: Objective position (back wall)")
+    print("  • Red line at Y=0: Rotation indicator (0° reference)")
+    print("  • Gray cylinder: Sample holder (extends from position to top)")
+    print("  • Cyan wireframe: Chamber boundaries")
+    print()
+    print("=" * 60)
+
+    # Optionally enable streaming for simulated data
+    # (commented out by default - user can test manually with sliders)
+    enable_simulated_data = False
+
+    if enable_simulated_data:
+        print("\nSimulating frame data...")
+        window.is_streaming = True
+
+        # Simulate scanning through Z
+        z_start_mm = (z_range[0] + z_range[1]) * 0.4
+        z_end_mm = (z_range[0] + z_range[1]) * 0.6
+        num_z_planes = 10
+
+        z_positions_mm = np.linspace(z_start_mm, z_end_mm, num_z_planes)
+
+        for z_idx, z_mm in enumerate(z_positions_mm):
             frame = simulate_frame_data(z_idx, num_z_planes)
 
             metadata = {
-                'z_position': z,
-                'rotation': rotation,
-                'timestamp': frame_count * 0.1,
-                'pixel_to_micron': 10.0,  # 10 µm/pixel for reasonable sample size
+                'x_position': config['x_default_mm'],
+                'y_position': config['y_default_mm'],
+                'z_position': z_mm * 1000,  # Convert to µm
+                'rotation': {'rx': 0, 'ry': 0, 'rz': 0},
+                'timestamp': z_idx * 0.1,
+                'pixel_to_micron': 10.0,
                 'active_channels': [0, 1, 2, 3]
             }
 
-            # Process the frame
             window.process_frame(frame, metadata)
-            frame_count += 1
 
-            # Update the UI periodically
-            if frame_count % 2 == 0:
+            if z_idx % 2 == 0:
                 window._update_visualization()
                 app.processEvents()
-                print(f"  Processed Z-plane {z_idx + 1}/{num_z_planes} at {z:.0f} µm")
+                print(f"  Processed Z-plane {z_idx + 1}/{num_z_planes} at {z_mm:.2f} mm")
 
-    # Final update
-    window._update_visualization()
-    app.processEvents()
+        window._update_visualization()
+        app.processEvents()
 
-    print(f"\nProcessed {frame_count} total frames")
-    print("Test complete. Window is now interactive.")
-    print("\nTips:")
-    print("  - Toggle channel visibility in the Channels tab")
-    print("  - Adjust contrast/opacity for each channel")
-    print("  - Rotate the view with your mouse in the napari viewer")
-    print("  - Try different rendering modes (MIP, Average, Additive)")
-
-    # Show memory usage
-    memory_stats = window.voxel_storage.get_memory_usage()
-    print(f"Memory usage: {memory_stats['total_mb']:.1f} MB")
-    print(f"Storage voxels: {memory_stats['storage_voxels']:,}")
-    print(f"Display voxels: {memory_stats['display_voxels']:,}")
+        memory_stats = window.voxel_storage.get_memory_usage()
+        print(f"\nMemory usage: {memory_stats['total_mb']:.1f} MB")
 
     # Run the application
     sys.exit(app.exec_())

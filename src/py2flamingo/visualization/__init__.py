@@ -3,10 +3,11 @@
 """
 
 from .dual_resolution_storage import DualResolutionVoxelStorage, DualResolutionConfig
-from .coordinate_transforms import CoordinateTransformer
+from .coordinate_transforms import CoordinateTransformer, PhysicalToNapariMapper
 
 __all__ = [
     'DualResolutionVoxelStorage',
     'DualResolutionConfig',
-    'CoordinateTransformer'
+    'CoordinateTransformer',
+    'PhysicalToNapariMapper'
 ]

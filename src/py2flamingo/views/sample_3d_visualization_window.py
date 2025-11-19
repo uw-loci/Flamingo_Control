@@ -28,7 +28,7 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent))
 
 from visualization.dual_resolution_storage import DualResolutionVoxelStorage, DualResolutionConfig
-from visualization.coordinate_transforms import CoordinateTransformer
+from visualization.coordinate_transforms import CoordinateTransformer, PhysicalToNapariMapper
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +60,22 @@ class Sample3DVisualizationWindow(QWidget):
         # Load configuration
         self.config = self._load_config()
 
-        # Initialize storage system
-        self._init_storage()
+        # Initialize physical to napari coordinate mapper FIRST
+        # (storage system depends on this)
+        mapper_config = {
+            'x_range_mm': self.config['stage_control']['x_range_mm'],
+            'y_range_mm': self.config['stage_control']['y_range_mm'],
+            'z_range_mm': self.config['stage_control']['z_range_mm'],
+            'voxel_size_um': self.config['display']['voxel_size_um'][0],  # Assume isotropic
+            'invert_x': self.config['stage_control']['invert_x_default'],
+            'invert_z': self.config['stage_control']['invert_z_default']
+        }
+        self.coord_mapper = PhysicalToNapariMapper(mapper_config)
 
-        # Initialize coordinate transformer
+        # Initialize storage system using coord_mapper dimensions
+        self._init_storage_with_mapper()
+
+        # Initialize coordinate transformers (for rotation)
         self.transformer = CoordinateTransformer()
 
         # Current state
@@ -133,23 +145,23 @@ class Sample3DVisualizationWindow(QWidget):
         return config
 
     def _init_storage(self):
-        """Initialize the dual-resolution storage system."""
-        # Calculate chamber dimensions from config parameters
-        chamber_config = self.config['sample_chamber']
+        """Initialize the dual-resolution storage system using coordinate mapper dimensions."""
+        # Will be initialized after coord_mapper is created
+        # This method will be called again in __init__ after coord_mapper exists
+        pass
 
-        chamber_width_x = chamber_config['chamber_width_x_mm'] * 1000  # X (left-right)
-        chamber_depth_z = chamber_config['chamber_depth_z_mm'] * 1000  # Z (depth, toward objective)
-        chamber_height_y = (chamber_config['chamber_below_anchor_mm'] +
-                           chamber_config['chamber_above_anchor_mm']) * 1000  # Y (vertical height)
+    def _init_storage_with_mapper(self):
+        """Initialize storage system after coordinate mapper is available."""
+        # Get dimensions from coordinate mapper
+        napari_dims = self.coord_mapper.get_napari_dimensions()
+        voxel_size_um = self.config['display']['voxel_size_um'][0]  # Assume isotropic
 
-        # Napari dims order: (axis_0, axis_1, axis_2) where axis_1 is vertical
-        # So we need: (X, Y, Z) where Y is height
-        chamber_dims_um = (chamber_width_x, chamber_height_y, chamber_depth_z)
-
-        # Store chamber positioning info for later use
-        self.chamber_below_anchor_um = chamber_config['chamber_below_anchor_mm'] * 1000
-        self.chamber_above_anchor_um = chamber_config['chamber_above_anchor_mm'] * 1000
-        self.y_min_anchor_um = chamber_config['y_min_anchor_mm'] * 1000
+        # Calculate chamber dimensions in µm
+        chamber_dims_um = (
+            napari_dims[0] * voxel_size_um,  # X width
+            napari_dims[1] * voxel_size_um,  # Y height
+            napari_dims[2] * voxel_size_um   # Z depth
+        )
 
         storage_config = DualResolutionConfig(
             storage_voxel_size=tuple(self.config['storage']['voxel_size_um']),
@@ -317,77 +329,273 @@ class Sample3DVisualizationWindow(QWidget):
         return widget
 
     def _create_sample_controls(self) -> QWidget:
-        """Create sample position and rotation control widgets."""
+        """Create sample position and rotation control widgets with color-coded sliders."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        # Position controls
+        # Position controls with color-coded sliders
         position_group = QGroupBox("Sample Position")
-        pos_layout = QGridLayout()
+        pos_layout = QVBoxLayout()
 
-        # X, Y, Z position controls with actual stage ranges
-        self.stage_position_inputs = {}
-        axes = [
-            ('X', 'x', 1000, 12310, 100),    # 1.0mm to 12.31mm
-            ('Y', 'y', 0, 15000, 100),       # 0-15mm (vertical, -5 to +10 relative to anchor)
-            ('Z', 'z', 12500, 26000, 100)    # 12.5mm to 26mm (depth)
-        ]
+        # Store slider and checkbox references
+        self.position_sliders = {}
 
-        for i, (axis_label, key, min_val, max_val, step) in enumerate(axes):
-            pos_layout.addWidget(QLabel(f"{axis_label}:"), i, 0)
+        # Get config values
+        stage_config = self.config['stage_control']
+        axis_colors = self.config['coordinate_mapping']['axis_colors']
 
-            spinbox = QSpinBox()
-            spinbox.setRange(min_val, max_val)
-            # Default values: Y=5mm (anchor), X and Z at center of range
-            if key == 'y':
-                spinbox.setValue(5000)  # Y anchor
-            else:
-                spinbox.setValue((min_val + max_val) // 2)  # Center
-            spinbox.setSingleStep(step)
-            spinbox.setSuffix(" µm")
-            spinbox.setMaximumWidth(120)
-            pos_layout.addWidget(spinbox, i, 1)
+        # Z Slider - Yellow (Napari Axis 0)
+        z_widget = self._create_axis_slider(
+            label="Z Position (Depth)",
+            color=axis_colors['z'],
+            napari_axis=0,
+            min_val=stage_config['z_range_mm'][0],
+            max_val=stage_config['z_range_mm'][1],
+            default_val=stage_config['z_default_mm'],
+            has_invert=True,
+            tooltip="Z-axis (depth, toward objective)\nNapari Axis 0 (Yellow)"
+        )
+        pos_layout.addWidget(z_widget)
 
-            self.stage_position_inputs[key] = spinbox
+        # Y Slider - Magenta (Napari Axis 1)
+        y_widget = self._create_axis_slider(
+            label="Y Position (Height)",
+            color=axis_colors['y'],
+            napari_axis=1,
+            min_val=stage_config['y_range_mm'][0],
+            max_val=stage_config['y_range_mm'][1],
+            default_val=stage_config['y_default_mm'],
+            has_invert=False,  # Y doesn't need invert (handled by coord transform)
+            tooltip="Y-axis (vertical height)\nNapari Axis 1 (Magenta)\nY-axis is inverted for intuitive display"
+        )
+        pos_layout.addWidget(y_widget)
+
+        # X Slider - Cyan (Napari Axis 2)
+        x_widget = self._create_axis_slider(
+            label="X Position (Width)",
+            color=axis_colors['x'],
+            napari_axis=2,
+            min_val=stage_config['x_range_mm'][0],
+            max_val=stage_config['x_range_mm'][1],
+            default_val=stage_config['x_default_mm'],
+            has_invert=True,
+            tooltip="X-axis (horizontal, left-right)\nNapari Axis 2 (Cyan)"
+        )
+        pos_layout.addWidget(x_widget)
 
         position_group.setLayout(pos_layout)
         layout.addWidget(position_group)
 
         # Rotation control
         rotation_group = QGroupBox("Stage Rotation (Y-Axis)")
-        rot_layout = QGridLayout()
+        rot_layout = QVBoxLayout()
 
-        rot_layout.addWidget(QLabel("Angle:"), 0, 0)
+        # Rotation header
+        rot_header = QHBoxLayout()
+        rot_header.addWidget(QLabel("Rotation Angle:"))
+        rot_header.addStretch()
+        self.rotation_value_label = QLabel(f"{stage_config['rotation_default_deg']:.1f}°")
+        self.rotation_value_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        rot_header.addWidget(self.rotation_value_label)
+        rot_layout.addLayout(rot_header)
 
+        # Rotation slider
         self.rotation_slider = QSlider(Qt.Horizontal)
-        self.rotation_slider.setRange(-180, 180)
-        self.rotation_slider.setValue(0)
-        rot_layout.addWidget(self.rotation_slider, 0, 1)
+        rot_range = stage_config['rotation_range_deg']
+        self.rotation_slider.setRange(int(rot_range[0]), int(rot_range[1]))
+        self.rotation_slider.setValue(int(stage_config['rotation_default_deg']))
+        self.rotation_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #999999;
+                height: 8px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #FF0000, stop:0.5 #888888, stop:1 #00FF00);
+                margin: 2px 0;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: #FFFFFF;
+                border: 2px solid #555555;
+                width: 18px;
+                margin: -5px 0;
+                border-radius: 9px;
+            }
+        """)
+        rot_layout.addWidget(self.rotation_slider)
 
-        self.rotation_value_label = QLabel("0°")
-        rot_layout.addWidget(self.rotation_value_label, 0, 2)
+        # Range labels
+        range_layout = QHBoxLayout()
+        range_layout.addWidget(QLabel(f"{rot_range[0]}°"))
+        range_layout.addStretch()
+        range_layout.addWidget(QLabel(f"{rot_range[1]}°"))
+        rot_layout.addLayout(range_layout)
 
         # Reset button
-        reset_btn = QPushButton("Reset")
+        reset_btn = QPushButton("Reset to 0°")
         reset_btn.clicked.connect(lambda: self.rotation_slider.setValue(0))
-        rot_layout.addWidget(reset_btn, 0, 3)
+        rot_layout.addWidget(reset_btn)
 
         # Connect slider to label
         self.rotation_slider.valueChanged.connect(
-            lambda v: self.rotation_value_label.setText(f"{v}°")
+            lambda v: self.rotation_value_label.setText(f"{v:.1f}°")
         )
 
         rotation_group.setLayout(rot_layout)
         layout.addWidget(rotation_group)
 
         # Info label
-        info_label = QLabel("Note: Y-axis rotation rotates around the vertical axis.")
+        info_label = QLabel("ℹ Rotation indicator (red line) shows 0° reference orientation in XZ plane.")
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("QLabel { color: #666; font-style: italic; padding: 5px; }")
+        info_label.setStyleSheet("QLabel { color: #888; font-style: italic; padding: 5px; font-size: 11px; }")
         layout.addWidget(info_label)
 
         layout.addStretch()
         return widget
+
+    def _create_axis_slider(self, label: str, color: str, napari_axis: int,
+                           min_val: float, max_val: float, default_val: float,
+                           has_invert: bool, tooltip: str) -> QWidget:
+        """Create a single color-coded axis slider."""
+        # Container widget
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(5)
+        layout.setContentsMargins(8, 8, 8, 8)
+
+        # Header with color indicator and label
+        header_layout = QHBoxLayout()
+
+        # Color indicator (colored square matching napari axis)
+        color_indicator = QLabel("█")  # Unicode block character
+        color_indicator.setStyleSheet(f"color: {color}; font-size: 20px;")
+        color_indicator.setToolTip(f"Napari Axis {napari_axis}")
+        header_layout.addWidget(color_indicator)
+
+        # Axis label
+        axis_label = QLabel(label)
+        axis_label.setStyleSheet(f"font-weight: bold; color: {color};")
+        axis_label.setToolTip(tooltip)
+        header_layout.addWidget(axis_label)
+
+        header_layout.addStretch()
+
+        # Napari axis number badge
+        axis_badge = QLabel(f"Axis {napari_axis}")
+        axis_badge.setStyleSheet(f"""
+            background-color: {color};
+            color: black;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+        """)
+        header_layout.addWidget(axis_badge)
+
+        layout.addLayout(header_layout)
+
+        # Slider with colored groove
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(int(min_val * 1000), int(max_val * 1000))  # µm precision
+        slider.setValue(int(default_val * 1000))
+        slider.setToolTip(tooltip)
+
+        # Calculate lighter color for gradient
+        lighter_color = self._lighten_color(color, 1.3)
+
+        # Style slider with colored groove matching axis color
+        slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                border: 1px solid #999999;
+                height: 8px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #444444, stop:1 {color});
+                margin: 2px 0;
+                border-radius: 4px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {color};
+                border: 2px solid #555555;
+                width: 18px;
+                margin: -5px 0;
+                border-radius: 9px;
+            }}
+            QSlider::handle:horizontal:hover {{
+                background: {lighter_color};
+                border: 2px solid {color};
+            }}
+        """)
+
+        layout.addWidget(slider)
+
+        # Value display with range info
+        value_layout = QHBoxLayout()
+
+        range_label = QLabel(f"{min_val:.2f}")
+        range_label.setStyleSheet("color: #888888; font-size: 10px;")
+        value_layout.addWidget(range_label)
+
+        value_layout.addStretch()
+
+        value_label = QLabel(f"{default_val:.2f} mm")
+        value_label.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 14px;")
+        value_layout.addWidget(value_label)
+
+        value_layout.addStretch()
+
+        range_label_max = QLabel(f"{max_val:.2f}")
+        range_label_max.setStyleSheet("color: #888888; font-size: 10px;")
+        value_layout.addWidget(range_label_max)
+
+        layout.addLayout(value_layout)
+
+        # Invert checkbox (if applicable)
+        if has_invert:
+            invert_cb = QCheckBox("Invert stage movement")
+            invert_cb.setStyleSheet(f"color: {color};")
+            invert_cb.setToolTip("Reverse the direction of stage movement for this axis")
+            layout.addWidget(invert_cb)
+
+            # Store reference
+            axis_key = label.split()[0].lower()  # 'x', 'y', or 'z'
+            self.position_sliders[f'{axis_key}_invert'] = invert_cb
+
+        # Store slider and label references
+        axis_key = label.split()[0].lower()
+        self.position_sliders[f'{axis_key}_slider'] = slider
+        self.position_sliders[f'{axis_key}_label'] = value_label
+
+        # Connect slider to update label
+        slider.valueChanged.connect(
+            lambda v, lbl=value_label: lbl.setText(f"{v/1000:.2f} mm")
+        )
+
+        # Add subtle colored border to entire widget
+        widget.setStyleSheet(f"""
+            QWidget {{
+                border: 2px solid {color};
+                border-radius: 5px;
+                padding: 8px;
+                background-color: #2a2a2a;
+            }}
+        """)
+
+        return widget
+
+    def _lighten_color(self, hex_color: str, factor: float = 1.3) -> str:
+        """Lighten a hex color for hover effects."""
+        # Remove '#' if present
+        hex_color = hex_color.lstrip('#')
+
+        # Convert to RGB
+        r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+        # Lighten
+        r = min(255, int(r * factor))
+        g = min(255, int(g * factor))
+        b = min(255, int(b * factor))
+
+        # Convert back to hex
+        return f"#{r:02x}{g:02x}{b:02x}"
 
     def _create_data_controls(self) -> QWidget:
         """Create data management controls."""
@@ -475,10 +683,14 @@ class Sample3DVisualizationWindow(QWidget):
         # Export
         self.export_button.clicked.connect(self._on_export_data)
 
-        # Position spinboxes
-        self.stage_position_inputs['x'].valueChanged.connect(self._on_x_changed)
-        self.stage_position_inputs['y'].valueChanged.connect(self._on_y_changed)
-        self.stage_position_inputs['z'].valueChanged.connect(self._on_z_changed)
+        # Position sliders
+        self.position_sliders['x_slider'].valueChanged.connect(self._on_x_slider_changed)
+        self.position_sliders['y_slider'].valueChanged.connect(self._on_y_slider_changed)
+        self.position_sliders['z_slider'].valueChanged.connect(self._on_z_slider_changed)
+
+        # Invert checkboxes
+        self.position_sliders['x_invert'].toggled.connect(self._on_x_invert_toggled)
+        self.position_sliders['z_invert'].toggled.connect(self._on_z_invert_toggled)
 
         # Rotation slider
         self.rotation_slider.valueChanged.connect(self._on_rotation_changed)
@@ -726,15 +938,15 @@ class Sample3DVisualizationWindow(QWidget):
         dims = self.voxel_storage.display_dims
 
         # Create a circle on the back wall (XY plane at Z=0)
-        # We image along Z axis (axis 2) into this objective
-        center_x = dims[0] // 2  # X center (axis 0)
-        center_y = dims[1] // 2  # Y center (axis 1, vertical)
-        z_back = 0  # Back wall (axis 2 minimum)
+        # Z=0 is the back wall where the objective is located
+        center_x = dims[0] // 2  # X center
+        center_y = dims[1] // 2  # Y center
+        z_objective = 0  # Back wall - OBJECTIVE LOCATION
 
         # Circle radius (about 1/6 of the chamber width for visibility)
         radius = min(dims[0], dims[1]) // 6
 
-        # Create circle as a series of points on the XY plane (constant Z)
+        # Create circle as a series of points on the XY plane (constant Z=0)
         num_points = 36  # Points to form the circle
         angles = np.linspace(0, 2 * np.pi, num_points, endpoint=False)
 
@@ -743,11 +955,11 @@ class Sample3DVisualizationWindow(QWidget):
             x = center_x + radius * np.cos(angle)
             y = center_y + radius * np.sin(angle)
             # Coordinates in (X, Y, Z) order - circle in XY plane at Z=0
-            circle_points.append([x, y, z_back])
+            circle_points.append([x, y, z_objective])
 
         self.viewer.add_points(
             np.array(circle_points),
-            name='Objective',
+            name='Objective (Z=0)',
             size=15,
             face_color='yellow',
             border_color='orange',
@@ -755,8 +967,10 @@ class Sample3DVisualizationWindow(QWidget):
             opacity=0.9
         )
 
+        logger.info(f"Added objective indicator at Z=0 (back wall), center=({center_x}, {center_y})")
+
     def _add_rotation_indicator(self):
-        """Add rotation indicator extending from sample holder at 0 degrees."""
+        """Add rotation indicator in XZ plane at Y=0 (top of chamber)."""
         if not self.viewer:
             return
 
@@ -764,29 +978,24 @@ class Sample3DVisualizationWindow(QWidget):
         dims = self.voxel_storage.display_dims
         indicator_length = min(dims[0], dims[2]) // 2  # 1/2 shortest chamber width
 
-        # Position: extends in XZ plane (horizontal) at a fixed Y height
-        # Always near the top of the chamber
-        y_position = max(dims[1] - 5, dims[1] // 2)  # Near top (Y is vertical, axis 1)
+        # Position: extends in XZ plane at Y=0 (top of chamber)
+        # Y=0 is the top of the chamber in napari coords
+        y_position = 0  # TOP OF CHAMBER
+
+        # Center position in X and Z
+        center_x = dims[0] // 2
+        center_z = dims[2] // 2
 
         # Create indicator points in (X, Y, Z) order
-        # At 0 degrees, points along X axis (axis 0)
-        indicator_start = np.array([
-            self.holder_position['x'],
-            y_position,
-            self.holder_position['z']
-        ])
-
-        indicator_end = np.array([
-            self.holder_position['x'] + indicator_length,
-            y_position,
-            self.holder_position['z']
-        ])
+        # At 0 degrees, points along +X axis
+        indicator_start = np.array([center_x, y_position, center_z])
+        indicator_end = np.array([center_x + indicator_length, y_position, center_z])
 
         # Add as a line (using shapes layer for better control)
         self.viewer.add_shapes(
             data=[[indicator_start, indicator_end]],  # 3D line in (X, Y, Z) order
             shape_type='line',
-            name='Rotation Indicator',
+            name='Rotation Indicator (Y=0)',
             edge_color='red',
             edge_width=3,
             opacity=0.8
@@ -796,81 +1005,83 @@ class Sample3DVisualizationWindow(QWidget):
         self.rotation_indicator_base = indicator_start.copy()
         self.rotation_indicator_length = indicator_length
 
-    def _update_sample_holder_position(self, x_pos=None, y_pos=None, z_pos=None):
-        """Update sample holder position when stage moves."""
+        logger.info(f"Added rotation indicator at Y=0 (top), starts at ({center_x}, {y_position}, {center_z})")
+
+    def _update_sample_holder_position(self, x_mm: float, y_mm: float, z_mm: float):
+        """
+        Update sample holder position when stage moves.
+
+        Args:
+            x_mm, y_mm, z_mm: Physical stage coordinates in mm
+        """
         if not self.viewer or 'Sample Holder' not in self.viewer.layers:
             return
 
-        # Convert physical coordinates (µm) to voxel coordinates with chamber offsets
-        voxel_size = self.config['display']['voxel_size_um']
+        # Convert physical mm to napari pixel coordinates
+        napari_x, napari_y, napari_z = self.coord_mapper.physical_to_napari(x_mm, y_mm, z_mm)
 
-        # Update position (convert physical µm to voxel coordinates with offsets)
-        if x_pos is not None:
-            self.holder_position['x'] = int((x_pos - self.chamber_offset_um['x']) / voxel_size[0])
-        if y_pos is not None:
-            self.holder_position['y'] = int((y_pos - self.chamber_offset_um['y']) / voxel_size[1])
-        if z_pos is not None:
-            self.holder_position['z'] = int((z_pos - self.chamber_offset_um['z']) / voxel_size[2])
+        # Update holder position
+        self.holder_position = {
+            'x': napari_x,
+            'y': napari_y,
+            'z': napari_z
+        }
 
-        logger.info(f"Updated holder position to (voxels): {self.holder_position}")
+        logger.info(f"Physical position: ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm")
+        logger.info(f"Napari position: ({napari_x}, {napari_y}, {napari_z}) pixels")
 
         # Regenerate holder points
-        dims = self.voxel_storage.display_dims
+        # Holder extends from current Y position (napari_y) to top (Y=0)
+        # Note: Y=0 is top, Y increases downward in napari coords (inverted from physical)
         holder_points = []
 
-        # Only display visible portion of holder (from position to chamber top)
-        # This significantly reduces voxel count
-        y_top = dims[1] - 1  # Chamber top (Y is vertical, axis 1)
-        y_bottom = max(0, self.holder_position['y'])
+        y_top = 0  # Top of chamber (Y=0 in napari coords)
+        y_bottom = napari_y
 
-        # Napari coordinates: (X, Y, Z) where Y (axis 1) is vertical
-        for y in range(y_bottom, y_top, 2):
-            holder_points.append([self.holder_position['x'], y, self.holder_position['z']])
+        # Napari coordinates: (X, Y, Z)
+        for y in range(y_top, y_bottom + 1, 2):  # Sample every 2 voxels
+            holder_points.append([napari_x, y, napari_z])
 
-        logger.info(f"Regenerated {len(holder_points)} holder points (y_bottom={y_bottom}, y_top={y_top})")
+        logger.info(f"Regenerated {len(holder_points)} holder points (y_top={y_top}, y_bottom={y_bottom})")
 
-        # Always update the layer data, even if empty
+        # Update the layer data
         if holder_points:
             self.viewer.layers['Sample Holder'].data = np.array(holder_points)
         else:
-            # If no points (holder fully retracted), show a minimal placeholder
-            self.viewer.layers['Sample Holder'].data = np.array([[self.holder_position['x'], y_top, self.holder_position['z']]])
+            # If no points (holder at very top), show a minimal placeholder
+            self.viewer.layers['Sample Holder'].data = np.array([[napari_x, y_top, napari_z]])
 
         # Update rotation indicator position (stays at top)
         self._update_rotation_indicator()
 
     def _update_rotation_indicator(self):
-        """Update rotation indicator based on current rotation and holder position."""
-        if not self.viewer or 'Rotation Indicator' not in self.viewer.layers:
+        """Update rotation indicator based on current rotation (always at Y=0)."""
+        if not self.viewer or 'Rotation Indicator (Y=0)' not in self.viewer.layers:
             return
 
         # Get Y-axis rotation (the physical stage rotation)
         angle_rad = np.radians(self.current_rotation.get('ry', 0))
 
-        # Indicator extends from holder center in XZ plane (horizontal)
-        dims = self.voxel_storage.display_dims
-        y_position = max(dims[1] - 5, dims[1] // 2)  # Near top (Y is vertical, axis 1)
+        # Indicator always at Y=0 (top of chamber), extends in XZ plane
+        y_position = 0  # TOP OF CHAMBER
 
         # Calculate end point displacement based on Y rotation
         # Rotation around Y axis (vertical) affects X and Z coordinates
         dx = self.rotation_indicator_length * np.cos(angle_rad)
         dz = self.rotation_indicator_length * np.sin(angle_rad)
 
-        # Create points in (X, Y, Z) order - rotating in XZ plane around Y axis
-        start = np.array([
-            self.holder_position['x'],
-            y_position,
-            self.holder_position['z']
-        ])
+        # Start position (center of chamber in X and Z, at Y=0)
+        start = self.rotation_indicator_base.copy()
 
+        # End position rotated in XZ plane
         end = np.array([
-            self.holder_position['x'] + dx,
-            y_position,
-            self.holder_position['z'] + dz
+            start[0] + dx,
+            y_position,  # Always at Y=0
+            start[2] + dz
         ])
 
         # Update the line - provide 3D coordinates in (X, Y, Z) order
-        self.viewer.layers['Rotation Indicator'].data = [[start, end]]
+        self.viewer.layers['Rotation Indicator (Y=0)'].data = [[start, end]]
 
     def _setup_data_layers(self):
         """Setup napari layers for multi-channel data."""
@@ -939,23 +1150,52 @@ class Sample3DVisualizationWindow(QWidget):
         # TODO: Implement export functionality
         QMessageBox.information(self, "Export", "Export functionality not yet implemented")
 
-    def _on_x_changed(self, value: int):
-        """Handle X position changes."""
-        self.x_position_changed.emit(value)
-        # Update sample holder X position
-        self._update_sample_holder_position(x_pos=value)
+    def _on_x_slider_changed(self, value: int):
+        """Handle X slider position changes."""
+        x_mm = value / 1000.0  # Convert µm to mm
+        self.x_position_changed.emit(x_mm)
+        # Update sample holder position using coordinate mapper
+        y_mm = self.position_sliders['y_slider'].value() / 1000.0
+        z_mm = self.position_sliders['z_slider'].value() / 1000.0
+        self._update_sample_holder_position(x_mm, y_mm, z_mm)
 
-    def _on_y_changed(self, value: int):
-        """Handle Y position changes (vertical)."""
-        self.y_position_changed.emit(value)
-        # Update sample holder Y position (vertical movement)
-        self._update_sample_holder_position(y_pos=value)
+    def _on_y_slider_changed(self, value: int):
+        """Handle Y slider position changes (vertical)."""
+        y_mm = value / 1000.0  # Convert µm to mm
+        self.y_position_changed.emit(y_mm)
+        # Update sample holder position using coordinate mapper
+        x_mm = self.position_sliders['x_slider'].value() / 1000.0
+        z_mm = self.position_sliders['z_slider'].value() / 1000.0
+        self._update_sample_holder_position(x_mm, y_mm, z_mm)
 
-    def _on_z_changed(self, value: int):
-        """Handle Z position changes (depth)."""
-        self.z_position_changed.emit(value)
-        # Update sample holder Z position
-        self._update_sample_holder_position(z_pos=value)
+    def _on_z_slider_changed(self, value: int):
+        """Handle Z slider position changes (depth)."""
+        z_mm = value / 1000.0  # Convert µm to mm
+        self.z_position_changed.emit(z_mm)
+        # Update sample holder position using coordinate mapper
+        x_mm = self.position_sliders['x_slider'].value() / 1000.0
+        y_mm = self.position_sliders['y_slider'].value() / 1000.0
+        self._update_sample_holder_position(x_mm, y_mm, z_mm)
+
+    def _on_x_invert_toggled(self, checked: bool):
+        """Handle X axis inversion toggle."""
+        self.coord_mapper.set_inversions(invert_x=checked)
+        logger.info(f"X axis inversion: {checked}")
+        # Update visualization with current position
+        x_mm = self.position_sliders['x_slider'].value() / 1000.0
+        y_mm = self.position_sliders['y_slider'].value() / 1000.0
+        z_mm = self.position_sliders['z_slider'].value() / 1000.0
+        self._update_sample_holder_position(x_mm, y_mm, z_mm)
+
+    def _on_z_invert_toggled(self, checked: bool):
+        """Handle Z axis inversion toggle."""
+        self.coord_mapper.set_inversions(invert_z=checked)
+        logger.info(f"Z axis inversion: {checked}")
+        # Update visualization with current position
+        x_mm = self.position_sliders['x_slider'].value() / 1000.0
+        y_mm = self.position_sliders['y_slider'].value() / 1000.0
+        z_mm = self.position_sliders['z_slider'].value() / 1000.0
+        self._update_sample_holder_position(x_mm, y_mm, z_mm)
 
     def _on_rotation_changed(self, value: int):
         """Handle rotation slider changes."""

@@ -1,11 +1,12 @@
 """
 Coordinate transformation utilities for 3D visualization.
-Handles rotation transformations for sample positioning.
+Handles rotation transformations for sample positioning and
+physical mm to napari pixel coordinate mapping.
 """
 
 import numpy as np
 from scipy.spatial.transform import Rotation
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict
 import logging
 
 logger = logging.getLogger(__name__)
@@ -303,3 +304,230 @@ class CoordinateTransformer:
             w2 = t
 
         return w1 * q1 + w2 * q2
+
+
+class PhysicalToNapariMapper:
+    """
+    Maps between physical stage coordinates (mm) and napari pixel coordinates.
+
+    Napari coordinate system:
+        - Origin (0,0,0) at back upper left
+        - Z=0: Back wall (where objective is located)
+        - Y=0: Top of chamber
+        - X=0: Left side of chamber
+
+    Physical coordinate system:
+        - X: Stage left-right position (mm)
+        - Y: Stage vertical position (mm) - inverted for intuitive "up" direction
+        - Z: Stage depth position (mm)
+
+    Features:
+        - Bidirectional transformation (physical ↔ napari)
+        - Y-axis inversion for user-friendly visualization
+        - Optional X/Z axis inversion for different stage configurations
+        - Validation of physical positions against chamber bounds
+    """
+
+    def __init__(self, config: Dict):
+        """
+        Initialize the physical to napari coordinate mapper.
+
+        Args:
+            config: Configuration dictionary with:
+                - x_range_mm: [x_min, x_max]
+                - y_range_mm: [y_min, y_max]
+                - z_range_mm: [z_min, z_max]
+                - voxel_size_um: Voxel size in micrometers
+        """
+        # Physical ranges (mm)
+        self.x_range_mm = tuple(config['x_range_mm'])
+        self.y_range_mm = tuple(config['y_range_mm'])
+        self.z_range_mm = tuple(config['z_range_mm'])
+
+        # Voxel size (convert µm to mm)
+        self.voxel_size_mm = config['voxel_size_um'] / 1000.0
+
+        # Inversion flags (can be set by user preferences)
+        self.invert_x = config.get('invert_x', False)
+        self.invert_z = config.get('invert_z', False)
+
+        # Calculate napari dimensions in pixels
+        self.napari_dims = self._calculate_napari_dimensions()
+
+        logger.info(f"Initialized PhysicalToNapariMapper:")
+        logger.info(f"  Physical ranges: X={self.x_range_mm}, Y={self.y_range_mm}, Z={self.z_range_mm}")
+        logger.info(f"  Voxel size: {self.voxel_size_mm*1000:.1f} µm")
+        logger.info(f"  Napari dims: {self.napari_dims} pixels")
+        logger.info(f"  Inversions: X={self.invert_x}, Z={self.invert_z}")
+
+    def _calculate_napari_dimensions(self) -> Tuple[int, int, int]:
+        """Calculate napari volume dimensions in pixels."""
+        width_x = int((self.x_range_mm[1] - self.x_range_mm[0]) / self.voxel_size_mm)
+        height_y = int((self.y_range_mm[1] - self.y_range_mm[0]) / self.voxel_size_mm)
+        depth_z = int((self.z_range_mm[1] - self.z_range_mm[0]) / self.voxel_size_mm)
+
+        return (width_x, height_y, depth_z)
+
+    def set_inversions(self, invert_x: bool = None, invert_z: bool = None):
+        """
+        Set axis inversion flags.
+
+        Args:
+            invert_x: If True, invert X axis direction
+            invert_z: If True, invert Z axis direction
+        """
+        if invert_x is not None:
+            self.invert_x = invert_x
+            logger.info(f"X axis inversion set to: {self.invert_x}")
+
+        if invert_z is not None:
+            self.invert_z = invert_z
+            logger.info(f"Z axis inversion set to: {self.invert_z}")
+
+    def physical_to_napari(self, x_mm: float, y_mm: float, z_mm: float) -> Tuple[int, int, int]:
+        """
+        Convert physical stage coordinates (mm) to napari pixel coordinates.
+
+        Args:
+            x_mm: Physical X position in mm
+            y_mm: Physical Y position in mm
+            z_mm: Physical Z position in mm
+
+        Returns:
+            (napari_x, napari_y, napari_z) in pixel coordinates
+        """
+        # Apply inversions to physical coordinates if enabled
+        x_eff = self._apply_x_inversion(x_mm)
+        z_eff = self._apply_z_inversion(z_mm)
+
+        # X: left to right (straightforward mapping)
+        napari_x = (x_eff - self.x_range_mm[0]) / self.voxel_size_mm
+
+        # Y: INVERTED (y_max maps to napari Y=0, y_min maps to napari Y=max)
+        # This makes increasing Y move "up" visually in the display
+        napari_y = (self.y_range_mm[1] - y_mm) / self.voxel_size_mm
+
+        # Z: back to front (objective at Z=0)
+        napari_z = (z_eff - self.z_range_mm[0]) / self.voxel_size_mm
+
+        # Round to nearest pixel
+        napari_x = int(round(napari_x))
+        napari_y = int(round(napari_y))
+        napari_z = int(round(napari_z))
+
+        # Clamp to valid range
+        napari_x = np.clip(napari_x, 0, self.napari_dims[0] - 1)
+        napari_y = np.clip(napari_y, 0, self.napari_dims[1] - 1)
+        napari_z = np.clip(napari_z, 0, self.napari_dims[2] - 1)
+
+        return (napari_x, napari_y, napari_z)
+
+    def napari_to_physical(self, napari_x: int, napari_y: int, napari_z: int) -> Tuple[float, float, float]:
+        """
+        Convert napari pixel coordinates to physical stage coordinates (mm).
+
+        Args:
+            napari_x: Napari X pixel coordinate
+            napari_y: Napari Y pixel coordinate
+            napari_z: Napari Z pixel coordinate
+
+        Returns:
+            (x_mm, y_mm, z_mm) in physical mm coordinates
+        """
+        # Convert pixels to mm
+        x_mm = napari_x * self.voxel_size_mm + self.x_range_mm[0]
+        y_mm = self.y_range_mm[1] - (napari_y * self.voxel_size_mm)  # Y inverted
+        z_mm = napari_z * self.voxel_size_mm + self.z_range_mm[0]
+
+        # Unapply inversions
+        x_mm = self._unapply_x_inversion(x_mm)
+        z_mm = self._unapply_z_inversion(z_mm)
+
+        return (x_mm, y_mm, z_mm)
+
+    def _apply_x_inversion(self, x_mm: float) -> float:
+        """Apply X axis inversion if enabled."""
+        if self.invert_x:
+            # Reflect around center of X range
+            center_x = (self.x_range_mm[0] + self.x_range_mm[1]) / 2
+            return 2 * center_x - x_mm
+        return x_mm
+
+    def _unapply_x_inversion(self, x_mm: float) -> float:
+        """Unapply X axis inversion (inverse operation)."""
+        # Inversion is symmetric, so same operation
+        return self._apply_x_inversion(x_mm)
+
+    def _apply_z_inversion(self, z_mm: float) -> float:
+        """Apply Z axis inversion if enabled."""
+        if self.invert_z:
+            # Reflect around center of Z range
+            center_z = (self.z_range_mm[0] + self.z_range_mm[1]) / 2
+            return 2 * center_z - z_mm
+        return z_mm
+
+    def _unapply_z_inversion(self, z_mm: float) -> float:
+        """Unapply Z axis inversion (inverse operation)."""
+        # Inversion is symmetric, so same operation
+        return self._apply_z_inversion(z_mm)
+
+    def validate_physical_position(self, x_mm: float, y_mm: float, z_mm: float) -> bool:
+        """
+        Check if physical position is within chamber bounds.
+
+        Args:
+            x_mm: Physical X position
+            y_mm: Physical Y position
+            z_mm: Physical Z position
+
+        Returns:
+            True if position is within bounds, False otherwise
+        """
+        x_valid = self.x_range_mm[0] <= x_mm <= self.x_range_mm[1]
+        y_valid = self.y_range_mm[0] <= y_mm <= self.y_range_mm[1]
+        z_valid = self.z_range_mm[0] <= z_mm <= self.z_range_mm[1]
+
+        return x_valid and y_valid and z_valid
+
+    def get_physical_bounds(self) -> Dict[str, Tuple[float, float]]:
+        """Get physical coordinate bounds."""
+        return {
+            'x': self.x_range_mm,
+            'y': self.y_range_mm,
+            'z': self.z_range_mm
+        }
+
+    def get_napari_dimensions(self) -> Tuple[int, int, int]:
+        """Get napari volume dimensions in pixels."""
+        return self.napari_dims
+
+    def test_round_trip(self, x_mm: float, y_mm: float, z_mm: float,
+                       tolerance: float = 0.01) -> bool:
+        """
+        Test round-trip transformation (physical → napari → physical).
+
+        Args:
+            x_mm, y_mm, z_mm: Physical coordinates to test
+            tolerance: Maximum allowed error in mm
+
+        Returns:
+            True if round-trip error is within tolerance
+        """
+        # Forward transform
+        napari_coords = self.physical_to_napari(x_mm, y_mm, z_mm)
+
+        # Backward transform
+        x_back, y_back, z_back = self.napari_to_physical(*napari_coords)
+
+        # Calculate errors
+        error_x = abs(x_back - x_mm)
+        error_y = abs(y_back - y_mm)
+        error_z = abs(z_back - z_mm)
+
+        max_error = max(error_x, error_y, error_z)
+
+        logger.debug(f"Round-trip test: ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) → "
+                    f"{napari_coords} → ({x_back:.2f}, {y_back:.2f}, {z_back:.2f})")
+        logger.debug(f"  Max error: {max_error:.4f} mm")
+
+        return max_error <= tolerance
