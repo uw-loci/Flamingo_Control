@@ -43,11 +43,11 @@ sample_chamber:
   y_min_anchor_mm: 5.0
 
   # Chamber extends below the anchor point (in mm)
-  chamber_below_anchor_mm: 30.0  # 3cm below Y minimum
+  chamber_below_anchor_mm: 10.0  # 1cm below Y minimum
 
   # Chamber extends above the anchor point (in mm)
-  chamber_above_anchor_mm: 50.0  # 5cm above Y minimum
-  # Total chamber height = 30mm + 50mm = 80mm (8cm)
+  chamber_above_anchor_mm: 5.0  # 5mm above Y minimum
+  # Total chamber height = 10mm + 5mm = 15mm
 
   # Chamber width in X and Y directions (in mm)
   chamber_width_x_mm: 12.0
@@ -55,7 +55,7 @@ sample_chamber:
 
   # Sample holder dimensions
   holder_diameter_mm: 1.0  # Diameter of the cylindrical holder
-  holder_extension_above_chamber_mm: 30.0  # 3cm above chamber top
+  # Holder extends from chamber top down to Y_min (and beyond, but we only display visible portion)
 
   # Visualization wall thickness (just for display, not physical)
   wall_thickness_mm: 1.0

@@ -628,14 +628,14 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Sample holder dimensions (from config)
         holder_diameter_mm = self.config['sample_chamber']['holder_diameter_mm']
-        holder_extension_mm = self.config['sample_chamber']['holder_extension_above_chamber_mm']
         voxel_size_um = self.config['display']['voxel_size_um'][2]  # Use Z voxel size
         holder_radius_voxels = int((holder_diameter_mm * 1000 / 2) / voxel_size_um)
 
         # Get chamber dimensions
         dims = self.voxel_storage.display_dims
 
-        # Sample holder extends from top to current Z position
+        # Sample holder extends from chamber top down to Y_min
+        # Only display the portion within the visible chamber bounds
         # Default to center of chamber in X and Y
         self.holder_position = {
             'x': dims[0] // 2,
@@ -646,14 +646,13 @@ class Sample3DVisualizationWindow(QWidget):
         # Create cylinder as a series of circles (points)
         holder_points = []
 
-        # Generate cylinder from holder position up through chamber top and beyond
-        # Extend above chamber by holder_extension_mm
-        extension_voxels = int((holder_extension_mm * 1000) / voxel_size_um)
-        z_top = dims[2] - 1 + extension_voxels  # Extend above chamber
+        # Holder only displays from chamber top down to current position
+        # This reduces voxel count significantly
+        z_top = dims[2] - 1  # Chamber top (no extension beyond display)
         z_bottom = self.holder_position['z']
 
         # Create vertical line of points for cylinder axis
-        # Napari coordinates: trying (X, Z, Y) order where Z is vertical
+        # Napari coordinates: (X, Z, Y) order where Z is vertical
         for z in range(z_bottom, z_top, 2):  # Sample every 2 voxels for performance
             holder_points.append([self.holder_position['x'], z, self.holder_position['y']])
 
@@ -718,7 +717,7 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Position: extends from holder position along X-axis (0 degrees)
         # Always at the top of the displayed holder
-        z_position = dims[2] - 10  # Near top of chamber
+        z_position = max(dims[2] - 5, dims[2] // 2)  # Near top of chamber
 
         # Create indicator points in (X, Z, Y) order where Z is vertical
         indicator_start = np.array([
@@ -764,12 +763,9 @@ class Sample3DVisualizationWindow(QWidget):
         dims = self.voxel_storage.display_dims
         holder_points = []
 
-        # Calculate holder extension above chamber
-        holder_extension_mm = self.config['sample_chamber']['holder_extension_above_chamber_mm']
-        voxel_size_um = self.config['display']['voxel_size_um'][2]
-        extension_voxels = int((holder_extension_mm * 1000) / voxel_size_um)
-
-        z_top = dims[2] - 1 + extension_voxels  # Extend above chamber
+        # Only display visible portion of holder (from position to chamber top)
+        # This significantly reduces voxel count
+        z_top = dims[2] - 1  # Chamber top (no extension)
         z_bottom = max(0, self.holder_position['z'])
 
         # Napari coordinates: (X, Z, Y) order where Z is vertical
@@ -792,7 +788,7 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Indicator extends from holder center
         dims = self.voxel_storage.display_dims
-        z_position = dims[2] - 10  # Always near top
+        z_position = max(dims[2] - 5, dims[2] // 2)  # Near top of chamber
 
         # Calculate end point displacement based on Y rotation
         # Rotation around Y axis affects X and Z coordinates
