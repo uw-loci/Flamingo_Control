@@ -497,10 +497,11 @@ class Sample3DVisualizationWindow(QWidget):
             # Create napari viewer with axis display for debugging
             self.viewer = napari.Viewer(ndisplay=3, show=False)
 
-            # Enable axis display with X, Y, Z labels
+            # Enable axis display
             self.viewer.axes.visible = True
-            self.viewer.axes.labels = ['X', 'Y', 'Z']
+            self.viewer.axes.labels = True  # Show default 0,1,2 labels (napari doesn't support custom)
             self.viewer.axes.colored = True
+            # Note: Axis 0=X, Axis 1=Y (vertical), Axis 2=Z (depth)
 
             # Embed viewer in our widget FIRST before adding layers
             # This ensures the viewer is properly initialized
