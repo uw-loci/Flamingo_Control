@@ -115,6 +115,12 @@ class Sample3DVisualizationWindow(QWidget):
         self.update_timer.timeout.connect(self._update_visualization)
         self.update_timer.setInterval(100)  # 10 Hz update rate
 
+        # Debounce timer for rotation spinbox (typing vs arrows)
+        self.rotation_debounce_timer = QTimer()
+        self.rotation_debounce_timer.setSingleShot(True)
+        self.rotation_debounce_timer.timeout.connect(self._apply_rotation_from_spinbox)
+        self.rotation_debounce_delay_ms = 150  # 150ms delay for typing
+
         # Configure window
         self.setWindowTitle("3D Sample Chamber Visualization")
         self.setWindowFlags(Qt.Window)
@@ -452,19 +458,40 @@ class Sample3DVisualizationWindow(QWidget):
         rotation_group = QGroupBox("Stage Rotation (Y-Axis)")
         rot_layout = QVBoxLayout()
 
-        # Rotation header
+        # Rotation header with editable value
         rot_header = QHBoxLayout()
         rot_header.addWidget(QLabel("Rotation Angle:"))
         rot_header.addStretch()
-        self.rotation_value_label = QLabel(f"{stage_config['rotation_default_deg']:.1f}°")
-        self.rotation_value_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        rot_header.addWidget(self.rotation_value_label)
+
+        # Editable rotation spinbox
+        # Display range: 0-360° (but software handles -720 to 720 with wrapping)
+        # TODO: Handle edge case when stage starts at angles like -570°
+        from PyQt5.QtWidgets import QDoubleSpinBox
+        self.rotation_spinbox = QDoubleSpinBox()
+        self.rotation_spinbox.setRange(0, 360)  # User-facing range
+        self.rotation_spinbox.setValue(stage_config['rotation_default_deg'])
+        self.rotation_spinbox.setDecimals(1)
+        self.rotation_spinbox.setSuffix("°")
+        self.rotation_spinbox.setWrapping(True)  # Wraps from 360 to 0
+        self.rotation_spinbox.setSingleStep(1.0)  # 1° per arrow click
+        self.rotation_spinbox.setStyleSheet("""
+            QDoubleSpinBox {
+                font-weight: bold;
+                font-size: 14px;
+                border: 2px solid #888;
+                border-radius: 4px;
+                padding: 2px;
+                background-color: #1a1a1a;
+            }
+        """)
+        self.rotation_spinbox.setMaximumWidth(100)
+        rot_header.addWidget(self.rotation_spinbox)
         rot_layout.addLayout(rot_header)
 
         # Rotation slider
         self.rotation_slider = QSlider(Qt.Horizontal)
-        rot_range = stage_config['rotation_range_deg']
-        self.rotation_slider.setRange(int(rot_range[0]), int(rot_range[1]))
+        # Note: Software can handle -720 to 720 with angle wrapping
+        self.rotation_slider.setRange(0, 360)  # Match spinbox range
         self.rotation_slider.setValue(int(stage_config['rotation_default_deg']))
         self.rotation_slider.setStyleSheet("""
             QSlider::groove:horizontal {
@@ -487,20 +514,15 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Range labels
         range_layout = QHBoxLayout()
-        range_layout.addWidget(QLabel(f"{rot_range[0]}°"))
+        range_layout.addWidget(QLabel("0°"))
         range_layout.addStretch()
-        range_layout.addWidget(QLabel(f"{rot_range[1]}°"))
+        range_layout.addWidget(QLabel("360°"))
         rot_layout.addLayout(range_layout)
 
         # Reset button
         reset_btn = QPushButton("Reset to 0°")
-        reset_btn.clicked.connect(lambda: self.rotation_slider.setValue(0))
+        reset_btn.clicked.connect(lambda: (self.rotation_slider.setValue(0), self.rotation_spinbox.setValue(0)))
         rot_layout.addWidget(reset_btn)
-
-        # Connect slider to label
-        self.rotation_slider.valueChanged.connect(
-            lambda v: self.rotation_value_label.setText(f"{v:.1f}°")
-        )
 
         rotation_group.setLayout(rot_layout)
         layout.addWidget(rotation_group)
@@ -790,8 +812,15 @@ class Sample3DVisualizationWindow(QWidget):
         self.position_sliders['y_slider'].valueChanged.connect(self._on_y_slider_changed)
         self.position_sliders['z_slider'].valueChanged.connect(self._on_z_slider_changed)
 
-        # Rotation slider
-        self.rotation_slider.valueChanged.connect(self._on_rotation_changed)
+        # Rotation controls
+        # Slider: real-time updates
+        self.rotation_slider.valueChanged.connect(self._on_rotation_slider_changed)
+
+        # Spinbox: debounced updates (instant for arrows, delayed for typing)
+        self.rotation_spinbox.valueChanged.connect(self._on_rotation_spinbox_changed)
+
+        # Spinbox editing finished: immediate update (for Enter key)
+        self.rotation_spinbox.editingFinished.connect(self._apply_rotation_from_spinbox)
 
         # Channel visibility
         for ch_id, controls in self.channel_controls.items():
@@ -1627,8 +1656,39 @@ class Sample3DVisualizationWindow(QWidget):
         # Update sample data position
         self._update_sample_data_visualization()
 
-    def _on_rotation_changed(self, value: int):
-        """Handle rotation slider changes."""
+    def _on_rotation_slider_changed(self, value: int):
+        """Handle rotation slider changes (real-time updates)."""
+        # Update spinbox without triggering its signals
+        self.rotation_spinbox.blockSignals(True)
+        self.rotation_spinbox.setValue(float(value))
+        self.rotation_spinbox.blockSignals(False)
+
+        # Apply rotation immediately
+        self._apply_rotation(value)
+
+    def _on_rotation_spinbox_changed(self, value: float):
+        """Handle rotation spinbox changes (debounced for typing, instant for arrows)."""
+        # Update slider without triggering its signals
+        self.rotation_slider.blockSignals(True)
+        self.rotation_slider.setValue(int(value))
+        self.rotation_slider.blockSignals(False)
+
+        # Start/restart debounce timer
+        # This makes arrow clicks feel instant (~150ms) but debounces rapid typing
+        self.rotation_debounce_timer.stop()
+        self.rotation_debounce_timer.start(self.rotation_debounce_delay_ms)
+
+    def _apply_rotation_from_spinbox(self):
+        """Apply rotation from spinbox value (called after debounce or Enter)."""
+        # Stop debounce timer if running
+        self.rotation_debounce_timer.stop()
+
+        # Apply the rotation
+        value = self.rotation_spinbox.value()
+        self._apply_rotation(int(value))
+
+    def _apply_rotation(self, value: int):
+        """Apply rotation update to visualization."""
         # Update current rotation (only Y axis rotation)
         self.current_rotation['ry'] = value
 
