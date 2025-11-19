@@ -1395,7 +1395,11 @@ class Sample3DVisualizationWindow(QWidget):
             if (visible_z_start >= visible_z_end or
                 visible_y_start >= visible_y_end or
                 visible_x_start >= visible_x_end):
-                print(f"DEBUG: Ch{ch_id} completely outside visible volume, skipping")
+                print(f"DEBUG: Ch{ch_id} completely outside visible volume")
+                # Data is outside - sparse renderer was already cleared, just update napari layer
+                dense_volume = self.sparse_renderer.get_dense_volume(ch_id)
+                self.channel_layers[ch_id].data = dense_volume
+                logger.info(f"Ch{ch_id}: Data outside visible volume, cleared display")
                 continue
 
             bounds = (visible_z_start, visible_z_end, visible_y_start, visible_y_end, visible_x_start, visible_x_end)
@@ -1421,7 +1425,7 @@ class Sample3DVisualizationWindow(QWidget):
             logger.info(f"Ch{ch_id}: placing {data_to_place.shape} at bounds {bounds}")
             logger.info(f"  Data range: {data_to_place.min()}-{data_to_place.max()}, non-zero: {np.count_nonzero(data_to_place)}")
 
-            # Update sparse renderer
+            # Update sparse renderer with visible portion
             self.sparse_renderer.update_region(ch_id, bounds, data_to_place)
 
             # Get dense volume from sparse renderer and update napari layer
