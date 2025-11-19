@@ -986,7 +986,7 @@ class Sample3DVisualizationWindow(QWidget):
         logger.info(f"Added objective indicator at Z=0 (back wall), center Y={center_y}, X={center_x}")
 
     def _add_rotation_indicator(self):
-        """Add rotation indicator in ZX plane at Y=0 (top of chamber)."""
+        """Add rotation indicator in ZX plane at Y=0 (follows sample holder XZ position)."""
         if not self.viewer:
             return
 
@@ -995,17 +995,17 @@ class Sample3DVisualizationWindow(QWidget):
         indicator_length = min(dims[0], dims[2]) // 2  # 1/2 shortest dimension
 
         # Position: extends in ZX plane at Y=0 (top of chamber)
-        # Y=0 is the top of the chamber (Axis 1)
+        # Follows the sample holder's X and Z position
         y_position = 0  # TOP OF CHAMBER
 
-        # Center position in Z and X
-        center_z = dims[0] // 2  # Z center (Axis 0)
-        center_x = dims[2] // 2  # X center (Axis 2)
+        # Start at sample holder's XZ position (in napari coords)
+        holder_z = self.holder_position['z']  # Z position (Axis 0)
+        holder_x = self.holder_position['x']  # X position (Axis 2)
 
         # Create indicator points in (Z, Y, X) order
         # At 0 degrees, points along +X axis
-        indicator_start = np.array([center_z, y_position, center_x])
-        indicator_end = np.array([center_z, y_position, center_x + indicator_length])
+        indicator_start = np.array([holder_z, y_position, holder_x])
+        indicator_end = np.array([holder_z, y_position, holder_x + indicator_length])
 
         # Add as a line (using shapes layer for better control)
         self.viewer.add_shapes(
@@ -1017,11 +1017,10 @@ class Sample3DVisualizationWindow(QWidget):
             opacity=0.8
         )
 
-        # Store for updates during rotation
-        self.rotation_indicator_base = indicator_start.copy()
+        # Store indicator length for rotation updates
         self.rotation_indicator_length = indicator_length
 
-        logger.info(f"Added rotation indicator at Y=0 (top), center Z={center_z}, X={center_x}")
+        logger.info(f"Added rotation indicator at Y=0 (top), following holder at Z={holder_z}, X={holder_x}")
 
     def _update_sample_holder_position(self, x_mm: float, y_mm: float, z_mm: float):
         """
@@ -1071,7 +1070,7 @@ class Sample3DVisualizationWindow(QWidget):
         self._update_rotation_indicator()
 
     def _update_rotation_indicator(self):
-        """Update rotation indicator based on current rotation (always at Y=0)."""
+        """Update rotation indicator based on current rotation (follows sample holder XZ position)."""
         if not self.viewer or 'Rotation Indicator' not in self.viewer.layers:
             return
 
@@ -1081,15 +1080,20 @@ class Sample3DVisualizationWindow(QWidget):
         # Indicator always at Y=0 (top of chamber), extends in ZX plane
         y_position = 0  # TOP OF CHAMBER
 
+        # Start position follows sample holder's X and Z position (in napari coords)
+        # But always at Y=0 (top)
+        start = np.array([
+            self.holder_position['z'],  # Z coordinate (napari index 0)
+            y_position,                  # Y coordinate (napari index 1) - always at top
+            self.holder_position['x']   # X coordinate (napari index 2)
+        ])
+
         # Calculate end point displacement based on Y rotation
         # Rotation around Y axis (vertical) affects Z and X coordinates
         # At 0°, indicator points in +X direction
         # Napari coords are (Z, Y, X), so rotation affects indices 0 and 2
         dx = self.rotation_indicator_length * np.cos(angle_rad)
         dz = self.rotation_indicator_length * np.sin(angle_rad)
-
-        # Start position (base stored in (Z, Y, X) order)
-        start = self.rotation_indicator_base.copy()
 
         # End position rotated in ZX plane (indices 0 and 2)
         end = np.array([
