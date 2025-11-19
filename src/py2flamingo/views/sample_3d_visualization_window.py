@@ -132,10 +132,20 @@ class Sample3DVisualizationWindow(QWidget):
 
     def _init_storage(self):
         """Initialize the dual-resolution storage system."""
-        # Convert chamber dimensions from mm to micrometers
-        chamber_dims_um = tuple(
-            d * 1000 for d in self.config['sample_chamber']['dimensions_mm']
-        )
+        # Calculate chamber dimensions from config parameters
+        chamber_config = self.config['sample_chamber']
+
+        chamber_width_x = chamber_config['chamber_width_x_mm'] * 1000  # Convert to µm
+        chamber_width_y = chamber_config['chamber_width_y_mm'] * 1000
+        chamber_height = (chamber_config['chamber_below_anchor_mm'] +
+                         chamber_config['chamber_above_anchor_mm']) * 1000
+
+        chamber_dims_um = (chamber_width_x, chamber_width_y, chamber_height)
+
+        # Store chamber positioning info for later use
+        self.chamber_below_anchor_um = chamber_config['chamber_below_anchor_mm'] * 1000
+        self.chamber_above_anchor_um = chamber_config['chamber_above_anchor_mm'] * 1000
+        self.y_min_anchor_um = chamber_config['y_min_anchor_mm'] * 1000
 
         storage_config = DualResolutionConfig(
             storage_voxel_size=tuple(self.config['storage']['voxel_size_um']),
@@ -144,7 +154,7 @@ class Sample3DVisualizationWindow(QWidget):
         )
 
         self.voxel_storage = DualResolutionVoxelStorage(storage_config)
-        logger.info("Initialized dual-resolution voxel storage")
+        logger.info(f"Initialized dual-resolution voxel storage: {chamber_dims_um} µm")
 
     def _setup_ui(self):
         """Setup the user interface."""
@@ -668,29 +678,33 @@ class Sample3DVisualizationWindow(QWidget):
         dims = self.voxel_storage.display_dims
 
         # Create a circle on the back wall (Z=0) at the center
-        # Using shapes layer with an ellipse
         center_x = dims[0] // 2
         center_y = dims[1] // 2
         z_back = 0  # Back wall
 
-        # Circle radius (about 1/8 of the chamber width for visibility)
-        radius = min(dims[0], dims[1]) // 8
+        # Circle radius (about 1/6 of the chamber width for visibility)
+        radius = min(dims[0], dims[1]) // 6
 
-        # Create circle vertices in 3D (on the Z=0 plane)
-        # Ellipse data format: [center, radii] in (X, Z, Y) order
-        circle_data = np.array([[
-            [center_x, z_back, center_y],  # Center point (X, Z, Y)
-            [radius, 0, radius]            # Radii (X and Y radii, no Z thickness)
-        ]])
+        # Create circle as a series of points on the back wall
+        # This is more reliable than trying to use shapes
+        num_points = 36  # Points to form the circle
+        angles = np.linspace(0, 2 * np.pi, num_points, endpoint=False)
 
-        self.viewer.add_shapes(
-            data=circle_data,
-            shape_type='ellipse',
+        circle_points = []
+        for angle in angles:
+            x = center_x + radius * np.cos(angle)
+            y = center_y + radius * np.sin(angle)
+            # Coordinates in (X, Z, Y) order where Z is vertical
+            circle_points.append([x, z_back, y])
+
+        self.viewer.add_points(
+            np.array(circle_points),
             name='Objective',
-            edge_color='orange',
+            size=15,
             face_color='yellow',
-            edge_width=3,
-            opacity=0.7
+            border_color='orange',
+            border_width=0.2,
+            opacity=0.9
         )
 
     def _add_rotation_indicator(self):

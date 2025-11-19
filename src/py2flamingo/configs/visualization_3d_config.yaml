@@ -36,14 +36,26 @@ storage:
   chunk_size_voxels: [64, 64, 32]
 
 sample_chamber:
-  # Chamber dimensions for visualization (update with real measurements)
-  # Format: [width_x, width_y, height_z] in millimeters
-  # Height should be ~3x the average of XY dimensions
-  dimensions_mm: [12, 12, 36]  # XY width, Z height
+  # Chamber dimensions and positioning
+  # The chamber is positioned relative to the Y minimum stage position (anchor point)
+
+  # Stage Y minimum position (anchor point in mm)
+  y_min_anchor_mm: 5.0
+
+  # Chamber extends below the anchor point (in mm)
+  chamber_below_anchor_mm: 30.0  # 3cm below Y minimum
+
+  # Chamber extends above the anchor point (in mm)
+  chamber_above_anchor_mm: 50.0  # 5cm above Y minimum
+  # Total chamber height = 30mm + 50mm = 80mm (8cm)
+
+  # Chamber width in X and Y directions (in mm)
+  chamber_width_x_mm: 12.0
+  chamber_width_y_mm: 12.0
 
   # Sample holder dimensions
   holder_diameter_mm: 1.0  # Diameter of the cylindrical holder
-  holder_extension_above_chamber_mm: 5.0  # How far holder extends above chamber top
+  holder_extension_above_chamber_mm: 30.0  # 3cm above chamber top
 
   # Visualization wall thickness (just for display, not physical)
   wall_thickness_mm: 1.0
