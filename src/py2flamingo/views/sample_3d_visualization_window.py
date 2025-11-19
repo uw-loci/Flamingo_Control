@@ -29,6 +29,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from visualization.dual_resolution_storage import DualResolutionVoxelStorage, DualResolutionConfig
 from visualization.coordinate_transforms import CoordinateTransformer, PhysicalToNapariMapper
+from visualization.sparse_volume_renderer import SparseVolumeRenderer
 
 logger = logging.getLogger(__name__)
 
@@ -87,11 +88,13 @@ class Sample3DVisualizationWindow(QWidget):
         self.holder_position = {'x': 0, 'y': 0, 'z': 0}
         self.rotation_indicator_length = 0
 
-        # Test sample data
-        self.test_sample_data = None
+        # Test sample data (raw, unrotated)
+        self.test_sample_data_raw = None
         self.test_sample_size_mm = 2.0  # 2mm cube of sample data
         self.test_sample_offset_mm = 0.5  # 0.5mm below holder tip
-        self.previous_sample_bounds = {}  # Track previous bounds for efficient clearing
+
+        # Sparse volume renderer for efficient display
+        self.sparse_renderer = None  # Initialized after voxel_storage
 
         # Setup UI
         self._setup_ui()
@@ -185,6 +188,14 @@ class Sample3DVisualizationWindow(QWidget):
         logger.info(f"  Chamber dimensions (µm): {chamber_dims_um}")
         logger.info(f"  Display dimensions (voxels): {self.voxel_storage.display_dims}")
         logger.info(f"  Voxel size (µm): {self.config['display']['voxel_size_um']}")
+
+        # Initialize sparse volume renderer
+        self.sparse_renderer = SparseVolumeRenderer(
+            dims=self.voxel_storage.display_dims,
+            num_channels=4,
+            block_size=32,
+            use_sparse=True
+        )
 
     def _setup_ui(self):
         """Setup the user interface."""
@@ -1206,8 +1217,8 @@ class Sample3DVisualizationWindow(QWidget):
         voxel_size_mm = self.coord_mapper.voxel_size_mm
         sample_size_voxels = int(self.test_sample_size_mm / voxel_size_mm)
 
-        # Create 4-channel test data
-        self.test_sample_data = {}
+        # Create 4-channel test data (raw, unrotated)
+        self.test_sample_data_raw = {}
 
         for ch_id in range(4):
             # Create a 3D volume for this channel
@@ -1255,40 +1266,50 @@ class Sample3DVisualizationWindow(QWidget):
                     mask = (x-cx)**2 + (y-cy)**2 + (z-cz)**2 <= radius**2
                     data[mask] = np.random.randint(35000, 55000)
 
-            self.test_sample_data[ch_id] = data
+            self.test_sample_data_raw[ch_id] = data
 
         logger.info(f"Generated test sample data: {sample_size_voxels}x{sample_size_voxels}x{sample_size_voxels} voxels per channel")
 
     def _update_sample_data_visualization(self):
-        """Update the sample data visualization based on current holder position and rotation."""
-        if not self.viewer or self.test_sample_data is None:
+        """Update the sample data visualization with position and rotation transforms."""
+        if not self.viewer or self.test_sample_data_raw is None or self.sparse_renderer is None:
             return
 
-        # Get current physical position
+        # Get current physical position and rotation
         x_mm = self.position_sliders['x_slider'].value() / 1000.0
         y_mm = self.position_sliders['y_slider'].value() / 1000.0
         z_mm = self.position_sliders['z_slider'].value() / 1000.0
+        rotation_deg = self.current_rotation.get('ry', 0)
+
+        # Clear all previous data from sparse renderer
+        for ch_id in range(4):
+            # Get previous active bounds and clear them
+            prev_bounds = self.sparse_renderer.get_active_bounds(ch_id)
+            if prev_bounds:
+                self.sparse_renderer.clear_region(ch_id, prev_bounds)
 
         # Calculate sample data position (below holder tip)
         sample_center_y_mm = y_mm - self.test_sample_offset_mm - (self.test_sample_size_mm / 2)
 
-        # Convert to napari coordinates
+        # Convert center to napari coordinates
         sample_x, sample_y, sample_z = self.coord_mapper.physical_to_napari(
             x_mm, sample_center_y_mm, z_mm
         )
 
-        # Get sample data size in voxels
+        # Apply rotation transform to sample data
         voxel_size_mm = self.coord_mapper.voxel_size_mm
         sample_size_voxels = int(self.test_sample_size_mm / voxel_size_mm)
-        half_size = sample_size_voxels // 2
 
-        # Update each channel with positioned data
-        for ch_id, sample_data in self.test_sample_data.items():
-            if ch_id not in self.channel_layers:
-                continue
+        # Update each channel
+        for ch_id, raw_data in self.test_sample_data_raw.items():
+            # Apply rotation to the data
+            rotated_data = self._rotate_sample_data(raw_data, rotation_deg)
 
-            # Calculate bounds for placing sample data
-            # In napari (Z, Y, X) coordinates
+            # Transpose to (Z, Y, X) for napari
+            rotated_transposed = np.transpose(rotated_data, (2, 0, 1))
+
+            # Calculate bounds in napari coordinates
+            half_size = sample_size_voxels // 2
             z_start = max(0, sample_z - half_size)
             z_end = min(self.voxel_storage.display_dims[0], sample_z + half_size)
             y_start = max(0, sample_y - half_size)
@@ -1296,44 +1317,61 @@ class Sample3DVisualizationWindow(QWidget):
             x_start = max(0, sample_x - half_size)
             x_end = min(self.voxel_storage.display_dims[2], sample_x + half_size)
 
-            current_bounds = (z_start, z_end, y_start, y_end, x_start, x_end)
+            bounds = (z_start, z_end, y_start, y_end, x_start, x_end)
 
-            # Clear previous sample data region if position changed
-            if ch_id in self.previous_sample_bounds:
-                prev_bounds = self.previous_sample_bounds[ch_id]
-                # Only clear if bounds changed
-                if prev_bounds != current_bounds:
-                    pz_start, pz_end, py_start, py_end, px_start, px_end = prev_bounds
-                    self.channel_layers[ch_id].data[pz_start:pz_end, py_start:py_end, px_start:px_end] = 0
+            # Extract the portion that fits in bounds
+            data_z_size = z_end - z_start
+            data_y_size = y_end - y_start
+            data_x_size = x_end - x_start
 
-            # Calculate corresponding bounds in sample data
-            sample_z_start = max(0, half_size - sample_z + z_start)
-            sample_z_end = sample_z_start + (z_end - z_start)
-            sample_y_start = max(0, half_size - sample_y + y_start)
-            sample_y_end = sample_y_start + (y_end - y_start)
-            sample_x_start = max(0, half_size - sample_x + x_start)
-            sample_x_end = sample_x_start + (x_end - x_start)
+            # Get corresponding region from rotated data
+            src_z_start = max(0, half_size - (sample_z - z_start))
+            src_y_start = max(0, half_size - (sample_y - y_start))
+            src_x_start = max(0, half_size - (sample_x - x_start))
 
-            # Transpose sample data to (Z, Y, X) for napari
-            sample_transposed = np.transpose(sample_data, (2, 0, 1))
+            data_to_place = rotated_transposed[
+                src_z_start:src_z_start + data_z_size,
+                src_y_start:src_y_start + data_y_size,
+                src_x_start:src_x_start + data_x_size
+            ]
 
-            try:
-                # Directly update the layer data (no copy!)
-                self.channel_layers[ch_id].data[z_start:z_end, y_start:y_end, x_start:x_end] = \
-                    sample_transposed[sample_z_start:sample_z_end,
-                                    sample_y_start:sample_y_end,
-                                    sample_x_start:sample_x_end]
+            # Update sparse renderer
+            self.sparse_renderer.update_region(ch_id, bounds, data_to_place)
 
-                # Force refresh
-                self.channel_layers[ch_id].refresh()
+            # Get dense volume from sparse renderer and update napari layer
+            dense_volume = self.sparse_renderer.get_dense_volume(ch_id)
+            self.channel_layers[ch_id].data = dense_volume
 
-            except Exception as e:
-                logger.warning(f"Could not place sample data for channel {ch_id}: {e}")
+        # Update memory display
+        mem_stats = self.sparse_renderer.get_memory_usage()
+        self.memory_label.setText(f"Memory: {mem_stats['total_mb']:.1f} MB")
+        self.voxel_count_label.setText(f"Voxels: {mem_stats['total_voxels']:,}")
 
-            # Store current bounds for next update
-            self.previous_sample_bounds[ch_id] = current_bounds
+        logger.debug(f"Updated sample data at ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm, rotation={rotation_deg}°")
 
-        logger.debug(f"Updated sample data at ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm")
+    def _rotate_sample_data(self, data: np.ndarray, rotation_deg: float) -> np.ndarray:
+        """
+        Apply Y-axis rotation to sample data.
+
+        Args:
+            data: 3D array in (Y, X, Z) order
+            rotation_deg: Rotation angle in degrees around Y axis
+
+        Returns:
+            Rotated 3D array in same order
+        """
+        if abs(rotation_deg) < 0.1:
+            # No rotation needed
+            return data
+
+        from scipy.ndimage import rotate
+
+        # Rotate around Y axis (axis=0 in the data array which is Y,X,Z ordered)
+        # Y-axis rotation affects X and Z, so we rotate in the XZ plane (axes 1 and 2)
+        rotated = rotate(data, rotation_deg, axes=(2, 1), reshape=False,
+                        order=1, mode='constant', cval=0)
+
+        return rotated.astype(np.uint16)
 
     def _on_streaming_toggled(self, checked: bool):
         """Handle streaming start/stop."""
@@ -1417,8 +1455,9 @@ class Sample3DVisualizationWindow(QWidget):
         # Emit signal
         self.rotation_changed.emit(self.current_rotation)
 
-        # Update visualization
+        # Update visualization - both indicator and sample data
         self._update_rotation_indicator()
+        self._update_sample_data_visualization()
 
     def _on_channel_visibility_changed(self, channel_id: int, visible: bool):
         """Handle channel visibility changes."""
