@@ -36,9 +36,16 @@ storage:
   chunk_size_voxels: [64, 64, 32]
 
 sample_chamber:
-  # Default chamber dimensions (can be overridden per system)
-  outer_dimensions_mm: [12, 12, 45]
-  inner_dimensions_mm: [10, 10, 43]
+  # Chamber dimensions for visualization (update with real measurements)
+  # Format: [width_x, width_y, height_z] in millimeters
+  # Height should be ~3x the average of XY dimensions
+  dimensions_mm: [12, 12, 36]  # XY width, Z height
+
+  # Sample holder dimensions
+  holder_diameter_mm: 1.0  # Diameter of the cylindrical holder
+  holder_extension_above_chamber_mm: 5.0  # How far holder extends above chamber top
+
+  # Visualization wall thickness (just for display, not physical)
   wall_thickness_mm: 1.0
 
   # Material properties
@@ -47,7 +54,7 @@ sample_chamber:
 
   # Sample region (where high-res data is stored)
   sample_region_radius_um: 3000  # Radius around center for high-res storage
-  sample_region_center_um: [5000, 5000, 21500]  # Default center position
+  sample_region_center_um: [6000, 6000, 18000]  # Default center position (updated for new dimensions)
 
 channels:
   # Laser line channel configurations

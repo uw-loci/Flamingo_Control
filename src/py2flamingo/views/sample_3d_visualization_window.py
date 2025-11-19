@@ -132,9 +132,9 @@ class Sample3DVisualizationWindow(QWidget):
 
     def _init_storage(self):
         """Initialize the dual-resolution storage system."""
-        # Convert config to DualResolutionConfig
+        # Convert chamber dimensions from mm to micrometers
         chamber_dims_um = tuple(
-            d * 1000 for d in self.config['sample_chamber']['inner_dimensions_mm']
+            d * 1000 for d in self.config['sample_chamber']['dimensions_mm']
         )
 
         storage_config = DualResolutionConfig(
@@ -422,8 +422,8 @@ class Sample3DVisualizationWindow(QWidget):
         self.show_objective_cb = QCheckBox("Show Objective Position")
         self.show_objective_cb.setChecked(True)
 
-        # Rotation axes
-        self.show_axes_cb = QCheckBox("Show Rotation Axes")
+        # Rotation axis indicator
+        self.show_axes_cb = QCheckBox("Show Rotation Axis")
         self.show_axes_cb.setChecked(True)
 
         # Rendering mode
@@ -523,19 +523,9 @@ class Sample3DVisualizationWindow(QWidget):
         # Add rotation indicator (extends from sample holder at 0 degrees)
         self._add_rotation_indicator()
 
-        # Add objective position indicator
-        # Position it at a reasonable default location
-        dims = self.voxel_storage.display_dims
-        objective_pos = np.array([[dims[0] // 2, dims[1] // 2, dims[2] // 4]])  # Near bottom
-        self.viewer.add_points(
-            objective_pos,
-            name='Objective',
-            size=80,  # Larger size for better visibility
-            face_color='yellow',
-            border_color='orange',  # napari >= 0.5.0 uses border_* parameters
-            border_width=0.15,  # Relative to point size
-            opacity=0.9
-        )
+        # Add objective position indicator as a flat circle on back wall (Z=0)
+        # This shows the detection light path direction
+        self._add_objective_indicator()
 
         # Add rotation axes (will be updated dynamically)
         # Initialize with actual axes data
@@ -548,16 +538,16 @@ class Sample3DVisualizationWindow(QWidget):
 
         dims = self.voxel_storage.display_dims
 
-        # Define the 8 corners of the box
+        # Define the 8 corners of the box in (Z, Y, X) order for napari
         corners = np.array([
-            [0, 0, 0],
-            [dims[0]-1, 0, 0],
-            [dims[0]-1, dims[1]-1, 0],
-            [0, dims[1]-1, 0],
-            [0, 0, dims[2]-1],
-            [dims[0]-1, 0, dims[2]-1],
-            [dims[0]-1, dims[1]-1, dims[2]-1],
-            [0, dims[1]-1, dims[2]-1]
+            [0, 0, 0],                              # Bottom corner (z_min, y_min, x_min)
+            [0, 0, dims[0]-1],                      # Bottom corner (z_min, y_min, x_max)
+            [0, dims[1]-1, dims[0]-1],              # Bottom corner (z_min, y_max, x_max)
+            [0, dims[1]-1, 0],                      # Bottom corner (z_min, y_max, x_min)
+            [dims[2]-1, 0, 0],                      # Top corner (z_max, y_min, x_min)
+            [dims[2]-1, 0, dims[0]-1],              # Top corner (z_max, y_min, x_max)
+            [dims[2]-1, dims[1]-1, dims[0]-1],      # Top corner (z_max, y_max, x_max)
+            [dims[2]-1, dims[1]-1, 0]               # Top corner (z_max, y_max, x_min)
         ])
 
         # Define edges connecting corners (12 edges of a box)
@@ -628,10 +618,10 @@ class Sample3DVisualizationWindow(QWidget):
         if not self.viewer:
             return
 
-        # Sample holder dimensions (in voxels)
-        # Convert from mm to voxels based on display resolution
-        holder_diameter_mm = 1.0  # 1mm diameter cylinder
-        voxel_size_um = self.config['display']['voxel_size_um'][0]  # Assume isotropic
+        # Sample holder dimensions (from config)
+        holder_diameter_mm = self.config['sample_chamber']['holder_diameter_mm']
+        holder_extension_mm = self.config['sample_chamber']['holder_extension_above_chamber_mm']
+        voxel_size_um = self.config['display']['voxel_size_um'][2]  # Use Z voxel size
         holder_radius_voxels = int((holder_diameter_mm * 1000 / 2) / voxel_size_um)
 
         # Get chamber dimensions
@@ -648,13 +638,16 @@ class Sample3DVisualizationWindow(QWidget):
         # Create cylinder as a series of circles (points)
         holder_points = []
 
-        # Generate cylinder from top of chamber down to holder position
-        z_top = dims[2] - 1
+        # Generate cylinder from holder position up through chamber top and beyond
+        # Extend above chamber by holder_extension_mm
+        extension_voxels = int((holder_extension_mm * 1000) / voxel_size_um)
+        z_top = dims[2] - 1 + extension_voxels  # Extend above chamber
         z_bottom = self.holder_position['z']
 
         # Create vertical line of points for cylinder axis
+        # Napari expects coordinates in (Z, Y, X) order for 3D displays
         for z in range(z_bottom, z_top, 2):  # Sample every 2 voxels for performance
-            holder_points.append([self.holder_position['x'], self.holder_position['y'], z])
+            holder_points.append([z, self.holder_position['y'], self.holder_position['x']])
 
         if holder_points:
             holder_array = np.array(holder_points)
@@ -669,34 +662,68 @@ class Sample3DVisualizationWindow(QWidget):
                 shading='spherical'
             )
 
+    def _add_objective_indicator(self):
+        """Add objective position indicator as a flat circle on the back wall (Z=0)."""
+        if not self.viewer:
+            return
+
+        dims = self.voxel_storage.display_dims
+
+        # Create a circle on the back wall (Z=0) at the center
+        # Using shapes layer with an ellipse
+        center_x = dims[0] // 2
+        center_y = dims[1] // 2
+        z_back = 0  # Back wall
+
+        # Circle radius (about 1/8 of the chamber width for visibility)
+        radius = min(dims[0], dims[1]) // 8
+
+        # Create circle vertices in 3D (on the Z=0 plane)
+        # Ellipse data format: [center, radii] in (Z, Y, X) order for napari
+        circle_data = np.array([[
+            [z_back, center_y, center_x],  # Center point (Z, Y, X)
+            [0, radius, radius]            # Radii (no Z thickness, Y and X radii)
+        ]])
+
+        self.viewer.add_shapes(
+            data=circle_data,
+            shape_type='ellipse',
+            name='Objective',
+            edge_color='orange',
+            face_color='yellow',
+            edge_width=3,
+            opacity=0.7
+        )
+
     def _add_rotation_indicator(self):
         """Add rotation indicator extending from sample holder at 0 degrees."""
         if not self.viewer:
             return
 
-        # Indicator dimensions
+        # Indicator dimensions - 1/2 the shortest chamber width
         dims = self.voxel_storage.display_dims
-        indicator_length = dims[0] // 10  # 1/10th of chamber width
+        indicator_length = min(dims[0], dims[1]) // 2  # 1/2 shortest chamber width
 
         # Position: extends from holder position along X-axis (0 degrees)
         # Always at the top of the displayed holder
         z_position = dims[2] - 10  # Near top of chamber
 
+        # Create indicator points in (Z, Y, X) order for napari
         indicator_start = np.array([
-            self.holder_position['x'],
+            z_position,
             self.holder_position['y'],
-            z_position
+            self.holder_position['x']
         ])
 
         indicator_end = np.array([
-            self.holder_position['x'] + indicator_length,
+            z_position,
             self.holder_position['y'],
-            z_position
+            self.holder_position['x'] + indicator_length
         ])
 
         # Add as a line (using shapes layer for better control)
         self.viewer.add_shapes(
-            data=[[indicator_start, indicator_end]],  # 3D line in 3D viewer
+            data=[[indicator_start, indicator_end]],  # 3D line in (Z, Y, X) order
             shape_type='line',
             name='Rotation Indicator',
             edge_color='red',
@@ -725,11 +752,17 @@ class Sample3DVisualizationWindow(QWidget):
         dims = self.voxel_storage.display_dims
         holder_points = []
 
-        z_top = dims[2] - 1
+        # Calculate holder extension above chamber
+        holder_extension_mm = self.config['sample_chamber']['holder_extension_above_chamber_mm']
+        voxel_size_um = self.config['display']['voxel_size_um'][2]
+        extension_voxels = int((holder_extension_mm * 1000) / voxel_size_um)
+
+        z_top = dims[2] - 1 + extension_voxels  # Extend above chamber
         z_bottom = max(0, self.holder_position['z'])
 
+        # Napari expects coordinates in (Z, Y, X) order
         for z in range(z_bottom, z_top, 2):
-            holder_points.append([self.holder_position['x'], self.holder_position['y'], z])
+            holder_points.append([z, self.holder_position['y'], self.holder_position['x']])
 
         if holder_points:
             self.viewer.layers['Sample Holder'].data = np.array(holder_points)
@@ -749,19 +782,24 @@ class Sample3DVisualizationWindow(QWidget):
         dims = self.voxel_storage.display_dims
         z_position = dims[2] - 10  # Always near top
 
-        start = np.array([
-            self.holder_position['x'],
-            self.holder_position['y'],
-            z_position
-        ])
-
-        # Calculate end point based on rotation
+        # Calculate end point displacement based on rotation
         dx = self.rotation_indicator_length * np.cos(angle_rad)
         dy = self.rotation_indicator_length * np.sin(angle_rad)
 
-        end = start + np.array([dx, dy, 0])  # Add 0 for z component
+        # Create points in (Z, Y, X) order for napari
+        start = np.array([
+            z_position,
+            self.holder_position['y'],
+            self.holder_position['x']
+        ])
 
-        # Update the line - provide 3D coordinates for 3D viewer
+        end = np.array([
+            z_position,
+            self.holder_position['y'] + dy,
+            self.holder_position['x'] + dx
+        ])
+
+        # Update the line - provide 3D coordinates in (Z, Y, X) order
         self.viewer.layers['Rotation Indicator'].data = [[start, end]]
 
     def _setup_data_layers(self):
@@ -880,28 +918,29 @@ class Sample3DVisualizationWindow(QWidget):
         if not self.viewer:
             return
 
-        # Create rotation vectors at origin
+        # Create rotation axis at center of chamber
+        dims = self.voxel_storage.display_dims
         center = np.array([
-            self.voxel_storage.display_dims[0] // 2,
-            self.voxel_storage.display_dims[1] // 2,
-            self.voxel_storage.display_dims[2] // 2
+            dims[2] // 2,  # Z center
+            dims[1] // 2,  # Y center
+            dims[0] // 2   # X center
         ])
 
-        # Axis lengths (in voxels)
-        axis_length = 30
+        # Y-axis length (the physical rotation axis) - make it prominent
+        axis_length = dims[1] // 2  # Half chamber width in Y
 
-        # Create axes vectors (start point, direction vector)
+        # Create Y-axis vector (the physical stage rotation axis)
+        # Format for napari vectors in (Z, Y, X) order: array of [position, direction] pairs
         vectors = np.array([
-            [[center[0], center[1], center[2]], [axis_length, 0, 0]],  # X axis - red
-            [[center[0], center[1], center[2]], [0, axis_length, 0]],  # Y axis - green
-            [[center[0], center[1], center[2]], [0, 0, axis_length]]   # Z axis - blue
+            [[center[0], center[1], center[2]], [0, axis_length, 0]]  # Y axis - green
         ])
 
         self.viewer.add_vectors(
             vectors,
             name='Rotation Axes',
-            edge_color=['red', 'green', 'blue'],
-            edge_width=3,
+            edge_color='green',
+            edge_width=5,
+            length=1.0,
             visible=self.show_axes_cb.isChecked()
         )
 
