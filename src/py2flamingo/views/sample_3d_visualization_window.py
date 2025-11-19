@@ -468,12 +468,20 @@ class Sample3DVisualizationWindow(QWidget):
         self.rotation_spinbox.setSingleStep(1.0)  # 1° per arrow click
         self.rotation_spinbox.setStyleSheet("""
             QDoubleSpinBox {
-                color: white;
+                background-color: #2a2a2a;
+                color: #FFFFFF;
                 font-weight: bold;
                 font-size: 14px;
-                border: 1px solid #888;
-                border-radius: 4px;
-                padding: 4px;
+                border: 1px solid #666;
+                border-radius: 3px;
+                padding: 3px;
+            }
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+                background-color: #3a3a3a;
+                border: 1px solid #555;
+            }
+            QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
+                background-color: #4a4a4a;
             }
         """)
         self.rotation_spinbox.setMaximumWidth(100)
@@ -926,33 +934,59 @@ class Sample3DVisualizationWindow(QWidget):
             [0, dims[1]-1, dims[2]-1]               # Back-top-right
         ])
 
-        # Define edges connecting corners (12 edges of a box)
-        edges = [
-            # Bottom face
-            [corners[0], corners[1]],
-            [corners[1], corners[2]],
-            [corners[2], corners[3]],
-            [corners[3], corners[0]],
-            # Top face
-            [corners[4], corners[5]],
-            [corners[5], corners[6]],
-            [corners[6], corners[7]],
-            [corners[7], corners[4]],
-            # Vertical edges
-            [corners[0], corners[4]],
-            [corners[1], corners[5]],
-            [corners[2], corners[6]],
-            [corners[3], corners[7]]
+        # Define edges by axis for color coding
+        # Z edges (Axis 0 - Yellow, dim) - parallel to Z axis
+        z_edges = [
+            [corners[0], corners[1]],  # Bottom-back
+            [corners[3], corners[2]],  # Bottom-front
+            [corners[4], corners[5]],  # Top-back
+            [corners[7], corners[6]]   # Top-front
         ]
 
-        # Add as shapes layer with lines
+        # Y edges (Axis 1 - Magenta, dim) - parallel to Y axis (vertical)
+        y_edges = [
+            [corners[0], corners[4]],  # Back-left vertical
+            [corners[1], corners[5]],  # Front-left vertical
+            [corners[2], corners[6]],  # Front-right vertical
+            [corners[3], corners[7]]   # Back-right vertical
+        ]
+
+        # X edges (Axis 2 - Cyan, darker) - parallel to X axis
+        x_edges = [
+            [corners[0], corners[3]],  # Bottom-back
+            [corners[1], corners[2]],  # Bottom-front
+            [corners[4], corners[7]],  # Top-back
+            [corners[5], corners[6]]   # Top-front
+        ]
+
+        # Add Z edges (yellow, dim)
         self.viewer.add_shapes(
-            data=edges,
+            data=z_edges,
             shape_type='line',
-            name='Chamber',
-            edge_color='cyan',
+            name='Chamber Z-edges',
+            edge_color='#8B8B00',  # Dim yellow
             edge_width=2,
-            opacity=0.7
+            opacity=0.6
+        )
+
+        # Add Y edges (magenta, dim)
+        self.viewer.add_shapes(
+            data=y_edges,
+            shape_type='line',
+            name='Chamber Y-edges',
+            edge_color='#8B008B',  # Dim magenta
+            edge_width=2,
+            opacity=0.6
+        )
+
+        # Add X edges (cyan, darker)
+        self.viewer.add_shapes(
+            data=x_edges,
+            shape_type='line',
+            name='Chamber X-edges',
+            edge_color='#008B8B',  # Darker cyan
+            edge_width=2,
+            opacity=0.6
         )
 
     def _generate_chamber_wireframe(self) -> np.ndarray:
@@ -1539,6 +1573,10 @@ class Sample3DVisualizationWindow(QWidget):
             self.channel_layers[ch_id].data[visible_z_start:visible_z_end,
                                            visible_y_start:visible_y_end,
                                            visible_x_start:visible_x_end] = data_to_place
+
+            # Trigger napari to detect the change (CRITICAL!)
+            self.channel_layers[ch_id].refresh()
+
             t_napari_total += (time.time() - t_update_start)
 
             # Store bounds for next update
@@ -1730,10 +1768,17 @@ class Sample3DVisualizationWindow(QWidget):
         if not self.viewer:
             return
 
-        # Update layer visibility
-        if 'Chamber' in self.viewer.layers:
-            self.viewer.layers['Chamber'].visible = self.show_chamber_cb.isChecked()
+        # Update chamber wireframe visibility (all edge layers)
+        chamber_visible = self.show_chamber_cb.isChecked()
+        for layer_name in ['Chamber Z-edges', 'Chamber Y-edges', 'Chamber X-edges']:
+            if layer_name in self.viewer.layers:
+                self.viewer.layers[layer_name].visible = chamber_visible
 
+        # Legacy chamber layer (if exists)
+        if 'Chamber' in self.viewer.layers:
+            self.viewer.layers['Chamber'].visible = chamber_visible
+
+        # Update objective visibility
         if 'Objective' in self.viewer.layers:
             self.viewer.layers['Objective'].visible = self.show_objective_cb.isChecked()
 
