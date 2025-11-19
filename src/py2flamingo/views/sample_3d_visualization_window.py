@@ -381,6 +381,8 @@ class Sample3DVisualizationWindow(QWidget):
                 lambda v, label=contrast_max_label, cid=ch_id: self._on_contrast_changed(cid, v, 'max', label)
             )
 
+            # Note: Contrast sliders will be updated to match napari's auto-scaling after layers are created
+
         layout.addStretch()
         return widget
 
@@ -498,7 +500,8 @@ class Sample3DVisualizationWindow(QWidget):
                 border: 1px solid #999999;
                 height: 8px;
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #FF0000, stop:0.5 #888888, stop:1 #00FF00);
+                    stop:0 #4169E1, stop:0.25 #FF4500, stop:0.5 #FFD700,
+                    stop:0.75 #FF4500, stop:1 #4169E1);
                 margin: 2px 0;
                 border-radius: 4px;
             }
@@ -886,6 +889,9 @@ class Sample3DVisualizationWindow(QWidget):
             try:
                 self._update_sample_data_visualization()
                 logger.info("Initial sample data visualization complete")
+
+                # Sync contrast sliders with napari's auto-scaled values
+                self._sync_contrast_sliders_with_napari()
             except Exception as e:
                 logger.error(f"Failed to update sample data visualization: {e}")
 
@@ -1161,14 +1167,15 @@ class Sample3DVisualizationWindow(QWidget):
             # Napari coordinates in (Z, Y, X) order - circle in YX plane at Z=0
             circle_points.append([z_objective, y, x])
 
-        self.viewer.add_points(
-            np.array(circle_points),
+        # Add as thin line circle (less obtrusive than bright points)
+        self.viewer.add_shapes(
+            data=[[circle_points[i], circle_points[(i+1) % len(circle_points)]]
+                  for i in range(len(circle_points))],
+            shape_type='line',
             name='Objective',
-            size=15,
-            face_color='yellow',
-            border_color='orange',
-            border_width=0.2,
-            opacity=0.9
+            edge_color='#666600',  # Dim yellow/olive (less bright)
+            edge_width=1,
+            opacity=0.3
         )
 
         logger.info(f"Added objective indicator at Z=0 (back wall), center Y={center_y}, X={center_x}")
@@ -1741,6 +1748,28 @@ class Sample3DVisualizationWindow(QWidget):
         if self.viewer and channel_id in self.channel_layers:
             self.channel_layers[channel_id].visible = visible
         self.channel_visibility_changed.emit(channel_id, visible)
+
+    def _sync_contrast_sliders_with_napari(self):
+        """Sync contrast sliders with napari's actual contrast limits."""
+        for ch_id in range(4):
+            if ch_id in self.channel_layers and ch_id in self.channel_controls:
+                # Get actual contrast limits from napari layer
+                actual_limits = self.channel_layers[ch_id].contrast_limits
+
+                # Update sliders to match (without triggering updates)
+                controls = self.channel_controls[ch_id]
+
+                controls['contrast_min'].blockSignals(True)
+                controls['contrast_min'].setValue(int(actual_limits[0]))
+                controls['contrast_min_label'].setText(str(int(actual_limits[0])))
+                controls['contrast_min'].blockSignals(False)
+
+                controls['contrast_max'].blockSignals(True)
+                controls['contrast_max'].setValue(int(actual_limits[1]))
+                controls['contrast_max_label'].setText(str(int(actual_limits[1])))
+                controls['contrast_max'].blockSignals(False)
+
+                logger.info(f"Synced Ch{ch_id} contrast sliders to napari: {actual_limits}")
 
     def _on_contrast_changed(self, channel_id: int, value: int, limit_type: str, label: QLabel):
         """Handle contrast limit changes."""
