@@ -1,0 +1,158 @@
+"""Unified Workflow Management System for Flamingo Control.
+
+This package provides a clean, consolidated architecture for workflow management,
+replacing the previously fragmented system with a single, coherent pipeline.
+
+Architecture:
+    WorkflowFacade: Single API entry point for all workflow operations
+    WorkflowOrchestrator: Core business logic and lifecycle management
+    WorkflowRepository: File I/O operations (load, save, templates)
+    WorkflowValidator: Centralized validation logic
+    WorkflowExecutor: Hardware execution engine
+
+Usage Example:
+    ```python
+    from py2flamingo.workflows import WorkflowFacade
+    from py2flamingo.models.hardware.stage import Position
+
+    # Create facade (single entry point)
+    facade = WorkflowFacade()
+
+    # Create a simple snapshot workflow
+    position = Position(x=10, y=20, z=5, r=0)
+    workflow = facade.create_snapshot(position, laser_power=10.0)
+
+    # Validate workflow
+    facade.validate_workflow(workflow)
+
+    # Execute workflow
+    facade.start_workflow(workflow)
+
+    # Monitor progress
+    while facade.get_workflow_status() == WorkflowState.EXECUTING:
+        progress = facade.get_workflow_progress()
+        print(f"Progress: {progress:.1f}%")
+        time.sleep(1)
+    ```
+
+Migration from Legacy Code:
+    # Old way (multiple entry points):
+    tcp_client.send_workflow(workflow_dict)  # Option 1
+    connection_service.send_workflow(data)    # Option 2
+    workflow_service.execute_workflow(wf)     # Option 3
+
+    # New way (single entry point):
+    facade = WorkflowFacade()
+    facade.start_workflow(workflow)
+
+This consolidation addresses the original issues of:
+- 4 different workflow entry points
+- 2 incompatible WorkflowService classes
+- Command codes hardcoded in multiple places
+- Duplicate validation logic
+- No single source of truth for workflow state
+"""
+
+# Import all components for easy access
+from .workflow_facade import (
+    WorkflowFacade,
+    WorkflowError,
+    WorkflowValidationError,
+    WorkflowExecutionError
+)
+
+from .workflow_orchestrator import (
+    WorkflowOrchestrator,
+    WorkflowConfiguration,
+    WorkflowOrchestrationError
+)
+
+from .workflow_repository import (
+    WorkflowRepository,
+    RepositoryError,
+    WorkflowNotFoundError,
+    WorkflowFormatError
+)
+
+from .workflow_validator import (
+    WorkflowValidator,
+    ValidationResult,
+    HardwareConstraints,
+    WorkflowValidationError as ValidatorError  # Avoid name conflict
+)
+
+from .workflow_executor import (
+    WorkflowExecutor,
+    ExecutionState,
+    ExecutionContext,
+    WorkflowExecutionError as ExecutorError  # Avoid name conflict
+)
+
+# Define public API
+__all__ = [
+    # Main facade
+    'WorkflowFacade',
+
+    # Core components (for advanced usage)
+    'WorkflowOrchestrator',
+    'WorkflowRepository',
+    'WorkflowValidator',
+    'WorkflowExecutor',
+
+    # Configuration
+    'WorkflowConfiguration',
+    'HardwareConstraints',
+    'ValidationResult',
+    'ExecutionContext',
+
+    # Exceptions
+    'WorkflowError',
+    'WorkflowValidationError',
+    'WorkflowExecutionError',
+    'WorkflowOrchestrationError',
+    'RepositoryError',
+    'WorkflowNotFoundError',
+    'WorkflowFormatError',
+
+    # States
+    'ExecutionState',
+]
+
+# Module version
+__version__ = '2.0.0'
+
+# Convenience function for getting singleton facade
+_facade_instance = None
+
+def get_facade() -> WorkflowFacade:
+    """Get singleton WorkflowFacade instance.
+
+    This is the recommended way to access workflow functionality
+    throughout the application.
+
+    Returns:
+        Singleton WorkflowFacade instance
+
+    Example:
+        ```python
+        from py2flamingo.workflows import get_facade
+
+        facade = get_facade()
+        workflow = facade.create_snapshot(position)
+        ```
+    """
+    global _facade_instance
+    if _facade_instance is None:
+        _facade_instance = WorkflowFacade()
+    return _facade_instance
+
+def reset_facade():
+    """Reset the singleton facade instance.
+
+    This is mainly useful for testing or when you need to
+    completely reinitialize the workflow system.
+    """
+    global _facade_instance
+    if _facade_instance is not None:
+        _facade_instance.reset()
+        _facade_instance = None
