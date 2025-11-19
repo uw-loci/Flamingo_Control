@@ -196,6 +196,8 @@ class Sample3DVisualizationWindow(QWidget):
             block_size=32,
             use_sparse=True
         )
+        print(f"DEBUG: Created sparse_renderer in _init_storage_with_mapper: {self.sparse_renderer is not None}")
+        print(f"DEBUG: sparse_renderer type: {type(self.sparse_renderer)}")
 
     def _setup_ui(self):
         """Setup the user interface."""
@@ -801,6 +803,8 @@ class Sample3DVisualizationWindow(QWidget):
 
     def _init_napari_viewer(self):
         """Initialize the napari viewer."""
+        print(f"DEBUG: _init_napari_viewer called, sparse_renderer exists: {hasattr(self, 'sparse_renderer') and self.sparse_renderer is not None}")
+
         if not NAPARI_AVAILABLE:
             return
 
