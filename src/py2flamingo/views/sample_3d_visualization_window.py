@@ -87,6 +87,11 @@ class Sample3DVisualizationWindow(QWidget):
         self.holder_position = {'x': 0, 'y': 0, 'z': 0}
         self.rotation_indicator_length = 0
 
+        # Test sample data
+        self.test_sample_data = None
+        self.test_sample_size_mm = 2.0  # 2mm cube of sample data
+        self.test_sample_offset_mm = 0.5  # 0.5mm below holder tip
+
         # Setup UI
         self._setup_ui()
         self._connect_signals()
@@ -307,15 +312,32 @@ class Sample3DVisualizationWindow(QWidget):
             strategy_combo.addItems(['latest', 'maximum', 'average', 'additive'])
             strategy_combo.setCurrentText(ch_config.get('update_strategy', 'latest'))
 
+            # Contrast limits (min/max intensity)
+            contrast_min_slider = QSlider(Qt.Horizontal)
+            contrast_min_slider.setRange(0, 65535)
+            contrast_min_slider.setValue(0)
+            contrast_min_label = QLabel("0")
+
+            contrast_max_slider = QSlider(Qt.Horizontal)
+            contrast_max_slider.setRange(0, 65535)
+            contrast_max_slider.setValue(65535)
+            contrast_max_label = QLabel("65535")
+
             # Layout channel controls
-            ch_layout.addWidget(visible_cb, 0, 0, 1, 2)
+            ch_layout.addWidget(visible_cb, 0, 0, 1, 3)
             ch_layout.addWidget(QLabel("Color:"), 1, 0)
-            ch_layout.addWidget(colormap_combo, 1, 1)
+            ch_layout.addWidget(colormap_combo, 1, 1, 1, 2)
             ch_layout.addWidget(QLabel("Opacity:"), 2, 0)
             ch_layout.addWidget(opacity_slider, 2, 1)
             ch_layout.addWidget(opacity_label, 2, 2)
-            ch_layout.addWidget(QLabel("Update:"), 3, 0)
-            ch_layout.addWidget(strategy_combo, 3, 1)
+            ch_layout.addWidget(QLabel("Contrast Min:"), 3, 0)
+            ch_layout.addWidget(contrast_min_slider, 3, 1)
+            ch_layout.addWidget(contrast_min_label, 3, 2)
+            ch_layout.addWidget(QLabel("Contrast Max:"), 4, 0)
+            ch_layout.addWidget(contrast_max_slider, 4, 1)
+            ch_layout.addWidget(contrast_max_label, 4, 2)
+            ch_layout.addWidget(QLabel("Update:"), 5, 0)
+            ch_layout.addWidget(strategy_combo, 5, 1, 1, 2)
 
             group.setLayout(ch_layout)
             layout.addWidget(group)
@@ -326,12 +348,22 @@ class Sample3DVisualizationWindow(QWidget):
                 'colormap': colormap_combo,
                 'opacity': opacity_slider,
                 'opacity_label': opacity_label,
-                'strategy': strategy_combo
+                'strategy': strategy_combo,
+                'contrast_min': contrast_min_slider,
+                'contrast_min_label': contrast_min_label,
+                'contrast_max': contrast_max_slider,
+                'contrast_max_label': contrast_max_label
             }
 
-            # Connect opacity slider to label
+            # Connect sliders to labels
             opacity_slider.valueChanged.connect(
                 lambda v, label=opacity_label: label.setText(f"{v}%")
+            )
+            contrast_min_slider.valueChanged.connect(
+                lambda v, label=contrast_min_label, cid=ch_id: self._on_contrast_changed(cid, v, 'min', label)
+            )
+            contrast_max_slider.valueChanged.connect(
+                lambda v, label=contrast_max_label, cid=ch_id: self._on_contrast_changed(cid, v, 'max', label)
             )
 
         layout.addStretch()
@@ -1163,6 +1195,138 @@ class Sample3DVisualizationWindow(QWidget):
                 self.channel_layers = {}
             self.channel_layers[ch_id] = layer
 
+        # Generate and add test sample data
+        self._generate_test_sample_data()
+        self._update_sample_data_visualization()
+
+    def _generate_test_sample_data(self):
+        """Generate test sample data for visualization testing."""
+        # Calculate sample data size in voxels
+        voxel_size_mm = self.coord_mapper.voxel_size_mm
+        sample_size_voxels = int(self.test_sample_size_mm / voxel_size_mm)
+
+        # Create 4-channel test data
+        self.test_sample_data = {}
+
+        for ch_id in range(4):
+            # Create a 3D volume for this channel
+            data = np.zeros((sample_size_voxels, sample_size_voxels, sample_size_voxels), dtype=np.uint16)
+
+            if ch_id == 0:  # DAPI - small spheres (nuclei)
+                # Create 3-5 nuclei
+                for _ in range(4):
+                    cx, cy, cz = np.random.randint(10, sample_size_voxels-10, 3)
+                    radius = np.random.randint(3, 6)
+                    y, x, z = np.ogrid[:sample_size_voxels, :sample_size_voxels, :sample_size_voxels]
+                    mask = (x-cx)**2 + (y-cy)**2 + (z-cz)**2 <= radius**2
+                    data[mask] = np.random.randint(30000, 50000)
+
+            elif ch_id == 1:  # GFP - diffuse signal
+                # Create diffuse cloud
+                center = sample_size_voxels // 2
+                y, x, z = np.ogrid[:sample_size_voxels, :sample_size_voxels, :sample_size_voxels]
+                dist = np.sqrt((x-center)**2 + (y-center)**2 + (z-center)**2)
+                data = np.clip(20000 * np.exp(-dist/(sample_size_voxels/4)), 0, 65535).astype(np.uint16)
+
+            elif ch_id == 2:  # RFP - linear structures
+                # Create some "fibers"
+                for _ in range(3):
+                    start = np.random.randint(0, sample_size_voxels, 3)
+                    direction = np.random.randn(3)
+                    direction /= np.linalg.norm(direction)
+                    for t in range(sample_size_voxels//2):
+                        pos = start + t * direction
+                        px, py, pz = np.clip(pos.astype(int), 0, sample_size_voxels-1)
+                        # Add thickness
+                        for dx in range(-1, 2):
+                            for dy in range(-1, 2):
+                                for dz in range(-1, 2):
+                                    x, y, z = px+dx, py+dy, pz+dz
+                                    if 0 <= x < sample_size_voxels and 0 <= y < sample_size_voxels and 0 <= z < sample_size_voxels:
+                                        data[y, x, z] = max(data[y, x, z], 25000)
+
+            elif ch_id == 3:  # Far-Red - sparse bright spots
+                # Random bright spots
+                for _ in range(5):
+                    cx, cy, cz = np.random.randint(5, sample_size_voxels-5, 3)
+                    radius = np.random.randint(2, 4)
+                    y, x, z = np.ogrid[:sample_size_voxels, :sample_size_voxels, :sample_size_voxels]
+                    mask = (x-cx)**2 + (y-cy)**2 + (z-cz)**2 <= radius**2
+                    data[mask] = np.random.randint(35000, 55000)
+
+            self.test_sample_data[ch_id] = data
+
+        logger.info(f"Generated test sample data: {sample_size_voxels}x{sample_size_voxels}x{sample_size_voxels} voxels per channel")
+
+    def _update_sample_data_visualization(self):
+        """Update the sample data visualization based on current holder position and rotation."""
+        if not self.viewer or self.test_sample_data is None:
+            return
+
+        # Get current physical position
+        x_mm = self.position_sliders['x_slider'].value() / 1000.0
+        y_mm = self.position_sliders['y_slider'].value() / 1000.0
+        z_mm = self.position_sliders['z_slider'].value() / 1000.0
+
+        # Calculate sample data position (below holder tip)
+        sample_center_y_mm = y_mm - self.test_sample_offset_mm - (self.test_sample_size_mm / 2)
+
+        # Convert to napari coordinates
+        sample_x, sample_y, sample_z = self.coord_mapper.physical_to_napari(
+            x_mm, sample_center_y_mm, z_mm
+        )
+
+        # Get sample data size in voxels
+        voxel_size_mm = self.coord_mapper.voxel_size_mm
+        sample_size_voxels = int(self.test_sample_size_mm / voxel_size_mm)
+        half_size = sample_size_voxels // 2
+
+        # Update each channel with positioned data
+        for ch_id, sample_data in self.test_sample_data.items():
+            if ch_id not in self.channel_layers:
+                continue
+
+            # Get current display volume
+            display_volume = self.channel_layers[ch_id].data.copy()
+
+            # Clear previous sample data region (simple approach - clear all for now)
+            display_volume[:] = 0
+
+            # Calculate bounds for placing sample data
+            # In napari (Z, Y, X) coordinates
+            z_start = max(0, sample_z - half_size)
+            z_end = min(display_volume.shape[0], sample_z + half_size)
+            y_start = max(0, sample_y - half_size)
+            y_end = min(display_volume.shape[1], sample_y + half_size)
+            x_start = max(0, sample_x - half_size)
+            x_end = min(display_volume.shape[2], sample_x + half_size)
+
+            # Calculate corresponding bounds in sample data
+            sample_z_start = max(0, half_size - sample_z)
+            sample_z_end = sample_z_start + (z_end - z_start)
+            sample_y_start = max(0, half_size - sample_y)
+            sample_y_end = sample_y_start + (y_end - y_start)
+            sample_x_start = max(0, half_size - sample_x)
+            sample_x_end = sample_x_start + (x_end - x_start)
+
+            # Place sample data into display volume
+            # Note: sample_data is in (Y, X, Z) order from numpy creation
+            # Need to transpose to (Z, Y, X) for napari
+            sample_transposed = np.transpose(sample_data, (2, 0, 1))  # (Z, Y, X)
+
+            try:
+                display_volume[z_start:z_end, y_start:y_end, x_start:x_end] = \
+                    sample_transposed[sample_z_start:sample_z_end,
+                                    sample_y_start:sample_y_end,
+                                    sample_x_start:sample_x_end]
+            except Exception as e:
+                logger.warning(f"Could not place sample data for channel {ch_id}: {e}")
+
+            # Update layer
+            self.channel_layers[ch_id].data = display_volume
+
+        logger.info(f"Updated sample data at position ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm")
+
     def _on_streaming_toggled(self, checked: bool):
         """Handle streaming start/stop."""
         self.is_streaming = checked
@@ -1209,6 +1373,8 @@ class Sample3DVisualizationWindow(QWidget):
         y_mm = self.position_sliders['y_slider'].value() / 1000.0
         z_mm = self.position_sliders['z_slider'].value() / 1000.0
         self._update_sample_holder_position(x_mm, y_mm, z_mm)
+        # Update sample data position
+        self._update_sample_data_visualization()
 
     def _on_y_slider_changed(self, value: int):
         """Handle Y slider position changes (vertical)."""
@@ -1218,6 +1384,8 @@ class Sample3DVisualizationWindow(QWidget):
         x_mm = self.position_sliders['x_slider'].value() / 1000.0
         z_mm = self.position_sliders['z_slider'].value() / 1000.0
         self._update_sample_holder_position(x_mm, y_mm, z_mm)
+        # Update sample data position
+        self._update_sample_data_visualization()
 
     def _on_z_slider_changed(self, value: int):
         """Handle Z slider position changes (depth)."""
@@ -1227,6 +1395,8 @@ class Sample3DVisualizationWindow(QWidget):
         x_mm = self.position_sliders['x_slider'].value() / 1000.0
         y_mm = self.position_sliders['y_slider'].value() / 1000.0
         self._update_sample_holder_position(x_mm, y_mm, z_mm)
+        # Update sample data position
+        self._update_sample_data_visualization()
 
     def _on_rotation_changed(self, value: int):
         """Handle rotation slider changes."""
@@ -1247,6 +1417,27 @@ class Sample3DVisualizationWindow(QWidget):
         if self.viewer and channel_id in self.channel_layers:
             self.channel_layers[channel_id].visible = visible
         self.channel_visibility_changed.emit(channel_id, visible)
+
+    def _on_contrast_changed(self, channel_id: int, value: int, limit_type: str, label: QLabel):
+        """Handle contrast limit changes."""
+        # Update label
+        label.setText(str(value))
+
+        # Update napari layer contrast limits
+        if self.viewer and channel_id in self.channel_layers:
+            layer = self.channel_layers[channel_id]
+            current_limits = layer.contrast_limits
+
+            if limit_type == 'min':
+                new_limits = (value, current_limits[1])
+            else:  # 'max'
+                new_limits = (current_limits[0], value)
+
+            # Ensure min < max
+            if new_limits[0] < new_limits[1]:
+                layer.contrast_limits = new_limits
+            else:
+                logger.warning(f"Invalid contrast limits for channel {channel_id}: {new_limits}")
 
     def _on_display_settings_changed(self):
         """Handle display setting changes."""
