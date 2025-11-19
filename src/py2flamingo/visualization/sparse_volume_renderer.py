@@ -154,15 +154,17 @@ class SparseVolumeRenderer:
             (z_min, z_max, y_min, y_max, x_min, x_max) or None if empty
         """
         if self.use_sparse:
-            coords = self.channels[channel_id].coords
-            if len(coords[0]) == 0:
+            # Convert DOK to COO to get coords
+            coo = self.channels[channel_id].to_coo()
+            if coo.nnz == 0:
                 return None
 
+            coords = coo.coords
             z_min, z_max = coords[0].min(), coords[0].max()
             y_min, y_max = coords[1].min(), coords[1].max()
             x_min, x_max = coords[2].min(), coords[2].max()
 
-            return (z_min, z_max + 1, y_min, y_max + 1, x_min, x_max + 1)
+            return (int(z_min), int(z_max) + 1, int(y_min), int(y_max) + 1, int(x_min), int(x_max) + 1)
         else:
             # For dense, find non-zero region
             nonzero = np.argwhere(self.channels[channel_id] > 0)
