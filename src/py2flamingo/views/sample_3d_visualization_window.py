@@ -97,7 +97,8 @@ class Sample3DVisualizationWindow(QWidget):
         self.extension_length_mm = 4.95  # Extension reaches objective center at Y=7.45mm
         self.extension_diameter_mm = 0.22  # Very fine extension (220 micrometers)
 
-        # Note: sparse_renderer is initialized in _init_storage_with_mapper() above
+        # Cache previous sample data bounds for efficient clearing (dense array optimization)
+        self.previous_sample_bounds = {}  # {ch_id: (z_start, z_end, y_start, y_end, x_start, x_end)}
 
         # Setup UI
         self._setup_ui()
@@ -197,16 +198,7 @@ class Sample3DVisualizationWindow(QWidget):
         logger.info(f"  Chamber dimensions (µm): {chamber_dims_um}")
         logger.info(f"  Display dimensions (voxels): {self.voxel_storage.display_dims}")
         logger.info(f"  Voxel size (µm): {self.config['display']['voxel_size_um']}")
-
-        # Initialize sparse volume renderer
-        self.sparse_renderer = SparseVolumeRenderer(
-            dims=self.voxel_storage.display_dims,
-            num_channels=4,
-            block_size=32,
-            use_sparse=True
-        )
-        print(f"DEBUG: Created sparse_renderer in _init_storage_with_mapper: {self.sparse_renderer is not None}")
-        print(f"DEBUG: sparse_renderer type: {type(self.sparse_renderer)}")
+        logger.info(f"  Using direct dense array updates for performance")
 
     def _setup_ui(self):
         """Setup the user interface."""
@@ -476,12 +468,12 @@ class Sample3DVisualizationWindow(QWidget):
         self.rotation_spinbox.setSingleStep(1.0)  # 1° per arrow click
         self.rotation_spinbox.setStyleSheet("""
             QDoubleSpinBox {
+                color: white;
                 font-weight: bold;
                 font-size: 14px;
-                border: 2px solid #888;
+                border: 1px solid #888;
                 border-radius: 4px;
-                padding: 2px;
-                background-color: #1a1a1a;
+                padding: 4px;
             }
         """)
         self.rotation_spinbox.setMaximumWidth(100)
@@ -1411,19 +1403,12 @@ class Sample3DVisualizationWindow(QWidget):
         logger.info(f"Generated test sample data: {data_shape} voxels per channel (Y dimension 2x for testing)")
 
     def _update_sample_data_visualization(self):
-        """Update the sample data visualization with position and rotation transforms."""
+        """Update the sample data visualization with direct dense array updates (optimized)."""
         import time
         t_start = time.time()
 
-        # Debug early returns
-        if not self.viewer:
-            print("DEBUG: No viewer, returning")
-            return
-        if self.test_sample_data_raw is None:
-            print("DEBUG: No test_sample_data_raw, returning")
-            return
-        if self.sparse_renderer is None:
-            print("DEBUG: No sparse_renderer, returning")
+        # Early returns
+        if not self.viewer or self.test_sample_data_raw is None:
             return
 
         print(f"PERF: Update started")
@@ -1436,12 +1421,13 @@ class Sample3DVisualizationWindow(QWidget):
 
         t_clear_start = time.time()
 
-        # Clear all previous data from sparse renderer
+        # Clear previous data directly from napari layers (fast!)
         for ch_id in range(4):
-            # Get previous active bounds and clear them
-            prev_bounds = self.sparse_renderer.get_active_bounds(ch_id)
-            if prev_bounds:
-                self.sparse_renderer.clear_region(ch_id, prev_bounds)
+            if ch_id in self.previous_sample_bounds and ch_id in self.channel_layers:
+                prev_bounds = self.previous_sample_bounds[ch_id]
+                pz_start, pz_end, py_start, py_end, px_start, px_end = prev_bounds
+                # Direct numpy array clear (< 1ms)
+                self.channel_layers[ch_id].data[pz_start:pz_end, py_start:py_end, px_start:px_end] = 0
 
         print(f"PERF: Clear took {(time.time() - t_clear_start)*1000:.1f}ms")
 
@@ -1524,10 +1510,9 @@ class Sample3DVisualizationWindow(QWidget):
                 visible_y_start >= visible_y_end or
                 visible_x_start >= visible_x_end):
                 print(f"DEBUG: Ch{ch_id} completely outside visible volume")
-                # Data is outside - sparse renderer was already cleared, just update napari layer
-                dense_volume = self.sparse_renderer.get_dense_volume(ch_id)
-                self.channel_layers[ch_id].data = dense_volume
-                logger.info(f"Ch{ch_id}: Data outside visible volume, cleared display")
+                # Clear cached bounds (data is now invisible)
+                if ch_id in self.previous_sample_bounds:
+                    del self.previous_sample_bounds[ch_id]
                 continue
 
             bounds = (visible_z_start, visible_z_end, visible_y_start, visible_y_end, visible_x_start, visible_x_end)
@@ -1549,29 +1534,26 @@ class Sample3DVisualizationWindow(QWidget):
 
             print(f"DEBUG: Visible portion: {data_to_place.shape}, non-zero: {np.count_nonzero(data_to_place)}")
 
-            # Update sparse renderer with visible portion
-            t_sparse_start = time.time()
-            self.sparse_renderer.update_region(ch_id, bounds, data_to_place)
-            t_sparse_total += (time.time() - t_sparse_start)
+            # Direct dense array update (FAST!)
+            t_update_start = time.time()
+            self.channel_layers[ch_id].data[visible_z_start:visible_z_end,
+                                           visible_y_start:visible_y_end,
+                                           visible_x_start:visible_x_end] = data_to_place
+            t_napari_total += (time.time() - t_update_start)
 
-            # Get dense volume from sparse renderer
-            t_dense_start = time.time()
-            dense_volume = self.sparse_renderer.get_dense_volume(ch_id)
-            t_dense_total += (time.time() - t_dense_start)
+            # Store bounds for next update
+            self.previous_sample_bounds[ch_id] = bounds
 
-            # Update napari layer
-            t_napari_start = time.time()
-            self.channel_layers[ch_id].data = dense_volume
-            self.channel_layers[ch_id].contrast_limits = (0, 65535)
-            t_napari_total += (time.time() - t_napari_start)
+        # Calculate memory usage (dense arrays)
+        total_voxels = sum(np.count_nonzero(self.channel_layers[ch_id].data)
+                          for ch_id in range(4) if ch_id in self.channel_layers)
+        memory_mb = (np.prod(self.voxel_storage.display_dims) * 4 * 2) / (1024 * 1024)  # 4 channels, uint16
 
-        # Update memory display
-        mem_stats = self.sparse_renderer.get_memory_usage()
-        self.memory_label.setText(f"Memory: {mem_stats['total_mb']:.1f} MB")
-        self.voxel_count_label.setText(f"Voxels: {mem_stats['total_voxels']:,}")
+        self.memory_label.setText(f"Memory: {memory_mb:.1f} MB")
+        self.voxel_count_label.setText(f"Voxels: {total_voxels:,}")
 
         t_total = (time.time() - t_start) * 1000
-        print(f"PERF: Total={t_total:.1f}ms | Rotation={t_rotation_total*1000:.1f}ms | Sparse={t_sparse_total*1000:.1f}ms | Dense={t_dense_total*1000:.1f}ms | Napari={t_napari_total*1000:.1f}ms")
+        print(f"PERF: Total={t_total:.1f}ms | Clear={((time.time()-t_clear_start)*1000 - t_total):.1f}ms | Rotation={t_rotation_total*1000:.1f}ms | Update={t_napari_total*1000:.1f}ms")
 
         logger.debug(f"Updated sample data at ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm, rotation={rotation_deg}°")
 
