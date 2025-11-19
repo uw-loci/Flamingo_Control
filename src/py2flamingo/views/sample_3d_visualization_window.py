@@ -656,14 +656,15 @@ class Sample3DVisualizationWindow(QWidget):
         self.position_sliders[f'{axis_key}_slider'] = slider
         self.position_sliders[f'{axis_key}_spinbox'] = value_spinbox
 
-        # Connect slider to update spinbox
+        # Connect slider to update spinbox (real-time)
         slider.valueChanged.connect(
-            lambda v, sb=value_spinbox: sb.setValue(v/1000.0)
+            lambda v, sb=value_spinbox: sb.blockSignals(True) or sb.setValue(v/1000.0) or sb.blockSignals(False)
         )
 
-        # Connect spinbox to update slider
-        value_spinbox.valueChanged.connect(
-            lambda v, sl=slider: sl.setValue(int(v * 1000))
+        # Connect spinbox to update slider (only when editing finished)
+        # This prevents intermediate updates while typing
+        value_spinbox.editingFinished.connect(
+            lambda sb=value_spinbox, sl=slider: sl.setValue(int(sb.value() * 1000))
         )
 
         # Add subtle colored border to entire widget
