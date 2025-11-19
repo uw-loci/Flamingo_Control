@@ -136,13 +136,11 @@ class Sample3DVisualizationWindow(QWidget):
         chamber_config = self.config['sample_chamber']
 
         chamber_width_x = chamber_config['chamber_width_x_mm'] * 1000  # Convert to µm
-        chamber_depth_z = chamber_config['chamber_width_y_mm'] * 1000  # Z is depth (toward objective)
-        chamber_height_y = (chamber_config['chamber_below_anchor_mm'] +
-                           chamber_config['chamber_above_anchor_mm']) * 1000  # Y is vertical
+        chamber_width_y = chamber_config['chamber_width_y_mm'] * 1000
+        chamber_height = (chamber_config['chamber_below_anchor_mm'] +
+                         chamber_config['chamber_above_anchor_mm']) * 1000
 
-        # Dimensions in (X, Y, Z) order matching stage coordinates
-        # X = left-right, Y = vertical (height), Z = depth (toward objective)
-        chamber_dims_um = (chamber_width_x, chamber_height_y, chamber_depth_z)
+        chamber_dims_um = (chamber_width_x, chamber_width_y, chamber_height)
 
         # Store chamber positioning info for later use
         self.chamber_below_anchor_um = chamber_config['chamber_below_anchor_mm'] * 1000
@@ -432,6 +430,10 @@ class Sample3DVisualizationWindow(QWidget):
         self.show_objective_cb = QCheckBox("Show Objective Position")
         self.show_objective_cb.setChecked(True)
 
+        # Rotation axis indicator
+        self.show_axes_cb = QCheckBox("Show Rotation Axis")
+        self.show_axes_cb.setChecked(True)
+
         # Rendering mode
         disp_layout.addWidget(QLabel("Rendering:"), 3, 0)
         self.rendering_combo = QComboBox()
@@ -440,6 +442,7 @@ class Sample3DVisualizationWindow(QWidget):
 
         disp_layout.addWidget(self.show_chamber_cb, 0, 0, 1, 2)
         disp_layout.addWidget(self.show_objective_cb, 1, 0, 1, 2)
+        disp_layout.addWidget(self.show_axes_cb, 2, 0, 1, 2)
 
         display_group.setLayout(disp_layout)
         layout.addWidget(display_group)
@@ -474,6 +477,7 @@ class Sample3DVisualizationWindow(QWidget):
         # Display settings
         self.show_chamber_cb.toggled.connect(self._on_display_settings_changed)
         self.show_objective_cb.toggled.connect(self._on_display_settings_changed)
+        self.show_axes_cb.toggled.connect(self._on_display_settings_changed)
 
     def _init_napari_viewer(self):
         """Initialize the napari viewer."""
@@ -531,6 +535,10 @@ class Sample3DVisualizationWindow(QWidget):
         # This shows the detection light path direction
         self._add_objective_indicator()
 
+        # Add rotation axes (will be updated dynamically)
+        # Initialize with actual axes data
+        self._add_rotation_axes()
+
     def _add_chamber_wireframe(self):
         """Add chamber wireframe as box edges using shapes layer."""
         if not self.viewer:
@@ -538,16 +546,16 @@ class Sample3DVisualizationWindow(QWidget):
 
         dims = self.voxel_storage.display_dims
 
-        # Define the 8 corners of the box in (X, Y, Z) order where Y is vertical
+        # Define the 8 corners of the box in (X, Z, Y) order where Z is vertical
         corners = np.array([
-            [0, 0, 0],                              # Bottom corner (x_min, y_min, z_min)
-            [dims[0]-1, 0, 0],                      # Bottom corner (x_max, y_min, z_min)
-            [dims[0]-1, 0, dims[2]-1],              # Bottom corner (x_max, y_min, z_max)
-            [0, 0, dims[2]-1],                      # Bottom corner (x_min, y_min, z_max)
-            [0, dims[1]-1, 0],                      # Top corner (x_min, y_max, z_min)
-            [dims[0]-1, dims[1]-1, 0],              # Top corner (x_max, y_max, z_min)
-            [dims[0]-1, dims[1]-1, dims[2]-1],      # Top corner (x_max, y_max, z_max)
-            [0, dims[1]-1, dims[2]-1]               # Top corner (x_min, y_max, z_max)
+            [0, 0, 0],                              # Bottom corner (x_min, z_min, y_min)
+            [dims[0]-1, 0, 0],                      # Bottom corner (x_max, z_min, y_min)
+            [dims[0]-1, 0, dims[1]-1],              # Bottom corner (x_max, z_min, y_max)
+            [0, 0, dims[1]-1],                      # Bottom corner (x_min, z_min, y_max)
+            [0, dims[2]-1, 0],                      # Top corner (x_min, z_max, y_min)
+            [dims[0]-1, dims[2]-1, 0],              # Top corner (x_max, z_max, y_min)
+            [dims[0]-1, dims[2]-1, dims[1]-1],      # Top corner (x_max, z_max, y_max)
+            [0, dims[2]-1, dims[1]-1]               # Top corner (x_min, z_max, y_max)
         ])
 
         # Define edges connecting corners (12 edges of a box)
@@ -628,11 +636,11 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Sample holder extends from chamber top down to Y_min
         # Only display the portion within the visible chamber bounds
-        # Default to center of chamber in X and Z, middle in Y
+        # Default to center of chamber in X and Y
         self.holder_position = {
-            'x': dims[0] // 2,  # X center
-            'y': dims[1] // 2,  # Y middle (vertical)
-            'z': dims[2] // 2   # Z center (depth)
+            'x': dims[0] // 2,
+            'y': dims[1] // 2,
+            'z': dims[2] // 2  # Default Z position
         }
 
         # Create cylinder as a series of circles (points)
@@ -640,13 +648,13 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Holder only displays from chamber top down to current position
         # This reduces voxel count significantly
-        y_top = dims[1] - 1  # Chamber top (Y is vertical)
-        y_bottom = self.holder_position['y']
+        z_top = dims[2] - 1  # Chamber top (no extension beyond display)
+        z_bottom = self.holder_position['z']
 
         # Create vertical line of points for cylinder axis
-        # Napari coordinates: (X, Y, Z) order matching stage - Y is vertical
-        for y in range(y_bottom, y_top, 2):  # Sample every 2 voxels for performance
-            holder_points.append([self.holder_position['x'], y, self.holder_position['z']])
+        # Napari coordinates: (X, Z, Y) order where Z is vertical
+        for z in range(z_bottom, z_top, 2):  # Sample every 2 voxels for performance
+            holder_points.append([self.holder_position['x'], z, self.holder_position['y']])
 
         if holder_points:
             holder_array = np.array(holder_points)
@@ -662,22 +670,22 @@ class Sample3DVisualizationWindow(QWidget):
             )
 
     def _add_objective_indicator(self):
-        """Add objective position indicator as a flat circle on the back wall (XY plane at Z=0)."""
+        """Add objective position indicator as a flat circle on the back wall (Z=0)."""
         if not self.viewer:
             return
 
         dims = self.voxel_storage.display_dims
 
-        # Create a circle on the back wall (XY plane at Z=0)
-        # We image along Z axis into this objective
+        # Create a circle on the back wall (Z=0) at the center
         center_x = dims[0] // 2
         center_y = dims[1] // 2
-        z_back = 0  # Back wall (imaging along Z)
+        z_back = 0  # Back wall
 
         # Circle radius (about 1/6 of the chamber width for visibility)
         radius = min(dims[0], dims[1]) // 6
 
-        # Create circle as a series of points on the XY plane (constant Z)
+        # Create circle as a series of points on the back wall
+        # This is more reliable than trying to use shapes
         num_points = 36  # Points to form the circle
         angles = np.linspace(0, 2 * np.pi, num_points, endpoint=False)
 
@@ -685,8 +693,8 @@ class Sample3DVisualizationWindow(QWidget):
         for angle in angles:
             x = center_x + radius * np.cos(angle)
             y = center_y + radius * np.sin(angle)
-            # Coordinates in (X, Y, Z) order - circle in XY plane at Z=0
-            circle_points.append([x, y, z_back])
+            # Coordinates in (X, Z, Y) order where Z is vertical
+            circle_points.append([x, z_back, y])
 
         self.viewer.add_points(
             np.array(circle_points),
@@ -705,29 +713,28 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Indicator dimensions - 1/2 the shortest chamber width
         dims = self.voxel_storage.display_dims
-        indicator_length = min(dims[0], dims[2]) // 2  # 1/2 shortest chamber width
+        indicator_length = min(dims[0], dims[1]) // 2  # 1/2 shortest chamber width
 
-        # Position: extends from holder position in XY plane (rotating around Y axis)
+        # Position: extends from holder position along X-axis (0 degrees)
         # Always at the top of the displayed holder
-        y_position = max(dims[1] - 5, dims[1] // 2)  # Near top of chamber (Y is vertical)
+        z_position = max(dims[2] - 5, dims[2] // 2)  # Near top of chamber
 
-        # Create indicator points in (X, Y, Z) order - line in XY plane
-        # At 0 degrees, points along X axis
+        # Create indicator points in (X, Z, Y) order where Z is vertical
         indicator_start = np.array([
             self.holder_position['x'],
-            y_position,
-            self.holder_position['z']
+            z_position,
+            self.holder_position['y']
         ])
 
         indicator_end = np.array([
             self.holder_position['x'] + indicator_length,
-            y_position,
-            self.holder_position['z']
+            z_position,
+            self.holder_position['y']
         ])
 
         # Add as a line (using shapes layer for better control)
         self.viewer.add_shapes(
-            data=[[indicator_start, indicator_end]],  # 3D line in (X, Y, Z) order
+            data=[[indicator_start, indicator_end]],  # 3D line in (X, Z, Y) order
             shape_type='line',
             name='Rotation Indicator',
             edge_color='red',
@@ -758,12 +765,12 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Only display visible portion of holder (from position to chamber top)
         # This significantly reduces voxel count
-        y_top = dims[1] - 1  # Chamber top (Y is vertical)
-        y_bottom = max(0, self.holder_position['y'])
+        z_top = dims[2] - 1  # Chamber top (no extension)
+        z_bottom = max(0, self.holder_position['z'])
 
-        # Napari coordinates: (X, Y, Z) order matching stage - Y is vertical
-        for y in range(y_bottom, y_top, 2):
-            holder_points.append([self.holder_position['x'], y, self.holder_position['z']])
+        # Napari coordinates: (X, Z, Y) order where Z is vertical
+        for z in range(z_bottom, z_top, 2):
+            holder_points.append([self.holder_position['x'], z, self.holder_position['y']])
 
         if holder_points:
             self.viewer.layers['Sample Holder'].data = np.array(holder_points)
@@ -779,29 +786,29 @@ class Sample3DVisualizationWindow(QWidget):
         # Get Y-axis rotation (the physical stage rotation)
         angle_rad = np.radians(self.current_rotation.get('ry', 0))
 
-        # Indicator extends from holder center in XY plane
+        # Indicator extends from holder center
         dims = self.voxel_storage.display_dims
-        y_position = max(dims[1] - 5, dims[1] // 2)  # Near top of chamber (Y is vertical)
+        z_position = max(dims[2] - 5, dims[2] // 2)  # Near top of chamber
 
         # Calculate end point displacement based on Y rotation
-        # Rotation around Y axis (vertical) affects X and Z coordinates in XY plane
-        dx = self.rotation_indicator_length * np.cos(angle_rad)
-        dz = self.rotation_indicator_length * np.sin(angle_rad)
+        # Rotation around Y axis affects X and Z coordinates
+        dx = self.rotation_indicator_length * np.sin(angle_rad)
+        dz = self.rotation_indicator_length * np.cos(angle_rad)
 
-        # Create points in (X, Y, Z) order - rotating in XY plane around Y axis
+        # Create points in (X, Z, Y) order where Z is vertical
         start = np.array([
             self.holder_position['x'],
-            y_position,
-            self.holder_position['z']
+            z_position,
+            self.holder_position['y']
         ])
 
         end = np.array([
             self.holder_position['x'] + dx,
-            y_position,
-            self.holder_position['z'] + dz
+            z_position + dz,
+            self.holder_position['y']
         ])
 
-        # Update the line - provide 3D coordinates in (X, Y, Z) order
+        # Update the line - provide 3D coordinates in (X, Z, Y) order
         self.viewer.layers['Rotation Indicator'].data = [[start, end]]
 
     def _setup_data_layers(self):
@@ -911,6 +918,9 @@ class Sample3DVisualizationWindow(QWidget):
 
         if 'Objective' in self.viewer.layers:
             self.viewer.layers['Objective'].visible = self.show_objective_cb.isChecked()
+
+        if 'Rotation Axes' in self.viewer.layers:
+            self.viewer.layers['Rotation Axes'].visible = self.show_axes_cb.isChecked()
 
     def _add_rotation_axes(self):
         """Add rotation axes to the viewer."""
