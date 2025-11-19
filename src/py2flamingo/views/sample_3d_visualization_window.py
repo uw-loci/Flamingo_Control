@@ -191,9 +191,30 @@ class Sample3DVisualizationWindow(QWidget):
         control_panel = self._create_control_panel()
         splitter.addWidget(control_panel)
 
-        # Right panel: Napari viewer placeholder
+        # Right panel: Status bar + Napari viewer
         viewer_container = QWidget()
         viewer_layout = QVBoxLayout(viewer_container)
+
+        # Horizontal status bar (centered above viewer)
+        status_layout = QHBoxLayout()
+        status_layout.addStretch()
+
+        self.status_label = QLabel("Status: Ready")
+        self.status_label.setStyleSheet("font-weight: bold;")
+        status_layout.addWidget(self.status_label)
+
+        status_layout.addSpacing(40)
+
+        self.memory_label = QLabel("Memory: 0 MB")
+        status_layout.addWidget(self.memory_label)
+
+        status_layout.addSpacing(40)
+
+        self.voxel_count_label = QLabel("Voxels: 0")
+        status_layout.addWidget(self.voxel_count_label)
+
+        status_layout.addStretch()
+        viewer_layout.addLayout(status_layout)
 
         if NAPARI_AVAILABLE:
             # Placeholder - napari viewer will be embedded here
@@ -232,26 +253,9 @@ class Sample3DVisualizationWindow(QWidget):
         data_tab = self._create_data_controls()
         tabs.addTab(data_tab, "Data")
 
-        # Display Settings tab
-        display_tab = self._create_display_controls()
-        tabs.addTab(display_tab, "Display")
+        # Display tab removed - controls moved to Sample Control tab
 
         layout.addWidget(tabs)
-
-        # Status panel
-        status_group = QGroupBox("Status")
-        status_layout = QVBoxLayout()
-
-        self.status_label = QLabel("Ready")
-        self.memory_label = QLabel("Memory: 0 MB")
-        self.voxel_count_label = QLabel("Voxels: 0")
-
-        status_layout.addWidget(self.status_label)
-        status_layout.addWidget(self.memory_label)
-        status_layout.addWidget(self.voxel_count_label)
-
-        status_group.setLayout(status_layout)
-        layout.addWidget(status_group)
 
         # Control buttons
         button_layout = QHBoxLayout()
@@ -357,7 +361,7 @@ class Sample3DVisualizationWindow(QWidget):
             min_val=stage_config['z_range_mm'][0],
             max_val=stage_config['z_range_mm'][1],
             default_val=stage_config['z_default_mm'],
-            has_invert=True,
+            has_invert=False,  # Invert config now in JSON file
             tooltip="Z-axis (depth, toward objective)\nNapari Axis 0 (Yellow)"
         )
         pos_layout.addWidget(z_widget)
@@ -387,7 +391,7 @@ class Sample3DVisualizationWindow(QWidget):
             min_val=stage_config['x_range_mm'][0],
             max_val=stage_config['x_range_mm'][1],
             default_val=stage_config['x_default_mm'],
-            has_invert=True,
+            has_invert=False,  # Invert config now in JSON file
             tooltip="X-axis (horizontal, left-right)\nNapari Axis 2 (Cyan)"
         )
         pos_layout.addWidget(x_widget)
@@ -451,6 +455,34 @@ class Sample3DVisualizationWindow(QWidget):
 
         rotation_group.setLayout(rot_layout)
         layout.addWidget(rotation_group)
+
+        # Display Settings (moved from Display tab)
+        display_group = QGroupBox("Display Settings")
+        disp_layout = QGridLayout()
+
+        # Chamber wireframe checkbox
+        self.show_chamber_cb = QCheckBox("Show Chamber Wireframe")
+        self.show_chamber_cb.setChecked(True)
+        disp_layout.addWidget(self.show_chamber_cb, 0, 0, 1, 2)
+
+        # Objective indicator checkbox
+        self.show_objective_cb = QCheckBox("Show Objective Position")
+        self.show_objective_cb.setChecked(True)
+        disp_layout.addWidget(self.show_objective_cb, 1, 0, 1, 2)
+
+        # Rendering mode
+        disp_layout.addWidget(QLabel("Rendering:"), 2, 0)
+        self.rendering_combo = QComboBox()
+        self.rendering_combo.addItems(['mip', 'minip', 'average', 'iso'])
+        disp_layout.addWidget(self.rendering_combo, 2, 1)
+
+        # Reset view button
+        self.reset_view_btn = QPushButton("Reset View")
+        self.reset_view_btn.setToolTip("Reset camera to default orientation and zoom")
+        disp_layout.addWidget(self.reset_view_btn, 3, 0, 1, 2)
+
+        display_group.setLayout(disp_layout)
+        layout.addWidget(display_group)
 
         # Info label
         info_label = QLabel("ℹ Rotation indicator (red line) shows 0° reference orientation in XZ plane.")
@@ -573,17 +605,6 @@ class Sample3DVisualizationWindow(QWidget):
         value_layout.addWidget(range_label_max)
 
         layout.addLayout(value_layout)
-
-        # Invert checkbox (if applicable)
-        if has_invert:
-            invert_cb = QCheckBox("Invert stage movement")
-            invert_cb.setStyleSheet(f"color: {color};")
-            invert_cb.setToolTip("Reverse the direction of stage movement for this axis")
-            layout.addWidget(invert_cb)
-
-            # Store reference
-            axis_key = label.split()[0].lower()  # 'x', 'y', or 'z'
-            self.position_sliders[f'{axis_key}_invert'] = invert_cb
 
         # Store slider and spinbox references
         axis_key = label.split()[0].lower()
@@ -719,10 +740,6 @@ class Sample3DVisualizationWindow(QWidget):
         self.position_sliders['y_slider'].valueChanged.connect(self._on_y_slider_changed)
         self.position_sliders['z_slider'].valueChanged.connect(self._on_z_slider_changed)
 
-        # Invert checkboxes
-        self.position_sliders['x_invert'].toggled.connect(self._on_x_invert_toggled)
-        self.position_sliders['z_invert'].toggled.connect(self._on_z_invert_toggled)
-
         # Rotation slider
         self.rotation_slider.valueChanged.connect(self._on_rotation_changed)
 
@@ -732,10 +749,11 @@ class Sample3DVisualizationWindow(QWidget):
                 lambda checked, cid=ch_id: self._on_channel_visibility_changed(cid, checked)
             )
 
-        # Display settings
+        # Display settings (now in Sample Control tab)
         self.show_chamber_cb.toggled.connect(self._on_display_settings_changed)
         self.show_objective_cb.toggled.connect(self._on_display_settings_changed)
         self.reset_view_btn.clicked.connect(self._on_reset_view)
+        self.rendering_combo.currentTextChanged.connect(self._on_rendering_mode_changed)
 
     def _init_napari_viewer(self):
         """Initialize the napari viewer."""
@@ -1151,7 +1169,7 @@ class Sample3DVisualizationWindow(QWidget):
 
         if checked:
             self.start_button.setText("Stop Streaming")
-            self.status_label.setText("Streaming...")
+            self.status_label.setText("Status: Streaming...")
             self.update_timer.start()
 
             # Start acquiring data if camera controller available
@@ -1161,7 +1179,7 @@ class Sample3DVisualizationWindow(QWidget):
 
         else:
             self.start_button.setText("Start Streaming")
-            self.status_label.setText("Stopped")
+            self.status_label.setText("Status: Stopped")
             self.update_timer.stop()
 
     def _on_clear_data(self):
@@ -1175,7 +1193,7 @@ class Sample3DVisualizationWindow(QWidget):
         if reply == QMessageBox.Yes:
             self.voxel_storage.clear()
             self._update_visualization()
-            self.status_label.setText("Data cleared")
+            self.status_label.setText("Status: Data cleared")
             logger.info("Cleared all visualization data")
 
     def _on_export_data(self):
@@ -1208,26 +1226,6 @@ class Sample3DVisualizationWindow(QWidget):
         # Update sample holder position using coordinate mapper
         x_mm = self.position_sliders['x_slider'].value() / 1000.0
         y_mm = self.position_sliders['y_slider'].value() / 1000.0
-        self._update_sample_holder_position(x_mm, y_mm, z_mm)
-
-    def _on_x_invert_toggled(self, checked: bool):
-        """Handle X axis inversion toggle."""
-        self.coord_mapper.set_inversions(invert_x=checked)
-        logger.info(f"X axis inversion: {checked}")
-        # Update visualization with current position
-        x_mm = self.position_sliders['x_slider'].value() / 1000.0
-        y_mm = self.position_sliders['y_slider'].value() / 1000.0
-        z_mm = self.position_sliders['z_slider'].value() / 1000.0
-        self._update_sample_holder_position(x_mm, y_mm, z_mm)
-
-    def _on_z_invert_toggled(self, checked: bool):
-        """Handle Z axis inversion toggle."""
-        self.coord_mapper.set_inversions(invert_z=checked)
-        logger.info(f"Z axis inversion: {checked}")
-        # Update visualization with current position
-        x_mm = self.position_sliders['x_slider'].value() / 1000.0
-        y_mm = self.position_sliders['y_slider'].value() / 1000.0
-        z_mm = self.position_sliders['z_slider'].value() / 1000.0
         self._update_sample_holder_position(x_mm, y_mm, z_mm)
 
     def _on_rotation_changed(self, value: int):
@@ -1271,6 +1269,16 @@ class Sample3DVisualizationWindow(QWidget):
         self.viewer.camera.angles = (45, 30, 0)
         self.viewer.camera.zoom = 2.0
         self.viewer.reset_view()
+
+    def _on_rendering_mode_changed(self, mode: str):
+        """Handle rendering mode changes."""
+        if not self.viewer:
+            return
+
+        # Update all channel layers to use the new rendering mode
+        for layer in self.channel_layers.values():
+            layer.rendering = mode
+        logger.info(f"Rendering mode changed to: {mode}")
 
     def _add_rotation_axes(self):
         """Add rotation axes to the viewer."""
@@ -1416,7 +1424,7 @@ class Sample3DVisualizationWindow(QWidget):
             )
 
         # Update status
-        self.status_label.setText(f"Processing frame at Z={self.current_z:.1f} µm")
+        self.status_label.setText(f"Status: Processing frame at Z={self.current_z:.1f} µm")
 
     def closeEvent(self, event):
         """Handle window close event."""
