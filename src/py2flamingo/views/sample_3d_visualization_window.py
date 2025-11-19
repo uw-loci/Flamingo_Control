@@ -708,6 +708,52 @@ class Sample3DVisualizationWindow(QWidget):
 
         return widget
 
+    def _get_rotation_gradient_color(self, angle_deg: float) -> str:
+        """
+        Get color from rotation slider gradient based on angle.
+
+        Gradient: Blue(0°) → Orange(90°) → Yellow(180°) → Orange(270°) → Blue(360°)
+
+        Args:
+            angle_deg: Rotation angle in degrees (0-360)
+
+        Returns:
+            Hex color string
+        """
+        # Normalize angle to 0-360 range
+        angle = angle_deg % 360
+
+        # Color stops: Blue, Orange, Yellow, Orange, Blue
+        # Positions:    0°    90°     180°    270°    360°
+        colors = [
+            (0.0,   (0x41, 0x69, 0xE1)),  # Royal Blue
+            (0.25,  (0xFF, 0x45, 0x00)),  # Orange Red
+            (0.5,   (0xFF, 0xD7, 0x00)),  # Gold/Yellow
+            (0.75,  (0xFF, 0x45, 0x00)),  # Orange Red
+            (1.0,   (0x41, 0x69, 0xE1))   # Royal Blue
+        ]
+
+        # Find which segment we're in
+        t = angle / 360.0  # Normalize to 0-1
+
+        # Find the two color stops to interpolate between
+        for i in range(len(colors) - 1):
+            t_start, color_start = colors[i]
+            t_end, color_end = colors[i + 1]
+
+            if t_start <= t <= t_end:
+                # Interpolate between these two colors
+                local_t = (t - t_start) / (t_end - t_start)
+
+                r = int(color_start[0] + (color_end[0] - color_start[0]) * local_t)
+                g = int(color_start[1] + (color_end[1] - color_start[1]) * local_t)
+                b = int(color_start[2] + (color_end[2] - color_start[2]) * local_t)
+
+                return f"#{r:02x}{g:02x}{b:02x}"
+
+        # Fallback (shouldn't reach here)
+        return "#4169E1"
+
     def _lighten_color(self, hex_color: str, factor: float = 1.3) -> str:
         """Lighten a hex color for hover effects."""
         # Remove '#' if present
@@ -1202,12 +1248,16 @@ class Sample3DVisualizationWindow(QWidget):
         indicator_start = np.array([holder_z, y_position, holder_x])
         indicator_end = np.array([holder_z, y_position, holder_x + indicator_length])
 
+        # Get initial color matching rotation angle
+        initial_angle = self.current_rotation.get('ry', 0)
+        initial_color = self._get_rotation_gradient_color(initial_angle)
+
         # Add as a line (using shapes layer for better control)
         self.viewer.add_shapes(
             data=[[indicator_start, indicator_end]],  # 3D line in (Z, Y, X) order
             shape_type='line',
             name='Rotation Indicator',
-            edge_color='red',
+            edge_color=initial_color,
             edge_width=3,
             opacity=0.8
         )
@@ -1304,7 +1354,11 @@ class Sample3DVisualizationWindow(QWidget):
             return
 
         # Get Y-axis rotation (the physical stage rotation)
-        angle_rad = np.radians(self.current_rotation.get('ry', 0))
+        angle_deg = self.current_rotation.get('ry', 0)
+        angle_rad = np.radians(angle_deg)
+
+        # Get color matching the rotation slider gradient
+        indicator_color = self._get_rotation_gradient_color(angle_deg)
 
         # Indicator always at Y=0 (top of chamber), extends in ZX plane
         y_position = 0  # TOP OF CHAMBER
@@ -1333,6 +1387,7 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Update the line - provide 3D coordinates in (Z, Y, X) order
         self.viewer.layers['Rotation Indicator'].data = [[start, end]]
+        self.viewer.layers['Rotation Indicator'].edge_color = [indicator_color]
 
     def _setup_data_layers(self):
         """Setup napari layers for multi-channel data."""
