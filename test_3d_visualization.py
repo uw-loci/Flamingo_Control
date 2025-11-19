@@ -15,31 +15,50 @@ from PyQt5.QtWidgets import QApplication
 from py2flamingo.views.sample_3d_visualization_window import Sample3DVisualizationWindow
 
 
-def simulate_frame_data():
-    """Generate simulated multi-channel microscopy data."""
-    # Simulate a 512x512 4-channel image
-    h, w, c = 512, 512, 4
+def simulate_frame_data(z_index=0, num_z_planes=20):
+    """Generate simulated multi-channel microscopy data.
+
+    Args:
+        z_index: Current Z-plane index (0 to num_z_planes-1)
+        num_z_planes: Total number of Z-planes being simulated
+    """
+    # Simulate a smaller 256x256 4-channel image (faster for testing)
+    h, w, c = 256, 256, 4
     frame = np.zeros((h, w, c), dtype=np.uint16)
 
-    # Channel 0 (DAPI): Small bright spots (nuclei)
-    for _ in range(20):
-        x, y = np.random.randint(50, w-50), np.random.randint(50, h-50)
-        r = np.random.randint(5, 15)
+    # Channel 0 (405nm DAPI): Small bright spots that vary with Z
+    # Simulate nuclei that are brighter when in focus
+    focus_factor = 1.0 - abs(z_index - num_z_planes//2) / (num_z_planes//2)
+    num_spots = max(5, int(15 * focus_factor))
+
+    for _ in range(num_spots):
+        x, y = np.random.randint(30, w-30), np.random.randint(30, h-30)
+        r = np.random.randint(3, 8)
         yy, xx = np.ogrid[-y:h-y, -x:w-x]
         mask = xx**2 + yy**2 <= r**2
-        frame[mask, 0] = np.random.randint(20000, 40000)
+        intensity = int(30000 * focus_factor + 10000)
+        frame[mask, 0] = np.random.randint(intensity, min(intensity + 10000, 65000))
 
-    # Channel 1 (GFP): Diffuse signal
+    # Channel 1 (488nm GFP): Diffuse signal with Z-variation
     x, y = w//2, h//2
     yy, xx = np.ogrid[:h, :w]
     dist = np.sqrt((xx - x)**2 + (yy - y)**2)
-    frame[:, :, 1] = np.clip(10000 * np.exp(-dist/100), 0, 65535).astype(np.uint16)
+    z_modulation = 0.5 + 0.5 * np.cos(2 * np.pi * z_index / num_z_planes)
+    frame[:, :, 1] = np.clip(15000 * z_modulation * np.exp(-dist/80), 0, 65535).astype(np.uint16)
 
-    # Channel 2 (RFP): Linear gradient
-    frame[:, :, 2] = np.linspace(0, 30000, h)[:, np.newaxis].astype(np.uint16)
+    # Channel 2 (561nm RFP): Horizontal gradient that shifts with Z
+    shift = int(w * z_index / num_z_planes)
+    gradient = np.roll(np.linspace(0, 25000, w), shift)
+    frame[:, :, 2] = np.tile(gradient, (h, 1)).astype(np.uint16)
 
-    # Channel 3 (Brightfield): Uniform with noise
-    frame[:, :, 3] = np.random.randint(5000, 10000, (h, w), dtype=np.uint16)
+    # Channel 3 (640nm Far-Red): Sparse bright regions
+    if z_index % 5 == 0:  # Only show in some Z-planes
+        for _ in range(3):
+            x, y = np.random.randint(40, w-40), np.random.randint(40, h-40)
+            r = np.random.randint(15, 25)
+            yy, xx = np.ogrid[-y:h-y, -x:w-x]
+            mask = xx**2 + yy**2 <= r**2
+            frame[mask, 3] = np.random.randint(20000, 35000)
 
     return frame
 
@@ -59,25 +78,32 @@ def test_window():
     window.is_streaming = True
 
     # Simulate scanning through Z with rotation
-    z_positions = np.linspace(0, 5000, 20)  # 20 Z-planes from 0 to 5000 µm
+    # Using smaller region in the middle of the chamber for visibility
+    chamber_height_um = 36000  # 36mm chamber
+    scan_start_um = chamber_height_um * 0.3  # Start at 30% height
+    scan_end_um = chamber_height_um * 0.7    # End at 70% height
+    num_z_planes = 20
+
+    z_positions = np.linspace(scan_start_um, scan_end_um, num_z_planes)
+
+    # Start with just no rotation for simplicity
     rotations = [
         {'rx': 0, 'ry': 0, 'rz': 0},      # No rotation
-        {'rx': 0, 'ry': 0, 'rz': 45},     # 45° rotation around Z
-        {'rx': 0, 'ry': 45, 'rz': 0},     # 45° rotation around Y
-        {'rx': 30, 'ry': 30, 'rz': 30},   # Combined rotation
     ]
 
     frame_count = 0
-    for rotation in rotations:
-        print(f"Processing rotation: {rotation}")
-        for z in z_positions:
-            frame = simulate_frame_data()
+    for rotation_idx, rotation in enumerate(rotations):
+        print(f"\nProcessing rotation {rotation_idx + 1}/{len(rotations)}: {rotation}")
+        for z_idx, z in enumerate(z_positions):
+            # Generate frame with Z-dependent features
+            frame = simulate_frame_data(z_idx, num_z_planes)
+
             metadata = {
                 'z_position': z,
                 'rotation': rotation,
                 'timestamp': frame_count * 0.1,
-                'pixel_to_micron': 0.65,
-                'active_channels': [0, 1, 2]
+                'pixel_to_micron': 10.0,  # 10 µm/pixel for reasonable sample size
+                'active_channels': [0, 1, 2, 3]
             }
 
             # Process the frame
@@ -85,12 +111,22 @@ def test_window():
             frame_count += 1
 
             # Update the UI periodically
-            if frame_count % 5 == 0:
+            if frame_count % 2 == 0:
                 window._update_visualization()
                 app.processEvents()
+                print(f"  Processed Z-plane {z_idx + 1}/{num_z_planes} at {z:.0f} µm")
 
-    print(f"Processed {frame_count} frames")
+    # Final update
+    window._update_visualization()
+    app.processEvents()
+
+    print(f"\nProcessed {frame_count} total frames")
     print("Test complete. Window is now interactive.")
+    print("\nTips:")
+    print("  - Toggle channel visibility in the Channels tab")
+    print("  - Adjust contrast/opacity for each channel")
+    print("  - Rotate the view with your mouse in the napari viewer")
+    print("  - Try different rendering modes (MIP, Average, Additive)")
 
     # Show memory usage
     memory_stats = window.voxel_storage.get_memory_usage()
