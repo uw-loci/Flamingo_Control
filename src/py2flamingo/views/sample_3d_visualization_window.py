@@ -444,10 +444,6 @@ class Sample3DVisualizationWindow(QWidget):
         self.show_objective_cb = QCheckBox("Show Objective Position")
         self.show_objective_cb.setChecked(True)
 
-        # Rotation axis indicator
-        self.show_axes_cb = QCheckBox("Show Rotation Axis")
-        self.show_axes_cb.setChecked(True)
-
         # Rendering mode
         disp_layout.addWidget(QLabel("Rendering:"), 3, 0)
         self.rendering_combo = QComboBox()
@@ -456,7 +452,6 @@ class Sample3DVisualizationWindow(QWidget):
 
         disp_layout.addWidget(self.show_chamber_cb, 0, 0, 1, 2)
         disp_layout.addWidget(self.show_objective_cb, 1, 0, 1, 2)
-        disp_layout.addWidget(self.show_axes_cb, 2, 0, 1, 2)
 
         display_group.setLayout(disp_layout)
         layout.addWidget(display_group)
@@ -492,7 +487,6 @@ class Sample3DVisualizationWindow(QWidget):
         # Display settings
         self.show_chamber_cb.toggled.connect(self._on_display_settings_changed)
         self.show_objective_cb.toggled.connect(self._on_display_settings_changed)
-        self.show_axes_cb.toggled.connect(self._on_display_settings_changed)
 
     def _init_napari_viewer(self):
         """Initialize the napari viewer."""
@@ -503,9 +497,9 @@ class Sample3DVisualizationWindow(QWidget):
             # Create napari viewer with axis display for debugging
             self.viewer = napari.Viewer(ndisplay=3, show=False)
 
-            # Enable axis display to show coordinate orientation
+            # Enable axis display with X, Y, Z labels
             self.viewer.axes.visible = True
-            self.viewer.axes.labels = True
+            self.viewer.axes.labels = ['X', 'Y', 'Z']
             self.viewer.axes.colored = True
 
             # Embed viewer in our widget FIRST before adding layers
@@ -554,10 +548,6 @@ class Sample3DVisualizationWindow(QWidget):
         # Add objective position indicator as a flat circle on back wall (Z=0)
         # This shows the detection light path direction
         self._add_objective_indicator()
-
-        # Add rotation axes (will be updated dynamically)
-        # Initialize with actual axes data
-        self._add_rotation_axes()
 
     def _add_chamber_wireframe(self):
         """Add chamber wireframe as box edges using shapes layer."""
@@ -690,12 +680,19 @@ class Sample3DVisualizationWindow(QWidget):
 
         logger.info(f"Holder Y range: {y_bottom} to {y_top}")
 
+        # Check if range is valid
+        if y_bottom >= y_top:
+            logger.warning(f"Invalid holder Y range: {y_bottom} >= {y_top}. Setting y_bottom to 0.")
+            y_bottom = 0
+
         # Create vertical line of points for cylinder axis
         # Napari coordinates: (X, Y, Z) where Y (axis 1) is vertical
         for y in range(y_bottom, y_top, 2):  # Sample every 2 voxels for performance
             holder_points.append([self.holder_position['x'], y, self.holder_position['z']])
 
         logger.info(f"Created {len(holder_points)} holder points")
+        if holder_points:
+            logger.info(f"First point: {holder_points[0]}, Last point: {holder_points[-1]}")
 
         if holder_points:
             holder_array = np.array(holder_points)
@@ -978,9 +975,6 @@ class Sample3DVisualizationWindow(QWidget):
 
         if 'Objective' in self.viewer.layers:
             self.viewer.layers['Objective'].visible = self.show_objective_cb.isChecked()
-
-        if 'Rotation Axes' in self.viewer.layers:
-            self.viewer.layers['Rotation Axes'].visible = self.show_axes_cb.isChecked()
 
     def _add_rotation_axes(self):
         """Add rotation axes to the viewer."""
