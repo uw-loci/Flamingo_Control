@@ -541,9 +541,26 @@ class Sample3DVisualizationWindow(QWidget):
 
         value_layout.addStretch()
 
-        value_label = QLabel(f"{default_val:.2f} mm")
-        value_label.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 14px;")
-        value_layout.addWidget(value_label)
+        # Editable value input (QDoubleSpinBox)
+        from PyQt5.QtWidgets import QDoubleSpinBox
+        value_spinbox = QDoubleSpinBox()
+        value_spinbox.setRange(min_val, max_val)
+        value_spinbox.setValue(default_val)
+        value_spinbox.setDecimals(2)
+        value_spinbox.setSuffix(" mm")
+        value_spinbox.setStyleSheet(f"""
+            QDoubleSpinBox {{
+                color: {color};
+                font-weight: bold;
+                font-size: 14px;
+                border: 2px solid {color};
+                border-radius: 4px;
+                padding: 2px;
+                background-color: #1a1a1a;
+            }}
+        """)
+        value_spinbox.setMaximumWidth(120)
+        value_layout.addWidget(value_spinbox)
 
         value_layout.addStretch()
 
@@ -564,14 +581,19 @@ class Sample3DVisualizationWindow(QWidget):
             axis_key = label.split()[0].lower()  # 'x', 'y', or 'z'
             self.position_sliders[f'{axis_key}_invert'] = invert_cb
 
-        # Store slider and label references
+        # Store slider and spinbox references
         axis_key = label.split()[0].lower()
         self.position_sliders[f'{axis_key}_slider'] = slider
-        self.position_sliders[f'{axis_key}_label'] = value_label
+        self.position_sliders[f'{axis_key}_spinbox'] = value_spinbox
 
-        # Connect slider to update label
+        # Connect slider to update spinbox
         slider.valueChanged.connect(
-            lambda v, lbl=value_label: lbl.setText(f"{v/1000:.2f} mm")
+            lambda v, sb=value_spinbox: sb.setValue(v/1000.0)
+        )
+
+        # Connect spinbox to update slider
+        value_spinbox.valueChanged.connect(
+            lambda v, sl=slider: sl.setValue(int(v * 1000))
         )
 
         # Add subtle colored border to entire widget
