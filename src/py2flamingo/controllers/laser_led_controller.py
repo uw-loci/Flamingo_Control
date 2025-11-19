@@ -269,7 +269,7 @@ class LaserLEDController(QObject):
 
             # Step 1: Disable ALL light sources first (LED + all lasers)
             self.logger.info("Step 1: Disabling all light sources (ensures clean state)")
-            self.disable_all_light_sources()
+            self.disable_all_light_sources(emit_signal=False)  # Don't emit - this is internal cleanup
 
             # Step 2: Set laser power
             power = self._laser_powers.get(laser_index, 5.0)
@@ -342,7 +342,7 @@ class LaserLEDController(QObject):
 
             # Step 1: Disable ALL light sources first (all lasers + LED)
             self.logger.info("Step 1: Disabling all light sources (ensures clean state)")
-            self.disable_all_light_sources()
+            self.disable_all_light_sources(emit_signal=False)  # Don't emit - this is internal cleanup
 
             # Step 2: Set intensity for selected color
             intensity = self._led_intensities.get(self._led_color, 50.0)
@@ -374,9 +374,13 @@ class LaserLEDController(QObject):
             self.error_occurred.emit(error_msg)
             return False
 
-    def disable_all_light_sources(self) -> bool:
+    def disable_all_light_sources(self, emit_signal: bool = True) -> bool:
         """
         Disable all light sources (lasers and LED).
+
+        Args:
+            emit_signal: Whether to emit preview_disabled signal (True for user actions,
+                        False for internal cleanup during enable sequence)
 
         Returns:
             True if successful
@@ -395,7 +399,8 @@ class LaserLEDController(QObject):
             self._active_source = None
             self._active_laser_index = None
 
-            self.preview_disabled.emit()
+            if emit_signal:
+                self.preview_disabled.emit()
             self.logger.info("All light sources disabled")
             return True
 
