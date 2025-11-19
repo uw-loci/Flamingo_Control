@@ -50,38 +50,39 @@ sample_chamber:
   sample_region_center_um: [5000, 5000, 21500]  # Default center position
 
 channels:
-  # Default channel configurations
+  # Laser line channel configurations
+  # These represent fluorescent signals excited by different laser wavelengths
   - id: 0
-    name: "DAPI"
-    default_colormap: "cyan"
+    name: "405nm (DAPI)"
+    default_colormap: "blue"
     default_visible: true
-    update_strategy: "latest"  # "latest", "maximum", "average", "additive"
+    update_strategy: "maximum"  # Maximum intensity projection for fluorescence
     blend_mode: "additive"
     opacity: 0.8
 
   - id: 1
-    name: "GFP"
+    name: "488nm (GFP)"
     default_colormap: "green"
     default_visible: true
-    update_strategy: "latest"
+    update_strategy: "maximum"
     blend_mode: "additive"
     opacity: 0.8
 
   - id: 2
-    name: "RFP"
+    name: "561nm (RFP)"
     default_colormap: "red"
     default_visible: true
-    update_strategy: "latest"
+    update_strategy: "maximum"
     blend_mode: "additive"
     opacity: 0.8
 
   - id: 3
-    name: "Brightfield"
-    default_colormap: "gray"
+    name: "640nm (Far-Red)"
+    default_colormap: "magenta"
     default_visible: false
-    update_strategy: "average"  # Average to reduce noise
-    blend_mode: "translucent"
-    opacity: 0.5
+    update_strategy: "maximum"
+    blend_mode: "additive"
+    opacity: 0.8
 
 rotation:
   # Rotation handling parameters

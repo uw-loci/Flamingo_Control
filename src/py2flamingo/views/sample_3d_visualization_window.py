@@ -304,14 +304,25 @@ class Sample3DVisualizationWindow(QWidget):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        rotation_group = QGroupBox("Sample Rotation")
+        # Add clarification about rotation types
+        info_label = QLabel("Note: Only Y-axis rotation is physical (stage rotation).\nX and Z rotations are for visualization only.")
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("QLabel { color: #666; font-style: italic; padding: 5px; }")
+        layout.addWidget(info_label)
+
+        rotation_group = QGroupBox("View Rotation")
         rot_layout = QGridLayout()
 
         self.rotation_sliders = {}
-        axes = [('X', 'rx', -180, 180), ('Y', 'ry', -180, 180), ('Z', 'rz', 0, 360)]
+        # Y is physical rotation (stage), X and Z are visual only
+        axes = [
+            ('X (Visual)', 'rx', -180, 180),
+            ('Y (Stage)', 'ry', -180, 180),
+            ('Z (Visual)', 'rz', 0, 360)
+        ]
 
         for i, (label, key, min_val, max_val) in enumerate(axes):
-            rot_layout.addWidget(QLabel(f"Rotate {label}:"), i, 0)
+            rot_layout.addWidget(QLabel(f"{label}:"), i, 0)
 
             slider = QSlider(Qt.Horizontal)
             slider.setRange(min_val, max_val)
@@ -503,14 +514,8 @@ class Sample3DVisualizationWindow(QWidget):
         if not self.viewer:
             return
 
-        # Generate chamber wireframe
-        chamber_wireframe = self._generate_chamber_wireframe()
-        self.viewer.add_labels(
-            chamber_wireframe,
-            name='Chamber',
-            opacity=0.3,
-            rendering='translucent'
-        )
+        # Generate chamber wireframe as shapes (box edges)
+        self._add_chamber_wireframe()
 
         # Add sample holder (cylinder coming down from top)
         self._add_sample_holder()
@@ -519,26 +524,69 @@ class Sample3DVisualizationWindow(QWidget):
         self._add_rotation_indicator()
 
         # Add objective position indicator
-        objective_pos = np.array([[100, 100, 0]])  # Default position
+        # Position it at a reasonable default location
+        dims = self.voxel_storage.display_dims
+        objective_pos = np.array([[dims[0] // 2, dims[1] // 2, dims[2] // 4]])  # Near bottom
         self.viewer.add_points(
             objective_pos,
             name='Objective',
-            size=20,
+            size=80,  # Larger size for better visibility
             face_color='yellow',
             border_color='orange',  # napari >= 0.5.0 uses border_* parameters
-            border_width=0.1,  # Relative to point size
-            opacity=0.8
+            border_width=0.15,  # Relative to point size
+            opacity=0.9
         )
 
         # Add rotation axes (will be updated dynamically)
-        # Initialize with dummy data since napari requires non-None data
-        dummy_vectors = np.zeros((3, 2, 3))  # 3 vectors, 2 points (start, direction), 3D
-        self.viewer.add_vectors(
-            dummy_vectors,
-            name='Rotation Axes',
-            edge_color=['red', 'green', 'blue'],
-            edge_width=3,
-            visible=False  # Hide initially until we have real data
+        # Initialize with actual axes data
+        self._add_rotation_axes()
+
+    def _add_chamber_wireframe(self):
+        """Add chamber wireframe as box edges using shapes layer."""
+        if not self.viewer:
+            return
+
+        dims = self.voxel_storage.display_dims
+
+        # Define the 8 corners of the box
+        corners = np.array([
+            [0, 0, 0],
+            [dims[0]-1, 0, 0],
+            [dims[0]-1, dims[1]-1, 0],
+            [0, dims[1]-1, 0],
+            [0, 0, dims[2]-1],
+            [dims[0]-1, 0, dims[2]-1],
+            [dims[0]-1, dims[1]-1, dims[2]-1],
+            [0, dims[1]-1, dims[2]-1]
+        ])
+
+        # Define edges connecting corners (12 edges of a box)
+        edges = [
+            # Bottom face
+            [corners[0], corners[1]],
+            [corners[1], corners[2]],
+            [corners[2], corners[3]],
+            [corners[3], corners[0]],
+            # Top face
+            [corners[4], corners[5]],
+            [corners[5], corners[6]],
+            [corners[6], corners[7]],
+            [corners[7], corners[4]],
+            # Vertical edges
+            [corners[0], corners[4]],
+            [corners[1], corners[5]],
+            [corners[2], corners[6]],
+            [corners[3], corners[7]]
+        ]
+
+        # Add as shapes layer with lines
+        self.viewer.add_shapes(
+            data=edges,
+            shape_type='line',
+            name='Chamber',
+            edge_color='cyan',
+            edge_width=2,
+            opacity=0.7
         )
 
     def _generate_chamber_wireframe(self) -> np.ndarray:
@@ -826,6 +874,36 @@ class Sample3DVisualizationWindow(QWidget):
 
         if 'Rotation Axes' in self.viewer.layers:
             self.viewer.layers['Rotation Axes'].visible = self.show_axes_cb.isChecked()
+
+    def _add_rotation_axes(self):
+        """Add rotation axes to the viewer."""
+        if not self.viewer:
+            return
+
+        # Create rotation vectors at origin
+        center = np.array([
+            self.voxel_storage.display_dims[0] // 2,
+            self.voxel_storage.display_dims[1] // 2,
+            self.voxel_storage.display_dims[2] // 2
+        ])
+
+        # Axis lengths (in voxels)
+        axis_length = 30
+
+        # Create axes vectors (start point, direction vector)
+        vectors = np.array([
+            [[center[0], center[1], center[2]], [axis_length, 0, 0]],  # X axis - red
+            [[center[0], center[1], center[2]], [0, axis_length, 0]],  # Y axis - green
+            [[center[0], center[1], center[2]], [0, 0, axis_length]]   # Z axis - blue
+        ])
+
+        self.viewer.add_vectors(
+            vectors,
+            name='Rotation Axes',
+            edge_color=['red', 'green', 'blue'],
+            edge_width=3,
+            visible=self.show_axes_cb.isChecked()
+        )
 
     def _update_rotation_axes(self):
         """Update rotation axis indicators."""
