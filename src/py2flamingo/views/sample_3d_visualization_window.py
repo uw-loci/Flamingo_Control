@@ -363,15 +363,19 @@ class Sample3DVisualizationWindow(QWidget):
         pos_layout.addWidget(z_widget)
 
         # Y Slider - Magenta (Napari Axis 1)
+        # Use stage limits, not chamber extent
+        y_min = stage_config.get('y_stage_min_mm', stage_config['y_range_mm'][0])
+        y_max = stage_config.get('y_stage_max_mm', stage_config['y_range_mm'][1])
+
         y_widget = self._create_axis_slider(
             label="Y Position (Height)",
             color=axis_colors['y'],
             napari_axis=1,
-            min_val=stage_config['y_range_mm'][0],
-            max_val=stage_config['y_range_mm'][1],
+            min_val=y_min,
+            max_val=y_max,
             default_val=stage_config['y_default_mm'],
             has_invert=False,  # Y doesn't need invert (handled by coord transform)
-            tooltip="Y-axis (vertical height)\nNapari Axis 1 (Magenta)\nY-axis is inverted for intuitive display"
+            tooltip="Y-axis (vertical height)\nNapari Axis 1 (Magenta)\nY-axis is inverted for intuitive display\nMinimum: collision prevention limit"
         )
         pos_layout.addWidget(y_widget)
 
@@ -956,7 +960,14 @@ class Sample3DVisualizationWindow(QWidget):
         # Objective at Z=0 (back wall, Axis 0)
         # Circle varies in Y and X dimensions (Axes 1 and 2)
         z_objective = 0  # Back wall - OBJECTIVE LOCATION (Axis 0)
-        center_y = dims[1] // 2  # Y center (Axis 1)
+
+        # Objective centered at Y=0mm (anchor point) in chamber coordinates
+        # Convert chamber Y=0mm to napari coordinates
+        y_chamber_anchor_mm = 0.0
+        napari_y_anchor = int((self.coord_mapper.y_range_mm[1] - y_chamber_anchor_mm) /
+                              (self.coord_mapper.voxel_size_mm))
+
+        center_y = napari_y_anchor  # Y at anchor point (Axis 1)
         center_x = dims[2] // 2  # X center (Axis 2)
 
         # Circle radius (about 1/6 of the smaller dimension for visibility)

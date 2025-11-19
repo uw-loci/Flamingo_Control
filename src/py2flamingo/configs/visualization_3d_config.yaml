@@ -74,15 +74,19 @@ sample_chamber:
   sample_region_center_um: [6000, 6000, 18000]  # Default center position (updated for new dimensions)
 
 stage_control:
-  # Physical stage ranges (in mm) - these define the napari visualization bounds
-  # These should match the microscope's physical stage limits
+  # Physical stage ranges (in mm)
+  # These define the chamber visualization bounds and stage movement limits
   x_range_mm: [1.0, 12.31]    # X axis: left-right
-  y_range_mm: [0.0, 15.0]     # Y axis: vertical (0-15mm, with 5mm anchor)
+  y_range_mm: [-5.0, 10.0]    # Y axis: chamber extent (15mm total, anchor at 0mm)
   z_range_mm: [12.5, 26.0]    # Z axis: depth (toward objective)
+
+  # Stage position limits (may differ from chamber bounds)
+  y_stage_min_mm: 5.0         # Minimum stage position (collision prevention)
+  y_stage_max_mm: 15.0        # Maximum stage position (can leave chamber)
 
   # Default positions (mm) - starting position for visualization
   x_default_mm: 6.655         # Center of X range
-  y_default_mm: 7.5           # Mid-height (above anchor)
+  y_default_mm: 5.0           # At minimum (1/3 down from chamber top)
   z_default_mm: 19.25         # Center of Z range
 
   # Axis inversion defaults (user preferences for stage control)
