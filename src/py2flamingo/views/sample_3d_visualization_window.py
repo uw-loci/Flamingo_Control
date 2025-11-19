@@ -1268,6 +1268,12 @@ class Sample3DVisualizationWindow(QWidget):
 
             self.test_sample_data_raw[ch_id] = data
 
+        # Log data statistics
+        for ch_id, data in self.test_sample_data_raw.items():
+            nonzero_count = np.count_nonzero(data)
+            max_val = np.max(data)
+            logger.info(f"Channel {ch_id}: {nonzero_count} non-zero voxels, max intensity: {max_val}")
+
         logger.info(f"Generated test sample data: {sample_size_voxels}x{sample_size_voxels}x{sample_size_voxels} voxels per channel")
 
     def _update_sample_data_visualization(self):
@@ -1302,8 +1308,17 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Update each channel
         for ch_id, raw_data in self.test_sample_data_raw.items():
+            if ch_id not in self.channel_layers:
+                logger.warning(f"Channel {ch_id} not in channel_layers, skipping")
+                continue
+
             # Apply rotation to the data
             rotated_data = self._rotate_sample_data(raw_data, rotation_deg)
+
+            # Log rotation results
+            nonzero_before = np.count_nonzero(raw_data)
+            nonzero_after = np.count_nonzero(rotated_data)
+            logger.info(f"Ch{ch_id} rotation: {nonzero_before} → {nonzero_after} non-zero voxels")
 
             # Transpose to (Z, Y, X) for napari
             rotated_transposed = np.transpose(rotated_data, (2, 0, 1))
@@ -1335,19 +1350,29 @@ class Sample3DVisualizationWindow(QWidget):
                 src_x_start:src_x_start + data_x_size
             ]
 
+            # Log what we're placing
+            logger.info(f"Ch{ch_id}: placing {data_to_place.shape} at bounds {bounds}")
+            logger.info(f"  Data range: {data_to_place.min()}-{data_to_place.max()}, non-zero: {np.count_nonzero(data_to_place)}")
+
             # Update sparse renderer
             self.sparse_renderer.update_region(ch_id, bounds, data_to_place)
 
             # Get dense volume from sparse renderer and update napari layer
             dense_volume = self.sparse_renderer.get_dense_volume(ch_id)
+
+            # Log dense volume stats
+            logger.info(f"Ch{ch_id}: dense volume shape {dense_volume.shape}, non-zero: {np.count_nonzero(dense_volume)}")
+
+            # Update napari layer
             self.channel_layers[ch_id].data = dense_volume
+            self.channel_layers[ch_id].contrast_limits = (0, 65535)  # Reset contrast
 
         # Update memory display
         mem_stats = self.sparse_renderer.get_memory_usage()
         self.memory_label.setText(f"Memory: {mem_stats['total_mb']:.1f} MB")
         self.voxel_count_label.setText(f"Voxels: {mem_stats['total_voxels']:,}")
 
-        logger.debug(f"Updated sample data at ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm, rotation={rotation_deg}°")
+        logger.info(f"Updated sample data at ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm, rotation={rotation_deg}°")
 
     def _rotate_sample_data(self, data: np.ndarray, rotation_deg: float) -> np.ndarray:
         """

@@ -502,17 +502,21 @@ class PhysicalToNapariMapper:
         return self.napari_dims
 
     def test_round_trip(self, x_mm: float, y_mm: float, z_mm: float,
-                       tolerance: float = 0.01) -> bool:
+                       tolerance: float = None) -> bool:
         """
         Test round-trip transformation (physical → napari → physical).
 
         Args:
             x_mm, y_mm, z_mm: Physical coordinates to test
-            tolerance: Maximum allowed error in mm
+            tolerance: Maximum allowed error in mm (default: voxel_size_mm)
 
         Returns:
             True if round-trip error is within tolerance
         """
+        # Default tolerance is one voxel size (quantization error)
+        if tolerance is None:
+            tolerance = self.voxel_size_mm
+
         # Forward transform
         napari_coords = self.physical_to_napari(x_mm, y_mm, z_mm)
 
@@ -528,6 +532,6 @@ class PhysicalToNapariMapper:
 
         logger.debug(f"Round-trip test: ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) → "
                     f"{napari_coords} → ({x_back:.2f}, {y_back:.2f}, {z_back:.2f})")
-        logger.debug(f"  Max error: {max_error:.4f} mm")
+        logger.debug(f"  Max error: {max_error:.4f} mm (tolerance: {tolerance:.4f} mm)")
 
         return max_error <= tolerance
