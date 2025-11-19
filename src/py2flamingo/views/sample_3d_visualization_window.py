@@ -1284,8 +1284,18 @@ class Sample3DVisualizationWindow(QWidget):
 
     def _update_sample_data_visualization(self):
         """Update the sample data visualization with position and rotation transforms."""
-        if not self.viewer or self.test_sample_data_raw is None or self.sparse_renderer is None:
+        # Debug early returns
+        if not self.viewer:
+            print("DEBUG: No viewer, returning")
             return
+        if self.test_sample_data_raw is None:
+            print("DEBUG: No test_sample_data_raw, returning")
+            return
+        if self.sparse_renderer is None:
+            print("DEBUG: No sparse_renderer, returning")
+            return
+
+        print(f"DEBUG: _update_sample_data_visualization called, viewer={self.viewer is not None}, data={self.test_sample_data_raw is not None}, renderer={self.sparse_renderer is not None}")
 
         # Get current physical position and rotation
         x_mm = self.position_sliders['x_slider'].value() / 1000.0
@@ -1312,9 +1322,14 @@ class Sample3DVisualizationWindow(QWidget):
         voxel_size_mm = self.coord_mapper.voxel_size_mm
         sample_size_voxels = int(self.test_sample_size_mm / voxel_size_mm)
 
+        print(f"DEBUG: Starting channel updates, {len(self.test_sample_data_raw)} channels, rotation={rotation_deg}°")
+
         # Update each channel
         for ch_id, raw_data in self.test_sample_data_raw.items():
+            print(f"DEBUG: Processing channel {ch_id}, raw_data shape={raw_data.shape}")
+
             if ch_id not in self.channel_layers:
+                print(f"DEBUG: Channel {ch_id} not in channel_layers!")
                 logger.warning(f"Channel {ch_id} not in channel_layers, skipping")
                 continue
 
