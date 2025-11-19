@@ -91,6 +91,7 @@ class Sample3DVisualizationWindow(QWidget):
         self.test_sample_data = None
         self.test_sample_size_mm = 2.0  # 2mm cube of sample data
         self.test_sample_offset_mm = 0.5  # 0.5mm below holder tip
+        self.previous_sample_bounds = {}  # Track previous bounds for efficient clearing
 
         # Setup UI
         self._setup_ui()
@@ -1286,46 +1287,53 @@ class Sample3DVisualizationWindow(QWidget):
             if ch_id not in self.channel_layers:
                 continue
 
-            # Get current display volume
-            display_volume = self.channel_layers[ch_id].data.copy()
-
-            # Clear previous sample data region (simple approach - clear all for now)
-            display_volume[:] = 0
-
             # Calculate bounds for placing sample data
             # In napari (Z, Y, X) coordinates
             z_start = max(0, sample_z - half_size)
-            z_end = min(display_volume.shape[0], sample_z + half_size)
+            z_end = min(self.voxel_storage.display_dims[0], sample_z + half_size)
             y_start = max(0, sample_y - half_size)
-            y_end = min(display_volume.shape[1], sample_y + half_size)
+            y_end = min(self.voxel_storage.display_dims[1], sample_y + half_size)
             x_start = max(0, sample_x - half_size)
-            x_end = min(display_volume.shape[2], sample_x + half_size)
+            x_end = min(self.voxel_storage.display_dims[2], sample_x + half_size)
+
+            current_bounds = (z_start, z_end, y_start, y_end, x_start, x_end)
+
+            # Clear previous sample data region if position changed
+            if ch_id in self.previous_sample_bounds:
+                prev_bounds = self.previous_sample_bounds[ch_id]
+                # Only clear if bounds changed
+                if prev_bounds != current_bounds:
+                    pz_start, pz_end, py_start, py_end, px_start, px_end = prev_bounds
+                    self.channel_layers[ch_id].data[pz_start:pz_end, py_start:py_end, px_start:px_end] = 0
 
             # Calculate corresponding bounds in sample data
-            sample_z_start = max(0, half_size - sample_z)
+            sample_z_start = max(0, half_size - sample_z + z_start)
             sample_z_end = sample_z_start + (z_end - z_start)
-            sample_y_start = max(0, half_size - sample_y)
+            sample_y_start = max(0, half_size - sample_y + y_start)
             sample_y_end = sample_y_start + (y_end - y_start)
-            sample_x_start = max(0, half_size - sample_x)
+            sample_x_start = max(0, half_size - sample_x + x_start)
             sample_x_end = sample_x_start + (x_end - x_start)
 
-            # Place sample data into display volume
-            # Note: sample_data is in (Y, X, Z) order from numpy creation
-            # Need to transpose to (Z, Y, X) for napari
-            sample_transposed = np.transpose(sample_data, (2, 0, 1))  # (Z, Y, X)
+            # Transpose sample data to (Z, Y, X) for napari
+            sample_transposed = np.transpose(sample_data, (2, 0, 1))
 
             try:
-                display_volume[z_start:z_end, y_start:y_end, x_start:x_end] = \
+                # Directly update the layer data (no copy!)
+                self.channel_layers[ch_id].data[z_start:z_end, y_start:y_end, x_start:x_end] = \
                     sample_transposed[sample_z_start:sample_z_end,
                                     sample_y_start:sample_y_end,
                                     sample_x_start:sample_x_end]
+
+                # Force refresh
+                self.channel_layers[ch_id].refresh()
+
             except Exception as e:
                 logger.warning(f"Could not place sample data for channel {ch_id}: {e}")
 
-            # Update layer
-            self.channel_layers[ch_id].data = display_volume
+            # Store current bounds for next update
+            self.previous_sample_bounds[ch_id] = current_bounds
 
-        logger.info(f"Updated sample data at position ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm")
+        logger.debug(f"Updated sample data at ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm")
 
     def _on_streaming_toggled(self, checked: bool):
         """Handle streaming start/stop."""

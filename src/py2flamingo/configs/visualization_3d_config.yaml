@@ -4,7 +4,7 @@
 
 display:
   # Display resolution (what the user sees in napari)
-  voxel_size_um: [15, 15, 15]  # micrometers per display voxel
+  voxel_size_um: [50, 50, 50]  # micrometers per display voxel (larger = fewer voxels = better performance)
 
   # Rendering settings
   fps_target: 30
