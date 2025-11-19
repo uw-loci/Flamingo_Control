@@ -453,6 +453,11 @@ class Sample3DVisualizationWindow(QWidget):
         disp_layout.addWidget(self.show_chamber_cb, 0, 0, 1, 2)
         disp_layout.addWidget(self.show_objective_cb, 1, 0, 1, 2)
 
+        # Reset view button
+        self.reset_view_btn = QPushButton("Reset View")
+        self.reset_view_btn.setToolTip("Reset camera to default orientation and zoom")
+        disp_layout.addWidget(self.reset_view_btn, 4, 0, 1, 2)
+
         display_group.setLayout(disp_layout)
         layout.addWidget(display_group)
 
@@ -487,6 +492,7 @@ class Sample3DVisualizationWindow(QWidget):
         # Display settings
         self.show_chamber_cb.toggled.connect(self._on_display_settings_changed)
         self.show_objective_cb.toggled.connect(self._on_display_settings_changed)
+        self.reset_view_btn.clicked.connect(self._on_reset_view)
 
     def _init_napari_viewer(self):
         """Initialize the napari viewer."""
@@ -502,6 +508,12 @@ class Sample3DVisualizationWindow(QWidget):
             self.viewer.axes.labels = True  # Show default 0,1,2 labels (napari doesn't support custom)
             self.viewer.axes.colored = True
             # Note: Axis 0=X, Axis 1=Y (vertical), Axis 2=Z (depth)
+
+            # Set initial camera orientation
+            # Default napari view is often upside down, so we need to set a proper orientation
+            # Camera angles: (azimuth, elevation) in degrees
+            self.viewer.camera.angles = (45, 30, 0)  # Good 3D perspective
+            self.viewer.camera.zoom = 2.0  # Start with a reasonable zoom
 
             # Embed viewer in our widget FIRST before adding layers
             # This ensures the viewer is properly initialized
@@ -811,8 +823,14 @@ class Sample3DVisualizationWindow(QWidget):
         for y in range(y_bottom, y_top, 2):
             holder_points.append([self.holder_position['x'], y, self.holder_position['z']])
 
+        logger.info(f"Regenerated {len(holder_points)} holder points (y_bottom={y_bottom}, y_top={y_top})")
+
+        # Always update the layer data, even if empty
         if holder_points:
             self.viewer.layers['Sample Holder'].data = np.array(holder_points)
+        else:
+            # If no points (holder fully retracted), show a minimal placeholder
+            self.viewer.layers['Sample Holder'].data = np.array([[self.holder_position['x'], y_top, self.holder_position['z']]])
 
         # Update rotation indicator position (stays at top)
         self._update_rotation_indicator()
@@ -966,6 +984,16 @@ class Sample3DVisualizationWindow(QWidget):
 
         if 'Objective' in self.viewer.layers:
             self.viewer.layers['Objective'].visible = self.show_objective_cb.isChecked()
+
+    def _on_reset_view(self):
+        """Reset camera to default orientation and zoom."""
+        if not self.viewer:
+            return
+
+        # Reset camera to default view
+        self.viewer.camera.angles = (45, 30, 0)
+        self.viewer.camera.zoom = 2.0
+        self.viewer.reset_view()
 
     def _add_rotation_axes(self):
         """Add rotation axes to the viewer."""
