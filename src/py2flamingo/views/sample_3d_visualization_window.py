@@ -1412,6 +1412,9 @@ class Sample3DVisualizationWindow(QWidget):
 
     def _update_sample_data_visualization(self):
         """Update the sample data visualization with position and rotation transforms."""
+        import time
+        t_start = time.time()
+
         # Debug early returns
         if not self.viewer:
             print("DEBUG: No viewer, returning")
@@ -1423,7 +1426,7 @@ class Sample3DVisualizationWindow(QWidget):
             print("DEBUG: No sparse_renderer, returning")
             return
 
-        print(f"DEBUG: _update_sample_data_visualization called, viewer={self.viewer is not None}, data={self.test_sample_data_raw is not None}, renderer={self.sparse_renderer is not None}")
+        print(f"PERF: Update started")
 
         # Get current physical position and rotation
         x_mm = self.position_sliders['x_slider'].value() / 1000.0
@@ -1431,12 +1434,16 @@ class Sample3DVisualizationWindow(QWidget):
         z_mm = self.position_sliders['z_slider'].value() / 1000.0
         rotation_deg = self.current_rotation.get('ry', 0)
 
+        t_clear_start = time.time()
+
         # Clear all previous data from sparse renderer
         for ch_id in range(4):
             # Get previous active bounds and clear them
             prev_bounds = self.sparse_renderer.get_active_bounds(ch_id)
             if prev_bounds:
                 self.sparse_renderer.clear_region(ch_id, prev_bounds)
+
+        print(f"PERF: Clear took {(time.time() - t_clear_start)*1000:.1f}ms")
 
         # Calculate sample data position (below EXTENSION tip, not holder tip)
         # Extension extends down from holder by extension_length_mm
@@ -1461,17 +1468,22 @@ class Sample3DVisualizationWindow(QWidget):
         print(f"DEBUG: Sample data shape (Y,X,Z): {first_data.shape}")
         print(f"DEBUG: Starting channel updates, {len(self.test_sample_data_raw)} channels, rotation={rotation_deg}°")
 
+        t_rotation_total = 0
+        t_sparse_total = 0
+        t_dense_total = 0
+        t_napari_total = 0
+
         # Update each channel
         for ch_id, raw_data in self.test_sample_data_raw.items():
-            print(f"DEBUG: Processing channel {ch_id}, raw_data shape={raw_data.shape}")
-
             if ch_id not in self.channel_layers:
                 print(f"DEBUG: Channel {ch_id} not in channel_layers!")
                 logger.warning(f"Channel {ch_id} not in channel_layers, skipping")
                 continue
 
             # Apply rotation to the data
+            t_rot_start = time.time()
             rotated_data = self._rotate_sample_data(raw_data, rotation_deg)
+            t_rotation_total += (time.time() - t_rot_start)
 
             # Log rotation results
             nonzero_before = np.count_nonzero(raw_data)
@@ -1537,29 +1549,31 @@ class Sample3DVisualizationWindow(QWidget):
 
             print(f"DEBUG: Visible portion: {data_to_place.shape}, non-zero: {np.count_nonzero(data_to_place)}")
 
-            # Log what we're placing
-            logger.info(f"Ch{ch_id}: placing {data_to_place.shape} at bounds {bounds}")
-            logger.info(f"  Data range: {data_to_place.min()}-{data_to_place.max()}, non-zero: {np.count_nonzero(data_to_place)}")
-
             # Update sparse renderer with visible portion
+            t_sparse_start = time.time()
             self.sparse_renderer.update_region(ch_id, bounds, data_to_place)
+            t_sparse_total += (time.time() - t_sparse_start)
 
-            # Get dense volume from sparse renderer and update napari layer
+            # Get dense volume from sparse renderer
+            t_dense_start = time.time()
             dense_volume = self.sparse_renderer.get_dense_volume(ch_id)
-
-            # Log dense volume stats
-            logger.info(f"Ch{ch_id}: dense volume shape {dense_volume.shape}, non-zero: {np.count_nonzero(dense_volume)}")
+            t_dense_total += (time.time() - t_dense_start)
 
             # Update napari layer
+            t_napari_start = time.time()
             self.channel_layers[ch_id].data = dense_volume
-            self.channel_layers[ch_id].contrast_limits = (0, 65535)  # Reset contrast
+            self.channel_layers[ch_id].contrast_limits = (0, 65535)
+            t_napari_total += (time.time() - t_napari_start)
 
         # Update memory display
         mem_stats = self.sparse_renderer.get_memory_usage()
         self.memory_label.setText(f"Memory: {mem_stats['total_mb']:.1f} MB")
         self.voxel_count_label.setText(f"Voxels: {mem_stats['total_voxels']:,}")
 
-        logger.info(f"Updated sample data at ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm, rotation={rotation_deg}°")
+        t_total = (time.time() - t_start) * 1000
+        print(f"PERF: Total={t_total:.1f}ms | Rotation={t_rotation_total*1000:.1f}ms | Sparse={t_sparse_total*1000:.1f}ms | Dense={t_dense_total*1000:.1f}ms | Napari={t_napari_total*1000:.1f}ms")
+
+        logger.debug(f"Updated sample data at ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm, rotation={rotation_deg}°")
 
     def _rotate_sample_data(self, data: np.ndarray, rotation_deg: float) -> np.ndarray:
         """
