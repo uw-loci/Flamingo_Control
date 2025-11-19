@@ -152,15 +152,19 @@ class Sample3DVisualizationWindow(QWidget):
 
     def _init_storage_with_mapper(self):
         """Initialize storage system after coordinate mapper is available."""
-        # Get dimensions from coordinate mapper
-        napari_dims = self.coord_mapper.get_napari_dimensions()
+        # Get dimensions from coordinate mapper (X, Y, Z)
+        mapper_dims = self.coord_mapper.get_napari_dimensions()
         voxel_size_um = self.config['display']['voxel_size_um'][0]  # Assume isotropic
 
-        # Calculate chamber dimensions in µm
+        # Napari expects dimensions in (Z, Y, X) order since:
+        # Axis 0 = Z (yellow), Axis 1 = Y (magenta), Axis 2 = X (cyan)
+        napari_dims = (mapper_dims[2], mapper_dims[1], mapper_dims[0])  # (Z, Y, X)
+
+        # Calculate chamber dimensions in µm (Z, Y, X order)
         chamber_dims_um = (
-            napari_dims[0] * voxel_size_um,  # X width
-            napari_dims[1] * voxel_size_um,  # Y height
-            napari_dims[2] * voxel_size_um   # Z depth
+            napari_dims[0] * voxel_size_um,  # Z depth (Axis 0)
+            napari_dims[1] * voxel_size_um,  # Y height (Axis 1)
+            napari_dims[2] * voxel_size_um   # X width (Axis 2)
         )
 
         storage_config = DualResolutionConfig(
@@ -171,6 +175,7 @@ class Sample3DVisualizationWindow(QWidget):
 
         self.voxel_storage = DualResolutionVoxelStorage(storage_config)
         logger.info(f"Initialized dual-resolution voxel storage")
+        logger.info(f"  Napari dimensions (Z, Y, X): {napari_dims}")
         logger.info(f"  Chamber dimensions (µm): {chamber_dims_um}")
         logger.info(f"  Display dimensions (voxels): {self.voxel_storage.display_dims}")
         logger.info(f"  Voxel size (µm): {self.config['display']['voxel_size_um']}")
@@ -779,18 +784,19 @@ class Sample3DVisualizationWindow(QWidget):
         if not self.viewer:
             return
 
-        dims = self.voxel_storage.display_dims
+        dims = self.voxel_storage.display_dims  # (Z, Y, X) order
 
-        # Define the 8 corners of the box in (X, Y, Z) order where Y (axis 1) is vertical
+        # Define the 8 corners of the box in napari (Z, Y, X) order
+        # Z = Axis 0 (depth), Y = Axis 1 (height), X = Axis 2 (width)
         corners = np.array([
-            [0, 0, 0],                              # Bottom corner (x_min, y_min, z_min)
-            [dims[0]-1, 0, 0],                      # Bottom corner (x_max, y_min, z_min)
-            [dims[0]-1, 0, dims[2]-1],              # Bottom corner (x_max, y_min, z_max)
-            [0, 0, dims[2]-1],                      # Bottom corner (x_min, y_min, z_max)
-            [0, dims[1]-1, 0],                      # Top corner (x_min, y_max, z_min)
-            [dims[0]-1, dims[1]-1, 0],              # Top corner (x_max, y_max, z_min)
-            [dims[0]-1, dims[1]-1, dims[2]-1],      # Top corner (x_max, y_max, z_max)
-            [0, dims[1]-1, dims[2]-1]               # Top corner (x_min, y_max, z_max)
+            [0, 0, 0],                              # Back-bottom-left
+            [dims[0]-1, 0, 0],                      # Front-bottom-left
+            [dims[0]-1, 0, dims[2]-1],              # Front-bottom-right
+            [0, 0, dims[2]-1],                      # Back-bottom-right
+            [0, dims[1]-1, 0],                      # Back-top-left
+            [dims[0]-1, dims[1]-1, 0],              # Front-top-left
+            [dims[0]-1, dims[1]-1, dims[2]-1],      # Front-top-right
+            [0, dims[1]-1, dims[2]-1]               # Back-top-right
         ])
 
         # Define edges connecting corners (12 edges of a box)
@@ -863,59 +869,47 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Sample holder dimensions (from config)
         holder_diameter_mm = self.config['sample_chamber']['holder_diameter_mm']
-        voxel_size_um = self.config['display']['voxel_size_um'][2]  # Use Z voxel size
+        voxel_size_um = self.config['display']['voxel_size_um'][0]  # Isotropic
         holder_radius_voxels = int((holder_diameter_mm * 1000 / 2) / voxel_size_um)
 
-        # Get chamber dimensions
+        # Get chamber dimensions (Z, Y, X)
         dims = self.voxel_storage.display_dims
 
-        # Sample holder - initialize at chamber center in voxel space
-        # The green rotation axis showed this was the correct position
+        # Get INITIAL position from sliders
+        x_mm = self.position_sliders['x_slider'].value() / 1000.0
+        y_mm = self.position_sliders['y_slider'].value() / 1000.0
+        z_mm = self.position_sliders['z_slider'].value() / 1000.0
+
+        # Convert to napari coordinates (returns X, Y, Z conceptually)
+        napari_x, napari_y, napari_z = self.coord_mapper.physical_to_napari(x_mm, y_mm, z_mm)
+
+        # Store holder position
         self.holder_position = {
-            'x': dims[0] // 2,  # X center in voxel space
-            'y': dims[1] // 2,  # Y center in voxel space
-            'z': dims[2] // 2   # Z center in voxel space
+            'x': napari_x,
+            'y': napari_y,
+            'z': napari_z
         }
 
-        # Store chamber offsets for position updates from controls
-        chamber_config = self.config['sample_chamber']
-        # Y offset is: Y_anchor - chamber_below_anchor = 5mm - 10mm = -5mm
-        y_anchor_mm = chamber_config['y_min_anchor_mm']
-        y_offset_mm = y_anchor_mm - chamber_config['chamber_below_anchor_mm']
+        logger.info(f"Initial physical position: ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm")
+        logger.info(f"Initial holder position (voxels): X={napari_x}, Y={napari_y}, Z={napari_z}")
+        logger.info(f"Chamber dims (Z,Y,X): {dims}")
 
-        self.chamber_offset_um = {
-            'x': chamber_config['chamber_x_offset_mm'] * 1000,  # 1.0mm (X minimum)
-            'y': y_offset_mm * 1000,  # -5mm (chamber bottom: anchor - 10mm)
-            'z': chamber_config['chamber_z_offset_mm'] * 1000  # 12.5mm (Z minimum)
-        }
-
-        logger.info(f"Chamber offsets (µm): {self.chamber_offset_um}")
-        logger.info(f"Initial holder position (voxels): {self.holder_position}")
-        logger.info(f"Chamber dims (voxels): X={dims[0]}, Y={dims[1]}, Z={dims[2]}")
-
-        # Create cylinder as a series of circles (points)
+        # Create holder points
+        # Holder extends from current Y position to top (Y=0 in napari coords)
         holder_points = []
 
-        # Holder only displays from chamber top down to current position
-        # This reduces voxel count significantly
-        y_top = dims[1] - 1  # Chamber top (axis 1 is vertical)
-        y_bottom = self.holder_position['y']
+        y_top = 0  # Top of chamber (Y=0)
+        y_bottom = napari_y
 
-        logger.info(f"Holder Y range: {y_bottom} to {y_top}")
+        # Create vertical line of points
+        # Napari coordinates: (Z, Y, X) order!
+        for y in range(y_top, y_bottom + 1, 2):  # Sample every 2 voxels
+            # Points in (Z, Y, X) order
+            holder_points.append([napari_z, y, napari_x])
 
-        # Check if range is valid
-        if y_bottom >= y_top:
-            logger.warning(f"Invalid holder Y range: {y_bottom} >= {y_top}. Setting y_bottom to 0.")
-            y_bottom = 0
-
-        # Create vertical line of points for cylinder axis
-        # Napari coordinates: (X, Y, Z) where Y (axis 1) is vertical
-        for y in range(y_bottom, y_top, 2):  # Sample every 2 voxels for performance
-            holder_points.append([self.holder_position['x'], y, self.holder_position['z']])
-
-        logger.info(f"Created {len(holder_points)} holder points")
+        logger.info(f"Created {len(holder_points)} holder points (Y from {y_top} to {y_bottom})")
         if holder_points:
-            logger.info(f"First point: {holder_points[0]}, Last point: {holder_points[-1]}")
+            logger.info(f"First point (Z,Y,X): {holder_points[0]}, Last point: {holder_points[-1]}")
 
         if holder_points:
             holder_array = np.array(holder_points)
@@ -925,41 +919,41 @@ class Sample3DVisualizationWindow(QWidget):
                 size=holder_radius_voxels * 2,  # Diameter for point size
                 face_color='gray',
                 border_color='darkgray',
-                border_width=0.05,  # Small border
+                border_width=0.05,
                 opacity=0.6,
                 shading='spherical'
             )
 
     def _add_objective_indicator(self):
-        """Add objective position indicator on the back wall (XY plane at Z=0)."""
+        """Add objective position indicator at Z=0 (back wall, in YX plane)."""
         if not self.viewer:
             return
 
-        dims = self.voxel_storage.display_dims
+        dims = self.voxel_storage.display_dims  # (Z, Y, X)
 
-        # Create a circle on the back wall (XY plane at Z=0)
-        # Z=0 is the back wall where the objective is located
-        center_x = dims[0] // 2  # X center
-        center_y = dims[1] // 2  # Y center
-        z_objective = 0  # Back wall - OBJECTIVE LOCATION
+        # Objective at Z=0 (back wall, Axis 0)
+        # Circle varies in Y and X dimensions (Axes 1 and 2)
+        z_objective = 0  # Back wall - OBJECTIVE LOCATION (Axis 0)
+        center_y = dims[1] // 2  # Y center (Axis 1)
+        center_x = dims[2] // 2  # X center (Axis 2)
 
-        # Circle radius (about 1/6 of the chamber width for visibility)
-        radius = min(dims[0], dims[1]) // 6
+        # Circle radius (about 1/6 of the smaller dimension for visibility)
+        radius = min(dims[1], dims[2]) // 6
 
-        # Create circle as a series of points on the XY plane (constant Z=0)
+        # Create circle as a series of points in the YX plane at Z=0
         num_points = 36  # Points to form the circle
         angles = np.linspace(0, 2 * np.pi, num_points, endpoint=False)
 
         circle_points = []
         for angle in angles:
-            x = center_x + radius * np.cos(angle)
-            y = center_y + radius * np.sin(angle)
-            # Coordinates in (X, Y, Z) order - circle in XY plane at Z=0
-            circle_points.append([x, y, z_objective])
+            y = center_y + radius * np.cos(angle)
+            x = center_x + radius * np.sin(angle)
+            # Napari coordinates in (Z, Y, X) order - circle in YX plane at Z=0
+            circle_points.append([z_objective, y, x])
 
         self.viewer.add_points(
             np.array(circle_points),
-            name='Objective (Z=0)',
+            name='Objective',
             size=15,
             face_color='yellow',
             border_color='orange',
@@ -967,35 +961,35 @@ class Sample3DVisualizationWindow(QWidget):
             opacity=0.9
         )
 
-        logger.info(f"Added objective indicator at Z=0 (back wall), center=({center_x}, {center_y})")
+        logger.info(f"Added objective indicator at Z=0 (back wall), center Y={center_y}, X={center_x}")
 
     def _add_rotation_indicator(self):
-        """Add rotation indicator in XZ plane at Y=0 (top of chamber)."""
+        """Add rotation indicator in ZX plane at Y=0 (top of chamber)."""
         if not self.viewer:
             return
 
         # Indicator dimensions - 1/2 the shortest chamber width
-        dims = self.voxel_storage.display_dims
-        indicator_length = min(dims[0], dims[2]) // 2  # 1/2 shortest chamber width
+        dims = self.voxel_storage.display_dims  # (Z, Y, X)
+        indicator_length = min(dims[0], dims[2]) // 2  # 1/2 shortest dimension
 
-        # Position: extends in XZ plane at Y=0 (top of chamber)
-        # Y=0 is the top of the chamber in napari coords
+        # Position: extends in ZX plane at Y=0 (top of chamber)
+        # Y=0 is the top of the chamber (Axis 1)
         y_position = 0  # TOP OF CHAMBER
 
-        # Center position in X and Z
-        center_x = dims[0] // 2
-        center_z = dims[2] // 2
+        # Center position in Z and X
+        center_z = dims[0] // 2  # Z center (Axis 0)
+        center_x = dims[2] // 2  # X center (Axis 2)
 
-        # Create indicator points in (X, Y, Z) order
+        # Create indicator points in (Z, Y, X) order
         # At 0 degrees, points along +X axis
-        indicator_start = np.array([center_x, y_position, center_z])
-        indicator_end = np.array([center_x + indicator_length, y_position, center_z])
+        indicator_start = np.array([center_z, y_position, center_x])
+        indicator_end = np.array([center_z, y_position, center_x + indicator_length])
 
         # Add as a line (using shapes layer for better control)
         self.viewer.add_shapes(
-            data=[[indicator_start, indicator_end]],  # 3D line in (X, Y, Z) order
+            data=[[indicator_start, indicator_end]],  # 3D line in (Z, Y, X) order
             shape_type='line',
-            name='Rotation Indicator (Y=0)',
+            name='Rotation Indicator',
             edge_color='red',
             edge_width=3,
             opacity=0.8
@@ -1005,7 +999,7 @@ class Sample3DVisualizationWindow(QWidget):
         self.rotation_indicator_base = indicator_start.copy()
         self.rotation_indicator_length = indicator_length
 
-        logger.info(f"Added rotation indicator at Y=0 (top), starts at ({center_x}, {y_position}, {center_z})")
+        logger.info(f"Added rotation indicator at Y=0 (top), center Z={center_z}, X={center_x}")
 
     def _update_sample_holder_position(self, x_mm: float, y_mm: float, z_mm: float):
         """
@@ -1038,9 +1032,9 @@ class Sample3DVisualizationWindow(QWidget):
         y_top = 0  # Top of chamber (Y=0 in napari coords)
         y_bottom = napari_y
 
-        # Napari coordinates: (X, Y, Z)
+        # Napari coordinates: (Z, Y, X) order!
         for y in range(y_top, y_bottom + 1, 2):  # Sample every 2 voxels
-            holder_points.append([napari_x, y, napari_z])
+            holder_points.append([napari_z, y, napari_x])
 
         logger.info(f"Regenerated {len(holder_points)} holder points (y_top={y_top}, y_bottom={y_bottom})")
 
@@ -1049,39 +1043,41 @@ class Sample3DVisualizationWindow(QWidget):
             self.viewer.layers['Sample Holder'].data = np.array(holder_points)
         else:
             # If no points (holder at very top), show a minimal placeholder
-            self.viewer.layers['Sample Holder'].data = np.array([[napari_x, y_top, napari_z]])
+            self.viewer.layers['Sample Holder'].data = np.array([[napari_z, y_top, napari_x]])
 
         # Update rotation indicator position (stays at top)
         self._update_rotation_indicator()
 
     def _update_rotation_indicator(self):
         """Update rotation indicator based on current rotation (always at Y=0)."""
-        if not self.viewer or 'Rotation Indicator (Y=0)' not in self.viewer.layers:
+        if not self.viewer or 'Rotation Indicator' not in self.viewer.layers:
             return
 
         # Get Y-axis rotation (the physical stage rotation)
         angle_rad = np.radians(self.current_rotation.get('ry', 0))
 
-        # Indicator always at Y=0 (top of chamber), extends in XZ plane
+        # Indicator always at Y=0 (top of chamber), extends in ZX plane
         y_position = 0  # TOP OF CHAMBER
 
         # Calculate end point displacement based on Y rotation
-        # Rotation around Y axis (vertical) affects X and Z coordinates
+        # Rotation around Y axis (vertical) affects Z and X coordinates
+        # At 0°, indicator points in +X direction
+        # Napari coords are (Z, Y, X), so rotation affects indices 0 and 2
         dx = self.rotation_indicator_length * np.cos(angle_rad)
         dz = self.rotation_indicator_length * np.sin(angle_rad)
 
-        # Start position (center of chamber in X and Z, at Y=0)
+        # Start position (base stored in (Z, Y, X) order)
         start = self.rotation_indicator_base.copy()
 
-        # End position rotated in XZ plane
+        # End position rotated in ZX plane (indices 0 and 2)
         end = np.array([
-            start[0] + dx,
-            y_position,  # Always at Y=0
-            start[2] + dz
+            start[0] + dz,   # Z coordinate (index 0)
+            y_position,      # Y coordinate (index 1) - always at top
+            start[2] + dx    # X coordinate (index 2)
         ])
 
-        # Update the line - provide 3D coordinates in (X, Y, Z) order
-        self.viewer.layers['Rotation Indicator (Y=0)'].data = [[start, end]]
+        # Update the line - provide 3D coordinates in (Z, Y, X) order
+        self.viewer.layers['Rotation Indicator'].data = [[start, end]]
 
     def _setup_data_layers(self):
         """Setup napari layers for multi-channel data."""
