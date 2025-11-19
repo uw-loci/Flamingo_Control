@@ -644,30 +644,24 @@ class Sample3DVisualizationWindow(QWidget):
         # Get chamber dimensions
         dims = self.voxel_storage.display_dims
 
-        # Sample holder extends from chamber top down to Y_min
-        # Initialize at default physical positions, then convert to voxel coordinates
-        chamber_config = self.config['sample_chamber']
-        voxel_size = self.config['display']['voxel_size_um']
-
-        # Default physical positions (µm)
-        default_x_phys = 6500   # ~6.5mm (middle of X range)
-        default_y_phys = 5000   # 5mm (Y anchor)
-        default_z_phys = 19250  # ~19.25mm (middle of Z range)
-
-        # Chamber offsets in physical space (µm)
-        x_offset = chamber_config['chamber_x_offset_mm'] * 1000  # 1.0mm
-        y_offset = -chamber_config['chamber_below_anchor_mm'] * 1000  # -10mm
-        z_offset = chamber_config['chamber_z_offset_mm'] * 1000  # 12.5mm
-
-        # Convert to voxel coordinates accounting for chamber offset
+        # Sample holder - initialize at chamber center in voxel space
+        # The green rotation axis showed this was the correct position
         self.holder_position = {
-            'x': int((default_x_phys - x_offset) / voxel_size[0]),
-            'y': int((default_y_phys - y_offset) / voxel_size[1]),
-            'z': int((default_z_phys - z_offset) / voxel_size[2])
+            'x': dims[0] // 2,  # X center in voxel space
+            'y': dims[1] // 2,  # Y center in voxel space
+            'z': dims[2] // 2   # Z center in voxel space
         }
 
-        logger.info(f"Chamber offsets (µm): X={x_offset}, Y={y_offset}, Z={z_offset}")
-        logger.info(f"Holder position (voxels): {self.holder_position}")
+        # Store chamber offsets for position updates from controls
+        chamber_config = self.config['sample_chamber']
+        self.chamber_offset_um = {
+            'x': chamber_config['chamber_x_offset_mm'] * 1000,  # 1.0mm
+            'y': -chamber_config['chamber_below_anchor_mm'] * 1000,  # -10mm (below anchor)
+            'z': chamber_config['chamber_z_offset_mm'] * 1000  # 12.5mm
+        }
+
+        logger.info(f"Chamber offsets (µm): {self.chamber_offset_um}")
+        logger.info(f"Initial holder position (voxels): {self.holder_position}")
         logger.info(f"Chamber dims (voxels): X={dims[0]}, Y={dims[1]}, Z={dims[2]}")
 
         # Create cylinder as a series of circles (points)
@@ -790,22 +784,18 @@ class Sample3DVisualizationWindow(QWidget):
         if not self.viewer or 'Sample Holder' not in self.viewer.layers:
             return
 
-        # Convert physical coordinates to voxel coordinates with offsets
-        chamber_config = self.config['sample_chamber']
+        # Convert physical coordinates (µm) to voxel coordinates with chamber offsets
         voxel_size = self.config['display']['voxel_size_um']
-
-        # Chamber offsets in physical space (µm)
-        x_offset = chamber_config['chamber_x_offset_mm'] * 1000  # 1.0mm
-        y_offset = -chamber_config['chamber_below_anchor_mm'] * 1000  # -10mm (below anchor)
-        z_offset = chamber_config['chamber_z_offset_mm'] * 1000  # 12.5mm
 
         # Update position (convert physical µm to voxel coordinates with offsets)
         if x_pos is not None:
-            self.holder_position['x'] = int((x_pos - x_offset) / voxel_size[0])
+            self.holder_position['x'] = int((x_pos - self.chamber_offset_um['x']) / voxel_size[0])
         if y_pos is not None:
-            self.holder_position['y'] = int((y_pos - y_offset) / voxel_size[1])
+            self.holder_position['y'] = int((y_pos - self.chamber_offset_um['y']) / voxel_size[1])
         if z_pos is not None:
-            self.holder_position['z'] = int((z_pos - z_offset) / voxel_size[2])
+            self.holder_position['z'] = int((z_pos - self.chamber_offset_um['z']) / voxel_size[2])
+
+        logger.info(f"Updated holder position to (voxels): {self.holder_position}")
 
         # Regenerate holder points
         dims = self.voxel_storage.display_dims
