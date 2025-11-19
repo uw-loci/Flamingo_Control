@@ -91,7 +91,11 @@ class Sample3DVisualizationWindow(QWidget):
         # Test sample data (raw, unrotated)
         self.test_sample_data_raw = None
         self.test_sample_size_mm = 2.0  # 2mm cube of sample data
-        self.test_sample_offset_mm = 0.5  # 0.5mm below holder tip
+        self.test_sample_offset_mm = 0.5  # 0.5mm below extension tip
+
+        # Fine extension parameters
+        self.extension_length_mm = 4.95  # Extension reaches objective center at Y=7.45mm
+        self.extension_diameter_mm = 0.22  # Very fine extension (220 micrometers)
 
         # Note: sparse_renderer is initialized in _init_storage_with_mapper() above
 
@@ -871,6 +875,9 @@ class Sample3DVisualizationWindow(QWidget):
         # Add sample holder (cylinder coming down from top)
         self._add_sample_holder()
 
+        # Add fine extension (thin probe extending from holder)
+        self._add_fine_extension()
+
         # Add rotation indicator (extends from sample holder at 0 degrees)
         self._add_rotation_indicator()
 
@@ -1023,6 +1030,48 @@ class Sample3DVisualizationWindow(QWidget):
                 shading='spherical'
             )
 
+    def _add_fine_extension(self):
+        """Add fine extension (thin probe) extending from sample holder tip."""
+        if not self.viewer:
+            return
+
+        # Extension dimensions
+        voxel_size_mm = self.coord_mapper.voxel_size_mm
+        extension_radius_voxels = int((self.extension_diameter_mm / 2) / voxel_size_mm)
+        extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
+
+        # Get holder position
+        napari_x = self.holder_position['x']
+        napari_y = self.holder_position['y']  # Holder tip
+        napari_z = self.holder_position['z']
+
+        # Extension extends DOWN from holder tip (increasing Y in napari coords)
+        # At Y=7.45mm stage, extension tip should reach Y=2.5mm chamber (objective center)
+        extension_points = []
+
+        y_start = napari_y  # Start at holder tip
+        y_end = napari_y + extension_length_voxels  # Extend downward
+
+        # Create vertical line of points for extension
+        # Napari coordinates: (Z, Y, X) order
+        for y in range(y_start, min(y_end, self.voxel_storage.display_dims[1]), 2):
+            extension_points.append([napari_z, y, napari_x])
+
+        logger.info(f"Created {len(extension_points)} extension points (Y from {y_start} to {min(y_end, self.voxel_storage.display_dims[1])})")
+
+        if extension_points:
+            extension_array = np.array(extension_points)
+            self.viewer.add_points(
+                extension_array,
+                name='Fine Extension',
+                size=max(2, extension_radius_voxels * 2),  # Diameter, minimum 2 for visibility
+                face_color='#E0E0E0',  # Light grey (off-white)
+                border_color='#C0C0C0',
+                border_width=0.05,
+                opacity=0.7,
+                shading='spherical'
+            )
+
     def _add_objective_indicator(self):
         """Add objective position indicator at Z=0 (back wall, in YX plane)."""
         if not self.viewer:
@@ -1152,6 +1201,40 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Update rotation indicator position (stays at top)
         self._update_rotation_indicator()
+
+        # Update fine extension position
+        self._update_fine_extension()
+
+    def _update_fine_extension(self):
+        """Update fine extension position to match sample holder."""
+        if not self.viewer or 'Fine Extension' not in self.viewer.layers:
+            return
+
+        # Extension dimensions
+        voxel_size_mm = self.coord_mapper.voxel_size_mm
+        extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
+
+        # Get holder position (in napari coords)
+        napari_x = self.holder_position['x']
+        napari_y = self.holder_position['y']  # Holder tip
+        napari_z = self.holder_position['z']
+
+        # Extension extends DOWN from holder tip
+        extension_points = []
+
+        y_start = napari_y
+        y_end = napari_y + extension_length_voxels
+
+        # Create vertical line of points in (Z, Y, X) order
+        for y in range(y_start, min(y_end, self.voxel_storage.display_dims[1]), 2):
+            extension_points.append([napari_z, y, napari_x])
+
+        # Update the layer
+        if extension_points:
+            self.viewer.layers['Fine Extension'].data = np.array(extension_points)
+        else:
+            # If no points, show minimal placeholder
+            self.viewer.layers['Fine Extension'].data = np.array([[napari_z, y_start, napari_x]])
 
     def _update_rotation_indicator(self):
         """Update rotation indicator based on current rotation (follows sample holder XZ position)."""
@@ -1326,8 +1409,12 @@ class Sample3DVisualizationWindow(QWidget):
             if prev_bounds:
                 self.sparse_renderer.clear_region(ch_id, prev_bounds)
 
-        # Calculate sample data position (below holder tip)
-        sample_center_y_mm = y_mm - self.test_sample_offset_mm - (self.test_sample_size_mm / 2)
+        # Calculate sample data position (below EXTENSION tip, not holder tip)
+        # Extension extends down from holder by extension_length_mm
+        extension_tip_y_mm = y_mm - self.extension_length_mm
+        sample_center_y_mm = extension_tip_y_mm - self.test_sample_offset_mm - (self.test_sample_size_mm / 2)
+
+        print(f"DEBUG: Holder Y={y_mm:.2f}mm, Extension tip Y={extension_tip_y_mm:.2f}mm, Sample center Y={sample_center_y_mm:.2f}mm")
 
         # Convert center to napari coordinates
         sample_x, sample_y, sample_z = self.coord_mapper.physical_to_napari(
