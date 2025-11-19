@@ -93,8 +93,7 @@ class Sample3DVisualizationWindow(QWidget):
         self.test_sample_size_mm = 2.0  # 2mm cube of sample data
         self.test_sample_offset_mm = 0.5  # 0.5mm below holder tip
 
-        # Sparse volume renderer for efficient display
-        self.sparse_renderer = None  # Initialized after voxel_storage
+        # Note: sparse_renderer is initialized in _init_storage_with_mapper() above
 
         # Setup UI
         self._setup_ui()
