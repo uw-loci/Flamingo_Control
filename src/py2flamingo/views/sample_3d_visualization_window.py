@@ -648,7 +648,7 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Add as a line (using shapes layer for better control)
         self.viewer.add_shapes(
-            data=[[indicator_start[:2], indicator_end[:2]]],  # 2D line in XY plane
+            data=[[indicator_start, indicator_end]],  # 3D line in 3D viewer
             shape_type='line',
             name='Rotation Indicator',
             edge_color='red',
@@ -703,16 +703,17 @@ class Sample3DVisualizationWindow(QWidget):
 
         start = np.array([
             self.holder_position['x'],
-            self.holder_position['y']
+            self.holder_position['y'],
+            z_position
         ])
 
         # Calculate end point based on rotation
         dx = self.rotation_indicator_length * np.cos(angle_rad)
         dy = self.rotation_indicator_length * np.sin(angle_rad)
 
-        end = start + np.array([dx, dy])
+        end = start + np.array([dx, dy, 0])  # Add 0 for z component
 
-        # Update the line
+        # Update the line - provide 3D coordinates for 3D viewer
         self.viewer.layers['Rotation Indicator'].data = [[start, end]]
 
     def _setup_data_layers(self):
