@@ -49,9 +49,14 @@ sample_chamber:
   chamber_above_anchor_mm: 5.0  # 5mm above Y minimum
   # Total chamber height = 10mm + 5mm = 15mm
 
-  # Chamber width in X and Y directions (in mm)
-  chamber_width_x_mm: 12.0
-  chamber_width_y_mm: 12.0
+  # Chamber dimensions based on stage travel ranges
+  # X: 1.0mm to 12.31mm = 11.31mm width
+  chamber_width_x_mm: 11.31  # X dimension (horizontal, left-right)
+  chamber_x_offset_mm: 1.0   # X minimum position
+
+  # Z: 12.5mm to 26mm = 13.5mm depth
+  chamber_depth_z_mm: 13.5   # Z dimension (depth, toward objective)
+  chamber_z_offset_mm: 12.5  # Z minimum position
 
   # Sample holder dimensions
   holder_diameter_mm: 1.0  # Diameter of the cylindrical holder

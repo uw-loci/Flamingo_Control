@@ -46,6 +46,8 @@ class Sample3DVisualizationWindow(QWidget):
 
     # Signals
     rotation_changed = pyqtSignal(dict)  # Emits {'rx': float, 'ry': float, 'rz': float}
+    x_position_changed = pyqtSignal(float)
+    y_position_changed = pyqtSignal(float)
     z_position_changed = pyqtSignal(float)
     channel_visibility_changed = pyqtSignal(int, bool)
 
@@ -135,10 +137,10 @@ class Sample3DVisualizationWindow(QWidget):
         # Calculate chamber dimensions from config parameters
         chamber_config = self.config['sample_chamber']
 
-        chamber_width_x = chamber_config['chamber_width_x_mm'] * 1000  # Convert to µm
-        chamber_depth_z = chamber_config['chamber_width_y_mm'] * 1000  # Depth (toward objective)
+        chamber_width_x = chamber_config['chamber_width_x_mm'] * 1000  # X (left-right)
+        chamber_depth_z = chamber_config['chamber_depth_z_mm'] * 1000  # Z (depth, toward objective)
         chamber_height_y = (chamber_config['chamber_below_anchor_mm'] +
-                           chamber_config['chamber_above_anchor_mm']) * 1000  # Height (vertical)
+                           chamber_config['chamber_above_anchor_mm']) * 1000  # Y (vertical height)
 
         # Napari dims order: (axis_0, axis_1, axis_2) where axis_1 is vertical
         # So we need: (X, Y, Z) where Y is height
@@ -205,9 +207,9 @@ class Sample3DVisualizationWindow(QWidget):
         channel_tab = self._create_channel_controls()
         tabs.addTab(channel_tab, "Channels")
 
-        # Rotation Controls tab
-        rotation_tab = self._create_rotation_controls()
-        tabs.addTab(rotation_tab, "Rotation")
+        # Sample Control tab (position and rotation)
+        sample_control_tab = self._create_sample_controls()
+        tabs.addTab(sample_control_tab, "Sample Control")
 
         # Data Management tab
         data_tab = self._create_data_controls()
@@ -314,68 +316,75 @@ class Sample3DVisualizationWindow(QWidget):
         layout.addStretch()
         return widget
 
-    def _create_rotation_controls(self) -> QWidget:
-        """Create rotation control widgets."""
+    def _create_sample_controls(self) -> QWidget:
+        """Create sample position and rotation control widgets."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        # Add clarification about rotation
-        info_label = QLabel("Note: Y-axis rotation is the physical stage rotation around the vertical axis.")
-        info_label.setWordWrap(True)
-        info_label.setStyleSheet("QLabel { color: #666; font-style: italic; padding: 5px; }")
-        layout.addWidget(info_label)
+        # Position controls
+        position_group = QGroupBox("Sample Position")
+        pos_layout = QGridLayout()
 
-        rotation_group = QGroupBox("Stage Rotation")
-        rot_layout = QGridLayout()
-
-        self.rotation_sliders = {}
-        # Only Y rotation is physical (stage rotation around vertical axis)
+        # X, Y, Z position controls with actual stage ranges
+        self.stage_position_inputs = {}
         axes = [
-            ('Y-Axis (Stage)', 'ry', -180, 180)
+            ('X', 'x', 1000, 12310, 100),    # 1.0mm to 12.31mm
+            ('Y', 'y', 0, 15000, 100),       # 0-15mm (vertical, -5 to +10 relative to anchor)
+            ('Z', 'z', 12500, 26000, 100)    # 12.5mm to 26mm (depth)
         ]
 
-        for i, (label, key, min_val, max_val) in enumerate(axes):
-            rot_layout.addWidget(QLabel(f"{label}:"), i, 0)
+        for i, (axis_label, key, min_val, max_val, step) in enumerate(axes):
+            pos_layout.addWidget(QLabel(f"{axis_label}:"), i, 0)
 
-            slider = QSlider(Qt.Horizontal)
-            slider.setRange(min_val, max_val)
-            slider.setValue(0)
-            rot_layout.addWidget(slider, i, 1)
+            spinbox = QSpinBox()
+            spinbox.setRange(min_val, max_val)
+            # Default values: Y=5mm (anchor), X and Z at center of range
+            if key == 'y':
+                spinbox.setValue(5000)  # Y anchor
+            else:
+                spinbox.setValue((min_val + max_val) // 2)  # Center
+            spinbox.setSingleStep(step)
+            spinbox.setSuffix(" µm")
+            spinbox.setMaximumWidth(120)
+            pos_layout.addWidget(spinbox, i, 1)
 
-            value_label = QLabel("0°")
-            rot_layout.addWidget(value_label, i, 2)
+            self.stage_position_inputs[key] = spinbox
 
-            # Reset button
-            reset_btn = QPushButton("Reset")
-            reset_btn.clicked.connect(lambda checked, s=slider: s.setValue(0))
-            rot_layout.addWidget(reset_btn, i, 3)
+        position_group.setLayout(pos_layout)
+        layout.addWidget(position_group)
 
-            self.rotation_sliders[key] = {
-                'slider': slider,
-                'label': value_label
-            }
+        # Rotation control
+        rotation_group = QGroupBox("Stage Rotation (Y-Axis)")
+        rot_layout = QGridLayout()
 
-            # Connect slider to label
-            slider.valueChanged.connect(
-                lambda v, label=value_label: label.setText(f"{v}°")
-            )
+        rot_layout.addWidget(QLabel("Angle:"), 0, 0)
+
+        self.rotation_slider = QSlider(Qt.Horizontal)
+        self.rotation_slider.setRange(-180, 180)
+        self.rotation_slider.setValue(0)
+        rot_layout.addWidget(self.rotation_slider, 0, 1)
+
+        self.rotation_value_label = QLabel("0°")
+        rot_layout.addWidget(self.rotation_value_label, 0, 2)
+
+        # Reset button
+        reset_btn = QPushButton("Reset")
+        reset_btn.clicked.connect(lambda: self.rotation_slider.setValue(0))
+        rot_layout.addWidget(reset_btn, 0, 3)
+
+        # Connect slider to label
+        self.rotation_slider.valueChanged.connect(
+            lambda v: self.rotation_value_label.setText(f"{v}°")
+        )
 
         rotation_group.setLayout(rot_layout)
         layout.addWidget(rotation_group)
 
-        # Z Position control
-        z_group = QGroupBox("Z Position")
-        z_layout = QGridLayout()
-
-        z_layout.addWidget(QLabel("Z:"), 0, 0)
-        self.z_spinbox = QSpinBox()
-        self.z_spinbox.setRange(-10000, 35000)
-        self.z_spinbox.setSuffix(" µm")
-        self.z_spinbox.setSingleStep(10)
-        z_layout.addWidget(self.z_spinbox, 0, 1)
-
-        z_group.setLayout(z_layout)
-        layout.addWidget(z_group)
+        # Info label
+        info_label = QLabel("Note: Y-axis rotation rotates around the vertical axis.")
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("QLabel { color: #666; font-style: italic; padding: 5px; }")
+        layout.addWidget(info_label)
 
         layout.addStretch()
         return widget
@@ -466,12 +475,13 @@ class Sample3DVisualizationWindow(QWidget):
         # Export
         self.export_button.clicked.connect(self._on_export_data)
 
-        # Rotation sliders
-        for key, controls in self.rotation_sliders.items():
-            controls['slider'].valueChanged.connect(self._on_rotation_changed)
+        # Position spinboxes
+        self.stage_position_inputs['x'].valueChanged.connect(self._on_x_changed)
+        self.stage_position_inputs['y'].valueChanged.connect(self._on_y_changed)
+        self.stage_position_inputs['z'].valueChanged.connect(self._on_z_changed)
 
-        # Z position
-        self.z_spinbox.valueChanged.connect(self._on_z_changed)
+        # Rotation slider
+        self.rotation_slider.valueChanged.connect(self._on_rotation_changed)
 
         # Channel visibility
         for ch_id, controls in self.channel_controls.items():
@@ -652,6 +662,9 @@ class Sample3DVisualizationWindow(QWidget):
             'z': dims[2] // 2   # Z center (axis 2, depth)
         }
 
+        logger.info(f"Holder position: {self.holder_position}")
+        logger.info(f"Chamber dims (voxels): X={dims[0]}, Y={dims[1]}, Z={dims[2]}")
+
         # Create cylinder as a series of circles (points)
         holder_points = []
 
@@ -660,10 +673,14 @@ class Sample3DVisualizationWindow(QWidget):
         y_top = dims[1] - 1  # Chamber top (axis 1 is vertical)
         y_bottom = self.holder_position['y']
 
+        logger.info(f"Holder Y range: {y_bottom} to {y_top}")
+
         # Create vertical line of points for cylinder axis
         # Napari coordinates: (X, Y, Z) where Y (axis 1) is vertical
         for y in range(y_bottom, y_top, 2):  # Sample every 2 voxels for performance
             holder_points.append([self.holder_position['x'], y, self.holder_position['z']])
+
+        logger.info(f"Created {len(holder_points)} holder points")
 
         if holder_points:
             holder_array = np.array(holder_points)
@@ -888,11 +905,28 @@ class Sample3DVisualizationWindow(QWidget):
         # TODO: Implement export functionality
         QMessageBox.information(self, "Export", "Export functionality not yet implemented")
 
-    def _on_rotation_changed(self):
+    def _on_x_changed(self, value: int):
+        """Handle X position changes."""
+        self.x_position_changed.emit(value)
+        # Update sample holder X position
+        self._update_sample_holder_position(x_pos=value)
+
+    def _on_y_changed(self, value: int):
+        """Handle Y position changes (vertical)."""
+        self.y_position_changed.emit(value)
+        # Update sample holder Y position (vertical movement)
+        self._update_sample_holder_position(y_pos=value)
+
+    def _on_z_changed(self, value: int):
+        """Handle Z position changes (depth)."""
+        self.z_position_changed.emit(value)
+        # Update sample holder Z position
+        self._update_sample_holder_position(z_pos=value)
+
+    def _on_rotation_changed(self, value: int):
         """Handle rotation slider changes."""
-        # Update current rotation
-        for key, controls in self.rotation_sliders.items():
-            self.current_rotation[key] = controls['slider'].value()
+        # Update current rotation (only Y axis rotation)
+        self.current_rotation['ry'] = value
 
         # Update transformer
         self.transformer.set_rotation(**self.current_rotation)
@@ -901,15 +935,7 @@ class Sample3DVisualizationWindow(QWidget):
         self.rotation_changed.emit(self.current_rotation)
 
         # Update visualization
-        self._update_rotation_axes()
-        self._update_rotation_indicator()  # Update rotation indicator
-
-    def _on_z_changed(self, value: int):
-        """Handle Z position changes."""
-        self.current_z = value
-        self.z_position_changed.emit(value)
-        # Update sample holder to show it moving with stage
-        self._update_sample_holder_position(z_pos=value)
+        self._update_rotation_indicator()
 
     def _on_channel_visibility_changed(self, channel_id: int, visible: bool):
         """Handle channel visibility changes."""
