@@ -1052,17 +1052,20 @@ class Sample3DVisualizationWindow(QWidget):
         if not self.is_streaming:
             return
 
-        # Update current state
+        # Update current state from metadata
+        if 'x_position' in metadata:
+            self.stage_position_inputs['x'].setValue(int(metadata['x_position']))
+        if 'y_position' in metadata:
+            self.stage_position_inputs['y'].setValue(int(metadata['y_position']))
         if 'z_position' in metadata:
             self.current_z = metadata['z_position']
-            self.z_spinbox.setValue(int(self.current_z))
+            self.stage_position_inputs['z'].setValue(int(self.current_z))
 
         if 'rotation' in metadata:
             self.current_rotation = metadata['rotation']
-            # Update sliders
-            for key, value in self.current_rotation.items():
-                if key in self.rotation_sliders:
-                    self.rotation_sliders[key]['slider'].setValue(int(value))
+            # Update Y rotation slider
+            if 'ry' in self.current_rotation:
+                self.rotation_slider.setValue(int(self.current_rotation['ry']))
 
         # Transform coordinates
         self.transformer.set_rotation(**self.current_rotation)
