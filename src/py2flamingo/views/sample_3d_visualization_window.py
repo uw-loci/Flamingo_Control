@@ -124,6 +124,11 @@ class Sample3DVisualizationWindow(QWidget):
         self.rotation_debounce_timer.timeout.connect(self._apply_rotation_from_spinbox)
         self.rotation_debounce_delay_ms = 150  # 150ms delay for typing
 
+        # Populate timer for capturing frames from Live View
+        self.populate_timer = QTimer()
+        self.populate_timer.timeout.connect(self._on_populate_tick)
+        self.populate_timer.setInterval(500)  # Capture every 500ms (2 Hz)
+
         # Configure window
         self.setWindowTitle("3D Sample Chamber Visualization")
         self.setWindowFlags(Qt.Window)
@@ -1722,18 +1727,17 @@ class Sample3DVisualizationWindow(QWidget):
 
             # Start frame capture timer if camera controller available
             if self.camera_controller:
-                # TODO Phase 3: Implement frame capture timer
-                # self.populate_timer.start()
-                logger.info("Started populating from Live View")
+                self.populate_timer.start()
+                logger.info("Started populating from Live View (capturing at 2 Hz)")
             else:
                 logger.warning("No camera controller - populate disabled")
                 self.populate_button.setChecked(False)
+                self.status_label.setText("Status: No camera controller")
 
         else:
             self.populate_button.setText("Populate from Live View")
             self.status_label.setText("Status: Stopped")
-            # TODO Phase 3: Stop populate timer
-            # self.populate_timer.stop()
+            self.populate_timer.stop()
             logger.info("Stopped populating")
 
     def _on_clear_data(self):
@@ -2194,6 +2198,120 @@ class Sample3DVisualizationWindow(QWidget):
         self.position_sliders['y_spinbox'].setEnabled(enabled)
         self.position_sliders['z_spinbox'].setEnabled(enabled)
         self.rotation_spinbox.setEnabled(enabled)
+
+    def _on_populate_tick(self):
+        """Capture current frame from Live View and add to 3D volume."""
+        if not self.is_populating or not self.camera_controller:
+            return
+
+        try:
+            # Get current stage position
+            if not self.movement_controller:
+                logger.warning("No movement controller - cannot get position")
+                return
+
+            position = self.movement_controller.get_position()
+            if position is None:
+                logger.warning("Position unavailable - skipping frame")
+                return
+
+            # Get latest camera frame
+            frame_data = self.camera_controller.get_latest_frame(clear_buffer=True)
+            if frame_data is None:
+                logger.debug("No new frame available")
+                return
+
+            image, header = frame_data
+
+            # Determine which channel this frame belongs to
+            # For now, assume channel 0 (TODO: detect from laser/LED controller)
+            channel_id = 0
+
+            # Process frame into 3D volume
+            self._process_camera_frame_to_3d(image, header, channel_id, position)
+
+            logger.debug(f"Captured frame at position X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}, R={position.r:.1f}°")
+
+        except Exception as e:
+            logger.error(f"Error capturing frame: {e}")
+
+    def _process_camera_frame_to_3d(self, image: np.ndarray, header, channel_id: int, position):
+        """
+        Transform camera frame to 3D world coordinates and accumulate.
+
+        Args:
+            image: Camera image (e.g., 2048x2048, uint16)
+            header: Image header with metadata
+            channel_id: Which channel (0-3)
+            position: Position object with x, y, z, r
+        """
+        # Downsample camera image to storage resolution
+        downsampled = self._downsample_for_storage(image)
+
+        H, W = downsampled.shape
+        logger.debug(f"Downsampled frame from {image.shape} to {downsampled.shape}")
+
+        # Generate pixel coordinate grid
+        y_indices, x_indices = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
+
+        # Convert to camera space (micrometers), centered at (0, 0)
+        storage_voxel_size_um = self.config['storage']['voxel_size_um'][0]
+        camera_x = (x_indices - W/2) * storage_voxel_size_um
+        camera_y = (y_indices - H/2) * storage_voxel_size_um
+
+        # Stack into (N, 2) array for transformation
+        camera_coords_2d = np.column_stack([camera_x.ravel(), camera_y.ravel()])
+
+        # Set rotation for transformation
+        self.transformer.set_rotation(rx=0, ry=position.r, rz=0)
+
+        # Transform 2D camera coords + Z position to 3D world coords
+        # Z position from stage (in micrometers)
+        z_position_um = position.z * 1000
+
+        world_coords_3d = self.transformer.camera_to_world(camera_coords_2d, z_position_um)
+
+        # Extract intensity values
+        intensity_values = downsampled.ravel()
+
+        # Update voxel storage with transformed coordinates
+        self.voxel_storage.update_storage(
+            channel_id=channel_id,
+            world_coords=world_coords_3d,
+            intensity_values=intensity_values,
+            timestamp=header.timestamp_ms if hasattr(header, 'timestamp_ms') else 0,
+            update_mode='maximum'  # Maximum intensity projection for fluorescence
+        )
+
+        logger.info(f"Added frame to channel {channel_id}: {np.count_nonzero(intensity_values)} non-zero pixels")
+
+    def _downsample_for_storage(self, image: np.ndarray) -> np.ndarray:
+        """
+        Downsample camera image to storage resolution.
+
+        Args:
+            image: Full resolution camera image
+
+        Returns:
+            Downsampled image at storage voxel size
+        """
+        from scipy.ndimage import zoom
+
+        # Camera pixel size (from calibration - TODO: get from config)
+        pixel_size_um = 0.65  # micrometers per pixel
+
+        # Target voxel size
+        target_voxel_size_um = self.config['storage']['voxel_size_um'][0]
+
+        # Calculate downsample factor
+        downsample_factor = target_voxel_size_um / pixel_size_um
+
+        # Downsample with bilinear interpolation
+        if downsample_factor > 1.0:
+            downsampled = zoom(image, 1.0 / downsample_factor, order=1)
+            return downsampled.astype(np.uint16)
+        else:
+            return image
 
     def closeEvent(self, event):
         """Handle window close event."""
