@@ -2227,7 +2227,7 @@ class Sample3DVisualizationWindow(QWidget):
                 return
 
             # Get latest camera frame
-            frame_data = self.camera_controller.get_latest_frame(clear_buffer=True)
+            frame_data = self.camera_controller.get_latest_frame()
             if frame_data is None:
                 logger.debug("No new frame available")
                 return
