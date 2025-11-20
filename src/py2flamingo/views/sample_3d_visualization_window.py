@@ -82,7 +82,7 @@ class Sample3DVisualizationWindow(QWidget):
         # Current state
         self.current_rotation = {'rx': 0, 'ry': 0, 'rz': 0}
         self.current_z = 0
-        self.is_streaming = False
+        self.is_populating = False  # Renamed from is_streaming for clarity
         self._controls_enabled = True  # Track if controls should be enabled
 
         # Sample holder position (will be initialized in _add_sample_holder)
@@ -282,12 +282,13 @@ class Sample3DVisualizationWindow(QWidget):
         # Control buttons
         button_layout = QHBoxLayout()
 
-        self.start_button = QPushButton("Start Streaming")
-        self.start_button.setCheckable(True)
+        self.populate_button = QPushButton("Populate from Live View")
+        self.populate_button.setCheckable(True)
+        self.populate_button.setToolTip("Capture frames from Live Viewer and accumulate into 3D volume")
         self.clear_button = QPushButton("Clear Data")
         self.export_button = QPushButton("Export...")
 
-        button_layout.addWidget(self.start_button)
+        button_layout.addWidget(self.populate_button)
         button_layout.addWidget(self.clear_button)
         button_layout.addWidget(self.export_button)
 
@@ -849,8 +850,8 @@ class Sample3DVisualizationWindow(QWidget):
 
     def _connect_signals(self):
         """Connect widget signals to slots."""
-        # Start/stop streaming
-        self.start_button.toggled.connect(self._on_streaming_toggled)
+        # Start/stop populating from live view
+        self.populate_button.toggled.connect(self._on_populate_toggled)
 
         # Clear data
         self.clear_button.clicked.connect(self._on_clear_data)
@@ -1711,24 +1712,29 @@ class Sample3DVisualizationWindow(QWidget):
 
         return rotated.astype(np.uint16)
 
-    def _on_streaming_toggled(self, checked: bool):
-        """Handle streaming start/stop."""
-        self.is_streaming = checked
+    def _on_populate_toggled(self, checked: bool):
+        """Handle populate from live view start/stop."""
+        self.is_populating = checked
 
         if checked:
-            self.start_button.setText("Stop Streaming")
-            self.status_label.setText("Status: Streaming...")
-            self.update_timer.start()
+            self.populate_button.setText("Stop Populating")
+            self.status_label.setText("Status: Populating from Live View...")
 
-            # Start acquiring data if camera controller available
+            # Start frame capture timer if camera controller available
             if self.camera_controller:
-                # This would connect to actual camera streaming
-                pass
+                # TODO Phase 3: Implement frame capture timer
+                # self.populate_timer.start()
+                logger.info("Started populating from Live View")
+            else:
+                logger.warning("No camera controller - populate disabled")
+                self.populate_button.setChecked(False)
 
         else:
-            self.start_button.setText("Start Streaming")
+            self.populate_button.setText("Populate from Live View")
             self.status_label.setText("Status: Stopped")
-            self.update_timer.stop()
+            # TODO Phase 3: Stop populate timer
+            # self.populate_timer.stop()
+            logger.info("Stopped populating")
 
     def _on_clear_data(self):
         """Clear all accumulated data."""
@@ -2007,7 +2013,7 @@ class Sample3DVisualizationWindow(QWidget):
             frame_data: Multi-channel image data (H, W, C)
             metadata: Dictionary with z_position, rotation, timestamp, etc.
         """
-        if not self.is_streaming:
+        if not self.is_populating:
             return
 
         # Update current state from metadata
@@ -2191,9 +2197,9 @@ class Sample3DVisualizationWindow(QWidget):
 
     def closeEvent(self, event):
         """Handle window close event."""
-        # Stop streaming
-        if self.is_streaming:
-            self.start_button.setChecked(False)
+        # Stop populating
+        if self.is_populating:
+            self.populate_button.setChecked(False)
 
         # Close napari viewer
         if self.viewer:
