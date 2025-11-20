@@ -1153,16 +1153,18 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Create holder points
         # Holder extends from current Y position to top (Y=0 in napari coords)
+        # Allow holder to extend ABOVE chamber (negative Y) when stage is at high Y positions
         holder_points = []
 
-        y_top = 0  # Top of chamber (Y=0)
-        y_bottom = napari_y
+        # Allow holder to extend past chamber bounds
+        y_top = min(0, napari_y)  # Top can be negative if holder is above chamber
+        y_bottom = napari_y  # Always end at holder position
 
         # Create vertical line of points
         # Napari coordinates: (Z, Y, X) order!
         for y in range(y_top, y_bottom + 1, 2):  # Sample every 2 voxels
             # Points in (Z, Y, X) order
-            holder_points.append([napari_z, y, napari_x])
+            holder_points.append([napari_z, y, napari_x]])
 
         logger.info(f"Created {len(holder_points)} holder points (Y from {y_top} to {y_bottom})")
         if holder_points:
@@ -1205,10 +1207,11 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Create vertical line of points for extension
         # Napari coordinates: (Z, Y, X) order
-        for y in range(y_start, min(y_end, self.voxel_storage.display_dims[1]), 2):
+        # Note: Allow extension to go past display bounds - napari Points layer handles this gracefully
+        for y in range(y_start, y_end, 2):
             extension_points.append([napari_z, y, napari_x])
 
-        logger.info(f"Created {len(extension_points)} extension points (Y from {y_start} to {min(y_end, self.voxel_storage.display_dims[1])})")
+        logger.info(f"Created {len(extension_points)} extension points (Y from {y_start} to {y_end}, unclamped)")
 
         if extension_points:
             extension_array = np.array(extension_points)
@@ -1337,14 +1340,16 @@ class Sample3DVisualizationWindow(QWidget):
         # Regenerate holder points
         # Holder extends from current Y position (napari_y) to top (Y=0)
         # Note: Y=0 is top, Y increases downward in napari coords (inverted from physical)
+        # Allow holder to extend ABOVE chamber (negative Y) when stage is at high Y positions
         holder_points = []
 
-        y_top = 0  # Top of chamber (Y=0 in napari coords)
-        y_bottom = napari_y
+        # Allow holder to extend past chamber bounds
+        y_top = min(0, napari_y)  # Top can be negative if holder is above chamber
+        y_bottom = napari_y  # Always end at holder position
 
         # Napari coordinates: (Z, Y, X) order!
         for y in range(y_top, y_bottom + 1, 2):  # Sample every 2 voxels
-            holder_points.append([napari_z, y, napari_x])
+            holder_points.append([napari_z, y, napari_x]])
 
         logger.info(f"Regenerated {len(holder_points)} holder points (y_top={y_top}, y_bottom={y_bottom})")
 
@@ -1382,7 +1387,8 @@ class Sample3DVisualizationWindow(QWidget):
         y_end = napari_y + extension_length_voxels
 
         # Create vertical line of points in (Z, Y, X) order
-        for y in range(y_start, min(y_end, self.voxel_storage.display_dims[1]), 2):
+        # Allow extension to go past display bounds (napari handles gracefully)
+        for y in range(y_start, y_end, 2):
             extension_points.append([napari_z, y, napari_x])
 
         # Update the layer

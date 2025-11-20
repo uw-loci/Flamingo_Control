@@ -9,9 +9,9 @@ stage:
       soft_max_mm: 11.81
     y_axis:
       min_mm: 5.0
-      max_mm: 20.0
+      max_mm: 25.0
       soft_min_mm: 5.5
-      soft_max_mm: 19.5
+      soft_max_mm: 24.5
     z_axis:
       min_mm: 12.5
       max_mm: 26.0

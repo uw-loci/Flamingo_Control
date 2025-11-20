@@ -10,9 +10,123 @@ This controller handles:
 
 import logging
 from typing import Optional, List
-from PyQt5.QtCore import QObject, pyqtSignal, QTimer
+from PyQt5.QtCore import QObject, pyqtSignal, QTimer, QRunnable, QThreadPool, pyqtSlot
 
 from py2flamingo.services.laser_led_service import LaserLEDService, LaserInfo
+
+
+class LaserEnableWorker(QRunnable):
+    """Background worker for async laser enabling operations."""
+
+    def __init__(self, controller: 'LaserLEDController', laser_index: int, path: str):
+        super().__init__()
+        self.controller = controller
+        self.laser_index = laser_index
+        self.path = path
+        self.setAutoDelete(True)
+
+    def run(self):
+        """Execute laser enable sequence in background thread."""
+        try:
+            # All blocking hardware operations happen here (off UI thread)
+            controller = self.controller
+            laser_led_service = controller.laser_led_service
+
+            # Step 1: Disable all light sources (no signal emission)
+            controller.logger.info(f"[ASYNC] Step 1: Disabling all light sources")
+            laser_led_service.disable_all_lasers()
+            if controller.is_led_available():
+                laser_led_service.disable_led_preview()
+            laser_led_service.disable_illumination()
+
+            # Step 2: Set laser power
+            power = controller._laser_powers.get(self.laser_index, 5.0)
+            controller.logger.info(f"[ASYNC] Step 2: Setting laser {self.laser_index} power to {power:.1f}%")
+            success, actual_power = laser_led_service.set_laser_power(self.laser_index, power)
+            if success:
+                controller._laser_powers[self.laser_index] = actual_power
+
+            # Step 3: Enable laser preview
+            controller.logger.info(f"[ASYNC] Step 3: Enabling laser {self.laser_index} preview")
+            laser_led_service.enable_laser_preview(self.laser_index)
+
+            # Step 4: Enable illumination
+            left_enabled = (self.path == "left")
+            right_enabled = (self.path == "right")
+            controller.logger.info(f"[ASYNC] Step 4: Enabling {self.path.upper()} illumination")
+            laser_led_service.enable_illumination(left=left_enabled, right=right_enabled)
+
+            # Update state and emit success signal
+            controller._active_source = f"laser_{self.laser_index}"
+            controller._active_laser_index = self.laser_index
+
+            # Get laser name
+            laser_name = f"Laser {self.laser_index}"
+            for laser in controller.get_available_lasers():
+                if laser.index == self.laser_index:
+                    laser_name = laser.name
+                    break
+
+            # Emit signal on main thread
+            controller.preview_enabled.emit(f"{laser_name} ({self.path.upper()} path)")
+            controller.logger.info(f"[ASYNC] Laser {self.laser_index} enabled successfully")
+
+        except Exception as e:
+            error_msg = f"Error enabling laser {self.laser_index}: {e}"
+            controller.logger.error(error_msg)
+            controller.error_occurred.emit(error_msg)
+
+
+class LEDEnableWorker(QRunnable):
+    """Background worker for async LED enabling operations."""
+
+    def __init__(self, controller: 'LaserLEDController', led_color: int):
+        super().__init__()
+        self.controller = controller
+        self.led_color = led_color
+        self.setAutoDelete(True)
+
+    def run(self):
+        """Execute LED enable sequence in background thread."""
+        try:
+            controller = self.controller
+            laser_led_service = controller.laser_led_service
+            color_names = ["Red", "Green", "Blue", "White"]
+            color_name = color_names[self.led_color]
+
+            controller.logger.info(f"[ASYNC] Enabling {color_name} LED")
+
+            # Step 1: Disable all light sources
+            controller.logger.info(f"[ASYNC] Step 1: Disabling all light sources")
+            laser_led_service.disable_all_lasers()
+            if controller.is_led_available():
+                laser_led_service.disable_led_preview()
+            laser_led_service.disable_illumination()
+
+            # Step 2: Set LED intensity
+            intensity = controller._led_intensities.get(self.led_color, 50.0)
+            controller.logger.info(f"[ASYNC] Step 2: Setting {color_name} LED intensity to {intensity:.1f}%")
+            laser_led_service.set_led_intensity(self.led_color, intensity)
+
+            # Step 3: Enable LED preview
+            controller.logger.info(f"[ASYNC] Step 3: Enabling LED preview")
+            laser_led_service.enable_led_preview()
+
+            # Step 4: Enable illumination
+            controller.logger.info(f"[ASYNC] Step 4: Enabling illumination")
+            laser_led_service.enable_illumination()
+
+            # Update state and emit success
+            controller._active_source = f"led_{color_name[0]}"
+            controller._active_laser_index = None
+
+            controller.preview_enabled.emit(f"{color_name} LED")
+            controller.logger.info(f"[ASYNC] {color_name} LED enabled successfully")
+
+        except Exception as e:
+            error_msg = f"Error enabling LED: {e}"
+            controller.logger.error(error_msg)
+            controller.error_occurred.emit(error_msg)
 
 
 class LaserLEDController(QObject):
@@ -65,6 +179,10 @@ class LaserLEDController(QObject):
         # Initialize laser powers to 5% (will be updated from hardware when Camera Live Viewer opens)
         for laser in self.get_available_lasers():
             self._laser_powers[laser.index] = 5.0
+
+        # Thread pool for async hardware operations (improves UI responsiveness)
+        self._thread_pool = QThreadPool.globalInstance()
+        self._thread_pool.setMaxThreadCount(2)  # Limit concurrent hardware operations
 
         self.logger.info("LaserLEDController initialized")
 
@@ -373,6 +491,49 @@ class LaserLEDController(QObject):
             self.logger.error(error_msg)
             self.error_occurred.emit(error_msg)
             return False
+
+    def enable_laser_for_preview_async(self, laser_index: int, path: str = "left") -> None:
+        """
+        Enable laser for preview asynchronously (non-blocking).
+
+        This method queues the laser enable operation to run in a background thread,
+        allowing the UI to remain responsive. The preview_enabled signal will be
+        emitted when the operation completes.
+
+        Args:
+            laser_index: Laser index (1-7)
+            path: Light path ("left" or "right")
+        """
+        self.logger.info(f"Queuing async laser {laser_index} enable on {path.upper()} path")
+
+        # Create and queue worker
+        worker = LaserEnableWorker(self, laser_index, path)
+        self._thread_pool.start(worker)
+
+        # Return immediately - UI stays responsive!
+
+    def enable_led_for_preview_async(self, led_color: Optional[int] = None) -> None:
+        """
+        Enable LED for preview asynchronously (non-blocking).
+
+        This method queues the LED enable operation to run in a background thread,
+        allowing the UI to remain responsive. The preview_enabled signal will be
+        emitted when the operation completes.
+
+        Args:
+            led_color: LED color (0=Red, 1=Green, 2=Blue, 3=White)
+        """
+        if led_color is not None:
+            self._led_color = led_color
+
+        color_names = ["Red", "Green", "Blue", "White"]
+        self.logger.info(f"Queuing async {color_names[self._led_color]} LED enable")
+
+        # Create and queue worker
+        worker = LEDEnableWorker(self, self._led_color)
+        self._thread_pool.start(worker)
+
+        # Return immediately - UI stays responsive!
 
     def disable_all_light_sources(self, emit_signal: bool = True) -> bool:
         """

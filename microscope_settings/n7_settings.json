@@ -12,9 +12,9 @@
     },
     "y": {
       "min": 5.0,
-      "max": 20.0,
+      "max": 25.0,
       "unit": "mm",
-      "note": "Sample-dependent. Min 5.0 (lowest sample can go with high mount, centered). Max 20.0 but could be anything the stage allows."
+      "note": "Sample-dependent. Min 5.0 (lowest sample can go with high mount, centered). Max 25.0 extended range for FEP tube visualization."
     },
     "z": {
       "min": 12.5,

@@ -496,7 +496,7 @@ class LaserLEDControlPanel(QWidget):
                 if other_button != button and other_button.isChecked():
                     other_button.setChecked(False)
 
-            # Now enable the selected source
+            # Now enable the selected source (async for UI responsiveness)
             if button == self._led_radio:
                 # LED selected - hide path selection (LED doesn't use paths)
                 if self._path_group:
@@ -505,16 +505,17 @@ class LaserLEDControlPanel(QWidget):
                 led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
                 color_names = ["Red", "Green", "Blue", "White"]
                 self.logger.info(f"{color_names[led_color]} LED selected for preview")
-                self.laser_led_controller.enable_led_for_preview(led_color)
+                # Use async method to avoid blocking UI
+                self.laser_led_controller.enable_led_for_preview_async(led_color)
 
             elif source_id >= 1:  # Laser (laser indices are typically 1, 2, 3, 4)
                 # Laser selected - show path selection
                 if self._path_group:
                     self._path_group.setVisible(True)
 
-                # Enable laser with current path selection
+                # Enable laser with current path selection (async for responsiveness)
                 self.logger.info(f"Laser {source_id} selected for preview on {self._laser_path.upper()} path")
-                self.laser_led_controller.enable_laser_for_preview(source_id, self._laser_path)
+                self.laser_led_controller.enable_laser_for_preview_async(source_id, self._laser_path)
 
             else:
                 # This shouldn't happen, but log for debugging

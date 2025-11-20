@@ -1094,10 +1094,17 @@ class PositionController:
         """
         Wait for motion complete in a background thread and query actual position from hardware.
 
+        Implements C++-style command replacement: if a new movement command arrives while
+        waiting for a previous motion, the old wait is cancelled and replaced with the new one.
+
         Args:
             target_position: Expected target position (for fallback if query fails)
             moved_axes: List of axis codes that were moved (AxisCode.X, Y, Z, R), or None for all axes
         """
+        # Cancel any existing motion wait (C++ pattern: terminate old thread)
+        if self._motion_tracker is not None:
+            self._motion_tracker.cancel_wait()
+
         def wait_thread():
             try:
                 # Motion tracker should already be initialized in __init__
@@ -1107,8 +1114,9 @@ class PositionController:
                     return
 
                 # Wait for motion complete (blocks this thread, not GUI)
+                # allow_cancel=True enables replacement by new commands
                 self.logger.info("Waiting for motion complete callback...")
-                completed = self._motion_tracker.wait_for_motion_complete(timeout=30.0)
+                completed = self._motion_tracker.wait_for_motion_complete(timeout=30.0, allow_cancel=True)
 
                 if completed:
                     self.logger.info("Motion completed successfully")

@@ -37,25 +37,46 @@ class MotionTracker:
         self.logger = logging.getLogger(__name__)
         self._is_moving = False
         self._lock = threading.Lock()
+        self._stop_waiting = False  # Flag to cancel current wait
+        self._wait_thread: Optional[threading.Thread] = None
 
-    def wait_for_motion_complete(self, timeout: float = 30.0) -> bool:
+    def cancel_wait(self) -> None:
+        """
+        Cancel the current motion wait operation.
+
+        This allows a new motion command to replace the current one,
+        matching the C++ behavior of thread replacement.
+        """
+        self.logger.info("Cancelling current motion wait")
+        self._stop_waiting = True
+
+        # Wait for thread to finish if it exists
+        if self._wait_thread and self._wait_thread.is_alive():
+            self._wait_thread.join(timeout=0.5)
+
+    def wait_for_motion_complete(self, timeout: float = 30.0, allow_cancel: bool = True) -> bool:
         """
         Wait for motion-stopped callback from microscope.
 
         This method blocks until either:
         - Motion-stopped callback (0x6010) is received
         - Timeout expires
+        - Wait is cancelled by new motion command (if allow_cancel=True)
 
         Args:
             timeout: Maximum time to wait in seconds (default: 30s)
+            allow_cancel: Whether this wait can be cancelled by new commands
 
         Returns:
-            True if motion completed, False if timeout
+            True if motion completed, False if timeout or cancelled
 
         Raises:
             RuntimeError: If socket error occurs
         """
-        self.logger.info(f"Waiting for motion complete (timeout={timeout}s)...")
+        self.logger.info(f"Waiting for motion complete (timeout={timeout}s, cancellable={allow_cancel})...")
+
+        # Reset cancel flag
+        self._stop_waiting = False
 
         # Set socket timeout
         original_timeout = self.command_socket.gettimeout()
@@ -67,6 +88,10 @@ class MotionTracker:
 
             # Keep reading messages until we get motion-stopped
             while True:
+                # Check if wait was cancelled
+                if allow_cancel and self._stop_waiting:
+                    self.logger.info("Motion wait cancelled by new command")
+                    return False
                 try:
                     # Read 128-byte message
                     data = self._receive_full_message(128)
