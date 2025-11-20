@@ -312,7 +312,9 @@ class Sample3DVisualizationWindow(QWidget):
             ch_id = ch_config['id']
             ch_name = ch_config['name']
 
-            group = QGroupBox(f"Channel {ch_id}: {ch_name}")
+            # Display channel number as 1-4 (user-facing) instead of 0-3 (internal)
+            display_channel_num = ch_id + 1
+            group = QGroupBox(f"Channel {display_channel_num}: {ch_name}")
             ch_layout = QGridLayout()
 
             # Visibility checkbox
@@ -378,9 +380,15 @@ class Sample3DVisualizationWindow(QWidget):
                 'contrast_max_label': contrast_max_label
             }
 
-            # Connect sliders to labels
+            # Connect controls to napari layer updates
+            colormap_combo.currentTextChanged.connect(
+                lambda colormap, cid=ch_id: self._on_colormap_changed(cid, colormap)
+            )
             opacity_slider.valueChanged.connect(
-                lambda v, label=opacity_label: label.setText(f"{v}%")
+                lambda v, label=opacity_label, cid=ch_id: (
+                    label.setText(f"{v}%"),
+                    self._on_opacity_changed(cid, v/100.0)
+                )
             )
             contrast_min_slider.valueChanged.connect(
                 lambda v, label=contrast_min_label, cid=ch_id: self._on_contrast_changed(cid, v, 'min', label)
@@ -967,15 +975,15 @@ class Sample3DVisualizationWindow(QWidget):
 
             logger.info("napari viewer initialized successfully")
 
-            # Now that viewer is fully initialized, update sample data visualization
+            # Initial visualization update (will show empty until data is populated)
             try:
-                self._update_sample_data_visualization()
-                logger.info("Initial sample data visualization complete")
+                self._update_visualization()
+                logger.info("Initial visualization ready")
 
                 # Sync contrast sliders with napari's auto-scaled values
                 self._sync_contrast_sliders_with_napari()
             except Exception as e:
-                logger.error(f"Failed to update sample data visualization: {e}")
+                logger.error(f"Failed to initialize visualization: {e}")
 
         except Exception as e:
             logger.error(f"Failed to initialize napari viewer: {e}")
@@ -1454,8 +1462,7 @@ class Sample3DVisualizationWindow(QWidget):
                 self.channel_layers = {}
             self.channel_layers[ch_id] = layer
 
-        # Generate test sample data (but don't visualize yet - viewer not ready)
-        self._generate_test_sample_data()
+        # Test data generation removed - use real camera data or call _generate_test_sample_data() manually for testing
 
     def _generate_test_sample_data(self):
         """Generate test sample data for visualization testing."""
@@ -1760,37 +1767,31 @@ class Sample3DVisualizationWindow(QWidget):
         QMessageBox.information(self, "Export", "Export functionality not yet implemented")
 
     def _on_x_slider_changed(self, value: int):
-        """Handle X slider position changes."""
+        """Handle X slider position changes (local visualization update only)."""
         x_mm = value / 1000.0  # Convert µm to mm
         self.x_position_changed.emit(x_mm)
         # Update sample holder position using coordinate mapper
         y_mm = self.position_sliders['y_slider'].value() / 1000.0
         z_mm = self.position_sliders['z_slider'].value() / 1000.0
         self._update_sample_holder_position(x_mm, y_mm, z_mm)
-        # Update sample data position
-        self._update_sample_data_visualization()
 
     def _on_y_slider_changed(self, value: int):
-        """Handle Y slider position changes (vertical)."""
+        """Handle Y slider position changes (local visualization update only)."""
         y_mm = value / 1000.0  # Convert µm to mm
         self.y_position_changed.emit(y_mm)
         # Update sample holder position using coordinate mapper
         x_mm = self.position_sliders['x_slider'].value() / 1000.0
         z_mm = self.position_sliders['z_slider'].value() / 1000.0
         self._update_sample_holder_position(x_mm, y_mm, z_mm)
-        # Update sample data position
-        self._update_sample_data_visualization()
 
     def _on_z_slider_changed(self, value: int):
-        """Handle Z slider position changes (depth)."""
+        """Handle Z slider position changes (local visualization update only)."""
         z_mm = value / 1000.0  # Convert µm to mm
         self.z_position_changed.emit(z_mm)
         # Update sample holder position using coordinate mapper
         x_mm = self.position_sliders['x_slider'].value() / 1000.0
         y_mm = self.position_sliders['y_slider'].value() / 1000.0
         self._update_sample_holder_position(x_mm, y_mm, z_mm)
-        # Update sample data position
-        self._update_sample_data_visualization()
 
     def _on_rotation_slider_changed(self, value: int):
         """Handle rotation slider changes (real-time updates)."""
@@ -1834,9 +1835,8 @@ class Sample3DVisualizationWindow(QWidget):
         # Emit signal
         self.rotation_changed.emit(self.current_rotation)
 
-        # Update visualization - both indicator and sample data
+        # Update rotation indicator (data is rotation-invariant in storage)
         self._update_rotation_indicator()
-        self._update_sample_data_visualization()
 
     def _on_channel_visibility_changed(self, channel_id: int, visible: bool):
         """Handle channel visibility changes."""
@@ -1865,6 +1865,18 @@ class Sample3DVisualizationWindow(QWidget):
                 controls['contrast_max'].blockSignals(False)
 
                 logger.info(f"Synced Ch{ch_id} contrast sliders to napari: {actual_limits}")
+
+    def _on_colormap_changed(self, channel_id: int, colormap: str):
+        """Handle colormap change for a channel."""
+        if self.viewer and channel_id in self.channel_layers:
+            self.channel_layers[channel_id].colormap = colormap
+            logger.debug(f"Changed channel {channel_id} colormap to {colormap}")
+
+    def _on_opacity_changed(self, channel_id: int, opacity: float):
+        """Handle opacity change for a channel."""
+        if self.viewer and channel_id in self.channel_layers:
+            self.channel_layers[channel_id].opacity = opacity
+            logger.debug(f"Changed channel {channel_id} opacity to {opacity:.2f}")
 
     def _on_contrast_changed(self, channel_id: int, value: int, limit_type: str, label: QLabel):
         """Handle contrast limit changes."""
@@ -2153,10 +2165,9 @@ class Sample3DVisualizationWindow(QWidget):
             # Update current rotation state
             self.current_rotation['ry'] = r
 
-            # Update napari visualization
+            # Update napari visualization (holder/indicator only, data is in voxel storage)
             self._update_sample_holder_position(x, y, z)
             self._update_rotation_indicator()
-            self._update_sample_data_visualization()
 
             logger.debug(f"Position synced from controller: X={x:.2f}, Y={y:.2f}, Z={z:.2f}, R={r:.2f}°")
 
