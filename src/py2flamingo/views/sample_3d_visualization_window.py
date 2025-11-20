@@ -83,6 +83,7 @@ class Sample3DVisualizationWindow(QWidget):
         self.current_rotation = {'rx': 0, 'ry': 0, 'rz': 0}
         self.current_z = 0
         self.is_streaming = False
+        self._controls_enabled = True  # Track if controls should be enabled
 
         # Sample holder position (will be initialized in _add_sample_holder)
         self.holder_position = {'x': 0, 'y': 0, 'z': 0}
@@ -103,6 +104,7 @@ class Sample3DVisualizationWindow(QWidget):
         # Setup UI
         self._setup_ui()
         self._connect_signals()
+        self._connect_movement_controller()
 
         # Initialize napari viewer if available
         self.viewer = None
@@ -882,6 +884,34 @@ class Sample3DVisualizationWindow(QWidget):
         self.show_objective_cb.toggled.connect(self._on_display_settings_changed)
         self.reset_view_btn.clicked.connect(self._on_reset_view)
         self.rendering_combo.currentTextChanged.connect(self._on_rendering_mode_changed)
+
+    def _connect_movement_controller(self):
+        """Connect to movement controller signals for bidirectional sync."""
+        if not self.movement_controller:
+            logger.info("No movement controller - 3D window will operate in visualization-only mode")
+            return
+
+        # Connect to movement controller signals
+        try:
+            self.movement_controller.position_changed.connect(self._on_position_changed_from_controller)
+            self.movement_controller.motion_started.connect(self._on_motion_started)
+            self.movement_controller.motion_stopped.connect(self._on_motion_stopped)
+
+            # Connect slider release events to send movement commands
+            self.position_sliders['x_slider'].sliderReleased.connect(self._on_x_slider_released)
+            self.position_sliders['y_slider'].sliderReleased.connect(self._on_y_slider_released)
+            self.position_sliders['z_slider'].sliderReleased.connect(self._on_z_slider_released)
+            self.rotation_slider.sliderReleased.connect(self._on_rotation_slider_released)
+
+            # Connect spinbox Enter key (editingFinished) to also send commands
+            self.position_sliders['x_spinbox'].editingFinished.connect(self._on_x_slider_released)
+            self.position_sliders['y_spinbox'].editingFinished.connect(self._on_y_slider_released)
+            self.position_sliders['z_spinbox'].editingFinished.connect(self._on_z_slider_released)
+            self.rotation_spinbox.editingFinished.connect(self._on_rotation_slider_released)
+
+            logger.info("Connected to movement controller - 3D window synchronized with stage")
+        except Exception as e:
+            logger.error(f"Failed to connect movement controller: {e}")
 
     def _init_napari_viewer(self):
         """Initialize the napari viewer."""
@@ -2031,6 +2061,133 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Update status
         self.status_label.setText(f"Status: Processing frame at Z={self.current_z:.1f} µm")
+
+    def _on_x_slider_released(self):
+        """Handle X slider release - send move command to stage."""
+        if not self.movement_controller or not self._controls_enabled:
+            return
+
+        x_mm = self.position_sliders['x_slider'].value() / 1000.0
+        try:
+            self.movement_controller.move_absolute('x', x_mm, verify=False)
+            logger.debug(f"X slider released - moving stage to {x_mm:.3f} mm")
+        except Exception as e:
+            logger.error(f"Error moving X axis: {e}")
+
+    def _on_y_slider_released(self):
+        """Handle Y slider release - send move command to stage."""
+        if not self.movement_controller or not self._controls_enabled:
+            return
+
+        y_mm = self.position_sliders['y_slider'].value() / 1000.0
+        try:
+            self.movement_controller.move_absolute('y', y_mm, verify=False)
+            logger.debug(f"Y slider released - moving stage to {y_mm:.3f} mm")
+        except Exception as e:
+            logger.error(f"Error moving Y axis: {e}")
+
+    def _on_z_slider_released(self):
+        """Handle Z slider release - send move command to stage."""
+        if not self.movement_controller or not self._controls_enabled:
+            return
+
+        z_mm = self.position_sliders['z_slider'].value() / 1000.0
+        try:
+            self.movement_controller.move_absolute('z', z_mm, verify=False)
+            logger.debug(f"Z slider released - moving stage to {z_mm:.3f} mm")
+        except Exception as e:
+            logger.error(f"Error moving Z axis: {e}")
+
+    def _on_rotation_slider_released(self):
+        """Handle rotation slider/spinbox release - send rotation command to stage."""
+        if not self.movement_controller or not self._controls_enabled:
+            return
+
+        rotation_deg = self.rotation_slider.value()
+        try:
+            self.movement_controller.move_absolute('r', rotation_deg, verify=False)
+            logger.debug(f"Rotation released - moving stage to {rotation_deg:.2f}°")
+        except Exception as e:
+            logger.error(f"Error moving rotation: {e}")
+
+    def _on_position_changed_from_controller(self, x: float, y: float, z: float, r: float):
+        """
+        Handle position change from movement controller (from ANY window).
+        Updates visualization WITHOUT triggering commands (prevents loops).
+        """
+        # Block signals to prevent infinite loops
+        self.position_sliders['x_slider'].blockSignals(True)
+        self.position_sliders['y_slider'].blockSignals(True)
+        self.position_sliders['z_slider'].blockSignals(True)
+        self.position_sliders['x_spinbox'].blockSignals(True)
+        self.position_sliders['y_spinbox'].blockSignals(True)
+        self.position_sliders['z_spinbox'].blockSignals(True)
+        self.rotation_slider.blockSignals(True)
+        self.rotation_spinbox.blockSignals(True)
+
+        try:
+            # Update position sliders (convert mm to µm)
+            self.position_sliders['x_slider'].setValue(int(x * 1000))
+            self.position_sliders['y_slider'].setValue(int(y * 1000))
+            self.position_sliders['z_slider'].setValue(int(z * 1000))
+
+            # Update position spinboxes
+            self.position_sliders['x_spinbox'].setValue(x)
+            self.position_sliders['y_spinbox'].setValue(y)
+            self.position_sliders['z_spinbox'].setValue(z)
+
+            # Update rotation controls
+            self.rotation_slider.setValue(int(r))
+            self.rotation_spinbox.setValue(r)
+
+            # Update current rotation state
+            self.current_rotation['ry'] = r
+
+            # Update napari visualization
+            self._update_sample_holder_position(x, y, z)
+            self._update_rotation_indicator()
+            self._update_sample_data_visualization()
+
+            logger.debug(f"Position synced from controller: X={x:.2f}, Y={y:.2f}, Z={z:.2f}, R={r:.2f}°")
+
+        finally:
+            # Always restore signals
+            self.position_sliders['x_slider'].blockSignals(False)
+            self.position_sliders['y_slider'].blockSignals(False)
+            self.position_sliders['z_slider'].blockSignals(False)
+            self.position_sliders['x_spinbox'].blockSignals(False)
+            self.position_sliders['y_spinbox'].blockSignals(False)
+            self.position_sliders['z_spinbox'].blockSignals(False)
+            self.rotation_slider.blockSignals(False)
+            self.rotation_spinbox.blockSignals(False)
+
+    def _on_motion_started(self, axis_name: str):
+        """Handle motion started - disable controls during movement."""
+        self._set_controls_enabled(False)
+        self.status_label.setText(f"Status: Moving {axis_name}...")
+        logger.debug(f"Motion started on {axis_name} - controls disabled")
+
+    def _on_motion_stopped(self, axis_name: str):
+        """Handle motion stopped - re-enable controls."""
+        self._set_controls_enabled(True)
+        self.status_label.setText("Status: Ready")
+        logger.debug(f"Motion stopped on {axis_name} - controls enabled")
+
+    def _set_controls_enabled(self, enabled: bool):
+        """Enable or disable movement controls during motion."""
+        self._controls_enabled = enabled
+
+        # Enable/disable sliders
+        self.position_sliders['x_slider'].setEnabled(enabled)
+        self.position_sliders['y_slider'].setEnabled(enabled)
+        self.position_sliders['z_slider'].setEnabled(enabled)
+        self.rotation_slider.setEnabled(enabled)
+
+        # Enable/disable spinboxes
+        self.position_sliders['x_spinbox'].setEnabled(enabled)
+        self.position_sliders['y_spinbox'].setEnabled(enabled)
+        self.position_sliders['z_spinbox'].setEnabled(enabled)
+        self.rotation_spinbox.setEnabled(enabled)
 
     def closeEvent(self, event):
         """Handle window close event."""
