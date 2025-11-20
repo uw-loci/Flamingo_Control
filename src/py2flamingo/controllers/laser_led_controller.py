@@ -395,6 +395,9 @@ class LaserLEDController(QObject):
             if self.is_led_available():
                 self.laser_led_service.disable_led_preview()
 
+            # CRITICAL: Disable illumination paths (matches enable sequence)
+            self.laser_led_service.disable_illumination()
+
             # Update state
             self._active_source = None
             self._active_laser_index = None
