@@ -2295,7 +2295,7 @@ class Sample3DVisualizationWindow(QWidget):
         self.voxel_storage.update_storage(
             channel_id=channel_id,
             world_coords=world_coords_3d,
-            intensity_values=intensity_values,
+            pixel_values=intensity_values,  # Correct parameter name
             timestamp=header.timestamp_ms if hasattr(header, 'timestamp_ms') else 0,
             update_mode='maximum'  # Maximum intensity projection for fluorescence
         )
