@@ -154,6 +154,13 @@ class DualResolutionVoxelStorage:
         )
 
         if not np.any(valid_mask):
+            # Log warning to help diagnose why voxels are being rejected
+            logger.warning(f"Channel {channel_id}: All {len(storage_voxels)} voxels rejected - outside sample region")
+            logger.warning(f"  Sample region: center={self.config.sample_region_center}, radius={self.config.sample_region_radius} µm")
+            if len(world_coords) > 0:
+                logger.warning(f"  Rejected coords range: X=[{world_coords[:, 0].min():.1f}, {world_coords[:, 0].max():.1f}], "
+                              f"Y=[{world_coords[:, 1].min():.1f}, {world_coords[:, 1].max():.1f}], "
+                              f"Z=[{world_coords[:, 2].min():.1f}, {world_coords[:, 2].max():.1f}] µm")
             return  # No valid voxels to update
 
         valid_voxels = storage_voxels[valid_mask]

@@ -2245,11 +2245,30 @@ class Sample3DVisualizationWindow(QWidget):
         # Set rotation for transformation
         self.transformer.set_rotation(rx=0, ry=position.r, rz=0)
 
-        # Transform 2D camera coords + Z position to 3D world coords
-        # Z position from stage (in micrometers)
-        z_position_um = position.z * 1000
+        # Transform 2D camera coords + stage position to 3D world coords
+        # CRITICAL: Must include ALL stage coordinates (X, Y, Z) not just Z
+        # The camera images a plane at the stage position
+        # Camera X,Y offsets are relative to that stage position
+        stage_x_um = position.x * 1000  # Convert mm to micrometers
+        stage_y_um = position.y * 1000
+        stage_z_um = position.z * 1000
 
-        world_coords_3d = self.transformer.camera_to_world(camera_coords_2d, z_position_um)
+        # Create 3D coords by combining camera offsets with stage position
+        coords_3d = np.column_stack([
+            camera_coords_2d[:, 0] + stage_x_um,  # Camera X offset + stage X
+            camera_coords_2d[:, 1] + stage_y_um,  # Camera Y offset + stage Y
+            np.full(len(camera_coords_2d), stage_z_um)  # Stage Z (depth)
+        ])
+
+        # Apply rotation around sample center
+        # Center coordinates around rotation center
+        centered = coords_3d - self.transformer.sample_center
+
+        # Apply rotation matrix
+        rotated = centered @ self.transformer.rotation_matrix.T
+
+        # Translate back to world coordinates
+        world_coords_3d = rotated + self.transformer.sample_center
 
         # Extract intensity values
         intensity_values = downsampled.ravel()
@@ -2264,6 +2283,12 @@ class Sample3DVisualizationWindow(QWidget):
         )
 
         logger.info(f"Added frame to channel {channel_id}: {np.count_nonzero(intensity_values)} non-zero pixels")
+
+        # Diagnostic: Log world coordinate ranges for debugging
+        logger.debug(f"World coordinate ranges:")
+        logger.debug(f"  X: [{world_coords_3d[:, 0].min():.1f}, {world_coords_3d[:, 0].max():.1f}] µm")
+        logger.debug(f"  Y: [{world_coords_3d[:, 1].min():.1f}, {world_coords_3d[:, 1].max():.1f}] µm")
+        logger.debug(f"  Z: [{world_coords_3d[:, 2].min():.1f}, {world_coords_3d[:, 2].max():.1f}] µm")
 
     def _detect_active_channel(self) -> Optional[int]:
         """

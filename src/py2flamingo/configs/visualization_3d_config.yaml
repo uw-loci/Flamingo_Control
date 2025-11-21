@@ -149,7 +149,7 @@ channels:
   - id: 3
     name: "640nm (Far-Red)"
     default_colormap: "magenta"
-    default_visible: false
+    default_visible: true  # Changed from false - users expect to see active laser data
     update_strategy: "maximum"
     blend_mode: "additive"
     opacity: 0.8
