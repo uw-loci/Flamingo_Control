@@ -533,17 +533,12 @@ class StageControlView(QWidget):
         rotation_layout.addStretch()
         layout.addLayout(rotation_layout)
 
-        # Create compact grid for jog buttons (just - and + for each axis)
+        # Create compact grid for jog buttons (no headers - buttons show +/-)
         grid = QGridLayout()
-        grid.setSpacing(4)
-
-        # Headers
-        grid.addWidget(QLabel("<b>Axis</b>"), 0, 0)
-        grid.addWidget(QLabel("<b>−</b>"), 0, 1, Qt.AlignCenter)
-        grid.addWidget(QLabel("<b>+</b>"), 0, 2, Qt.AlignCenter)
+        grid.setSpacing(2)  # Reduced spacing for compactness
 
         # X-axis jog buttons (with dynamic labels)
-        row = 1
+        row = 0  # Start at row 0 since no header
         self.x_axis_label = QLabel("X:")
         grid.addWidget(self.x_axis_label, row, 0)
         self.x_minus_btn = self._create_jog_button("−", lambda: self._jog_with_increment('x', -1))
@@ -552,7 +547,7 @@ class StageControlView(QWidget):
         grid.addWidget(self.x_plus_btn, row, 2)
 
         # Y-axis jog buttons (with dynamic labels)
-        row = 2
+        row = 1
         self.y_axis_label = QLabel("Y:")
         grid.addWidget(self.y_axis_label, row, 0)
         self.y_minus_btn = self._create_jog_button("−", lambda: self._jog_with_increment('y', -1))
@@ -561,7 +556,7 @@ class StageControlView(QWidget):
         grid.addWidget(self.y_plus_btn, row, 2)
 
         # Z-axis jog buttons (with dynamic labels)
-        row = 3
+        row = 2
         self.z_axis_label = QLabel("Z:")
         grid.addWidget(self.z_axis_label, row, 0)
         self.z_minus_btn = self._create_jog_button("−", lambda: self._jog_with_z_increment(-1))
@@ -570,7 +565,7 @@ class StageControlView(QWidget):
         grid.addWidget(self.z_plus_btn, row, 2)
 
         # R-axis jog buttons (uses different increments: 1°, 10°, 45°)
-        row = 4
+        row = 3
         grid.addWidget(QLabel("R (°):"), row, 0)
         grid.addWidget(self._create_jog_button("−", lambda: self._jog_with_rotation_increment(-1)), row, 1)
         grid.addWidget(self._create_jog_button("+", lambda: self._jog_with_rotation_increment(1)), row, 2)
@@ -595,17 +590,18 @@ class StageControlView(QWidget):
         return group
 
     def _create_jog_button(self, text: str, callback) -> QPushButton:
-        """Create a compact jog button with consistent styling (45px width)."""
+        """Create a compact jog button with consistent styling (45px width, minimal height)."""
         btn = QPushButton(text)
         btn.setMinimumWidth(45)
         btn.setMaximumWidth(45)
+        btn.setMaximumHeight(28)  # Limit height for compactness
         btn.clicked.connect(callback)
 
         # Style based on direction (negative = purple, positive = teal)
         if text.startswith('−') or text.startswith('-') or text == '−':
-            btn.setStyleSheet(f"background-color: {NEGATIVE_JOG_COLOR}; padding: 6px; font-weight: bold; font-size: 10pt;")
+            btn.setStyleSheet(f"background-color: {NEGATIVE_JOG_COLOR}; padding: 3px; font-weight: bold; font-size: 10pt;")
         else:
-            btn.setStyleSheet(f"background-color: {POSITIVE_JOG_COLOR}; padding: 6px; font-weight: bold; font-size: 10pt;")
+            btn.setStyleSheet(f"background-color: {POSITIVE_JOG_COLOR}; padding: 3px; font-weight: bold; font-size: 10pt;")
 
         return btn
 
