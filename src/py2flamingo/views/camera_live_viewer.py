@@ -223,6 +223,12 @@ class CameraLiveViewer(QWidget):
         intensity_layout.addWidget(QLabel("Intensity Range:"))
         self.intensity_label = QLabel("--")
         intensity_layout.addWidget(self.intensity_label)
+
+        # Auto-scale warning indicator
+        self.auto_scale_warning = QLabel("")
+        self.auto_scale_warning.setStyleSheet("color: red; font-weight: bold;")
+        intensity_layout.addWidget(self.auto_scale_warning)
+
         intensity_layout.addStretch()
         info_layout.addLayout(intensity_layout)
 
@@ -852,6 +858,12 @@ class CameraLiveViewer(QWidget):
     def set_auto_scale(self, enabled: bool) -> None:
         """Set auto-scale state (pass through to camera controller)."""
         self.camera_controller.set_auto_scale(enabled)
+
+        # Update warning indicator
+        if enabled:
+            self.auto_scale_warning.setText("AUTO-ADJUSTING INTENSITY")
+        else:
+            self.auto_scale_warning.setText("")
 
     def set_zoom(self, zoom_percentage: float) -> None:
         """Set zoom as percentage (1.0 = 100%)."""
