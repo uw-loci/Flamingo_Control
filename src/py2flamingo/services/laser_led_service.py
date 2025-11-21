@@ -300,20 +300,33 @@ class LaserLEDService(MicroscopeCommandService):
 
     def disable_all_lasers(self) -> bool:
         """
-        Disable all laser lines.
+        Disable all laser lines individually.
+
+        Sends individual disable command for each laser (1-4) to properly
+        turn off the laser hardware and conserve laser controller lifetime.
 
         Returns:
-            True if successful, False otherwise
+            True if all successful, False if any failed
         """
         self.logger.info("Disabling all lasers")
 
-        result = self._send_command(
-            LaserLEDCommandCode.LASER_DISABLE_ALL,
-            "LASER_DISABLE_ALL",
-            params=[0, 0, 0, 0, 0, 0, 0]
-        )
+        all_success = True
 
-        return result['success']
+        # Disable each laser individually with laser number in int32Data0
+        for laser_index in range(1, 5):  # Lasers 1-4
+            result = self._send_command(
+                LaserLEDCommandCode.LASER_DISABLE_ALL,
+                f"LASER_DISABLE_ALL (Laser {laser_index})",
+                params=[0, 0, 0, laser_index, 0, 0, 0]  # int32Data0 = laser_index
+            )
+
+            if not result['success']:
+                self.logger.warning(f"Failed to disable laser {laser_index}")
+                all_success = False
+            else:
+                self.logger.debug(f"Disabled laser {laser_index}")
+
+        return all_success
 
     def set_led_intensity(self, led_color: int, intensity_percent: float) -> bool:
         """
