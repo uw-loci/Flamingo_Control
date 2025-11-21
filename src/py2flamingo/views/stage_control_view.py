@@ -981,9 +981,12 @@ class StageControlView(QWidget):
             z_distance_mm = 1.0
             z_label = "Z (1.000 mm):"
 
-        # Update axis labels
-        self.x_axis_label.setText(xy_label)
-        self.y_axis_label.setText(xy_label)
+        # Update axis labels (separate X and Y for clarity)
+        x_label = xy_label.replace("X/Y", "X")
+        y_label = xy_label.replace("X/Y", "Y")
+
+        self.x_axis_label.setText(x_label)
+        self.y_axis_label.setText(y_label)
         self.z_axis_label.setText(z_label)
 
     def _on_save_preset_clicked(self) -> None:
