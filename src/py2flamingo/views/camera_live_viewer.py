@@ -602,8 +602,15 @@ class CameraLiveViewer(QWidget):
 
             # Get display range
             if self.camera_controller.is_auto_scale():
-                min_val = header.image_scale_min
-                max_val = header.image_scale_max
+                # True auto-scale: calculate from actual image data
+                # Use 1st and 99th percentiles to avoid outliers
+                min_val = int(np.percentile(transformed, 1))
+                max_val = int(np.percentile(transformed, 99))
+
+                # Update camera controller with calculated values
+                self.camera_controller.set_display_range(min_val, max_val)
+
+                self.logger.debug(f"Auto-scaled: {min_val} - {max_val}")
             else:
                 min_val, max_val = self.camera_controller.get_display_range()
 
