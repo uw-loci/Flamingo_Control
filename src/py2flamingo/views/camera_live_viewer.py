@@ -918,6 +918,11 @@ class CameraLiveViewer(QWidget):
         if self.laser_led_controller:
             self.laser_led_controller.load_laser_powers_from_hardware()
 
+        # Restore any checked illumination (if live view was previously running)
+        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+            self.logger.info("Attempting to restore checked illumination sources...")
+            self.laser_led_panel.restore_checked_illumination()
+
     def hideEvent(self, event: QHideEvent) -> None:
         """
         Handle window hide event.

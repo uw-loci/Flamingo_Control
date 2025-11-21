@@ -583,21 +583,24 @@ class LaserLEDControlPanel(QWidget):
 
     @pyqtSlot()
     def _on_preview_disabled(self) -> None:
-        """Update UI when preview is disabled."""
-        # Uncheck all checkboxes (no need to toggle exclusive mode with checkboxes)
-        for button in self._source_button_group.buttons():
-            button.setChecked(False)
+        """
+        Update UI when preview is disabled.
 
-        # Hide path selection when nothing is selected
+        Note: Checkboxes are NOT unchecked - they remember the user's desired state.
+        When live view restarts, checked sources will be automatically re-enabled.
+        """
+        # Don't uncheck checkboxes - remember user's intent for when live view restarts
+
+        # Hide path selection when nothing is active
         if self._path_group:
             self._path_group.setVisible(False)
 
-        self._status_label.setText("Select a light source for live viewing")
+        self._status_label.setText("Illumination off (live view stopped) - restart to restore")
         self._status_label.setStyleSheet(
             f"background-color: {WARNING_BG}; color: #856404; padding: 8px; "
             f"border: 1px solid #ffc107; border-radius: 4px; font-weight: bold;"
         )
-        self.logger.info("Preview disabled")
+        self.logger.info("Preview disabled (checkboxes left checked to remember user intent)")
 
     @pyqtSlot(str)
     def _on_error(self, error_message: str) -> None:
@@ -631,3 +634,39 @@ class LaserLEDControlPanel(QWidget):
     def is_source_active(self) -> bool:
         """Check if any light source is currently active."""
         return self.laser_led_controller.is_preview_active()
+
+    def restore_checked_illumination(self) -> None:
+        """
+        Restore illumination for any checked light source.
+
+        Called when live view is restarted to automatically re-enable
+        the light source that was previously selected by the user.
+        """
+        checked_button = self._source_button_group.checkedButton()
+        if not checked_button:
+            self.logger.debug("No light source checked - nothing to restore")
+            return
+
+        source_id = self._source_button_group.id(checked_button)
+
+        if source_id == -1:  # LED
+            # Get LED color from combobox
+            led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
+            color_names = ["red", "green", "blue", "white"]
+            color_name = color_names[led_color]
+
+            # Get LED intensity from slider
+            intensity = self._led_slider.value() if self._led_slider else 50
+
+            self.logger.info(f"Restoring LED illumination: {color_name} at {intensity}%")
+            self.laser_led_controller.enable_led_preview(led_color, intensity)
+
+        else:  # Laser
+            # Get laser power from slider
+            if source_id in self._laser_sliders:
+                power = self._laser_sliders[source_id].value()
+            else:
+                power = 5.0  # Default power
+
+            self.logger.info(f"Restoring laser {source_id} illumination at {power}% on {self._laser_path} path")
+            self.laser_led_controller.enable_laser_preview(source_id, power, self._laser_path)
