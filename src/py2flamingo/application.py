@@ -258,7 +258,8 @@ class FlamingoApplication:
         self.logger.debug("Creating 3D sample visualization window...")
         self.sample_3d_visualization_window = Sample3DVisualizationWindow(
             movement_controller=self.movement_controller,
-            camera_controller=self.camera_controller
+            camera_controller=self.camera_controller,
+            laser_led_controller=self.laser_led_controller
         )
         # Window starts hidden - user can open it via menu
         self.sample_3d_visualization_window.hide()
