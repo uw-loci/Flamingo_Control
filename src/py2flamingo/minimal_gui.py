@@ -17,6 +17,7 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 
 from py2flamingo.tcp_client import TCPClient, parse_metadata_file
+from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR
 
 
 class MinimalFlamingoGUI(QMainWindow):
@@ -114,11 +115,11 @@ class MinimalFlamingoGUI(QMainWindow):
         button_layout = QHBoxLayout()
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.clicked.connect(self.toggle_connection)
-        self.connect_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; }")
+        self.connect_btn.setStyleSheet(f"QPushButton {{ background-color: {SUCCESS_COLOR}; color: white; font-weight: bold; }}")
         button_layout.addWidget(self.connect_btn)
 
         self.connection_status = QLabel("Disconnected")
-        self.connection_status.setStyleSheet("QLabel { color: red; font-weight: bold; }")
+        self.connection_status.setStyleSheet(f"QLabel {{ color: {ERROR_COLOR}; font-weight: bold; }}")
         button_layout.addWidget(self.connection_status)
         button_layout.addStretch()
         layout.addLayout(button_layout)
@@ -172,7 +173,7 @@ class MinimalFlamingoGUI(QMainWindow):
         self.stop_btn = QPushButton("Stop Workflow")
         self.stop_btn.clicked.connect(self.stop_workflow)
         self.stop_btn.setEnabled(False)
-        self.stop_btn.setStyleSheet("QPushButton { background-color: #f44336; color: white; font-weight: bold; }")
+        self.stop_btn.setStyleSheet(f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; font-weight: bold; }}")
         button_layout.addWidget(self.stop_btn)
         button_layout.addStretch()
         layout.addLayout(button_layout)
@@ -292,9 +293,9 @@ class MinimalFlamingoGUI(QMainWindow):
             if nuc and live:
                 self.connected = True
                 self.connect_btn.setText("Disconnect")
-                self.connect_btn.setStyleSheet("QPushButton { background-color: #f44336; color: white; font-weight: bold; }")
+                self.connect_btn.setStyleSheet(f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; font-weight: bold; }}")
                 self.connection_status.setText("Connected")
-                self.connection_status.setStyleSheet("QLabel { color: green; font-weight: bold; }")
+                self.connection_status.setStyleSheet(f"QLabel {{ color: {SUCCESS_COLOR}; font-weight: bold; }}")
                 self.send_btn.setEnabled(True)
                 self.stop_btn.setEnabled(True)
                 self.log("Connected successfully!")
@@ -314,9 +315,9 @@ class MinimalFlamingoGUI(QMainWindow):
 
         self.connected = False
         self.connect_btn.setText("Connect")
-        self.connect_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; }")
+        self.connect_btn.setStyleSheet(f"QPushButton {{ background-color: {SUCCESS_COLOR}; color: white; font-weight: bold; }}")
         self.connection_status.setText("Disconnected")
-        self.connection_status.setStyleSheet("QLabel { color: red; font-weight: bold; }")
+        self.connection_status.setStyleSheet(f"QLabel {{ color: {ERROR_COLOR}; font-weight: bold; }}")
         self.send_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
         self.log("Disconnected")

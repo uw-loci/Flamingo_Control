@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer
 
 from py2flamingo.controllers.laser_led_controller import LaserLEDController
+from py2flamingo.views.colors import SUCCESS_BG, WARNING_BG, ERROR_BG
 
 
 class LaserLEDControlPanel(QWidget):
@@ -112,8 +113,8 @@ class LaserLEDControlPanel(QWidget):
         # Status
         self._status_label = QLabel("Select a light source for live viewing")
         self._status_label.setStyleSheet(
-            "background-color: #fff3cd; color: #856404; padding: 8px; "
-            "border: 1px solid #ffc107; border-radius: 4px; font-weight: bold;"
+            f"background-color: {WARNING_BG}; color: #856404; padding: 8px; "
+            f"border: 1px solid #ffc107; border-radius: 4px; font-weight: bold;"
         )
         main_layout.addWidget(self._status_label)
 
@@ -575,8 +576,8 @@ class LaserLEDControlPanel(QWidget):
         """Update UI when preview is enabled."""
         self._status_label.setText(f"✓ Active: {source_name} (allows live viewing)")
         self._status_label.setStyleSheet(
-            "background-color: #d4edda; color: #155724; padding: 8px; "
-            "border: 1px solid #c3e6cb; border-radius: 4px; font-weight: bold;"
+            f"background-color: {SUCCESS_BG}; color: #155724; padding: 8px; "
+            f"border: 1px solid #c3e6cb; border-radius: 4px; font-weight: bold;"
         )
         self.logger.info(f"Preview enabled: {source_name}")
 
@@ -593,8 +594,8 @@ class LaserLEDControlPanel(QWidget):
 
         self._status_label.setText("Select a light source for live viewing")
         self._status_label.setStyleSheet(
-            "background-color: #fff3cd; color: #856404; padding: 8px; "
-            "border: 1px solid #ffc107; border-radius: 4px; font-weight: bold;"
+            f"background-color: {WARNING_BG}; color: #856404; padding: 8px; "
+            f"border: 1px solid #ffc107; border-radius: 4px; font-weight: bold;"
         )
         self.logger.info("Preview disabled")
 
@@ -603,8 +604,8 @@ class LaserLEDControlPanel(QWidget):
         """Display error message."""
         self._status_label.setText(f"Error: {error_message}")
         self._status_label.setStyleSheet(
-            "background-color: #f8d7da; color: #721c24; padding: 8px; "
-            "border: 1px solid #f5c6cb; border-radius: 4px; font-weight: bold;"
+            f"background-color: {ERROR_BG}; color: #721c24; padding: 8px; "
+            f"border: 1px solid #f5c6cb; border-radius: 4px; font-weight: bold;"
         )
         self.logger.error(error_message)
 

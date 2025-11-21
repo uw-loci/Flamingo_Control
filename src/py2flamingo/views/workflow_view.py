@@ -13,6 +13,8 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 
+from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR
+
 
 class WorkflowView(QWidget):
     """UI view for managing workflow execution.
@@ -175,7 +177,7 @@ class WorkflowView(QWidget):
         elif workflow_loaded:
             # Workflow loaded but not running
             self.status_label.setText("Status: Workflow loaded")
-            self.status_label.setStyleSheet("color: green; font-weight: bold;")
+            self.status_label.setStyleSheet(f"color: {SUCCESS_COLOR}; font-weight: bold;")
 
             # Start button enabled only if we have connection
             # (Controller will validate connection, this is just UI state)
@@ -195,13 +197,13 @@ class WorkflowView(QWidget):
 
         Args:
             message: Message text to display
-            is_error: True for error (red), False for success (green)
+            is_error: True for error (red-orange), False for success (blue)
         """
         self.message_label.setText(message)
         if is_error:
-            self.message_label.setStyleSheet("color: red;")
+            self.message_label.setStyleSheet(f"color: {ERROR_COLOR};")
         else:
-            self.message_label.setStyleSheet("color: green;")
+            self.message_label.setStyleSheet(f"color: {SUCCESS_COLOR};")
 
     def update_for_connection_state(self, connected: bool) -> None:
         """Update workflow view based on connection state.

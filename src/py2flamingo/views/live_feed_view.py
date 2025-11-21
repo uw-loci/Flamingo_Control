@@ -23,6 +23,7 @@ from ..models.microscope import Position
 from ..controllers import WorkflowController
 from ..utils.image_transforms import Rotation, Colormap, apply_transforms
 from ..utils.image_processing import convert_to_qimage
+from .colors import SUCCESS_COLOR, ERROR_COLOR
 
 
 class LiveFeedView(QWidget):
@@ -502,12 +503,12 @@ class LiveFeedView(QWidget):
 
             # Update status
             self.status_label.setText(f"Status: Live ({self._frame_count} frames)")
-            self.status_label.setStyleSheet("color: green; font-style: italic;")
+            self.status_label.setStyleSheet(f"color: {SUCCESS_COLOR}; font-style: italic;")
 
         except Exception as e:
             self._logger.exception(f"Error displaying image: {e}")
             self.status_label.setText(f"Status: Error - {str(e)}")
-            self.status_label.setStyleSheet("color: red; font-style: italic;")
+            self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-style: italic;")
 
     def _set_rotation(self, degrees: int) -> None:
         """
@@ -641,7 +642,7 @@ class LiveFeedView(QWidget):
         except Exception as e:
             self._logger.error(f"Error moving {axis}: {e}")
             self.status_label.setText(f"Status: Error moving stage - {str(e)}")
-            self.status_label.setStyleSheet("color: red; font-style: italic;")
+            self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-style: italic;")
 
     def _on_move_to_position(self) -> None:
         """Handle move to absolute position button click."""
@@ -668,7 +669,7 @@ class LiveFeedView(QWidget):
         except Exception as e:
             self._logger.error(f"Error moving to position: {e}")
             self.status_label.setText(f"Status: Error - {str(e)}")
-            self.status_label.setStyleSheet("color: red; font-style: italic;")
+            self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-style: italic;")
 
     def _update_position_display(self) -> None:
         """Update the position label with current position."""
@@ -771,7 +772,7 @@ class LiveFeedView(QWidget):
         except Exception as e:
             self._logger.error(f"Error requesting snapshot: {e}")
             self.status_label.setText(f"Status: Snapshot error - {str(e)}")
-            self.status_label.setStyleSheet("color: red; font-style: italic;")
+            self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-style: italic;")
             self.snapshot_btn.setEnabled(True)
 
     def _on_brightfield_clicked(self) -> None:
@@ -793,7 +794,7 @@ class LiveFeedView(QWidget):
         except Exception as e:
             self._logger.error(f"Error requesting brightfield: {e}")
             self.status_label.setText(f"Status: Brightfield error - {str(e)}")
-            self.status_label.setStyleSheet("color: red; font-style: italic;")
+            self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-style: italic;")
             self.brightfield_btn.setEnabled(True)
 
     def _on_sync_settings(self) -> None:
@@ -815,7 +816,7 @@ class LiveFeedView(QWidget):
         except Exception as e:
             self._logger.error(f"Error syncing settings: {e}")
             self.status_label.setText(f"Status: Sync error - {str(e)}")
-            self.status_label.setStyleSheet("color: red; font-style: italic;")
+            self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-style: italic;")
             self.sync_settings_btn.setEnabled(True)
 
     def set_controls_enabled(self, enabled: bool) -> None:

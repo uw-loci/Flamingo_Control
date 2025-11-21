@@ -10,6 +10,7 @@ from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtProperty
 from PyQt5.QtGui import QColor, QPalette
 
 from py2flamingo.services.status_indicator_service import GlobalStatus
+from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR, WARNING_COLOR, NEUTRAL_COLOR
 
 
 class StatusIndicatorWidget(QWidget):
@@ -17,20 +18,21 @@ class StatusIndicatorWidget(QWidget):
     Visual status indicator widget.
 
     Displays system status with:
-    - Color-coded indicator (Blue=Ready, Red=Moving, Magenta=Workflow, Grey=Disconnected)
+    - Color-coded indicator (Blue=Ready, Amber=Moving, Purple=Workflow, Grey=Disconnected)
     - Status text label
     - Smooth color transitions
     - Tooltip with detailed status
 
     The widget consists of a small colored square (15x15px) next to a status label.
+    Colors are optimized for colorblind accessibility.
     """
 
-    # Color mapping for each status
+    # Color mapping for each status (colorblind-friendly)
     STATUS_COLORS = {
-        GlobalStatus.DISCONNECTED: QColor(128, 128, 128),  # Grey
-        GlobalStatus.IDLE: QColor(70, 130, 180),           # Steel Blue
-        GlobalStatus.MOVING: QColor(220, 50, 50),          # Red
-        GlobalStatus.WORKFLOW_RUNNING: QColor(200, 50, 200)  # Magenta
+        GlobalStatus.DISCONNECTED: QColor(NEUTRAL_COLOR),      # Grey
+        GlobalStatus.IDLE: QColor(SUCCESS_COLOR),              # Blue
+        GlobalStatus.MOVING: QColor(WARNING_COLOR),            # Amber/Gold
+        GlobalStatus.WORKFLOW_RUNNING: QColor("#a56eff")       # Purple
     }
 
     def __init__(self, parent=None):

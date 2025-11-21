@@ -19,6 +19,7 @@ from PyQt5.QtGui import QPixmap, QImage, QCloseEvent, QShowEvent, QHideEvent
 
 from py2flamingo.controllers.camera_controller import CameraController, CameraState
 from py2flamingo.services.camera_service import ImageHeader
+from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR
 
 
 class CameraLiveViewer(QWidget):
@@ -121,12 +122,12 @@ class CameraLiveViewer(QWidget):
         lv_layout.addWidget(QLabel("Live View:"))
 
         self.start_btn = QPushButton("Start Live View")
-        self.start_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 8px;")
+        self.start_btn.setStyleSheet(f"background-color: {SUCCESS_COLOR}; color: white; font-weight: bold; padding: 8px;")
         self.start_btn.clicked.connect(self._on_start_clicked)
         lv_layout.addWidget(self.start_btn)
 
         self.stop_btn = QPushButton("Stop Live View")
-        self.stop_btn.setStyleSheet("background-color: #f44336; color: white; font-weight: bold; padding: 8px;")
+        self.stop_btn.setStyleSheet(f"background-color: {ERROR_COLOR}; color: white; font-weight: bold; padding: 8px;")
         self.stop_btn.clicked.connect(self._on_stop_clicked)
         self.stop_btn.setEnabled(False)
         lv_layout.addWidget(self.stop_btn)
@@ -257,7 +258,7 @@ class CameraLiveViewer(QWidget):
             self.start_btn.setEnabled(False)
             self.stop_btn.setEnabled(True)
             self.status_label.setText("Live View Active")
-            self.status_label.setStyleSheet("color: green; font-weight: bold;")
+            self.status_label.setStyleSheet(f"color: {SUCCESS_COLOR}; font-weight: bold;")
 
         elif state == CameraState.ACQUIRING:
             self.start_btn.setEnabled(False)
@@ -269,7 +270,7 @@ class CameraLiveViewer(QWidget):
             self.start_btn.setEnabled(True)
             self.stop_btn.setEnabled(False)
             self.status_label.setText("Error")
-            self.status_label.setStyleSheet("color: red; font-weight: bold;")
+            self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-weight: bold;")
 
     # ===== Slot implementations =====
 
@@ -311,7 +312,7 @@ class CameraLiveViewer(QWidget):
         """Handle error from controller."""
         self.logger.error(f"Camera error: {error_msg}")
         self.status_label.setText(f"Error: {error_msg[:30]}")
-        self.status_label.setStyleSheet("color: red; font-weight: bold;")
+        self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-weight: bold;")
 
     @pyqtSlot(float)
     def _on_frame_rate_updated(self, fps: float) -> None:
@@ -380,11 +381,11 @@ class CameraLiveViewer(QWidget):
 
                 if success:
                     self.status_label.setText(f"Snapshot saved: {Path(filename).name}")
-                    self.status_label.setStyleSheet("color: green; font-weight: bold;")
+                    self.status_label.setStyleSheet(f"color: {SUCCESS_COLOR}; font-weight: bold;")
                     self.logger.info(f"Snapshot saved to {filename}")
                 else:
                     self.status_label.setText("Snapshot failed")
-                    self.status_label.setStyleSheet("color: red; font-weight: bold;")
+                    self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-weight: bold;")
 
                 # Re-enable button
                 self.snapshot_btn.setEnabled(True)

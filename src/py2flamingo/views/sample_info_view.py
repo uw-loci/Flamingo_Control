@@ -18,6 +18,8 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import pyqtSignal
 
+from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR
+
 
 class SampleInfoView(QWidget):
     """
@@ -281,7 +283,7 @@ class SampleInfoView(QWidget):
         self._sample_name = name
         if name:
             self.sample_name_display.setText(f"Current: {name}")
-            self.sample_name_display.setStyleSheet("color: green; font-weight: bold;")
+            self.sample_name_display.setStyleSheet(f"color: {SUCCESS_COLOR}; font-weight: bold;")
         else:
             self.sample_name_display.setText("Current: <not set>")
             self.sample_name_display.setStyleSheet("color: gray; font-style: italic;")
@@ -347,7 +349,7 @@ class SampleInfoView(QWidget):
                 self.create_dir_btn.setEnabled(True)
             else:
                 self.local_path_display.setText("Local equivalent: <invalid configuration>")
-                self.local_path_display.setStyleSheet("color: red; font-size: 10pt;")
+                self.local_path_display.setStyleSheet(f"color: {ERROR_COLOR}; font-size: 10pt;")
                 self.create_dir_btn.setEnabled(False)
         else:
             self.local_path_display.setText("Local equivalent: <no mount point configured>")

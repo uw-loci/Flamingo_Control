@@ -14,6 +14,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
 
+from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR
+
 
 class ConnectionView(QWidget):
     """UI view for managing microscope connection.
@@ -278,7 +280,7 @@ class ConnectionView(QWidget):
         if connected:
             # Connected state
             self.status_label.setText("Status: Connected")
-            self.status_label.setStyleSheet("color: green; font-weight: bold;")
+            self.status_label.setStyleSheet(f"color: {SUCCESS_COLOR}; font-weight: bold;")
             self.connect_btn.setEnabled(False)
             self.disconnect_btn.setEnabled(True)
             self.ip_input.setEnabled(False)
@@ -303,13 +305,13 @@ class ConnectionView(QWidget):
 
         Args:
             message: Message text to display
-            is_error: True for error (red), False for success (green)
+            is_error: True for error (red-orange), False for success (blue)
         """
         self.message_label.setText(message)
         if is_error:
-            self.message_label.setStyleSheet("color: red;")
+            self.message_label.setStyleSheet(f"color: {ERROR_COLOR};")
         else:
-            self.message_label.setStyleSheet("color: green;")
+            self.message_label.setStyleSheet(f"color: {SUCCESS_COLOR};")
 
     def get_connection_info(self) -> Tuple[str, int]:
         """Get current IP and port from UI inputs.
@@ -861,8 +863,8 @@ class ConnectionView(QWidget):
             self._logger.error(f"ConnectionView: {error_msg}", exc_info=True)
             self.settings_display.setPlainText(error_msg)
             self.settings_display.setStyleSheet(
-                "QTextEdit { font-family: 'Courier New', monospace; "
-                "font-size: 10pt; color: red; }"
+                f"QTextEdit {{ font-family: 'Courier New', monospace; "
+                f"font-size: 10pt; color: {ERROR_COLOR}; }}"
             )
 
     def _format_settings(self, settings: Dict[str, Any]) -> str:

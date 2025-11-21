@@ -17,6 +17,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 
 from py2flamingo.models.microscope import Position
+from py2flamingo.views.colors import SUCCESS_COLOR
 
 
 class PositionHistoryDialog(QDialog):
@@ -75,7 +76,7 @@ class PositionHistoryDialog(QDialog):
         self.goto_btn.setEnabled(False)
         self.goto_btn.clicked.connect(self._on_goto_clicked)
         self.goto_btn.setStyleSheet(
-            "background-color: #4caf50; color: white; padding: 12px; "
+            f"background-color: {SUCCESS_COLOR}; color: white; padding: 12px; "
             "font-weight: bold; font-size: 11pt;"
         )
         right_layout.addWidget(self.goto_btn)
