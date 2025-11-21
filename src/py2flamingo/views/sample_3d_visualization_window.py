@@ -1164,7 +1164,7 @@ class Sample3DVisualizationWindow(QWidget):
         # Napari coordinates: (Z, Y, X) order!
         for y in range(y_top, y_bottom + 1, 2):  # Sample every 2 voxels
             # Points in (Z, Y, X) order
-            holder_points.append([napari_z, y, napari_x]])
+            holder_points.append([napari_z, y, napari_x])
 
         logger.info(f"Created {len(holder_points)} holder points (Y from {y_top} to {y_bottom})")
         if holder_points:
@@ -1349,7 +1349,7 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Napari coordinates: (Z, Y, X) order!
         for y in range(y_top, y_bottom + 1, 2):  # Sample every 2 voxels
-            holder_points.append([napari_z, y, napari_x]])
+            holder_points.append([napari_z, y, napari_x])
 
         logger.info(f"Regenerated {len(holder_points)} holder points (y_top={y_top}, y_bottom={y_bottom})")
 
