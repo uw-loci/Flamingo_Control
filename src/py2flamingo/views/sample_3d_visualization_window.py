@@ -78,7 +78,9 @@ class Sample3DVisualizationWindow(QWidget):
         self._init_storage_with_mapper()
 
         # Initialize coordinate transformers (for rotation)
-        self.transformer = CoordinateTransformer()
+        # CRITICAL: Must use correct sample center from config for accurate rotation
+        sample_center_um = self.config['storage']['sample_region_center_um']
+        self.transformer = CoordinateTransformer(sample_center=sample_center_um)
 
         # Current state
         self.current_rotation = {'rx': 0, 'ry': 0, 'rz': 0}
@@ -2284,11 +2286,13 @@ class Sample3DVisualizationWindow(QWidget):
 
         logger.info(f"Added frame to channel {channel_id}: {np.count_nonzero(intensity_values)} non-zero pixels")
 
-        # Diagnostic: Log world coordinate ranges for debugging
-        logger.debug(f"World coordinate ranges:")
+        # Diagnostic: Log world coordinate ranges and rotation for debugging
+        logger.debug(f"Stage position: X={position.x:.2f}mm, Y={position.y:.2f}mm, Z={position.z:.2f}mm, R={position.r:.1f}°")
+        logger.debug(f"World coordinate ranges after rotation:")
         logger.debug(f"  X: [{world_coords_3d[:, 0].min():.1f}, {world_coords_3d[:, 0].max():.1f}] µm")
         logger.debug(f"  Y: [{world_coords_3d[:, 1].min():.1f}, {world_coords_3d[:, 1].max():.1f}] µm")
         logger.debug(f"  Z: [{world_coords_3d[:, 2].min():.1f}, {world_coords_3d[:, 2].max():.1f}] µm")
+        logger.debug(f"Rotation center: {self.transformer.sample_center} µm")
 
     def _detect_active_channel(self) -> Optional[int]:
         """
