@@ -146,7 +146,7 @@ class Sample3DVisualizationWindow(QWidget):
             # Use defaults if config file doesn't exist
             config = {
                 'display': {
-                    'voxel_size_um': [15, 15, 15],
+                    'voxel_size_um': [50, 50, 50],
                     'fps_target': 30,
                     'downsample_factor': 4,
                     'max_channels': 4
@@ -157,13 +157,46 @@ class Sample3DVisualizationWindow(QWidget):
                     'max_memory_mb': 2000
                 },
                 'sample_chamber': {
-                    'inner_dimensions_mm': [10, 10, 43]
+                    'inner_dimensions_mm': [10, 10, 43],
+                    'holder_diameter_mm': 1.0,
+                    'chamber_width_x_mm': 11.31,
+                    'chamber_x_offset_mm': 1.0,
+                    'chamber_depth_z_mm': 13.5,
+                    'chamber_z_offset_mm': 12.5,
+                    'y_min_anchor_mm': 5.0,
+                    'chamber_below_anchor_mm': 10.0,
+                    'chamber_above_anchor_mm': 5.0
+                },
+                'stage_control': {
+                    'x_range_mm': [1.0, 12.31],
+                    'y_range_mm': [-5.0, 10.0],
+                    'z_range_mm': [12.5, 26.0],
+                    'y_stage_min_mm': 5.0,
+                    'y_stage_max_mm': 15.0,
+                    'x_default_mm': 6.655,
+                    'y_default_mm': 5.0,
+                    'z_default_mm': 19.25,
+                    'invert_x_default': False,
+                    'invert_z_default': False,
+                    'rotation_angle_offset_deg': 0.0,
+                    'rotation_range_deg': [-180, 180],
+                    'rotation_default_deg': 0.0
+                },
+                'coordinate_mapping': {
+                    'napari_origin': 'back_upper_left',
+                    'napari_axis_mapping': {'z': 0, 'y': 1, 'x': 2},
+                    'invert_y_display': True,
+                    'axis_colors': {
+                        'x': '#00FFFF',
+                        'y': '#FF00FF',
+                        'z': '#FFD700'
+                    }
                 },
                 'channels': [
-                    {'id': 0, 'name': 'DAPI', 'default_colormap': 'cyan'},
-                    {'id': 1, 'name': 'GFP', 'default_colormap': 'green'},
-                    {'id': 2, 'name': 'RFP', 'default_colormap': 'red'},
-                    {'id': 3, 'name': 'BF', 'default_colormap': 'gray'}
+                    {'id': 0, 'name': '405nm (DAPI)', 'default_colormap': 'cyan', 'default_visible': True},
+                    {'id': 1, 'name': '488nm (GFP)', 'default_colormap': 'green', 'default_visible': True},
+                    {'id': 2, 'name': '561nm (RFP)', 'default_colormap': 'red', 'default_visible': True},
+                    {'id': 3, 'name': '640nm (Far-Red)', 'default_colormap': 'magenta', 'default_visible': False}
                 ]
             }
             logger.warning("Using default 3D visualization config")
@@ -1944,63 +1977,6 @@ class Sample3DVisualizationWindow(QWidget):
             layer.rendering = mode
         logger.info(f"Rendering mode changed to: {mode}")
 
-    def _add_rotation_axes(self):
-        """Add rotation axes to the viewer."""
-        if not self.viewer:
-            return
-
-        # Create rotation axis at center of chamber
-        dims = self.voxel_storage.display_dims
-        center = np.array([
-            dims[0] // 2,  # X center (axis 0)
-            dims[1] // 2,  # Y center (axis 1, vertical)
-            dims[2] // 2   # Z center (axis 2)
-        ])
-
-        # Y-axis length (the physical rotation axis) - make it prominent
-        axis_length = dims[1] // 2  # Half chamber height in Y
-
-        # Create Y-axis vector (the physical stage rotation axis)
-        # Format for napari vectors in (X, Y, Z) order: array of [position, direction] pairs
-        vectors = np.array([
-            [[center[0], center[1], center[2]], [0, axis_length, 0]]  # Y axis - green, vertical
-        ])
-
-        self.viewer.add_vectors(
-            vectors,
-            name='Rotation Axes',
-            edge_color='green',
-            edge_width=5,
-            length=1.0,
-            visible=self.show_axes_cb.isChecked()
-        )
-
-    def _update_rotation_axes(self):
-        """Update rotation axis indicators."""
-        if not self.viewer or 'Rotation Axes' not in self.viewer.layers:
-            return
-
-        # Create rotation vectors
-        axes = np.array([
-            [30, 0, 0],  # X axis
-            [0, 30, 0],  # Y axis
-            [0, 0, 30]   # Z axis
-        ])
-
-        # Apply rotation
-        rotated_axes = axes @ self.transformer.rotation_matrix.T
-
-        # Create vector data for napari (n, 2, d) format
-        # n=3 vectors, 2 components (position, direction), d=3 dimensions
-        origin = np.array([100, 100, 50])
-        vectors = np.zeros((3, 2, 3))
-        for i in range(3):
-            vectors[i, 0, :] = origin  # Starting position
-            vectors[i, 1, :] = rotated_axes[i]  # Direction vector
-
-        self.viewer.layers['Rotation Axes'].data = vectors
-        self.viewer.layers['Rotation Axes'].visible = True  # Make visible
-
     def _update_visualization(self):
         """Update the visualization with latest data."""
         if not self.viewer:
@@ -2038,14 +2014,17 @@ class Sample3DVisualizationWindow(QWidget):
         if not self.is_populating:
             return
 
-        # Update current state from metadata
+        # Update current state from metadata (positions in µm from metadata)
         if 'x_position' in metadata:
-            self.stage_position_inputs['x'].setValue(int(metadata['x_position']))
+            self.position_sliders['x_slider'].setValue(int(metadata['x_position']))
+            self.position_sliders['x_spinbox'].setValue(metadata['x_position'] / 1000.0)
         if 'y_position' in metadata:
-            self.stage_position_inputs['y'].setValue(int(metadata['y_position']))
+            self.position_sliders['y_slider'].setValue(int(metadata['y_position']))
+            self.position_sliders['y_spinbox'].setValue(metadata['y_position'] / 1000.0)
         if 'z_position' in metadata:
             self.current_z = metadata['z_position']
-            self.stage_position_inputs['z'].setValue(int(self.current_z))
+            self.position_sliders['z_slider'].setValue(int(self.current_z))
+            self.position_sliders['z_spinbox'].setValue(self.current_z / 1000.0)
 
         if 'rotation' in metadata:
             self.current_rotation = metadata['rotation']
@@ -2335,6 +2314,14 @@ class Sample3DVisualizationWindow(QWidget):
         # Stop populating
         if self.is_populating:
             self.populate_button.setChecked(False)
+
+        # Stop all timers
+        if hasattr(self, 'update_timer') and self.update_timer.isActive():
+            self.update_timer.stop()
+        if hasattr(self, 'populate_timer') and self.populate_timer.isActive():
+            self.populate_timer.stop()
+        if hasattr(self, 'rotation_debounce_timer') and self.rotation_debounce_timer.isActive():
+            self.rotation_debounce_timer.stop()
 
         # Close napari viewer
         if self.viewer:
