@@ -1115,28 +1115,30 @@ class PositionController:
 
                 # Wait for motion complete (blocks this thread, not GUI)
                 # allow_cancel=True enables replacement by new commands
+                # Reduced timeout from 30s to 5s - most movements complete in <2s
                 self.logger.info("Waiting for motion complete callback...")
-                completed = self._motion_tracker.wait_for_motion_complete(timeout=30.0, allow_cancel=True)
+                completed = self._motion_tracker.wait_for_motion_complete(timeout=5.0, allow_cancel=True)
 
                 if completed:
                     self.logger.info("Motion completed successfully")
-
-                    # Add old position to history before updating
-                    if self._current_position is not None:
-                        self._add_to_history(self._current_position)
-
-                    # Query actual position from hardware
-                    actual_position = self._query_position_after_move(moved_axes, target_position)
-
-                    # Update current position with hardware-verified values
-                    self._current_position = actual_position
-                    self.logger.info(
-                        f"Position confirmed from hardware: X={actual_position.x:.3f}, "
-                        f"Y={actual_position.y:.3f}, Z={actual_position.z:.3f}, "
-                        f"R={actual_position.r:.2f}°"
-                    )
                 else:
-                    self.logger.warning("Motion complete timeout - position may be uncertain")
+                    self.logger.debug("Motion complete callback timeout - querying position directly")
+
+                # Always query position from hardware and update (regardless of callback receipt)
+                # Add old position to history before updating
+                if self._current_position is not None:
+                    self._add_to_history(self._current_position)
+
+                # Query actual position from hardware
+                actual_position = self._query_position_after_move(moved_axes, target_position)
+
+                # Update current position with hardware-verified values
+                self._current_position = actual_position
+                self.logger.info(
+                    f"Position confirmed from hardware: X={actual_position.x:.3f}, "
+                    f"Y={actual_position.y:.3f}, Z={actual_position.z:.3f}, "
+                    f"R={actual_position.r:.2f}°"
+                )
 
                 # Fire callback if registered
                 if self._motion_complete_callback:

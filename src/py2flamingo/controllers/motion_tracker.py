@@ -121,7 +121,7 @@ class MotionTracker:
                         self.logger.debug(f"Ignoring unexpected message {command_code}")
 
                 except socket.timeout:
-                    self.logger.warning(f"Timeout waiting for motion complete after {timeout}s")
+                    self.logger.debug(f"Timeout waiting for motion complete after {timeout}s - stage may have completed without callback")
                     return False
 
         except Exception as e:

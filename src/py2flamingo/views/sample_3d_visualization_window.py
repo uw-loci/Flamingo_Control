@@ -118,6 +118,7 @@ class Sample3DVisualizationWindow(QWidget):
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self._update_visualization)
         self.update_timer.setInterval(100)  # 10 Hz update rate
+        self.update_timer.start()  # Start the timer to enable real-time visualization updates
 
         # Debounce timer for rotation spinbox (typing vs arrows)
         self.rotation_debounce_timer = QTimer()
