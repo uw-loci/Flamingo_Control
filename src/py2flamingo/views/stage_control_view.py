@@ -965,13 +965,21 @@ class StageControlView(QWidget):
             xy_label = f"X/Y ({xy_distance_mm:.3f} mm):"
         else:
             # mm-based mode
-            xy_distance_mm = float(xy_increment_text.split()[0])
-            xy_label = f"X/Y ({xy_distance_mm:.3f} mm):"
+            try:
+                xy_distance_mm = float(xy_increment_text.split()[0])
+                xy_label = f"X/Y ({xy_distance_mm:.3f} mm):"
+            except (IndexError, ValueError):
+                xy_distance_mm = 1.0
+                xy_label = "X/Y (1.000 mm):"
 
         # Get Z increment
         z_increment_text = self.z_increment_combo.currentText()
-        z_distance_mm = float(z_increment_text.split()[0])
-        z_label = f"Z ({z_distance_mm:.3f} mm):"
+        try:
+            z_distance_mm = float(z_increment_text.split()[0])
+            z_label = f"Z ({z_distance_mm:.3f} mm):"
+        except (IndexError, ValueError):
+            z_distance_mm = 1.0
+            z_label = "Z (1.000 mm):"
 
         # Update axis labels
         self.x_axis_label.setText(xy_label)
