@@ -290,7 +290,7 @@ class Sample3DVisualizationWindow(QWidget):
             viewer_layout.addWidget(msg_label)
 
         splitter.addWidget(viewer_container)
-        splitter.setSizes([400, 800])
+        splitter.setSizes([270, 930])  # Reduced control panel to 2/3 width
 
         main_layout.addWidget(splitter)
 
@@ -340,6 +340,20 @@ class Sample3DVisualizationWindow(QWidget):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
+        # Global accumulation strategy (applies to all channels)
+        strategy_group = QGroupBox("Data Accumulation")
+        strategy_layout = QHBoxLayout()
+        strategy_layout.addWidget(QLabel("Strategy:"))
+
+        self.global_strategy_combo = QComboBox()
+        self.global_strategy_combo.addItems(['maximum', 'latest', 'average', 'additive'])
+        self.global_strategy_combo.setCurrentText('maximum')  # Default for fluorescence
+        self.global_strategy_combo.setToolTip("How to accumulate data when the same voxel is imaged multiple times")
+        strategy_layout.addWidget(self.global_strategy_combo)
+
+        strategy_group.setLayout(strategy_layout)
+        layout.addWidget(strategy_group)
+
         self.channel_controls = {}
 
         for ch_config in self.config['channels']:
@@ -366,37 +380,23 @@ class Sample3DVisualizationWindow(QWidget):
             opacity_slider.setValue(80)
             opacity_label = QLabel("80%")
 
-            # Update strategy
-            strategy_combo = QComboBox()
-            strategy_combo.addItems(['latest', 'maximum', 'average', 'additive'])
-            strategy_combo.setCurrentText(ch_config.get('update_strategy', 'latest'))
+            # Contrast range slider (min and max in one slider)
+            from superqt import QRangeSlider
+            contrast_range_slider = QRangeSlider(Qt.Horizontal)
+            contrast_range_slider.setRange(0, 65535)
+            contrast_range_slider.setValue((0, 65535))
+            contrast_range_label = QLabel("0 - 65535")
 
-            # Contrast limits (min/max intensity)
-            contrast_min_slider = QSlider(Qt.Horizontal)
-            contrast_min_slider.setRange(0, 65535)
-            contrast_min_slider.setValue(0)
-            contrast_min_label = QLabel("0")
-
-            contrast_max_slider = QSlider(Qt.Horizontal)
-            contrast_max_slider.setRange(0, 65535)
-            contrast_max_slider.setValue(65535)
-            contrast_max_label = QLabel("65535")
-
-            # Layout channel controls
+            # Layout channel controls (more compact)
             ch_layout.addWidget(visible_cb, 0, 0, 1, 3)
             ch_layout.addWidget(QLabel("Color:"), 1, 0)
             ch_layout.addWidget(colormap_combo, 1, 1, 1, 2)
             ch_layout.addWidget(QLabel("Opacity:"), 2, 0)
             ch_layout.addWidget(opacity_slider, 2, 1)
             ch_layout.addWidget(opacity_label, 2, 2)
-            ch_layout.addWidget(QLabel("Contrast Min:"), 3, 0)
-            ch_layout.addWidget(contrast_min_slider, 3, 1)
-            ch_layout.addWidget(contrast_min_label, 3, 2)
-            ch_layout.addWidget(QLabel("Contrast Max:"), 4, 0)
-            ch_layout.addWidget(contrast_max_slider, 4, 1)
-            ch_layout.addWidget(contrast_max_label, 4, 2)
-            ch_layout.addWidget(QLabel("Update:"), 5, 0)
-            ch_layout.addWidget(strategy_combo, 5, 1, 1, 2)
+            ch_layout.addWidget(QLabel("Contrast:"), 3, 0)
+            ch_layout.addWidget(contrast_range_slider, 3, 1)
+            ch_layout.addWidget(contrast_range_label, 3, 2)
 
             group.setLayout(ch_layout)
             layout.addWidget(group)
@@ -407,11 +407,8 @@ class Sample3DVisualizationWindow(QWidget):
                 'colormap': colormap_combo,
                 'opacity': opacity_slider,
                 'opacity_label': opacity_label,
-                'strategy': strategy_combo,
-                'contrast_min': contrast_min_slider,
-                'contrast_min_label': contrast_min_label,
-                'contrast_max': contrast_max_slider,
-                'contrast_max_label': contrast_max_label
+                'contrast_range': contrast_range_slider,
+                'contrast_label': contrast_range_label
             }
 
             # Connect controls to napari layer updates
@@ -424,14 +421,9 @@ class Sample3DVisualizationWindow(QWidget):
                     self._on_opacity_changed(cid, v/100.0)
                 )
             )
-            contrast_min_slider.valueChanged.connect(
-                lambda v, label=contrast_min_label, cid=ch_id: self._on_contrast_changed(cid, v, 'min', label)
+            contrast_range_slider.valueChanged.connect(
+                lambda value, label=contrast_range_label, cid=ch_id: self._on_contrast_range_changed(cid, value, label)
             )
-            contrast_max_slider.valueChanged.connect(
-                lambda v, label=contrast_max_label, cid=ch_id: self._on_contrast_changed(cid, v, 'max', label)
-            )
-
-            # Note: Contrast sliders will be updated to match napari's auto-scaling after layers are created
 
         layout.addStretch()
         return widget
@@ -1885,26 +1877,21 @@ class Sample3DVisualizationWindow(QWidget):
         self.channel_visibility_changed.emit(channel_id, visible)
 
     def _sync_contrast_sliders_with_napari(self):
-        """Sync contrast sliders with napari's actual contrast limits."""
+        """Sync contrast range sliders with napari's actual contrast limits."""
         for ch_id in range(4):
             if ch_id in self.channel_layers and ch_id in self.channel_controls:
                 # Get actual contrast limits from napari layer
                 actual_limits = self.channel_layers[ch_id].contrast_limits
 
-                # Update sliders to match (without triggering updates)
+                # Update range slider to match (without triggering updates)
                 controls = self.channel_controls[ch_id]
 
-                controls['contrast_min'].blockSignals(True)
-                controls['contrast_min'].setValue(int(actual_limits[0]))
-                controls['contrast_min_label'].setText(str(int(actual_limits[0])))
-                controls['contrast_min'].blockSignals(False)
+                controls['contrast_range'].blockSignals(True)
+                controls['contrast_range'].setValue((int(actual_limits[0]), int(actual_limits[1])))
+                controls['contrast_label'].setText(f"{int(actual_limits[0])} - {int(actual_limits[1])}")
+                controls['contrast_range'].blockSignals(False)
 
-                controls['contrast_max'].blockSignals(True)
-                controls['contrast_max'].setValue(int(actual_limits[1]))
-                controls['contrast_max_label'].setText(str(int(actual_limits[1])))
-                controls['contrast_max'].blockSignals(False)
-
-                logger.info(f"Synced Ch{ch_id} contrast sliders to napari: {actual_limits}")
+                logger.info(f"Synced Ch{ch_id} contrast range to napari: {actual_limits}")
 
     def _on_colormap_changed(self, channel_id: int, colormap: str):
         """Handle colormap change for a channel."""
@@ -1918,26 +1905,17 @@ class Sample3DVisualizationWindow(QWidget):
             self.channel_layers[channel_id].opacity = opacity
             logger.debug(f"Changed channel {channel_id} opacity to {opacity:.2f}")
 
-    def _on_contrast_changed(self, channel_id: int, value: int, limit_type: str, label: QLabel):
-        """Handle contrast limit changes."""
+    def _on_contrast_range_changed(self, channel_id: int, value: tuple, label: QLabel):
+        """Handle contrast range slider change (min and max together)."""
+        min_val, max_val = value
+
         # Update label
-        label.setText(str(value))
+        label.setText(f"{min_val} - {max_val}")
 
         # Update napari layer contrast limits
         if self.viewer and channel_id in self.channel_layers:
-            layer = self.channel_layers[channel_id]
-            current_limits = layer.contrast_limits
-
-            if limit_type == 'min':
-                new_limits = (value, current_limits[1])
-            else:  # 'max'
-                new_limits = (current_limits[0], value)
-
-            # Ensure min < max
-            if new_limits[0] < new_limits[1]:
-                layer.contrast_limits = new_limits
-            else:
-                logger.warning(f"Invalid contrast limits for channel {channel_id}: {new_limits}")
+            self.channel_layers[channel_id].contrast_limits = (min_val, max_val)
+            logger.debug(f"Channel {channel_id} contrast: {min_val} - {max_val}")
 
     def _on_display_settings_changed(self):
         """Handle display setting changes."""
