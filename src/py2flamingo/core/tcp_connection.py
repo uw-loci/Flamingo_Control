@@ -104,6 +104,11 @@ class TCPConnection:
                 self._live_socket.settimeout(None)  # Clear timeout after connection
                 self.logger.info("Connected to live imaging port")
 
+                # CRITICAL: Flush stale data from buffers
+                # Prevents first-command timeout caused by buffered responses
+                self._flush_receive_buffer(self._command_socket)
+                self._flush_receive_buffer(self._live_socket)
+
                 # Store connection info
                 self._ip = ip
                 self._port = port
@@ -116,6 +121,50 @@ class TCPConnection:
                 # Clean up partial connections
                 self._disconnect_unsafe()
                 raise
+
+    def _flush_receive_buffer(self, sock: socket.socket, timeout: float = 0.1) -> int:
+        """
+        Drain stale data from socket receive buffer.
+
+        Clears any accumulated responses from connection handshake or previous sessions.
+        Critical for preventing first-command timeout issues.
+
+        Args:
+            sock: Socket to flush
+            timeout: Short timeout for non-blocking reads (default: 0.1s)
+
+        Returns:
+            Number of bytes flushed
+        """
+        if sock is None:
+            return 0
+
+        flushed = 0
+        original_timeout = sock.gettimeout()
+
+        try:
+            sock.settimeout(timeout)
+
+            while True:
+                try:
+                    data = sock.recv(4096)
+                    if not data:
+                        break
+                    flushed += len(data)
+                    self.logger.debug(f"Flushed {len(data)} bytes from buffer")
+                except socket.timeout:
+                    break  # No more data waiting
+                except Exception as e:
+                    self.logger.warning(f"Error during buffer flush: {e}")
+                    break
+
+        finally:
+            sock.settimeout(original_timeout)
+
+        if flushed > 0:
+            self.logger.info(f"Flushed {flushed} stale bytes from receive buffer")
+
+        return flushed
 
     def disconnect(self) -> None:
         """
