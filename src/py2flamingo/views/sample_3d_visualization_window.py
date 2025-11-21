@@ -52,11 +52,12 @@ class Sample3DVisualizationWindow(QWidget):
     z_position_changed = pyqtSignal(float)
     channel_visibility_changed = pyqtSignal(int, bool)
 
-    def __init__(self, movement_controller=None, camera_controller=None, parent=None):
+    def __init__(self, movement_controller=None, camera_controller=None, laser_led_controller=None, parent=None):
         super().__init__(parent)
 
         self.movement_controller = movement_controller
         self.camera_controller = camera_controller
+        self.laser_led_controller = laser_led_controller
 
         # Load configuration
         self.config = self._load_config()
@@ -2220,8 +2221,12 @@ class Sample3DVisualizationWindow(QWidget):
             image, header = frame_data
 
             # Determine which channel this frame belongs to
-            # For now, assume channel 0 (TODO: detect from laser/LED controller)
-            channel_id = 0
+            channel_id = self._detect_active_channel()
+
+            # Skip if LED/brightfield (not appropriate for 3D fluorescence volume)
+            if channel_id is None:
+                logger.debug("LED/brightfield active - skipping 3D accumulation")
+                return
 
             # Process frame into 3D volume
             self._process_camera_frame_to_3d(image, header, channel_id, position)
@@ -2280,6 +2285,45 @@ class Sample3DVisualizationWindow(QWidget):
         )
 
         logger.info(f"Added frame to channel {channel_id}: {np.count_nonzero(intensity_values)} non-zero pixels")
+
+    def _detect_active_channel(self) -> Optional[int]:
+        """
+        Detect which fluorescence channel is currently active.
+
+        Returns:
+            Channel ID (0-3) for lasers, None for LED/brightfield
+        """
+        # Check if laser/LED controller is available
+        if not hasattr(self, 'laser_led_controller') or self.laser_led_controller is None:
+            logger.warning("No laser/LED controller - defaulting to channel 0")
+            return 0
+
+        try:
+            active_source = self.laser_led_controller.get_active_source()
+
+            if active_source is None:
+                logger.debug("No light source active")
+                return None
+
+            # Map laser to channel
+            if active_source == "laser_1":
+                return 0  # 405nm (DAPI)
+            elif active_source == "laser_2":
+                return 1  # 488nm (GFP)
+            elif active_source == "laser_3":
+                return 2  # 561nm (RFP)
+            elif active_source == "laser_4":
+                return 3  # 640nm (Far-Red)
+            elif active_source == "led":
+                # LED/brightfield - skip 3D accumulation
+                return None
+            else:
+                logger.warning(f"Unknown light source: {active_source}, defaulting to channel 0")
+                return 0
+
+        except Exception as e:
+            logger.error(f"Error detecting active channel: {e}")
+            return 0  # Fallback
 
     def _downsample_for_storage(self, image: np.ndarray) -> np.ndarray:
         """
