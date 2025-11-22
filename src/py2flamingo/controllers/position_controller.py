@@ -1107,24 +1107,17 @@ class PositionController:
 
         def wait_thread():
             try:
-                # Motion tracker should already be initialized in __init__
-                if self._motion_tracker is None:
-                    self.logger.error("Motion tracker not initialized - cannot wait for motion complete")
-                    self._movement_lock.release()
-                    return
+                # TEMPORARY FIX: Use delay-based wait instead of callback wait
+                # The callback-based motion tracker has socket contention issues where
+                # it consumes POSITION_GET responses, causing position queries to fail
+                # and return 0.0mm (dangerous!)
+                # TODO: Implement proper CallbackListener or socket locking
+                import time
+                self.logger.info("Waiting for motion complete (using delay-based approach)...")
+                time.sleep(0.5)  # 500ms delay for stage to complete movement
+                self.logger.debug("Motion delay complete - querying position from hardware")
 
-                # Wait for motion complete (blocks this thread, not GUI)
-                # allow_cancel=True enables replacement by new commands
-                # Reduced timeout from 30s to 5s - most movements complete in <2s
-                self.logger.info("Waiting for motion complete callback...")
-                completed = self._motion_tracker.wait_for_motion_complete(timeout=5.0, allow_cancel=True)
-
-                if completed:
-                    self.logger.info("Motion completed successfully")
-                else:
-                    self.logger.debug("Motion complete callback timeout - querying position directly")
-
-                # Always query position from hardware and update (regardless of callback receipt)
+                # Query position from hardware to verify movement completed
                 # Add old position to history before updating
                 if self._current_position is not None:
                     self._add_to_history(self._current_position)
