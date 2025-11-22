@@ -79,7 +79,7 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Initialize coordinate transformers (for rotation)
         # CRITICAL: Must use correct sample center from config for accurate rotation
-        sample_center_um = self.config['storage']['sample_region_center_um']
+        sample_center_um = self.config['sample_chamber']['sample_region_center_um']
         self.transformer = CoordinateTransformer(sample_center=sample_center_um)
 
         # Current state
