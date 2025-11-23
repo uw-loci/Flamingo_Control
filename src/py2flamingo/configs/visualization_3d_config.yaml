@@ -71,13 +71,13 @@ sample_chamber:
 
   # Sample region (where high-res data is stored)
   sample_region_radius_um: 3000  # Radius around center for high-res storage
-  sample_region_center_um: [6000, 6000, 18000]  # Default center position (updated for new dimensions)
+  sample_region_center_um: [6655, 15000, 19250]  # Center of stage ranges: X=(1.0+12.31)/2, Y=(5.0+25.0)/2, Z=(12.5+26.0)/2
 
 stage_control:
   # Physical stage ranges (in mm)
   # These define the chamber visualization bounds and stage movement limits
   x_range_mm: [1.0, 12.31]    # X axis: left-right
-  y_range_mm: [-5.0, 10.0]    # Y axis: chamber extent (15mm total, anchor at 0mm)
+  y_range_mm: [5.0, 25.0]     # Y axis: FIXED - must match actual stage limits (was [-5.0, 10.0])
   z_range_mm: [12.5, 26.0]    # Z axis: depth (toward objective)
 
   # Stage position limits (may differ from chamber bounds)
