@@ -70,7 +70,8 @@ sample_chamber:
   refractive_index: 1.52
 
   # Sample region (where high-res data is stored)
-  sample_region_radius_um: 3000  # Radius around center for high-res storage
+  # Radius must be large enough to cover entire working area where sample can be positioned
+  sample_region_radius_um: 8000  # Increased from 3000 - allows ±8mm from center (covers full stage range)
   sample_region_center_um: [6655, 15000, 19250]  # Center of stage ranges: X=(1.0+12.31)/2, Y=(5.0+25.0)/2, Z=(12.5+26.0)/2
 
 stage_control:
