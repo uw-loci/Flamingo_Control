@@ -669,4 +669,4 @@ class LaserLEDControlPanel(QWidget):
                 power = 5.0  # Default power
 
             self.logger.info(f"Restoring laser {source_id} illumination at {power}% on {self._laser_path} path")
-            self.laser_led_controller.enable_laser_preview(source_id, power, self._laser_path)
+            self.laser_led_controller.enable_laser_for_preview(source_id, power, self._laser_path)
