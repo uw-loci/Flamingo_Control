@@ -103,24 +103,15 @@ class DualResolutionVoxelStorage:
             self.display_dirty[ch] = False
 
     def world_to_storage_voxel(self, world_coords: np.ndarray) -> np.ndarray:
-        """Convert world coordinates (µm) to storage voxel indices."""
-        # Offset to sample region
-        offset_coords = world_coords - np.array(self.config.sample_region_center)
+        """
+        Convert world coordinates (µm) to storage voxel indices.
 
-        # Check if within sample region
-        distances = np.linalg.norm(offset_coords, axis=1 if world_coords.ndim > 1 else None)
-        within_region = distances <= self.config.sample_region_radius
-
-        # Convert to voxel indices
-        voxel_coords = offset_coords / np.array(self.config.storage_voxel_size)
-        voxel_coords += np.array(self.storage_dims) / 2  # Center in storage array
-        voxel_indices = np.round(voxel_coords).astype(int)
-
-        # Mark out-of-region voxels
-        if world_coords.ndim > 1:
-            voxel_indices[~within_region] = -1
-        elif not within_region:
-            voxel_indices[:] = -1
+        Accept all coordinates within the chamber bounds (no artificial sample region restriction).
+        Storage uses sparse arrays, so memory usage is proportional to actual data, not chamber size.
+        """
+        # Convert directly to voxel indices (no offset by sample region center)
+        # Storage array spans the entire chamber
+        voxel_indices = np.round(world_coords / np.array(self.config.storage_voxel_size)).astype(int)
 
         return voxel_indices
 
@@ -154,9 +145,9 @@ class DualResolutionVoxelStorage:
         )
 
         if not np.any(valid_mask):
-            # Log warning to help diagnose why voxels are being rejected
-            logger.warning(f"Channel {channel_id}: All {len(storage_voxels)} voxels rejected - outside sample region")
-            logger.warning(f"  Sample region: center={self.config.sample_region_center}, radius={self.config.sample_region_radius} µm")
+            # Log warning - voxels outside storage array bounds (should be rare)
+            logger.warning(f"Channel {channel_id}: All {len(storage_voxels)} voxels rejected - outside storage bounds")
+            logger.warning(f"  Storage dims: {self.storage_dims}")
             if len(world_coords) > 0:
                 logger.warning(f"  Rejected coords range: X=[{world_coords[:, 0].min():.1f}, {world_coords[:, 0].max():.1f}], "
                               f"Y=[{world_coords[:, 1].min():.1f}, {world_coords[:, 1].max():.1f}], "
