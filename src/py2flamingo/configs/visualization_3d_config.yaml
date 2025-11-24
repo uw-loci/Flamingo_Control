@@ -72,13 +72,14 @@ sample_chamber:
   # Sample region (where high-res data is stored)
   # Radius must be large enough to cover entire working area where sample can be positioned
   sample_region_radius_um: 8000  # Increased from 3000 - allows ±8mm from center (covers full stage range)
-  sample_region_center_um: [6655, 15000, 19250]  # Center of stage ranges: X=(1.0+12.31)/2, Y=(5.0+25.0)/2, Z=(12.5+26.0)/2
+  sample_region_center_um: [6655, 7000, 19250]  # Center of visualization: X=(1.0+12.31)/2, Y=objective=7mm, Z=(12.5+26.0)/2
 
 stage_control:
-  # Physical stage ranges (in mm)
-  # These define the chamber visualization bounds and stage movement limits
-  x_range_mm: [1.0, 12.31]    # X axis: left-right
-  y_range_mm: [5.0, 25.0]     # Y axis: FIXED - must match actual stage limits (was [-5.0, 10.0])
+  # Visualization chamber ranges (in mm) - defines what we display in napari
+  # These should be CENTERED on the objective focal plane, not the full stage range
+  # The chamber is a fixed container; we visualize the region around the objective
+  x_range_mm: [1.0, 12.31]    # X axis: left-right (full stage range, objective is centered)
+  y_range_mm: [0.0, 14.0]     # Y axis: chamber from 0mm (top) to 14mm (bottom), objective at 7mm (middle)
   z_range_mm: [12.5, 26.0]    # Z axis: depth (toward objective)
 
   # Stage position limits (may differ from chamber bounds)
