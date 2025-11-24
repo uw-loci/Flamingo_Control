@@ -97,8 +97,8 @@ class Sample3DVisualizationWindow(QWidget):
         self.test_sample_size_mm = 2.0  # 2mm cube of sample data
         self.test_sample_offset_mm = 0.5  # 0.5mm below extension tip
 
-        # Fine extension parameters
-        self.extension_length_mm = 4.95  # Extension reaches objective center at Y=7.45mm
+        # Fine extension parameters (simplified visualization - just show the thin part)
+        self.extension_length_mm = 10.0  # Extension extends 10mm upward from tip (will hit chamber top)
         self.extension_diameter_mm = 0.22  # Very fine extension (220 micrometers)
 
         # Stage-to-chamber coordinate reference point
@@ -1192,42 +1192,29 @@ class Sample3DVisualizationWindow(QWidget):
         logger.info(f"Initial napari position: X={napari_x}, Y_tip={napari_y_tip}, Y_base={napari_y_base}, Z={napari_z}")
         logger.info(f"Chamber dims (Z,Y,X): {dims}")
 
-        # Create holder points (THICK part)
-        # Holder extends from chamber top (Y=0) down to base position
-        holder_points = []
+        # Simplified: Show holder as just a single ball at chamber top
+        # This represents the mounting point without cluttering the visualization
+        holder_point = np.array([[napari_z, 0, napari_x]])  # Single point at top (Y=0)
 
-        y_top = 0  # Always start at chamber top
-        y_bottom = napari_y_base  # End at holder base (where thick meets thin)
+        logger.info(f"Created holder indicator at chamber top: (Z,Y,X) = ({napari_z}, 0, {napari_x})")
 
-        # Create vertical line of points
-        # Napari coordinates: (Z, Y, X) order!
-        for y in range(y_top, y_bottom + 1, 2):  # Sample every 2 voxels
-            # Points in (Z, Y, X) order
-            holder_points.append([napari_z, y, napari_x])
-
-        logger.info(f"Created {len(holder_points)} holder points (Y from {y_top} to {y_bottom})")
-        if holder_points:
-            logger.info(f"First point (Z,Y,X): {holder_points[0]}, Last point: {holder_points[-1]}")
-
-        if holder_points:
-            holder_array = np.array(holder_points)
-            self.viewer.add_points(
-                holder_array,
-                name='Sample Holder',
-                size=holder_radius_voxels * 2,  # Diameter for point size
-                face_color='gray',
-                border_color='darkgray',
-                border_width=0.05,
-                opacity=0.6,
-                shading='spherical'
-            )
+        self.viewer.add_points(
+            holder_point,
+            name='Sample Holder',
+            size=holder_radius_voxels * 2,  # Diameter for point size
+            face_color='gray',
+            border_color='darkgray',
+            border_width=0.05,
+            opacity=0.6,
+            shading='spherical'
+        )
 
     def _add_fine_extension(self):
         """
-        Add fine extension (thin probe) extending from holder base to tip.
+        Add fine extension (thin probe) showing sample position.
 
-        The extension is the thin part of the sample holder. It extends from
-        the holder base (where thick meets thin) down to the tip (where sample is attached).
+        The extension tip is at the imaging position (sample location).
+        Extension extends UPWARD from tip by 10mm (reaching toward chamber top).
         """
         if not self.viewer:
             return
@@ -1237,25 +1224,24 @@ class Sample3DVisualizationWindow(QWidget):
         extension_radius_voxels = int((self.extension_diameter_mm / 2) / voxel_size_mm)
         extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
 
-        # Get holder TIP position (stored in holder_position)
+        # Get extension TIP position (stored in holder_position)
         napari_x = self.holder_position['x']
-        napari_y_tip = self.holder_position['y']  # Extension tip (where sample is)
+        napari_y_tip = self.holder_position['y']  # Extension tip (where sample is attached)
         napari_z = self.holder_position['z']
 
-        # Calculate base position
-        # CRITICAL: Napari Y is INVERTED - larger napari Y = lower physical position
-        # Physically: base (2.05mm) is BELOW tip (7.0mm)
-        # In napari: base has LARGER Y than tip
-        napari_y_base = napari_y_tip + extension_length_voxels  # Base has LARGER Y (lower position)
+        # Extension extends UPWARD from tip by 10mm
+        # CRITICAL: Napari Y inverted - upward means DECREASING Y
+        # Tip at Y=140 (7mm chamber) → Top at Y=140-200 = -60 (above chamber, OK)
+        napari_y_top = napari_y_tip - extension_length_voxels  # Top is ABOVE tip (smaller Y)
 
         extension_points = []
 
-        y_start = napari_y_tip  # Start at tip (smaller Y, higher physically)
-        y_end = napari_y_base  # End at base (larger Y, lower physically)
+        # Extension goes from top (smaller Y) to tip (larger Y)
+        y_start = max(0, napari_y_top)  # Clamp to chamber top if needed
+        y_end = napari_y_tip  # End at tip
 
         # Create vertical line of points for extension
         # Napari coordinates: (Z, Y, X) order
-        # Note: Allow extension to go past display bounds - napari Points layer handles this gracefully
         for y in range(y_start, y_end + 1, 2):
             extension_points.append([napari_z, y, napari_x])
 
@@ -1266,11 +1252,11 @@ class Sample3DVisualizationWindow(QWidget):
             self.viewer.add_points(
                 extension_array,
                 name='Fine Extension',
-                size=max(2, extension_radius_voxels * 2),  # Diameter, minimum 2 for visibility
-                face_color='#E0E0E0',  # Light grey (off-white)
-                border_color='#C0C0C0',
-                border_width=0.05,
-                opacity=0.7,
+                size=4,  # Fixed size for visibility (was too small at 2 pixels)
+                face_color='#FFFF00',  # Bright yellow for high visibility
+                border_color='#FFA500',  # Orange border
+                border_width=0.1,
+                opacity=0.9,  # High opacity to be clearly visible
                 shading='spherical'
             )
 
@@ -1418,29 +1404,14 @@ class Sample3DVisualizationWindow(QWidget):
         }
 
         logger.info(f"Stage position: ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm")
-        logger.info(f"Chamber Y tip: {chamber_y_tip_mm:.2f} mm, base: {chamber_y_base_mm:.2f} mm")
-        logger.info(f"Napari Y tip: {napari_y_tip}, base: {napari_y_base}")
+        logger.info(f"Chamber Y tip: {chamber_y_tip_mm:.2f} mm")
+        logger.info(f"Napari Y tip: {napari_y_tip}")
 
-        # Regenerate holder points (THICK part)
-        # Holder extends from chamber top (napari Y=0) down to base position
-        holder_points = []
+        # Simplified: Holder shown as single ball at chamber top (just a reference point)
+        holder_point = np.array([[napari_z, 0, napari_x]])
+        self.viewer.layers['Sample Holder'].data = holder_point
 
-        # Thick holder goes from top to base (NOT to tip - that's the extension)
-        y_top = 0  # Always start at chamber top
-        y_bottom = napari_y_base  # End at holder base (where thick meets thin)
-
-        # Napari coordinates: (Z, Y, X) order!
-        for y in range(y_top, y_bottom + 1, 2):  # Sample every 2 voxels
-            holder_points.append([napari_z, y, napari_x])
-
-        logger.info(f"Regenerated {len(holder_points)} holder points (y_top={y_top}, y_bottom={y_bottom})")
-
-        # Update the layer data
-        if holder_points:
-            self.viewer.layers['Sample Holder'].data = np.array(holder_points)
-        else:
-            # If no points (holder at very top), show a minimal placeholder
-            self.viewer.layers['Sample Holder'].data = np.array([[napari_z, y_top, napari_x]])
+        logger.info(f"Updated holder position indicator at chamber top")
 
         # Update rotation indicator position (stays at top)
         self._update_rotation_indicator()
@@ -1450,32 +1421,30 @@ class Sample3DVisualizationWindow(QWidget):
 
     def _update_fine_extension(self):
         """
-        Update fine extension position to match sample holder.
+        Update fine extension position.
 
-        Extension is the THIN part that extends from holder base down to the tip.
-        The tip position is stored in self.holder_position['y'].
+        Extension shows where the sample is positioned. The tip is at the sample location,
+        and it extends upward 10mm (toward chamber top) for visibility.
         """
         if not self.viewer or 'Fine Extension' not in self.viewer.layers:
             return
 
-        # Get current holder position (this is the TIP position)
+        # Get current TIP position (where sample is)
         napari_x = self.holder_position['x']
         napari_y_tip = self.holder_position['y']  # Extension tip
         napari_z = self.holder_position['z']
 
-        # Calculate extension base (where thick holder ends)
-        # CRITICAL: Napari Y is INVERTED (larger napari Y = lower physical position)
-        # Physically: base (2.05mm) is BELOW tip (7.0mm)
-        # In napari: base has LARGER Y than tip
+        # Extension extends UPWARD from tip by 10mm
+        # Napari Y inverted: upward = DECREASING Y values
         voxel_size_mm = self.coord_mapper.voxel_size_mm
         extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
-        napari_y_base = napari_y_tip + extension_length_voxels  # Base has LARGER Y (lower physical position)
+        napari_y_top = napari_y_tip - extension_length_voxels  # Top is ABOVE tip (smaller Y)
 
-        # Extension extends from tip to base (increasing Y in napari)
         extension_points = []
 
-        y_start = napari_y_tip  # Start at tip (smaller Y, higher physically)
-        y_end = napari_y_base  # End at base (larger Y, lower physically)
+        # Extension from top (smaller Y) to tip (larger Y)
+        y_start = max(0, napari_y_top)  # Clamp to chamber top
+        y_end = napari_y_tip  # End at tip (sample position)
 
         # Create vertical line of points in (Z, Y, X) order
         for y in range(y_start, y_end + 1, 2):
