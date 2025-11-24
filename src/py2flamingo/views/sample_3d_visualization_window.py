@@ -2329,7 +2329,7 @@ class Sample3DVisualizationWindow(QWidget):
         logger.debug(f"  X: [{world_coords_3d[:, 0].min():.1f}, {world_coords_3d[:, 0].max():.1f}] µm")
         logger.debug(f"  Y: [{world_coords_3d[:, 1].min():.1f}, {world_coords_3d[:, 1].max():.1f}] µm")
         logger.debug(f"  Z: [{world_coords_3d[:, 2].min():.1f}, {world_coords_3d[:, 2].max():.1f}] µm")
-        logger.debug(f"Sample region: center={self.transformer.sample_center} µm, radius={self.voxel_storage.config.sample_region_radius} µm")
+        logger.debug(f"Sample region center: {self.transformer.sample_center} µm")
 
     def _detect_active_channel(self) -> Optional[int]:
         """
