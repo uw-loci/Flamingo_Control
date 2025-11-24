@@ -133,18 +133,48 @@ def validate_args(args: argparse.Namespace) -> bool:
 
 
 def setup_logging(level: str):
-    """Configure application logging.
+    """Configure application logging with both console and file output.
 
     Args:
         level: Logging level as string (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     """
+    from datetime import datetime
+    from pathlib import Path
+
     numeric_level = getattr(logging, level.upper(), None)
 
-    logging.basicConfig(
-        level=numeric_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    # Create logs directory
+    log_dir = Path(__file__).parent.parent.parent / "logs"
+    log_dir.mkdir(exist_ok=True)
+
+    # Create timestamped log filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = log_dir / f"flamingo_{timestamp}.log"
+
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(numeric_level)
+
+    # Format for log messages
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
+
+    # Console handler (existing behavior)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(numeric_level)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    # File handler (new - saves to logs/)
+    file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+    file_handler.setLevel(numeric_level)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
+    # Log the log file location
+    root_logger.info(f"Logging to file: {log_file}")
 
 
 def main(args: Optional[List[str]] = None) -> int:
