@@ -101,6 +101,11 @@ class Sample3DVisualizationWindow(QWidget):
         self.extension_length_mm = 4.95  # Extension reaches objective center at Y=7.45mm
         self.extension_diameter_mm = 0.22  # Very fine extension (220 micrometers)
 
+        # Stage-to-chamber coordinate reference point
+        # At stage Y=7.45mm, the extension tip is centered at the objective focal plane
+        self.STAGE_Y_AT_OBJECTIVE = 7.45  # mm - calibration reference
+        self.OBJECTIVE_CHAMBER_Y_MM = 7.0  # mm - objective focal plane in chamber coordinates
+
         # Cache previous sample data bounds for efficient clearing (dense array optimization)
         self.previous_sample_bounds = {}  # {ch_id: (z_start, z_end, y_start, y_end, x_start, x_end)}
 
@@ -1163,31 +1168,36 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Get INITIAL position from sliders
         x_mm = self.position_sliders['x_slider'].value() / 1000.0
-        y_mm = self.position_sliders['y_slider'].value() / 1000.0
+        stage_y_mm = self.position_sliders['y_slider'].value() / 1000.0
         z_mm = self.position_sliders['z_slider'].value() / 1000.0
 
-        # Convert to napari coordinates (returns X, Y, Z conceptually)
-        napari_x, napari_y, napari_z = self.coord_mapper.physical_to_napari(x_mm, y_mm, z_mm)
+        # Convert stage Y to chamber Y (where extension tip is)
+        chamber_y_tip_mm = self._stage_y_to_chamber_y(stage_y_mm)
+        chamber_y_base_mm = chamber_y_tip_mm - self.extension_length_mm
 
-        # Store holder position
+        # Convert to napari coordinates
+        napari_x, _, napari_z = self.coord_mapper.physical_to_napari(x_mm, 0, z_mm)
+        _, napari_y_tip, _ = self.coord_mapper.physical_to_napari(0, chamber_y_tip_mm, 0)
+        _, napari_y_base, _ = self.coord_mapper.physical_to_napari(0, chamber_y_base_mm, 0)
+
+        # Store holder TIP position (what matters for data attachment)
         self.holder_position = {
             'x': napari_x,
-            'y': napari_y,
+            'y': napari_y_tip,
             'z': napari_z
         }
 
-        logger.info(f"Initial physical position: ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm")
-        logger.info(f"Initial holder position (voxels): X={napari_x}, Y={napari_y}, Z={napari_z}")
+        logger.info(f"Initial stage position: ({x_mm:.2f}, {stage_y_mm:.2f}, {z_mm:.2f}) mm")
+        logger.info(f"Initial chamber Y: tip={chamber_y_tip_mm:.2f}mm, base={chamber_y_base_mm:.2f}mm")
+        logger.info(f"Initial napari position: X={napari_x}, Y_tip={napari_y_tip}, Y_base={napari_y_base}, Z={napari_z}")
         logger.info(f"Chamber dims (Z,Y,X): {dims}")
 
-        # Create holder points
-        # Holder extends from current Y position to top (Y=0 in napari coords)
-        # Allow holder to extend ABOVE chamber (negative Y) when stage is at high Y positions
+        # Create holder points (THICK part)
+        # Holder extends from chamber top (Y=0) down to base position
         holder_points = []
 
-        # Allow holder to extend past chamber bounds
-        y_top = min(0, napari_y)  # Top can be negative if holder is above chamber
-        y_bottom = napari_y  # Always end at holder position
+        y_top = 0  # Always start at chamber top
+        y_bottom = napari_y_base  # End at holder base (where thick meets thin)
 
         # Create vertical line of points
         # Napari coordinates: (Z, Y, X) order!
@@ -1213,7 +1223,12 @@ class Sample3DVisualizationWindow(QWidget):
             )
 
     def _add_fine_extension(self):
-        """Add fine extension (thin probe) extending from sample holder tip."""
+        """
+        Add fine extension (thin probe) extending from holder base to tip.
+
+        The extension is the thin part of the sample holder. It extends from
+        the holder base (where thick meets thin) down to the tip (where sample is attached).
+        """
         if not self.viewer:
             return
 
@@ -1222,17 +1237,18 @@ class Sample3DVisualizationWindow(QWidget):
         extension_radius_voxels = int((self.extension_diameter_mm / 2) / voxel_size_mm)
         extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
 
-        # Get holder position
+        # Get holder TIP position (stored in holder_position)
         napari_x = self.holder_position['x']
-        napari_y = self.holder_position['y']  # Holder tip
+        napari_y_tip = self.holder_position['y']  # Extension tip (where sample is)
         napari_z = self.holder_position['z']
 
-        # Extension extends DOWN from holder tip (increasing Y in napari coords)
-        # At Y=7.45mm stage, extension tip should reach Y=2.5mm chamber (objective center)
+        # Calculate base position (extension extends from base DOWN to tip)
+        napari_y_base = napari_y_tip - extension_length_voxels  # Base is ABOVE tip
+
         extension_points = []
 
-        y_start = napari_y  # Start at holder tip
-        y_end = napari_y + extension_length_voxels  # Extend downward
+        y_start = napari_y_base  # Start at base (where it connects to thick holder)
+        y_end = napari_y_tip  # End at tip (where sample is attached)
 
         # Create vertical line of points for extension
         # Napari coordinates: (Z, Y, X) order
@@ -1346,38 +1362,69 @@ class Sample3DVisualizationWindow(QWidget):
 
         logger.info(f"Added rotation indicator at Y=0 (top), following holder at Z={holder_z}, X={holder_x}")
 
+    def _stage_y_to_chamber_y(self, stage_y_mm: float) -> float:
+        """
+        Convert stage Y position to chamber Y coordinate.
+
+        The stage Y is a control parameter. Chamber Y is the actual position
+        in the visualization chamber. Reference: at stage Y=7.45mm, the extension
+        tip is at the objective focal plane (Y=7.0mm in chamber coordinates).
+
+        Args:
+            stage_y_mm: Stage Y position in mm
+
+        Returns:
+            Chamber Y position in mm where the extension tip is located
+        """
+        # Tip position in chamber = objective position + offset from reference
+        chamber_y_tip = self.OBJECTIVE_CHAMBER_Y_MM + (stage_y_mm - self.STAGE_Y_AT_OBJECTIVE)
+        return chamber_y_tip
+
     def _update_sample_holder_position(self, x_mm: float, y_mm: float, z_mm: float):
         """
         Update sample holder position when stage moves.
 
+        The stage Y position controls where the sample holder is positioned.
+        At stage Y=7.45mm, the extension tip is at the objective (Y=7mm chamber coords).
+
         Args:
-            x_mm, y_mm, z_mm: Physical stage coordinates in mm
+            x_mm, y_mm, z_mm: Physical stage coordinates in mm (y_mm is stage control value)
         """
         if not self.viewer or 'Sample Holder' not in self.viewer.layers:
             return
 
-        # Convert physical mm to napari pixel coordinates
-        napari_x, napari_y, napari_z = self.coord_mapper.physical_to_napari(x_mm, y_mm, z_mm)
+        # Convert stage Y to chamber Y (where extension tip actually is)
+        chamber_y_tip_mm = self._stage_y_to_chamber_y(y_mm)
 
-        # Update holder position
+        # Holder base is above the tip by the extension length
+        chamber_y_base_mm = chamber_y_tip_mm - self.extension_length_mm
+
+        # Convert chamber coordinates to napari
+        # For X and Z, use stage values directly (they are absolute positions)
+        napari_x, _, napari_z = self.coord_mapper.physical_to_napari(x_mm, 0, z_mm)
+
+        # For Y, convert the holder base position
+        _, napari_y_base, _ = self.coord_mapper.physical_to_napari(0, chamber_y_base_mm, 0)
+        _, napari_y_tip, _ = self.coord_mapper.physical_to_napari(0, chamber_y_tip_mm, 0)
+
+        # Update holder position (store the TIP position, which is what matters)
         self.holder_position = {
             'x': napari_x,
-            'y': napari_y,
+            'y': napari_y_tip,  # Use tip position, not base
             'z': napari_z
         }
 
-        logger.info(f"Physical position: ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm")
-        logger.info(f"Napari position: ({napari_x}, {napari_y}, {napari_z}) pixels")
+        logger.info(f"Stage position: ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm")
+        logger.info(f"Chamber Y tip: {chamber_y_tip_mm:.2f} mm, base: {chamber_y_base_mm:.2f} mm")
+        logger.info(f"Napari Y tip: {napari_y_tip}, base: {napari_y_base}")
 
-        # Regenerate holder points
-        # Holder extends from current Y position (napari_y) to top (Y=0)
-        # Note: Y=0 is top, Y increases downward in napari coords (inverted from physical)
-        # Allow holder to extend ABOVE chamber (negative Y) when stage is at high Y positions
+        # Regenerate holder points (THICK part)
+        # Holder extends from chamber top (napari Y=0) down to base position
         holder_points = []
 
-        # Allow holder to extend past chamber bounds
-        y_top = min(0, napari_y)  # Top can be negative if holder is above chamber
-        y_bottom = napari_y  # Always end at holder position
+        # Thick holder goes from top to base (NOT to tip - that's the extension)
+        y_top = 0  # Always start at chamber top
+        y_bottom = napari_y_base  # End at holder base (where thick meets thin)
 
         # Napari coordinates: (Z, Y, X) order!
         for y in range(y_top, y_bottom + 1, 2):  # Sample every 2 voxels
@@ -1399,28 +1446,33 @@ class Sample3DVisualizationWindow(QWidget):
         self._update_fine_extension()
 
     def _update_fine_extension(self):
-        """Update fine extension position to match sample holder."""
+        """
+        Update fine extension position to match sample holder.
+
+        Extension is the THIN part that extends from holder base down to the tip.
+        The tip position is stored in self.holder_position['y'].
+        """
         if not self.viewer or 'Fine Extension' not in self.viewer.layers:
             return
 
-        # Extension dimensions
-        voxel_size_mm = self.coord_mapper.voxel_size_mm
-        extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
-
-        # Get holder position (in napari coords)
+        # Get current holder position (this is the TIP position)
         napari_x = self.holder_position['x']
-        napari_y = self.holder_position['y']  # Holder tip
+        napari_y_tip = self.holder_position['y']  # Extension tip
         napari_z = self.holder_position['z']
 
-        # Extension extends DOWN from holder tip
+        # Calculate extension base (where thick holder ends)
+        voxel_size_mm = self.coord_mapper.voxel_size_mm
+        extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
+        napari_y_base = napari_y_tip - extension_length_voxels  # Base is ABOVE tip (smaller Y in napari)
+
+        # Extension extends from base DOWN to tip
         extension_points = []
 
-        y_start = napari_y
-        y_end = napari_y + extension_length_voxels
+        y_start = napari_y_base  # Start at base (where it connects to thick holder)
+        y_end = napari_y_tip  # End at tip (where sample is attached)
 
         # Create vertical line of points in (Z, Y, X) order
-        # Allow extension to go past display bounds (napari handles gracefully)
-        for y in range(y_start, y_end, 2):
+        for y in range(y_start, y_end + 1, 2):
             extension_points.append([napari_z, y, napari_x])
 
         # Update the layer
@@ -2251,17 +2303,22 @@ class Sample3DVisualizationWindow(QWidget):
         self.transformer.set_rotation(rx=0, ry=position.r, rz=0)
 
         # Transform 2D camera coords + stage position to 3D world coords
-        # CRITICAL: Must include ALL stage coordinates (X, Y, Z) not just Z
-        # The camera images a plane at the stage position
-        # Camera X,Y offsets are relative to that stage position
-        stage_x_um = position.x * 1000  # Convert mm to micrometers
-        stage_y_um = position.y * 1000
+        # CRITICAL: Must convert stage Y to chamber Y using the calibration reference
+        # Stage Y is a control parameter; chamber Y is the actual position in the visualization
+        # The imaging data is attached to the sample (at extension tip), so it moves with the holder
+
+        stage_x_um = position.x * 1000  # X and Z are absolute positions in mm, convert to µm
         stage_z_um = position.z * 1000
 
-        # Create 3D coords by combining camera offsets with stage position
+        # Convert stage Y to chamber Y (where the extension tip actually is)
+        chamber_y_tip_mm = self._stage_y_to_chamber_y(position.y)
+        chamber_y_um = chamber_y_tip_mm * 1000  # Convert to µm
+
+        # Create 3D coords by combining camera offsets with chamber position
+        # Data is attached to the sample at the extension tip, so use chamber Y (not stage Y)
         coords_3d = np.column_stack([
             camera_coords_2d[:, 0] + stage_x_um,  # Camera X offset + stage X
-            camera_coords_2d[:, 1] + stage_y_um,  # Camera Y offset + stage Y
+            camera_coords_2d[:, 1] + chamber_y_um,  # Camera Y offset + CHAMBER Y (converted from stage Y)
             np.full(len(camera_coords_2d), stage_z_um)  # Stage Z (depth)
         ])
 
@@ -2290,12 +2347,12 @@ class Sample3DVisualizationWindow(QWidget):
         logger.info(f"Added frame to channel {channel_id}: {np.count_nonzero(intensity_values)} non-zero pixels")
 
         # Diagnostic: Log world coordinate ranges and rotation for debugging
-        logger.debug(f"Stage position: X={position.x:.2f}mm, Y={position.y:.2f}mm, Z={position.z:.2f}mm, R={position.r:.1f}°")
+        logger.debug(f"Stage position: X={position.x:.2f}mm, Y={position.y:.2f}mm (chamber Y={chamber_y_tip_mm:.2f}mm), Z={position.z:.2f}mm, R={position.r:.1f}°")
         logger.debug(f"World coordinate ranges after rotation:")
         logger.debug(f"  X: [{world_coords_3d[:, 0].min():.1f}, {world_coords_3d[:, 0].max():.1f}] µm")
         logger.debug(f"  Y: [{world_coords_3d[:, 1].min():.1f}, {world_coords_3d[:, 1].max():.1f}] µm")
         logger.debug(f"  Z: [{world_coords_3d[:, 2].min():.1f}, {world_coords_3d[:, 2].max():.1f}] µm")
-        logger.debug(f"Rotation center: {self.transformer.sample_center} µm")
+        logger.debug(f"Sample region: center={self.transformer.sample_center} µm, radius={self.voxel_storage.config.sample_region_radius} µm")
 
     def _detect_active_channel(self) -> Optional[int]:
         """
