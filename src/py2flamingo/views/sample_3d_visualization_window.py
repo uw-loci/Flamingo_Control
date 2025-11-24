@@ -238,7 +238,9 @@ class Sample3DVisualizationWindow(QWidget):
         storage_config = DualResolutionConfig(
             storage_voxel_size=tuple(self.config['storage']['voxel_size_um']),
             display_voxel_size=tuple(self.config['display']['voxel_size_um']),
-            chamber_dimensions=chamber_dims_um
+            chamber_dimensions=chamber_dims_um,
+            sample_region_center=tuple(self.config['sample_chamber']['sample_region_center_um']),
+            sample_region_radius=self.config['sample_chamber']['sample_region_radius_um']
         )
 
         self.voxel_storage = DualResolutionVoxelStorage(storage_config)
