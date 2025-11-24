@@ -106,12 +106,21 @@ class DualResolutionVoxelStorage:
         """
         Convert world coordinates (µm) to storage voxel indices.
 
-        Accept all coordinates within the chamber bounds (no artificial sample region restriction).
+        Storage array is centered at sample_region_center, covering a region
+        of ±sample_region_radius in all directions.
         Storage uses sparse arrays, so memory usage is proportional to actual data, not chamber size.
         """
-        # Convert directly to voxel indices (no offset by sample region center)
-        # Storage array spans the entire chamber
-        voxel_indices = np.round(world_coords / np.array(self.config.storage_voxel_size)).astype(int)
+        # Calculate storage origin in world coordinates
+        # Storage array is centered at sample_region_center
+        storage_origin_world = (
+            np.array(self.config.sample_region_center) -
+            np.array(self.storage_dims) * np.array(self.config.storage_voxel_size) / 2
+        )
+
+        # Convert world coords to voxel indices relative to storage origin
+        voxel_indices = np.round(
+            (world_coords - storage_origin_world) / np.array(self.config.storage_voxel_size)
+        ).astype(int)
 
         return voxel_indices
 
