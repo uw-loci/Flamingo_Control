@@ -110,16 +110,20 @@ class DualResolutionVoxelStorage:
         of ±sample_region_radius in all directions.
         Storage uses sparse arrays, so memory usage is proportional to actual data, not chamber size.
         """
+        # Validate input
+        if world_coords.size == 0:
+            return np.array([], dtype=int).reshape(0, 3)
+
         # Calculate storage origin in world coordinates
         # Storage array is centered at sample_region_center
         storage_origin_world = (
-            np.array(self.config.sample_region_center) -
-            np.array(self.storage_dims) * np.array(self.config.storage_voxel_size) / 2
+            np.array(self.config.sample_region_center, dtype=np.float64) -
+            np.array(self.storage_dims, dtype=np.float64) * np.array(self.config.storage_voxel_size, dtype=np.float64) / 2
         )
 
         # Convert world coords to voxel indices relative to storage origin
         voxel_indices = np.round(
-            (world_coords - storage_origin_world) / np.array(self.config.storage_voxel_size)
+            (world_coords - storage_origin_world) / np.array(self.config.storage_voxel_size, dtype=np.float64)
         ).astype(int)
 
         return voxel_indices
