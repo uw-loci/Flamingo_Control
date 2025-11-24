@@ -170,10 +170,21 @@ class DualResolutionVoxelStorage:
         for voxel_idx, value in zip(valid_voxels, valid_values):
             x, y, z = tuple(voxel_idx)
 
-            # Get existing data
-            old_value = self.storage_data[channel_id].get((x, y, z), 0)
-            old_time = self.storage_timestamps[channel_id].get((x, y, z), 0)
-            old_conf = self.storage_confidence[channel_id].get((x, y, z), 0)
+            # Get existing data (sparse.DOK doesn't have .get(), use try/except)
+            try:
+                old_value = self.storage_data[channel_id][x, y, z]
+            except (KeyError, IndexError):
+                old_value = 0
+
+            try:
+                old_time = self.storage_timestamps[channel_id][x, y, z]
+            except (KeyError, IndexError):
+                old_time = 0
+
+            try:
+                old_conf = self.storage_confidence[channel_id][x, y, z]
+            except (KeyError, IndexError):
+                old_conf = 0
 
             # Apply update strategy
             new_value = self._apply_update_strategy(
