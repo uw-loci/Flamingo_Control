@@ -1242,18 +1242,21 @@ class Sample3DVisualizationWindow(QWidget):
         napari_y_tip = self.holder_position['y']  # Extension tip (where sample is)
         napari_z = self.holder_position['z']
 
-        # Calculate base position (extension extends from base DOWN to tip)
-        napari_y_base = napari_y_tip - extension_length_voxels  # Base is ABOVE tip
+        # Calculate base position
+        # CRITICAL: Napari Y is INVERTED - larger napari Y = lower physical position
+        # Physically: base (2.05mm) is BELOW tip (7.0mm)
+        # In napari: base has LARGER Y than tip
+        napari_y_base = napari_y_tip + extension_length_voxels  # Base has LARGER Y (lower position)
 
         extension_points = []
 
-        y_start = napari_y_base  # Start at base (where it connects to thick holder)
-        y_end = napari_y_tip  # End at tip (where sample is attached)
+        y_start = napari_y_tip  # Start at tip (smaller Y, higher physically)
+        y_end = napari_y_base  # End at base (larger Y, lower physically)
 
         # Create vertical line of points for extension
         # Napari coordinates: (Z, Y, X) order
         # Note: Allow extension to go past display bounds - napari Points layer handles this gracefully
-        for y in range(y_start, y_end, 2):
+        for y in range(y_start, y_end + 1, 2):
             extension_points.append([napari_z, y, napari_x])
 
         logger.info(f"Created {len(extension_points)} extension points (Y from {y_start} to {y_end}, unclamped)")
@@ -1461,15 +1464,18 @@ class Sample3DVisualizationWindow(QWidget):
         napari_z = self.holder_position['z']
 
         # Calculate extension base (where thick holder ends)
+        # CRITICAL: Napari Y is INVERTED (larger napari Y = lower physical position)
+        # Physically: base (2.05mm) is BELOW tip (7.0mm)
+        # In napari: base has LARGER Y than tip
         voxel_size_mm = self.coord_mapper.voxel_size_mm
         extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
-        napari_y_base = napari_y_tip - extension_length_voxels  # Base is ABOVE tip (smaller Y in napari)
+        napari_y_base = napari_y_tip + extension_length_voxels  # Base has LARGER Y (lower physical position)
 
-        # Extension extends from base DOWN to tip
+        # Extension extends from tip to base (increasing Y in napari)
         extension_points = []
 
-        y_start = napari_y_base  # Start at base (where it connects to thick holder)
-        y_end = napari_y_tip  # End at tip (where sample is attached)
+        y_start = napari_y_tip  # Start at tip (smaller Y, higher physically)
+        y_end = napari_y_base  # End at base (larger Y, lower physically)
 
         # Create vertical line of points in (Z, Y, X) order
         for y in range(y_start, y_end + 1, 2):
