@@ -64,11 +64,11 @@ class DualResolutionVoxelStorage:
     def __init__(self, config: Optional[DualResolutionConfig] = None):
         self.config = config or DualResolutionConfig()
 
-        # High-resolution storage (sparse for memory efficiency)
+        # High-resolution storage (sparse for memory efficiency using dictionaries)
         self.storage_dims = self.config.storage_dimensions
-        self.storage_data: Dict[int, sparse.DOK] = {}  # Channel -> sparse array
-        self.storage_timestamps: Dict[int, sparse.DOK] = {}
-        self.storage_confidence: Dict[int, sparse.DOK] = {}
+        self.storage_data: Dict[int, Dict] = {}  # Channel -> dict of (x,y,z) -> value
+        self.storage_timestamps: Dict[int, Dict] = {}  # Channel -> dict of (x,y,z) -> timestamp
+        self.storage_confidence: Dict[int, Dict] = {}  # Channel -> dict of (x,y,z) -> confidence
 
         # Low-resolution display cache
         self.display_dims = self.config.display_dimensions
@@ -93,10 +93,11 @@ class DualResolutionVoxelStorage:
     def _initialize_storage(self):
         """Initialize storage arrays for all channels."""
         for ch in range(self.num_channels):
-            # High-res sparse storage
-            self.storage_data[ch] = sparse.DOK(self.storage_dims, dtype=np.uint16)
-            self.storage_timestamps[ch] = sparse.DOK(self.storage_dims, dtype=np.float32)
-            self.storage_confidence[ch] = sparse.DOK(self.storage_dims, dtype=np.uint8)
+            # High-res sparse storage using Python dictionaries (faster than sparse.DOK and no Numba compilation)
+            # Dictionary keys are (x, y, z) tuples, values are the data
+            self.storage_data[ch] = {}
+            self.storage_timestamps[ch] = {}
+            self.storage_confidence[ch] = {}
 
             # Low-res display cache (dense for napari)
             self.display_cache[ch] = np.zeros(self.display_dims, dtype=np.uint16)
@@ -171,24 +172,18 @@ class DualResolutionVoxelStorage:
         valid_values = pixel_values[valid_mask]
 
         # Update storage with appropriate strategy
+        # Using Python dictionaries for sparse storage (faster than sparse.DOK)
+        data_dict = self.storage_data[channel_id]
+        time_dict = self.storage_timestamps[channel_id]
+        conf_dict = self.storage_confidence[channel_id]
+
         for voxel_idx, value in zip(valid_voxels, valid_values):
-            x, y, z = tuple(voxel_idx)
+            key = tuple(voxel_idx)  # (x, y, z) tuple as dictionary key
 
-            # Get existing data (sparse.DOK doesn't have .get(), use try/except)
-            try:
-                old_value = self.storage_data[channel_id][x, y, z]
-            except (KeyError, IndexError):
-                old_value = 0
-
-            try:
-                old_time = self.storage_timestamps[channel_id][x, y, z]
-            except (KeyError, IndexError):
-                old_time = 0
-
-            try:
-                old_conf = self.storage_confidence[channel_id][x, y, z]
-            except (KeyError, IndexError):
-                old_conf = 0
+            # Get existing data (dictionary .get() is fast)
+            old_value = data_dict.get(key, 0)
+            old_time = time_dict.get(key, 0)
+            old_conf = conf_dict.get(key, 0)
 
             # Apply update strategy
             new_value = self._apply_update_strategy(
@@ -196,9 +191,9 @@ class DualResolutionVoxelStorage:
             )
 
             # Store updated values
-            self.storage_data[channel_id][x, y, z] = new_value
-            self.storage_timestamps[channel_id][x, y, z] = timestamp
-            self.storage_confidence[channel_id][x, y, z] = min(255, old_conf + 1)
+            data_dict[key] = new_value
+            time_dict[key] = timestamp
+            conf_dict[key] = min(255, old_conf + 1)
 
         # Update data bounds
         self._update_bounds(world_coords[valid_mask])
@@ -384,10 +379,11 @@ class DualResolutionVoxelStorage:
 
     def get_memory_usage(self) -> Dict[str, float]:
         """Report memory usage statistics."""
+        # Calculate storage bytes from dictionary sizes
         storage_bytes = sum(
-            self.storage_data[ch].nnz * 2 +  # uint16, nnz = number of non-zero elements
-            self.storage_timestamps[ch].nnz * 4 +  # float32
-            self.storage_confidence[ch].nnz  # uint8
+            len(self.storage_data[ch]) * 2 +  # uint16, number of occupied voxels
+            len(self.storage_timestamps[ch]) * 4 +  # float32
+            len(self.storage_confidence[ch])  # uint8
             for ch in range(self.num_channels)
         )
 
@@ -400,6 +396,6 @@ class DualResolutionVoxelStorage:
             'storage_mb': storage_bytes / (1024 * 1024),
             'display_mb': display_bytes / (1024 * 1024),
             'total_mb': (storage_bytes + display_bytes) / (1024 * 1024),
-            'storage_voxels': sum(self.storage_data[ch].nnz for ch in range(self.num_channels)),
+            'storage_voxels': sum(len(self.storage_data[ch]) for ch in range(self.num_channels)),
             'display_voxels': np.prod(self.display_dims) * self.num_channels
         }
