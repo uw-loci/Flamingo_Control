@@ -84,7 +84,7 @@ stage_control:
 
   # Stage position limits (may differ from chamber bounds)
   y_stage_min_mm: 5.0         # Minimum stage position (collision prevention)
-  y_stage_max_mm: 15.0        # Maximum stage position (can leave chamber)
+  y_stage_max_mm: 25.0        # Maximum stage position (can leave chamber)
 
   # Default positions (mm) - starting position for visualization
   x_default_mm: 6.655         # Center of X range
