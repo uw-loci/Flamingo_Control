@@ -2326,6 +2326,10 @@ class Sample3DVisualizationWindow(QWidget):
             chamber_y_tip_mm = self._stage_y_to_chamber_y(position.y)
             chamber_y_um = chamber_y_tip_mm * 1000  # Convert to µm
 
+            logger.info(f"Stage position (mm): X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}")
+            logger.info(f"Chamber Y tip (mm): {chamber_y_tip_mm:.2f}")
+            logger.info(f"World position center (µm): X={stage_x_um:.1f}, Y={chamber_y_um:.1f}, Z={stage_z_um:.1f}")
+
             # Create 3D coords by combining camera offsets with chamber position
             # Data is attached to the sample at the extension tip, so use chamber Y (not stage Y)
             logger.debug("Process 3D: Creating 3D coordinate array")

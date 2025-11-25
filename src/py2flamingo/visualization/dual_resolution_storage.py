@@ -163,10 +163,15 @@ class DualResolutionVoxelStorage:
             # Log warning - voxels outside storage array bounds (should be rare)
             logger.warning(f"Channel {channel_id}: All {len(storage_voxels)} voxels rejected - outside storage bounds")
             logger.warning(f"  Storage dims: {self.storage_dims}")
+            logger.warning(f"  Sample region center: {self.config.sample_region_center} µm")
+            logger.warning(f"  Sample region radius: {self.config.sample_region_radius} µm")
             if len(world_coords) > 0:
-                logger.warning(f"  Rejected coords range: X=[{world_coords[:, 0].min():.1f}, {world_coords[:, 0].max():.1f}], "
+                logger.warning(f"  Rejected world coords range: X=[{world_coords[:, 0].min():.1f}, {world_coords[:, 0].max():.1f}], "
                               f"Y=[{world_coords[:, 1].min():.1f}, {world_coords[:, 1].max():.1f}], "
                               f"Z=[{world_coords[:, 2].min():.1f}, {world_coords[:, 2].max():.1f}] µm")
+                logger.warning(f"  Rejected storage voxel range: X=[{storage_voxels[:, 0].min()}, {storage_voxels[:, 0].max()}], "
+                              f"Y=[{storage_voxels[:, 1].min()}, {storage_voxels[:, 1].max()}], "
+                              f"Z=[{storage_voxels[:, 2].min()}, {storage_voxels[:, 2].max()}]")
             return  # No valid voxels to update
 
         valid_voxels = storage_voxels[valid_mask]
@@ -317,8 +322,19 @@ class DualResolutionVoxelStorage:
         # Check if valid region has positive size in all dimensions
         if np.any(valid_end <= valid_start):
             logger.warning(f"Channel {channel_id}: Downsampled region outside display bounds, skipping copy")
-            logger.debug(f"  Display origin: {display_origin}, shape: {downsampled.shape}")
-            logger.debug(f"  Display dims: {self.display_dims}")
+            logger.warning(f"  Attempted to place data at:")
+            logger.warning(f"    Display voxel origin: {display_origin} (Z={display_origin[0]}, Y={display_origin[1]}, X={display_origin[2]})")
+            logger.warning(f"    Display voxel end: {display_end} (Z={display_end[0]}, Y={display_end[1]}, X={display_end[2]})")
+            logger.warning(f"  But display dimensions are: {self.display_dims} (Z={self.display_dims[0]}, Y={self.display_dims[1]}, X={self.display_dims[2]})")
+            logger.warning(f"  World coordinates of region:")
+            # Convert display voxels back to world coords for debugging
+            world_origin = np.array(display_origin) * np.array(self.config.display_voxel_size) + np.array(self.config.chamber_origin)
+            world_end = np.array(display_end) * np.array(self.config.display_voxel_size) + np.array(self.config.chamber_origin)
+            logger.warning(f"    World origin: {world_origin/1000} mm (Z={world_origin[0]/1000:.2f}, Y={world_origin[1]/1000:.2f}, X={world_origin[2]/1000:.2f})")
+            logger.warning(f"    World end: {world_end/1000} mm (Z={world_end[0]/1000:.2f}, Y={world_end[1]/1000:.2f}, X={world_end[2]/1000:.2f})")
+            logger.warning(f"  Chamber bounds (mm): Z=[{self.config.chamber_origin[0]/1000:.1f}, {(self.config.chamber_origin[0] + self.config.chamber_dimensions[0])/1000:.1f}], "
+                          f"Y=[{self.config.chamber_origin[1]/1000:.1f}, {(self.config.chamber_origin[1] + self.config.chamber_dimensions[1])/1000:.1f}], "
+                          f"X=[{self.config.chamber_origin[2]/1000:.1f}, {(self.config.chamber_origin[2] + self.config.chamber_dimensions[2])/1000:.1f}]")
             self.display_dirty[channel_id] = False
             return self.display_cache[channel_id]
 
