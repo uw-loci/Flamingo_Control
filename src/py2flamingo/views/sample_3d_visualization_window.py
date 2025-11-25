@@ -2002,6 +2002,13 @@ class Sample3DVisualizationWindow(QWidget):
                 # Get display volume
                 volume = self.voxel_storage.get_display_volume(ch_id)
 
+                # Debug: Log if we have any data
+                non_zero = np.count_nonzero(volume)
+                if non_zero > 0:
+                    logger.info(f"Visualization update: Channel {ch_id} has {non_zero} non-zero voxels in display")
+                    logger.debug(f"  Display volume shape: {volume.shape}, dtype: {volume.dtype}")
+                    logger.debug(f"  Value range: [{volume.min()}, {volume.max()}]")
+
                 # Update layer data
                 self.channel_layers[ch_id].data = volume
 

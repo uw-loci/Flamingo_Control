@@ -256,6 +256,8 @@ class DualResolutionVoxelStorage:
             self.display_dirty[channel_id] = False
             return self.display_cache[channel_id]
 
+        logger.debug(f"Downsampling channel {channel_id}: {len(storage_sparse)} voxels in storage")
+
         # Create temporary dense storage array (only for occupied region)
         # This is more memory efficient than densifying the entire storage
         occupied_coords = np.array(list(storage_sparse.keys()))
