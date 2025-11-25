@@ -116,6 +116,27 @@ class StageService(MicroscopeCommandService):
                 # SCommand structure: [start(4) + cmd(4) + status(4) + params(28) + doubleData(8) + ...]
                 position = struct.unpack('<d', raw_response[40:48])[0]
 
+                # Check for 0.000 response which indicates microscope is still processing
+                if position == 0.0 and axis in [1, 2, 3]:  # X, Y, Z should never be exactly 0.0
+                    self.logger.warning(
+                        f"{axis_name}-axis returned 0.000 - microscope may still be processing. "
+                        f"This often occurs when querying position immediately after a move command."
+                    )
+                    # Try one retry after a short delay
+                    import time
+                    time.sleep(0.2)  # 200ms delay
+                    retry_result = self._query_command(
+                        StageCommandCode.POSITION_GET,
+                        f"STAGE_POSITION_GET_{axis_name}_RETRY",
+                        params=[0, 0, 0, axis, 0, 0, 0x80000000],
+                        value=0.0
+                    )
+                    if retry_result and retry_result.get('success') and len(retry_result.get('raw_response', b'')) >= 48:
+                        position = struct.unpack('<d', retry_result['raw_response'][40:48])[0]
+                        if position != 0.0:
+                            self.logger.info(f"{axis_name}-axis position (retry successful): {position} mm")
+                            return float(position)
+
                 # CRITICAL SAFETY CHECK: Validate position is within hardware limits
                 # This prevents accepting corrupted/invalid responses that could damage hardware
                 valid_ranges = {

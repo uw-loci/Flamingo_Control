@@ -2318,25 +2318,47 @@ class Sample3DVisualizationWindow(QWidget):
             # Stage Y is a control parameter; chamber Y is the actual position in the visualization
             # The imaging data is attached to the sample (at extension tip), so it moves with the holder
 
-            logger.debug("Process 3D: Converting stage coords to world coords")
-            stage_x_um = position.x * 1000  # X and Z are absolute positions in mm, convert to µm
-            stage_z_um = position.z * 1000
+            logger.debug("Process 3D: Converting stage coords to napari world coords")
 
-            # Convert stage Y to chamber Y (where the extension tip actually is)
-            chamber_y_tip_mm = self._stage_y_to_chamber_y(position.y)
-            chamber_y_um = chamber_y_tip_mm * 1000  # Convert to µm
+            # The objective is FIXED at the center of the napari visualization
+            # When stage is at X=7.08, Y=7.45, Z=17.06, the sample tip is at the objective
+            # This is our reference point for coordinate transformation
+
+            # Reference stage position where tip is at objective focal plane
+            STAGE_X_AT_FOCUS = 7.08  # mm
+            STAGE_Y_AT_FOCUS = 7.45  # mm
+            STAGE_Z_AT_FOCUS = 17.06  # mm
+
+            # The objective center in napari world coordinates (µm)
+            # This should be roughly in the middle of the visualization
+            objective_center_um = np.array([
+                (self.config['stage_control']['x_range_mm'][0] + self.config['stage_control']['x_range_mm'][1]) / 2 * 1000,
+                (self.config['stage_control']['y_range_mm'][0] + self.config['stage_control']['y_range_mm'][1]) / 2 * 1000,
+                (self.config['stage_control']['z_range_mm'][0] + self.config['stage_control']['z_range_mm'][1]) / 2 * 1000
+            ])
+
+            # Calculate offset from the focus reference position
+            stage_offset_mm = np.array([
+                position.x - STAGE_X_AT_FOCUS,
+                position.y - STAGE_Y_AT_FOCUS,
+                position.z - STAGE_Z_AT_FOCUS
+            ])
+
+            # Convert offset to µm and add to objective center
+            # Note: When stage moves +X, the sample moves +X in napari
+            world_center_um = objective_center_um + stage_offset_mm * 1000
 
             logger.info(f"Stage position (mm): X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}")
-            logger.info(f"Chamber Y tip (mm): {chamber_y_tip_mm:.2f}")
-            logger.info(f"World position center (µm): X={stage_x_um:.1f}, Y={chamber_y_um:.1f}, Z={stage_z_um:.1f}")
+            logger.info(f"Stage offset from focus (mm): X={stage_offset_mm[0]:.2f}, Y={stage_offset_mm[1]:.2f}, Z={stage_offset_mm[2]:.2f}")
+            logger.info(f"Objective center (µm): X={objective_center_um[0]:.1f}, Y={objective_center_um[1]:.1f}, Z={objective_center_um[2]:.1f}")
+            logger.info(f"Data placement center (µm): X={world_center_um[0]:.1f}, Y={world_center_um[1]:.1f}, Z={world_center_um[2]:.1f}")
 
-            # Create 3D coords by combining camera offsets with chamber position
-            # Data is attached to the sample at the extension tip, so use chamber Y (not stage Y)
+            # Create 3D coords by combining camera offsets with world position
             logger.debug("Process 3D: Creating 3D coordinate array")
             coords_3d = np.column_stack([
-                camera_coords_2d[:, 0] + stage_x_um,  # Camera X offset + stage X
-                camera_coords_2d[:, 1] + chamber_y_um,  # Camera Y offset + CHAMBER Y (converted from stage Y)
-                np.full(len(camera_coords_2d), stage_z_um)  # Stage Z (depth)
+                camera_coords_2d[:, 0] + world_center_um[0],  # Camera X offset + world X
+                camera_coords_2d[:, 1] + world_center_um[1],  # Camera Y offset + world Y
+                np.full(len(camera_coords_2d), world_center_um[2])  # World Z (depth)
             ])
 
             # Apply rotation around sample center

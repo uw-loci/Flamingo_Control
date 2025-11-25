@@ -72,7 +72,9 @@ sample_chamber:
   # Sample region (where high-res data is stored)
   # Radius must be large enough to cover entire working area where sample can be positioned
   sample_region_radius_um: 8000  # Increased from 3000 - allows ±8mm from center (covers full stage range)
-  sample_region_center_um: [6655, 7000, 19250]  # Center of visualization: X=(1.0+12.31)/2, Y=objective=7mm, Z=(12.5+26.0)/2
+  # The sample region center should be at the objective center (middle of visualization)
+  # This is calculated as the center of the stage_control ranges below
+  sample_region_center_um: [6655, 7000, 19250]  # Center of chamber: X=(1.0+12.31)/2, Y=(0+14)/2, Z=(12.5+26)/2 mm
 
 stage_control:
   # Visualization chamber ranges (in mm) - defines what we display in napari
