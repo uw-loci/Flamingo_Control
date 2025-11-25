@@ -295,6 +295,11 @@ class DualResolutionVoxelStorage:
         # Convert to display voxel coords
         display_origin = self.world_to_display_voxel(region_origin_world)
 
+        logger.debug(f"  Downsampled shape: {downsampled.shape}")
+        logger.debug(f"  Region origin (world): {region_origin_world}")
+        logger.debug(f"  Display origin (voxel): {display_origin}")
+        logger.debug(f"  Display dims: {self.display_dims}")
+
         # Clear display cache
         self.display_cache[channel_id].fill(0)
 
@@ -305,9 +310,18 @@ class DualResolutionVoxelStorage:
         valid_start = np.maximum(0, display_origin)
         valid_end = np.minimum(self.display_dims, display_end)
 
+        logger.debug(f"  Display end: {display_end}")
+        logger.debug(f"  Valid start: {valid_start}")
+        logger.debug(f"  Valid end: {valid_end}")
+
         # Calculate source region
         src_start = valid_start - display_origin
         src_end = src_start + (valid_end - valid_start)
+
+        logger.debug(f"  Source start: {src_start}")
+        logger.debug(f"  Source end: {src_end}")
+        logger.debug(f"  Dest shape: {valid_end - valid_start}")
+        logger.debug(f"  Source shape: {src_end - src_start}")
 
         # Copy to display cache
         self.display_cache[channel_id][
