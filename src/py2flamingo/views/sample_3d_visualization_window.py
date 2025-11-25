@@ -2329,29 +2329,25 @@ class Sample3DVisualizationWindow(QWidget):
             STAGE_Y_AT_FOCUS = 7.45  # mm
             STAGE_Z_AT_FOCUS = 17.06  # mm
 
-            # The objective center in napari world coordinates (µm)
-            # This should be roughly in the middle of the visualization
-            objective_center_um = np.array([
-                (self.config['stage_control']['x_range_mm'][0] + self.config['stage_control']['x_range_mm'][1]) / 2 * 1000,
-                (self.config['stage_control']['y_range_mm'][0] + self.config['stage_control']['y_range_mm'][1]) / 2 * 1000,
-                (self.config['stage_control']['z_range_mm'][0] + self.config['stage_control']['z_range_mm'][1]) / 2 * 1000
-            ])
+            # The objective is FIXED in the chamber at a specific location
+            # It doesn't move with the stage Y position
+            # The objective sees a fixed plane in space
+            objective_x_mm = (self.config['stage_control']['x_range_mm'][0] + self.config['stage_control']['x_range_mm'][1]) / 2
+            objective_y_mm = 7.0  # FIXED at 7mm in chamber (middle of Y range)
+            objective_z_mm = (self.config['stage_control']['z_range_mm'][0] + self.config['stage_control']['z_range_mm'][1]) / 2
 
-            # Calculate offset from the focus reference position
-            stage_offset_mm = np.array([
-                position.x - STAGE_X_AT_FOCUS,
-                position.y - STAGE_Y_AT_FOCUS,
-                position.z - STAGE_Z_AT_FOCUS
+            # The data appears where the objective sees it, adjusted for stage X and Z movement
+            # Stage Y doesn't affect where data appears (it affects what sample is in view)
+            world_center_um = np.array([
+                (objective_x_mm + (position.x - STAGE_X_AT_FOCUS)) * 1000,  # X moves with stage
+                objective_y_mm * 1000,  # Y is FIXED at objective position (7mm)
+                (objective_z_mm + (position.z - STAGE_Z_AT_FOCUS)) * 1000   # Z moves with stage
             ])
-
-            # Convert offset to µm and add to objective center
-            # Note: When stage moves +X, the sample moves +X in napari
-            world_center_um = objective_center_um + stage_offset_mm * 1000
 
             logger.info(f"Stage position (mm): X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}")
-            logger.info(f"Stage offset from focus (mm): X={stage_offset_mm[0]:.2f}, Y={stage_offset_mm[1]:.2f}, Z={stage_offset_mm[2]:.2f}")
-            logger.info(f"Objective center (µm): X={objective_center_um[0]:.1f}, Y={objective_center_um[1]:.1f}, Z={objective_center_um[2]:.1f}")
+            logger.info(f"Objective fixed at (mm): X={objective_x_mm:.2f}, Y={objective_y_mm:.2f}, Z={objective_z_mm:.2f}")
             logger.info(f"Data placement center (µm): X={world_center_um[0]:.1f}, Y={world_center_um[1]:.1f}, Z={world_center_um[2]:.1f}")
+            logger.info(f"Note: Y is FIXED at objective (7mm), stage Y={position.y:.2f}mm affects which part of sample is in view")
 
             # For 3D visualization, we need to place the 2D camera image as a thin slice
             # The imaging plane has some depth (depth of field ~1.9mm in Z)
