@@ -22,8 +22,9 @@ class DualResolutionConfig:
     # Display resolution (low-res)
     display_voxel_size: Tuple[float, float, float] = (15, 15, 15)  # micrometers
 
-    # Chamber dimensions in micrometers
+    # Chamber dimensions and origin in micrometers
     chamber_dimensions: Tuple[float, float, float] = (10000, 10000, 43000)
+    chamber_origin: Tuple[float, float, float] = (0, 0, 0)  # World coordinate where chamber starts
 
     # Sample region for high-res storage
     sample_region_center: Tuple[float, float, float] = (5000, 5000, 21500)
@@ -131,8 +132,8 @@ class DualResolutionVoxelStorage:
 
     def world_to_display_voxel(self, world_coords: np.ndarray) -> np.ndarray:
         """Convert world coordinates (µm) to display voxel indices."""
-        # Direct conversion for display (covers entire chamber)
-        voxel_coords = world_coords / np.array(self.config.display_voxel_size)
+        # Display starts at chamber_origin in world coordinates
+        voxel_coords = (world_coords - np.array(self.config.chamber_origin)) / np.array(self.config.display_voxel_size)
         return np.round(voxel_coords).astype(int)
 
     def update_storage(self, channel_id: int, world_coords: np.ndarray,

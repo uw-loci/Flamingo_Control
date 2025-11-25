@@ -235,10 +235,19 @@ class Sample3DVisualizationWindow(QWidget):
             napari_dims[2] * voxel_size_um   # X width (Axis 2)
         )
 
+        # Calculate chamber origin in world coordinates (Z, Y, X order in µm)
+        # Origin is the minimum corner of the chamber in world space
+        chamber_origin_um = (
+            self.config['stage_control']['z_range_mm'][0] * 1000,  # Z min
+            self.config['stage_control']['y_range_mm'][0] * 1000,  # Y min
+            self.config['stage_control']['x_range_mm'][0] * 1000   # X min
+        )
+
         storage_config = DualResolutionConfig(
             storage_voxel_size=tuple(self.config['storage']['voxel_size_um']),
             display_voxel_size=tuple(self.config['display']['voxel_size_um']),
             chamber_dimensions=chamber_dims_um,
+            chamber_origin=chamber_origin_um,
             sample_region_center=tuple(self.config['sample_chamber']['sample_region_center_um']),
             sample_region_radius=self.config['sample_chamber']['sample_region_radius_um']
         )
