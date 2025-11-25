@@ -314,9 +314,20 @@ class DualResolutionVoxelStorage:
         logger.debug(f"  Valid start: {valid_start}")
         logger.debug(f"  Valid end: {valid_end}")
 
+        # Check if valid region has positive size in all dimensions
+        if np.any(valid_end <= valid_start):
+            logger.warning(f"Channel {channel_id}: Downsampled region outside display bounds, skipping copy")
+            logger.debug(f"  Display origin: {display_origin}, shape: {downsampled.shape}")
+            logger.debug(f"  Display dims: {self.display_dims}")
+            self.display_dirty[channel_id] = False
+            return self.display_cache[channel_id]
+
         # Calculate source region
-        src_start = valid_start - display_origin
+        src_start = np.maximum(0, valid_start - display_origin)
         src_end = src_start + (valid_end - valid_start)
+
+        # Ensure source indices are within downsampled bounds
+        src_end = np.minimum(src_end, downsampled.shape)
 
         logger.debug(f"  Source start: {src_start}")
         logger.debug(f"  Source end: {src_end}")
