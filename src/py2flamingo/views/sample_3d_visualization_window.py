@@ -2215,25 +2215,35 @@ class Sample3DVisualizationWindow(QWidget):
             return
 
         try:
+            logger.debug("Populate tick: Starting frame capture")
+
             # Get current stage position
             if not self.movement_controller:
                 logger.warning("No movement controller - cannot get position")
                 return
 
+            logger.debug("Populate tick: Getting position")
             position = self.movement_controller.get_position()
             if position is None:
                 logger.warning("Position unavailable - skipping frame")
                 return
 
+            logger.debug(f"Populate tick: Position acquired - {position}")
+
             # Get latest camera frame
+            logger.debug("Populate tick: Getting latest frame")
             frame_data = self.camera_controller.get_latest_frame()
             if frame_data is None:
                 logger.debug("No new frame available")
                 return
 
+            logger.debug("Populate tick: Frame acquired")
             image, header = frame_data
 
+            logger.debug(f"Populate tick: Frame shape={image.shape}, dtype={image.dtype}")
+
             # Determine which channel this frame belongs to
+            logger.debug("Populate tick: Detecting active channel")
             channel_id = self._detect_active_channel()
 
             # Skip if LED/brightfield (not appropriate for 3D fluorescence volume)
@@ -2241,13 +2251,15 @@ class Sample3DVisualizationWindow(QWidget):
                 logger.debug("LED/brightfield active - skipping 3D accumulation")
                 return
 
+            logger.debug(f"Populate tick: Processing frame for channel {channel_id}")
+
             # Process frame into 3D volume
             self._process_camera_frame_to_3d(image, header, channel_id, position)
 
-            logger.debug(f"Captured frame at position X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}, R={position.r:.1f}°")
+            logger.debug(f"Populate tick: Frame processed successfully at X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}, R={position.r:.1f}°")
 
         except Exception as e:
-            logger.error(f"Error capturing frame: {e}")
+            logger.error(f"Error capturing frame: {e}", exc_info=True)
 
     def _process_camera_frame_to_3d(self, image: np.ndarray, header, channel_id: int, position):
         """
@@ -2259,76 +2271,91 @@ class Sample3DVisualizationWindow(QWidget):
             channel_id: Which channel (0-3)
             position: Position object with x, y, z, r
         """
-        # Downsample camera image to storage resolution
-        downsampled = self._downsample_for_storage(image)
+        try:
+            logger.debug("Process 3D: Starting downsample")
+            # Downsample camera image to storage resolution
+            downsampled = self._downsample_for_storage(image)
 
-        H, W = downsampled.shape
-        logger.debug(f"Downsampled frame from {image.shape} to {downsampled.shape}")
+            H, W = downsampled.shape
+            logger.debug(f"Process 3D: Downsampled from {image.shape} to {downsampled.shape}")
 
-        # Generate pixel coordinate grid
-        y_indices, x_indices = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
+            # Generate pixel coordinate grid
+            logger.debug("Process 3D: Creating coordinate grid")
+            y_indices, x_indices = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
 
-        # Convert to camera space (micrometers), centered at (0, 0)
-        storage_voxel_size_um = self.config['storage']['voxel_size_um'][0]
-        camera_x = (x_indices - W/2) * storage_voxel_size_um
-        camera_y = (y_indices - H/2) * storage_voxel_size_um
+            # Convert to camera space (micrometers), centered at (0, 0)
+            logger.debug("Process 3D: Converting to camera space")
+            storage_voxel_size_um = self.config['storage']['voxel_size_um'][0]
+            camera_x = (x_indices - W/2) * storage_voxel_size_um
+            camera_y = (y_indices - H/2) * storage_voxel_size_um
 
-        # Stack into (N, 2) array for transformation
-        camera_coords_2d = np.column_stack([camera_x.ravel(), camera_y.ravel()])
+            # Stack into (N, 2) array for transformation
+            logger.debug("Process 3D: Stacking coordinates")
+            camera_coords_2d = np.column_stack([camera_x.ravel(), camera_y.ravel()])
 
-        # Set rotation for transformation
-        self.transformer.set_rotation(rx=0, ry=position.r, rz=0)
+            # Set rotation for transformation
+            logger.debug(f"Process 3D: Setting rotation (ry={position.r})")
+            self.transformer.set_rotation(rx=0, ry=position.r, rz=0)
 
-        # Transform 2D camera coords + stage position to 3D world coords
-        # CRITICAL: Must convert stage Y to chamber Y using the calibration reference
-        # Stage Y is a control parameter; chamber Y is the actual position in the visualization
-        # The imaging data is attached to the sample (at extension tip), so it moves with the holder
+            # Transform 2D camera coords + stage position to 3D world coords
+            # CRITICAL: Must convert stage Y to chamber Y using the calibration reference
+            # Stage Y is a control parameter; chamber Y is the actual position in the visualization
+            # The imaging data is attached to the sample (at extension tip), so it moves with the holder
 
-        stage_x_um = position.x * 1000  # X and Z are absolute positions in mm, convert to µm
-        stage_z_um = position.z * 1000
+            logger.debug("Process 3D: Converting stage coords to world coords")
+            stage_x_um = position.x * 1000  # X and Z are absolute positions in mm, convert to µm
+            stage_z_um = position.z * 1000
 
-        # Convert stage Y to chamber Y (where the extension tip actually is)
-        chamber_y_tip_mm = self._stage_y_to_chamber_y(position.y)
-        chamber_y_um = chamber_y_tip_mm * 1000  # Convert to µm
+            # Convert stage Y to chamber Y (where the extension tip actually is)
+            chamber_y_tip_mm = self._stage_y_to_chamber_y(position.y)
+            chamber_y_um = chamber_y_tip_mm * 1000  # Convert to µm
 
-        # Create 3D coords by combining camera offsets with chamber position
-        # Data is attached to the sample at the extension tip, so use chamber Y (not stage Y)
-        coords_3d = np.column_stack([
-            camera_coords_2d[:, 0] + stage_x_um,  # Camera X offset + stage X
-            camera_coords_2d[:, 1] + chamber_y_um,  # Camera Y offset + CHAMBER Y (converted from stage Y)
-            np.full(len(camera_coords_2d), stage_z_um)  # Stage Z (depth)
-        ])
+            # Create 3D coords by combining camera offsets with chamber position
+            # Data is attached to the sample at the extension tip, so use chamber Y (not stage Y)
+            logger.debug("Process 3D: Creating 3D coordinate array")
+            coords_3d = np.column_stack([
+                camera_coords_2d[:, 0] + stage_x_um,  # Camera X offset + stage X
+                camera_coords_2d[:, 1] + chamber_y_um,  # Camera Y offset + CHAMBER Y (converted from stage Y)
+                np.full(len(camera_coords_2d), stage_z_um)  # Stage Z (depth)
+            ])
 
-        # Apply rotation around sample center
-        # Center coordinates around rotation center
-        centered = coords_3d - self.transformer.sample_center
+            # Apply rotation around sample center
+            # Center coordinates around rotation center
+            logger.debug("Process 3D: Applying rotation")
+            centered = coords_3d - self.transformer.sample_center
 
-        # Apply rotation matrix
-        rotated = centered @ self.transformer.rotation_matrix.T
+            # Apply rotation matrix
+            rotated = centered @ self.transformer.rotation_matrix.T
 
-        # Translate back to world coordinates
-        world_coords_3d = rotated + self.transformer.sample_center
+            # Translate back to world coordinates
+            world_coords_3d = rotated + self.transformer.sample_center
 
-        # Extract intensity values
-        intensity_values = downsampled.ravel()
+            # Extract intensity values
+            logger.debug("Process 3D: Extracting intensity values")
+            intensity_values = downsampled.ravel()
 
-        # Update voxel storage with transformed coordinates
-        self.voxel_storage.update_storage(
-            channel_id=channel_id,
-            world_coords=world_coords_3d,
-            pixel_values=intensity_values,  # Correct parameter name
-            timestamp=header.timestamp_ms if hasattr(header, 'timestamp_ms') else 0,
-            update_mode='maximum'  # Maximum intensity projection for fluorescence
-        )
+            # Update voxel storage with transformed coordinates
+            logger.debug(f"Process 3D: Updating voxel storage for channel {channel_id}")
+            self.voxel_storage.update_storage(
+                channel_id=channel_id,
+                world_coords=world_coords_3d,
+                pixel_values=intensity_values,  # Correct parameter name
+                timestamp=header.timestamp_ms if hasattr(header, 'timestamp_ms') else 0,
+                update_mode='maximum'  # Maximum intensity projection for fluorescence
+            )
 
-        logger.info(f"Added frame to channel {channel_id}: {np.count_nonzero(intensity_values)} non-zero pixels")
+            logger.info(f"Added frame to channel {channel_id}: {np.count_nonzero(intensity_values)} non-zero pixels")
 
-        # Diagnostic: Log world coordinate ranges and rotation for debugging
-        logger.debug(f"Stage position: X={position.x:.2f}mm, Y={position.y:.2f}mm (chamber Y={chamber_y_tip_mm:.2f}mm), Z={position.z:.2f}mm, R={position.r:.1f}°")
-        logger.debug(f"World coordinate ranges after rotation:")
-        logger.debug(f"  X: [{world_coords_3d[:, 0].min():.1f}, {world_coords_3d[:, 0].max():.1f}] µm")
-        logger.debug(f"  Y: [{world_coords_3d[:, 1].min():.1f}, {world_coords_3d[:, 1].max():.1f}] µm")
-        logger.debug(f"  Z: [{world_coords_3d[:, 2].min():.1f}, {world_coords_3d[:, 2].max():.1f}] µm")
+            # Diagnostic: Log world coordinate ranges and rotation for debugging
+            logger.debug(f"Stage position: X={position.x:.2f}mm, Y={position.y:.2f}mm (chamber Y={chamber_y_tip_mm:.2f}mm), Z={position.z:.2f}mm, R={position.r:.1f}°")
+            logger.debug(f"World coordinate ranges after rotation:")
+            logger.debug(f"  X: [{world_coords_3d[:, 0].min():.1f}, {world_coords_3d[:, 0].max():.1f}] µm")
+            logger.debug(f"  Y: [{world_coords_3d[:, 1].min():.1f}, {world_coords_3d[:, 1].max():.1f}] µm")
+            logger.debug(f"  Z: [{world_coords_3d[:, 2].min():.1f}, {world_coords_3d[:, 2].max():.1f}] µm")
+
+        except Exception as e:
+            logger.error(f"Error in _process_camera_frame_to_3d: {e}", exc_info=True)
+            raise
         logger.debug(f"Sample region center: {self.transformer.sample_center} µm")
 
     def _detect_active_channel(self) -> Optional[int]:
