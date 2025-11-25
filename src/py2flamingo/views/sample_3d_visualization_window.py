@@ -2353,24 +2353,24 @@ class Sample3DVisualizationWindow(QWidget):
             logger.info(f"Objective center (µm): X={objective_center_um[0]:.1f}, Y={objective_center_um[1]:.1f}, Z={objective_center_um[2]:.1f}")
             logger.info(f"Data placement center (µm): X={world_center_um[0]:.1f}, Y={world_center_um[1]:.1f}, Z={world_center_um[2]:.1f}")
 
-            # Create 3D coords by combining camera offsets with world position
-            logger.debug("Process 3D: Creating 3D coordinate array")
-            coords_3d = np.column_stack([
-                camera_coords_2d[:, 0] + world_center_um[0],  # Camera X offset + world X
-                camera_coords_2d[:, 1] + world_center_um[1],  # Camera Y offset + world Y
-                np.full(len(camera_coords_2d), world_center_um[2])  # World Z (depth)
+            # Create 3D coords for camera offsets (relative to imaging plane center)
+            logger.debug("Process 3D: Creating 3D coordinate array for camera offsets")
+            camera_offsets_3d = np.column_stack([
+                camera_coords_2d[:, 0],  # Camera X offset
+                camera_coords_2d[:, 1],  # Camera Y offset
+                np.zeros(len(camera_coords_2d))  # Z=0 at focal plane
             ])
 
-            # Apply rotation around sample center
-            # Center coordinates around rotation center
-            logger.debug("Process 3D: Applying rotation")
-            centered = coords_3d - self.transformer.sample_center
+            # Apply rotation to camera offsets (rotation is around the sample holder axis)
+            # This rotates the image data relative to the sample holder orientation
+            logger.debug("Process 3D: Applying rotation to camera offsets")
 
-            # Apply rotation matrix
-            rotated = centered @ self.transformer.rotation_matrix.T
+            # Apply rotation matrix to the camera offsets
+            rotated_offsets = camera_offsets_3d @ self.transformer.rotation_matrix.T
 
-            # Translate back to world coordinates
-            world_coords_3d = rotated + self.transformer.sample_center
+            # Now add the rotated offsets to the world position
+            # This places the rotated image at the current stage location
+            world_coords_3d = rotated_offsets + world_center_um
 
             # Extract intensity values
             logger.debug("Process 3D: Extracting intensity values")
@@ -2389,7 +2389,7 @@ class Sample3DVisualizationWindow(QWidget):
             logger.info(f"Added frame to channel {channel_id}: {np.count_nonzero(intensity_values)} non-zero pixels")
 
             # Diagnostic: Log world coordinate ranges and rotation for debugging
-            logger.debug(f"Stage position: X={position.x:.2f}mm, Y={position.y:.2f}mm (chamber Y={chamber_y_tip_mm:.2f}mm), Z={position.z:.2f}mm, R={position.r:.1f}°")
+            logger.debug(f"Stage position: X={position.x:.2f}mm, Y={position.y:.2f}mm, Z={position.z:.2f}mm, R={position.r:.1f}°")
             logger.debug(f"World coordinate ranges after rotation:")
             logger.debug(f"  X: [{world_coords_3d[:, 0].min():.1f}, {world_coords_3d[:, 0].max():.1f}] µm")
             logger.debug(f"  Y: [{world_coords_3d[:, 1].min():.1f}, {world_coords_3d[:, 1].max():.1f}] µm")
