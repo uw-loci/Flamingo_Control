@@ -2353,24 +2353,37 @@ class Sample3DVisualizationWindow(QWidget):
             logger.info(f"Objective center (µm): X={objective_center_um[0]:.1f}, Y={objective_center_um[1]:.1f}, Z={objective_center_um[2]:.1f}")
             logger.info(f"Data placement center (µm): X={world_center_um[0]:.1f}, Y={world_center_um[1]:.1f}, Z={world_center_um[2]:.1f}")
 
+            # For 3D visualization, we need to place the 2D camera image as a thin slice
+            # The imaging plane has some depth (depth of field ~1.9mm in Z)
+            # We'll represent this as a thin slab centered at the focal plane
+
             # Create 3D coords for camera offsets (relative to imaging plane center)
             logger.debug("Process 3D: Creating 3D coordinate array for camera offsets")
+
+            # The camera captures a 2D image at the focal plane
+            # We need to give it some thickness for visualization (e.g., 100µm)
+            slice_thickness_um = 100  # Thickness of the imaged slice
+
+            # Create a grid of Z values to give the slice some thickness
+            num_pixels = len(camera_coords_2d)
+            z_offsets = np.linspace(-slice_thickness_um/2, slice_thickness_um/2, num_pixels)
+
             camera_offsets_3d = np.column_stack([
                 camera_coords_2d[:, 0],  # Camera X offset
                 camera_coords_2d[:, 1],  # Camera Y offset
-                np.zeros(len(camera_coords_2d))  # Z=0 at focal plane
+                z_offsets  # Small Z variation for slice thickness
             ])
 
-            # Apply rotation to camera offsets (rotation is around the sample holder axis)
-            # This rotates the image data relative to the sample holder orientation
-            logger.debug("Process 3D: Applying rotation to camera offsets")
+            # For R-axis rotation: The sample holder rotates, but the imaging plane stays fixed
+            # The rotation affects how the sample appears in the image, not where the image is placed
+            # Therefore, we should NOT rotate the placement coordinates
 
-            # Apply rotation matrix to the camera offsets
-            rotated_offsets = camera_offsets_3d @ self.transformer.rotation_matrix.T
+            logger.debug(f"Process 3D: R-axis rotation = {position.r}° (sample holder orientation)")
+            logger.info(f"Note: R-axis rotation affects sample appearance, not image placement in 3D space")
 
-            # Now add the rotated offsets to the world position
-            # This places the rotated image at the current stage location
-            world_coords_3d = rotated_offsets + world_center_um
+            # The world coordinates are simply the camera offsets plus the stage position
+            # No rotation is applied to the placement (the objective/camera don't rotate)
+            world_coords_3d = camera_offsets_3d + world_center_um
 
             # Extract intensity values
             logger.debug("Process 3D: Extracting intensity values")
