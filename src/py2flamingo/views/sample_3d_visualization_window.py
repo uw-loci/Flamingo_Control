@@ -2301,9 +2301,21 @@ class Sample3DVisualizationWindow(QWidget):
 
             # Convert to camera space (micrometers), centered at (0, 0)
             logger.debug("Process 3D: Converting to camera space")
-            storage_voxel_size_um = self.config['storage']['voxel_size_um'][0]
-            camera_x = (x_indices - W/2) * storage_voxel_size_um
-            camera_y = (y_indices - H/2) * storage_voxel_size_um
+
+            # Calculate actual FOV from magnification
+            # FOV was calculated as 0.5182mm for 25.69× magnification
+            # This should ideally come from camera_controller or configuration
+            FOV_mm = 0.5182  # mm (field of view width/height)
+            FOV_um = FOV_mm * 1000  # Convert to micrometers
+
+            # Scale camera pixels to physical coordinates based on FOV
+            # The camera image spans the full FOV
+            pixel_size_um = FOV_um / W  # Micrometers per camera pixel
+
+            camera_x = (x_indices - W/2) * pixel_size_um
+            camera_y = (y_indices - H/2) * pixel_size_um
+
+            logger.info(f"FOV: {FOV_mm:.3f}mm = {FOV_um:.1f}µm, Pixel size: {pixel_size_um:.3f}µm/pixel")
 
             # Stack into (N, 2) array for transformation
             logger.debug("Process 3D: Stacking coordinates")
@@ -2330,24 +2342,24 @@ class Sample3DVisualizationWindow(QWidget):
             STAGE_Z_AT_FOCUS = 17.06  # mm
 
             # The objective is FIXED in the chamber at a specific location
-            # It doesn't move with the stage Y position
-            # The objective sees a fixed plane in space
+            # Data ALWAYS appears at the objective location, regardless of stage position
             objective_x_mm = (self.config['stage_control']['x_range_mm'][0] + self.config['stage_control']['x_range_mm'][1]) / 2
             objective_y_mm = 7.0  # FIXED at 7mm in chamber (middle of Y range)
             objective_z_mm = (self.config['stage_control']['z_range_mm'][0] + self.config['stage_control']['z_range_mm'][1]) / 2
 
-            # The data appears where the objective sees it, adjusted for stage X and Z movement
-            # Stage Y doesn't affect where data appears (it affects what sample is in view)
+            # NEW DATA ALWAYS APPEARS AT THE OBJECTIVE LOCATION
+            # The entire accumulated voxel block will move with the stage (handled elsewhere)
+            # But new data is always placed at the fixed objective position
             world_center_um = np.array([
-                (objective_x_mm + (position.x - STAGE_X_AT_FOCUS)) * 1000,  # X moves with stage
-                objective_y_mm * 1000,  # Y is FIXED at objective position (7mm)
-                (objective_z_mm + (position.z - STAGE_Z_AT_FOCUS)) * 1000   # Z moves with stage
+                objective_x_mm * 1000,  # FIXED X at objective
+                objective_y_mm * 1000,  # FIXED Y at objective
+                objective_z_mm * 1000   # FIXED Z at objective
             ])
 
-            logger.info(f"Stage position (mm): X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}")
-            logger.info(f"Objective fixed at (mm): X={objective_x_mm:.2f}, Y={objective_y_mm:.2f}, Z={objective_z_mm:.2f}")
+            logger.info(f"Stage position (mm): X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}, R={position.r:.1f}°")
+            logger.info(f"New data ALWAYS placed at objective (mm): X={objective_x_mm:.2f}, Y={objective_y_mm:.2f}, Z={objective_z_mm:.2f}")
             logger.info(f"Data placement center (µm): X={world_center_um[0]:.1f}, Y={world_center_um[1]:.1f}, Z={world_center_um[2]:.1f}")
-            logger.info(f"Note: Y is FIXED at objective (7mm), stage Y={position.y:.2f}mm affects which part of sample is in view")
+            logger.info(f"Note: Entire voxel block moves with stage, but new data always appears at objective location")
 
             # For 3D visualization, we need to place the 2D camera image as a thin slice
             # The imaging plane has some depth (depth of field ~1.9mm in Z)
