@@ -971,7 +971,8 @@ class Sample3DVisualizationWindow(QWidget):
         # Connect to movement controller signals
         try:
             # Connect position changes to thread-safe handler
-            self.movement_controller.position_changed.connect(self.on_stage_position_changed)
+            # Note: position_changed emits (x, y, z, r) as separate floats
+            self.movement_controller.position_changed.connect(self._on_position_changed_for_transform)
             # Also connect to UI update handler
             self.movement_controller.position_changed.connect(self._on_position_changed_from_controller)
             self.movement_controller.motion_started.connect(self._on_motion_started)
@@ -2137,13 +2138,24 @@ class Sample3DVisualizationWindow(QWidget):
         finally:
             self.update_mutex.unlock()
 
+    def _on_position_changed_for_transform(self, x: float, y: float, z: float, r: float):
+        """
+        Wrapper to convert movement controller's 4-float signal to dict for transformation.
+
+        Args:
+            x, y, z, r: Individual position components from movement controller
+        """
+        # Convert to dict and call the thread-safe handler
+        position_dict = {'x': x, 'y': y, 'z': z, 'r': r}
+        self.on_stage_position_changed(position_dict)
+
     def on_stage_position_changed(self, position):
         """
         Called when stage position changes (from any thread).
         Uses signal to ensure thread safety.
 
         Args:
-            position: New stage position
+            position: New stage position (dict or Position object)
         """
         # Don't process directly - emit signal for thread-safe handling
         self.stage_position_update_signal.emit(position)
