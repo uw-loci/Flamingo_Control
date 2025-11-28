@@ -2104,9 +2104,13 @@ class Sample3DVisualizationWindow(QWidget):
                     'z': position.z if hasattr(position, 'z') else 0,
                     'r': position.r if hasattr(position, 'r') else 0
                 }
-            else:
+            elif isinstance(position, dict):
                 # Already a dict
                 stage_pos = position
+            else:
+                # Unknown type - log error and use last known position
+                logger.error(f"Unexpected position type: {type(position)} with value: {position}")
+                stage_pos = self.last_stage_position
 
             # Store last stage position
             self.last_stage_position = stage_pos

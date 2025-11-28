@@ -516,6 +516,12 @@ class DualResolutionVoxelStorage:
             # No transformer set, return regular display volume
             return self.get_display_volume(channel_id)
 
+        # Validate stage position is a dict
+        if not isinstance(current_stage_pos, dict):
+            logger.error(f"Expected dict for stage position, got {type(current_stage_pos)}: {current_stage_pos}")
+            # Fall back to regular display volume
+            return self.get_display_volume(channel_id)
+
         # Check if only translation changed (fast path)
         dr = current_stage_pos.get('r', 0) - self.last_rotation
 
