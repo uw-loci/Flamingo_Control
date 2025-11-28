@@ -75,13 +75,13 @@ class Sample3DVisualizationWindow(QWidget):
         }
         self.coord_mapper = PhysicalToNapariMapper(mapper_config)
 
-        # Initialize storage system using coord_mapper dimensions
-        self._init_storage_with_mapper()
-
-        # Initialize coordinate transformers (for rotation)
+        # Initialize coordinate transformers (for rotation) BEFORE storage
         # CRITICAL: Must use correct sample center from config for accurate rotation
         sample_center_um = self.config['sample_chamber']['sample_region_center_um']
         self.transformer = CoordinateTransformer(sample_center=sample_center_um)
+
+        # Initialize storage system using coord_mapper dimensions (requires transformer)
+        self._init_storage_with_mapper()
 
         # Current state
         self.current_rotation = {'rx': 0, 'ry': 0, 'rz': 0}
