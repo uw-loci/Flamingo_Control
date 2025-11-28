@@ -305,6 +305,112 @@ class CoordinateTransformer:
 
         return w1 * q1 + w2 * q2
 
+    def transform_voxel_volume_affine(self, volume: np.ndarray,
+                                     stage_offset_mm: Tuple[float, float, float],
+                                     rotation_deg: float,
+                                     center_voxels: np.ndarray,
+                                     voxel_size_um: float = 50.0) -> np.ndarray:
+        """
+        Transform entire voxel volume using affine transformation.
+        Uses existing rotation utilities for consistency.
+
+        This method applies:
+        1. Translation to origin (center point)
+        2. Rotation around Y-axis
+        3. Translation back from origin
+        4. Stage position offset
+
+        Args:
+            volume: 3D numpy array to transform
+            stage_offset_mm: (dx, dy, dz) stage offset in millimeters
+            rotation_deg: Y-axis rotation in degrees
+            center_voxels: (x, y, z) rotation center in voxel coordinates
+            voxel_size_um: Voxel size in micrometers (default 50)
+
+        Returns:
+            Transformed 3D volume with same shape as input
+        """
+        from scipy.ndimage import affine_transform
+
+        # Set rotation for Y-axis only
+        self.set_rotation(ry=rotation_deg)
+
+        # Build affine transformation matrix
+        # Order: T3 @ T2 @ R @ T1 (translate to origin, rotate, translate back, apply offset)
+
+        # T1: Translate center to origin
+        T1 = np.eye(4)
+        T1[:3, 3] = -center_voxels
+
+        # R: Rotation matrix (use existing rotation_matrix)
+        R = np.eye(4)
+        R[:3, :3] = self.rotation_matrix
+
+        # T2: Translate back from origin
+        T2 = np.eye(4)
+        T2[:3, 3] = center_voxels
+
+        # T3: Apply stage offset (convert mm to voxels)
+        T3 = np.eye(4)
+        offset_voxels = np.array(stage_offset_mm) * 1000.0 / voxel_size_um
+        T3[:3, 3] = offset_voxels
+
+        # Combine transformations in correct order
+        combined = T3 @ T2 @ R @ T1
+
+        # Apply transformation using scipy
+        # Note: scipy expects the inverse transformation matrix
+        # and we transpose the rotation part
+        transformed = affine_transform(
+            volume,
+            combined[:3, :3].T,  # Transpose for scipy convention
+            offset=combined[:3, 3],
+            order=1,  # Linear interpolation
+            mode='constant',
+            cval=0
+        )
+
+        return transformed
+
+    def rotate_volume_with_padding(self, volume: np.ndarray,
+                                  angle_degrees: float,
+                                  center_voxels: np.ndarray,
+                                  pad_size: int = 20) -> np.ndarray:
+        """
+        Rotate volume with padding to prevent edge clipping.
+
+        Args:
+            volume: 3D numpy array to rotate
+            angle_degrees: Y-axis rotation angle
+            center_voxels: Rotation center in voxel coordinates
+            pad_size: Padding size in voxels
+
+        Returns:
+            Rotated volume with same shape as input
+        """
+        # Pad volume to prevent clipping
+        padded = np.pad(volume, pad_size, mode='constant', constant_values=0)
+
+        # Adjust center for padding
+        center_padded = center_voxels + pad_size
+
+        # Apply rotation with no stage offset
+        rotated_padded = self.transform_voxel_volume_affine(
+            padded,
+            stage_offset_mm=(0, 0, 0),
+            rotation_deg=angle_degrees,
+            center_voxels=center_padded
+        )
+
+        # Crop back to original size
+        if pad_size > 0:
+            return rotated_padded[
+                pad_size:-pad_size,
+                pad_size:-pad_size,
+                pad_size:-pad_size
+            ]
+        return rotated_padded
+
 
 class PhysicalToNapariMapper:
     """

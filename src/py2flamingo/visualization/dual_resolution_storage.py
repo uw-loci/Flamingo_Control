@@ -9,6 +9,7 @@ from typing import Dict, Tuple, Optional, List
 from dataclasses import dataclass
 import logging
 from scipy import ndimage
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ class DualResolutionVoxelStorage:
     while the low-resolution display provides smooth real-time visualization.
     """
 
-    def __init__(self, config: Optional[DualResolutionConfig] = None):
+    def __init__(self, config: Optional[DualResolutionConfig] = None, max_history_blocks: int = 500):
         self.config = config or DualResolutionConfig()
 
         # High-resolution storage (sparse for memory efficiency using dictionaries)
@@ -75,6 +76,16 @@ class DualResolutionVoxelStorage:
         self.display_dims = self.config.display_dimensions
         self.display_cache: Dict[int, np.ndarray] = {}  # Channel -> dense array
         self.display_dirty: Dict[int, bool] = {}  # Track which channels need update
+
+        # Transform caching and stage position tracking
+        self.transform_cache: Dict[int, np.ndarray] = {}  # Channel -> cached transformed volume
+        self.last_rotation = 0.0  # Last rotation angle for cache invalidation
+        self.last_stage_position = {'x': 0, 'y': 0, 'z': 0, 'r': 0}  # Last stage position
+        self.data_collection_positions = []  # Track where data was collected
+        self.max_history_blocks = max_history_blocks  # Limit memory growth
+
+        # Coordinate transformer for volume transformations
+        self.coord_transformer = None  # Will be set by visualization window
 
         # Initialize storage for each channel
         self.num_channels = 4
@@ -90,6 +101,7 @@ class DualResolutionVoxelStorage:
         logger.info(f"  Storage: {self.storage_dims} voxels at {self.config.storage_voxel_size} µm")
         logger.info(f"  Display: {self.display_dims} voxels at {self.config.display_voxel_size} µm")
         logger.info(f"  Resolution ratio: {self.config.resolution_ratio}")
+        logger.info(f"  Max history blocks: {self.max_history_blocks}")
 
     def _initialize_storage(self):
         """Initialize storage arrays for all channels."""
@@ -443,3 +455,147 @@ class DualResolutionVoxelStorage:
             'storage_voxels': sum(len(self.storage_data[ch]) for ch in range(self.num_channels)),
             'display_voxels': np.prod(self.display_dims) * self.num_channels
         }
+
+    def add_data_with_position(self, data: np.ndarray, world_origin_um: np.ndarray,
+                              stage_position: dict, channel_id: int):
+        """
+        Store data with its collection stage position.
+
+        Args:
+            data: 3D numpy array of voxel data
+            world_origin_um: World coordinates of data origin in micrometers
+            stage_position: Dictionary with 'x', 'y', 'z', 'r' keys
+            channel_id: Channel to store data in
+        """
+        # Store in regular storage
+        # Convert 3D data to coordinates and values
+        nonzero = np.nonzero(data)
+        if len(nonzero[0]) > 0:
+            coords = np.column_stack(nonzero)
+            values = data[nonzero]
+
+            # Convert voxel indices to world coordinates
+            world_coords = world_origin_um + coords * np.array(self.config.storage_voxel_size)
+
+            # Update storage
+            timestamp = time.time()
+            self.update_storage(channel_id, world_coords, values, timestamp)
+
+        # Track collection position
+        block_info = {
+            'stage_pos': stage_position.copy(),
+            'world_origin': world_origin_um.copy(),
+            'channel': channel_id,
+            'timestamp': time.time()
+        }
+        self.data_collection_positions.append(block_info)
+
+        # Limit history (prevent memory growth)
+        if len(self.data_collection_positions) > self.max_history_blocks:
+            # Remove oldest blocks
+            self.data_collection_positions.pop(0)
+
+    def get_display_volume_transformed(self, channel_id: int,
+                                      current_stage_pos: dict) -> np.ndarray:
+        """
+        Get display volume with all voxels transformed to current stage position.
+
+        Uses caching to optimize performance:
+        - Only retransform if rotation changed
+        - Fast translation for X,Y,Z only changes
+
+        Args:
+            channel_id: Channel to get volume for
+            current_stage_pos: Dictionary with 'x', 'y', 'z', 'r' keys
+
+        Returns:
+            Transformed display volume
+        """
+        # Check if we have a coordinate transformer
+        if self.coord_transformer is None:
+            # No transformer set, return regular display volume
+            return self.get_display_volume(channel_id)
+
+        # Check if only translation changed (fast path)
+        dr = current_stage_pos.get('r', 0) - self.last_rotation
+
+        if abs(dr) < 0.01:  # No significant rotation
+            # Use cached rotated volume, just translate
+            if channel_id in self.transform_cache:
+                dx = current_stage_pos['x'] - self.last_stage_position['x']
+                dy = current_stage_pos['y'] - self.last_stage_position['y']
+                dz = current_stage_pos['z'] - self.last_stage_position['z']
+
+                # Check if translation is significant
+                if abs(dx) < 0.001 and abs(dy) < 0.001 and abs(dz) < 0.001:
+                    # No significant change, return cached
+                    return self.transform_cache[channel_id]
+
+                # Fast translation using shift
+                from scipy.ndimage import shift
+                offset_voxels = np.array([dx, dy, dz]) * 1000 / self.config.display_voxel_size[0]
+                return shift(self.transform_cache[channel_id],
+                           offset_voxels, order=0, mode='constant', cval=0)
+
+        # Rotation changed - need full transformation
+        volume = self.get_display_volume(channel_id)
+
+        # Get rotation center in voxels
+        center_voxels = self._get_rotation_center_voxels()
+
+        # Calculate stage offset
+        stage_offset_mm = (
+            current_stage_pos.get('x', 0),
+            current_stage_pos.get('y', 0),
+            current_stage_pos.get('z', 0)
+        )
+
+        # Apply transformation
+        transformed = self.coord_transformer.transform_voxel_volume_affine(
+            volume,
+            stage_offset_mm=stage_offset_mm,
+            rotation_deg=current_stage_pos.get('r', 0),
+            center_voxels=center_voxels,
+            voxel_size_um=self.config.display_voxel_size[0]
+        )
+
+        # Cache for next time
+        self.transform_cache[channel_id] = transformed
+        self.last_rotation = current_stage_pos.get('r', 0)
+        self.last_stage_position = current_stage_pos.copy()
+
+        return transformed
+
+    def _get_rotation_center_voxels(self) -> np.ndarray:
+        """
+        Get rotation center in display voxel coordinates.
+
+        Returns:
+            Center coordinates in voxels
+        """
+        # Use sample region center from config
+        center_um = np.array(self.config.sample_region_center)
+
+        # Convert to display voxels
+        center_voxels = self.world_to_display_voxel(center_um)
+
+        return center_voxels
+
+    def set_coordinate_transformer(self, transformer):
+        """
+        Set the coordinate transformer for volume transformations.
+
+        Args:
+            transformer: CoordinateTransformer instance
+        """
+        self.coord_transformer = transformer
+        logger.info("Coordinate transformer set for volume transformations")
+
+    def invalidate_transform_cache(self):
+        """Invalidate the transform cache, forcing recalculation."""
+        self.transform_cache.clear()
+        logger.debug("Transform cache invalidated")
+
+    def has_data(self, channel_id: int) -> bool:
+        """Check if a channel has any data."""
+        return len(self.storage_data.get(channel_id, {})) > 0

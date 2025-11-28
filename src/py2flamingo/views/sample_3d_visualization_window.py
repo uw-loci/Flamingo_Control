@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
     QGroupBox, QSlider, QCheckBox, QComboBox, QSpinBox,
     QSplitter, QTabWidget, QGridLayout, QMessageBox
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QMutex, QMutexLocker
 from PyQt5.QtGui import QIcon
 import logging
 
@@ -51,6 +51,7 @@ class Sample3DVisualizationWindow(QWidget):
     y_position_changed = pyqtSignal(float)
     z_position_changed = pyqtSignal(float)
     channel_visibility_changed = pyqtSignal(int, bool)
+    stage_position_update_signal = pyqtSignal(object)  # Thread-safe stage position updates
 
     def __init__(self, movement_controller=None, camera_controller=None, laser_led_controller=None, parent=None):
         super().__init__(parent)
@@ -137,6 +138,19 @@ class Sample3DVisualizationWindow(QWidget):
         self.populate_timer = QTimer()
         self.populate_timer.timeout.connect(self._on_populate_tick)
         self.populate_timer.setInterval(500)  # Capture every 500ms (2 Hz)
+
+        # Thread safety for updates
+        self.update_mutex = QMutex()
+        self.pending_stage_update = None
+        self.last_stage_position = {'x': 0, 'y': 0, 'z': 0, 'r': 0}
+
+        # Update throttle timer for stage movements
+        self.update_throttle_timer = QTimer()
+        self.update_throttle_timer.timeout.connect(self._process_pending_stage_update)
+        self.update_throttle_timer.setInterval(50)  # 20 FPS max for stage updates
+
+        # Connect thread-safe signal
+        self.stage_position_update_signal.connect(self._handle_stage_update_threadsafe)
 
         # Configure window
         self.setWindowTitle("3D Sample Chamber Visualization")
@@ -253,6 +267,10 @@ class Sample3DVisualizationWindow(QWidget):
         )
 
         self.voxel_storage = DualResolutionVoxelStorage(storage_config)
+
+        # Set the coordinate transformer on storage for volume transformations
+        self.voxel_storage.set_coordinate_transformer(self.transformer)
+
         logger.info(f"Initialized dual-resolution voxel storage")
         logger.info(f"  Napari dimensions (Z, Y, X): {napari_dims}")
         logger.info(f"  Chamber dimensions (µm): {chamber_dims_um}")
@@ -952,6 +970,9 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Connect to movement controller signals
         try:
+            # Connect position changes to thread-safe handler
+            self.movement_controller.position_changed.connect(self.on_stage_position_changed)
+            # Also connect to UI update handler
             self.movement_controller.position_changed.connect(self._on_position_changed_from_controller)
             self.movement_controller.motion_started.connect(self._on_motion_started)
             self.movement_controller.motion_stopped.connect(self._on_motion_stopped)
@@ -2005,26 +2026,40 @@ class Sample3DVisualizationWindow(QWidget):
         if not self.viewer:
             return
 
-        # Update each channel
-        for ch_id in range(self.voxel_storage.num_channels):
-            if ch_id in self.channel_layers:
-                # Get display volume
-                volume = self.voxel_storage.get_display_volume(ch_id)
+        # Try to acquire mutex, skip update if already updating
+        if not self.update_mutex.tryLock():
+            return
 
-                # Debug: Log if we have any data
-                non_zero = np.count_nonzero(volume)
-                if non_zero > 0:
-                    logger.info(f"Visualization update: Channel {ch_id} has {non_zero} non-zero voxels in display")
-                    logger.debug(f"  Display volume shape: {volume.shape}, dtype: {volume.dtype}")
-                    logger.debug(f"  Value range: [{volume.min()}, {volume.max()}]")
+        try:
+            # Update each channel
+            for ch_id in range(self.voxel_storage.num_channels):
+                if ch_id in self.channel_layers:
+                    # Get display volume (or transformed volume if stage moved)
+                    if self.pending_stage_update:
+                        # Use transformed volume if we have a pending stage update
+                        volume = self.voxel_storage.get_display_volume_transformed(
+                            ch_id, self.last_stage_position
+                        )
+                    else:
+                        # Regular display volume
+                        volume = self.voxel_storage.get_display_volume(ch_id)
 
-                # Update layer data
-                self.channel_layers[ch_id].data = volume
+                    # Debug: Log if we have any data
+                    non_zero = np.count_nonzero(volume)
+                    if non_zero > 0:
+                        logger.info(f"Visualization update: Channel {ch_id} has {non_zero} non-zero voxels in display")
+                        logger.debug(f"  Display volume shape: {volume.shape}, dtype: {volume.dtype}")
+                        logger.debug(f"  Value range: [{volume.min()}, {volume.max()}]")
 
-        # Update memory usage
-        memory_stats = self.voxel_storage.get_memory_usage()
-        self.memory_label.setText(f"Memory: {memory_stats['total_mb']:.1f} MB")
-        self.voxel_count_label.setText(f"Voxels: {memory_stats['storage_voxels']:,}")
+                    # Update layer data
+                    self.channel_layers[ch_id].data = volume
+
+            # Update memory usage
+            memory_stats = self.voxel_storage.get_memory_usage()
+            self.memory_label.setText(f"Memory: {memory_stats['total_mb']:.1f} MB")
+            self.voxel_count_label.setText(f"Voxels: {memory_stats['storage_voxels']:,}")
+        finally:
+            self.update_mutex.unlock()
 
         # Check memory limit
         if self.auto_clear_cb.isChecked():
@@ -2032,6 +2067,82 @@ class Sample3DVisualizationWindow(QWidget):
             if memory_stats['total_mb'] > limit:
                 logger.warning(f"Memory limit exceeded ({memory_stats['total_mb']:.1f} > {limit} MB)")
                 # Could implement auto-clearing of old data here
+
+    def _handle_stage_update_threadsafe(self, position):
+        """
+        Handle stage update on main Qt thread (thread-safe).
+
+        Args:
+            position: Stage position object or dict with x, y, z, r
+        """
+        # Store pending update
+        self.pending_stage_update = position
+
+        # Start throttle timer if not running
+        if not self.update_throttle_timer.isActive():
+            self.update_throttle_timer.start()
+
+    def _process_pending_stage_update(self):
+        """Process pending stage update with mutex protection."""
+        if not self.pending_stage_update:
+            self.update_throttle_timer.stop()
+            return
+
+        if not self.update_mutex.tryLock():
+            return  # Skip if already updating
+
+        try:
+            position = self.pending_stage_update
+            self.pending_stage_update = None
+
+            # Convert position to dict if needed
+            if hasattr(position, 'x'):
+                # Position object
+                stage_pos = {
+                    'x': position.x if hasattr(position, 'x') else 0,
+                    'y': position.y if hasattr(position, 'y') else 0,
+                    'z': position.z if hasattr(position, 'z') else 0,
+                    'r': position.r if hasattr(position, 'r') else 0
+                }
+            else:
+                # Already a dict
+                stage_pos = position
+
+            # Store last stage position
+            self.last_stage_position = stage_pos
+
+            # Update each channel with transformed data
+            for ch_id in range(self.voxel_storage.num_channels):
+                if not self.voxel_storage.has_data(ch_id):
+                    continue
+
+                # Get transformed volume
+                volume = self.voxel_storage.get_display_volume_transformed(
+                    ch_id, stage_pos
+                )
+
+                # Update napari layer
+                if ch_id in self.channel_layers:
+                    self.channel_layers[ch_id].data = volume
+
+                    # Log update
+                    non_zero = np.count_nonzero(volume)
+                    if non_zero > 0:
+                        logger.debug(f"Stage update: Channel {ch_id} transformed, {non_zero} voxels")
+
+        finally:
+            self.update_mutex.unlock()
+
+    def on_stage_position_changed(self, position):
+        """
+        Called when stage position changes (from any thread).
+        Uses signal to ensure thread safety.
+
+        Args:
+            position: New stage position
+        """
+        # Don't process directly - emit signal for thread-safe handling
+        self.stage_position_update_signal.emit(position)
 
     def process_frame(self, frame_data: np.ndarray, metadata: dict):
         """
