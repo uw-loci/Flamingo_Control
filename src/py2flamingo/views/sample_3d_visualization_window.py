@@ -2448,9 +2448,12 @@ class Sample3DVisualizationWindow(QWidget):
             logger.debug("Process 3D: Stacking coordinates")
             camera_coords_2d = np.column_stack([camera_x.ravel(), camera_y.ravel()])
 
-            # Set rotation for transformation
-            logger.debug(f"Process 3D: Setting rotation (ry={position.r})")
-            self.transformer.set_rotation(rx=0, ry=position.r, rz=0)
+            # DO NOT set rotation for data placement
+            # The objective/camera are fixed - only the sample holder rotates
+            # Setting rotation here was causing data to be placed at wrong Z coordinates
+            logger.debug(f"Process 3D: Sample rotation (ry={position.r}°) - NOT applied to placement")
+            # IMPORTANT: Reset transformer to ensure no rotation is applied to placement
+            self.transformer.set_rotation(rx=0, ry=0, rz=0)  # Reset to no rotation
 
             # Transform 2D camera coords + stage position to 3D world coords
             # CRITICAL: Must convert stage Y to chamber Y using the calibration reference
@@ -2519,6 +2522,14 @@ class Sample3DVisualizationWindow(QWidget):
             # The world coordinates are simply the camera offsets plus the stage position
             # No rotation is applied to the placement (the objective/camera don't rotate)
             world_coords_3d = camera_offsets_3d + world_center_um
+
+            # Debug logging to trace coordinate transformation
+            logger.debug(f"World center (objective) µm: {world_center_um}")
+            logger.debug(f"Camera offset range X: [{camera_offsets_3d[:, 0].min():.1f}, {camera_offsets_3d[:, 0].max():.1f}] µm")
+            logger.debug(f"Camera offset range Y: [{camera_offsets_3d[:, 1].min():.1f}, {camera_offsets_3d[:, 1].max():.1f}] µm")
+            logger.debug(f"World coord range X: [{world_coords_3d[:, 0].min():.1f}, {world_coords_3d[:, 0].max():.1f}] µm")
+            logger.debug(f"World coord range Y: [{world_coords_3d[:, 1].min():.1f}, {world_coords_3d[:, 1].max():.1f}] µm")
+            logger.debug(f"World coord range Z: [{world_coords_3d[:, 2].min():.1f}, {world_coords_3d[:, 2].max():.1f}] µm")
 
             # Extract intensity values
             logger.debug("Process 3D: Extracting intensity values")
