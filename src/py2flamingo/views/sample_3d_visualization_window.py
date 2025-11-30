@@ -260,22 +260,34 @@ class Sample3DVisualizationWindow(QWidget):
         # Check if asymmetric bounds are specified in config
         if all(key in self.config['sample_chamber'] for key in
                ['sample_region_half_width_x_um', 'sample_region_half_width_y_um', 'sample_region_half_width_z_um']):
+            # Reorder from X,Y,Z config format to Z,Y,X storage format
             half_widths = (
-                self.config['sample_chamber']['sample_region_half_width_x_um'],
-                self.config['sample_chamber']['sample_region_half_width_y_um'],
-                self.config['sample_chamber']['sample_region_half_width_z_um']
+                self.config['sample_chamber']['sample_region_half_width_z_um'],  # Z first
+                self.config['sample_chamber']['sample_region_half_width_y_um'],  # Y second
+                self.config['sample_chamber']['sample_region_half_width_x_um']   # X third
             )
         else:
             half_widths = None
 
+        # Reorder sample_region_center from config's X,Y,Z to storage's Z,Y,X format
+        center_xyz = self.config['sample_chamber']['sample_region_center_um']
+        center_zyx = (center_xyz[2], center_xyz[1], center_xyz[0])  # Reorder to Z,Y,X
+
+        # Reorder voxel sizes from X,Y,Z to Z,Y,X
+        storage_voxel_xyz = self.config['storage']['voxel_size_um']
+        storage_voxel_zyx = (storage_voxel_xyz[2], storage_voxel_xyz[1], storage_voxel_xyz[0])
+
+        display_voxel_xyz = self.config['display']['voxel_size_um']
+        display_voxel_zyx = (display_voxel_xyz[2], display_voxel_xyz[1], display_voxel_xyz[0])
+
         storage_config = DualResolutionConfig(
-            storage_voxel_size=tuple(self.config['storage']['voxel_size_um']),
-            display_voxel_size=tuple(self.config['display']['voxel_size_um']),
-            chamber_dimensions=chamber_dims_um,
-            chamber_origin=chamber_origin_um,
-            sample_region_center=tuple(self.config['sample_chamber']['sample_region_center_um']),
+            storage_voxel_size=storage_voxel_zyx,  # Now in Z,Y,X order
+            display_voxel_size=display_voxel_zyx,  # Now in Z,Y,X order
+            chamber_dimensions=chamber_dims_um,     # Already in Z,Y,X order
+            chamber_origin=chamber_origin_um,       # Already in Z,Y,X order
+            sample_region_center=center_zyx,        # Now in Z,Y,X order
             sample_region_radius=self.config['sample_chamber']['sample_region_radius_um'],
-            sample_region_half_widths=half_widths
+            sample_region_half_widths=half_widths   # Now in Z,Y,X order
         )
 
         self.voxel_storage = DualResolutionVoxelStorage(storage_config)

@@ -195,12 +195,14 @@ class DualResolutionVoxelStorage:
             logger.warning(f"  Sample region center: {self.config.sample_region_center} µm")
             logger.warning(f"  Sample region radius: {self.config.sample_region_radius} µm")
             if len(world_coords) > 0:
-                logger.warning(f"  Rejected world coords range: X=[{world_coords[:, 0].min():.1f}, {world_coords[:, 0].max():.1f}], "
+                # World coords are in Z,Y,X order per napari convention
+                logger.warning(f"  Rejected world coords range (ZYX order): Z=[{world_coords[:, 0].min():.1f}, {world_coords[:, 0].max():.1f}], "
                               f"Y=[{world_coords[:, 1].min():.1f}, {world_coords[:, 1].max():.1f}], "
-                              f"Z=[{world_coords[:, 2].min():.1f}, {world_coords[:, 2].max():.1f}] µm")
-                logger.warning(f"  Rejected storage voxel range: X=[{storage_voxels[:, 0].min()}, {storage_voxels[:, 0].max()}], "
+                              f"X=[{world_coords[:, 2].min():.1f}, {world_coords[:, 2].max():.1f}] µm")
+                # Storage voxels should also be in Z,Y,X order
+                logger.warning(f"  Rejected storage voxel range (ZYX): Z=[{storage_voxels[:, 0].min()}, {storage_voxels[:, 0].max()}], "
                               f"Y=[{storage_voxels[:, 1].min()}, {storage_voxels[:, 1].max()}], "
-                              f"Z=[{storage_voxels[:, 2].min()}, {storage_voxels[:, 2].max()}]")
+                              f"X=[{storage_voxels[:, 2].min()}, {storage_voxels[:, 2].max()}]")
             return  # No valid voxels to update
 
         valid_voxels = storage_voxels[valid_mask]
