@@ -29,7 +29,10 @@ class DualResolutionConfig:
 
     # Sample region for high-res storage
     sample_region_center: Tuple[float, float, float] = (5000, 5000, 21500)
-    sample_region_radius: float = 3000  # micrometers
+    sample_region_radius: float = 3000  # micrometers - used if half_widths not specified
+
+    # Asymmetric storage bounds (optional, overrides radius if specified)
+    sample_region_half_widths: Optional[Tuple[float, float, float]] = None  # (X, Y, Z) half-widths
 
     @property
     def resolution_ratio(self) -> Tuple[int, int, int]:
@@ -41,10 +44,18 @@ class DualResolutionConfig:
     @property
     def storage_dimensions(self) -> Tuple[int, int, int]:
         """Calculate storage array dimensions based on sample region."""
-        return tuple(
-            int(2 * self.sample_region_radius / vs)
-            for vs in self.storage_voxel_size
-        )
+        if self.sample_region_half_widths:
+            # Use asymmetric bounds if specified
+            return tuple(
+                int(2 * hw / vs)
+                for hw, vs in zip(self.sample_region_half_widths, self.storage_voxel_size)
+            )
+        else:
+            # Fall back to symmetric radius
+            return tuple(
+                int(2 * self.sample_region_radius / vs)
+                for vs in self.storage_voxel_size
+            )
 
     @property
     def display_dimensions(self) -> Tuple[int, int, int]:
@@ -101,6 +112,11 @@ class DualResolutionVoxelStorage:
         logger.info(f"  Storage: {self.storage_dims} voxels at {self.config.storage_voxel_size} µm")
         logger.info(f"  Display: {self.display_dims} voxels at {self.config.display_voxel_size} µm")
         logger.info(f"  Resolution ratio: {self.config.resolution_ratio}")
+        if self.config.sample_region_half_widths:
+            logger.info(f"  Asymmetric storage bounds (µm): X=±{self.config.sample_region_half_widths[0]}, "
+                       f"Y=±{self.config.sample_region_half_widths[1]}, Z=±{self.config.sample_region_half_widths[2]}")
+        else:
+            logger.info(f"  Symmetric storage radius: {self.config.sample_region_radius} µm")
         logger.info(f"  Max history blocks: {self.max_history_blocks}")
 
     def _initialize_storage(self):
@@ -121,7 +137,8 @@ class DualResolutionVoxelStorage:
         Convert world coordinates (µm) to storage voxel indices.
 
         Storage array is centered at sample_region_center, covering a region
-        of ±sample_region_radius in all directions.
+        defined by either sample_region_half_widths (if specified) or
+        ±sample_region_radius in all directions.
         Storage uses sparse arrays, so memory usage is proportional to actual data, not chamber size.
         """
         # Validate input

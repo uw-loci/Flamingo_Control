@@ -257,13 +257,25 @@ class Sample3DVisualizationWindow(QWidget):
             self.config['stage_control']['x_range_mm'][0] * 1000   # X min
         )
 
+        # Check if asymmetric bounds are specified in config
+        if all(key in self.config['sample_chamber'] for key in
+               ['sample_region_half_width_x_um', 'sample_region_half_width_y_um', 'sample_region_half_width_z_um']):
+            half_widths = (
+                self.config['sample_chamber']['sample_region_half_width_x_um'],
+                self.config['sample_chamber']['sample_region_half_width_y_um'],
+                self.config['sample_chamber']['sample_region_half_width_z_um']
+            )
+        else:
+            half_widths = None
+
         storage_config = DualResolutionConfig(
             storage_voxel_size=tuple(self.config['storage']['voxel_size_um']),
             display_voxel_size=tuple(self.config['display']['voxel_size_um']),
             chamber_dimensions=chamber_dims_um,
             chamber_origin=chamber_origin_um,
             sample_region_center=tuple(self.config['sample_chamber']['sample_region_center_um']),
-            sample_region_radius=self.config['sample_chamber']['sample_region_radius_um']
+            sample_region_radius=self.config['sample_chamber']['sample_region_radius_um'],
+            sample_region_half_widths=half_widths
         )
 
         self.voxel_storage = DualResolutionVoxelStorage(storage_config)
@@ -2189,8 +2201,10 @@ class Sample3DVisualizationWindow(QWidget):
             if 'ry' in self.current_rotation:
                 self.rotation_slider.setValue(int(self.current_rotation['ry']))
 
-        # Transform coordinates
-        self.transformer.set_rotation(**self.current_rotation)
+        # DO NOT set rotation for data placement - same fix as in _process_camera_frame_to_3d
+        # The objective/camera are fixed - only the sample holder rotates
+        # Transform coordinates WITHOUT rotation
+        self.transformer.set_rotation(rx=0, ry=0, rz=0)  # Reset to no rotation
 
         # Generate pixel coordinates
         h, w = frame_data.shape[:2]
