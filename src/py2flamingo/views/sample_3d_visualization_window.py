@@ -2494,15 +2494,16 @@ class Sample3DVisualizationWindow(QWidget):
             # NEW DATA ALWAYS APPEARS AT THE OBJECTIVE LOCATION
             # The entire accumulated voxel block will move with the stage (handled elsewhere)
             # But new data is always placed at the fixed objective position
+            # IMPORTANT: Storage expects (Z, Y, X) order for consistency with napari
             world_center_um = np.array([
-                objective_x_mm * 1000,  # FIXED X at objective
-                objective_y_mm * 1000,  # FIXED Y at objective
-                objective_z_mm * 1000   # FIXED Z at objective
+                objective_z_mm * 1000,  # Z at objective (first for napari/storage order)
+                objective_y_mm * 1000,  # Y at objective (second)
+                objective_x_mm * 1000   # X at objective (third)
             ])
 
             logger.info(f"Stage position (mm): X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}, R={position.r:.1f}°")
             logger.info(f"New data ALWAYS placed at objective (mm): X={objective_x_mm:.2f}, Y={objective_y_mm:.2f}, Z={objective_z_mm:.2f}")
-            logger.info(f"Data placement center (µm): X={world_center_um[0]:.1f}, Y={world_center_um[1]:.1f}, Z={world_center_um[2]:.1f}")
+            logger.info(f"Data placement center (µm): Z={world_center_um[0]:.1f}, Y={world_center_um[1]:.1f}, X={world_center_um[2]:.1f} (ZYX order for storage)")
             logger.info(f"Note: Entire voxel block moves with stage, but new data always appears at objective location")
 
             # For 3D visualization, we need to place the 2D camera image as a thin slice
@@ -2520,10 +2521,11 @@ class Sample3DVisualizationWindow(QWidget):
             num_pixels = len(camera_coords_2d)
             z_offsets = np.linspace(-slice_thickness_um/2, slice_thickness_um/2, num_pixels)
 
+            # IMPORTANT: Must use (Z, Y, X) order to match storage/napari convention
             camera_offsets_3d = np.column_stack([
-                camera_coords_2d[:, 0],  # Camera X offset
-                camera_coords_2d[:, 1],  # Camera Y offset
-                z_offsets  # Small Z variation for slice thickness
+                z_offsets,                # Z variation for slice thickness (first)
+                camera_coords_2d[:, 1],   # Camera Y offset (second)
+                camera_coords_2d[:, 0]    # Camera X offset (third)
             ])
 
             # For R-axis rotation: The sample holder rotates, but the imaging plane stays fixed
@@ -2538,12 +2540,13 @@ class Sample3DVisualizationWindow(QWidget):
             world_coords_3d = camera_offsets_3d + world_center_um
 
             # Debug logging to trace coordinate transformation
-            logger.debug(f"World center (objective) µm: {world_center_um}")
-            logger.debug(f"Camera offset range X: [{camera_offsets_3d[:, 0].min():.1f}, {camera_offsets_3d[:, 0].max():.1f}] µm")
+            logger.debug(f"World center (objective) µm (ZYX order): {world_center_um}")
+            logger.debug(f"Camera offset range Z: [{camera_offsets_3d[:, 0].min():.1f}, {camera_offsets_3d[:, 0].max():.1f}] µm")
             logger.debug(f"Camera offset range Y: [{camera_offsets_3d[:, 1].min():.1f}, {camera_offsets_3d[:, 1].max():.1f}] µm")
-            logger.debug(f"World coord range X: [{world_coords_3d[:, 0].min():.1f}, {world_coords_3d[:, 0].max():.1f}] µm")
+            logger.debug(f"Camera offset range X: [{camera_offsets_3d[:, 2].min():.1f}, {camera_offsets_3d[:, 2].max():.1f}] µm")
+            logger.debug(f"World coord range Z: [{world_coords_3d[:, 0].min():.1f}, {world_coords_3d[:, 0].max():.1f}] µm")
             logger.debug(f"World coord range Y: [{world_coords_3d[:, 1].min():.1f}, {world_coords_3d[:, 1].max():.1f}] µm")
-            logger.debug(f"World coord range Z: [{world_coords_3d[:, 2].min():.1f}, {world_coords_3d[:, 2].max():.1f}] µm")
+            logger.debug(f"World coord range X: [{world_coords_3d[:, 2].min():.1f}, {world_coords_3d[:, 2].max():.1f}] µm")
 
             # Extract intensity values
             logger.debug("Process 3D: Extracting intensity values")
@@ -2563,10 +2566,10 @@ class Sample3DVisualizationWindow(QWidget):
 
             # Diagnostic: Log world coordinate ranges and rotation for debugging
             logger.debug(f"Stage position: X={position.x:.2f}mm, Y={position.y:.2f}mm, Z={position.z:.2f}mm, R={position.r:.1f}°")
-            logger.debug(f"World coordinate ranges after rotation:")
-            logger.debug(f"  X: [{world_coords_3d[:, 0].min():.1f}, {world_coords_3d[:, 0].max():.1f}] µm")
+            logger.debug(f"World coordinate ranges (ZYX order, no rotation applied):")
+            logger.debug(f"  Z: [{world_coords_3d[:, 0].min():.1f}, {world_coords_3d[:, 0].max():.1f}] µm")
             logger.debug(f"  Y: [{world_coords_3d[:, 1].min():.1f}, {world_coords_3d[:, 1].max():.1f}] µm")
-            logger.debug(f"  Z: [{world_coords_3d[:, 2].min():.1f}, {world_coords_3d[:, 2].max():.1f}] µm")
+            logger.debug(f"  X: [{world_coords_3d[:, 2].min():.1f}, {world_coords_3d[:, 2].max():.1f}] µm")
 
         except Exception as e:
             logger.error(f"Error in _process_camera_frame_to_3d: {e}", exc_info=True)
