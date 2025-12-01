@@ -91,40 +91,37 @@ def test_voxel_movement(controller, main_window=None):
                 laser_controller = camera_viewer.laser_led_controller
                 print("   Found laser controller via camera_live_viewer")
 
-            if laser_controller:
-                # Make sure to disable all light sources first
-                laser_controller.disable_all_light_sources()
-                time.sleep(0.5)
+            # Simulate GUI actions instead of direct controller calls
+            if camera_viewer and hasattr(camera_viewer, 'laser_checkboxes'):
+                # Find laser controls (checkboxes and power inputs)
+                if len(camera_viewer.laser_checkboxes) > 3:
+                    # First uncheck all lasers
+                    for i, checkbox in enumerate(camera_viewer.laser_checkboxes):
+                        if checkbox.isChecked():
+                            checkbox.setChecked(False)
+                    print("   Unchecked all laser checkboxes")
 
-                # Set the laser power level first
-                if hasattr(laser_controller, 'set_laser_power'):
-                    result = laser_controller.set_laser_power(4, 14.4)
-                    print(f"   Laser 4 power set to 14.4%: {result}")
-                    time.sleep(0.5)
+                    # Set power for laser 4 via GUI spinbox
+                    if hasattr(camera_viewer, 'laser_power_inputs') and len(camera_viewer.laser_power_inputs) > 3:
+                        power_input = camera_viewer.laser_power_inputs[3]
+                        power_input.setValue(14.4)
+                        print("   Set Laser 4 power to 14.4% via GUI")
 
-                # Enable the laser for preview on left path
-                try:
-                    result = laser_controller.enable_laser_for_preview(4, "left")
-                    laser_enabled = result
-                    print(f"   Laser 4 preview enabled: {result}")
+                    smart_sleep(0.5, "Letting GUI update...")
 
-                    # Update the GUI checkbox to show laser is enabled
-                    if camera_viewer and hasattr(camera_viewer, 'laser_checkboxes'):
-                        # Find checkbox for laser 4 (index 3)
-                        if len(camera_viewer.laser_checkboxes) > 3:
-                            camera_viewer.laser_checkboxes[3].setChecked(True)
-                            print("   Updated GUI: Laser 4 checkbox checked")
+                    # Check laser 4 checkbox - this triggers the actual hardware command
+                    laser_checkbox = camera_viewer.laser_checkboxes[3]
+                    laser_checkbox.setChecked(True)
+                    # Trigger the click event to ensure handler runs
+                    laser_checkbox.clicked.emit(True)
+                    print("   Clicked Laser 4 checkbox - this enables the laser")
 
-                    # Verify laser is active
-                    if hasattr(laser_controller, 'get_active_laser'):
-                        active = laser_controller.get_active_laser()
-                        print(f"   Active laser confirmed: {active}")
-                except Exception as e:
-                    print(f"   Failed to enable laser: {e}")
+                    laser_enabled = True
+                    smart_sleep(1, "Waiting for laser to enable...")
+                else:
+                    print("   WARNING: Could not find laser checkboxes in GUI")
             else:
-                print("   WARNING: Could not find laser controller")
-        else:
-            print("   WARNING: Could not find main window")
+                print("   WARNING: Could not find camera viewer for GUI simulation")
 
         if not laser_enabled:
             print("   WARNING: Laser may not be enabled - fluorescence data may not be captured")
@@ -147,23 +144,22 @@ def test_voxel_movement(controller, main_window=None):
                 print("   Camera Live Viewer window opened")
                 smart_sleep(5, "Waiting 5 seconds for camera initialization and OpenGL...")
 
-        # Now start live view through the camera controller (from camera_live_viewer)
+        # Simulate clicking the Start Live View button in the GUI
         if main_window and hasattr(main_window, 'camera_live_viewer'):
             camera_viewer = main_window.camera_live_viewer
-            if camera_viewer and hasattr(camera_viewer, 'camera_controller'):
-                camera_controller = camera_viewer.camera_controller
-                result = camera_controller.start_live_view()
-                print(f"   Live view started: {result}")
-
-                # Update GUI buttons to reflect live view state
-                if hasattr(camera_viewer, 'start_btn') and hasattr(camera_viewer, 'stop_btn'):
-                    camera_viewer.start_btn.setEnabled(False)
-                    camera_viewer.stop_btn.setEnabled(True)
-                    print("   Updated GUI: Live view buttons state changed")
+            if camera_viewer and hasattr(camera_viewer, 'start_btn'):
+                # Click the start button - this triggers all the proper GUI updates
+                start_button = camera_viewer.start_btn
+                if start_button.isEnabled():
+                    print("   Clicking 'Start Live View' button...")
+                    start_button.click()  # This will handle everything including button state changes
+                    print("   Live view started via GUI button click")
+                else:
+                    print("   Start button is disabled - live view may already be running")
 
                 smart_sleep(3, "Waiting 3 seconds for camera stream to stabilize...")
             else:
-                print("   WARNING: Could not find camera controller in camera_live_viewer")
+                print("   WARNING: Could not find start button in camera_live_viewer")
         else:
             print("   WARNING: Could not find camera_live_viewer")
     except Exception as e:
@@ -252,8 +248,7 @@ def test_voxel_movement(controller, main_window=None):
         new_y = 24.5
         print(f"   NOTE: Clamping Y to {new_y:.3f} to stay within safe range")
     controller.move_y(new_y)
-    # Y-axis often needs more time due to position query retries
-    smart_sleep(12, "Waiting 12 seconds for Y movement (may need extra retries)...")
+    smart_sleep(2, "Waiting 2 seconds for Y movement completion...")
     movements.append(('Y', initial_y, new_y))
     y_voxels = capture_voxel_state(viz_window)
     print(f"   Y movement complete. Voxel state: {y_voxels}")
@@ -282,21 +277,19 @@ def test_voxel_movement(controller, main_window=None):
     # Step 11: Stop live view
     print("\n10. Stopping live view...")
     try:
-        # Use camera controller from camera_live_viewer
+        # Simulate clicking the Stop Live View button in the GUI
         if main_window and hasattr(main_window, 'camera_live_viewer'):
             camera_viewer = main_window.camera_live_viewer
-            if camera_viewer and hasattr(camera_viewer, 'camera_controller'):
-                camera_controller = camera_viewer.camera_controller
-                result = camera_controller.stop_live_view()
-                print(f"   Live view stopped: {result}")
-
-                # Update GUI buttons to reflect live view stopped
-                if hasattr(camera_viewer, 'start_btn') and hasattr(camera_viewer, 'stop_btn'):
-                    camera_viewer.start_btn.setEnabled(True)
-                    camera_viewer.stop_btn.setEnabled(False)
-                    print("   Updated GUI: Live view buttons reset")
+            if camera_viewer and hasattr(camera_viewer, 'stop_btn'):
+                stop_button = camera_viewer.stop_btn
+                if stop_button.isEnabled():
+                    print("   Clicking 'Stop Live View' button...")
+                    stop_button.click()  # This will handle everything including button state changes
+                    print("   Live view stopped via GUI button click")
+                else:
+                    print("   Stop button is disabled - live view may already be stopped")
             else:
-                print("   WARNING: Could not find camera controller to stop live view")
+                print("   WARNING: Could not find stop button in camera_live_viewer")
         else:
             print("   WARNING: Could not find camera_live_viewer to stop live view")
     except Exception as e:
@@ -306,18 +299,22 @@ def test_voxel_movement(controller, main_window=None):
     # Step 12: Disable laser
     print("\n11. Disabling laser...")
     try:
-        # Use laser controller from camera_live_viewer
+        # Simulate unchecking the laser checkbox in the GUI
         if main_window and hasattr(main_window, 'camera_live_viewer'):
             camera_viewer = main_window.camera_live_viewer
-            if camera_viewer and hasattr(camera_viewer, 'laser_led_controller'):
-                laser_controller = camera_viewer.laser_led_controller
-                if laser_controller:
-                    laser_controller.disable_all_light_sources()
-                    print("   All light sources disabled")
-                else:
-                    print("   WARNING: Laser controller not available")
+            if camera_viewer and hasattr(camera_viewer, 'laser_checkboxes'):
+                # Uncheck all laser checkboxes
+                unchecked_any = False
+                for i, checkbox in enumerate(camera_viewer.laser_checkboxes):
+                    if checkbox.isChecked():
+                        checkbox.setChecked(False)
+                        checkbox.clicked.emit(False)  # Trigger the handler
+                        print(f"   Unchecked Laser {i+1} checkbox")
+                        unchecked_any = True
+                if not unchecked_any:
+                    print("   All lasers already disabled")
             else:
-                print("   WARNING: Could not find laser controller in camera_live_viewer")
+                print("   WARNING: Could not find laser checkboxes in camera_live_viewer")
         else:
             print("   WARNING: Could not find camera_live_viewer to disable laser")
     except Exception as e:
