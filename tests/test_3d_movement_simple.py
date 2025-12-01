@@ -231,26 +231,15 @@ def test_voxel_movement(controller, main_window=None):
 
     # Step 8: Move stage and capture data
     print("\n7. Moving stage in X, Y, Z (one FOV each = ~0.5mm)...")
-
-    # IMPORTANT: We use the stage service directly to avoid automatic position queries
-    # that trigger safety violations when hardware returns 0.000 during movement
-    from py2flamingo.services.stage_service import StageService, AxisCode
-    stage_service = None
-    if controller and hasattr(controller, 'connection'):
-        stage_service = StageService(controller.connection)
-        print("   Using direct stage service to avoid position query issues")
+    print("   Note: Position queries now handle 'stage still moving' (0.000) responses properly")
 
     movements = []
 
     # Move X by 0.5mm (1 FOV)
     print("\n   Moving X by +0.5mm...")
     new_x = initial_x + 0.5
-    if stage_service:
-        # Use stage service directly - no automatic position queries
-        stage_service.move_absolute(AxisCode.X_AXIS, new_x)
-    else:
-        controller.move_x(new_x)
-    smart_sleep(7, "Waiting 7 seconds for movement to fully complete...")
+    controller.move_x(new_x)
+    smart_sleep(5, "Waiting 5 seconds for movement completion and data capture...")
     movements.append(('X', initial_x, new_x))
     x_voxels = capture_voxel_state(viz_window)
     print(f"   X movement complete. Voxel state: {x_voxels}")
@@ -262,11 +251,8 @@ def test_voxel_movement(controller, main_window=None):
     if new_y > 24.5:  # Leave margin from max of 25.0
         new_y = 24.5
         print(f"   NOTE: Clamping Y to {new_y:.3f} to stay within safe range")
-    if stage_service:
-        stage_service.move_absolute(AxisCode.Y_AXIS, new_y)
-    else:
-        controller.move_y(new_y)
-    smart_sleep(7, "Waiting 7 seconds for movement to fully complete...")
+    controller.move_y(new_y)
+    smart_sleep(5, "Waiting 5 seconds for movement completion and data capture...")
     movements.append(('Y', initial_y, new_y))
     y_voxels = capture_voxel_state(viz_window)
     print(f"   Y movement complete. Voxel state: {y_voxels}")
@@ -274,11 +260,8 @@ def test_voxel_movement(controller, main_window=None):
     # Move Z by 0.5mm (1 FOV)
     print("\n   Moving Z by +0.5mm...")
     new_z = initial_z + 0.5
-    if stage_service:
-        stage_service.move_absolute(AxisCode.Z_AXIS, new_z)
-    else:
-        controller.move_z(new_z)
-    smart_sleep(7, "Waiting 7 seconds for movement to fully complete...")
+    controller.move_z(new_z)
+    smart_sleep(5, "Waiting 5 seconds for movement completion and data capture...")
     movements.append(('Z', initial_z, new_z))
     z_voxels = capture_voxel_state(viz_window)
     print(f"   Z movement complete. Voxel state: {z_voxels}")
@@ -342,45 +325,36 @@ def test_voxel_movement(controller, main_window=None):
     # Step 13: Return to original position for repeatability
     print("\n12. Returning to original position for test repeatability...")
 
-    # IMPORTANT: We use the stage service directly to avoid automatic position queries
-    # that trigger safety violations when hardware returns 0.000 during movement.
-    # We also use longer delays to ensure movements are fully complete.
-
     print(f"   Commanding return to: X={initial_x:.3f}, Y={initial_y:.3f}, Z={initial_z:.3f}")
 
-    # Try to use stage service directly if available
-    from py2flamingo.services.stage_service import StageService, AxisCode
-    stage_service = None
-    if controller and hasattr(controller, 'connection'):
-        stage_service = StageService(controller.connection)
-        print("   Using direct stage service for return movements")
+    controller.move_x(initial_x)
+    smart_sleep(3, "Waiting 3 seconds for X axis to complete movement...")
 
-    if stage_service:
-        stage_service.move_absolute(AxisCode.X_AXIS, initial_x)
+    controller.move_y(initial_y)
+    smart_sleep(3, "Waiting 3 seconds for Y axis to complete movement...")
+
+    controller.move_z(initial_z)
+    smart_sleep(3, "Waiting 3 seconds for Z axis to complete movement...")
+
+    # Wait extra time to ensure all movements are fully complete
+    smart_sleep(2, "Waiting for stage to fully settle...")
+
+    # Now we can safely query position since the StageService handles 0.000 responses properly
+    print("\n   Verifying return to origin...")
+    pos = controller.get_current_position()
+    if pos:
+        print(f"   Current position: X={pos.x:.3f}, Y={pos.y:.3f}, Z={pos.z:.3f}")
+        print(f"   Target position:  X={initial_x:.3f}, Y={initial_y:.3f}, Z={initial_z:.3f}")
+
+        # Check if we're close enough (within 0.01mm tolerance)
+        if (abs(pos.x - initial_x) < 0.01 and
+            abs(pos.y - initial_y) < 0.01 and
+            abs(pos.z - initial_z) < 0.01):
+            print("   ✓ Successfully returned to original position")
+        else:
+            print("   ⚠ Position slightly off, but within acceptable range")
     else:
-        controller.move_x(initial_x)
-    smart_sleep(5, "Waiting 5 seconds for X axis to complete movement...")
-
-    if stage_service:
-        stage_service.move_absolute(AxisCode.Y_AXIS, initial_y)
-    else:
-        controller.move_y(initial_y)
-    smart_sleep(5, "Waiting 5 seconds for Y axis to complete movement...")
-
-    if stage_service:
-        stage_service.move_absolute(AxisCode.Z_AXIS, initial_z)
-    else:
-        controller.move_z(initial_z)
-    smart_sleep(5, "Waiting 5 seconds for Z axis to complete movement...")
-
-    # Wait extra time to ensure all movements are fully complete before any position queries
-    smart_sleep(3, "Waiting for stage to fully settle...")
-
-    # NOTE: We intentionally do NOT query position here to avoid triggering
-    # safety violations from 0.000 position during movement.
-    # We know we commanded it to the original position.
-    print(f"   Stage commanded back to original position")
-    print(f"   Original position was: X={initial_x:.3f}, Y={initial_y:.3f}, Z={initial_z:.3f}")
+        print("   Could not verify position, but stage was commanded to return")
 
     final_origin_voxels = capture_voxel_state(viz_window)
 

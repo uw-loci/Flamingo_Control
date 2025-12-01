@@ -116,26 +116,60 @@ class StageService(MicroscopeCommandService):
                 # SCommand structure: [start(4) + cmd(4) + status(4) + params(28) + doubleData(8) + ...]
                 position = struct.unpack('<d', raw_response[40:48])[0]
 
-                # Check for 0.000 response which indicates microscope is still processing
+                # Check for 0.000 response which indicates microscope is still moving
                 if position == 0.0 and axis in [1, 2, 3]:  # X, Y, Z should never be exactly 0.0
-                    self.logger.warning(
-                        f"{axis_name}-axis returned 0.000 - microscope may still be processing. "
-                        f"This often occurs when querying position immediately after a move command."
+                    self.logger.info(
+                        f"{axis_name}-axis returned 0.000 - stage is still moving, will retry..."
                     )
-                    # Try one retry after a short delay
+
+                    # Keep retrying until we get a valid position or timeout
                     import time
-                    time.sleep(0.2)  # 200ms delay
-                    retry_result = self._query_command(
-                        StageCommandCode.POSITION_GET,
-                        f"STAGE_POSITION_GET_{axis_name}_RETRY",
-                        params=[0, 0, 0, axis, 0, 0, 0x80000000],
-                        value=0.0
+                    max_retries = 20  # Up to 20 retries
+                    retry_delay = 0.5  # 500ms between retries
+                    total_timeout = 10.0  # Total max wait time of 10 seconds
+
+                    for retry_count in range(1, max_retries + 1):
+                        time.sleep(retry_delay)
+
+                        retry_result = self._query_command(
+                            StageCommandCode.POSITION_GET,
+                            f"STAGE_POSITION_GET_{axis_name}_RETRY_{retry_count}",
+                            params=[0, 0, 0, axis, 0, 0, 0x80000000],
+                            value=0.0
+                        )
+
+                        if retry_result and retry_result.get('success'):
+                            raw_response = retry_result.get('raw_response', b'')
+                            if len(raw_response) >= 48:
+                                try:
+                                    position = struct.unpack('<d', raw_response[40:48])[0]
+                                    if position != 0.0:
+                                        self.logger.info(
+                                            f"{axis_name}-axis position after {retry_count} "
+                                            f"retries ({retry_count * retry_delay:.1f}s): {position:.3f} mm"
+                                        )
+                                        return float(position)
+                                    else:
+                                        self.logger.debug(
+                                            f"{axis_name}-axis retry {retry_count}: still moving (0.000)"
+                                        )
+                                except Exception as e:
+                                    self.logger.warning(f"Error parsing retry {retry_count}: {e}")
+
+                        # Check if we've exceeded total timeout
+                        if retry_count * retry_delay >= total_timeout:
+                            self.logger.warning(
+                                f"{axis_name}-axis: Stage still returning 0.000 after {total_timeout}s - "
+                                f"movement may be taking unusually long or there may be a communication issue"
+                            )
+                            break
+
+                    # If we get here, all retries failed
+                    self.logger.error(
+                        f"{axis_name}-axis: Unable to get valid position after {max_retries} retries. "
+                        f"Stage may still be moving or there may be a hardware issue."
                     )
-                    if retry_result and retry_result.get('success') and len(retry_result.get('raw_response', b'')) >= 48:
-                        position = struct.unpack('<d', retry_result['raw_response'][40:48])[0]
-                        if position != 0.0:
-                            self.logger.info(f"{axis_name}-axis position (retry successful): {position} mm")
-                            return float(position)
+                    return None
 
                 # CRITICAL SAFETY CHECK: Validate position is within hardware limits
                 # This prevents accepting corrupted/invalid responses that could damage hardware
