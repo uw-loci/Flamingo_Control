@@ -183,8 +183,15 @@ class StageService(MicroscopeCommandService):
                         retry_result = self._query_command(
                             StageCommandCode.POSITION_GET,
                             f"STAGE_POSITION_GET_{axis_name}_RETRY_{retry_count}",
-                            params=[0, 0, 0, axis, 0, 0, 0],
-                            value=0.0
+                            params=[
+                                0,     # params[0] (hardwareID) - not used
+                                0,     # params[1] (subsystemID) - not used
+                                0,     # params[2] (clientID) - not used
+                                axis,  # params[3] (int32Data0) = axis code (1=X, 2=Y, 3=Z, 4=R)
+                                0,     # params[4] (int32Data1)
+                                0      # params[5] (int32Data2)
+                                # params[6] will be set to TRIGGER_CALL_BACK by _query_command
+                            ]
                         )
 
                         if retry_result and retry_result.get('success'):
