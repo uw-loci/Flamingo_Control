@@ -45,7 +45,7 @@ def test_voxel_movement(controller, main_window=None):
         print("   WARNING: Could not get position, using defaults")
         initial_x, initial_y, initial_z, initial_r = 8.197, 13.889, 22.182, 68.0
 
-    # Step 2: Enable Laser 4 (640nm) via GUI
+    # Step 2: Enable Laser 4 (640nm) directly via controller
     print("\n2. Enabling Laser 4 (640nm) at 14.4% power...")
     try:
         # Use provided main_window or find it
@@ -53,34 +53,32 @@ def test_voxel_movement(controller, main_window=None):
             from PyQt5.QtWidgets import QApplication
             app = QApplication.instance()
             for widget in app.topLevelWidgets():
-                if hasattr(widget, 'workflow_view'):
+                if widget.__class__.__name__ == 'MainWindow':
                     main_window = widget
                     break
 
-        if main_window and hasattr(main_window, 'workflow_view'):
-            workflow_view = main_window.workflow_view
+        # Use the laser controller directly (laser_checkboxes don't exist in workflow_view)
+        if main_window:
+            # Try to find laser controller in different possible locations
+            laser_controller = None
+            if hasattr(main_window, 'laser_controller'):
+                laser_controller = main_window.laser_controller
+            elif hasattr(main_window, 'laser_led_controller'):
+                laser_controller = main_window.laser_led_controller
 
-            # Uncheck all lasers first
-            if hasattr(workflow_view, 'laser_checkboxes'):
-                for checkbox in workflow_view.laser_checkboxes:
-                    checkbox.setChecked(False)
-
-                # Check Laser 4 (index 3)
-                if len(workflow_view.laser_checkboxes) > 3:
-                    workflow_view.laser_checkboxes[3].setChecked(True)
-                    print("   Laser 4 checkbox enabled")
-
-                # Set power
-                if hasattr(workflow_view, 'laser_power_inputs') and len(workflow_view.laser_power_inputs) > 3:
-                    workflow_view.laser_power_inputs[3].setText("14.4")
+            if laser_controller:
+                # First set the laser power
+                if hasattr(laser_controller, 'set_laser_power'):
+                    laser_controller.set_laser_power(4, 14.4)
                     print("   Laser 4 power set to 14.4%")
 
-            # Use the laser controller if available
-            if hasattr(main_window, 'laser_controller'):
-                main_window.laser_controller.enable_laser_for_preview(4, "left")
-                print("   Laser preview enabled")
+                # Then enable the laser for preview
+                result = laser_controller.enable_laser_for_preview(4, "left")
+                print(f"   Laser 4 preview enabled: {result}")
+            else:
+                print("   WARNING: Could not find laser controller")
         else:
-            print("   WARNING: Could not access workflow view for laser control")
+            print("   WARNING: Could not find main window")
 
         time.sleep(1)
     except Exception as e:
@@ -89,50 +87,48 @@ def test_voxel_movement(controller, main_window=None):
     # Step 3: Start live view
     print("\n3. Starting live view...")
     try:
-        # Use workflow view to start live view
-        if main_window and hasattr(main_window, 'workflow_view'):
-            workflow_view = main_window.workflow_view
-            if hasattr(workflow_view, 'start_live_view_button'):
-                workflow_view.start_live_view_button.click()
-                print("   Live view started via GUI button")
-            elif hasattr(main_window, 'camera_controller'):
-                # Fallback to camera controller
-                main_window.camera_controller.start_live_view()
-                print("   Live view started via camera controller")
-            else:
-                print("   WARNING: Could not find live view controls")
+        # Use camera controller directly (start_live_view_button doesn't exist in workflow_view)
+        if main_window and hasattr(main_window, 'camera_controller'):
+            result = main_window.camera_controller.start_live_view()
+            print(f"   Live view started: {result}")
+        else:
+            print("   WARNING: Could not find camera controller")
         time.sleep(2)
     except Exception as e:
         print(f"   Error starting live view: {e}")
 
-    # Step 4: Open 3D viewer through GUI
+    # Step 4: Open 3D viewer window
     print("\n4. Opening 3D Visualization window...")
     viz_window = None
     try:
-        # Try to open via workflow view button
-        if main_window and hasattr(main_window, 'workflow_view'):
-            workflow_view = main_window.workflow_view
-            if hasattr(workflow_view, 'open_3d_visualization_button'):
-                workflow_view.open_3d_visualization_button.click()
-                print("   3D Visualization window opened via button")
+        # Check if 3D window already exists in main_window
+        if main_window and hasattr(main_window, 'sample_3d_visualization_window'):
+            viz_window = main_window.sample_3d_visualization_window
+            if viz_window and not viz_window.isVisible():
+                viz_window.show()
+                print("   Showing existing 3D Visualization window")
+
+        # If not found, try to create it
+        if not viz_window and main_window:
+            # Check if main window has a method to open the 3D viewer
+            if hasattr(main_window, 'open_3d_visualization'):
+                main_window.open_3d_visualization()
+                print("   Opened 3D Visualization via main window method")
                 time.sleep(2)
+                # Try to get reference again
+                if hasattr(main_window, 'sample_3d_visualization_window'):
+                    viz_window = main_window.sample_3d_visualization_window
 
-        # Try to find the 3D visualization window
-        from PyQt5.QtWidgets import QApplication
-        app = QApplication.instance()
-        if app:
-            for widget in app.topLevelWidgets():
-                if hasattr(widget, 'visualization_3d_window'):
-                    viz_window = widget.visualization_3d_window
-                    break
-                # Also check if widget itself is the viz window
-                if widget.__class__.__name__ == 'Sample3DVisualizationWindow':
-                    viz_window = widget
-                    break
-
-        # If still not found, check main window
-        if not viz_window and main_window and hasattr(main_window, 'visualization_3d_window'):
-            viz_window = main_window.visualization_3d_window
+        # If still not found, search all top-level widgets
+        if not viz_window:
+            from PyQt5.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app:
+                for widget in app.topLevelWidgets():
+                    # Check if widget itself is the viz window
+                    if widget.__class__.__name__ == 'Sample3DVisualizationWindow':
+                        viz_window = widget
+                        break
 
         if viz_window:
             print("   Found 3D visualization window")
@@ -145,9 +141,9 @@ def test_voxel_movement(controller, main_window=None):
         time.sleep(3)
 
     # Step 6: Start populating (if we have window reference)
-    if viz_window and hasattr(viz_window, 'populate_live_checkbox'):
+    if viz_window and hasattr(viz_window, 'populate_button'):
         print("\n5. Starting 3D population from live view...")
-        viz_window.populate_live_checkbox.setChecked(True)
+        viz_window.populate_button.setChecked(True)
         print("   Population started")
         time.sleep(3)
     else:
@@ -193,9 +189,9 @@ def test_voxel_movement(controller, main_window=None):
     final_moved_voxels = capture_voxel_state(viz_window)
 
     # Step 10: Stop population
-    if viz_window and hasattr(viz_window, 'populate_live_checkbox'):
+    if viz_window and hasattr(viz_window, 'populate_button'):
         print("\n9. Stopping 3D population...")
-        viz_window.populate_live_checkbox.setChecked(False)
+        viz_window.populate_button.setChecked(False)
         time.sleep(1)
     else:
         print("\n9. Please manually stop 'Populate from Live View'")
@@ -203,16 +199,10 @@ def test_voxel_movement(controller, main_window=None):
     # Step 11: Stop live view
     print("\n10. Stopping live view...")
     try:
-        # Use workflow view to stop live view
-        if main_window and hasattr(main_window, 'workflow_view'):
-            workflow_view = main_window.workflow_view
-            if hasattr(workflow_view, 'stop_live_view_button'):
-                workflow_view.stop_live_view_button.click()
-                print("   Live view stopped via GUI button")
-            elif hasattr(main_window, 'camera_controller'):
-                # Fallback to camera controller
-                main_window.camera_controller.stop_live_view()
-                print("   Live view stopped via camera controller")
+        # Use camera controller directly (stop_live_view_button doesn't exist in workflow_view)
+        if main_window and hasattr(main_window, 'camera_controller'):
+            result = main_window.camera_controller.stop_live_view()
+            print(f"   Live view stopped: {result}")
     except Exception as e:
         print(f"   Error stopping live view: {e}")
     time.sleep(1)
@@ -225,22 +215,21 @@ def test_voxel_movement(controller, main_window=None):
             from PyQt5.QtWidgets import QApplication
             app = QApplication.instance()
             for widget in app.topLevelWidgets():
-                if hasattr(widget, 'workflow_view'):
+                if widget.__class__.__name__ == 'MainWindow':
                     main_window = widget
                     break
 
-        if main_window and hasattr(main_window, 'workflow_view'):
-            workflow_view = main_window.workflow_view
-            # Uncheck all laser checkboxes
-            if hasattr(workflow_view, 'laser_checkboxes'):
-                for checkbox in workflow_view.laser_checkboxes:
-                    checkbox.setChecked(False)
-                print("   All lasers disabled")
-
-            # Use the laser controller if available
+        # Use the laser controller directly (laser_checkboxes don't exist in workflow_view)
+        if main_window:
+            laser_controller = None
             if hasattr(main_window, 'laser_controller'):
-                main_window.laser_controller.disable_all_lasers()
-                print("   Laser preview disabled")
+                laser_controller = main_window.laser_controller
+            elif hasattr(main_window, 'laser_led_controller'):
+                laser_controller = main_window.laser_led_controller
+
+            if laser_controller:
+                laser_controller.disable_all_light_sources()
+                print("   All light sources disabled")
     except Exception as e:
         print(f"   Error disabling laser: {e}")
 
