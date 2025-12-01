@@ -252,7 +252,8 @@ def test_voxel_movement(controller, main_window=None):
         new_y = 24.5
         print(f"   NOTE: Clamping Y to {new_y:.3f} to stay within safe range")
     controller.move_y(new_y)
-    smart_sleep(5, "Waiting 5 seconds for movement completion and data capture...")
+    # Y-axis often needs more time due to position query retries
+    smart_sleep(12, "Waiting 12 seconds for Y movement (may need extra retries)...")
     movements.append(('Y', initial_y, new_y))
     y_voxels = capture_voxel_state(viz_window)
     print(f"   Y movement complete. Voxel state: {y_voxels}")
@@ -410,11 +411,15 @@ def capture_voxel_state(viz_window):
 
     try:
         state = {'total_voxels': 0}
+        # Count voxels by checking storage_data dictionary size per channel
         for ch_id in range(4):
-            count = storage.get_voxel_count(ch_id)
-            if count > 0:
-                state[f'ch{ch_id}'] = count
-                state['total_voxels'] += count
+            if storage.has_data(ch_id):
+                # Access the storage_data dictionary directly
+                if hasattr(storage, 'storage_data'):
+                    count = len(storage.storage_data.get(ch_id, {}))
+                    if count > 0:
+                        state[f'ch{ch_id}'] = count
+                        state['total_voxels'] += count
 
         # Also try to get center of mass for active channel
         if hasattr(storage, 'storage_arrays'):
