@@ -110,6 +110,11 @@ class Sample3DVisualizationWindow(QWidget):
         # Cache previous sample data bounds for efficient clearing (dense array optimization)
         self.previous_sample_bounds = {}  # {ch_id: (z_start, z_end, y_start, y_end, x_start, x_end)}
 
+        # Thread safety for updates - MUST be initialized before any UI/viewer operations
+        self.update_mutex = QMutex()
+        self.pending_stage_update = None
+        self.last_stage_position = {'x': 0, 'y': 0, 'z': 0, 'r': 0}
+
         # Setup UI
         self._setup_ui()
         self._connect_signals()
@@ -138,11 +143,6 @@ class Sample3DVisualizationWindow(QWidget):
         self.populate_timer = QTimer()
         self.populate_timer.timeout.connect(self._on_populate_tick)
         self.populate_timer.setInterval(500)  # Capture every 500ms (2 Hz)
-
-        # Thread safety for updates
-        self.update_mutex = QMutex()
-        self.pending_stage_update = None
-        self.last_stage_position = {'x': 0, 'y': 0, 'z': 0, 'r': 0}
 
         # Update throttle timer for stage movements
         self.update_throttle_timer = QTimer()
