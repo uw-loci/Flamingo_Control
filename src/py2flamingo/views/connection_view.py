@@ -185,6 +185,21 @@ class ConnectionView(QWidget):
         self.save_settings_btn.setEnabled(False)  # Enabled when connected
         debug_layout.addWidget(self.save_settings_btn)
 
+        # 3D Voxel Movement Test button
+        self.voxel_test_btn = QPushButton("Test 3D Voxel Movement")
+        self.voxel_test_btn.setToolTip(
+            "Run automated test sequence for 3D visualization voxel movement:\n"
+            "• Enables laser 4 (640nm)\n"
+            "• Starts live view\n"
+            "• Opens 3D viewer and populates from live\n"
+            "• Moves stage in X, Y, Z\n"
+            "• Returns to original position\n"
+            "• Exports diagnostic data"
+        )
+        self.voxel_test_btn.clicked.connect(self._on_voxel_test_clicked)
+        self.voxel_test_btn.setEnabled(False)  # Enabled when connected
+        debug_layout.addWidget(self.voxel_test_btn)
+
         debug_layout.addStretch()
         layout.addLayout(debug_layout)
 
@@ -288,6 +303,7 @@ class ConnectionView(QWidget):
             self.debug_command_combo.setEnabled(True)  # Enable debug tools when connected
             self.debug_query_btn.setEnabled(True)
             self.save_settings_btn.setEnabled(True)
+            self.voxel_test_btn.setEnabled(True)
         else:
             # Disconnected state
             self.status_label.setText("Status: Not connected")
@@ -299,6 +315,7 @@ class ConnectionView(QWidget):
             self.debug_command_combo.setEnabled(False)  # Disable debug tools when disconnected
             self.debug_query_btn.setEnabled(False)
             self.save_settings_btn.setEnabled(False)
+            self.voxel_test_btn.setEnabled(False)
 
     def _show_message(self, message: str, is_error: bool = False) -> None:
         """Display feedback message with appropriate color coding.
@@ -669,6 +686,98 @@ class ConnectionView(QWidget):
         except Exception as e:
             self._logger.error(f"Error saving settings: {e}", exc_info=True)
             self._show_message(f"Save failed: {e}", is_error=True)
+
+    def _on_voxel_test_clicked(self) -> None:
+        """Handle 3D voxel movement test button click.
+
+        Runs automated test sequence for debugging voxel movement in 3D visualization.
+        """
+        from PyQt5.QtCore import QTimer
+        from PyQt5.QtWidgets import QMessageBox, QApplication
+        import time
+
+        self._logger.info("3D Voxel Movement Test button clicked")
+
+        # Check if connected
+        if not self._position_controller or not self._position_controller.tcp_client:
+            self._show_message("Must be connected to run test", is_error=True)
+            return
+
+        # Find the main application window
+        app = QApplication.instance()
+        main_window = None
+        for widget in app.topLevelWidgets():
+            if hasattr(widget, 'workflow_view') and hasattr(widget, 'connection_controller'):
+                main_window = widget
+                break
+
+        if not main_window:
+            self._show_message("Could not find main application window", is_error=True)
+            return
+
+        # Show confirmation dialog
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Question)
+        msg.setWindowTitle("Run 3D Voxel Movement Test")
+        msg.setText("This will run an automated test sequence:")
+        msg.setInformativeText(
+            "1. Query and store current stage position\n"
+            "2. Enable Laser 4 (640nm) at 14.4% power\n"
+            "3. Start live view\n"
+            "4. Open 3D visualization window\n"
+            "5. Start populating from live view\n"
+            "6. Move stage ~0.5mm in X, Y, and Z\n"
+            "7. Stop population and live view\n"
+            "8. Disable laser\n"
+            "9. Return to original position\n"
+            "10. Export diagnostic data\n\n"
+            "The test takes about 60 seconds.\n\n"
+            "Continue?"
+        )
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setDefaultButton(QMessageBox.No)
+
+        if msg.exec_() != QMessageBox.Yes:
+            self._logger.info("User cancelled voxel test")
+            return
+
+        # Disable button during test
+        self.voxel_test_btn.setEnabled(False)
+        self.voxel_test_btn.setText("Test Running...")
+
+        try:
+            # Import and run the test
+            from tests.test_3d_movement_simple import test_voxel_movement
+
+            # Run test in a way that doesn't block the GUI
+            def run_test():
+                try:
+                    success = test_voxel_movement(self._position_controller)
+                    if success:
+                        self._show_message("3D Voxel Movement Test completed successfully!\nCheck exported data in tests/voxel_test_results/", is_error=False)
+                    else:
+                        self._show_message("Test completed with warnings. Check logs.", is_error=True)
+                except Exception as e:
+                    self._logger.error(f"Error running voxel test: {e}", exc_info=True)
+                    self._show_message(f"Test failed: {e}", is_error=True)
+                finally:
+                    # Re-enable button
+                    self.voxel_test_btn.setEnabled(True)
+                    self.voxel_test_btn.setText("Test 3D Voxel Movement")
+
+            # Schedule test to run after returning to event loop
+            QTimer.singleShot(100, run_test)
+
+        except ImportError as e:
+            self._logger.error(f"Could not import test module: {e}")
+            self._show_message("Test module not found. Make sure tests/test_3d_movement_simple.py exists.", is_error=True)
+            self.voxel_test_btn.setEnabled(True)
+            self.voxel_test_btn.setText("Test 3D Voxel Movement")
+        except Exception as e:
+            self._logger.error(f"Error starting test: {e}", exc_info=True)
+            self._show_message(f"Failed to start test: {e}", is_error=True)
+            self.voxel_test_btn.setEnabled(True)
+            self.voxel_test_btn.setText("Test 3D Voxel Movement")
 
     def _on_config_selected(self, config_name: str) -> None:
         """Handle configuration selection from dropdown.
