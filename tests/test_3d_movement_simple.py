@@ -57,37 +57,64 @@ def test_voxel_movement(controller, main_window=None):
                     main_window = widget
                     break
 
-        # Use the laser controller directly (laser_checkboxes don't exist in workflow_view)
+        # Use the laser controller directly
+        laser_enabled = False
         if main_window:
             # Try to find laser controller in different possible locations
             laser_controller = None
-            if hasattr(main_window, 'laser_controller'):
-                laser_controller = main_window.laser_controller
-            elif hasattr(main_window, 'laser_led_controller'):
+            if hasattr(main_window, 'laser_led_controller'):
                 laser_controller = main_window.laser_led_controller
+            elif hasattr(main_window, 'laser_controller'):
+                laser_controller = main_window.laser_controller
 
             if laser_controller:
-                # First set the laser power
-                if hasattr(laser_controller, 'set_laser_power'):
-                    laser_controller.set_laser_power(4, 14.4)
-                    print("   Laser 4 power set to 14.4%")
+                # Make sure to disable all light sources first
+                laser_controller.disable_all_light_sources()
+                time.sleep(0.5)
 
-                # Then enable the laser for preview
-                result = laser_controller.enable_laser_for_preview(4, "left")
-                print(f"   Laser 4 preview enabled: {result}")
+                # Set the laser power level first
+                if hasattr(laser_controller, 'set_laser_power'):
+                    result = laser_controller.set_laser_power(4, 14.4)
+                    print(f"   Laser 4 power set to 14.4%: {result}")
+                    time.sleep(0.5)
+
+                # Enable the laser for preview on left path
+                try:
+                    result = laser_controller.enable_laser_for_preview(4, "left")
+                    laser_enabled = result
+                    print(f"   Laser 4 preview enabled: {result}")
+
+                    # Verify laser is active
+                    if hasattr(laser_controller, 'get_active_laser'):
+                        active = laser_controller.get_active_laser()
+                        print(f"   Active laser confirmed: {active}")
+                except Exception as e:
+                    print(f"   Failed to enable laser: {e}")
             else:
                 print("   WARNING: Could not find laser controller")
         else:
             print("   WARNING: Could not find main window")
 
+        if not laser_enabled:
+            print("   WARNING: Laser may not be enabled - fluorescence data may not be captured")
+
         time.sleep(1)
     except Exception as e:
         print(f"   Error setting up laser: {e}")
 
-    # Step 3: Start live view
-    print("\n3. Starting live view...")
+    # Step 3: Open Camera Live Viewer window and start live view
+    print("\n3. Opening Camera Live Viewer and starting live view...")
+    camera_viewer = None
     try:
-        # Use camera controller directly (start_live_view_button doesn't exist in workflow_view)
+        # First, open the camera live viewer window (required for data flow)
+        if main_window and hasattr(main_window, 'camera_live_viewer'):
+            camera_viewer = main_window.camera_live_viewer
+            if camera_viewer and not camera_viewer.isVisible():
+                camera_viewer.show()
+                print("   Camera Live Viewer window opened")
+                time.sleep(1)
+
+        # Now start live view through the camera controller
         if main_window and hasattr(main_window, 'camera_controller'):
             result = main_window.camera_controller.start_live_view()
             print(f"   Live view started: {result}")
