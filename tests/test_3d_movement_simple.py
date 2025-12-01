@@ -12,11 +12,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def test_voxel_movement(controller):
+def test_voxel_movement(controller, main_window=None):
     """
     Simple test sequence to verify voxel movement.
 
-    Run from Connection tab:
+    Args:
+        controller: Position controller for stage movements
+        main_window: Main application window (optional, will search if not provided)
+
+    Run from Connection tab button or manually:
     >>> from tests.test_3d_movement_simple import test_voxel_movement
     >>> test_voxel_movement(self.controller)
     """
@@ -44,14 +48,14 @@ def test_voxel_movement(controller):
     # Step 2: Enable Laser 4 (640nm) via GUI
     print("\n2. Enabling Laser 4 (640nm) at 14.4% power...")
     try:
-        # Find the main application window to access workflow view
-        from PyQt5.QtWidgets import QApplication
-        app = QApplication.instance()
-        main_window = None
-        for widget in app.topLevelWidgets():
-            if hasattr(widget, 'workflow_view'):
-                main_window = widget
-                break
+        # Use provided main_window or find it
+        if not main_window:
+            from PyQt5.QtWidgets import QApplication
+            app = QApplication.instance()
+            for widget in app.topLevelWidgets():
+                if hasattr(widget, 'workflow_view'):
+                    main_window = widget
+                    break
 
         if main_window and hasattr(main_window, 'workflow_view'):
             workflow_view = main_window.workflow_view
@@ -194,14 +198,14 @@ def test_voxel_movement(controller):
     # Step 12: Disable laser
     print("\n11. Disabling laser...")
     try:
-        # Find main window again if needed
-        from PyQt5.QtWidgets import QApplication
-        app = QApplication.instance()
-        main_window = None
-        for widget in app.topLevelWidgets():
-            if hasattr(widget, 'workflow_view'):
-                main_window = widget
-                break
+        # Use existing main_window or find it if needed
+        if not main_window:
+            from PyQt5.QtWidgets import QApplication
+            app = QApplication.instance()
+            for widget in app.topLevelWidgets():
+                if hasattr(widget, 'workflow_view'):
+                    main_window = widget
+                    break
 
         if main_window and hasattr(main_window, 'workflow_view'):
             workflow_view = main_window.workflow_view

@@ -703,16 +703,27 @@ class ConnectionView(QWidget):
             self._show_message("Must be connected to run test", is_error=True)
             return
 
-        # Find the main application window
+        # Find the main window (MainWindow class has views)
         app = QApplication.instance()
         main_window = None
+        workflow_view = None
+
+        # Look for the MainWindow which contains the views
         for widget in app.topLevelWidgets():
-            if hasattr(widget, 'workflow_view') and hasattr(widget, 'connection_controller'):
+            if widget.__class__.__name__ == 'MainWindow':
                 main_window = widget
+                if hasattr(widget, 'workflow_view'):
+                    workflow_view = widget.workflow_view
+                break
+            # Also check for workflow_view directly
+            elif hasattr(widget, 'workflow_view'):
+                main_window = widget
+                workflow_view = widget.workflow_view
                 break
 
-        if not main_window:
+        if not main_window or not workflow_view:
             self._show_message("Could not find main application window", is_error=True)
+            self._logger.error("Failed to find MainWindow or workflow_view")
             return
 
         # Show confirmation dialog
@@ -752,7 +763,8 @@ class ConnectionView(QWidget):
             # Run test in a way that doesn't block the GUI
             def run_test():
                 try:
-                    success = test_voxel_movement(self._position_controller)
+                    # Pass both the position controller and main window to the test
+                    success = test_voxel_movement(self._position_controller, main_window)
                     if success:
                         self._show_message("3D Voxel Movement Test completed successfully!\nCheck exported data in tests/voxel_test_results/", is_error=False)
                     else:
