@@ -82,15 +82,14 @@ def test_voxel_movement(controller, main_window=None):
                     main_window = widget
                     break
 
-        # Use the laser controller directly
+        # Get laser controller from camera_live_viewer (where it's actually stored)
         laser_enabled = False
-        if main_window:
-            # Try to find laser controller in different possible locations
-            laser_controller = None
-            if hasattr(main_window, 'laser_led_controller'):
-                laser_controller = main_window.laser_led_controller
-            elif hasattr(main_window, 'laser_controller'):
-                laser_controller = main_window.laser_controller
+        laser_controller = None
+        if main_window and hasattr(main_window, 'camera_live_viewer'):
+            camera_viewer = main_window.camera_live_viewer
+            if camera_viewer and hasattr(camera_viewer, 'laser_led_controller'):
+                laser_controller = camera_viewer.laser_led_controller
+                print("   Found laser controller via camera_live_viewer")
 
             if laser_controller:
                 # Make sure to disable all light sources first
@@ -108,6 +107,13 @@ def test_voxel_movement(controller, main_window=None):
                     result = laser_controller.enable_laser_for_preview(4, "left")
                     laser_enabled = result
                     print(f"   Laser 4 preview enabled: {result}")
+
+                    # Update the GUI checkbox to show laser is enabled
+                    if camera_viewer and hasattr(camera_viewer, 'laser_checkboxes'):
+                        # Find checkbox for laser 4 (index 3)
+                        if len(camera_viewer.laser_checkboxes) > 3:
+                            camera_viewer.laser_checkboxes[3].setChecked(True)
+                            print("   Updated GUI: Laser 4 checkbox checked")
 
                     # Verify laser is active
                     if hasattr(laser_controller, 'get_active_laser'):
@@ -141,13 +147,25 @@ def test_voxel_movement(controller, main_window=None):
                 print("   Camera Live Viewer window opened")
                 smart_sleep(5, "Waiting 5 seconds for camera initialization and OpenGL...")
 
-        # Now start live view through the camera controller
-        if main_window and hasattr(main_window, 'camera_controller'):
-            result = main_window.camera_controller.start_live_view()
-            print(f"   Live view started: {result}")
-            smart_sleep(3, "Waiting 3 seconds for camera stream to stabilize...")
+        # Now start live view through the camera controller (from camera_live_viewer)
+        if main_window and hasattr(main_window, 'camera_live_viewer'):
+            camera_viewer = main_window.camera_live_viewer
+            if camera_viewer and hasattr(camera_viewer, 'camera_controller'):
+                camera_controller = camera_viewer.camera_controller
+                result = camera_controller.start_live_view()
+                print(f"   Live view started: {result}")
+
+                # Update GUI buttons to reflect live view state
+                if hasattr(camera_viewer, 'start_btn') and hasattr(camera_viewer, 'stop_btn'):
+                    camera_viewer.start_btn.setEnabled(False)
+                    camera_viewer.stop_btn.setEnabled(True)
+                    print("   Updated GUI: Live view buttons state changed")
+
+                smart_sleep(3, "Waiting 3 seconds for camera stream to stabilize...")
+            else:
+                print("   WARNING: Could not find camera controller in camera_live_viewer")
         else:
-            print("   WARNING: Could not find camera controller")
+            print("   WARNING: Could not find camera_live_viewer")
     except Exception as e:
         print(f"   Error starting live view: {e}")
 
@@ -262,10 +280,23 @@ def test_voxel_movement(controller, main_window=None):
     # Step 11: Stop live view
     print("\n10. Stopping live view...")
     try:
-        # Use camera controller directly (stop_live_view_button doesn't exist in workflow_view)
-        if main_window and hasattr(main_window, 'camera_controller'):
-            result = main_window.camera_controller.stop_live_view()
-            print(f"   Live view stopped: {result}")
+        # Use camera controller from camera_live_viewer
+        if main_window and hasattr(main_window, 'camera_live_viewer'):
+            camera_viewer = main_window.camera_live_viewer
+            if camera_viewer and hasattr(camera_viewer, 'camera_controller'):
+                camera_controller = camera_viewer.camera_controller
+                result = camera_controller.stop_live_view()
+                print(f"   Live view stopped: {result}")
+
+                # Update GUI buttons to reflect live view stopped
+                if hasattr(camera_viewer, 'start_btn') and hasattr(camera_viewer, 'stop_btn'):
+                    camera_viewer.start_btn.setEnabled(True)
+                    camera_viewer.stop_btn.setEnabled(False)
+                    print("   Updated GUI: Live view buttons reset")
+            else:
+                print("   WARNING: Could not find camera controller to stop live view")
+        else:
+            print("   WARNING: Could not find camera_live_viewer to stop live view")
     except Exception as e:
         print(f"   Error stopping live view: {e}")
     smart_sleep(1, "Waiting for live view to stop...")
@@ -273,26 +304,20 @@ def test_voxel_movement(controller, main_window=None):
     # Step 12: Disable laser
     print("\n11. Disabling laser...")
     try:
-        # Use existing main_window or find it if needed
-        if not main_window:
-            from PyQt5.QtWidgets import QApplication
-            app = QApplication.instance()
-            for widget in app.topLevelWidgets():
-                if widget.__class__.__name__ == 'MainWindow':
-                    main_window = widget
-                    break
-
-        # Use the laser controller directly (laser_checkboxes don't exist in workflow_view)
-        if main_window:
-            laser_controller = None
-            if hasattr(main_window, 'laser_controller'):
-                laser_controller = main_window.laser_controller
-            elif hasattr(main_window, 'laser_led_controller'):
-                laser_controller = main_window.laser_led_controller
-
-            if laser_controller:
-                laser_controller.disable_all_light_sources()
-                print("   All light sources disabled")
+        # Use laser controller from camera_live_viewer
+        if main_window and hasattr(main_window, 'camera_live_viewer'):
+            camera_viewer = main_window.camera_live_viewer
+            if camera_viewer and hasattr(camera_viewer, 'laser_led_controller'):
+                laser_controller = camera_viewer.laser_led_controller
+                if laser_controller:
+                    laser_controller.disable_all_light_sources()
+                    print("   All light sources disabled")
+                else:
+                    print("   WARNING: Laser controller not available")
+            else:
+                print("   WARNING: Could not find laser controller in camera_live_viewer")
+        else:
+            print("   WARNING: Could not find camera_live_viewer to disable laser")
     except Exception as e:
         print(f"   Error disabling laser: {e}")
 
