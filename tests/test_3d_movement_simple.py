@@ -232,13 +232,25 @@ def test_voxel_movement(controller, main_window=None):
     # Step 8: Move stage and capture data
     print("\n7. Moving stage in X, Y, Z (one FOV each = ~0.5mm)...")
 
+    # IMPORTANT: We use the stage service directly to avoid automatic position queries
+    # that trigger safety violations when hardware returns 0.000 during movement
+    from py2flamingo.services.stage_service import StageService, AxisCode
+    stage_service = None
+    if controller and hasattr(controller, 'connection'):
+        stage_service = StageService(controller.connection)
+        print("   Using direct stage service to avoid position query issues")
+
     movements = []
 
     # Move X by 0.5mm (1 FOV)
     print("\n   Moving X by +0.5mm...")
     new_x = initial_x + 0.5
-    controller.move_x(new_x)
-    smart_sleep(5, "Waiting 5 seconds for movement completion and data capture...")
+    if stage_service:
+        # Use stage service directly - no automatic position queries
+        stage_service.move_absolute(AxisCode.X_AXIS, new_x)
+    else:
+        controller.move_x(new_x)
+    smart_sleep(7, "Waiting 7 seconds for movement to fully complete...")
     movements.append(('X', initial_x, new_x))
     x_voxels = capture_voxel_state(viz_window)
     print(f"   X movement complete. Voxel state: {x_voxels}")
@@ -250,8 +262,11 @@ def test_voxel_movement(controller, main_window=None):
     if new_y > 24.5:  # Leave margin from max of 25.0
         new_y = 24.5
         print(f"   NOTE: Clamping Y to {new_y:.3f} to stay within safe range")
-    controller.move_y(new_y)
-    smart_sleep(5, "Waiting 5 seconds for movement completion and data capture...")
+    if stage_service:
+        stage_service.move_absolute(AxisCode.Y_AXIS, new_y)
+    else:
+        controller.move_y(new_y)
+    smart_sleep(7, "Waiting 7 seconds for movement to fully complete...")
     movements.append(('Y', initial_y, new_y))
     y_voxels = capture_voxel_state(viz_window)
     print(f"   Y movement complete. Voxel state: {y_voxels}")
@@ -259,8 +274,11 @@ def test_voxel_movement(controller, main_window=None):
     # Move Z by 0.5mm (1 FOV)
     print("\n   Moving Z by +0.5mm...")
     new_z = initial_z + 0.5
-    controller.move_z(new_z)
-    smart_sleep(5, "Waiting 5 seconds for movement completion and data capture...")
+    if stage_service:
+        stage_service.move_absolute(AxisCode.Z_AXIS, new_z)
+    else:
+        controller.move_z(new_z)
+    smart_sleep(7, "Waiting 7 seconds for movement to fully complete...")
     movements.append(('Z', initial_z, new_z))
     z_voxels = capture_voxel_state(viz_window)
     print(f"   Z movement complete. Voxel state: {z_voxels}")
@@ -324,24 +342,39 @@ def test_voxel_movement(controller, main_window=None):
     # Step 13: Return to original position for repeatability
     print("\n12. Returning to original position for test repeatability...")
 
-    # IMPORTANT: We use longer delays here and skip position verification to avoid
-    # the SAFETY VIOLATION issue. The hardware returns 0.000 while the stage is moving,
-    # which triggers safety checks. By waiting longer and not querying position during
-    # movement, we avoid this issue entirely.
+    # IMPORTANT: We use the stage service directly to avoid automatic position queries
+    # that trigger safety violations when hardware returns 0.000 during movement.
+    # We also use longer delays to ensure movements are fully complete.
 
     print(f"   Commanding return to: X={initial_x:.3f}, Y={initial_y:.3f}, Z={initial_z:.3f}")
 
-    controller.move_x(initial_x)
-    smart_sleep(3, "Waiting 3 seconds for X axis to complete movement...")
+    # Try to use stage service directly if available
+    from py2flamingo.services.stage_service import StageService, AxisCode
+    stage_service = None
+    if controller and hasattr(controller, 'connection'):
+        stage_service = StageService(controller.connection)
+        print("   Using direct stage service for return movements")
 
-    controller.move_y(initial_y)
-    smart_sleep(3, "Waiting 3 seconds for Y axis to complete movement...")
+    if stage_service:
+        stage_service.move_absolute(AxisCode.X_AXIS, initial_x)
+    else:
+        controller.move_x(initial_x)
+    smart_sleep(5, "Waiting 5 seconds for X axis to complete movement...")
 
-    controller.move_z(initial_z)
-    smart_sleep(3, "Waiting 3 seconds for Z axis to complete movement...")
+    if stage_service:
+        stage_service.move_absolute(AxisCode.Y_AXIS, initial_y)
+    else:
+        controller.move_y(initial_y)
+    smart_sleep(5, "Waiting 5 seconds for Y axis to complete movement...")
+
+    if stage_service:
+        stage_service.move_absolute(AxisCode.Z_AXIS, initial_z)
+    else:
+        controller.move_z(initial_z)
+    smart_sleep(5, "Waiting 5 seconds for Z axis to complete movement...")
 
     # Wait extra time to ensure all movements are fully complete before any position queries
-    smart_sleep(2, "Waiting for stage to fully settle...")
+    smart_sleep(3, "Waiting for stage to fully settle...")
 
     # NOTE: We intentionally do NOT query position here to avoid triggering
     # safety violations from 0.000 position during movement.
