@@ -760,25 +760,57 @@ class ConnectionView(QWidget):
             # Import and run the test
             from tests.test_3d_movement_simple import test_voxel_movement
 
-            # Run test in a way that doesn't block the GUI
-            def run_test():
+            # Check if required windows are already open
+            camera_viewer_open = False
+            viz_3d_open = False
+
+            if main_window:
+                # Check Camera Live Viewer
+                if hasattr(main_window, 'camera_live_viewer'):
+                    camera_viewer_open = main_window.camera_live_viewer and main_window.camera_live_viewer.isVisible()
+
+                # Check 3D Visualization
+                if hasattr(main_window, 'sample_3d_visualization_window'):
+                    viz_3d_open = main_window.sample_3d_visualization_window and main_window.sample_3d_visualization_window.isVisible()
+
+            if not camera_viewer_open or not viz_3d_open:
+                missing = []
+                if not camera_viewer_open:
+                    missing.append("Camera Live Viewer")
+                if not viz_3d_open:
+                    missing.append("3D Sample Visualization")
+
+                self._show_message(f"Please open these windows first:\n• {chr(10).join('• ' + w for w in missing)}", is_error=True)
+                self.voxel_test_btn.setEnabled(True)
+                self.voxel_test_btn.setText("Test 3D Voxel Movement")
+                return
+
+            # Run test in separate thread to avoid blocking GUI
+            from threading import Thread
+
+            def run_test_thread():
                 try:
                     # Pass both the position controller and main window to the test
                     success = test_voxel_movement(self._position_controller, main_window)
-                    if success:
-                        self._show_message("3D Voxel Movement Test completed successfully!\nCheck exported data in tests/voxel_test_results/", is_error=False)
-                    else:
-                        self._show_message("Test completed with warnings. Check logs.", is_error=True)
+
+                    # Use Qt signal to update GUI from thread
+                    QTimer.singleShot(0, lambda: self._show_message(
+                        "3D Voxel Movement Test completed successfully!\nCheck exported data in tests/voxel_test_results/" if success
+                        else "Test completed with warnings. Check logs.",
+                        is_error=not success
+                    ))
                 except Exception as e:
                     self._logger.error(f"Error running voxel test: {e}", exc_info=True)
-                    self._show_message(f"Test failed: {e}", is_error=True)
+                    error_msg = str(e)
+                    QTimer.singleShot(0, lambda: self._show_message(f"Test failed: {error_msg}", is_error=True))
                 finally:
-                    # Re-enable button
-                    self.voxel_test_btn.setEnabled(True)
-                    self.voxel_test_btn.setText("Test 3D Voxel Movement")
+                    # Re-enable button using Qt signal
+                    QTimer.singleShot(0, lambda: self.voxel_test_btn.setEnabled(True))
+                    QTimer.singleShot(0, lambda: self.voxel_test_btn.setText("Test 3D Voxel Movement"))
 
-            # Schedule test to run after returning to event loop
-            QTimer.singleShot(100, run_test)
+            # Start test in background thread
+            test_thread = Thread(target=run_test_thread, daemon=True)
+            test_thread.start()
 
         except ImportError as e:
             self._logger.error(f"Could not import test module: {e}")
