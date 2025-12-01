@@ -106,20 +106,69 @@ class StageService(MicroscopeCommandService):
                 return None
             raise RuntimeError(f"Failed to get {axis_name} position: {result.get('error', 'Unknown error')}")
 
+        # Parse the full response to check all fields
+        parsed = result.get('parsed', {})
+        raw_response = result.get('raw_response', b'')
+
+        # Log the complete response for debugging
+        if parsed:
+            status_code = parsed.get('status_code', 0)
+            params = parsed.get('params', [])
+
+            # Log status and params to understand motion state indicators
+            self.logger.debug(f"{axis_name}-axis response - Status: 0x{status_code:08X}, "
+                            f"Params: {[f'0x{p:08X}' for p in params]}")
+
         # Position is returned in the doubleData field (bytes 40-47 of SCommand)
         # NOT in the data buffer - that's a common mistake!
         import struct
-        raw_response = result.get('raw_response', b'')
         if len(raw_response) >= 48:  # Need at least 48 bytes to read doubleData field
             try:
                 # Position in doubleData field (bytes 40-47)
                 # SCommand structure: [start(4) + cmd(4) + status(4) + params(28) + doubleData(8) + ...]
                 position = struct.unpack('<d', raw_response[40:48])[0]
 
-                # Check for 0.000 response which indicates microscope is still moving
+                # Check if stage is still moving based on response
+                # We need to examine multiple indicators:
+                # 1. Position value of 0.000 for X,Y,Z (which shouldn't normally be exactly 0)
+                # 2. Status code that might indicate motion
+                # 3. Parameters that might contain motion flags
+
+                is_likely_moving = False
+                motion_reason = ""
+
+                # Check 1: Position is exactly 0.000 for axes that shouldn't be at origin
                 if position == 0.0 and axis in [1, 2, 3]:  # X, Y, Z should never be exactly 0.0
+                    is_likely_moving = True
+                    motion_reason = "position=0.000"
+
+                # Check 2: Examine status code (if non-zero might indicate busy/moving)
+                if parsed and not is_likely_moving:
+                    status_code = parsed.get('status_code', 0)
+                    if status_code != 0:
+                        self.logger.info(
+                            f"{axis_name}-axis has non-zero status: 0x{status_code:08X} - may indicate motion"
+                        )
+                        # Specific status codes might indicate motion - needs reverse engineering
+                        # For now, log but don't assume motion just from non-zero status
+
+                # Check 3: Examine parameters for motion flags
+                if parsed and not is_likely_moving:
+                    params = parsed.get('params', [])
+                    # Check if any param has specific motion-indicating bits
+                    # params[6] often contains flags (cmdDataBits0)
+                    if len(params) > 6:
+                        flags = params[6]
+                        # Check for specific flag patterns that might indicate motion
+                        # This needs more investigation of the protocol
+                        if flags != 0 and flags != 0x80000000:  # 0x80000000 is TRIGGER_CALL_BACK
+                            self.logger.debug(
+                                f"{axis_name}-axis params[6] flags: 0x{flags:08X} - checking for motion indicators"
+                            )
+
+                if is_likely_moving:
                     self.logger.info(
-                        f"{axis_name}-axis returned 0.000 - stage is still moving, will retry..."
+                        f"{axis_name}-axis appears to be moving ({motion_reason}), will retry..."
                     )
 
                     # Keep retrying until we get a valid position or timeout
@@ -134,16 +183,29 @@ class StageService(MicroscopeCommandService):
                         retry_result = self._query_command(
                             StageCommandCode.POSITION_GET,
                             f"STAGE_POSITION_GET_{axis_name}_RETRY_{retry_count}",
-                            params=[0, 0, 0, axis, 0, 0, 0x80000000],
+                            params=[0, 0, 0, axis, 0, 0, 0],
                             value=0.0
                         )
 
                         if retry_result and retry_result.get('success'):
+                            retry_parsed = retry_result.get('parsed', {})
                             raw_response = retry_result.get('raw_response', b'')
+
+                            # Log retry response details for investigation
+                            if retry_parsed and retry_count == 1:  # Log details on first retry
+                                retry_status = retry_parsed.get('status_code', 0)
+                                retry_params = retry_parsed.get('params', [])
+                                self.logger.debug(
+                                    f"{axis_name}-axis retry response - Status: 0x{retry_status:08X}, "
+                                    f"Params[6]: 0x{retry_params[6] if len(retry_params) > 6 else 0:08X}"
+                                )
+
                             if len(raw_response) >= 48:
                                 try:
                                     position = struct.unpack('<d', raw_response[40:48])[0]
-                                    if position != 0.0:
+
+                                    # For non-rotation axes, 0.000 likely means still moving
+                                    if position != 0.0 or axis == 4:  # Accept 0.0 for rotation
                                         self.logger.info(
                                             f"{axis_name}-axis position after {retry_count} "
                                             f"retries ({retry_count * retry_delay:.1f}s): {position:.3f} mm"
@@ -159,7 +221,7 @@ class StageService(MicroscopeCommandService):
                         # Check if we've exceeded total timeout
                         if retry_count * retry_delay >= total_timeout:
                             self.logger.warning(
-                                f"{axis_name}-axis: Stage still returning 0.000 after {total_timeout}s - "
+                                f"{axis_name}-axis: Stage still indicating motion after {total_timeout}s - "
                                 f"movement may be taking unusually long or there may be a communication issue"
                             )
                             break
