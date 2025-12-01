@@ -554,15 +554,22 @@ class DualResolutionVoxelStorage:
                 # Check if translation is significant
                 if abs(dx) < 0.001 and abs(dy) < 0.001 and abs(dz) < 0.001:
                     # No significant change, return cached
+                    logger.info(f"Transform: No significant movement, returning cached volume")
                     return self.transform_cache[channel_id]
 
                 # Fast translation using shift
+                logger.info(f"Transform: Translating by (dx={dx:.3f}, dy={dy:.3f}, dz={dz:.3f}) mm")
                 from scipy.ndimage import shift
                 offset_voxels = np.array([dx, dy, dz]) * 1000 / self.config.display_voxel_size[0]
+                logger.info(f"Transform: Voxel offset = {offset_voxels}")
                 return shift(self.transform_cache[channel_id],
                            offset_voxels, order=0, mode='constant', cval=0)
+            else:
+                logger.info(f"Transform: No cached volume for channel {channel_id}, need full transformation")
 
         # Rotation changed - need full transformation
+        logger.info(f"Transform: Rotation changed ({self.last_rotation:.1f}° -> {current_stage_pos.get('r', 0):.1f}°), "
+                   f"performing full transformation")
         volume = self.get_display_volume(channel_id)
 
         # Get rotation center in voxels
@@ -574,6 +581,9 @@ class DualResolutionVoxelStorage:
             current_stage_pos.get('y', 0),
             current_stage_pos.get('z', 0)
         )
+
+        logger.info(f"Transform: Applying affine transformation with offset {stage_offset_mm} mm, "
+                   f"rotation {current_stage_pos.get('r', 0):.1f}°")
 
         # Apply transformation
         transformed = self.coord_transformer.transform_voxel_volume_affine(
@@ -589,6 +599,7 @@ class DualResolutionVoxelStorage:
         self.last_rotation = current_stage_pos.get('r', 0)
         self.last_stage_position = current_stage_pos.copy()
 
+        logger.info(f"Transform: Cached transformed volume for channel {channel_id}")
         return transformed
 
     def _get_rotation_center_voxels(self) -> np.ndarray:

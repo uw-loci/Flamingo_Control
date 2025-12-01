@@ -2140,6 +2140,10 @@ class Sample3DVisualizationWindow(QWidget):
             # Store last stage position
             self.last_stage_position = stage_pos
 
+            # Log at INFO level to confirm handler is running
+            logger.info(f"Processing stage update: X={stage_pos['x']:.3f}, Y={stage_pos['y']:.3f}, "
+                       f"Z={stage_pos['z']:.3f}, R={stage_pos.get('r', 0):.1f}°")
+
             # Update each channel with transformed data
             for ch_id in range(self.voxel_storage.num_channels):
                 if not self.voxel_storage.has_data(ch_id):
@@ -2152,12 +2156,14 @@ class Sample3DVisualizationWindow(QWidget):
 
                 # Update napari layer
                 if ch_id in self.channel_layers:
+                    # Log BEFORE updating to debug the issue
+                    non_zero_before = np.count_nonzero(self.channel_layers[ch_id].data)
                     self.channel_layers[ch_id].data = volume
+                    non_zero_after = np.count_nonzero(volume)
 
-                    # Log update
-                    non_zero = np.count_nonzero(volume)
-                    if non_zero > 0:
-                        logger.debug(f"Stage update: Channel {ch_id} transformed, {non_zero} voxels")
+                    # Log at INFO level to see what's happening
+                    logger.info(f"Stage transformation: Channel {ch_id} updated - "
+                               f"voxels before: {non_zero_before}, after: {non_zero_after}")
 
         finally:
             self.update_mutex.unlock()
