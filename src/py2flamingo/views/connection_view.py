@@ -699,7 +699,7 @@ class ConnectionView(QWidget):
         self._logger.info("3D Voxel Movement Test button clicked")
 
         # Check if connected
-        if not self._position_controller or not self._position_controller.tcp_client:
+        if not self._position_controller or not self._position_controller.connection.is_connected():
             self._show_message("Must be connected to run test", is_error=True)
             return
 

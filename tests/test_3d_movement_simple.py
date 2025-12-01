@@ -24,11 +24,9 @@ def test_voxel_movement(controller):
     print("3D Voxel Movement Test - Simplified Version")
     print("="*60)
 
-    if not controller or not controller.tcp_client:
+    if not controller or not controller.connection.is_connected():
         print("ERROR: No active connection to microscope")
         return False
-
-    client = controller.tcp_client
 
     # Step 1: Query initial position
     print("\n1. Getting initial stage position...")
@@ -43,17 +41,44 @@ def test_voxel_movement(controller):
         print("   WARNING: Could not get position, using defaults")
         initial_x, initial_y, initial_z, initial_r = 8.197, 13.889, 22.182, 68.0
 
-    # Step 2: Enable Laser 4 (640nm)
+    # Step 2: Enable Laser 4 (640nm) via GUI
     print("\n2. Enabling Laser 4 (640nm) at 14.4% power...")
     try:
-        # Set laser power
-        client.send_command_and_wait("LASER_LEVEL_SET", int32Data0=4, buffer="14.4")
-        time.sleep(0.5)
+        # Find the main application window to access workflow view
+        from PyQt5.QtWidgets import QApplication
+        app = QApplication.instance()
+        main_window = None
+        for widget in app.topLevelWidgets():
+            if hasattr(widget, 'workflow_view'):
+                main_window = widget
+                break
 
-        # Enable preview
-        result = client.laser_enable_preview(4)
-        print(f"   Laser preview enabled: {result}")
-        time.sleep(0.5)
+        if main_window and hasattr(main_window, 'workflow_view'):
+            workflow_view = main_window.workflow_view
+
+            # Uncheck all lasers first
+            if hasattr(workflow_view, 'laser_checkboxes'):
+                for checkbox in workflow_view.laser_checkboxes:
+                    checkbox.setChecked(False)
+
+                # Check Laser 4 (index 3)
+                if len(workflow_view.laser_checkboxes) > 3:
+                    workflow_view.laser_checkboxes[3].setChecked(True)
+                    print("   Laser 4 checkbox enabled")
+
+                # Set power
+                if hasattr(workflow_view, 'laser_power_inputs') and len(workflow_view.laser_power_inputs) > 3:
+                    workflow_view.laser_power_inputs[3].setText("14.4")
+                    print("   Laser 4 power set to 14.4%")
+
+            # Use the laser controller if available
+            if hasattr(main_window, 'laser_controller'):
+                main_window.laser_controller.enable_laser_for_preview(4, "left")
+                print("   Laser preview enabled")
+        else:
+            print("   WARNING: Could not access workflow view for laser control")
+
+        time.sleep(1)
     except Exception as e:
         print(f"   Error setting up laser: {e}")
 
@@ -66,14 +91,18 @@ def test_voxel_movement(controller):
     except Exception as e:
         print(f"   Error starting live view: {e}")
 
-    # Step 4: Open 3D viewer (must be done through GUI)
-    print("\n4. Please manually open the 3D Visualization window if not already open")
-    print("   Waiting 3 seconds...")
-    time.sleep(3)
-
-    # Step 5: Get 3D visualization window reference
+    # Step 4: Open 3D viewer through GUI
+    print("\n4. Opening 3D Visualization window...")
     viz_window = None
     try:
+        # Try to open via workflow view button
+        if main_window and hasattr(main_window, 'workflow_view'):
+            workflow_view = main_window.workflow_view
+            if hasattr(workflow_view, 'open_3d_visualization_button'):
+                workflow_view.open_3d_visualization_button.click()
+                print("   3D Visualization window opened via button")
+                time.sleep(2)
+
         # Try to find the 3D visualization window
         from PyQt5.QtWidgets import QApplication
         app = QApplication.instance()
@@ -82,15 +111,24 @@ def test_voxel_movement(controller):
                 if hasattr(widget, 'visualization_3d_window'):
                     viz_window = widget.visualization_3d_window
                     break
-    except:
-        pass
+                # Also check if widget itself is the viz window
+                if widget.__class__.__name__ == 'Sample3DVisualizationWindow':
+                    viz_window = widget
+                    break
 
-    if not viz_window:
-        print("   WARNING: Could not find 3D visualization window programmatically")
-        print("   Please ensure it's open and start 'Populate from Live View' manually")
-        time.sleep(5)
-    else:
-        print("   Found 3D visualization window")
+        # If still not found, check main window
+        if not viz_window and main_window and hasattr(main_window, 'visualization_3d_window'):
+            viz_window = main_window.visualization_3d_window
+
+        if viz_window:
+            print("   Found 3D visualization window")
+        else:
+            print("   WARNING: Could not find 3D visualization window")
+            print("   Please ensure it's open and start 'Populate from Live View' manually")
+            time.sleep(3)
+    except Exception as e:
+        print(f"   Error accessing 3D viewer: {e}")
+        time.sleep(3)
 
     # Step 6: Start populating (if we have window reference)
     if viz_window and hasattr(viz_window, 'populate_live_checkbox'):
@@ -156,9 +194,29 @@ def test_voxel_movement(controller):
     # Step 12: Disable laser
     print("\n11. Disabling laser...")
     try:
-        client.laser_disable_preview()
-    except:
-        pass
+        # Find main window again if needed
+        from PyQt5.QtWidgets import QApplication
+        app = QApplication.instance()
+        main_window = None
+        for widget in app.topLevelWidgets():
+            if hasattr(widget, 'workflow_view'):
+                main_window = widget
+                break
+
+        if main_window and hasattr(main_window, 'workflow_view'):
+            workflow_view = main_window.workflow_view
+            # Uncheck all laser checkboxes
+            if hasattr(workflow_view, 'laser_checkboxes'):
+                for checkbox in workflow_view.laser_checkboxes:
+                    checkbox.setChecked(False)
+                print("   All lasers disabled")
+
+            # Use the laser controller if available
+            if hasattr(main_window, 'laser_controller'):
+                main_window.laser_controller.disable_all_lasers()
+                print("   Laser preview disabled")
+    except Exception as e:
+        print(f"   Error disabling laser: {e}")
 
     # Step 13: Return to original position for repeatability
     print("\n12. Returning to original position for test repeatability...")
