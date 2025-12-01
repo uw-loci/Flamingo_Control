@@ -34,12 +34,12 @@ def test_voxel_movement(controller, main_window=None):
 
     # Step 1: Query initial position
     print("\n1. Getting initial stage position...")
-    pos = controller.get_current_stage_position()
+    pos = controller.get_current_position()
     if pos:
-        initial_x = pos.get('x', 8.197)
-        initial_y = pos.get('y', 13.889)
-        initial_z = pos.get('z', 22.182)
-        initial_r = pos.get('r', 68.0)
+        initial_x = pos.x
+        initial_y = pos.y
+        initial_z = pos.z
+        initial_r = getattr(pos, 'r', 0.0)  # r might not always be present
         print(f"   Position: X={initial_x:.3f}, Y={initial_y:.3f}, Z={initial_z:.3f}, R={initial_r:.1f}°")
     else:
         print("   WARNING: Could not get position, using defaults")
@@ -89,8 +89,18 @@ def test_voxel_movement(controller, main_window=None):
     # Step 3: Start live view
     print("\n3. Starting live view...")
     try:
-        controller.start_live_view()
-        print("   Live view started")
+        # Use workflow view to start live view
+        if main_window and hasattr(main_window, 'workflow_view'):
+            workflow_view = main_window.workflow_view
+            if hasattr(workflow_view, 'start_live_view_button'):
+                workflow_view.start_live_view_button.click()
+                print("   Live view started via GUI button")
+            elif hasattr(main_window, 'camera_controller'):
+                # Fallback to camera controller
+                main_window.camera_controller.start_live_view()
+                print("   Live view started via camera controller")
+            else:
+                print("   WARNING: Could not find live view controls")
         time.sleep(2)
     except Exception as e:
         print(f"   Error starting live view: {e}")
@@ -157,7 +167,7 @@ def test_voxel_movement(controller, main_window=None):
     # Move X by 0.5mm (1 FOV)
     print("\n   Moving X by +0.5mm...")
     new_x = initial_x + 0.5
-    controller.move_stage_absolute('X', new_x)
+    controller.move_x(new_x)
     time.sleep(3)
     movements.append(('X', initial_x, new_x))
     x_voxels = capture_voxel_state(viz_window)
@@ -165,7 +175,7 @@ def test_voxel_movement(controller, main_window=None):
     # Move Y by 0.5mm (1 FOV)
     print("   Moving Y by +0.5mm...")
     new_y = initial_y + 0.5
-    controller.move_stage_absolute('Y', new_y)
+    controller.move_y(new_y)
     time.sleep(3)
     movements.append(('Y', initial_y, new_y))
     y_voxels = capture_voxel_state(viz_window)
@@ -173,7 +183,7 @@ def test_voxel_movement(controller, main_window=None):
     # Move Z by 0.5mm (1 FOV)
     print("   Moving Z by +0.5mm...")
     new_z = initial_z + 0.5
-    controller.move_stage_absolute('Z', new_z)
+    controller.move_z(new_z)
     time.sleep(3)
     movements.append(('Z', initial_z, new_z))
     z_voxels = capture_voxel_state(viz_window)
@@ -192,7 +202,19 @@ def test_voxel_movement(controller, main_window=None):
 
     # Step 11: Stop live view
     print("\n10. Stopping live view...")
-    controller.stop_live_view()
+    try:
+        # Use workflow view to stop live view
+        if main_window and hasattr(main_window, 'workflow_view'):
+            workflow_view = main_window.workflow_view
+            if hasattr(workflow_view, 'stop_live_view_button'):
+                workflow_view.stop_live_view_button.click()
+                print("   Live view stopped via GUI button")
+            elif hasattr(main_window, 'camera_controller'):
+                # Fallback to camera controller
+                main_window.camera_controller.stop_live_view()
+                print("   Live view stopped via camera controller")
+    except Exception as e:
+        print(f"   Error stopping live view: {e}")
     time.sleep(1)
 
     # Step 12: Disable laser
@@ -224,17 +246,17 @@ def test_voxel_movement(controller, main_window=None):
 
     # Step 13: Return to original position for repeatability
     print("\n12. Returning to original position for test repeatability...")
-    controller.move_stage_absolute('X', initial_x)
+    controller.move_x(initial_x)
     time.sleep(1)
-    controller.move_stage_absolute('Y', initial_y)
+    controller.move_y(initial_y)
     time.sleep(1)
-    controller.move_stage_absolute('Z', initial_z)
+    controller.move_z(initial_z)
     time.sleep(2)
 
     # Verify we're back at origin
-    pos = controller.get_current_stage_position()
+    pos = controller.get_current_position()
     if pos:
-        print(f"   Returned to: X={pos['x']:.3f}, Y={pos['y']:.3f}, Z={pos['z']:.3f}")
+        print(f"   Returned to: X={pos.x:.3f}, Y={pos.y:.3f}, Z={pos.z:.3f}")
         print(f"   Original was: X={initial_x:.3f}, Y={initial_y:.3f}, Z={initial_z:.3f}")
 
     final_origin_voxels = capture_voxel_state(viz_window)
