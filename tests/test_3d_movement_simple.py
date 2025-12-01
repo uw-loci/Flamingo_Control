@@ -112,15 +112,17 @@ def test_voxel_movement(controller, main_window=None):
             if camera_viewer and not camera_viewer.isVisible():
                 camera_viewer.show()
                 print("   Camera Live Viewer window opened")
-                time.sleep(1)
+                print("   Waiting 5 seconds for camera initialization and OpenGL...")
+                time.sleep(5)  # Allow camera and OpenGL to fully initialize
 
         # Now start live view through the camera controller
         if main_window and hasattr(main_window, 'camera_controller'):
             result = main_window.camera_controller.start_live_view()
             print(f"   Live view started: {result}")
+            print("   Waiting 3 seconds for camera stream to stabilize...")
+            time.sleep(3)  # Allow camera stream to stabilize
         else:
             print("   WARNING: Could not find camera controller")
-        time.sleep(2)
     except Exception as e:
         print(f"   Error starting live view: {e}")
 
@@ -171,12 +173,14 @@ def test_voxel_movement(controller, main_window=None):
     if viz_window and hasattr(viz_window, 'populate_button'):
         print("\n5. Starting 3D population from live view...")
         viz_window.populate_button.setChecked(True)
-        print("   Population started")
-        time.sleep(3)
+        print("   Population started at 2 Hz")
+        print("   Waiting 10 seconds to capture baseline data (~20 frames)...")
+        time.sleep(10)  # Critical: Allow adequate baseline frames before movement
+        print("   Baseline capture complete")
     else:
         print("\n5. Please manually start 'Populate from Live View'")
-        print("   Waiting 5 seconds...")
-        time.sleep(5)
+        print("   Waiting 12 seconds for manual start and baseline...")
+        time.sleep(12)
 
     # Step 7: Capture initial voxel state
     print("\n6. Capturing initial voxel state...")
@@ -191,25 +195,31 @@ def test_voxel_movement(controller, main_window=None):
     print("\n   Moving X by +0.5mm...")
     new_x = initial_x + 0.5
     controller.move_x(new_x)
-    time.sleep(3)
+    print("   Waiting 5 seconds for movement and data capture...")
+    time.sleep(5)  # Allow movement to complete and capture ~10 frames
     movements.append(('X', initial_x, new_x))
     x_voxels = capture_voxel_state(viz_window)
+    print(f"   X movement complete. Voxel state: {x_voxels}")
 
     # Move Y by 0.5mm (1 FOV)
-    print("   Moving Y by +0.5mm...")
+    print("\n   Moving Y by +0.5mm...")
     new_y = initial_y + 0.5
     controller.move_y(new_y)
-    time.sleep(3)
+    print("   Waiting 5 seconds for movement and data capture...")
+    time.sleep(5)  # Allow movement to complete and capture ~10 frames
     movements.append(('Y', initial_y, new_y))
     y_voxels = capture_voxel_state(viz_window)
+    print(f"   Y movement complete. Voxel state: {y_voxels}")
 
     # Move Z by 0.5mm (1 FOV)
-    print("   Moving Z by +0.5mm...")
+    print("\n   Moving Z by +0.5mm...")
     new_z = initial_z + 0.5
     controller.move_z(new_z)
-    time.sleep(3)
+    print("   Waiting 5 seconds for movement and data capture...")
+    time.sleep(5)  # Allow movement to complete and capture ~10 frames
     movements.append(('Z', initial_z, new_z))
     z_voxels = capture_voxel_state(viz_window)
+    print(f"   Z movement complete. Voxel state: {z_voxels}")
 
     # Step 9: Capture final state at moved position
     print("\n8. Capturing final state at moved position...")
@@ -314,21 +324,31 @@ def test_voxel_movement(controller, main_window=None):
 
 def capture_voxel_state(viz_window):
     """Capture current voxel counts for all channels."""
-    if not viz_window or not hasattr(viz_window, 'dual_storage'):
+    if not viz_window:
         return {'error': 'No visualization window'}
 
-    try:
+    # Check for correct attribute name (voxel_storage vs dual_storage)
+    storage = None
+    if hasattr(viz_window, 'voxel_storage'):
+        storage = viz_window.voxel_storage
+    elif hasattr(viz_window, 'dual_storage'):
         storage = viz_window.dual_storage
-        state = {}
+
+    if not storage:
+        return {'error': 'No voxel storage found'}
+
+    try:
+        state = {'total_voxels': 0}
         for ch_id in range(4):
             count = storage.get_voxel_count(ch_id)
             if count > 0:
                 state[f'ch{ch_id}'] = count
+                state['total_voxels'] += count
 
         # Also try to get center of mass for active channel
         if hasattr(storage, 'storage_arrays'):
             for ch_id, array_dict in storage.storage_arrays.items():
-                if ch_id in state:
+                if f'ch{ch_id}' in state:
                     # Get approximate center of mass
                     try:
                         data = storage.get_display_array(ch_id)
@@ -338,6 +358,10 @@ def capture_voxel_state(viz_window):
                             state[f'ch{ch_id}_com'] = com.tolist()
                     except:
                         pass
+
+        # Add frame count estimate (at 2 Hz capture rate)
+        if state['total_voxels'] > 0:
+            state['approx_frames'] = 'Data is flowing'
 
         return state
     except Exception as e:
