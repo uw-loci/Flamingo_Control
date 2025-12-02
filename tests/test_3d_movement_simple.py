@@ -31,9 +31,9 @@ def smart_sleep(seconds, message=None):
         time.sleep(0.1)
         process_gui_events()
 
-def wait_for_movement_complete(controller, axis_name, timeout=3.0):
+def wait_for_movement_complete(controller, axis_name, timeout=5.0):
     """
-    Wait for stage movement to complete by checking position stability.
+    Wait for stage movement to complete by waiting for movement lock release.
 
     Args:
         controller: Position controller
@@ -45,45 +45,46 @@ def wait_for_movement_complete(controller, axis_name, timeout=3.0):
     """
     import time
     start_time = time.time()
-    last_position = None
-    stable_count = 0
 
     print(f"   Waiting for {axis_name}-axis movement to complete...")
 
+    # Wait for movement lock to be released (indicates motion complete)
     while time.time() - start_time < timeout:
-        # Get current position for the axis
-        try:
-            if axis_name == 'X':
-                current_pos = controller.stage_service.get_axis_position(1)
-            elif axis_name == 'Y':
-                current_pos = controller.stage_service.get_axis_position(2)
-            elif axis_name == 'Z':
-                current_pos = controller.stage_service.get_axis_position(3)
-            elif axis_name == 'R':
-                current_pos = controller.stage_service.get_axis_position(4)
-            else:
+        # Check if movement lock is still held
+        if hasattr(controller, '_movement_lock') and controller._movement_lock.locked():
+            # Movement still in progress
+            time.sleep(0.1)
+            process_gui_events()
+        else:
+            # Movement complete - lock released
+            # Brief delay to ensure position is stable
+            time.sleep(0.2)
+
+            # Get final position
+            try:
+                if axis_name == 'X':
+                    final_pos = controller.stage_service.get_axis_position(1)
+                elif axis_name == 'Y':
+                    final_pos = controller.stage_service.get_axis_position(2)
+                elif axis_name == 'Z':
+                    final_pos = controller.stage_service.get_axis_position(3)
+                elif axis_name == 'R':
+                    final_pos = controller.stage_service.get_axis_position(4)
+                else:
+                    return None
+
+                if final_pos is not None and final_pos != 0.0:
+                    print(f"   {axis_name}-axis movement complete at {final_pos:.3f}mm")
+                    return final_pos
+                else:
+                    print(f"   Warning: Could not get valid position for {axis_name}-axis")
+                    return None
+            except Exception as e:
+                print(f"   Warning: Error getting final position: {e}")
                 return None
 
-            if current_pos is not None and current_pos != 0.0:
-                # Check if position is stable (not changing)
-                if last_position is not None:
-                    if abs(current_pos - last_position) < 0.001:  # Within 1 micron
-                        stable_count += 1
-                        if stable_count >= 2:  # Stable for 2 consecutive reads
-                            print(f"   {axis_name}-axis movement complete at {current_pos:.3f}mm")
-                            return current_pos
-                    else:
-                        stable_count = 0  # Reset if position changed
-                last_position = current_pos
-        except Exception as e:
-            print(f"   Warning: Error checking position: {e}")
-
-        # Brief sleep before next check
-        time.sleep(0.1)
-        process_gui_events()
-
-    print(f"   Warning: {axis_name}-axis movement timeout after {timeout}s")
-    return last_position
+    print(f"   Warning: {axis_name}-axis movement timeout after {timeout}s - lock still held")
+    return None
 
 def test_voxel_movement(controller, main_window=None):
     """
@@ -159,44 +160,52 @@ def test_voxel_movement(controller, main_window=None):
 
             if laser_panel:
                 # Now use the laser panel for GUI simulation
-                # LaserLEDControlPanel uses _laser_radios dictionary, not laser_checkboxes
-                if hasattr(laser_panel, '_laser_radios'):
-                    laser_radios = laser_panel._laser_radios
-                    if 3 in laser_radios:  # Check if laser index 3 (laser 4) exists
-                        # First uncheck all laser radio buttons
-                        for laser_idx, radio in laser_radios.items():
-                            if radio.isChecked():
-                                radio.setChecked(False)
-                        print("   Unchecked all laser radio buttons")
+                # LaserLEDControlPanel uses checkboxes in a button group, not radio buttons
+                if hasattr(laser_panel, '_source_button_group'):
+                    button_group = laser_panel._source_button_group
 
-                        # Set power for laser 4 via GUI spinbox
-                        if hasattr(laser_panel, '_laser_spinboxes') and 3 in laser_panel._laser_spinboxes:
-                            power_spinbox = laser_panel._laser_spinboxes[3]
+                    # Find laser 4 checkbox (ID=4 in button group)
+                    laser_4_checkbox = button_group.button(4)  # Laser 4 has ID 4
+
+                    if laser_4_checkbox:
+                        # First set power for laser 4 via GUI spinbox
+                        if hasattr(laser_panel, '_laser_spinboxes') and 4 in laser_panel._laser_spinboxes:
+                            power_spinbox = laser_panel._laser_spinboxes[4]
                             power_spinbox.setValue(14.4)
                             print("   Set Laser 4 power to 14.4% via GUI spinbox")
-                        elif hasattr(laser_panel, '_laser_sliders') and 3 in laser_panel._laser_sliders:
+                        elif hasattr(laser_panel, '_laser_sliders') and 4 in laser_panel._laser_sliders:
                             # Try slider as alternative
-                            power_slider = laser_panel._laser_sliders[3]
-                            # Convert 14.4% to slider value (assuming 0-100 range)
-                            power_slider.setValue(14)
-                            print("   Set Laser 4 power to ~14% via GUI slider")
+                            power_slider = laser_panel._laser_sliders[4]
+                            # Convert 14.4% to slider value (0-1000 range for 0.0-100.0%)
+                            power_slider.setValue(144)  # 14.4% * 10
+                            print("   Set Laser 4 power to 14.4% via GUI slider")
 
                         smart_sleep(0.5, "Letting GUI update...")
 
-                        # Check laser 4 radio button - this triggers the actual hardware command
-                        laser_radio = laser_radios[3]
-                        laser_radio.setChecked(True)
-                        # Trigger the toggled signal to ensure handler runs
-                        if hasattr(laser_radio, 'toggled'):
-                            laser_radio.toggled.emit(True)
-                        print("   Clicked Laser 4 radio button - this enables the laser")
+                        # Uncheck all other sources first
+                        for button in button_group.buttons():
+                            if button.isChecked():
+                                button.setChecked(False)
+                        print("   Unchecked all light source checkboxes")
+
+                        # Check laser 4 checkbox - this triggers _on_source_clicked
+                        laser_4_checkbox.setChecked(True)
+                        # Manually trigger the click to ensure handler runs
+                        button_group.buttonClicked.emit(laser_4_checkbox)
+                        print("   Clicked Laser 4 checkbox - this enables the laser")
 
                         laser_enabled = True
                         smart_sleep(1, "Waiting for laser to enable...")
                     else:
-                        print("   WARNING: Laser 4 (index 3) not found in laser radio buttons")
+                        print("   WARNING: Laser 4 checkbox not found in button group")
+                        # Try alternative: look for laser_radios
+                        if hasattr(laser_panel, '_laser_radios') and 4 in laser_panel._laser_radios:
+                            print("   Found _laser_radios dictionary, trying alternative approach...")
+                            laser_checkbox = laser_panel._laser_radios[4]
+                            laser_checkbox.setChecked(True)
+                            laser_enabled = True
                 else:
-                    print("   WARNING: Could not find _laser_radios in panel")
+                    print("   WARNING: Could not find _source_button_group in panel")
             else:
                 print("   WARNING: Could not find laser control panel in camera viewer")
 
@@ -408,19 +417,24 @@ def test_voxel_movement(controller, main_window=None):
                         laser_panel = child
                         break
 
-            if laser_panel and hasattr(laser_panel, 'laser_checkboxes'):
-                # Uncheck all laser checkboxes
-                unchecked_any = False
-                for i, checkbox in enumerate(laser_panel.laser_checkboxes):
-                    if checkbox.isChecked():
-                        checkbox.setChecked(False)
-                        checkbox.clicked.emit(False)  # Trigger the handler
-                        print(f"   Unchecked Laser {i+1} checkbox")
-                        unchecked_any = True
-                if not unchecked_any:
-                    print("   All lasers already disabled")
+            if laser_panel:
+                # Uncheck all laser checkboxes using button group
+                if hasattr(laser_panel, '_source_button_group'):
+                    button_group = laser_panel._source_button_group
+                    unchecked_any = False
+                    for button in button_group.buttons():
+                        if button.isChecked():
+                            button.setChecked(False)
+                            # Trigger the click handler to disable laser
+                            button_group.buttonClicked.emit(button)
+                            print(f"   Unchecked light source button ID {button_group.id(button)}")
+                            unchecked_any = True
+                    if not unchecked_any:
+                        print("   All light sources already disabled")
+                else:
+                    print("   WARNING: Could not find _source_button_group in panel")
             else:
-                print("   WARNING: Could not find laser control panel or checkboxes")
+                print("   WARNING: Could not find laser control panel")
         else:
             print("   WARNING: Could not find camera_live_viewer to disable laser")
     except Exception as e:
@@ -431,17 +445,15 @@ def test_voxel_movement(controller, main_window=None):
 
     print(f"   Commanding return to: X={initial_x:.3f}, Y={initial_y:.3f}, Z={initial_z:.3f}")
 
+    # Use proper movement completion detection
     controller.move_x(initial_x)
-    smart_sleep(3, "Waiting 3 seconds for X axis to complete movement...")
+    wait_for_movement_complete(controller, 'X', timeout=5.0)
 
     controller.move_y(initial_y)
-    smart_sleep(3, "Waiting 3 seconds for Y axis to complete movement...")
+    wait_for_movement_complete(controller, 'Y', timeout=5.0)
 
     controller.move_z(initial_z)
-    smart_sleep(3, "Waiting 3 seconds for Z axis to complete movement...")
-
-    # Wait extra time to ensure all movements are fully complete
-    smart_sleep(2, "Waiting for stage to fully settle...")
+    wait_for_movement_complete(controller, 'Z', timeout=5.0)
 
     # Now we can safely query position since the StageService handles 0.000 responses properly
     print("\n   Verifying return to origin...")
