@@ -9,7 +9,7 @@ This version uses direct API calls rather than GUI simulation.
 import time
 import numpy as np
 import logging
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QWidget
 from PyQt5.QtCore import QCoreApplication
 
 logger = logging.getLogger(__name__)
@@ -82,46 +82,60 @@ def test_voxel_movement(controller, main_window=None):
                     main_window = widget
                     break
 
-        # Get laser controller from camera_live_viewer (where it's actually stored)
+        # Get camera_live_viewer and simulate GUI actions
         laser_enabled = False
-        laser_controller = None
         if main_window and hasattr(main_window, 'camera_live_viewer'):
             camera_viewer = main_window.camera_live_viewer
-            if camera_viewer and hasattr(camera_viewer, 'laser_led_controller'):
-                laser_controller = camera_viewer.laser_led_controller
-                print("   Found laser controller via camera_live_viewer")
 
-            # Simulate GUI actions instead of direct controller calls
-            if camera_viewer and hasattr(camera_viewer, 'laser_checkboxes'):
-                # Find laser controls (checkboxes and power inputs)
-                if len(camera_viewer.laser_checkboxes) > 3:
-                    # First uncheck all lasers
-                    for i, checkbox in enumerate(camera_viewer.laser_checkboxes):
-                        if checkbox.isChecked():
-                            checkbox.setChecked(False)
-                    print("   Unchecked all laser checkboxes")
-
-                    # Set power for laser 4 via GUI spinbox
-                    if hasattr(camera_viewer, 'laser_power_inputs') and len(camera_viewer.laser_power_inputs) > 3:
-                        power_input = camera_viewer.laser_power_inputs[3]
-                        power_input.setValue(14.4)
-                        print("   Set Laser 4 power to 14.4% via GUI")
-
-                    smart_sleep(0.5, "Letting GUI update...")
-
-                    # Check laser 4 checkbox - this triggers the actual hardware command
-                    laser_checkbox = camera_viewer.laser_checkboxes[3]
-                    laser_checkbox.setChecked(True)
-                    # Trigger the click event to ensure handler runs
-                    laser_checkbox.clicked.emit(True)
-                    print("   Clicked Laser 4 checkbox - this enables the laser")
-
-                    laser_enabled = True
-                    smart_sleep(1, "Waiting for laser to enable...")
-                else:
-                    print("   WARNING: Could not find laser checkboxes in GUI")
+            # Check if we have the laser panel (might be a separate widget)
+            laser_panel = None
+            if hasattr(camera_viewer, 'laser_led_panel'):
+                laser_panel = camera_viewer.laser_led_panel
+                print("   Found laser control panel")
+            elif hasattr(camera_viewer, 'laser_control_panel'):
+                laser_panel = camera_viewer.laser_control_panel
+                print("   Found laser control panel (alternate name)")
             else:
-                print("   WARNING: Could not find camera viewer for GUI simulation")
+                # Try to find it in the layout
+                for child in camera_viewer.findChildren(QWidget):
+                    if child.__class__.__name__ == 'LaserLEDControlPanel':
+                        laser_panel = child
+                        print("   Found laser control panel in children")
+                        break
+
+            if laser_panel:
+                # Now use the laser panel for GUI simulation
+                if hasattr(laser_panel, 'laser_checkboxes'):
+                    if len(laser_panel.laser_checkboxes) > 3:
+                        # First uncheck all lasers
+                        for i, checkbox in enumerate(laser_panel.laser_checkboxes):
+                            if checkbox.isChecked():
+                                checkbox.setChecked(False)
+                        print("   Unchecked all laser checkboxes")
+
+                        # Set power for laser 4 via GUI spinbox
+                        if hasattr(laser_panel, 'laser_power_spinboxes') and len(laser_panel.laser_power_spinboxes) > 3:
+                            power_spinbox = laser_panel.laser_power_spinboxes[3]
+                            power_spinbox.setValue(14.4)
+                            print("   Set Laser 4 power to 14.4% via GUI spinbox")
+
+                        smart_sleep(0.5, "Letting GUI update...")
+
+                        # Check laser 4 checkbox - this triggers the actual hardware command
+                        laser_checkbox = laser_panel.laser_checkboxes[3]
+                        laser_checkbox.setChecked(True)
+                        # Trigger the click event to ensure handler runs
+                        laser_checkbox.clicked.emit(True)
+                        print("   Clicked Laser 4 checkbox - this enables the laser")
+
+                        laser_enabled = True
+                        smart_sleep(1, "Waiting for laser to enable...")
+                    else:
+                        print("   WARNING: Not enough laser checkboxes in GUI")
+                else:
+                    print("   WARNING: Could not find laser checkboxes in panel")
+            else:
+                print("   WARNING: Could not find laser control panel in camera viewer")
 
         if not laser_enabled:
             print("   WARNING: Laser may not be enabled - fluorescence data may not be captured")
@@ -299,13 +313,27 @@ def test_voxel_movement(controller, main_window=None):
     # Step 12: Disable laser
     print("\n11. Disabling laser...")
     try:
-        # Simulate unchecking the laser checkbox in the GUI
+        # Find the laser control panel and uncheck laser checkboxes
         if main_window and hasattr(main_window, 'camera_live_viewer'):
             camera_viewer = main_window.camera_live_viewer
-            if camera_viewer and hasattr(camera_viewer, 'laser_checkboxes'):
+
+            # Find the laser panel (same logic as enable)
+            laser_panel = None
+            if hasattr(camera_viewer, 'laser_led_panel'):
+                laser_panel = camera_viewer.laser_led_panel
+            elif hasattr(camera_viewer, 'laser_control_panel'):
+                laser_panel = camera_viewer.laser_control_panel
+            else:
+                # Try to find it in the children
+                for child in camera_viewer.findChildren(QWidget):
+                    if child.__class__.__name__ == 'LaserLEDControlPanel':
+                        laser_panel = child
+                        break
+
+            if laser_panel and hasattr(laser_panel, 'laser_checkboxes'):
                 # Uncheck all laser checkboxes
                 unchecked_any = False
-                for i, checkbox in enumerate(camera_viewer.laser_checkboxes):
+                for i, checkbox in enumerate(laser_panel.laser_checkboxes):
                     if checkbox.isChecked():
                         checkbox.setChecked(False)
                         checkbox.clicked.emit(False)  # Trigger the handler
@@ -314,7 +342,7 @@ def test_voxel_movement(controller, main_window=None):
                 if not unchecked_any:
                     print("   All lasers already disabled")
             else:
-                print("   WARNING: Could not find laser checkboxes in camera_live_viewer")
+                print("   WARNING: Could not find laser control panel or checkboxes")
         else:
             print("   WARNING: Could not find camera_live_viewer to disable laser")
     except Exception as e:
@@ -447,8 +475,8 @@ def export_test_data(movements, initial, x_move, y_move, z_move, final_moved, fi
     import os
     from datetime import datetime
 
-    # Create results directory
-    results_dir = "/home/msnelson/LSControl/Flamingo_Control/tests/voxel_test_results"
+    # Create results directory relative to current working directory
+    results_dir = os.path.join(os.getcwd(), "tests", "voxel_test_results")
     os.makedirs(results_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
