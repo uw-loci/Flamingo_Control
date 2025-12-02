@@ -31,6 +31,60 @@ def smart_sleep(seconds, message=None):
         time.sleep(0.1)
         process_gui_events()
 
+def wait_for_movement_complete(controller, axis_name, timeout=3.0):
+    """
+    Wait for stage movement to complete by checking position stability.
+
+    Args:
+        controller: Position controller
+        axis_name: Name of axis ('X', 'Y', 'Z', or 'R')
+        timeout: Maximum time to wait (seconds)
+
+    Returns:
+        Final position or None if timeout
+    """
+    import time
+    start_time = time.time()
+    last_position = None
+    stable_count = 0
+
+    print(f"   Waiting for {axis_name}-axis movement to complete...")
+
+    while time.time() - start_time < timeout:
+        # Get current position for the axis
+        try:
+            if axis_name == 'X':
+                current_pos = controller.stage_service.get_axis_position(1)
+            elif axis_name == 'Y':
+                current_pos = controller.stage_service.get_axis_position(2)
+            elif axis_name == 'Z':
+                current_pos = controller.stage_service.get_axis_position(3)
+            elif axis_name == 'R':
+                current_pos = controller.stage_service.get_axis_position(4)
+            else:
+                return None
+
+            if current_pos is not None and current_pos != 0.0:
+                # Check if position is stable (not changing)
+                if last_position is not None:
+                    if abs(current_pos - last_position) < 0.001:  # Within 1 micron
+                        stable_count += 1
+                        if stable_count >= 2:  # Stable for 2 consecutive reads
+                            print(f"   {axis_name}-axis movement complete at {current_pos:.3f}mm")
+                            return current_pos
+                    else:
+                        stable_count = 0  # Reset if position changed
+                last_position = current_pos
+        except Exception as e:
+            print(f"   Warning: Error checking position: {e}")
+
+        # Brief sleep before next check
+        time.sleep(0.1)
+        process_gui_events()
+
+    print(f"   Warning: {axis_name}-axis movement timeout after {timeout}s")
+    return last_position
+
 def test_voxel_movement(controller, main_window=None):
     """
     Simple test sequence to verify voxel movement.
@@ -105,35 +159,44 @@ def test_voxel_movement(controller, main_window=None):
 
             if laser_panel:
                 # Now use the laser panel for GUI simulation
-                if hasattr(laser_panel, 'laser_checkboxes'):
-                    if len(laser_panel.laser_checkboxes) > 3:
-                        # First uncheck all lasers
-                        for i, checkbox in enumerate(laser_panel.laser_checkboxes):
-                            if checkbox.isChecked():
-                                checkbox.setChecked(False)
-                        print("   Unchecked all laser checkboxes")
+                # LaserLEDControlPanel uses _laser_radios dictionary, not laser_checkboxes
+                if hasattr(laser_panel, '_laser_radios'):
+                    laser_radios = laser_panel._laser_radios
+                    if 3 in laser_radios:  # Check if laser index 3 (laser 4) exists
+                        # First uncheck all laser radio buttons
+                        for laser_idx, radio in laser_radios.items():
+                            if radio.isChecked():
+                                radio.setChecked(False)
+                        print("   Unchecked all laser radio buttons")
 
                         # Set power for laser 4 via GUI spinbox
-                        if hasattr(laser_panel, 'laser_power_spinboxes') and len(laser_panel.laser_power_spinboxes) > 3:
-                            power_spinbox = laser_panel.laser_power_spinboxes[3]
+                        if hasattr(laser_panel, '_laser_spinboxes') and 3 in laser_panel._laser_spinboxes:
+                            power_spinbox = laser_panel._laser_spinboxes[3]
                             power_spinbox.setValue(14.4)
                             print("   Set Laser 4 power to 14.4% via GUI spinbox")
+                        elif hasattr(laser_panel, '_laser_sliders') and 3 in laser_panel._laser_sliders:
+                            # Try slider as alternative
+                            power_slider = laser_panel._laser_sliders[3]
+                            # Convert 14.4% to slider value (assuming 0-100 range)
+                            power_slider.setValue(14)
+                            print("   Set Laser 4 power to ~14% via GUI slider")
 
                         smart_sleep(0.5, "Letting GUI update...")
 
-                        # Check laser 4 checkbox - this triggers the actual hardware command
-                        laser_checkbox = laser_panel.laser_checkboxes[3]
-                        laser_checkbox.setChecked(True)
-                        # Trigger the click event to ensure handler runs
-                        laser_checkbox.clicked.emit(True)
-                        print("   Clicked Laser 4 checkbox - this enables the laser")
+                        # Check laser 4 radio button - this triggers the actual hardware command
+                        laser_radio = laser_radios[3]
+                        laser_radio.setChecked(True)
+                        # Trigger the toggled signal to ensure handler runs
+                        if hasattr(laser_radio, 'toggled'):
+                            laser_radio.toggled.emit(True)
+                        print("   Clicked Laser 4 radio button - this enables the laser")
 
                         laser_enabled = True
                         smart_sleep(1, "Waiting for laser to enable...")
                     else:
-                        print("   WARNING: Not enough laser checkboxes in GUI")
+                        print("   WARNING: Laser 4 (index 3) not found in laser radio buttons")
                 else:
-                    print("   WARNING: Could not find laser checkboxes in panel")
+                    print("   WARNING: Could not find _laser_radios in panel")
             else:
                 print("   WARNING: Could not find laser control panel in camera viewer")
 
@@ -249,10 +312,15 @@ def test_voxel_movement(controller, main_window=None):
     print("\n   Moving X by +0.5mm...")
     new_x = initial_x + 0.5
     controller.move_x(new_x)
-    smart_sleep(5, "Waiting 5 seconds for movement completion and data capture...")
+    # Wait for movement to actually complete
+    final_x = wait_for_movement_complete(controller, 'X', timeout=3.0)
+    if final_x is not None:
+        print(f"   X-axis reached position: {final_x:.3f}mm")
+    # Additional wait for voxel data capture
+    smart_sleep(1.5, "Capturing voxel data...")
     movements.append(('X', initial_x, new_x))
     x_voxels = capture_voxel_state(viz_window)
-    print(f"   X movement complete. Voxel state: {x_voxels}")
+    print(f"   Voxel state after X movement: {x_voxels}")
 
     # Move Y by 0.5mm (1 FOV) - ensure we stay within safe range (5.0-25.0)
     print("\n   Moving Y by +0.5mm...")
@@ -262,19 +330,29 @@ def test_voxel_movement(controller, main_window=None):
         new_y = 24.5
         print(f"   NOTE: Clamping Y to {new_y:.3f} to stay within safe range")
     controller.move_y(new_y)
-    smart_sleep(2, "Waiting 2 seconds for Y movement completion...")
+    # Wait for movement to actually complete
+    final_y = wait_for_movement_complete(controller, 'Y', timeout=3.0)
+    if final_y is not None:
+        print(f"   Y-axis reached position: {final_y:.3f}mm")
+    # Additional wait for voxel data capture
+    smart_sleep(1.5, "Capturing voxel data...")
     movements.append(('Y', initial_y, new_y))
     y_voxels = capture_voxel_state(viz_window)
-    print(f"   Y movement complete. Voxel state: {y_voxels}")
+    print(f"   Voxel state after Y movement: {y_voxels}")
 
     # Move Z by 0.5mm (1 FOV)
     print("\n   Moving Z by +0.5mm...")
     new_z = initial_z + 0.5
     controller.move_z(new_z)
-    smart_sleep(5, "Waiting 5 seconds for movement completion and data capture...")
+    # Wait for movement to actually complete
+    final_z = wait_for_movement_complete(controller, 'Z', timeout=3.0)
+    if final_z is not None:
+        print(f"   Z-axis reached position: {final_z:.3f}mm")
+    # Additional wait for voxel data capture
+    smart_sleep(1.5, "Capturing voxel data...")
     movements.append(('Z', initial_z, new_z))
     z_voxels = capture_voxel_state(viz_window)
-    print(f"   Z movement complete. Voxel state: {z_voxels}")
+    print(f"   Voxel state after Z movement: {z_voxels}")
 
     # Step 9: Capture final state at moved position
     print("\n8. Capturing final state at moved position...")

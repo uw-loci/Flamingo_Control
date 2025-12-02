@@ -173,9 +173,9 @@ class StageService(MicroscopeCommandService):
 
                     # Keep retrying until we get a valid position or timeout
                     import time
-                    max_retries = 20  # Up to 20 retries
+                    max_retries = 6   # Up to 6 retries (reduced from 20 - movements take <1s)
                     retry_delay = 0.5  # 500ms between retries
-                    total_timeout = 10.0  # Total max wait time of 10 seconds
+                    total_timeout = 3.0  # Total max wait time of 3 seconds (reduced from 10)
 
                     for retry_count in range(1, max_retries + 1):
                         time.sleep(retry_delay)
