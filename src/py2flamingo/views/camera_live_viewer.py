@@ -327,6 +327,12 @@ class CameraLiveViewer(QWidget):
 
     def _on_start_clicked(self) -> None:
         """Handle start button click."""
+        # Restore any checked illumination BEFORE starting live view
+        # This ensures the laser is activated on the server before live view starts
+        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+            self.logger.info("Restoring checked illumination before starting live view...")
+            self.laser_led_panel.restore_checked_illumination()
+
         self.camera_controller.start_live_view()
 
     def _on_stop_clicked(self) -> None:
