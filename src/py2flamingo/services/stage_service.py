@@ -213,6 +213,23 @@ class StageService(MicroscopeCommandService):
 
                                     # For non-rotation axes, 0.000 likely means still moving
                                     if position != 0.0 or axis == 4:  # Accept 0.0 for rotation
+                                        # CRITICAL: Apply safety check to retry results too!
+                                        # Without this, garbage values during movement could pass through
+                                        retry_valid_ranges = {
+                                            1: (1.0, 12.31),    # X-axis limits (mm)
+                                            2: (5.0, 25.0),     # Y-axis limits (mm)
+                                            3: (12.5, 26.0),    # Z-axis limits (mm)
+                                            4: (-720.0, 720.0)  # R-axis limits (degrees)
+                                        }
+                                        if axis in retry_valid_ranges:
+                                            min_val, max_val = retry_valid_ranges[axis]
+                                            if not (min_val <= position <= max_val):
+                                                self.logger.warning(
+                                                    f"{axis_name}-axis retry {retry_count}: position {position:.3f} is "
+                                                    f"OUT OF RANGE ({min_val}-{max_val}) - likely garbage value, continuing retry..."
+                                                )
+                                                continue  # Keep retrying instead of returning bad value
+
                                         self.logger.info(
                                             f"{axis_name}-axis position after {retry_count} "
                                             f"retries ({retry_count * retry_delay:.1f}s): {position:.3f} mm"

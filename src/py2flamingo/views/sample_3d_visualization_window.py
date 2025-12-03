@@ -2311,6 +2311,27 @@ class Sample3DVisualizationWindow(QWidget):
         Handle position change from movement controller (from ANY window).
         Updates visualization WITHOUT triggering commands (prevents loops).
         """
+        # CRITICAL: Validate position is within hardware limits BEFORE updating UI
+        # Garbage values during movement (e.g., 7.969mm for Z) could corrupt spinbox
+        # and cause subsequent user interactions to send movement to wrong position
+        stage_config = self.config['stage_control']
+        x_min, x_max = stage_config['x_range_mm']
+        z_min, z_max = stage_config['z_range_mm']
+        y_min = stage_config.get('y_stage_min_mm', 5.0)
+        y_max = stage_config.get('y_stage_max_mm', 25.0)
+
+        # Check if position is valid (with small tolerance for rounding)
+        tolerance = 0.01  # 10 µm tolerance
+        if not (x_min - tolerance <= x <= x_max + tolerance):
+            logger.warning(f"Ignoring invalid X position from controller: {x:.3f}mm (range: {x_min}-{x_max})")
+            return
+        if not (y_min - tolerance <= y <= y_max + tolerance):
+            logger.warning(f"Ignoring invalid Y position from controller: {y:.3f}mm (range: {y_min}-{y_max})")
+            return
+        if not (z_min - tolerance <= z <= z_max + tolerance):
+            logger.warning(f"Ignoring invalid Z position from controller: {z:.3f}mm (range: {z_min}-{z_max})")
+            return
+
         # Block signals to prevent infinite loops
         self.position_sliders['x_slider'].blockSignals(True)
         self.position_sliders['y_slider'].blockSignals(True)

@@ -116,14 +116,14 @@ def test_voxel_movement(controller, main_window=None):
         initial_r = getattr(pos, 'r', 0.0)  # r might not always be present
         print(f"   Position: X={initial_x:.3f}, Y={initial_y:.3f}, Z={initial_z:.3f}, R={initial_r:.1f}°")
 
-        # Validate Y position is within safe range to avoid safety violations
-        if initial_y < 5.0 or initial_y > 25.0:
-            print(f"   WARNING: Y position {initial_y:.3f} is outside safe range (5.0-25.0)")
+        # Validate position is within safe range to avoid safety violations
+        if initial_y < 5.0 or initial_y > 25.0 or initial_z < 12.5 or initial_z > 26.0:
+            print(f"   WARNING: Position is outside safe range")
             print("   Using safe default position instead")
-            initial_x, initial_y, initial_z, initial_r = 8.197, 13.889, 22.182, 68.0
+            initial_x, initial_y, initial_z, initial_r = 8.31, 13.5, 21.0, 68.0
     else:
         print("   WARNING: Could not get valid position (hardware may be initializing), using safe defaults")
-        initial_x, initial_y, initial_z, initial_r = 8.197, 13.889, 22.182, 68.0
+        initial_x, initial_y, initial_z, initial_r = 8.31, 13.5, 21.0, 68.0
 
     # Step 2: Enable Laser 4 (640nm) directly via controller
     print("\n2. Enabling Laser 4 (640nm) at 14.4% power...")

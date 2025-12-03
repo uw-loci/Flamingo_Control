@@ -1107,15 +1107,42 @@ class PositionController:
 
         def wait_thread():
             try:
-                # TEMPORARY FIX: Use delay-based wait instead of callback wait
-                # The callback-based motion tracker has socket contention issues where
-                # it consumes POSITION_GET responses, causing position queries to fail
-                # and return 0.0mm (dangerous!)
-                # TODO: Implement proper CallbackListener or socket locking
                 import time
-                self.logger.info("Waiting for motion complete (using delay-based approach)...")
-                time.sleep(0.5)  # 500ms delay for stage to complete movement
-                self.logger.debug("Motion delay complete - querying position from hardware")
+
+                # Use motion tracker to wait for STAGE_MOTION_STOPPED callback
+                # This is the proper way - wait for hardware confirmation, not polling
+                motion_complete = False
+                if self._motion_tracker is not None:
+                    self.logger.info("Waiting for STAGE_MOTION_STOPPED callback from hardware...")
+                    try:
+                        motion_complete = self._motion_tracker.wait_for_motion_complete(timeout=10.0)
+                        if motion_complete:
+                            self.logger.info("Motion stopped callback received - stage is idle")
+                        else:
+                            self.logger.warning("Motion tracker timed out - stage may still be moving")
+                    except Exception as e:
+                        self.logger.warning(f"Motion tracker error: {e} - falling back to delay")
+                        motion_complete = False
+
+                # If motion tracker failed or unavailable, use conservative delay
+                if not motion_complete:
+                    # Calculate delay based on expected movement distance
+                    # Z axis moves slower, so use longer delay for Z movements
+                    from py2flamingo.services.stage_service import AxisCode
+                    has_z_movement = moved_axes and AxisCode.Z_AXIS in moved_axes
+
+                    if has_z_movement:
+                        delay = 3.0  # 3 seconds for Z axis movements
+                        self.logger.info(f"Z-axis movement detected - waiting {delay}s for completion...")
+                    else:
+                        delay = 1.5  # 1.5 seconds for X/Y/R movements
+                        self.logger.info(f"Waiting {delay}s for movement completion (fallback delay)...")
+
+                    time.sleep(delay)
+
+                # Brief additional delay to ensure position is stable before querying
+                time.sleep(0.2)
+                self.logger.debug("Motion complete - querying position from hardware")
 
                 # Query position from hardware to verify movement completed
                 # Add old position to history before updating
