@@ -3,6 +3,7 @@
 """
 
 import numpy as np
+import time
 import yaml
 from pathlib import Path
 from typing import Optional, Dict, Tuple
@@ -146,6 +147,21 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Track last processed frame to avoid duplicates
         self._last_processed_frame_number = -1
+
+        # Motion-aware frame buffering for accurate position interpolation
+        # When stage is moving, buffer frames and interpolate positions after motion stops
+        self._motion_tracking = {
+            'in_progress': False,
+            'start_position': None,  # (x, y, z, r) in mm/degrees
+            'start_time': None,      # time.time() when motion detected
+            'end_position': None,
+            'end_time': None,
+            'frame_buffer': [],      # List of {'frame', 'header', 'channel_id', 'capture_time'}
+            'last_position': None,   # Last known position for change detection
+            'consecutive_stable_ticks': 0,
+        }
+        self._position_change_threshold_mm = 0.05  # 50 micrometers threshold for motion detection
+        self._stable_ticks_required = 2  # Require 2 stable ticks to confirm motion stopped
 
         # Update throttle timer for stage movements
         self.update_throttle_timer = QTimer()
@@ -1860,6 +1876,18 @@ class Sample3DVisualizationWindow(QWidget):
             # Reset frame tracking to allow new frames
             self._last_processed_frame_number = -1
 
+            # Reset motion tracking for fresh start
+            self._motion_tracking = {
+                'in_progress': False,
+                'start_position': None,
+                'start_time': None,
+                'end_position': None,
+                'end_time': None,
+                'frame_buffer': [],
+                'last_position': None,
+                'consecutive_stable_ticks': 0,
+            }
+
             # Start frame capture timer if camera controller available
             if self.camera_controller:
                 self.populate_timer.start()
@@ -1886,6 +1914,10 @@ class Sample3DVisualizationWindow(QWidget):
         if reply == QMessageBox.Yes:
             self.voxel_storage.clear()
             self._last_processed_frame_number = -1  # Allow new frames after clearing
+            # Reset motion tracking
+            self._motion_tracking['in_progress'] = False
+            self._motion_tracking['frame_buffer'] = []
+            self._motion_tracking['last_position'] = None
             self._update_visualization()
             self.status_label.setText("Status: Data cleared")
             logger.info("Cleared all visualization data")
@@ -2457,8 +2489,103 @@ class Sample3DVisualizationWindow(QWidget):
         self.position_sliders['z_spinbox'].setEnabled(enabled)
         self.rotation_spinbox.setEnabled(enabled)
 
+    def _is_position_changed(self, pos1, pos2) -> bool:
+        """Check if two positions differ significantly (motion detected)."""
+        if pos1 is None or pos2 is None:
+            return True
+        threshold = self._position_change_threshold_mm
+        return (abs(pos1[0] - pos2[0]) > threshold or
+                abs(pos1[1] - pos2[1]) > threshold or
+                abs(pos1[2] - pos2[2]) > threshold or
+                abs(pos1[3] - pos2[3]) > 0.5)  # 0.5 degree threshold for rotation
+
+    def _interpolate_position(self, capture_time: float) -> tuple:
+        """
+        Interpolate position based on capture time during motion.
+
+        Uses linear interpolation between motion start and end positions.
+
+        Args:
+            capture_time: time.time() when frame was captured
+
+        Returns:
+            (x, y, z, r) tuple with interpolated position in mm/degrees
+        """
+        mt = self._motion_tracking
+
+        # Clamp to motion time bounds
+        if mt['start_time'] is None or mt['end_time'] is None:
+            return mt['end_position'] if mt['end_position'] else mt['start_position']
+
+        t_total = mt['end_time'] - mt['start_time']
+        if t_total <= 0:
+            return mt['end_position']
+
+        t_frame = capture_time - mt['start_time']
+        ratio = max(0.0, min(1.0, t_frame / t_total))
+
+        start = mt['start_position']
+        end = mt['end_position']
+
+        # Linear interpolation for each axis
+        x = start[0] + ratio * (end[0] - start[0])
+        y = start[1] + ratio * (end[1] - start[1])
+        z = start[2] + ratio * (end[2] - start[2])
+        r = start[3] + ratio * (end[3] - start[3])
+
+        return (x, y, z, r)
+
+    def _process_motion_buffer(self):
+        """
+        Process all buffered frames after motion completes.
+
+        Interpolates position for each frame based on capture time
+        and processes them into the 3D volume.
+        """
+        mt = self._motion_tracking
+        buffer = mt['frame_buffer']
+
+        if not buffer:
+            logger.debug("Motion buffer empty - nothing to process")
+            return
+
+        logger.info(f"Processing motion buffer: {len(buffer)} frames from "
+                   f"({mt['start_position'][0]:.2f}, {mt['start_position'][1]:.2f}, {mt['start_position'][2]:.2f}) to "
+                   f"({mt['end_position'][0]:.2f}, {mt['end_position'][1]:.2f}, {mt['end_position'][2]:.2f})")
+
+        # Create a simple Position-like object for each interpolated position
+        class InterpolatedPosition:
+            def __init__(self, x, y, z, r):
+                self.x = x
+                self.y = y
+                self.z = z
+                self.r = r
+
+        for i, frame_data in enumerate(buffer):
+            interp_pos = self._interpolate_position(frame_data['capture_time'])
+            position = InterpolatedPosition(*interp_pos)
+
+            logger.debug(f"Processing buffered frame {i+1}/{len(buffer)} at interpolated "
+                        f"X={position.x:.3f}, Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.1f}°")
+
+            self._process_camera_frame_to_3d(
+                frame_data['frame'],
+                frame_data['header'],
+                frame_data['channel_id'],
+                position
+            )
+
+        # Clear buffer after processing
+        mt['frame_buffer'] = []
+        logger.info(f"Motion buffer processed: {len(buffer)} frames placed via interpolation")
+
     def _on_populate_tick(self):
-        """Capture current frame from Live View and add to 3D volume."""
+        """
+        Capture current frame from Live View and add to 3D volume.
+
+        Motion-aware: detects stage movement and buffers frames during motion.
+        After motion stops, frames are processed with interpolated positions.
+        """
         if not self.is_populating or not self.camera_controller:
             return
 
@@ -2481,7 +2608,9 @@ class Sample3DVisualizationWindow(QWidget):
                 logger.warning("Position unavailable - skipping frame")
                 return
 
-            logger.debug(f"Populate tick: Position acquired - {position}")
+            current_pos = (position.x, position.y, position.z, position.r)
+            capture_time = time.time()
+            logger.debug(f"Populate tick: Position acquired - {current_pos}")
 
             # Get latest camera frame
             logger.debug("Populate tick: Getting latest frame")
@@ -2511,12 +2640,63 @@ class Sample3DVisualizationWindow(QWidget):
                 logger.debug("LED/brightfield active - skipping 3D accumulation")
                 return
 
-            logger.debug(f"Populate tick: Processing frame for channel {channel_id}")
+            # Motion detection and buffering logic
+            mt = self._motion_tracking
+            last_pos = mt['last_position']
+            position_changed = self._is_position_changed(current_pos, last_pos)
 
-            # Process frame into 3D volume
-            self._process_camera_frame_to_3d(image, header, channel_id, position)
+            if position_changed:
+                # Position changed - we're in motion or motion just started
+                if not mt['in_progress']:
+                    # Motion just started
+                    mt['in_progress'] = True
+                    mt['start_position'] = last_pos if last_pos else current_pos
+                    mt['start_time'] = capture_time - 0.5  # Estimate start was ~500ms ago (one tick)
+                    mt['frame_buffer'] = []
+                    logger.info(f"Motion detected! Buffering frames. Start position: "
+                               f"X={mt['start_position'][0]:.3f}, Y={mt['start_position'][1]:.3f}, "
+                               f"Z={mt['start_position'][2]:.3f}, R={mt['start_position'][3]:.1f}°")
 
-            logger.debug(f"Populate tick: Frame processed successfully at X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}, R={position.r:.1f}°")
+                # Buffer this frame for later processing with interpolated position
+                mt['frame_buffer'].append({
+                    'frame': image.copy(),  # Copy to avoid reference issues
+                    'header': header,
+                    'channel_id': channel_id,
+                    'capture_time': capture_time
+                })
+                mt['consecutive_stable_ticks'] = 0
+                logger.debug(f"Buffered frame during motion (buffer size: {len(mt['frame_buffer'])})")
+
+            else:
+                # Position stable
+                mt['consecutive_stable_ticks'] += 1
+
+                if mt['in_progress'] and mt['consecutive_stable_ticks'] >= self._stable_ticks_required:
+                    # Motion just completed - process buffered frames
+                    mt['end_position'] = current_pos
+                    mt['end_time'] = capture_time
+                    logger.info(f"Motion complete! End position: "
+                               f"X={current_pos[0]:.3f}, Y={current_pos[1]:.3f}, "
+                               f"Z={current_pos[2]:.3f}, R={current_pos[3]:.1f}°")
+
+                    # Process all buffered frames with interpolated positions
+                    self._process_motion_buffer()
+
+                    # Reset motion tracking
+                    mt['in_progress'] = False
+                    mt['start_position'] = None
+                    mt['start_time'] = None
+                    mt['end_position'] = None
+                    mt['end_time'] = None
+
+                elif not mt['in_progress']:
+                    # No motion - process frame immediately at current position
+                    logger.debug(f"Populate tick: Processing frame for channel {channel_id}")
+                    self._process_camera_frame_to_3d(image, header, channel_id, position)
+                    logger.debug(f"Populate tick: Frame processed at X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}, R={position.r:.1f}°")
+
+            # Update last known position
+            mt['last_position'] = current_pos
 
         except Exception as e:
             logger.error(f"Error capturing frame: {e}", exc_info=True)
