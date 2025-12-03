@@ -2492,7 +2492,7 @@ class Sample3DVisualizationWindow(QWidget):
     def _is_position_changed(self, pos1, pos2) -> bool:
         """Check if two positions differ significantly (motion detected)."""
         if pos1 is None or pos2 is None:
-            return True
+            return False  # No previous position = not motion, just first reading
         threshold = self._position_change_threshold_mm
         return (abs(pos1[0] - pos2[0]) > threshold or
                 abs(pos1[1] - pos2[1]) > threshold or
