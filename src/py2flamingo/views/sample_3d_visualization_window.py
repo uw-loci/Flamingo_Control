@@ -2591,6 +2591,19 @@ class Sample3DVisualizationWindow(QWidget):
             logger.debug("Process 3D: Extracting intensity values")
             intensity_values = downsampled.ravel()
 
+            # Set reference position for transform calculations if not already set
+            # This happens on the FIRST frame captured, establishing the "zero point"
+            # for all subsequent stage movements
+            if self.voxel_storage.reference_stage_position is None:
+                stage_pos_dict = {
+                    'x': position.x,
+                    'y': position.y,
+                    'z': position.z,
+                    'r': position.r
+                }
+                self.voxel_storage.set_reference_position(stage_pos_dict)
+                logger.info(f"First frame captured - reference position set to stage position")
+
             # Update voxel storage with transformed coordinates
             logger.debug(f"Process 3D: Updating voxel storage for channel {channel_id}")
             self.voxel_storage.update_storage(

@@ -98,6 +98,10 @@ class DualResolutionVoxelStorage:
         # Coordinate transformer for volume transformations
         self.coord_transformer = None  # Will be set by visualization window
 
+        # Reference stage position for calculating movement deltas
+        # Set when first data is captured - all subsequent positions are relative to this
+        self.reference_stage_position = None  # Will be set on first data capture
+
         # Initialize storage for each channel
         self.num_channels = 4
         self._initialize_storage()
@@ -450,7 +454,11 @@ class DualResolutionVoxelStorage:
             'min': np.array([np.inf, np.inf, np.inf]),
             'max': np.array([-np.inf, -np.inf, -np.inf])
         }
-        logger.info("Cleared all voxel storage")
+        # Reset reference position so next data capture sets a new reference
+        self.reference_stage_position = None
+        # Clear transform cache
+        self.transform_cache.clear()
+        logger.info("Cleared all voxel storage and reset reference position")
 
     def get_memory_usage(self) -> Dict[str, float]:
         """Report memory usage statistics."""
@@ -519,6 +527,10 @@ class DualResolutionVoxelStorage:
         """
         Get display volume with all voxels transformed to current stage position.
 
+        The key insight: voxels are stored at fixed "objective location" in storage,
+        but when the stage moves, the entire voxel block should appear to move WITH
+        the sample. This creates the effect of building up a 3D volume as you scan.
+
         Uses caching to optimize performance:
         - Only retransform if rotation changed
         - Fast translation for X,Y,Z only changes
@@ -541,55 +553,74 @@ class DualResolutionVoxelStorage:
             # Fall back to regular display volume
             return self.get_display_volume(channel_id)
 
-        # Check if only translation changed (fast path)
-        dr = current_stage_pos.get('r', 0) - self.last_rotation
+        # Reference position should be set when first data is captured
+        # If not set yet, return untransformed volume (data is at objective location)
+        if self.reference_stage_position is None:
+            logger.debug("Transform: Reference position not set yet, returning untransformed volume")
+            return self.get_display_volume(channel_id)
 
-        if abs(dr) < 0.01:  # No significant rotation
+        # Calculate DELTA from reference position (not absolute position!)
+        # Voxels are stored at a fixed "objective" location, but when the stage moves,
+        # the data should move in the SAME direction as the stage.
+        # +Z = away from objective, -Z = toward objective
+        dx = current_stage_pos.get('x', 0) - self.reference_stage_position['x']
+        dy = current_stage_pos.get('y', 0) - self.reference_stage_position['y']
+        dz = current_stage_pos.get('z', 0) - self.reference_stage_position['z']
+        dr = current_stage_pos.get('r', 0) - self.reference_stage_position['r']
+
+        logger.debug(f"Transform: Delta from reference: dx={dx:.3f}, dy={dy:.3f}, dz={dz:.3f}, dr={dr:.1f}°")
+
+        # Check if only translation changed (fast path)
+        rotation_changed = abs(dr) > 0.01 and channel_id in self.transform_cache
+
+        if not rotation_changed:
             # Use cached rotated volume, just translate
             if channel_id in self.transform_cache:
-                dx = current_stage_pos['x'] - self.last_stage_position['x']
-                dy = current_stage_pos['y'] - self.last_stage_position['y']
-                dz = current_stage_pos['z'] - self.last_stage_position['z']
+                # Calculate delta from last position (same direction as stage)
+                ddx = current_stage_pos['x'] - self.last_stage_position['x']
+                ddy = current_stage_pos['y'] - self.last_stage_position['y']
+                ddz = current_stage_pos['z'] - self.last_stage_position['z']
 
                 # Check if translation is significant
-                if abs(dx) < 0.001 and abs(dy) < 0.001 and abs(dz) < 0.001:
+                if abs(ddx) < 0.001 and abs(ddy) < 0.001 and abs(ddz) < 0.001:
                     # No significant change, return cached
-                    logger.info(f"Transform: No significant movement, returning cached volume")
+                    logger.debug(f"Transform: No significant movement, returning cached volume")
                     return self.transform_cache[channel_id]
 
-                # Fast translation using shift
-                logger.info(f"Transform: Translating by (dx={dx:.3f}, dy={dy:.3f}, dz={dz:.3f}) mm")
+                # Fast translation using shift (same direction as stage movement)
+                logger.info(f"Transform: Translating by (ddx={ddx:.3f}, ddy={ddy:.3f}, ddz={ddz:.3f}) mm")
                 from scipy.ndimage import shift
-                offset_voxels = np.array([dx, dy, dz]) * 1000 / self.config.display_voxel_size[0]
-                logger.info(f"Transform: Voxel offset = {offset_voxels}")
-                return shift(self.transform_cache[channel_id],
-                           offset_voxels, order=0, mode='constant', cval=0)
+                offset_voxels = np.array([ddz, ddy, ddx]) * 1000 / self.config.display_voxel_size[0]
+                logger.info(f"Transform: Voxel offset = {offset_voxels} (ZYX order)")
+
+                # Update last position for next incremental update
+                self.last_stage_position = current_stage_pos.copy()
+
+                shifted = shift(self.transform_cache[channel_id],
+                              offset_voxels, order=0, mode='constant', cval=0)
+                self.transform_cache[channel_id] = shifted
+                return shifted
             else:
                 logger.info(f"Transform: No cached volume for channel {channel_id}, need full transformation")
 
         # Rotation changed - need full transformation
-        logger.info(f"Transform: Rotation changed ({self.last_rotation:.1f}° -> {current_stage_pos.get('r', 0):.1f}°), "
-                   f"performing full transformation")
+        logger.info(f"Transform: Performing full transformation (rotation delta={dr:.1f}°)")
         volume = self.get_display_volume(channel_id)
 
         # Get rotation center in voxels
         center_voxels = self._get_rotation_center_voxels()
 
-        # Calculate stage offset
-        stage_offset_mm = (
-            current_stage_pos.get('x', 0),
-            current_stage_pos.get('y', 0),
-            current_stage_pos.get('z', 0)
-        )
+        # Use DELTA offsets (voxels move same direction as stage)
+        stage_offset_mm = (dx, dy, dz)
 
         logger.info(f"Transform: Applying affine transformation with offset {stage_offset_mm} mm, "
-                   f"rotation {current_stage_pos.get('r', 0):.1f}°")
+                   f"rotation delta {dr:.1f}° (voxels shift with stage movement)")
 
         # Apply transformation
         transformed = self.coord_transformer.transform_voxel_volume_affine(
             volume,
             stage_offset_mm=stage_offset_mm,
-            rotation_deg=current_stage_pos.get('r', 0),
+            rotation_deg=dr,  # Use delta rotation, not absolute
             center_voxels=center_voxels,
             voxel_size_um=self.config.display_voxel_size[0]
         )
@@ -626,6 +657,27 @@ class DualResolutionVoxelStorage:
         """
         self.coord_transformer = transformer
         logger.info("Coordinate transformer set for volume transformations")
+
+    def set_reference_position(self, stage_pos: dict):
+        """
+        Set the reference stage position for transformation calculations.
+
+        Should be called when first data is captured, so that all subsequent
+        stage movements are calculated relative to this reference.
+
+        Args:
+            stage_pos: Dictionary with 'x', 'y', 'z', 'r' keys in mm/degrees
+        """
+        self.reference_stage_position = {
+            'x': stage_pos.get('x', 0),
+            'y': stage_pos.get('y', 0),
+            'z': stage_pos.get('z', 0),
+            'r': stage_pos.get('r', 0)
+        }
+        logger.info(f"Reference position set to X={self.reference_stage_position['x']:.3f}mm, "
+                   f"Y={self.reference_stage_position['y']:.3f}mm, "
+                   f"Z={self.reference_stage_position['z']:.3f}mm, "
+                   f"R={self.reference_stage_position['r']:.1f}°")
 
     def invalidate_transform_cache(self):
         """Invalidate the transform cache, forcing recalculation."""
