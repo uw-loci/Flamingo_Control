@@ -109,6 +109,10 @@ class CameraController(QObject):
             self.state_changed.emit(new_state)
             self.logger.info(f"Camera state changed to: {new_state.value}")
 
+    def is_live_view_active(self) -> bool:
+        """Check if live view is currently running."""
+        return self._state == CameraState.LIVE_VIEW
+
     def start_live_view(self) -> bool:
         """
         Start live view mode.
@@ -164,6 +168,9 @@ class CameraController(QObject):
 
             # Stop camera streaming
             self.camera_service.stop_live_view_streaming()
+
+            # Clear frame buffer to prevent stale frames being processed
+            self.clear_buffer()
 
             # Disable all light sources (lasers and LED) when stopping live view
             if self.laser_led_controller:

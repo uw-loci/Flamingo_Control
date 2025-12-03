@@ -144,6 +144,9 @@ class Sample3DVisualizationWindow(QWidget):
         self.populate_timer.timeout.connect(self._on_populate_tick)
         self.populate_timer.setInterval(500)  # Capture every 500ms (2 Hz)
 
+        # Track last processed frame to avoid duplicates
+        self._last_processed_frame_number = -1
+
         # Update throttle timer for stage movements
         self.update_throttle_timer = QTimer()
         self.update_throttle_timer.timeout.connect(self._process_pending_stage_update)
@@ -1854,6 +1857,9 @@ class Sample3DVisualizationWindow(QWidget):
             self.populate_button.setText("Stop Populating")
             self.status_label.setText("Status: Populating from Live View...")
 
+            # Reset frame tracking to allow new frames
+            self._last_processed_frame_number = -1
+
             # Start frame capture timer if camera controller available
             if self.camera_controller:
                 self.populate_timer.start()
@@ -1879,6 +1885,7 @@ class Sample3DVisualizationWindow(QWidget):
 
         if reply == QMessageBox.Yes:
             self.voxel_storage.clear()
+            self._last_processed_frame_number = -1  # Allow new frames after clearing
             self._update_visualization()
             self.status_label.setText("Status: Data cleared")
             logger.info("Cleared all visualization data")
@@ -2458,6 +2465,11 @@ class Sample3DVisualizationWindow(QWidget):
         try:
             logger.debug("Populate tick: Starting frame capture")
 
+            # Check if Live View is actually running
+            if not self.camera_controller.is_live_view_active():
+                logger.debug("Live View not active - skipping frame capture")
+                return
+
             # Get current stage position
             if not self.movement_controller:
                 logger.warning("No movement controller - cannot get position")
@@ -2481,7 +2493,14 @@ class Sample3DVisualizationWindow(QWidget):
             logger.debug("Populate tick: Frame acquired")
             image, header = frame_data
 
-            logger.debug(f"Populate tick: Frame shape={image.shape}, dtype={image.dtype}")
+            # Skip duplicate frames (same frame processed multiple times)
+            if hasattr(header, 'frame_number') and header.frame_number == self._last_processed_frame_number:
+                logger.debug(f"Skipping duplicate frame {header.frame_number}")
+                return
+            if hasattr(header, 'frame_number'):
+                self._last_processed_frame_number = header.frame_number
+
+            logger.debug(f"Populate tick: Frame shape={image.shape}, dtype={image.dtype}, frame_number={getattr(header, 'frame_number', 'N/A')}")
 
             # Determine which channel this frame belongs to
             logger.debug("Populate tick: Detecting active channel")
