@@ -321,8 +321,8 @@ def test_voxel_movement(controller, main_window=None):
     print("\n   Moving X by +0.5mm...")
     new_x = initial_x + 0.5
     controller.move_x(new_x)
-    # Wait for movement to actually complete
-    final_x = wait_for_movement_complete(controller, 'X', timeout=3.0)
+    # Wait for movement to actually complete (motion tracker uses 10s timeout + 1.5s fallback for X/Y)
+    final_x = wait_for_movement_complete(controller, 'X', timeout=15.0)
     if final_x is not None:
         print(f"   X-axis reached position: {final_x:.3f}mm")
     # Additional wait for voxel data capture
@@ -339,8 +339,8 @@ def test_voxel_movement(controller, main_window=None):
         new_y = 24.5
         print(f"   NOTE: Clamping Y to {new_y:.3f} to stay within safe range")
     controller.move_y(new_y)
-    # Wait for movement to actually complete
-    final_y = wait_for_movement_complete(controller, 'Y', timeout=3.0)
+    # Wait for movement to actually complete (motion tracker uses 10s timeout + 1.5s fallback for X/Y)
+    final_y = wait_for_movement_complete(controller, 'Y', timeout=15.0)
     if final_y is not None:
         print(f"   Y-axis reached position: {final_y:.3f}mm")
     # Additional wait for voxel data capture
@@ -353,8 +353,8 @@ def test_voxel_movement(controller, main_window=None):
     print("\n   Moving Z by +0.5mm...")
     new_z = initial_z + 0.5
     controller.move_z(new_z)
-    # Wait for movement to actually complete
-    final_z = wait_for_movement_complete(controller, 'Z', timeout=3.0)
+    # Wait for movement to actually complete (motion tracker uses 10s timeout + 3s fallback for Z)
+    final_z = wait_for_movement_complete(controller, 'Z', timeout=15.0)
     if final_z is not None:
         print(f"   Z-axis reached position: {final_z:.3f}mm")
     # Additional wait for voxel data capture
