@@ -2148,12 +2148,14 @@ class Sample3DVisualizationWindow(QWidget):
                         # Regular display volume
                         volume = self.voxel_storage.get_display_volume(ch_id)
 
-                    # Debug: Log if we have any data
+                    # Log voxel count only when it changes (reduce spam)
                     non_zero = np.count_nonzero(volume)
-                    if non_zero > 0:
-                        logger.info(f"Visualization update: Channel {ch_id} has {non_zero} non-zero voxels in display")
-                        logger.debug(f"  Display volume shape: {volume.shape}, dtype: {volume.dtype}")
-                        logger.debug(f"  Value range: [{volume.min()}, {volume.max()}]")
+                    if not hasattr(self, '_last_logged_voxels'):
+                        self._last_logged_voxels = {}
+                    if non_zero != self._last_logged_voxels.get(ch_id, 0):
+                        if non_zero > 0:
+                            logger.info(f"Visualization update: Channel {ch_id} has {non_zero} non-zero voxels in display")
+                        self._last_logged_voxels[ch_id] = non_zero
 
                     # Update layer data
                     self.channel_layers[ch_id].data = volume
@@ -2623,13 +2625,15 @@ class Sample3DVisualizationWindow(QWidget):
             image, header = frame_data
 
             # Skip duplicate frames (same frame processed multiple times)
-            if hasattr(header, 'frame_number') and header.frame_number == self._last_processed_frame_number:
-                logger.debug(f"Skipping duplicate frame {header.frame_number}")
+            frame_num = getattr(header, 'frame_number', -1)
+            if frame_num == self._last_processed_frame_number:
+                # Only log duplicate skips occasionally to avoid spam
+                if frame_num % 20 == 0:
+                    logger.debug(f"Skipping duplicate frame {frame_num}")
                 return
-            if hasattr(header, 'frame_number'):
-                self._last_processed_frame_number = header.frame_number
+            self._last_processed_frame_number = frame_num
 
-            logger.debug(f"Populate tick: Frame shape={image.shape}, dtype={image.dtype}, frame_number={getattr(header, 'frame_number', 'N/A')}")
+            logger.debug(f"Populate tick: Frame {frame_num}, shape={image.shape}")
 
             # Determine which channel this frame belongs to
             logger.debug("Populate tick: Detecting active channel")
@@ -2691,7 +2695,12 @@ class Sample3DVisualizationWindow(QWidget):
 
                 elif not mt['in_progress']:
                     # No motion - process frame immediately at current position
-                    logger.debug(f"Populate tick: Processing frame for channel {channel_id}")
+                    # Log every 10th frame at INFO level to reduce spam but show progress
+                    frame_num = getattr(header, 'frame_number', 0)
+                    if frame_num % 10 == 0:
+                        logger.info(f"Processing frame {frame_num} (stationary) at X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}")
+                    else:
+                        logger.debug(f"Populate tick: Processing frame for channel {channel_id}")
                     self._process_camera_frame_to_3d(image, header, channel_id, position)
                     logger.debug(f"Populate tick: Frame processed at X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}, R={position.r:.1f}°")
 
