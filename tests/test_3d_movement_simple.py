@@ -159,33 +159,69 @@ def test_voxel_movement(controller, main_window=None):
                         break
 
             if laser_panel:
-                # Use controller API directly instead of GUI manipulation (more reliable)
+                # Simulate GUI clicks to test actual user workflow
                 try:
-                    # Get the controller from the panel
-                    if hasattr(laser_panel, 'laser_led_controller'):
-                        llc = laser_panel.laser_led_controller
+                    if hasattr(laser_panel, '_source_button_group'):
+                        button_group = laser_panel._source_button_group
+                        print(f"   Button group has {len(button_group.buttons())} buttons")
 
-                        # Set laser power first
-                        print("   Setting Laser 4 power via controller...")
-                        llc.set_laser_power(4, 14.4)
-                        process_gui_events()
+                        # Find laser 4 checkbox (ID=4 in button group)
+                        laser_4_checkbox = button_group.button(4)  # Laser 4 has ID 4
+                        print(f"   Laser 4 checkbox: {laser_4_checkbox}")
 
-                        # Enable laser for preview
-                        print("   Enabling Laser 4 for preview...")
-                        llc.enable_laser_for_preview(4, 'LEFT')
-                        process_gui_events()
+                        if laser_4_checkbox:
+                            # First set power for laser 4 via GUI spinbox
+                            if hasattr(laser_panel, '_laser_spinboxes') and 4 in laser_panel._laser_spinboxes:
+                                power_spinbox = laser_panel._laser_spinboxes[4]
+                                print(f"   Setting power spinbox to 14.4%...")
+                                power_spinbox.setValue(14.4)
+                                process_gui_events()
+                                print("   Set Laser 4 power to 14.4% via GUI spinbox")
+                            elif hasattr(laser_panel, '_laser_sliders') and 4 in laser_panel._laser_sliders:
+                                power_slider = laser_panel._laser_sliders[4]
+                                power_slider.setValue(144)  # 14.4% * 10
+                                process_gui_events()
+                                print("   Set Laser 4 power to 14.4% via GUI slider")
 
-                        # Also update the GUI checkbox to match
-                        if hasattr(laser_panel, '_laser_radios') and 4 in laser_panel._laser_radios:
-                            laser_panel._laser_radios[4].setChecked(True)
+                            smart_sleep(0.5, "Letting GUI update...")
+
+                            # Uncheck all other sources first
+                            print("   Unchecking all other sources...")
+                            for button in button_group.buttons():
+                                if button.isChecked():
+                                    button.setChecked(False)
+                                    process_gui_events()
+                            print("   Unchecked all light source checkboxes")
+
+                            # Check laser 4 checkbox - this triggers _on_source_clicked
+                            print("   Checking Laser 4 checkbox...")
+                            laser_4_checkbox.setChecked(True)
                             process_gui_events()
 
-                        laser_enabled = True
-                        print("   Laser 4 enabled via controller API")
+                            # Manually trigger the click to ensure handler runs
+                            print("   Emitting buttonClicked signal...")
+                            button_group.buttonClicked.emit(laser_4_checkbox)
+                            process_gui_events()
+                            print("   Clicked Laser 4 checkbox - this enables the laser")
+
+                            laser_enabled = True
+                            smart_sleep(1, "Waiting for laser to enable...")
+                        else:
+                            print("   WARNING: Laser 4 checkbox not found in button group")
+                            # List available button IDs
+                            print(f"   Available button IDs: {[button_group.id(b) for b in button_group.buttons()]}")
+
+                            # Try alternative: look for laser_radios
+                            if hasattr(laser_panel, '_laser_radios') and 4 in laser_panel._laser_radios:
+                                print("   Found _laser_radios dictionary, trying alternative approach...")
+                                laser_checkbox = laser_panel._laser_radios[4]
+                                laser_checkbox.setChecked(True)
+                                process_gui_events()
+                                laser_enabled = True
                     else:
-                        print("   WARNING: No laser_led_controller found on panel")
+                        print("   WARNING: Could not find _source_button_group in panel")
                 except Exception as e:
-                    print(f"   Error enabling laser via controller: {e}")
+                    print(f"   Error during GUI simulation: {e}")
                     import traceback
                     traceback.print_exc()
             else:
