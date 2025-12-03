@@ -2119,6 +2119,9 @@ class Sample3DVisualizationWindow(QWidget):
                     # Update layer data
                     self.channel_layers[ch_id].data = volume
 
+                    # Update contrast slider range based on actual display values
+                    self._update_contrast_slider_range(ch_id)
+
             # Update memory usage
             memory_stats = self.voxel_storage.get_memory_usage()
             self.memory_label.setText(f"Memory: {memory_stats['total_mb']:.1f} MB")
@@ -2203,6 +2206,9 @@ class Sample3DVisualizationWindow(QWidget):
 
                     logger.info(f"Stage update: Channel {ch_id} - "
                                f"voxels before: {non_zero_before}, after: {non_zero_after}")
+
+                    # Update contrast slider range based on actual display values
+                    self._update_contrast_slider_range(ch_id)
 
         finally:
             self.update_mutex.unlock()

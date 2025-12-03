@@ -245,14 +245,8 @@ class DualResolutionVoxelStorage:
         # Update data bounds
         self._update_bounds(world_coords[valid_mask])
 
-        # Track max intensity for dynamic contrast adjustment
-        if len(valid_values) > 0:
-            current_max = int(np.max(valid_values))
-            if current_max > self.channel_max_values[channel_id]:
-                self.channel_max_values[channel_id] = current_max
-                logger.debug(f"Channel {channel_id} max value updated to {current_max}")
-
         # Mark display as needing update
+        # (max value tracking now happens in downsample_to_display based on display data)
         self.display_dirty[channel_id] = True
 
     def _apply_update_strategy(self, old_val: float, new_val: float,
@@ -408,6 +402,12 @@ class DualResolutionVoxelStorage:
             src_start[1]:src_end[1],
             src_start[2]:src_end[2]
         ]
+
+        # Track max value from DISPLAY data (what user sees in napari)
+        display_max = int(np.max(self.display_cache[channel_id]))
+        if display_max > self.channel_max_values[channel_id]:
+            self.channel_max_values[channel_id] = display_max
+            logger.info(f"Channel {channel_id} display max updated to {display_max}")
 
         self.display_dirty[channel_id] = False
         return self.display_cache[channel_id]
