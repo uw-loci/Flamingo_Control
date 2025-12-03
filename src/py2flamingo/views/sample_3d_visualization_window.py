@@ -2007,6 +2007,46 @@ class Sample3DVisualizationWindow(QWidget):
             self.channel_layers[channel_id].contrast_limits = (min_val, max_val)
             logger.debug(f"Channel {channel_id} contrast: {min_val} - {max_val}")
 
+    def _update_contrast_slider_range(self, channel_id: int):
+        """
+        Update contrast slider range based on maximum value recorded.
+
+        Sets the slider max to the current max intensity value for the channel,
+        making it easier to adjust contrast for the actual data range.
+        """
+        if channel_id not in self.channel_controls:
+            return
+
+        # Get max value from storage
+        max_value = self.voxel_storage.get_channel_max_value(channel_id)
+        if max_value <= 0:
+            return
+
+        # Add some headroom (10% above max, minimum 100)
+        slider_max = max(int(max_value * 1.1), max_value + 100)
+
+        controls = self.channel_controls[channel_id]
+        slider = controls['contrast_range']
+
+        # Only update if max changed significantly
+        current_max = slider.maximum()
+        if slider_max > current_max or slider_max < current_max * 0.5:
+            # Update slider range
+            slider.blockSignals(True)
+            current_value = slider.value()
+            slider.setRange(0, slider_max)
+            # Adjust current value if needed
+            new_max_val = min(current_value[1], slider_max)
+            slider.setValue((current_value[0], new_max_val))
+            controls['contrast_label'].setText(f"{current_value[0]} - {new_max_val}")
+            slider.blockSignals(False)
+
+            # Also update napari layer
+            if channel_id in self.channel_layers:
+                self.channel_layers[channel_id].contrast_limits = (current_value[0], new_max_val)
+
+            logger.info(f"Channel {channel_id} contrast range updated: 0 - {slider_max} (max value: {max_value})")
+
     def _on_display_settings_changed(self):
         """Handle display setting changes."""
         if not self.viewer:
@@ -2145,24 +2185,23 @@ class Sample3DVisualizationWindow(QWidget):
                        f"Z={stage_pos['z']:.3f}, R={stage_pos.get('r', 0):.1f}°")
 
             # Update each channel with transformed data
+            # Data is stored in SAMPLE coordinates, transform to CHAMBER coordinates for display
             for ch_id in range(self.voxel_storage.num_channels):
                 if not self.voxel_storage.has_data(ch_id):
                     continue
 
-                # Get transformed volume
+                # Get transformed volume (sample coords -> chamber coords)
                 volume = self.voxel_storage.get_display_volume_transformed(
                     ch_id, stage_pos
                 )
 
                 # Update napari layer
                 if ch_id in self.channel_layers:
-                    # Log BEFORE updating to debug the issue
                     non_zero_before = np.count_nonzero(self.channel_layers[ch_id].data)
                     self.channel_layers[ch_id].data = volume
                     non_zero_after = np.count_nonzero(volume)
 
-                    # Log at INFO level to see what's happening
-                    logger.info(f"Stage transformation: Channel {ch_id} updated - "
+                    logger.info(f"Stage update: Channel {ch_id} - "
                                f"voxels before: {non_zero_before}, after: {non_zero_after}")
 
         finally:
@@ -2513,37 +2552,60 @@ class Sample3DVisualizationWindow(QWidget):
             # Stage Y is a control parameter; chamber Y is the actual position in the visualization
             # The imaging data is attached to the sample (at extension tip), so it moves with the holder
 
-            logger.debug("Process 3D: Converting stage coords to napari world coords")
+            logger.debug("Process 3D: Converting stage coords to sample-relative coords")
 
-            # The objective is FIXED at the center of the napari visualization
-            # When stage is at X=7.08, Y=7.45, Z=17.06, the sample tip is at the objective
-            # This is our reference point for coordinate transformation
+            # Storage is in SAMPLE coordinates (fixed relative to sample holder)
+            # The focal plane position in sample coords changes as stage moves
+            #
+            # Physical model:
+            # - Focal plane is FIXED in chamber space (at objective)
+            # - Sample moves with stage
+            # - As stage Z increases (away from objective), we image DEEPER into sample
+            #
+            # Sample coordinate calculation:
+            # - Use a reference point (center of storage) as base
+            # - Offset by stage delta from reference position
+            # - This ensures different stage positions map to different sample positions
 
-            # Reference stage position where tip is at objective focal plane
-            STAGE_X_AT_FOCUS = 7.08  # mm
-            STAGE_Y_AT_FOCUS = 7.45  # mm
-            STAGE_Z_AT_FOCUS = 17.06  # mm
+            # Get reference position (set on first frame capture)
+            if self.voxel_storage.reference_stage_position is None:
+                # Will be set below, use current position as temporary reference
+                ref_x, ref_y, ref_z = position.x, position.y, position.z
+            else:
+                ref_x = self.voxel_storage.reference_stage_position['x']
+                ref_y = self.voxel_storage.reference_stage_position['y']
+                ref_z = self.voxel_storage.reference_stage_position['z']
 
-            # The objective is FIXED in the chamber at a specific location
-            # Data ALWAYS appears at the objective location, regardless of stage position
-            objective_x_mm = (self.config['stage_control']['x_range_mm'][0] + self.config['stage_control']['x_range_mm'][1]) / 2
-            objective_y_mm = 7.0  # FIXED at 7mm in chamber (middle of Y range)
-            objective_z_mm = (self.config['stage_control']['z_range_mm'][0] + self.config['stage_control']['z_range_mm'][1]) / 2
+            # Calculate stage delta from reference
+            delta_x = position.x - ref_x
+            delta_y = position.y - ref_y
+            delta_z = position.z - ref_z
 
-            # NEW DATA ALWAYS APPEARS AT THE OBJECTIVE LOCATION
-            # The entire accumulated voxel block will move with the stage (handled elsewhere)
-            # But new data is always placed at the fixed objective position
+            # Base storage position (center of sample region in storage coords)
+            # Config has [X, Y, Z] order, but we need Z, Y, X for napari
+            sample_center = self.config['sample_chamber']['sample_region_center_um']
+            base_x_um = sample_center[0]  # X is index 0 in config
+            base_y_um = sample_center[1]  # Y is index 1 in config
+            base_z_um = sample_center[2]  # Z is index 2 in config
+
+            # Storage position = base - delta (in sample coordinates)
+            # The negative delta ensures that when the display transform adds +delta,
+            # new data appears at the focal plane (base) while old data moves forward
+            #
+            # Example: reference at Z=21mm, current at Z=22mm (delta=+1mm)
+            # - Frame from Z=21 stored at base-0=base, displayed at base+1mm (moved forward)
+            # - Frame from Z=22 stored at base-1mm, displayed at base-1+1=base (focal plane)
+            #
             # IMPORTANT: Storage expects (Z, Y, X) order for consistency with napari
             world_center_um = np.array([
-                objective_z_mm * 1000,  # Z at objective (first for napari/storage order)
-                objective_y_mm * 1000,  # Y at objective (second)
-                objective_x_mm * 1000   # X at objective (third)
+                base_z_um - delta_z * 1000,  # Z in sample coords (subtract delta)
+                base_y_um - delta_y * 1000,  # Y in sample coords (subtract delta)
+                base_x_um - delta_x * 1000   # X in sample coords (subtract delta)
             ])
 
             logger.info(f"Stage position (mm): X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}, R={position.r:.1f}°")
-            logger.info(f"New data ALWAYS placed at objective (mm): X={objective_x_mm:.2f}, Y={objective_y_mm:.2f}, Z={objective_z_mm:.2f}")
-            logger.info(f"Data placement center (µm): Z={world_center_um[0]:.1f}, Y={world_center_um[1]:.1f}, X={world_center_um[2]:.1f} (ZYX order for storage)")
-            logger.info(f"Note: Entire voxel block moves with stage, but new data always appears at objective location")
+            logger.info(f"Stage delta from ref (mm): dX={delta_x:.2f}, dY={delta_y:.2f}, dZ={delta_z:.2f}")
+            logger.info(f"Sample storage position (µm): Z={world_center_um[0]:.1f}, Y={world_center_um[1]:.1f}, X={world_center_um[2]:.1f}")
 
             # For 3D visualization, we need to place the 2D camera image as a thin slice
             # The imaging plane has some depth (depth of field ~1.9mm in Z)
@@ -2579,7 +2641,7 @@ class Sample3DVisualizationWindow(QWidget):
             world_coords_3d = camera_offsets_3d + world_center_um
 
             # Debug logging to trace coordinate transformation
-            logger.debug(f"World center (objective) µm (ZYX order): {world_center_um}")
+            logger.debug(f"World center (sample coords) µm (ZYX order): {world_center_um}")
             logger.debug(f"Camera offset range Z: [{camera_offsets_3d[:, 0].min():.1f}, {camera_offsets_3d[:, 0].max():.1f}] µm")
             logger.debug(f"Camera offset range Y: [{camera_offsets_3d[:, 1].min():.1f}, {camera_offsets_3d[:, 1].max():.1f}] µm")
             logger.debug(f"Camera offset range X: [{camera_offsets_3d[:, 2].min():.1f}, {camera_offsets_3d[:, 2].max():.1f}] µm")
@@ -2615,6 +2677,9 @@ class Sample3DVisualizationWindow(QWidget):
             )
 
             logger.info(f"Added frame to channel {channel_id}: {np.count_nonzero(intensity_values)} non-zero pixels")
+
+            # Update contrast slider range based on actual data values
+            self._update_contrast_slider_range(channel_id)
 
             # Diagnostic: Log world coordinate ranges and rotation for debugging
             logger.debug(f"Stage position: X={position.x:.2f}mm, Y={position.y:.2f}mm, Z={position.z:.2f}mm, R={position.r:.1f}°")

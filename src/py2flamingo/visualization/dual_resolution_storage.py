@@ -125,6 +125,9 @@ class DualResolutionVoxelStorage:
 
     def _initialize_storage(self):
         """Initialize storage arrays for all channels."""
+        # Track max intensity per channel for dynamic contrast adjustment
+        self.channel_max_values = {}
+
         for ch in range(self.num_channels):
             # High-res sparse storage using Python dictionaries (faster than sparse.DOK and no Numba compilation)
             # Dictionary keys are (x, y, z) tuples, values are the data
@@ -135,6 +138,9 @@ class DualResolutionVoxelStorage:
             # Low-res display cache (dense for napari)
             self.display_cache[ch] = np.zeros(self.display_dims, dtype=np.uint16)
             self.display_dirty[ch] = False
+
+            # Initialize max value tracking
+            self.channel_max_values[ch] = 0
 
     def world_to_storage_voxel(self, world_coords: np.ndarray) -> np.ndarray:
         """
@@ -238,6 +244,13 @@ class DualResolutionVoxelStorage:
 
         # Update data bounds
         self._update_bounds(world_coords[valid_mask])
+
+        # Track max intensity for dynamic contrast adjustment
+        if len(valid_values) > 0:
+            current_max = int(np.max(valid_values))
+            if current_max > self.channel_max_values[channel_id]:
+                self.channel_max_values[channel_id] = current_max
+                logger.debug(f"Channel {channel_id} max value updated to {current_max}")
 
         # Mark display as needing update
         self.display_dirty[channel_id] = True
@@ -687,3 +700,17 @@ class DualResolutionVoxelStorage:
     def has_data(self, channel_id: int) -> bool:
         """Check if a channel has any data."""
         return len(self.storage_data.get(channel_id, {})) > 0
+
+    def get_channel_max_value(self, channel_id: int) -> int:
+        """
+        Get the maximum intensity value recorded for a channel.
+
+        Useful for dynamic contrast adjustment.
+
+        Args:
+            channel_id: Channel to query
+
+        Returns:
+            Maximum intensity value (0 if no data)
+        """
+        return self.channel_max_values.get(channel_id, 0)
