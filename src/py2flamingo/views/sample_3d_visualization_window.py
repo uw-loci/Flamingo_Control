@@ -1875,6 +1875,7 @@ class Sample3DVisualizationWindow(QWidget):
 
             # Reset frame tracking to allow new frames
             self._last_processed_frame_number = -1
+            self._populate_tick_count = 0
 
             # Reset motion tracking for fresh start
             self._motion_tracking = {
@@ -2592,11 +2593,15 @@ class Sample3DVisualizationWindow(QWidget):
             return
 
         try:
-            logger.debug("Populate tick: Starting frame capture")
+            # Track tick count for periodic diagnostics
+            if not hasattr(self, '_populate_tick_count'):
+                self._populate_tick_count = 0
+            self._populate_tick_count += 1
 
             # Check if Live View is actually running
             if not self.camera_controller.is_live_view_active():
-                logger.debug("Live View not active - skipping frame capture")
+                if self._populate_tick_count % 10 == 0:
+                    logger.warning(f"Tick {self._populate_tick_count}: Live View not active")
                 return
 
             # Get current stage position
@@ -2604,36 +2609,33 @@ class Sample3DVisualizationWindow(QWidget):
                 logger.warning("No movement controller - cannot get position")
                 return
 
-            logger.debug("Populate tick: Getting position")
             position = self.movement_controller.get_position()
             if position is None:
-                logger.warning("Position unavailable - skipping frame")
+                logger.warning(f"Tick {self._populate_tick_count}: Position unavailable")
                 return
 
             current_pos = (position.x, position.y, position.z, position.r)
             capture_time = time.time()
-            logger.debug(f"Populate tick: Position acquired - {current_pos}")
 
             # Get latest camera frame
-            logger.debug("Populate tick: Getting latest frame")
             frame_data = self.camera_controller.get_latest_frame()
             if frame_data is None:
-                logger.debug("No new frame available")
+                if self._populate_tick_count % 10 == 0:
+                    logger.warning(f"Tick {self._populate_tick_count}: No frame available")
                 return
 
-            logger.debug("Populate tick: Frame acquired")
             image, header = frame_data
 
             # Skip duplicate frames (same frame processed multiple times)
             frame_num = getattr(header, 'frame_number', -1)
             if frame_num == self._last_processed_frame_number:
-                # Only log duplicate skips occasionally to avoid spam
-                if frame_num % 20 == 0:
-                    logger.debug(f"Skipping duplicate frame {frame_num}")
+                # Log duplicate skips periodically to diagnose stuck frame buffer
+                if self._populate_tick_count % 10 == 0:
+                    logger.warning(f"Tick {self._populate_tick_count}: Still on frame {frame_num} (duplicate)")
                 return
             self._last_processed_frame_number = frame_num
 
-            logger.debug(f"Populate tick: Frame {frame_num}, shape={image.shape}")
+            logger.debug(f"Populate tick {self._populate_tick_count}: Frame {frame_num}")
 
             # Determine which channel this frame belongs to
             logger.debug("Populate tick: Detecting active channel")
