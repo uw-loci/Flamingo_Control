@@ -1893,7 +1893,10 @@ class Sample3DVisualizationWindow(QWidget):
             # Start frame capture timer if camera controller available
             if self.camera_controller:
                 self.populate_timer.start()
-                logger.info("Started populating from Live View (capturing at 2 Hz)")
+                # Slow down visualization updates during populate to reduce CPU load
+                # Normal: 10 Hz, During populate: 2 Hz (every 500ms)
+                self.update_timer.setInterval(500)
+                logger.info("Started populating from Live View (10 Hz capture, 2 Hz viz update)")
             else:
                 logger.warning("No camera controller - populate disabled")
                 self.populate_button.setChecked(False)
@@ -1903,7 +1906,9 @@ class Sample3DVisualizationWindow(QWidget):
             self.populate_button.setText("Populate from Live View")
             self.status_label.setText("Status: Stopped")
             self.populate_timer.stop()
-            logger.info("Stopped populating")
+            # Restore normal visualization update rate
+            self.update_timer.setInterval(100)  # 10 Hz
+            logger.info("Stopped populating (viz update restored to 10 Hz)")
 
     def _on_clear_data(self):
         """Clear all accumulated data."""
@@ -2137,18 +2142,15 @@ class Sample3DVisualizationWindow(QWidget):
             return
 
         try:
-            # Update each channel
+            # Always use transformed volume based on last_stage_position
+            # This ensures consistent display regardless of pending_stage_update state
+            # The transform accounts for stage movement relative to the reference position
             for ch_id in range(self.voxel_storage.num_channels):
                 if ch_id in self.channel_layers:
-                    # Get display volume (or transformed volume if stage moved)
-                    if self.pending_stage_update:
-                        # Use transformed volume if we have a pending stage update
-                        volume = self.voxel_storage.get_display_volume_transformed(
-                            ch_id, self.last_stage_position
-                        )
-                    else:
-                        # Regular display volume
-                        volume = self.voxel_storage.get_display_volume(ch_id)
+                    # Get transformed display volume
+                    volume = self.voxel_storage.get_display_volume_transformed(
+                        ch_id, self.last_stage_position
+                    )
 
                     # Log voxel count only when it changes (reduce spam)
                     non_zero = np.count_nonzero(volume)
@@ -2226,8 +2228,8 @@ class Sample3DVisualizationWindow(QWidget):
             # Store last stage position
             self.last_stage_position = stage_pos
 
-            # Log at INFO level to confirm handler is running
-            logger.info(f"Processing stage update: X={stage_pos['x']:.3f}, Y={stage_pos['y']:.3f}, "
+            # Log at DEBUG level to reduce spam (position updates are frequent)
+            logger.debug(f"Processing stage update: X={stage_pos['x']:.3f}, Y={stage_pos['y']:.3f}, "
                        f"Z={stage_pos['z']:.3f}, R={stage_pos.get('r', 0):.1f}°")
 
             # Update each channel with transformed data
@@ -2247,7 +2249,7 @@ class Sample3DVisualizationWindow(QWidget):
                     self.channel_layers[ch_id].data = volume
                     non_zero_after = np.count_nonzero(volume)
 
-                    logger.info(f"Stage update: Channel {ch_id} - "
+                    logger.debug(f"Stage update: Channel {ch_id} - "
                                f"voxels before: {non_zero_before}, after: {non_zero_after}")
 
                     # Update contrast slider range based on actual display values
@@ -2785,7 +2787,7 @@ class Sample3DVisualizationWindow(QWidget):
             camera_x = (x_indices - W/2) * pixel_size_um
             camera_y = (y_indices - H/2) * pixel_size_um
 
-            logger.info(f"FOV: {FOV_mm:.3f}mm = {FOV_um:.1f}µm, Pixel size: {pixel_size_um:.3f}µm/pixel")
+            logger.debug(f"FOV: {FOV_mm:.3f}mm = {FOV_um:.1f}µm, Pixel size: {pixel_size_um:.3f}µm/pixel")
 
             # Stack into (N, 2) array for transformation
             logger.debug("Process 3D: Stacking coordinates")
@@ -2854,9 +2856,9 @@ class Sample3DVisualizationWindow(QWidget):
                 base_x_um - delta_x * 1000   # X in sample coords (subtract delta)
             ])
 
-            logger.info(f"Stage position (mm): X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}, R={position.r:.1f}°")
-            logger.info(f"Stage delta from ref (mm): dX={delta_x:.2f}, dY={delta_y:.2f}, dZ={delta_z:.2f}")
-            logger.info(f"Sample storage position (µm): Z={world_center_um[0]:.1f}, Y={world_center_um[1]:.1f}, X={world_center_um[2]:.1f}")
+            logger.debug(f"Stage position (mm): X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}, R={position.r:.1f}°")
+            logger.debug(f"Stage delta from ref (mm): dX={delta_x:.2f}, dY={delta_y:.2f}, dZ={delta_z:.2f}")
+            logger.debug(f"Sample storage position (µm): Z={world_center_um[0]:.1f}, Y={world_center_um[1]:.1f}, X={world_center_um[2]:.1f}")
 
             # For 3D visualization, we need to place the 2D camera image as a thin slice
             # The imaging plane has some depth (depth of field ~1.9mm in Z)
@@ -2885,7 +2887,7 @@ class Sample3DVisualizationWindow(QWidget):
             # Therefore, we should NOT rotate the placement coordinates
 
             logger.debug(f"Process 3D: R-axis rotation = {position.r}° (sample holder orientation)")
-            logger.info(f"Note: R-axis rotation affects sample appearance, not image placement in 3D space")
+            logger.debug(f"Note: R-axis rotation affects sample appearance, not image placement in 3D space")
 
             # The world coordinates are simply the camera offsets plus the stage position
             # No rotation is applied to the placement (the objective/camera don't rotate)
@@ -2915,7 +2917,7 @@ class Sample3DVisualizationWindow(QWidget):
                     'r': position.r
                 }
                 self.voxel_storage.set_reference_position(stage_pos_dict)
-                logger.info(f"First frame captured - reference position set to stage position")
+                logger.debug(f"First frame captured - reference position set to stage position")
 
             # Update voxel storage with transformed coordinates
             logger.debug(f"Process 3D: Updating voxel storage for channel {channel_id}")
@@ -2927,7 +2929,7 @@ class Sample3DVisualizationWindow(QWidget):
                 update_mode='maximum'  # Maximum intensity projection for fluorescence
             )
 
-            logger.info(f"Added frame to channel {channel_id}: {np.count_nonzero(intensity_values)} non-zero pixels")
+            logger.debug(f"Added frame to channel {channel_id}: {np.count_nonzero(intensity_values)} non-zero pixels")
 
             # Update contrast slider range based on actual data values
             self._update_contrast_slider_range(channel_id)

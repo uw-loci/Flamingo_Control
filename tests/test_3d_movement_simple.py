@@ -104,12 +104,109 @@ def wait_for_movement_complete(controller, axis_name, timeout=5.0):
     print(f"   Warning: {axis_name}-axis movement timeout after {timeout}s - lock still held")
     return None
 
+def move_and_wait(movement_controller, axis: str, target_mm: float, timeout: float = 15.0):
+    """
+    Move axis using MovementController and wait for completion.
+
+    IMPORTANT: Uses MovementController.move_absolute() which emits motion_started/motion_stopped
+    signals that the 3D visualization is connected to. This ensures frames are buffered
+    during motion for proper interpolation.
+
+    Args:
+        movement_controller: MovementController instance
+        axis: 'x', 'y', 'z', or 'r'
+        target_mm: Target position in mm (or degrees for r)
+        timeout: Maximum wait time in seconds
+
+    Returns:
+        Final position or None if failed
+    """
+    import time
+
+    print(f"   Moving {axis.upper()} to {target_mm:.3f}...")
+
+    # Use move_absolute which emits motion_started signal
+    movement_controller.move_absolute(axis, target_mm)
+
+    # Wait for motion to complete by checking movement lock
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        # Check movement lock if available
+        if hasattr(movement_controller, '_movement_lock'):
+            if not movement_controller._movement_lock.locked():
+                break
+        time.sleep(0.1)
+        process_gui_events()
+
+    # Brief stabilization delay
+    time.sleep(0.3)
+    process_gui_events()
+
+    # Get final position
+    pos = movement_controller.get_position()
+    if pos:
+        final_val = getattr(pos, axis.lower(), None)
+        if final_val is not None:
+            print(f"   {axis.upper()}-axis reached: {final_val:.3f}")
+            return final_val
+    return None
+
+
+def wait_for_position(movement_controller, target_x, target_y, target_z, target_r,
+                      tolerance=0.05, max_retries=5, retry_delay=2.0):
+    """
+    Wait for stage to reach target position with retries.
+
+    Args:
+        movement_controller: MovementController instance
+        target_x, target_y, target_z, target_r: Target positions
+        tolerance: Acceptable error in mm
+        max_retries: Number of retries before giving up
+        retry_delay: Seconds to wait between retries
+
+    Returns:
+        True if position reached, False otherwise
+    """
+    import time
+
+    for attempt in range(max_retries):
+        pos = movement_controller.get_position()
+
+        if pos is None:
+            print(f"   Attempt {attempt + 1}/{max_retries}: Position unavailable, waiting...")
+            time.sleep(retry_delay)
+            process_gui_events()
+            continue
+
+        # Check if we're close enough
+        x_ok = abs(pos.x - target_x) < tolerance
+        y_ok = abs(pos.y - target_y) < tolerance
+        z_ok = abs(pos.z - target_z) < tolerance
+        r_ok = abs(pos.r - target_r) < 1.0  # 1 degree tolerance for rotation
+
+        if x_ok and y_ok and z_ok and r_ok:
+            print(f"   Position confirmed: X={pos.x:.3f}, Y={pos.y:.3f}, Z={pos.z:.3f}, R={pos.r:.1f}°")
+            return True
+
+        print(f"   Attempt {attempt + 1}/{max_retries}: Position mismatch")
+        print(f"      Current:  X={pos.x:.3f}, Y={pos.y:.3f}, Z={pos.z:.3f}, R={pos.r:.1f}°")
+        print(f"      Expected: X={target_x:.3f}, Y={target_y:.3f}, Z={target_z:.3f}, R={target_r:.1f}°")
+
+        if attempt < max_retries - 1:
+            print(f"   Waiting {retry_delay}s before retry...")
+            time.sleep(retry_delay)
+            process_gui_events()
+
+    print(f"   ERROR: Failed to confirm position after {max_retries} attempts")
+    return False
+
+
 def test_voxel_movement(controller, main_window=None):
     """
     Simple test sequence to verify voxel movement.
 
     Args:
-        controller: Position controller for stage movements
+        controller: Position controller (used only for connection check)
         main_window: Main application window (optional, will search if not provided)
 
     Run from Connection tab button or manually:
@@ -117,31 +214,50 @@ def test_voxel_movement(controller, main_window=None):
     >>> test_voxel_movement(self.controller)
     """
     print("\n" + "="*60)
-    print("3D Voxel Movement Test - Simplified Version")
+    print("3D Voxel Movement Test - Using MovementController")
     print("="*60)
 
     if not controller or not controller.connection.is_connected():
         print("ERROR: No active connection to microscope")
         return False
 
-    # Step 1: Query initial position
-    print("\n1. Getting initial stage position...")
-    pos = controller.get_current_position()
-    if pos and pos.y != 0.000:  # Check for valid position (0.000 indicates hardware still initializing)
-        initial_x = pos.x
-        initial_y = pos.y
-        initial_z = pos.z
-        initial_r = getattr(pos, 'r', 0.0)  # r might not always be present
-        print(f"   Position: X={initial_x:.3f}, Y={initial_y:.3f}, Z={initial_z:.3f}, R={initial_r:.1f}°")
+    # Find main_window if not provided
+    if not main_window:
+        from PyQt5.QtWidgets import QApplication
+        app = QApplication.instance()
+        for widget in app.topLevelWidgets():
+            if widget.__class__.__name__ == 'MainWindow':
+                main_window = widget
+                break
 
-        # Validate position is within safe range to avoid safety violations
-        if initial_y < 5.0 or initial_y > 25.0 or initial_z < 12.5 or initial_z > 26.0:
-            print(f"   WARNING: Position is outside safe range")
-            print("   Using safe default position instead")
-            initial_x, initial_y, initial_z, initial_r = 8.31, 13.5, 21.0, 68.0
-    else:
-        print("   WARNING: Could not get valid position (hardware may be initializing), using safe defaults")
-        initial_x, initial_y, initial_z, initial_r = 8.31, 13.5, 21.0, 68.0
+    # CRITICAL: Get MovementController from main_window
+    # The 3D visualization is connected to MovementController.motion_started/motion_stopped signals
+    # Using PositionController.move_x() etc. does NOT emit these signals!
+    if not main_window or not hasattr(main_window, 'movement_controller'):
+        print("ERROR: Could not find MovementController in main_window")
+        print("       Make sure you're running this from the application with 3D viz open")
+        return False
+
+    movement_controller = main_window.movement_controller
+    print(f"   Found MovementController: {movement_controller}")
+
+    # Step 1: Move to starting position for guaranteed contrast
+    # Position: X=4, Y=13.9, Z=20.2, R=0
+    print("\n1. Moving to test starting position (X=4, Y=13.9, Z=20.2, R=0)...")
+
+    # Move each axis
+    move_and_wait(movement_controller, 'x', 4.0)
+    move_and_wait(movement_controller, 'y', 13.9)
+    move_and_wait(movement_controller, 'z', 20.2)
+    move_and_wait(movement_controller, 'r', 0.0)
+
+    # Confirm position with retry logic
+    print("\n   Confirming starting position...")
+    if not wait_for_position(movement_controller, 4.0, 13.9, 20.2, 0.0):
+        print("   WARNING: Could not confirm starting position, continuing anyway...")
+
+    # Store initial position for return
+    initial_x, initial_y, initial_z, initial_r = 4.0, 13.9, 20.2, 0.0
 
     # Step 2: Enable Laser 4 (640nm) directly via controller
     print("\n2. Enabling Laser 4 (640nm) at 14.4% power...")
@@ -366,57 +482,53 @@ def test_voxel_movement(controller, main_window=None):
     print("\n6. Capturing initial voxel state...")
     initial_voxels = capture_voxel_state(viz_window)
 
-    # Step 8: Move stage and capture data
-    print("\n7. Moving stage in X, Y, Z (one FOV each = ~0.5mm)...")
-    print("   Note: Position queries now handle 'stage still moving' (0.000) responses properly")
+    # Step 8: Move stage with specific sequence for voxel filling test
+    # Movements: Z=23, X=4.6, Z=19.5, Y=11.5, Z=22
+    print("\n7. Executing movement sequence using MovementController...")
+    print("   (MovementController emits motion_started/motion_stopped signals for frame buffering)")
 
     movements = []
+    voxel_states = {'initial': initial_voxels}
 
-    # Move X by 0.5mm (1 FOV)
-    print("\n   Moving X by +0.5mm...")
-    new_x = initial_x + 0.5
-    controller.move_x(new_x)
-    # Wait for movement to actually complete (motion tracker uses 10s timeout + 1.5s fallback for X/Y)
-    final_x = wait_for_movement_complete(controller, 'X', timeout=15.0)
-    if final_x is not None:
-        print(f"   X-axis reached position: {final_x:.3f}mm")
-    # Additional wait for voxel data capture
-    smart_sleep(1.5, "Capturing voxel data...")
-    movements.append(('X', initial_x, new_x))
-    x_voxels = capture_voxel_state(viz_window)
-    print(f"   Voxel state after X movement: {x_voxels}")
+    # Movement 1: Z to 23
+    print("\n   Movement 1: Z to 23.0mm...")
+    move_and_wait(movement_controller, 'z', 23.0)
+    smart_sleep(2, "Capturing voxel data after Z movement...")
+    movements.append(('Z', initial_z, 23.0))
+    voxel_states['after_z1'] = capture_voxel_state(viz_window)
+    print(f"   Voxel state after Z=23: {voxel_states['after_z1']}")
 
-    # Move Y by 0.5mm (1 FOV) - ensure we stay within safe range (5.0-25.0)
-    print("\n   Moving Y by +0.5mm...")
-    new_y = initial_y + 0.5
-    # Clamp Y to safe range to avoid safety violations
-    if new_y > 24.5:  # Leave margin from max of 25.0
-        new_y = 24.5
-        print(f"   NOTE: Clamping Y to {new_y:.3f} to stay within safe range")
-    controller.move_y(new_y)
-    # Wait for movement to actually complete (motion tracker uses 10s timeout + 1.5s fallback for X/Y)
-    final_y = wait_for_movement_complete(controller, 'Y', timeout=15.0)
-    if final_y is not None:
-        print(f"   Y-axis reached position: {final_y:.3f}mm")
-    # Additional wait for voxel data capture
-    smart_sleep(1.5, "Capturing voxel data...")
-    movements.append(('Y', initial_y, new_y))
-    y_voxels = capture_voxel_state(viz_window)
-    print(f"   Voxel state after Y movement: {y_voxels}")
+    # Movement 2: X to 4.6
+    print("\n   Movement 2: X to 4.6mm...")
+    move_and_wait(movement_controller, 'x', 4.6)
+    smart_sleep(2, "Capturing voxel data after X movement...")
+    movements.append(('X', 4.0, 4.6))
+    voxel_states['after_x'] = capture_voxel_state(viz_window)
+    print(f"   Voxel state after X=4.6: {voxel_states['after_x']}")
 
-    # Move Z by 0.5mm (1 FOV)
-    print("\n   Moving Z by +0.5mm...")
-    new_z = initial_z + 0.5
-    controller.move_z(new_z)
-    # Wait for movement to actually complete (motion tracker uses 10s timeout + 3s fallback for Z)
-    final_z = wait_for_movement_complete(controller, 'Z', timeout=15.0)
-    if final_z is not None:
-        print(f"   Z-axis reached position: {final_z:.3f}mm")
-    # Additional wait for voxel data capture
-    smart_sleep(1.5, "Capturing voxel data...")
-    movements.append(('Z', initial_z, new_z))
-    z_voxels = capture_voxel_state(viz_window)
-    print(f"   Voxel state after Z movement: {z_voxels}")
+    # Movement 3: Z to 19.5
+    print("\n   Movement 3: Z to 19.5mm...")
+    move_and_wait(movement_controller, 'z', 19.5)
+    smart_sleep(2, "Capturing voxel data after Z movement...")
+    movements.append(('Z', 23.0, 19.5))
+    voxel_states['after_z2'] = capture_voxel_state(viz_window)
+    print(f"   Voxel state after Z=19.5: {voxel_states['after_z2']}")
+
+    # Movement 4: Y to 11.5
+    print("\n   Movement 4: Y to 11.5mm...")
+    move_and_wait(movement_controller, 'y', 11.5)
+    smart_sleep(2, "Capturing voxel data after Y movement...")
+    movements.append(('Y', 13.9, 11.5))
+    voxel_states['after_y'] = capture_voxel_state(viz_window)
+    print(f"   Voxel state after Y=11.5: {voxel_states['after_y']}")
+
+    # Movement 5: Z to 22
+    print("\n   Movement 5: Z to 22.0mm...")
+    move_and_wait(movement_controller, 'z', 22.0)
+    smart_sleep(2, "Capturing voxel data after Z movement...")
+    movements.append(('Z', 19.5, 22.0))
+    voxel_states['after_z3'] = capture_voxel_state(viz_window)
+    print(f"   Voxel state after Z=22: {voxel_states['after_z3']}")
 
     # Step 9: Capture final state at moved position
     print("\n8. Capturing final state at moved position...")
@@ -498,56 +610,41 @@ def test_voxel_movement(controller, main_window=None):
     # Step 13: Return to original position for repeatability
     print("\n12. Returning to original position for test repeatability...")
 
-    print(f"   Commanding return to: X={initial_x:.3f}, Y={initial_y:.3f}, Z={initial_z:.3f}")
+    print(f"   Commanding return to: X={initial_x:.3f}, Y={initial_y:.3f}, Z={initial_z:.3f}, R={initial_r:.1f}°")
 
-    # Use proper movement completion detection
-    controller.move_x(initial_x)
-    wait_for_movement_complete(controller, 'X', timeout=5.0)
+    # Use MovementController for return movements
+    move_and_wait(movement_controller, 'x', initial_x)
+    move_and_wait(movement_controller, 'y', initial_y)
+    move_and_wait(movement_controller, 'z', initial_z)
+    move_and_wait(movement_controller, 'r', initial_r)
 
-    controller.move_y(initial_y)
-    wait_for_movement_complete(controller, 'Y', timeout=5.0)
-
-    controller.move_z(initial_z)
-    wait_for_movement_complete(controller, 'Z', timeout=5.0)
-
-    # Now we can safely query position since the StageService handles 0.000 responses properly
+    # Verify return with retry logic
     print("\n   Verifying return to origin...")
-    pos = controller.get_current_position()
-    if pos:
-        print(f"   Current position: X={pos.x:.3f}, Y={pos.y:.3f}, Z={pos.z:.3f}")
-        print(f"   Target position:  X={initial_x:.3f}, Y={initial_y:.3f}, Z={initial_z:.3f}")
-
-        # Check if we're close enough (within 0.01mm tolerance)
-        if (abs(pos.x - initial_x) < 0.01 and
-            abs(pos.y - initial_y) < 0.01 and
-            abs(pos.z - initial_z) < 0.01):
-            print("   ✓ Successfully returned to original position")
-        else:
-            print("   ⚠ Position slightly off, but within acceptable range")
+    if wait_for_position(movement_controller, initial_x, initial_y, initial_z, initial_r):
+        print("   ✓ Successfully returned to original position")
     else:
-        print("   Could not verify position, but stage was commanded to return")
+        print("   ⚠ Could not fully verify return position")
 
     final_origin_voxels = capture_voxel_state(viz_window)
+    voxel_states['back_at_origin'] = final_origin_voxels
 
     # Step 14: Analyze results
     print("\n" + "="*60)
     print("TEST RESULTS:")
     print("="*60)
 
-    print("\nStage Movements:")
+    print("\nStage Movements (using MovementController for motion signals):")
     for axis, old_pos, new_pos in movements:
         print(f"  {axis}: {old_pos:.3f} -> {new_pos:.3f} mm (Δ={new_pos-old_pos:.3f} mm)")
 
     print("\nVoxel Analysis:")
-    print(f"  Initial voxels:      {initial_voxels}")
-    print(f"  After X move:        {x_voxels}")
-    print(f"  After Y move:        {y_voxels}")
-    print(f"  After Z move:        {z_voxels}")
+    for state_name, state in voxel_states.items():
+        print(f"  {state_name:20s}: {state}")
     print(f"  Final (moved):       {final_moved_voxels}")
-    print(f"  Back at origin:      {final_origin_voxels}")
 
     print("\nExpected Behavior:")
     print("  ✓ Voxels should increase as stage explores new regions")
+    print("  ✓ During Z movements, frames should be buffered and interpolated")
     print("  ✓ Original voxels should appear shifted when stage moves")
     print("  ✓ Returning to origin should show original voxels in same place")
     print("  ✓ Stage should be back at exact starting position for repeatability")
@@ -555,11 +652,12 @@ def test_voxel_movement(controller, main_window=None):
     print("\nActual Behavior:")
     print("  ? Check if voxel counts increased with movement")
     print("  ? Check if voxels appeared to move in the viewer")
-    print("  ? Check if original position was restored")
+    print("  ? Check logs for 'Motion started' and 'Motion stopped' messages")
+    print("  ? Check logs for 'Buffered X frames for interpolation' messages")
     print("  ? Verify stage returned to exact starting coordinates")
 
     # Export data for analysis
-    export_test_data(movements, initial_voxels, x_voxels, y_voxels, z_voxels, final_moved_voxels, final_origin_voxels)
+    export_test_data_v2(movements, voxel_states, final_moved_voxels)
 
     return True
 
@@ -615,7 +713,7 @@ def capture_voxel_state(viz_window):
 
 
 def export_test_data(movements, initial, x_move, y_move, z_move, final_moved, final_origin):
-    """Export test data for further analysis."""
+    """Export test data for further analysis (legacy version)."""
     import json
     import os
     from datetime import datetime
@@ -638,6 +736,40 @@ def export_test_data(movements, initial, x_move, y_move, z_move, final_moved, fi
             'final_at_moved_position': final_moved,
             'back_at_origin': final_origin
         },
+        'test_repeatable': True  # Indicates stage was returned to origin
+    }
+
+    with open(filename, 'w') as f:
+        json.dump(data, f, indent=2)
+
+    print(f"\nTest data exported to: {filename}")
+    return filename
+
+
+def export_test_data_v2(movements, voxel_states, final_moved):
+    """Export test data for further analysis (new version with motion signal tracking)."""
+    import json
+    import os
+    from datetime import datetime
+
+    # Create results directory relative to current working directory
+    results_dir = os.path.join(os.getcwd(), "tests", "voxel_test_results")
+    os.makedirs(results_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{results_dir}/voxel_movement_test_v2_{timestamp}.json"
+
+    data = {
+        'timestamp': timestamp,
+        'test_version': 'v2_motion_signals',
+        'movements': [{'axis': m[0], 'from_mm': m[1], 'to_mm': m[2]} for m in movements],
+        'voxel_states': voxel_states,
+        'final_at_moved_position': final_moved,
+        'test_notes': [
+            'Uses MovementController for motion_started/motion_stopped signals',
+            'Start position: X=4, Y=13.9, Z=20.2, R=0',
+            'Movement sequence: Z=23, X=4.6, Z=19.5, Y=11.5, Z=22',
+        ],
         'test_repeatable': True  # Indicates stage was returned to origin
     }
 
