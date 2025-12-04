@@ -221,24 +221,57 @@ def test_voxel_movement(controller, main_window=None):
         print("ERROR: No active connection to microscope")
         return False
 
-    # Find main_window if not provided
-    if not main_window:
-        from PyQt5.QtWidgets import QApplication
-        app = QApplication.instance()
+    # Find FlamingoApplication instance which has the movement_controller
+    # The movement_controller is on FlamingoApplication, not MainWindow
+    from PyQt5.QtWidgets import QApplication
+    app = QApplication.instance()
+
+    flamingo_app = None
+    movement_controller = None
+
+    # Method 1: Check if app itself is FlamingoApplication
+    if hasattr(app, 'movement_controller'):
+        flamingo_app = app
+        movement_controller = app.movement_controller
+        print(f"   Found MovementController on QApplication")
+
+    # Method 2: Search top-level widgets for FlamingoApplication reference
+    if not movement_controller:
         for widget in app.topLevelWidgets():
+            # Check if widget has reference to flamingo app
+            if hasattr(widget, 'flamingo_app') and hasattr(widget.flamingo_app, 'movement_controller'):
+                movement_controller = widget.flamingo_app.movement_controller
+                print(f"   Found MovementController via widget.flamingo_app")
+                break
+            # Check if widget IS the main window with a parent app
             if widget.__class__.__name__ == 'MainWindow':
                 main_window = widget
-                break
+                # Try to find app through parent chain
+                parent = widget.parent()
+                while parent:
+                    if hasattr(parent, 'movement_controller'):
+                        movement_controller = parent.movement_controller
+                        break
+                    parent = parent.parent() if hasattr(parent, 'parent') else None
 
-    # CRITICAL: Get MovementController from main_window
+    # Method 3: Use the controller's connection to find related objects
+    if not movement_controller and controller:
+        # The controller might have access to services that know about movement_controller
+        if hasattr(controller, 'stage_service'):
+            # Try to find it through the stage service's parent objects
+            print("   Attempting to find MovementController through stage service...")
+
+    # CRITICAL: Get MovementController
     # The 3D visualization is connected to MovementController.motion_started/motion_stopped signals
     # Using PositionController.move_x() etc. does NOT emit these signals!
-    if not main_window or not hasattr(main_window, 'movement_controller'):
-        print("ERROR: Could not find MovementController in main_window")
-        print("       Make sure you're running this from the application with 3D viz open")
+    if not movement_controller:
+        print("ERROR: Could not find MovementController")
+        print("       The MovementController is on FlamingoApplication, not MainWindow")
+        print("       Checking available attributes on app...")
+        print(f"       App type: {type(app)}")
+        print(f"       App attributes with 'controller': {[a for a in dir(app) if 'controller' in a.lower()]}")
         return False
 
-    movement_controller = main_window.movement_controller
     print(f"   Found MovementController: {movement_controller}")
 
     # Step 1: Move to starting position for guaranteed contrast
