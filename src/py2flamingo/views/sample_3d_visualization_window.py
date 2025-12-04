@@ -2572,48 +2572,16 @@ class Sample3DVisualizationWindow(QWidget):
         self.position_sliders['z_spinbox'].setEnabled(enabled)
         self.rotation_spinbox.setEnabled(enabled)
 
-    def _interpolate_position(self, capture_time: float) -> tuple:
-        """
-        Interpolate position based on capture time during motion.
-
-        Uses linear interpolation between motion start and end positions.
-
-        Args:
-            capture_time: time.time() when frame was captured
-
-        Returns:
-            (x, y, z, r) tuple with interpolated position in mm/degrees
-        """
-        mt = self._motion_tracking
-
-        # Clamp to motion time bounds
-        if mt['start_time'] is None or mt['end_time'] is None:
-            return mt['end_position'] if mt['end_position'] else mt['start_position']
-
-        t_total = mt['end_time'] - mt['start_time']
-        if t_total <= 0:
-            return mt['end_position']
-
-        t_frame = capture_time - mt['start_time']
-        ratio = max(0.0, min(1.0, t_frame / t_total))
-
-        start = mt['start_position']
-        end = mt['end_position']
-
-        # Linear interpolation for each axis
-        x = start[0] + ratio * (end[0] - start[0])
-        y = start[1] + ratio * (end[1] - start[1])
-        z = start[2] + ratio * (end[2] - start[2])
-        r = start[3] + ratio * (end[3] - start[3])
-
-        return (x, y, z, r)
-
     def _process_motion_buffer(self):
         """
         Process all buffered frames after motion completes.
 
-        Interpolates position for each frame based on capture time
-        and processes them into the 3D volume.
+        Distributes frames evenly from end position back to start position.
+        This is simpler than time-based interpolation and achieves the same
+        goal of filling voxels across the motion range.
+
+        Frame 0 (first captured) -> closest to start position
+        Frame N (last captured) -> closest to end position
         """
         mt = self._motion_tracking
         buffer = mt['frame_buffer']
@@ -2622,24 +2590,46 @@ class Sample3DVisualizationWindow(QWidget):
             logger.debug("Motion buffer empty - nothing to process")
             return
 
-        logger.info(f"Processing motion buffer: {len(buffer)} frames from "
-                   f"({mt['start_position'][0]:.2f}, {mt['start_position'][1]:.2f}, {mt['start_position'][2]:.2f}) to "
-                   f"({mt['end_position'][0]:.2f}, {mt['end_position'][1]:.2f}, {mt['end_position'][2]:.2f})")
+        start = mt['start_position']
+        end = mt['end_position']
 
-        # Create a simple Position-like object for each interpolated position
-        class InterpolatedPosition:
+        if not start or not end:
+            logger.warning("Motion buffer has frames but missing start/end position - skipping")
+            mt['frame_buffer'] = []
+            return
+
+        n_frames = len(buffer)
+        logger.info(f"Processing motion buffer: {n_frames} frames from "
+                   f"Z={start[2]:.2f} to Z={end[2]:.2f}mm "
+                   f"(delta={end[2]-start[2]:.2f}mm)")
+
+        # Create a simple Position-like object
+        class DistributedPosition:
             def __init__(self, x, y, z, r):
                 self.x = x
                 self.y = y
                 self.z = z
                 self.r = r
 
+        # Distribute frames evenly across the motion range
+        # Frame 0 was captured first (near start), Frame N-1 was captured last (near end)
         for i, frame_data in enumerate(buffer):
-            interp_pos = self._interpolate_position(frame_data['capture_time'])
-            position = InterpolatedPosition(*interp_pos)
+            # Calculate position ratio: 0.0 = start, 1.0 = end
+            if n_frames > 1:
+                ratio = i / (n_frames - 1)
+            else:
+                ratio = 1.0  # Single frame goes at end position
 
-            logger.debug(f"Processing buffered frame {i+1}/{len(buffer)} at interpolated "
-                        f"X={position.x:.3f}, Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.1f}°")
+            # Linear distribution between start and end
+            x = start[0] + ratio * (end[0] - start[0])
+            y = start[1] + ratio * (end[1] - start[1])
+            z = start[2] + ratio * (end[2] - start[2])
+            r = start[3] + ratio * (end[3] - start[3])
+
+            position = DistributedPosition(x, y, z, r)
+
+            logger.debug(f"Processing buffered frame {i+1}/{n_frames} at "
+                        f"Z={position.z:.3f}mm (ratio={ratio:.2f})")
 
             self._process_camera_frame_to_3d(
                 frame_data['frame'],
@@ -2650,14 +2640,17 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Clear buffer after processing
         mt['frame_buffer'] = []
-        logger.info(f"Motion buffer processed: {len(buffer)} frames placed via interpolation")
+        logger.info(f"Motion buffer processed: {n_frames} frames distributed across motion range")
 
     def _on_populate_tick(self):
         """
         Capture current frame from Live View and add to 3D volume.
 
-        Motion-aware: detects stage movement and buffers frames during motion.
-        After motion stops, frames are processed with interpolated positions.
+        Motion-aware buffering:
+        - When motion_started signal received: buffer all frames
+        - When motion_stopped signal received: distribute buffered frames
+          evenly across the motion range (start to end position)
+        - When stationary: process frames immediately at current position
         """
         if not self.is_populating or not self.camera_controller:
             return
