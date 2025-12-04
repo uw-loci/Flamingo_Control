@@ -2574,11 +2574,12 @@ class Sample3DVisualizationWindow(QWidget):
 
     def _process_motion_buffer(self):
         """
-        Process all buffered frames after motion completes.
+        Process buffered frames after motion completes.
 
-        Distributes frames evenly from end position back to start position.
-        This is simpler than time-based interpolation and achieves the same
-        goal of filling voxels across the motion range.
+        Selects frames based on voxel size to avoid redundant processing:
+        - Calculate how many unique voxel positions need to be filled
+        - If more frames than voxels: subsample to pick one frame per voxel
+        - If fewer frames than voxels: use all frames (some voxels will be empty)
 
         Frame 0 (first captured) -> closest to start position
         Frame N (last captured) -> closest to end position
@@ -2599,9 +2600,36 @@ class Sample3DVisualizationWindow(QWidget):
             return
 
         n_frames = len(buffer)
-        logger.info(f"Processing motion buffer: {n_frames} frames from "
-                   f"Z={start[2]:.2f} to Z={end[2]:.2f}mm "
-                   f"(delta={end[2]-start[2]:.2f}mm)")
+
+        # Calculate motion distance along each axis (in mm)
+        dx = abs(end[0] - start[0])
+        dy = abs(end[1] - start[1])
+        dz = abs(end[2] - start[2])
+
+        # Get storage voxel size (in µm) - this determines how many unique positions we need
+        storage_voxel_um = self.voxel_storage.config.storage_voxel_size[0]  # Assuming isotropic
+
+        # Calculate how many voxels we need to fill along the primary motion axis
+        # Use the largest motion distance
+        max_distance_mm = max(dx, dy, dz)
+        max_distance_um = max_distance_mm * 1000
+
+        # Number of unique voxel positions needed
+        voxels_needed = max(1, int(max_distance_um / storage_voxel_um))
+
+        logger.info(f"Motion buffer: {n_frames} frames, {max_distance_mm:.2f}mm motion, "
+                   f"{voxels_needed} voxels needed (at {storage_voxel_um}µm resolution)")
+
+        # Determine which frames to use
+        if n_frames <= voxels_needed:
+            # Use all frames - we don't have enough to fill every voxel
+            frames_to_use = list(range(n_frames))
+            logger.info(f"Using all {n_frames} frames (undersampled)")
+        else:
+            # Subsample: pick frames evenly spaced to fill voxels without redundancy
+            frames_to_use = [int(i * (n_frames - 1) / (voxels_needed - 1))
+                            for i in range(voxels_needed)] if voxels_needed > 1 else [n_frames - 1]
+            logger.info(f"Subsampling: using {len(frames_to_use)} of {n_frames} frames")
 
         # Create a simple Position-like object
         class DistributedPosition:
@@ -2611,12 +2639,14 @@ class Sample3DVisualizationWindow(QWidget):
                 self.z = z
                 self.r = r
 
-        # Distribute frames evenly across the motion range
-        # Frame 0 was captured first (near start), Frame N-1 was captured last (near end)
-        for i, frame_data in enumerate(buffer):
+        # Process selected frames at their distributed positions
+        n_selected = len(frames_to_use)
+        for out_idx, frame_idx in enumerate(frames_to_use):
+            frame_data = buffer[frame_idx]
+
             # Calculate position ratio: 0.0 = start, 1.0 = end
-            if n_frames > 1:
-                ratio = i / (n_frames - 1)
+            if n_selected > 1:
+                ratio = out_idx / (n_selected - 1)
             else:
                 ratio = 1.0  # Single frame goes at end position
 
@@ -2628,8 +2658,8 @@ class Sample3DVisualizationWindow(QWidget):
 
             position = DistributedPosition(x, y, z, r)
 
-            logger.debug(f"Processing buffered frame {i+1}/{n_frames} at "
-                        f"Z={position.z:.3f}mm (ratio={ratio:.2f})")
+            logger.debug(f"Processing frame {frame_idx} -> voxel {out_idx+1}/{n_selected} at "
+                        f"Z={position.z:.3f}mm")
 
             self._process_camera_frame_to_3d(
                 frame_data['frame'],
@@ -2640,7 +2670,7 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Clear buffer after processing
         mt['frame_buffer'] = []
-        logger.info(f"Motion buffer processed: {n_frames} frames distributed across motion range")
+        logger.info(f"Motion buffer processed: {n_selected} frames placed into {voxels_needed} voxel positions")
 
     def _on_populate_tick(self):
         """
