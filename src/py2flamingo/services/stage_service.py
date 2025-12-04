@@ -146,8 +146,10 @@ class StageService(MicroscopeCommandService):
                 if parsed and not is_likely_moving:
                     status_code = parsed.get('status_code', 0)
                     if status_code != 0:
-                        self.logger.info(
-                            f"{axis_name}-axis has non-zero status: 0x{status_code:08X} - may indicate motion"
+                        # Log at DEBUG level - status 0x00000001 is common and usually means "ready"
+                        # Only status 0x00000000 means "idle" - non-zero doesn't imply motion
+                        self.logger.debug(
+                            f"{axis_name}-axis status code: 0x{status_code:08X} (non-zero is normal)"
                         )
                         # Specific status codes might indicate motion - needs reverse engineering
                         # For now, log but don't assume motion just from non-zero status

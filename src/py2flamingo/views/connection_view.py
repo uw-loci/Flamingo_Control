@@ -785,32 +785,25 @@ class ConnectionView(QWidget):
                 self.voxel_test_btn.setText("Test 3D Voxel Movement")
                 return
 
-            # Run test in separate thread to avoid blocking GUI
-            from threading import Thread
+            # IMPORTANT: Run test in main thread, NOT a background thread!
+            # Qt widgets can only be manipulated from the main GUI thread.
+            # The test uses process_gui_events() to keep the GUI responsive during sleeps.
+            try:
+                # Pass both the position controller and main window to the test
+                success = test_voxel_movement(self._position_controller, main_window)
 
-            def run_test_thread():
-                try:
-                    # Pass both the position controller and main window to the test
-                    success = test_voxel_movement(self._position_controller, main_window)
-
-                    # Use Qt signal to update GUI from thread
-                    QTimer.singleShot(0, lambda: self._show_message(
-                        "3D Voxel Movement Test completed successfully!\nCheck exported data in tests/voxel_test_results/" if success
-                        else "Test completed with warnings. Check logs.",
-                        is_error=not success
-                    ))
-                except Exception as e:
-                    self._logger.error(f"Error running voxel test: {e}", exc_info=True)
-                    error_msg = str(e)
-                    QTimer.singleShot(0, lambda: self._show_message(f"Test failed: {error_msg}", is_error=True))
-                finally:
-                    # Re-enable button using Qt signal
-                    QTimer.singleShot(0, lambda: self.voxel_test_btn.setEnabled(True))
-                    QTimer.singleShot(0, lambda: self.voxel_test_btn.setText("Test 3D Voxel Movement"))
-
-            # Start test in background thread
-            test_thread = Thread(target=run_test_thread, daemon=True)
-            test_thread.start()
+                self._show_message(
+                    "3D Voxel Movement Test completed successfully!\nCheck exported data in tests/voxel_test_results/" if success
+                    else "Test completed with warnings. Check logs.",
+                    is_error=not success
+                )
+            except Exception as e:
+                self._logger.error(f"Error running voxel test: {e}", exc_info=True)
+                self._show_message(f"Test failed: {e}", is_error=True)
+            finally:
+                # Re-enable button
+                self.voxel_test_btn.setEnabled(True)
+                self.voxel_test_btn.setText("Test 3D Voxel Movement")
 
         except ImportError as e:
             self._logger.error(f"Could not import test module: {e}")
