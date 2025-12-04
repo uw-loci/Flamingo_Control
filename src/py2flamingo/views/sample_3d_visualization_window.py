@@ -359,6 +359,32 @@ class Sample3DVisualizationWindow(QWidget):
         status_layout.addStretch()
         viewer_layout.addLayout(status_layout)
 
+        # Scale information bar (below status, above viewer)
+        scale_layout = QHBoxLayout()
+        scale_layout.addStretch()
+
+        # Get dimensions from config for display
+        storage_voxel = self.config.get('storage', {}).get('voxel_size_um', [5, 5, 5])[0]
+        display_voxel = self.config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+        stage_ctrl = self.config.get('stage_control', {})
+        x_range = stage_ctrl.get('x_range_mm', [1.0, 12.31])
+        y_range = stage_ctrl.get('y_range_mm', [0.0, 14.0])
+        z_range = stage_ctrl.get('z_range_mm', [12.5, 26.0])
+
+        x_dim = x_range[1] - x_range[0]
+        y_dim = y_range[1] - y_range[0]
+        z_dim = z_range[1] - z_range[0]
+
+        self.scale_label = QLabel(
+            f"Resolution: {storage_voxel}µm/voxel (storage), {display_voxel}µm/voxel (display)  |  "
+            f"Volume: {x_dim:.1f} × {y_dim:.1f} × {z_dim:.1f} mm (X×Y×Z)"
+        )
+        self.scale_label.setStyleSheet("color: #888; font-size: 10px;")
+        scale_layout.addWidget(self.scale_label)
+
+        scale_layout.addStretch()
+        viewer_layout.addLayout(scale_layout)
+
         if NAPARI_AVAILABLE:
             # Placeholder - napari viewer will be embedded here
             self.viewer_placeholder = QWidget()
@@ -526,18 +552,18 @@ class Sample3DVisualizationWindow(QWidget):
         stage_config = self.config['stage_control']
         axis_colors = self.config['coordinate_mapping']['axis_colors']
 
-        # Z Slider - Yellow (Napari Axis 0)
-        z_widget = self._create_axis_slider(
-            label="Z Position (Depth)",
-            color=axis_colors['z'],
-            napari_axis=0,
-            min_val=stage_config['z_range_mm'][0],
-            max_val=stage_config['z_range_mm'][1],
-            default_val=stage_config['z_default_mm'],
+        # X Slider - Cyan (Napari Axis 2)
+        x_widget = self._create_axis_slider(
+            label="X Position (Width)",
+            color=axis_colors['x'],
+            napari_axis=2,
+            min_val=stage_config['x_range_mm'][0],
+            max_val=stage_config['x_range_mm'][1],
+            default_val=stage_config['x_default_mm'],
             has_invert=False,  # Invert config now in JSON file
-            tooltip="Z-axis (depth, toward objective)\nNapari Axis 0 (Yellow)"
+            tooltip="X-axis (horizontal, left-right)\nNapari Axis 2 (Cyan)"
         )
-        pos_layout.addWidget(z_widget)
+        pos_layout.addWidget(x_widget)
 
         # Y Slider - Magenta (Napari Axis 1)
         # Use stage limits, not chamber extent
@@ -556,18 +582,18 @@ class Sample3DVisualizationWindow(QWidget):
         )
         pos_layout.addWidget(y_widget)
 
-        # X Slider - Cyan (Napari Axis 2)
-        x_widget = self._create_axis_slider(
-            label="X Position (Width)",
-            color=axis_colors['x'],
-            napari_axis=2,
-            min_val=stage_config['x_range_mm'][0],
-            max_val=stage_config['x_range_mm'][1],
-            default_val=stage_config['x_default_mm'],
+        # Z Slider - Yellow (Napari Axis 0)
+        z_widget = self._create_axis_slider(
+            label="Z Position (Depth)",
+            color=axis_colors['z'],
+            napari_axis=0,
+            min_val=stage_config['z_range_mm'][0],
+            max_val=stage_config['z_range_mm'][1],
+            default_val=stage_config['z_default_mm'],
             has_invert=False,  # Invert config now in JSON file
-            tooltip="X-axis (horizontal, left-right)\nNapari Axis 2 (Cyan)"
+            tooltip="Z-axis (depth, toward objective)\nNapari Axis 0 (Yellow)"
         )
-        pos_layout.addWidget(x_widget)
+        pos_layout.addWidget(z_widget)
 
         position_group.setLayout(pos_layout)
         layout.addWidget(position_group)
