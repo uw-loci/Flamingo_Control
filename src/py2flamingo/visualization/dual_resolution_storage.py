@@ -249,6 +249,13 @@ class DualResolutionVoxelStorage:
         # (max value tracking now happens in downsample_to_display based on display data)
         self.display_dirty[channel_id] = True
 
+        # CRITICAL: Invalidate transform cache when new data is added
+        # Otherwise get_display_volume_transformed returns stale cached data
+        # that doesn't include newly captured frames
+        if channel_id in self.transform_cache:
+            del self.transform_cache[channel_id]
+            logger.debug(f"Transform cache invalidated for channel {channel_id} (new data added)")
+
     def _apply_update_strategy(self, old_val: float, new_val: float,
                               old_time: float, new_time: float,
                               mode: str) -> float:
