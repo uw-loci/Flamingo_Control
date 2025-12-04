@@ -6,13 +6,31 @@ Run this directly from the Connection tab Python console.
 This version uses direct API calls rather than GUI simulation.
 """
 
+import sys
 import time
 import numpy as np
 import logging
+import traceback
 from PyQt5.QtWidgets import QApplication, QWidget
 from PyQt5.QtCore import QCoreApplication
 
 logger = logging.getLogger(__name__)
+
+# Install global exception handler to catch crashes
+_original_excepthook = sys.excepthook
+
+def _custom_excepthook(exc_type, exc_value, exc_tb):
+    """Custom exception hook to log unhandled exceptions."""
+    logger.error("UNHANDLED EXCEPTION in 3D movement test:")
+    logger.error("".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
+    print("\n" + "="*60)
+    print("UNHANDLED EXCEPTION:")
+    print("".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
+    print("="*60 + "\n")
+    # Call original hook
+    _original_excepthook(exc_type, exc_value, exc_tb)
+
+sys.excepthook = _custom_excepthook
 
 def process_gui_events():
     """Process Qt events to keep GUI responsive during test."""
@@ -171,15 +189,34 @@ def test_voxel_movement(controller, main_window=None):
 
                         if laser_4_checkbox:
                             # First set power for laser 4 via GUI spinbox
+                            # Block signals to prevent any handlers from running during test
                             if hasattr(laser_panel, '_laser_spinboxes') and 4 in laser_panel._laser_spinboxes:
                                 power_spinbox = laser_panel._laser_spinboxes[4]
-                                print(f"   Setting power spinbox to 14.4%...")
-                                power_spinbox.setValue(14.4)
+                                print(f"   Setting power spinbox to 14.4%...", flush=True)
+                                print(f"   Spinbox valid: {power_spinbox is not None}", flush=True)
+                                print(f"   Spinbox range: {power_spinbox.minimum()}-{power_spinbox.maximum()}", flush=True)
+                                print(f"   Spinbox current value: {power_spinbox.value()}", flush=True)
+                                print(f"   About to call setValue(14.4)...", flush=True)
+                                # Block signals to prevent any crash from signal handlers
+                                power_spinbox.blockSignals(True)
+                                try:
+                                    power_spinbox.setValue(14.4)
+                                    print(f"   setValue completed successfully", flush=True)
+                                except Exception as e:
+                                    print(f"   ERROR in setValue: {e}", flush=True)
+                                    traceback.print_exc()
+                                finally:
+                                    power_spinbox.blockSignals(False)
+                                print(f"   About to process events...", flush=True)
                                 process_gui_events()
-                                print("   Set Laser 4 power to 14.4% via GUI spinbox")
+                                print("   Set Laser 4 power to 14.4% via GUI spinbox", flush=True)
                             elif hasattr(laser_panel, '_laser_sliders') and 4 in laser_panel._laser_sliders:
                                 power_slider = laser_panel._laser_sliders[4]
-                                power_slider.setValue(144)  # 14.4% * 10
+                                power_slider.blockSignals(True)
+                                try:
+                                    power_slider.setValue(144)  # 14.4% * 10
+                                finally:
+                                    power_slider.blockSignals(False)
                                 process_gui_events()
                                 print("   Set Laser 4 power to 14.4% via GUI slider")
 
