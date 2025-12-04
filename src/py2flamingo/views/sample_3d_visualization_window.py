@@ -153,18 +153,17 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Motion-aware frame buffering for accurate position interpolation
         # When stage is moving, buffer frames and interpolate positions after motion stops
+        # Uses motion_started/motion_stopped signals instead of position-based detection
+        # because position queries return OLD value during motion then jump to NEW after complete
         self._motion_tracking = {
-            'in_progress': False,
-            'start_position': None,  # (x, y, z, r) in mm/degrees
-            'start_time': None,      # time.time() when motion detected
-            'end_position': None,
-            'end_time': None,
-            'frame_buffer': [],      # List of {'frame', 'header', 'channel_id', 'capture_time'}
-            'last_position': None,   # Last known position for change detection
-            'consecutive_stable_ticks': 0,
+            'in_progress': False,     # True when motion_started signal received
+            'start_position': None,   # (x, y, z, r) in mm/degrees at motion start
+            'start_time': None,       # time.time() when motion_started received
+            'end_position': None,     # (x, y, z, r) at motion end
+            'end_time': None,         # time.time() when motion_stopped received
+            'frame_buffer': [],       # List of {'frame', 'header', 'channel_id', 'capture_time'}
+            'moving_axis': None,      # Which axis is moving (for logging)
         }
-        self._position_change_threshold_mm = 0.05  # 50 micrometers threshold for motion detection
-        self._stable_ticks_required = 2  # Require 2 stable ticks to confirm motion stopped
 
         # Update throttle timer for stage movements
         self.update_throttle_timer = QTimer()
@@ -1888,8 +1887,7 @@ class Sample3DVisualizationWindow(QWidget):
                 'end_position': None,
                 'end_time': None,
                 'frame_buffer': [],
-                'last_position': None,
-                'consecutive_stable_ticks': 0,
+                'moving_axis': None,
             }
 
             # Start frame capture timer if camera controller available
@@ -1921,7 +1919,7 @@ class Sample3DVisualizationWindow(QWidget):
             # Reset motion tracking
             self._motion_tracking['in_progress'] = False
             self._motion_tracking['frame_buffer'] = []
-            self._motion_tracking['last_position'] = None
+            self._motion_tracking['moving_axis'] = None
             self._update_visualization()
             self.status_label.setText("Status: Data cleared")
             logger.info("Cleared all visualization data")
@@ -2468,16 +2466,93 @@ class Sample3DVisualizationWindow(QWidget):
             self.rotation_spinbox.blockSignals(False)
 
     def _on_motion_started(self, axis_name: str):
-        """Handle motion started - disable controls during movement."""
+        """
+        Handle motion started signal - start frame buffering.
+
+        This is called by the movement controller when motion begins.
+        We record the current position and start buffering all incoming frames.
+        Position queries during motion return stale values, so we interpolate
+        after motion completes.
+        """
         self._set_controls_enabled(False)
         self.status_label.setText(f"Status: Moving {axis_name}...")
-        logger.debug(f"Motion started on {axis_name} - controls disabled")
+
+        # Get current position BEFORE motion starts
+        # This is the last reliable position reading
+        start_pos = None
+        if self.movement_controller:
+            position = self.movement_controller.get_position()
+            if position:
+                start_pos = (position.x, position.y, position.z, position.r)
+
+        # Start buffering frames
+        mt = self._motion_tracking
+        mt['in_progress'] = True
+        mt['start_position'] = start_pos
+        mt['start_time'] = time.time()
+        mt['end_position'] = None
+        mt['end_time'] = None
+        mt['frame_buffer'] = []  # Clear any stale frames
+        mt['moving_axis'] = axis_name
+
+        logger.info(f"Motion started on {axis_name} - buffering frames. "
+                   f"Start position: X={start_pos[0]:.3f}, Y={start_pos[1]:.3f}, "
+                   f"Z={start_pos[2]:.3f}, R={start_pos[3]:.1f}°" if start_pos else
+                   f"Motion started on {axis_name} - buffering frames (no start position)")
 
     def _on_motion_stopped(self, axis_name: str):
-        """Handle motion stopped - re-enable controls."""
+        """
+        Handle motion stopped signal - process buffered frames with interpolation.
+
+        This is called by the movement controller when motion completes.
+        We record the final position and process all buffered frames with
+        positions interpolated between start and end.
+        """
         self._set_controls_enabled(True)
         self.status_label.setText("Status: Ready")
-        logger.debug(f"Motion stopped on {axis_name} - controls enabled")
+
+        mt = self._motion_tracking
+
+        # Only process if we were actually tracking motion
+        if not mt['in_progress']:
+            logger.debug(f"Motion stopped on {axis_name} but no motion was being tracked")
+            return
+
+        # Get final position AFTER motion completes
+        # This is the new reliable position reading
+        end_pos = None
+        if self.movement_controller:
+            position = self.movement_controller.get_position()
+            if position:
+                end_pos = (position.x, position.y, position.z, position.r)
+
+        mt['end_position'] = end_pos
+        mt['end_time'] = time.time()
+
+        # Log motion summary
+        if mt['start_position'] and end_pos:
+            delta_z = end_pos[2] - mt['start_position'][2]
+            duration = mt['end_time'] - mt['start_time']
+            logger.info(f"Motion stopped on {axis_name}. "
+                       f"Moved Z from {mt['start_position'][2]:.3f} to {end_pos[2]:.3f}mm "
+                       f"(delta={delta_z:.3f}mm) in {duration:.2f}s. "
+                       f"Buffered {len(mt['frame_buffer'])} frames for interpolation.")
+        else:
+            logger.info(f"Motion stopped on {axis_name}. "
+                       f"Buffered {len(mt['frame_buffer'])} frames.")
+
+        # Process all buffered frames with interpolated positions
+        if mt['frame_buffer']:
+            self._process_motion_buffer()
+
+        # Reset motion tracking state
+        mt['in_progress'] = False
+        mt['start_position'] = None
+        mt['start_time'] = None
+        mt['end_position'] = None
+        mt['end_time'] = None
+        mt['frame_buffer'] = []
+        mt['moving_axis'] = None
 
     def _set_controls_enabled(self, enabled: bool):
         """Enable or disable movement controls during motion."""
@@ -2494,16 +2569,6 @@ class Sample3DVisualizationWindow(QWidget):
         self.position_sliders['y_spinbox'].setEnabled(enabled)
         self.position_sliders['z_spinbox'].setEnabled(enabled)
         self.rotation_spinbox.setEnabled(enabled)
-
-    def _is_position_changed(self, pos1, pos2) -> bool:
-        """Check if two positions differ significantly (motion detected)."""
-        if pos1 is None or pos2 is None:
-            return False  # No previous position = not motion, just first reading
-        threshold = self._position_change_threshold_mm
-        return (abs(pos1[0] - pos2[0]) > threshold or
-                abs(pos1[1] - pos2[1]) > threshold or
-                abs(pos1[2] - pos2[2]) > threshold or
-                abs(pos1[3] - pos2[3]) > 0.5)  # 0.5 degree threshold for rotation
 
     def _interpolate_position(self, capture_time: float) -> tuple:
         """
@@ -2651,23 +2716,13 @@ class Sample3DVisualizationWindow(QWidget):
                 logger.debug("LED/brightfield active - skipping 3D accumulation")
                 return
 
-            # Motion detection and buffering logic
+            # Signal-based motion tracking
+            # motion_started signal sets in_progress=True, motion_stopped sets it False
+            # During motion, buffer frames. After motion stops, frames are interpolated.
             mt = self._motion_tracking
-            last_pos = mt['last_position']
-            position_changed = self._is_position_changed(current_pos, last_pos)
 
-            if position_changed:
-                # Position changed - we're in motion or motion just started
-                if not mt['in_progress']:
-                    # Motion just started
-                    mt['in_progress'] = True
-                    mt['start_position'] = last_pos if last_pos else current_pos
-                    mt['start_time'] = capture_time - 0.5  # Estimate start was ~500ms ago (one tick)
-                    mt['frame_buffer'] = []
-                    logger.info(f"Motion detected! Buffering frames. Start position: "
-                               f"X={mt['start_position'][0]:.3f}, Y={mt['start_position'][1]:.3f}, "
-                               f"Z={mt['start_position'][2]:.3f}, R={mt['start_position'][3]:.1f}°")
-
+            if mt['in_progress']:
+                # Stage is moving (motion_started signal received)
                 # Buffer this frame for later processing with interpolated position
                 mt['frame_buffer'].append({
                     'frame': image.copy(),  # Copy to avoid reference issues
@@ -2675,44 +2730,19 @@ class Sample3DVisualizationWindow(QWidget):
                     'channel_id': channel_id,
                     'capture_time': capture_time
                 })
-                mt['consecutive_stable_ticks'] = 0
-                logger.debug(f"Buffered frame during motion (buffer size: {len(mt['frame_buffer'])})")
-
+                logger.debug(f"Buffered frame {local_frame_num} during {mt['moving_axis']} motion "
+                           f"(buffer size: {len(mt['frame_buffer'])})")
             else:
-                # Position stable
-                mt['consecutive_stable_ticks'] += 1
-
-                if mt['in_progress'] and mt['consecutive_stable_ticks'] >= self._stable_ticks_required:
-                    # Motion just completed - process buffered frames
-                    mt['end_position'] = current_pos
-                    mt['end_time'] = capture_time
-                    logger.info(f"Motion complete! End position: "
-                               f"X={current_pos[0]:.3f}, Y={current_pos[1]:.3f}, "
-                               f"Z={current_pos[2]:.3f}, R={current_pos[3]:.1f}°")
-
-                    # Process all buffered frames with interpolated positions
-                    self._process_motion_buffer()
-
-                    # Reset motion tracking
-                    mt['in_progress'] = False
-                    mt['start_position'] = None
-                    mt['start_time'] = None
-                    mt['end_position'] = None
-                    mt['end_time'] = None
-
-                elif not mt['in_progress']:
-                    # No motion - process frame immediately at current position
-                    # Log every 10th frame at INFO level to reduce spam but show progress
-                    frame_num = getattr(header, 'frame_number', 0)
-                    if frame_num % 10 == 0:
-                        logger.info(f"Processing frame {frame_num} (stationary) at X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}")
-                    else:
-                        logger.debug(f"Populate tick: Processing frame for channel {channel_id}")
-                    self._process_camera_frame_to_3d(image, header, channel_id, position)
-                    logger.debug(f"Populate tick: Frame processed at X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}, R={position.r:.1f}°")
-
-            # Update last known position
-            mt['last_position'] = current_pos
+                # Stage is stationary - process frame immediately at current position
+                # Log every 10th frame at INFO level to reduce spam but show progress
+                if local_frame_num % 10 == 0:
+                    logger.info(f"Processing frame {local_frame_num} (stationary) at "
+                               f"X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}")
+                else:
+                    logger.debug(f"Populate tick: Processing frame {local_frame_num} for channel {channel_id}")
+                self._process_camera_frame_to_3d(image, header, channel_id, position)
+                logger.debug(f"Populate tick: Frame {local_frame_num} processed at "
+                           f"X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}, R={position.r:.1f}°")
 
         except Exception as e:
             logger.error(f"Error capturing frame: {e}", exc_info=True)
