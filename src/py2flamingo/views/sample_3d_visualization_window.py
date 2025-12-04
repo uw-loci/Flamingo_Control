@@ -141,9 +141,12 @@ class Sample3DVisualizationWindow(QWidget):
         self.rotation_debounce_delay_ms = 150  # 150ms delay for typing
 
         # Populate timer for capturing frames from Live View
+        # 100ms (10 Hz) provides enough frames to fill voxels during motion:
+        # - 0.5mm movement at 50µm voxels = 10 voxels to fill
+        # - At 10 Hz over 1s movement = 10 frames captured
         self.populate_timer = QTimer()
         self.populate_timer.timeout.connect(self._on_populate_tick)
-        self.populate_timer.setInterval(500)  # Capture every 500ms (2 Hz)
+        self.populate_timer.setInterval(100)  # Capture every 100ms (10 Hz)
 
         # Track last processed frame to avoid duplicates
         self._last_processed_frame_number = -1
