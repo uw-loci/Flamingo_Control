@@ -2624,18 +2624,20 @@ class Sample3DVisualizationWindow(QWidget):
                     logger.warning(f"Tick {self._populate_tick_count}: No frame available")
                 return
 
-            image, header = frame_data
+            # Unpack 3-tuple: (image, header, local_frame_number)
+            # local_frame_number is controller's counter (hardware frame_number may be stuck at 0)
+            image, header, local_frame_num = frame_data
 
             # Skip duplicate frames (same frame processed multiple times)
-            frame_num = getattr(header, 'frame_number', -1)
-            if frame_num == self._last_processed_frame_number:
+            # Use local_frame_num instead of header.frame_number (hardware may send 0 for all frames)
+            if local_frame_num == self._last_processed_frame_number:
                 # Log duplicate skips periodically to diagnose stuck frame buffer
                 if self._populate_tick_count % 10 == 0:
-                    logger.warning(f"Tick {self._populate_tick_count}: Still on frame {frame_num} (duplicate)")
+                    logger.warning(f"Tick {self._populate_tick_count}: Still on frame {local_frame_num} (duplicate)")
                 return
-            self._last_processed_frame_number = frame_num
+            self._last_processed_frame_number = local_frame_num
 
-            logger.debug(f"Populate tick {self._populate_tick_count}: Frame {frame_num}")
+            logger.debug(f"Populate tick {self._populate_tick_count}: Frame {local_frame_num}")
 
             # Determine which channel this frame belongs to
             logger.debug("Populate tick: Detecting active channel")

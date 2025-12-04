@@ -83,6 +83,10 @@ class CameraController(QObject):
         self._capture_next_frame = False
         self._captured_snapshot: Optional[tuple] = None  # (image, header)
 
+        # Local frame counter for duplicate detection
+        # Hardware frame_number may not increment, so we use our own counter
+        self._local_frame_counter = 0
+
         # Timer-based frame pulling (ensures display always updates)
         # This timer pulls latest frame from buffer and discards accumulated frames
         self._display_timer = QTimer()
@@ -128,6 +132,9 @@ class CameraController(QObject):
 
         try:
             self.logger.info("Starting live view...")
+
+            # Reset local frame counter for fresh start
+            self._local_frame_counter = 0
 
             # Start camera streaming (fills buffer in background)
             self.camera_service.start_live_view_streaming()
@@ -308,14 +315,17 @@ class CameraController(QObject):
             image: Image array (uint16)
             header: Image metadata
         """
+        # Increment local frame counter (hardware frame_number may be stuck at 0)
+        self._local_frame_counter += 1
+
         # ONLY handle snapshot capture (fast operation)
         if self._capture_next_frame:
             self._captured_snapshot = (image.copy(), header)
             self._capture_next_frame = False
             self.logger.info("Snapshot captured from data stream")
 
-        # Add to our own buffer for history
-        self._frame_buffer.append((image.copy(), header))
+        # Add to our own buffer for history with local frame counter
+        self._frame_buffer.append((image.copy(), header, self._local_frame_counter))
 
     def _pull_and_display_frame(self) -> None:
         """
@@ -379,7 +389,9 @@ class CameraController(QObject):
         Get the most recent buffered frame.
 
         Returns:
-            Tuple of (image_array, header) or None if no frames available
+            Tuple of (image_array, header, local_frame_number) or None if no frames available.
+            local_frame_number is a counter that increments with each new frame received,
+            independent of hardware frame_number which may be stuck at 0.
         """
         if len(self._frame_buffer) > 0:
             return self._frame_buffer[-1]
