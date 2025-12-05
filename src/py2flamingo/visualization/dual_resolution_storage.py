@@ -607,11 +607,12 @@ class DualResolutionVoxelStorage:
                     logger.debug(f"Transform: No significant movement, returning cached volume")
                     return self.transform_cache[channel_id]
 
-                # Fast translation using shift (same direction as stage movement)
+                # Fast translation using shift (ZYX order, Y inverted for napari display)
                 logger.info(f"Transform: Translating by (ddx={ddx:.3f}, ddy={ddy:.3f}, ddz={ddz:.3f}) mm")
                 from scipy.ndimage import shift
-                offset_voxels = np.array([ddz, ddy, ddx]) * 1000 / self.config.display_voxel_size[0]
-                logger.info(f"Transform: Voxel offset = {offset_voxels} (ZYX order)")
+                # Y is inverted: napari Y increases downward, negate for "up = up" display
+                offset_voxels = np.array([ddz, -ddy, ddx]) * 1000 / self.config.display_voxel_size[0]
+                logger.info(f"Transform: Voxel offset = {offset_voxels} (ZYX order, Y inverted)")
 
                 # Update last position for next incremental update
                 self.last_stage_position = current_stage_pos.copy()
@@ -630,10 +631,13 @@ class DualResolutionVoxelStorage:
         # Get rotation center in voxels
         center_voxels = self._get_rotation_center_voxels()
 
-        # Use DELTA offsets (voxels move same direction as stage)
-        stage_offset_mm = (dx, dy, dz)
+        # Use DELTA offsets in ZYX order (napari axis order)
+        # Y is inverted: napari Y increases downward, but we want "up" to mean "up"
+        # So when stage Y increases (sample moves down physically), voxels should move down (-Y in napari)
+        # Therefore we negate dy for the display
+        stage_offset_mm = (dz, -dy, dx)
 
-        logger.info(f"Transform: Applying affine transformation with offset {stage_offset_mm} mm, "
+        logger.info(f"Transform: Applying affine transformation with offset {stage_offset_mm} mm (ZYX order, Y inverted), "
                    f"rotation delta {dr:.1f}° (voxels shift with stage movement)")
 
         # Apply transformation
