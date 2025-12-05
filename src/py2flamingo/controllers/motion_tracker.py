@@ -111,10 +111,21 @@ class MotionTracker:
                     # Check if this is the motion-stopped callback
                     if command_code == self.STAGE_MOTION_STOPPED:
                         status = parsed['params'][0] if parsed['params'] else None
-                        self.logger.info(
-                            f"Motion complete! Status={status} (0=stopped)"
-                        )
-                        return True
+
+                        # Status=0 means motion completed successfully
+                        # Status=-1 or other values may indicate cancelled/interrupted motion
+                        if status == 0:
+                            self.logger.info(f"Motion complete! Status={status} (0=stopped)")
+                            return True
+                        else:
+                            # Non-zero status - motion may have been interrupted
+                            # This could be a stale callback from a previous operation
+                            self.logger.warning(
+                                f"STAGE_MOTION_STOPPED received with status={status} (not 0) - "
+                                f"motion may have been interrupted, continuing to wait..."
+                            )
+                            # Continue waiting for a proper completion callback
+                            continue
 
                     else:
                         # Not the callback we're waiting for - log and continue
