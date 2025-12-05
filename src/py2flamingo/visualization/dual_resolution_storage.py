@@ -590,72 +590,64 @@ class DualResolutionVoxelStorage:
 
         logger.debug(f"Transform: Delta from reference: dx={dx:.3f}, dy={dy:.3f}, dz={dz:.3f}, dr={dr:.1f}°")
 
-        # Check if only translation changed (fast path)
-        rotation_changed = abs(dr) > 0.01 and channel_id in self.transform_cache
+        # Check if rotation changed - if so, need to recalculate rotated base volume
+        rotation_changed = abs(dr - self.last_rotation) > 0.01
 
-        if not rotation_changed:
-            # Use cached rotated volume, just translate
-            if channel_id in self.transform_cache:
-                # Calculate delta from last position (same direction as stage)
-                ddx = current_stage_pos['x'] - self.last_stage_position['x']
-                ddy = current_stage_pos['y'] - self.last_stage_position['y']
-                ddz = current_stage_pos['z'] - self.last_stage_position['z']
+        # Check if we have a cached base volume (rotated but not translated)
+        # We store the ROTATED volume in cache, then apply FULL translation each time
+        # This avoids accumulating shift errors when stage moves back and forth
+        cache_key = f"{channel_id}_rotated"
 
-                # Check if translation is significant
-                if abs(ddx) < 0.001 and abs(ddy) < 0.001 and abs(ddz) < 0.001:
-                    # No significant change, return cached
-                    logger.debug(f"Transform: No significant movement, returning cached volume")
-                    return self.transform_cache[channel_id]
+        if rotation_changed or cache_key not in self.transform_cache:
+            # Need to recalculate rotated base volume
+            logger.info(f"Transform: Calculating rotated base volume (rotation delta={dr:.1f}°)")
+            volume = self.get_display_volume(channel_id)
+            center_voxels = self._get_rotation_center_voxels()
 
-                # Fast translation using shift (ZYX order, Y inverted for napari display)
-                logger.info(f"Transform: Translating by (ddx={ddx:.3f}, ddy={ddy:.3f}, ddz={ddz:.3f}) mm")
-                from scipy.ndimage import shift
-                # Y is inverted: napari Y increases downward, negate for "up = up" display
-                offset_voxels = np.array([ddz, -ddy, ddx]) * 1000 / self.config.display_voxel_size[0]
-                logger.info(f"Transform: Voxel offset = {offset_voxels} (ZYX order, Y inverted)")
-
-                # Update last position for next incremental update
-                self.last_stage_position = current_stage_pos.copy()
-
-                shifted = shift(self.transform_cache[channel_id],
-                              offset_voxels, order=0, mode='constant', cval=0)
-                self.transform_cache[channel_id] = shifted
-                return shifted
+            if abs(dr) > 0.01:
+                # Apply rotation only (no translation)
+                rotated = self.coord_transformer.transform_voxel_volume_affine(
+                    volume,
+                    stage_offset_mm=(0, 0, 0),  # No translation for base
+                    rotation_deg=dr,
+                    center_voxels=center_voxels,
+                    voxel_size_um=self.config.display_voxel_size[0]
+                )
             else:
-                logger.info(f"Transform: No cached volume for channel {channel_id}, need full transformation")
+                rotated = volume
 
-        # Rotation changed - need full transformation
-        logger.info(f"Transform: Performing full transformation (rotation delta={dr:.1f}°)")
-        volume = self.get_display_volume(channel_id)
+            # Cache the rotated base volume
+            self.transform_cache[cache_key] = rotated
+            self.last_rotation = current_stage_pos.get('r', 0)
+            logger.info(f"Transform: Cached rotated base volume for channel {channel_id}")
+        else:
+            rotated = self.transform_cache[cache_key]
 
-        # Get rotation center in voxels
-        center_voxels = self._get_rotation_center_voxels()
+        # Always apply FULL translation from reference position (not incremental)
+        # This ensures returning to original position shows data in correct location
+        # Incremental shifts cause data loss at boundaries when shifting back
+        from scipy.ndimage import shift
 
-        # Use DELTA offsets in ZYX order (napari axis order)
-        # Y is inverted: napari Y increases downward, but we want "up" to mean "up"
-        # So when stage Y increases (sample moves down physically), voxels should move down (-Y in napari)
-        # Therefore we negate dy for the display
-        stage_offset_mm = (dz, -dy, dx)
+        # Full offset from reference in ZYX order, Y inverted
+        offset_voxels = np.array([dz, -dy, dx]) * 1000 / self.config.display_voxel_size[0]
 
-        logger.info(f"Transform: Applying affine transformation with offset {stage_offset_mm} mm (ZYX order, Y inverted), "
-                   f"rotation delta {dr:.1f}° (voxels shift with stage movement)")
+        # Check if translation is significant
+        if np.max(np.abs(offset_voxels)) < 0.5:
+            # Less than half a voxel - no shift needed
+            logger.debug(f"Transform: Offset < 0.5 voxels, returning rotated volume")
+            self.last_stage_position = current_stage_pos.copy()
+            return rotated
 
-        # Apply transformation
-        transformed = self.coord_transformer.transform_voxel_volume_affine(
-            volume,
-            stage_offset_mm=stage_offset_mm,
-            rotation_deg=dr,  # Use delta rotation, not absolute
-            center_voxels=center_voxels,
-            voxel_size_um=self.config.display_voxel_size[0]
-        )
+        logger.debug(f"Transform: Applying full offset {offset_voxels} voxels (ZYX, Y inverted) from reference")
 
-        # Cache for next time
-        self.transform_cache[channel_id] = transformed
-        self.last_rotation = current_stage_pos.get('r', 0)
+        # Apply translation to the rotated base volume
+        # Using order=1 (linear) for smoother results
+        translated = shift(rotated, offset_voxels, order=1, mode='constant', cval=0)
+
+        # Update last position for tracking
         self.last_stage_position = current_stage_pos.copy()
 
-        logger.info(f"Transform: Cached transformed volume for channel {channel_id}")
-        return transformed
+        return translated
 
     def _get_rotation_center_voxels(self) -> np.ndarray:
         """
