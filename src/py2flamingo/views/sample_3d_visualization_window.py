@@ -2523,6 +2523,12 @@ class Sample3DVisualizationWindow(QWidget):
         mt['frame_buffer'] = []  # Clear any stale frames
         mt['moving_axis'] = axis_name
 
+        # Speed up frame capture during motion (50 Hz instead of 10 Hz)
+        # This ensures we capture enough frames to fill voxels during fast movements
+        if self.populate_timer.isActive():
+            self.populate_timer.setInterval(20)  # 20ms = 50 Hz during motion
+            logger.info(f"Increased populate rate to 50 Hz for motion capture")
+
         logger.info(f"Motion started on {axis_name} - buffering frames. "
                    f"Start position: X={start_pos[0]:.3f}, Y={start_pos[1]:.3f}, "
                    f"Z={start_pos[2]:.3f}, R={start_pos[3]:.1f}°" if start_pos else
@@ -2568,6 +2574,11 @@ class Sample3DVisualizationWindow(QWidget):
         else:
             logger.info(f"Motion stopped on {axis_name}. "
                        f"Buffered {len(mt['frame_buffer'])} frames.")
+
+        # Restore normal capture rate (10 Hz)
+        if self.populate_timer.isActive():
+            self.populate_timer.setInterval(100)  # 100ms = 10 Hz normal rate
+            logger.info(f"Restored populate rate to 10 Hz")
 
         # Process all buffered frames with interpolated positions
         if mt['frame_buffer']:
