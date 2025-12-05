@@ -110,19 +110,20 @@ class MotionTracker:
 
                     # Check if this is the motion-stopped callback
                     if command_code == self.STAGE_MOTION_STOPPED:
-                        status = parsed['params'][0] if parsed['params'] else None
+                        # Use the actual status field (offset 8-11), not params[0] (hardwareID)
+                        # C++ protocol: status=1 means success, status=0 means failure
+                        status = parsed['status_code']
+                        # int32Data0 contains STAGE_AXIS_ALL (0x00FF) indicating which axis stopped
+                        axis_info = parsed['params'][3] if len(parsed['params']) > 3 else None
 
-                        # Status=0 means motion completed successfully
-                        # Status=-1 or other values may indicate cancelled/interrupted motion
-                        if status == 0:
-                            self.logger.info(f"Motion complete! Status={status} (0=stopped)")
+                        if status == 1:
+                            self.logger.info(f"Motion complete! Status={status} (1=success), axis={axis_info}")
                             return True
                         else:
-                            # Non-zero status - motion may have been interrupted
-                            # This could be a stale callback from a previous operation
+                            # Status != 1 means command failed or error occurred
                             self.logger.warning(
-                                f"STAGE_MOTION_STOPPED received with status={status} (not 0) - "
-                                f"motion may have been interrupted, continuing to wait..."
+                                f"STAGE_MOTION_STOPPED received with status={status} (not 1) - "
+                                f"motion may have failed, continuing to wait..."
                             )
                             # Continue waiting for a proper completion callback
                             continue
