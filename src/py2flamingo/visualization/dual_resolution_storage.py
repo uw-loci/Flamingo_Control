@@ -252,8 +252,10 @@ class DualResolutionVoxelStorage:
         # CRITICAL: Invalidate transform cache when new data is added
         # Otherwise get_display_volume_transformed returns stale cached data
         # that doesn't include newly captured frames
-        if channel_id in self.transform_cache:
-            del self.transform_cache[channel_id]
+        # Cache key format is f"{channel_id}_rotated" since we cache rotated base volumes
+        cache_key = f"{channel_id}_rotated"
+        if cache_key in self.transform_cache:
+            del self.transform_cache[cache_key]
             logger.debug(f"Transform cache invalidated for channel {channel_id} (new data added)")
 
     def _apply_update_strategy(self, old_val: float, new_val: float,
