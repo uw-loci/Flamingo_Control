@@ -246,26 +246,38 @@ class ProtocolEncoder:
 
         if code in debug_commands:
             cmd_name = get_command_name(code)
-            logger.info(f"[TX] ========== SENDING COMMAND ==========")
-            logger.info(f"[TX] Command: {cmd_name}")
-            logger.info(f"[TX] Command Code: {code} (0x{code:04X})")
-            logger.info(f"[TX] Status: {status}")
-            logger.info(f"[TX] Parameters:")
-            logger.info(f"[TX]   params[0] (hardwareID): {params[0]} (0x{params[0]:08X}) [bytes 12-15]")
-            logger.info(f"[TX]   params[1] (subsystemID): {params[1]} (0x{params[1]:08X}) [bytes 16-19]")
-            logger.info(f"[TX]   params[2] (clientID): {params[2]} (0x{params[2]:08X}) [bytes 20-23]")
-            logger.info(f"[TX]   params[3] (int32Data0): {params[3]} (0x{params[3]:08X}) [bytes 24-27] ← AXIS/LASER")
-            logger.info(f"[TX]   params[4] (int32Data1): {params[4]} (0x{params[4]:08X}) [bytes 28-31]")
-            logger.info(f"[TX]   params[5] (int32Data2): {params[5]} (0x{params[5]:08X}) [bytes 32-35]")
-            logger.info(f"[TX]   params[6] (cmdDataBits0): {params[6]} (0x{params[6]:08X}) [bytes 36-39]")
-            logger.info(f"[TX] Value (double): {value}")
-            logger.info(f"[TX] Additional Data Size: {additional_data_size}")
-            # Show first 32 bytes of data field if non-zero
-            data_preview = data[:32] if len(data) >= 32 else data
-            data_str = ' '.join(f'{b:02X}' for b in data_preview)
-            logger.info(f"[TX] Data (first 32 bytes): {data_str}")
-            logger.info(f"[TX] Start Marker: 0x{self.START_MARKER:08X}")
-            logger.info(f"[TX] End Marker: 0x{self.END_MARKER:08X}")
+
+            # Compact logging for position commands (these work well, reduce verbosity)
+            if code == 24580:  # POSITION_SET_MOVE
+                axis_names = {1: 'X', 2: 'Y', 3: 'Z', 4: 'R'}
+                axis = axis_names.get(params[3], f'?{params[3]}')
+                logger.info(f"[TX] POSITION_SET_MOVE: Axis={axis}, Value={value:.3f}")
+            elif code == 24584:  # POSITION_GET
+                axis_names = {1: 'X', 2: 'Y', 3: 'Z', 4: 'R'}
+                axis = axis_names.get(params[3], f'?{params[3]}')
+                logger.info(f"[TX] POSITION_GET: Axis={axis}")
+            else:
+                # Full logging for other debug commands
+                logger.info(f"[TX] ========== SENDING COMMAND ==========")
+                logger.info(f"[TX] Command: {cmd_name}")
+                logger.info(f"[TX] Command Code: {code} (0x{code:04X})")
+                logger.info(f"[TX] Status: {status}")
+                logger.info(f"[TX] Parameters:")
+                logger.info(f"[TX]   params[0] (hardwareID): {params[0]} (0x{params[0]:08X}) [bytes 12-15]")
+                logger.info(f"[TX]   params[1] (subsystemID): {params[1]} (0x{params[1]:08X}) [bytes 16-19]")
+                logger.info(f"[TX]   params[2] (clientID): {params[2]} (0x{params[2]:08X}) [bytes 20-23]")
+                logger.info(f"[TX]   params[3] (int32Data0): {params[3]} (0x{params[3]:08X}) [bytes 24-27] ← AXIS/LASER")
+                logger.info(f"[TX]   params[4] (int32Data1): {params[4]} (0x{params[4]:08X}) [bytes 28-31]")
+                logger.info(f"[TX]   params[5] (int32Data2): {params[5]} (0x{params[5]:08X}) [bytes 32-35]")
+                logger.info(f"[TX]   params[6] (cmdDataBits0): {params[6]} (0x{params[6]:08X}) [bytes 36-39]")
+                logger.info(f"[TX] Value (double): {value}")
+                logger.info(f"[TX] Additional Data Size: {additional_data_size}")
+                # Show first 32 bytes of data field if non-zero
+                data_preview = data[:32] if len(data) >= 32 else data
+                data_str = ' '.join(f'{b:02X}' for b in data_preview)
+                logger.info(f"[TX] Data (first 32 bytes): {data_str}")
+                logger.info(f"[TX] Start Marker: 0x{self.START_MARKER:08X}")
+                logger.info(f"[TX] End Marker: 0x{self.END_MARKER:08X}")
 
         # Pack command structure
         # C++ SCommand struct field order (bytes 0-127):
@@ -300,8 +312,8 @@ class ProtocolEncoder:
         except struct.error as e:
             raise ValueError(f"Failed to pack command structure: {e}")
 
-        # DEBUG: Log packed bytes verification for debug commands
-        if code in debug_commands:
+        # DEBUG: Log packed bytes verification for debug commands (skip position commands)
+        if code in debug_commands and code not in (24580, 24584):
             logger.info(f"[TX] --- Packed Bytes Verification ---")
             logger.info(f"[TX] Bytes 0-3 (Start): 0x{struct.unpack('I', command_bytes[0:4])[0]:08X}")
             logger.info(f"[TX] Bytes 4-7 (Code): {struct.unpack('I', command_bytes[4:8])[0]} (0x{struct.unpack('I', command_bytes[4:8])[0]:04X})")
@@ -425,46 +437,57 @@ class ProtocolDecoder:
         ]
 
         if code in debug_commands:
-            logger.info(f"[RX] ========== RECEIVED RESPONSE ==========")
-            logger.info(f"[RX] Command Code: {code} (0x{code:04X})")
-            logger.info(f"[RX] Status: {status}")
-            logger.info(f"[RX] Parameters:")
-            logger.info(f"[RX]   params[0] (hardwareID): {params[0]} (0x{params[0]:08X}) [bytes 12-15]")
-            logger.info(f"[RX]   params[1] (subsystemID): {params[1]} (0x{params[1]:08X}) [bytes 16-19]")
-            logger.info(f"[RX]   params[2] (clientID): {params[2]} (0x{params[2]:08X}) [bytes 20-23]")
-            logger.info(f"[RX]   params[3] (int32Data0): {params[3]} (0x{params[3]:08X}) [bytes 24-27] ← AXIS/LASER")
-            logger.info(f"[RX]   params[4] (int32Data1): {params[4]} (0x{params[4]:08X}) [bytes 28-31]")
-            logger.info(f"[RX]   params[5] (int32Data2): {params[5]} (0x{params[5]:08X}) [bytes 32-35]")
-            logger.info(f"[RX]   params[6] (cmdDataBits0): {params[6]} (0x{params[6]:08X}) [bytes 36-39]")
-            logger.info(f"[RX] Value (double): {value}")
-            logger.info(f"[RX] Reserved Field (addDataBytes): {reserved}")
-            # Show first 32 bytes of data field
-            data_preview = data_field[:32] if isinstance(data_field, bytes) and len(data_field) >= 32 else data_field
-            if isinstance(data_preview, bytes):
-                data_str = ' '.join(f'{b:02X}' for b in data_preview)
-                logger.info(f"[RX] Data (first 32 bytes): {data_str}")
+            # Compact logging for position commands (these work well, reduce verbosity)
+            if code == 24580:  # POSITION_SET_MOVE response
+                axis_names = {1: 'X', 2: 'Y', 3: 'Z', 4: 'R'}
+                axis = axis_names.get(params[3], f'?{params[3]}')
+                logger.info(f"[RX] POSITION_SET_MOVE response: Axis={axis}, Status={status}")
+            elif code == 24584:  # POSITION_GET response
+                axis_names = {1: 'X', 2: 'Y', 3: 'Z', 4: 'R'}
+                axis = axis_names.get(params[3], f'?{params[3]}')
+                logger.info(f"[RX] POSITION_GET response: Axis={axis}, Value={value:.3f}")
             else:
-                logger.info(f"[RX] Data: {data_preview}")
-            logger.info(f"[RX] Start Marker: 0x{start_marker:08X} {'✓' if start_marker == self.START_MARKER else '✗ INVALID'}")
-            logger.info(f"[RX] End Marker: 0x{end_marker:08X} {'✓' if end_marker == self.END_MARKER else '✗ INVALID'}")
-            logger.info(f"[RX] Packet Valid: {valid}")
+                # Full logging for other debug commands
+                logger.info(f"[RX] ========== RECEIVED RESPONSE ==========")
+                logger.info(f"[RX] Command Code: {code} (0x{code:04X})")
+                logger.info(f"[RX] Status: {status}")
+                logger.info(f"[RX] Parameters:")
+                logger.info(f"[RX]   params[0] (hardwareID): {params[0]} (0x{params[0]:08X}) [bytes 12-15]")
+                logger.info(f"[RX]   params[1] (subsystemID): {params[1]} (0x{params[1]:08X}) [bytes 16-19]")
+                logger.info(f"[RX]   params[2] (clientID): {params[2]} (0x{params[2]:08X}) [bytes 20-23]")
+                logger.info(f"[RX]   params[3] (int32Data0): {params[3]} (0x{params[3]:08X}) [bytes 24-27] ← AXIS/LASER")
+                logger.info(f"[RX]   params[4] (int32Data1): {params[4]} (0x{params[4]:08X}) [bytes 28-31]")
+                logger.info(f"[RX]   params[5] (int32Data2): {params[5]} (0x{params[5]:08X}) [bytes 32-35]")
+                logger.info(f"[RX]   params[6] (cmdDataBits0): {params[6]} (0x{params[6]:08X}) [bytes 36-39]")
+                logger.info(f"[RX] Value (double): {value}")
+                logger.info(f"[RX] Reserved Field (addDataBytes): {reserved}")
+                # Show first 32 bytes of data field
+                data_preview = data_field[:32] if isinstance(data_field, bytes) and len(data_field) >= 32 else data_field
+                if isinstance(data_preview, bytes):
+                    data_str = ' '.join(f'{b:02X}' for b in data_preview)
+                    logger.info(f"[RX] Data (first 32 bytes): {data_str}")
+                else:
+                    logger.info(f"[RX] Data: {data_preview}")
+                logger.info(f"[RX] Start Marker: 0x{start_marker:08X} {'✓' if start_marker == self.START_MARKER else '✗ INVALID'}")
+                logger.info(f"[RX] End Marker: 0x{end_marker:08X} {'✓' if end_marker == self.END_MARKER else '✗ INVALID'}")
+                logger.info(f"[RX] Packet Valid: {valid}")
 
-            # Log packed bytes verification
-            logger.info(f"[RX] --- Packed Bytes Verification ---")
-            logger.info(f"[RX] Bytes 0-3 (Start): 0x{struct.unpack('I', data[0:4])[0]:08X}")
-            logger.info(f"[RX] Bytes 4-7 (Code): {struct.unpack('I', data[4:8])[0]} (0x{struct.unpack('I', data[4:8])[0]:04X})")
-            logger.info(f"[RX] Bytes 8-11 (Status): {struct.unpack('I', data[8:12])[0]}")
-            logger.info(f"[RX] Bytes 12-15 (hardwareID): {struct.unpack('I', data[12:16])[0]} (0x{struct.unpack('I', data[12:16])[0]:08X})")
-            logger.info(f"[RX] Bytes 16-19 (subsystemID): {struct.unpack('I', data[16:20])[0]} (0x{struct.unpack('I', data[16:20])[0]:08X})")
-            logger.info(f"[RX] Bytes 20-23 (clientID): {struct.unpack('I', data[20:24])[0]} (0x{struct.unpack('I', data[20:24])[0]:08X})")
-            logger.info(f"[RX] Bytes 24-27 (int32Data0): {struct.unpack('I', data[24:28])[0]} (0x{struct.unpack('I', data[24:28])[0]:08X})")
-            logger.info(f"[RX] Bytes 28-31 (int32Data1): {struct.unpack('I', data[28:32])[0]} (0x{struct.unpack('I', data[28:32])[0]:08X})")
-            logger.info(f"[RX] Bytes 32-35 (int32Data2): {struct.unpack('I', data[32:36])[0]} (0x{struct.unpack('I', data[32:36])[0]:08X})")
-            logger.info(f"[RX] Bytes 36-39 (cmdDataBits0): {struct.unpack('I', data[36:40])[0]} (0x{struct.unpack('I', data[36:40])[0]:08X})")
-            logger.info(f"[RX] Bytes 40-47 (Value): {struct.unpack('d', data[40:48])[0]}")
-            logger.info(f"[RX] Bytes 48-51 (addDataBytes): {struct.unpack('I', data[48:52])[0]}")
-            logger.info(f"[RX] Bytes 124-127 (End): 0x{struct.unpack('I', data[124:128])[0]:08X}")
-            logger.info(f"[RX] ==========================================")
+                # Log packed bytes verification
+                logger.info(f"[RX] --- Packed Bytes Verification ---")
+                logger.info(f"[RX] Bytes 0-3 (Start): 0x{struct.unpack('I', data[0:4])[0]:08X}")
+                logger.info(f"[RX] Bytes 4-7 (Code): {struct.unpack('I', data[4:8])[0]} (0x{struct.unpack('I', data[4:8])[0]:04X})")
+                logger.info(f"[RX] Bytes 8-11 (Status): {struct.unpack('I', data[8:12])[0]}")
+                logger.info(f"[RX] Bytes 12-15 (hardwareID): {struct.unpack('I', data[12:16])[0]} (0x{struct.unpack('I', data[12:16])[0]:08X})")
+                logger.info(f"[RX] Bytes 16-19 (subsystemID): {struct.unpack('I', data[16:20])[0]} (0x{struct.unpack('I', data[16:20])[0]:08X})")
+                logger.info(f"[RX] Bytes 20-23 (clientID): {struct.unpack('I', data[20:24])[0]} (0x{struct.unpack('I', data[20:24])[0]:08X})")
+                logger.info(f"[RX] Bytes 24-27 (int32Data0): {struct.unpack('I', data[24:28])[0]} (0x{struct.unpack('I', data[24:28])[0]:08X})")
+                logger.info(f"[RX] Bytes 28-31 (int32Data1): {struct.unpack('I', data[28:32])[0]} (0x{struct.unpack('I', data[28:32])[0]:08X})")
+                logger.info(f"[RX] Bytes 32-35 (int32Data2): {struct.unpack('I', data[32:36])[0]} (0x{struct.unpack('I', data[32:36])[0]:08X})")
+                logger.info(f"[RX] Bytes 36-39 (cmdDataBits0): {struct.unpack('I', data[36:40])[0]} (0x{struct.unpack('I', data[36:40])[0]:08X})")
+                logger.info(f"[RX] Bytes 40-47 (Value): {struct.unpack('d', data[40:48])[0]}")
+                logger.info(f"[RX] Bytes 48-51 (addDataBytes): {struct.unpack('I', data[48:52])[0]}")
+                logger.info(f"[RX] Bytes 124-127 (End): 0x{struct.unpack('I', data[124:128])[0]:08X}")
+                logger.info(f"[RX] ==========================================")
 
         return {
             'start_marker': start_marker,
