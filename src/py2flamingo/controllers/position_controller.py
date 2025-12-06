@@ -102,8 +102,17 @@ class PositionController:
                 from py2flamingo.controllers.motion_tracker import MotionTracker
                 command_socket = self.connection._command_socket
                 if command_socket:
-                    self._motion_tracker = MotionTracker(command_socket)
-                    self.logger.info("Motion tracker initialized and ready")
+                    # Pass both socket and connection to support async/sync modes
+                    # MotionTracker will use async mode if connection has async reader
+                    self._motion_tracker = MotionTracker(
+                        command_socket=command_socket,
+                        connection=self.connection
+                    )
+                    # Log which mode is active
+                    if self._motion_tracker._use_async_mode():
+                        self.logger.info("Motion tracker initialized (async mode)")
+                    else:
+                        self.logger.info("Motion tracker initialized (sync mode)")
                 else:
                     self.logger.warning("Command socket not available - motion tracker cannot be initialized")
             else:

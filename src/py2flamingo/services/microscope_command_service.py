@@ -7,14 +7,21 @@ shared across all subsystem services (Camera, Stage, Laser, etc.).
 ENHANCED: This is now the single source of truth for ALL command operations,
 providing compatibility methods for legacy code while maintaining a consistent
 command sending implementation.
+
+ASYNC SUPPORT: When the connection has an async reader active, commands are
+sent and responses are received via the background reader's dispatch queues,
+preventing socket buffer buildup and ensuring callbacks are never missed.
 """
 
 import logging
 import struct
 import socket
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List, Union, TYPE_CHECKING
 
 from py2flamingo.core.tcp_protocol import CommandDataBits, get_command_name
+
+if TYPE_CHECKING:
+    from py2flamingo.core.socket_reader import ParsedMessage
 
 
 class MicroscopeCommandService:
@@ -47,6 +54,7 @@ class MicroscopeCommandService:
         Send a query command and return parsed response.
 
         Automatically adds TRIGGER_CALL_BACK flag and handles socket communication.
+        Uses async reader when available for non-blocking operation.
 
         Args:
             command_code: Command code to send
@@ -84,6 +92,17 @@ class MicroscopeCommandService:
                 data=b''
             )
 
+            # Use get_command_name for better logging if command_name is generic
+            if command_name == str(command_code) or 'COMMAND' in command_name.upper():
+                command_name = get_command_name(command_code)
+
+            # Check if async reader is available
+            if hasattr(self.connection, 'has_async_reader') and self.connection.has_async_reader:
+                return self._send_via_async_reader(
+                    cmd_bytes, command_code, command_name, timeout=3.0
+                )
+
+            # Fall back to synchronous mode
             # Get command socket
             command_socket = self.connection._command_socket
             if command_socket is None:
@@ -94,9 +113,6 @@ class MicroscopeCommandService:
 
             # Send command
             command_socket.sendall(cmd_bytes)
-            # Use get_command_name for better logging if command_name is generic
-            if command_name == str(command_code) or 'COMMAND' in command_name.upper():
-                command_name = get_command_name(command_code)
             self.logger.debug(f"Sent {command_name} (code {command_code:#06x})")
 
             # Read 128-byte response
@@ -144,7 +160,7 @@ class MicroscopeCommandService:
         Send an action command (non-query).
 
         Similar to _query_command but for commands that perform actions
-        rather than querying data.
+        rather than querying data. Uses async reader when available.
 
         Args:
             command_code: Command code to send
@@ -189,6 +205,17 @@ class MicroscopeCommandService:
                 additional_data_size=additional_data_size
             )
 
+            # Use get_command_name for better logging if command_name is generic
+            if command_name == str(command_code) or 'COMMAND' in command_name.upper():
+                command_name = get_command_name(command_code)
+
+            # Check if async reader is available
+            if hasattr(self.connection, 'has_async_reader') and self.connection.has_async_reader:
+                return self._send_via_async_reader(
+                    cmd_bytes, command_code, command_name, timeout=3.0
+                )
+
+            # Fall back to synchronous mode
             # Get command socket
             command_socket = self.connection._command_socket
             if command_socket is None:
@@ -199,9 +226,6 @@ class MicroscopeCommandService:
 
             # Send command
             command_socket.sendall(cmd_bytes)
-            # Use get_command_name for better logging if command_name is generic
-            if command_name == str(command_code) or 'COMMAND' in command_name.upper():
-                command_name = get_command_name(command_code)
             self.logger.debug(f"Sent {command_name} (code {command_code:#06x})")
 
             # Read 128-byte response
@@ -332,6 +356,95 @@ class MicroscopeCommandService:
             'reserved': add_data_bytes,
             'data': data_buffer,  # ADDED: 72-byte buffer field
             'end_marker': end_marker
+        }
+
+    def _send_via_async_reader(
+        self,
+        cmd_bytes: bytes,
+        command_code: int,
+        command_name: str,
+        timeout: float = 3.0
+    ) -> Dict[str, Any]:
+        """
+        Send command via async reader and convert response.
+
+        This method uses the background socket reader's dispatch queue
+        for non-blocking command-response handling.
+
+        Args:
+            cmd_bytes: Encoded 128-byte command
+            command_code: Command code for response matching
+            command_name: Human-readable name for logging
+            timeout: Response timeout in seconds
+
+        Returns:
+            Dict with 'success', 'parsed', 'raw_response' matching
+            the synchronous _send_command format.
+        """
+        try:
+            # Send via async reader
+            response = self.connection.send_command_async(
+                cmd_bytes, command_code, timeout=timeout
+            )
+
+            if response is None:
+                self.logger.error(f"Timeout waiting for {command_name} response (async)")
+                return {
+                    'success': False,
+                    'error': 'timeout'
+                }
+
+            self.logger.debug(f"Received {command_name} response (async)")
+
+            # Convert ParsedMessage to legacy dict format
+            parsed = self._convert_parsed_message(response)
+
+            # Note: Additional data handling would need separate mechanism
+            # for async mode if needed (currently not implemented)
+
+            return {
+                'success': True,
+                'parsed': parsed,
+                'raw_response': response.raw_data
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error in async {command_name}: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def _convert_parsed_message(self, msg: "ParsedMessage") -> Dict[str, Any]:
+        """
+        Convert ParsedMessage from async reader to legacy dict format.
+
+        Args:
+            msg: ParsedMessage from socket_reader
+
+        Returns:
+            Dict matching the format from _parse_response()
+        """
+        # Build params list from individual fields
+        params = [
+            msg.hardware_id,
+            msg.subsystem_id,
+            msg.client_id,
+            msg.int32_data0,
+            msg.int32_data1,
+            msg.int32_data2,
+            msg.cmd_data_bits,
+        ]
+
+        return {
+            'start_marker': msg.start_marker,
+            'command_code': msg.command_code,
+            'status_code': msg.status_code,
+            'params': params,
+            'value': msg.value,
+            'reserved': msg.additional_data_size,
+            'data': msg.data_field,
+            'end_marker': msg.end_marker
         }
 
     # ============================================================================

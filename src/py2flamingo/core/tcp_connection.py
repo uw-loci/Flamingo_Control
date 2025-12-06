@@ -5,12 +5,19 @@ This module handles low-level socket operations for connecting to and
 communicating with the Flamingo microscope control system. It manages
 dual sockets (command port and live imaging port) and provides thread-safe
 operations for sending and receiving data.
+
+Supports two modes:
+- Synchronous: Traditional blocking send/receive (for simple operations)
+- Asynchronous: Background reader with message dispatcher (for concurrent ops)
 """
 
 import socket
 import logging
 import threading
-from typing import Tuple, Optional
+from typing import Callable, Tuple, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .socket_reader import CommandClient, MessageDispatcher, ParsedMessage
 
 
 class TCPConnection:
@@ -31,8 +38,15 @@ class TCPConnection:
         >>> connection.disconnect()
     """
 
-    def __init__(self):
-        """Initialize TCP connection manager."""
+    def __init__(self, use_async_reader: bool = True):
+        """
+        Initialize TCP connection manager.
+
+        Args:
+            use_async_reader: If True, use background socket reader for
+                             non-blocking command/response handling.
+                             If False, use traditional synchronous I/O.
+        """
         self._command_socket: Optional[socket.socket] = None
         self._live_socket: Optional[socket.socket] = None
         self._lock = threading.Lock()
@@ -42,6 +56,10 @@ class TCPConnection:
         # Connection info
         self._ip: Optional[str] = None
         self._port: Optional[int] = None
+
+        # Async reader support
+        self._use_async_reader = use_async_reader
+        self._command_client: Optional["CommandClient"] = None
 
     def connect(
         self,
@@ -114,6 +132,10 @@ class TCPConnection:
                 self._port = port
                 self._connected = True
 
+                # Start async reader if enabled
+                if self._use_async_reader:
+                    self._start_async_reader()
+
                 return self._command_socket, self._live_socket
 
             except (socket.timeout, ConnectionRefusedError, OSError) as e:
@@ -184,6 +206,16 @@ class TCPConnection:
 
         Not thread-safe - should only be called from methods that hold the lock.
         """
+        # Stop async reader first (before closing socket)
+        if self._command_client:
+            try:
+                self._command_client.stop()
+                self.logger.info("Stopped async reader")
+            except Exception as e:
+                self.logger.error(f"Error stopping async reader: {e}")
+            finally:
+                self._command_client = None
+
         # Close command socket
         if self._command_socket:
             try:
@@ -522,6 +554,116 @@ class TCPConnection:
         """
         with self._lock:
             return self._ip, self._port
+
+    # ========== Async Reader Methods ==========
+
+    def _start_async_reader(self) -> None:
+        """
+        Initialize and start the background socket reader.
+
+        Called during connect() when use_async_reader=True.
+        Must be called while holding _lock.
+        """
+        from .socket_reader import CommandClient
+
+        self._command_client = CommandClient(self._command_socket)
+        self._command_client.start()
+        self.logger.info("Started async socket reader")
+
+    @property
+    def has_async_reader(self) -> bool:
+        """Check if async reader is active."""
+        return self._command_client is not None and self._command_client.is_running()
+
+    @property
+    def dispatcher(self) -> Optional["MessageDispatcher"]:
+        """
+        Get the message dispatcher for registering callbacks.
+
+        Returns:
+            MessageDispatcher if async reader is active, None otherwise
+        """
+        if self._command_client:
+            return self._command_client.dispatcher
+        return None
+
+    def send_command_async(
+        self,
+        command_bytes: bytes,
+        expected_response_code: int,
+        timeout: float = 3.0
+    ) -> Optional["ParsedMessage"]:
+        """
+        Send a command and wait for response using async reader.
+
+        This method is only available when async reader is active.
+        It sends the command and waits for the response via the
+        background reader's dispatch queue.
+
+        Args:
+            command_bytes: 128-byte command to send
+            expected_response_code: Command code expected in response
+            timeout: Seconds to wait for response
+
+        Returns:
+            ParsedMessage response, or None on timeout
+
+        Raises:
+            RuntimeError: If async reader not active
+            ConnectionError: If not connected
+        """
+        if not self._connected:
+            raise ConnectionError("Not connected to microscope")
+
+        if not self._command_client:
+            raise RuntimeError("Async reader not active - use send_bytes/receive_bytes instead")
+
+        return self._command_client.send_command(
+            command_bytes, expected_response_code, timeout
+        )
+
+    def register_callback(
+        self,
+        command_code: int,
+        handler: Callable[["ParsedMessage"], None]
+    ) -> None:
+        """
+        Register a handler for unsolicited callback messages.
+
+        This allows you to receive notifications when the microscope sends
+        unsolicited messages like STAGE_MOTION_STOPPED.
+
+        Args:
+            command_code: Command code to handle (e.g., 0x6010 for motion stopped)
+            handler: Function that takes ParsedMessage
+
+        Raises:
+            RuntimeError: If async reader not active
+        """
+        if not self._command_client:
+            raise RuntimeError("Async reader not active - cannot register callbacks")
+
+        self._command_client.register_callback(command_code, handler)
+
+    def unregister_callback(
+        self,
+        command_code: int,
+        handler: Callable[["ParsedMessage"], None]
+    ) -> None:
+        """Remove a callback handler."""
+        if self._command_client:
+            self._command_client.unregister_callback(command_code, handler)
+
+    def get_async_stats(self) -> Optional[dict]:
+        """
+        Get statistics from the async reader.
+
+        Returns:
+            Dict with reader and dispatcher stats, or None if not active
+        """
+        if self._command_client:
+            return self._command_client.get_stats()
+        return None
 
     @staticmethod
     def _validate_ip(ip: str) -> None:
