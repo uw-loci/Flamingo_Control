@@ -436,7 +436,7 @@ class MicroscopeCommandService:
             msg.cmd_data_bits,
         ]
 
-        return {
+        result = {
             'start_marker': msg.start_marker,
             'command_code': msg.command_code,
             'status_code': msg.status_code,
@@ -446,6 +446,12 @@ class MicroscopeCommandService:
             'data': msg.data_field,
             'end_marker': msg.end_marker
         }
+
+        # Include additional data if present
+        if hasattr(msg, 'additional_data') and msg.additional_data:
+            result['additional_data'] = msg.additional_data
+
+        return result
 
     # ============================================================================
     # COMPATIBILITY METHODS - For consolidating all send_command implementations

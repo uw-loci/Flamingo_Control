@@ -109,6 +109,7 @@ class ParsedMessage:
     data_field: bytes  # 72-byte data buffer
     end_marker: int
     timestamp: float = field(default_factory=time.time)
+    additional_data: Optional[bytes] = None  # Extra data following 128-byte message
 
     @property
     def is_valid(self) -> bool:
@@ -368,6 +369,21 @@ class SocketReader:
                     try:
                         message = self._parse_message(data)
                         if message.is_valid:
+                            # Check for additional data that follows the 128-byte message
+                            # This MUST be read before the next message or we'll lose sync
+                            additional_data = None
+                            if message.additional_data_size > 0:
+                                additional_data = self._read_additional_data(message.additional_data_size)
+                                if additional_data:
+                                    logger.debug(
+                                        f"Read {len(additional_data)} additional bytes for "
+                                        f"{message.command_name}"
+                                    )
+
+                            # Attach additional data to message if present
+                            if additional_data:
+                                message.additional_data = additional_data
+
                             self._dispatcher.dispatch(message)
                             self._stats['messages_read'] += 1
                             consecutive_invalid = 0  # Reset counter on valid message
@@ -506,6 +522,44 @@ class SocketReader:
                 continue
 
         return data
+
+    def _read_additional_data(self, size: int) -> Optional[bytes]:
+        """
+        Read additional data that follows a 128-byte message.
+
+        Some commands return extra data beyond the standard 128-byte response.
+        This data MUST be read before the next message or we'll lose sync.
+
+        Args:
+            size: Number of additional bytes to read
+
+        Returns:
+            Additional data bytes, or None on error/timeout
+        """
+        if size <= 0:
+            return None
+
+        data = b''
+        try:
+            while len(data) < size:
+                remaining = size - len(data)
+                chunk = self._socket.recv(remaining)
+
+                if not chunk:
+                    logger.warning(f"Socket closed while reading additional data ({len(data)}/{size})")
+                    return None
+
+                data += chunk
+                self._stats['bytes_read'] += len(chunk)
+
+            return data
+
+        except socket.timeout:
+            logger.warning(f"Timeout reading additional data ({len(data)}/{size})")
+            return data if data else None
+        except Exception as e:
+            logger.error(f"Error reading additional data: {e}")
+            return None
 
     def _parse_message(self, data: bytes) -> ParsedMessage:
         """
