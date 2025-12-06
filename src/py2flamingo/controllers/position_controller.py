@@ -100,13 +100,18 @@ class PositionController:
         try:
             if self.connection.is_connected():
                 from py2flamingo.controllers.motion_tracker import MotionTracker
+
+                # Get the underlying TCPConnection which has the async reader
+                # MVCConnectionService wraps TCPConnection as tcp_connection attribute
+                tcp_conn = getattr(self.connection, 'tcp_connection', None)
                 command_socket = self.connection._command_socket
+
                 if command_socket:
-                    # Pass both socket and connection to support async/sync modes
-                    # MotionTracker will use async mode if connection has async reader
+                    # Pass both socket and TCPConnection to support async/sync modes
+                    # MotionTracker will use async mode if TCPConnection has async reader
                     self._motion_tracker = MotionTracker(
                         command_socket=command_socket,
-                        connection=self.connection
+                        connection=tcp_conn  # Pass TCPConnection, not MVCConnectionService
                     )
                     # Log which mode is active
                     if self._motion_tracker._use_async_mode():
