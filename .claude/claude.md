@@ -637,7 +637,296 @@ def test_invalid_position():
 4. **Professional Logs**: Structured logging with appropriate severity levels
 5. **Maintainable Code**: Clear patterns for error handling throughout codebase
 
+## Async Socket Reader Architecture
+
+### Overview
+
+The Flamingo Control system uses a **background socket reader** for non-blocking command/response handling. This prevents socket buffer buildup and ensures unsolicited callbacks (like `STAGE_MOTION_STOPPED`) are never missed.
+
+### Why Async Reading?
+
+**Problem with Synchronous Reading:**
+- GUI freezes during blocking socket reads
+- Socket buffer fills up during concurrent operations (live view + stage movement)
+- Unsolicited callbacks can be missed or delayed
+- Position updates sent at 40Hz during motion can overwhelm the buffer
+
+**Solution - Background Reader:**
+- Dedicated thread continuously drains the command socket
+- Messages are parsed and routed to appropriate queues
+- Commands wait on response queues (non-blocking to GUI)
+- Callbacks are delivered via registered handlers
+
+### Architecture Components
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Application Layer                           │
+│  ┌─────────────────┐   ┌─────────────────┐   ┌───────────────┐ │
+│  │ MicroscopeCmd   │   │ MotionTracker   │   │ Other Services│ │
+│  │ Service         │   │                 │   │               │ │
+│  └────────┬────────┘   └────────┬────────┘   └───────┬───────┘ │
+│           │                     │                     │         │
+│           │ send_command_async  │ register_callback   │         │
+│           ▼                     ▼                     ▼         │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │                    TCPConnection                          │  │
+│  │  ┌─────────────────────────────────────────────────────┐ │  │
+│  │  │                   CommandClient                      │ │  │
+│  │  │  ┌─────────────┐     ┌──────────────────────────┐   │ │  │
+│  │  │  │ SocketReader│────▶│   MessageDispatcher      │   │ │  │
+│  │  │  │ (bg thread) │     │                          │   │ │  │
+│  │  │  └──────┬──────┘     │  ┌──────────────────┐   │   │ │  │
+│  │  │         │            │  │ Pending Requests │   │   │ │  │
+│  │  │         │            │  │ (response queues)│   │   │ │  │
+│  │  │         │            │  └──────────────────┘   │   │ │  │
+│  │  │         │            │  ┌──────────────────┐   │   │ │  │
+│  │  │         │            │  │ Callback Handlers│   │   │ │  │
+│  │  │         │            │  │ (unsolicited)    │   │   │ │  │
+│  │  │         │            │  └──────────────────┘   │   │ │  │
+│  │  │         │            └──────────────────────────┘   │ │  │
+│  │  └─────────┼───────────────────────────────────────────┘ │  │
+│  └────────────┼─────────────────────────────────────────────┘  │
+│               │                                                 │
+└───────────────┼─────────────────────────────────────────────────┘
+                │
+                ▼
+        ┌───────────────┐
+        │ Command Socket│
+        │ (TCP 53717)   │
+        └───────────────┘
+```
+
+### Key Classes
+
+#### `SocketReader` (`src/py2flamingo/core/socket_reader.py`)
+
+Background thread that continuously reads 128-byte messages from the command socket.
+
+```python
+class SocketReader:
+    MESSAGE_SIZE = 128
+    START_MARKER = 0xF321E654
+    END_MARKER = 0xFEDC4321
+
+    def _read_loop(self):
+        """Main loop - reads messages, handles additional data, dispatches"""
+        while self._running:
+            data = self._receive_message()  # 128 bytes
+            message = self._parse_message(data)
+
+            if message.is_valid:
+                # CRITICAL: Read additional data BEFORE next message
+                if message.additional_data_size > 0:
+                    additional = self._read_additional_data(message.additional_data_size)
+                    message.additional_data = additional
+
+                self._dispatcher.dispatch(message)
+```
+
+#### `MessageDispatcher`
+
+Routes parsed messages to appropriate destinations:
+
+```python
+class MessageDispatcher:
+    def dispatch(self, message: ParsedMessage):
+        # 1. Check if response to pending request
+        if message.command_code in self._pending_requests:
+            self._pending_requests[command_code].put(message)
+            return
+
+        # 2. Check if unsolicited callback with handler
+        if message.command_code in self._callback_handlers:
+            for handler in handlers:
+                handler(message)
+            return
+
+        # 3. Unhandled - log for debugging
+        logger.debug(f"Unhandled message 0x{command_code:04X}")
+```
+
+#### `ParsedMessage` Dataclass
+
+Structured representation of a 128-byte protocol message:
+
+```python
+@dataclass
+class ParsedMessage:
+    raw_data: bytes           # Original 128 bytes
+    start_marker: int         # 0xF321E654
+    command_code: int         # Command identifier
+    status_code: int          # Response status
+    hardware_id: int          # params[0]
+    subsystem_id: int         # params[1]
+    client_id: int            # params[2]
+    int32_data0: int          # params[3] - axis, laser index, etc.
+    int32_data1: int          # params[4]
+    int32_data2: int          # params[5]
+    cmd_data_bits: int        # params[6] - flags
+    value: float              # Double value (position, power, etc.)
+    additional_data_size: int # Bytes following this message
+    data_field: bytes         # 72-byte data buffer
+    end_marker: int           # 0xFEDC4321
+    timestamp: float          # When received
+    additional_data: Optional[bytes] = None  # Extra data after message
+```
+
+### Handling Additional Data
+
+**CRITICAL:** Some commands return extra data beyond the 128-byte response. This data **MUST** be read before the next message or the reader will lose sync.
+
+```
+Normal Message:
+┌──────────────────────────────────┐
+│     128-byte Message             │
+│  (start marker ... end marker)   │
+└──────────────────────────────────┘
+
+Message with Additional Data:
+┌──────────────────────────────────┐ ┌────────────────────┐
+│     128-byte Message             │ │  Additional Data   │
+│  (addDataBytes = N)              │ │  (N bytes)         │
+└──────────────────────────────────┘ └────────────────────┘
+```
+
+**Commands that return additional data:**
+- `SCOPE_SETTINGS_LOAD (4105)` - ~2800 bytes settings text
+- `SAVE_LOCATIONS_GET (24585)` - saved position data
+- Various query commands with string responses
+
+**The SocketReader handles this automatically:**
+```python
+if message.additional_data_size > 0:
+    additional = self._read_additional_data(message.additional_data_size)
+    message.additional_data = additional
+```
+
+### Unsolicited Callbacks
+
+The microscope sends some messages without being asked. These are **critical** to capture:
+
+| Command Code | Name | Description |
+|--------------|------|-------------|
+| `0x6010` (24592) | `STAGE_MOTION_STOPPED` | Stage finished moving |
+
+**Registering a callback handler:**
+```python
+# In MotionTracker
+connection.register_callback(
+    0x6010,  # STAGE_MOTION_STOPPED
+    self._on_motion_stopped
+)
+
+def _on_motion_stopped(self, message: ParsedMessage):
+    if message.status_code == 1:  # Success
+        self.logger.info("Motion complete!")
+        self._callback_queue.put(message)
+```
+
+### Resync Mechanism
+
+If the reader gets out of sync (e.g., missed some bytes), it will see invalid markers. After 5 consecutive invalid messages, it attempts to resync:
+
+```python
+def _try_resync(self):
+    """Scan for start marker to realign message boundaries"""
+    search_data = self._socket.recv(512)
+    marker_pos = search_data.find(START_MARKER_BYTES)
+    if marker_pos >= 0:
+        # Found marker - realign and continue
+        ...
+```
+
+### Usage Examples
+
+#### Sending a Command with Response
+
+```python
+# MicroscopeCommandService automatically uses async when available
+result = service._query_command(
+    command_code=STAGE_POSITION_GET,
+    command_name="POSITION_GET",
+    params=[0, 0, 0, 1, 0, 0, TRIGGER_CALL_BACK],  # Axis=X
+    value=0.0
+)
+```
+
+**What happens internally:**
+1. Service encodes 128-byte command
+2. Registers pending request with dispatcher (returns Queue)
+3. Sends command via socket
+4. Background reader receives response
+5. Dispatcher puts response in the Queue
+6. Service gets response from Queue (with timeout)
+
+#### Waiting for Motion Complete
+
+```python
+# MotionTracker uses callback queue
+tracker = MotionTracker(connection=connection)
+success = tracker.wait_for_motion_complete(timeout=30.0)
+```
+
+**What happens internally:**
+1. MotionTracker registers callback for `STAGE_MOTION_STOPPED`
+2. When motion completes, microscope sends callback
+3. Background reader receives and dispatches to handler
+4. Handler puts message in internal queue
+5. `wait_for_motion_complete` polls queue until message arrives
+
+### Configuration
+
+The async reader is **enabled by default**:
+
+```python
+# In TCPConnection.__init__
+def __init__(self, use_async_reader: bool = True):
+    ...
+
+# To disable (use synchronous mode):
+connection = TCPConnection(use_async_reader=False)
+```
+
+### Logging and Debugging
+
+The async reader logs useful debug information:
+
+```
+INFO - Started async socket reader
+INFO - Registered callback handler for 0x6010
+DEBUG - Read 2800 additional bytes for SCOPE_SETTINGS_LOAD
+DEBUG - Dispatched response for 0x6008
+WARNING - Invalid message markers: start=0x00000000 (consecutive: 1)
+INFO - Attempting to resync stream...
+INFO - Resync successful
+INFO - SocketReader read loop exiting. Stats: {'messages_read': 150, ...}
+```
+
+### Statistics
+
+Access reader statistics for debugging:
+
+```python
+stats = connection.get_async_stats()
+# Returns:
+# {
+#     'reader': {
+#         'messages_read': 150,
+#         'parse_errors': 2,
+#         'socket_errors': 0,
+#         'bytes_read': 21504
+#     },
+#     'dispatcher': {
+#         'messages_received': 150,
+#         'responses_dispatched': 145,
+#         'callbacks_dispatched': 5,
+#         'messages_dropped': 0
+#     }
+# }
+```
+
 ---
 
-**Last Updated:** 2024-11-17
+**Last Updated:** 2024-12-06
 **Maintained By:** Claude Code assistant
