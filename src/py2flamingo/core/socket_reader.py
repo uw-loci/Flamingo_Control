@@ -345,6 +345,10 @@ class SocketReader:
         original_timeout = self._socket.gettimeout()
         self._socket.settimeout(0.5)  # 500ms timeout allows shutdown checks
 
+        # Buffer for handling sync issues
+        self._resync_buffer = b''
+        consecutive_invalid = 0
+
         try:
             while self._running:
                 try:
@@ -366,10 +370,25 @@ class SocketReader:
                         if message.is_valid:
                             self._dispatcher.dispatch(message)
                             self._stats['messages_read'] += 1
+                            consecutive_invalid = 0  # Reset counter on valid message
                         else:
-                            logger.warning(f"Invalid message markers: start=0x{message.start_marker:08X}, "
-                                         f"end=0x{message.end_marker:08X}")
+                            consecutive_invalid += 1
                             self._stats['parse_errors'] += 1
+
+                            # Only log occasionally to avoid spam
+                            if consecutive_invalid <= 3 or consecutive_invalid % 100 == 0:
+                                logger.warning(
+                                    f"Invalid message markers: start=0x{message.start_marker:08X}, "
+                                    f"end=0x{message.end_marker:08X} (consecutive: {consecutive_invalid})"
+                                )
+
+                            # Try to resync if we get many consecutive invalid messages
+                            if consecutive_invalid >= 5:
+                                logger.info("Attempting to resync stream...")
+                                if self._try_resync():
+                                    consecutive_invalid = 0
+                                    logger.info("Resync successful")
+
                     except Exception as e:
                         logger.error(f"Message parse error: {e}")
                         self._stats['parse_errors'] += 1
@@ -396,6 +415,68 @@ class SocketReader:
             except:
                 pass
             logger.info(f"SocketReader read loop exiting. Stats: {self._stats}")
+
+    def _try_resync(self) -> bool:
+        """
+        Attempt to resynchronize the message stream by finding the start marker.
+
+        This is called when we receive multiple consecutive invalid messages,
+        indicating we've lost sync with the 128-byte message boundaries.
+
+        Returns:
+            True if resync was successful, False otherwise
+        """
+        # Start marker bytes in little-endian
+        START_MARKER_BYTES = struct.pack('<I', self.START_MARKER)  # 0xF321E654
+
+        # Read up to 512 bytes looking for the start marker
+        try:
+            search_data = self._socket.recv(512)
+            if not search_data:
+                return False
+
+            self._stats['bytes_read'] += len(search_data)
+
+            # Look for start marker in the data
+            marker_pos = search_data.find(START_MARKER_BYTES)
+            if marker_pos == -1:
+                logger.debug(f"Start marker not found in {len(search_data)} bytes")
+                return False
+
+            logger.debug(f"Found start marker at offset {marker_pos}")
+
+            # Read the rest of the message (128 - 4 bytes for marker already found)
+            # Plus account for data after the marker we already have
+            data_after_marker = search_data[marker_pos:]
+            bytes_needed = self.MESSAGE_SIZE - len(data_after_marker)
+
+            if bytes_needed > 0:
+                additional = b''
+                while len(additional) < bytes_needed:
+                    chunk = self._socket.recv(bytes_needed - len(additional))
+                    if not chunk:
+                        return False
+                    additional += chunk
+                    self._stats['bytes_read'] += len(chunk)
+                full_message = data_after_marker + additional
+            else:
+                full_message = data_after_marker[:self.MESSAGE_SIZE]
+
+            # Verify this is a valid message
+            message = self._parse_message(full_message)
+            if message.is_valid:
+                self._dispatcher.dispatch(message)
+                self._stats['messages_read'] += 1
+                return True
+            else:
+                logger.debug("Resync found marker but message still invalid")
+                return False
+
+        except socket.timeout:
+            return False
+        except Exception as e:
+            logger.error(f"Error during resync: {e}")
+            return False
 
     def _receive_message(self) -> Optional[bytes]:
         """
