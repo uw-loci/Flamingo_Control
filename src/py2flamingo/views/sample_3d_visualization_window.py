@@ -489,11 +489,12 @@ class Sample3DVisualizationWindow(QWidget):
             opacity_label = QLabel("80%")
 
             # Contrast range slider (min and max in one slider)
+            # Default to 0-50 for downsampled display (typical useful range)
             from superqt import QRangeSlider
             contrast_range_slider = QRangeSlider(Qt.Horizontal)
             contrast_range_slider.setRange(0, 65535)
-            contrast_range_slider.setValue((0, 65535))
-            contrast_range_label = QLabel("0 - 65535")
+            contrast_range_slider.setValue((0, 50))  # Default 0-50 for downsampled data
+            contrast_range_label = QLabel("0 - 50")
 
             # Layout channel controls (more compact)
             ch_layout.addWidget(visible_cb, 0, 0, 1, 3)
@@ -1615,7 +1616,7 @@ class Sample3DVisualizationWindow(QWidget):
             # Create empty volume
             empty_volume = np.zeros(self.voxel_storage.display_dims, dtype=np.uint16)
 
-            # Add layer
+            # Add layer with default contrast limits for downsampled data
             layer = self.viewer.add_image(
                 empty_volume,
                 name=ch_name,
@@ -1623,7 +1624,8 @@ class Sample3DVisualizationWindow(QWidget):
                 visible=ch_config.get('default_visible', True),
                 blending='additive',
                 opacity=0.8,
-                rendering='mip'
+                rendering='mip',
+                contrast_limits=(0, 50)  # Default 0-50 for downsampled display
             )
 
             # Store layer reference
