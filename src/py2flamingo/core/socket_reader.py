@@ -288,6 +288,9 @@ class SocketReader:
         self._socket = command_socket
         self._dispatcher = dispatcher
         self._running = False
+        self._paused = False
+        self._pause_event = threading.Event()
+        self._pause_event.set()  # Not paused initially
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
 
@@ -338,6 +341,39 @@ class SocketReader:
         """Check if reader is running."""
         return self._running
 
+    def pause(self):
+        """
+        Pause the reader to allow synchronous socket operations.
+
+        The reader thread will stop reading from the socket until resume() is called.
+        This is useful for operations like loading microscope settings that return
+        large text responses.
+        """
+        with self._lock:
+            if self._paused:
+                return
+            self._paused = True
+            self._pause_event.clear()
+            logger.info("SocketReader paused for synchronous operation")
+
+    def resume(self):
+        """
+        Resume the reader after a synchronous operation.
+
+        Call this after completing synchronous socket operations to restart
+        the background reading.
+        """
+        with self._lock:
+            if not self._paused:
+                return
+            self._paused = False
+            self._pause_event.set()
+            logger.info("SocketReader resumed")
+
+    def is_paused(self) -> bool:
+        """Check if reader is paused."""
+        return self._paused
+
     def _read_loop(self):
         """Main read loop - runs in background thread."""
         logger.info("SocketReader read loop starting")
@@ -352,6 +388,13 @@ class SocketReader:
 
         try:
             while self._running:
+                # Check if paused - wait until resumed or stopped
+                if not self._pause_event.wait(timeout=0.5):
+                    # Still paused, check if we should stop
+                    if not self._running:
+                        break
+                    continue
+
                 try:
                     # Read exactly 128 bytes
                     data = self._receive_message()
@@ -654,6 +697,18 @@ class CommandClient:
     def is_running(self) -> bool:
         """Check if client is running."""
         return self._reader.is_running()
+
+    def pause(self):
+        """Pause the reader for synchronous operations."""
+        self._reader.pause()
+
+    def resume(self):
+        """Resume the reader after synchronous operations."""
+        self._reader.resume()
+
+    def is_paused(self) -> bool:
+        """Check if reader is paused."""
+        return self._reader.is_paused()
 
     def send_command(self, command_bytes: bytes,
                      expected_response_code: int,

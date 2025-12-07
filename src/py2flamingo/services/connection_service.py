@@ -636,6 +636,16 @@ class MVCConnectionService:
         if not self.is_connected():
             raise RuntimeError("Not connected to microscope")
 
+        # Pause async reader to allow synchronous socket reading
+        reader_was_paused = False
+        if hasattr(self.tcp_connection, 'pause_async_reader'):
+            reader_was_paused = self.tcp_connection.pause_async_reader()
+            if reader_was_paused:
+                self.logger.debug("Paused async reader for text response")
+                # Brief delay to let the reader thread fully pause
+                import time
+                time.sleep(0.1)
+
         try:
             # Encode and send command
             cmd_bytes = self.encoder.encode_command(
@@ -703,6 +713,12 @@ class MVCConnectionService:
         except Exception as e:
             self.logger.error(f"Failed to get text response: {e}")
             raise ConnectionError(f"Failed to receive text response: {e}") from e
+
+        finally:
+            # Resume async reader if we paused it
+            if reader_was_paused and hasattr(self.tcp_connection, 'resume_async_reader'):
+                self.tcp_connection.resume_async_reader()
+                self.logger.debug("Resumed async reader after text response")
 
     def get_microscope_settings(self) -> Tuple[float, Dict[str, Any]]:
         """

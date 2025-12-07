@@ -575,6 +575,33 @@ class TCPConnection:
         """Check if async reader is active."""
         return self._command_client is not None and self._command_client.is_running()
 
+    def pause_async_reader(self) -> bool:
+        """
+        Pause the async reader for synchronous socket operations.
+
+        This is needed for operations like loading microscope settings
+        that return large text responses that must be read synchronously.
+
+        Returns:
+            True if reader was paused, False if not active
+        """
+        if self._command_client and self._command_client.is_running():
+            self._command_client.pause()
+            return True
+        return False
+
+    def resume_async_reader(self) -> bool:
+        """
+        Resume the async reader after synchronous operations.
+
+        Returns:
+            True if reader was resumed, False if not active
+        """
+        if self._command_client:
+            self._command_client.resume()
+            return True
+        return False
+
     @property
     def dispatcher(self) -> Optional["MessageDispatcher"]:
         """
