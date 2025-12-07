@@ -240,29 +240,26 @@ class VolumeScanWorkflow(QObject):
             z_start: Starting Z position for paint
             z_end: Ending Z position for paint
         """
-        # First move to XY position
-        logger.debug(f"Moving to XY: ({x:.2f}, {y:.2f})")
+        from py2flamingo.models.microscope import Position
 
-        # Move X
-        self.movement_controller.move_absolute('x', x)
-        time.sleep(0.1)  # Brief delay between commands
+        # Get current position to preserve R axis
+        current_r = 0.0
+        try:
+            current_pos = self.position_controller.get_current_position()
+            if current_pos:
+                current_r = current_pos.r
+        except Exception:
+            pass
 
-        # Move Y
-        self.movement_controller.move_absolute('y', y)
+        # Move to XY position and Z start together using move_to_position
+        # This handles the movement lock properly for multi-axis moves
+        logger.debug(f"Moving to XY: ({x:.2f}, {y:.2f}), Z start: {z_start:.1f}")
 
-        # Wait for XY positioning (movements run async)
-        time.sleep(self.config.xy_move_time_s)
+        target_position = Position(x=x, y=y, z=z_start, r=current_r)
+        self.position_controller.move_to_position(target_position, validate=True)
 
-        # Settle
+        # Settle after XY+Z positioning
         time.sleep(self.config.settle_time_s)
-
-        # Now move to Z start if not already there
-        # (For bidirectional, we should already be near the right Z from previous paint)
-        current_z = self._get_current_z()
-        if current_z is not None and abs(current_z - z_start) > 0.1:
-            logger.debug(f"Moving to Z start: {z_start:.1f}")
-            self.movement_controller.move_absolute('z', z_start)
-            time.sleep(1.0)  # Wait for Z positioning
 
         # Emit position signal (for 3D viewer to know where we're painting)
         self.scan_position.emit(x, y, z_start, z_end)
