@@ -837,7 +837,15 @@ class ConnectionView(QWidget):
         Runs optimal volume scan using bidirectional Z-painting with serpentine XY tiling.
         """
         from PyQt5.QtWidgets import QMessageBox, QApplication, QProgressDialog
-        from py2flamingo.workflows.volume_scan_workflow import VolumeScanWorkflow, VolumeScanConfig
+        from pathlib import Path
+        import importlib.util
+        # Direct import to avoid loading broken workflow_facade dependencies in __init__.py
+        workflow_path = Path(__file__).parent.parent / 'workflows' / 'volume_scan_workflow.py'
+        spec = importlib.util.spec_from_file_location("volume_scan_workflow", workflow_path)
+        vsw_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(vsw_module)
+        VolumeScanWorkflow = vsw_module.VolumeScanWorkflow
+        VolumeScanConfig = vsw_module.VolumeScanConfig
 
         self._logger.info("Volume Scan button clicked")
 
