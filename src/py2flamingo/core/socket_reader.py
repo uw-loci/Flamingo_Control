@@ -291,6 +291,8 @@ class SocketReader:
         self._paused = False
         self._pause_event = threading.Event()
         self._pause_event.set()  # Not paused initially
+        self._paused_confirmed = threading.Event()
+        self._paused_confirmed.set()  # Starts as "confirmed not paused"
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
 
@@ -341,19 +343,27 @@ class SocketReader:
         """Check if reader is running."""
         return self._running
 
-    def pause(self):
+    def pause(self, wait_timeout: float = 1.0):
         """
         Pause the reader to allow synchronous socket operations.
 
         The reader thread will stop reading from the socket until resume() is called.
-        This is useful for operations like loading microscope settings that return
-        large text responses.
+        This blocks until the reader thread confirms it has paused.
+
+        Args:
+            wait_timeout: Max time to wait for reader to actually pause
         """
         with self._lock:
             if self._paused:
                 return
             self._paused = True
             self._pause_event.clear()
+            self._paused_confirmed.clear()  # Will be set by reader thread
+
+        # Wait for the reader thread to confirm it's paused
+        if not self._paused_confirmed.wait(timeout=wait_timeout):
+            logger.warning(f"SocketReader pause confirmation timeout after {wait_timeout}s")
+        else:
             logger.info("SocketReader paused for synchronous operation")
 
     def resume(self):
@@ -389,11 +399,15 @@ class SocketReader:
         try:
             while self._running:
                 # Check if paused - wait until resumed or stopped
-                if not self._pause_event.wait(timeout=0.5):
-                    # Still paused, check if we should stop
-                    if not self._running:
-                        break
-                    continue
+                if not self._pause_event.is_set():
+                    # Signal that we're now paused (not reading)
+                    self._paused_confirmed.set()
+                    # Wait for resume
+                    if not self._pause_event.wait(timeout=0.5):
+                        # Still paused, check if we should stop
+                        if not self._running:
+                            break
+                        continue
 
                 try:
                     # Read exactly 128 bytes

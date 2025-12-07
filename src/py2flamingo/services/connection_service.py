@@ -642,9 +642,6 @@ class MVCConnectionService:
             reader_was_paused = self.tcp_connection.pause_async_reader()
             if reader_was_paused:
                 self.logger.debug("Paused async reader for text response")
-                # Brief delay to let the reader thread fully pause
-                import time
-                time.sleep(0.1)
 
         try:
             # Encode and send command
