@@ -200,6 +200,19 @@ class ConnectionView(QWidget):
         self.voxel_test_btn.setEnabled(False)  # Enabled when connected
         debug_layout.addWidget(self.voxel_test_btn)
 
+        # Volume Scan button
+        self.volume_scan_btn = QPushButton("Run Volume Scan")
+        self.volume_scan_btn.setToolTip(
+            "Run optimal volume scan using bidirectional Z-painting:\n"
+            "• Serpentine XY tiling pattern\n"
+            "• Alternating Z direction at each position\n"
+            "• Volume: X(4.0-4.6), Y(11.5-13.9), Z(19.5-23.0) mm\n"
+            "• Estimated time: ~7 minutes"
+        )
+        self.volume_scan_btn.clicked.connect(self._on_volume_scan_clicked)
+        self.volume_scan_btn.setEnabled(False)  # Enabled when connected
+        debug_layout.addWidget(self.volume_scan_btn)
+
         debug_layout.addStretch()
         layout.addLayout(debug_layout)
 
@@ -304,6 +317,7 @@ class ConnectionView(QWidget):
             self.debug_query_btn.setEnabled(True)
             self.save_settings_btn.setEnabled(True)
             self.voxel_test_btn.setEnabled(True)
+            self.volume_scan_btn.setEnabled(True)
         else:
             # Disconnected state
             self.status_label.setText("Status: Not connected")
@@ -316,6 +330,7 @@ class ConnectionView(QWidget):
             self.debug_query_btn.setEnabled(False)
             self.save_settings_btn.setEnabled(False)
             self.voxel_test_btn.setEnabled(False)
+            self.volume_scan_btn.setEnabled(False)
 
     def _show_message(self, message: str, is_error: bool = False) -> None:
         """Display feedback message with appropriate color coding.
@@ -815,6 +830,161 @@ class ConnectionView(QWidget):
             self._show_message(f"Failed to start test: {e}", is_error=True)
             self.voxel_test_btn.setEnabled(True)
             self.voxel_test_btn.setText("Test 3D Voxel Movement")
+
+    def _on_volume_scan_clicked(self) -> None:
+        """Handle volume scan button click.
+
+        Runs optimal volume scan using bidirectional Z-painting with serpentine XY tiling.
+        """
+        from PyQt5.QtWidgets import QMessageBox, QApplication, QProgressDialog
+        from py2flamingo.workflows.volume_scan_workflow import VolumeScanWorkflow, VolumeScanConfig
+
+        self._logger.info("Volume Scan button clicked")
+
+        # Check if connected
+        if not self._position_controller or not self._position_controller.connection.is_connected():
+            self._show_message("Must be connected to run volume scan", is_error=True)
+            return
+
+        # Find the main window
+        app = QApplication.instance()
+        main_window = None
+        for widget in app.topLevelWidgets():
+            if widget.__class__.__name__ == 'MainWindow':
+                main_window = widget
+                break
+
+        if not main_window:
+            self._show_message("Could not find main application window", is_error=True)
+            return
+
+        # Check if 3D visualization is open
+        viz_3d_open = False
+        if hasattr(main_window, 'sample_3d_visualization_window'):
+            viz_3d_open = main_window.sample_3d_visualization_window and main_window.sample_3d_visualization_window.isVisible()
+
+        if not viz_3d_open:
+            self._show_message("Please open 3D Sample Visualization first", is_error=True)
+            return
+
+        # Get movement controller from stage_control_view
+        movement_controller = None
+        if hasattr(main_window, 'stage_control_view') and main_window.stage_control_view:
+            movement_controller = getattr(main_window.stage_control_view, 'movement_controller', None)
+
+        if not movement_controller:
+            self._show_message("Movement controller not available", is_error=True)
+            return
+
+        # Create config
+        config = VolumeScanConfig()
+
+        # Calculate estimated time
+        workflow = VolumeScanWorkflow(
+            movement_controller=movement_controller,
+            position_controller=self._position_controller,
+            config=config
+        )
+        est_time_s = workflow.estimate_scan_time()
+        est_time_m = est_time_s / 60
+
+        # Show confirmation dialog
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Question)
+        msg.setWindowTitle("Run Volume Scan")
+        msg.setText("This will run an optimal volume scan:")
+        msg.setInformativeText(
+            f"Volume bounds:\n"
+            f"  X: {config.x_min:.1f} → {config.x_max:.1f} mm\n"
+            f"  Y: {config.y_min:.1f} → {config.y_max:.1f} mm\n"
+            f"  Z: {config.z_min:.1f} → {config.z_max:.1f} mm\n\n"
+            f"Step size: {config.xy_step:.2f} mm\n"
+            f"Estimated time: {est_time_m:.1f} minutes\n\n"
+            f"Strategy: Bidirectional Z-painting with serpentine XY\n\n"
+            "Continue?"
+        )
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setDefaultButton(QMessageBox.No)
+
+        if msg.exec_() != QMessageBox.Yes:
+            self._logger.info("User cancelled volume scan")
+            return
+
+        # Disable button during scan
+        self.volume_scan_btn.setEnabled(False)
+        self.volume_scan_btn.setText("Scanning...")
+
+        # Store workflow reference
+        self._volume_scan_workflow = workflow
+
+        # Create progress dialog
+        self._scan_progress = QProgressDialog(
+            "Starting volume scan...",
+            "Cancel",
+            0, 100,
+            self
+        )
+        self._scan_progress.setWindowTitle("Volume Scan Progress")
+        self._scan_progress.setMinimumDuration(0)
+        self._scan_progress.setAutoClose(False)
+        self._scan_progress.setAutoReset(False)
+
+        # Connect signals
+        workflow.scan_started.connect(self._on_scan_started)
+        workflow.scan_progress.connect(self._on_scan_progress)
+        workflow.scan_position.connect(self._on_scan_position)
+        workflow.scan_completed.connect(self._on_scan_completed)
+        workflow.scan_cancelled.connect(self._on_scan_cancelled)
+        workflow.scan_error.connect(self._on_scan_error)
+        self._scan_progress.canceled.connect(workflow.cancel)
+
+        # Start scan
+        self._logger.info("Starting volume scan workflow")
+        workflow.start()
+
+    def _on_scan_started(self) -> None:
+        """Handle scan started signal."""
+        self._logger.info("Volume scan started")
+        self._show_message("Volume scan started", is_error=False)
+
+    def _on_scan_progress(self, current: int, total: int, percent: float) -> None:
+        """Handle scan progress signal."""
+        if hasattr(self, '_scan_progress') and self._scan_progress:
+            self._scan_progress.setValue(int(percent))
+            self._scan_progress.setLabelText(
+                f"Scanning position {current}/{total} ({percent:.1f}%)"
+            )
+
+    def _on_scan_position(self, x: float, y: float, z_start: float, z_end: float) -> None:
+        """Handle scan position signal - update 3D visualization."""
+        self._logger.debug(f"Scan position: X={x:.2f}, Y={y:.2f}, Z={z_start:.1f}→{z_end:.1f}")
+
+    def _on_scan_completed(self) -> None:
+        """Handle scan completed signal."""
+        self._logger.info("Volume scan completed")
+        self._show_message("Volume scan completed successfully!", is_error=False)
+        self._cleanup_scan()
+
+    def _on_scan_cancelled(self) -> None:
+        """Handle scan cancelled signal."""
+        self._logger.info("Volume scan cancelled")
+        self._show_message("Volume scan cancelled", is_error=False)
+        self._cleanup_scan()
+
+    def _on_scan_error(self, error_msg: str) -> None:
+        """Handle scan error signal."""
+        self._logger.error(f"Volume scan error: {error_msg}")
+        self._show_message(f"Volume scan error: {error_msg}", is_error=True)
+        self._cleanup_scan()
+
+    def _cleanup_scan(self) -> None:
+        """Clean up after scan completes/cancels/errors."""
+        self.volume_scan_btn.setEnabled(True)
+        self.volume_scan_btn.setText("Run Volume Scan")
+        if hasattr(self, '_scan_progress') and self._scan_progress:
+            self._scan_progress.close()
+            self._scan_progress = None
+        self._volume_scan_workflow = None
 
     def _on_config_selected(self, config_name: str) -> None:
         """Handle configuration selection from dropdown.

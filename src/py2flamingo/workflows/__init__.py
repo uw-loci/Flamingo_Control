@@ -88,6 +88,12 @@ from .workflow_executor import (
     WorkflowExecutionError as ExecutorError  # Avoid name conflict
 )
 
+from .volume_scan_workflow import (
+    VolumeScanConfig,
+    VolumeScanWorkflow,
+    run_volume_scan,
+)
+
 # Define public API
 __all__ = [
     # Main facade
@@ -116,6 +122,11 @@ __all__ = [
 
     # States
     'ExecutionState',
+
+    # Volume scan workflow
+    'VolumeScanConfig',
+    'VolumeScanWorkflow',
+    'run_volume_scan',
 ]
 
 # Module version
