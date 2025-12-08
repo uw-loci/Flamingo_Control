@@ -201,20 +201,27 @@ def wait_for_position(movement_controller, target_x, target_y, target_z, target_
     return False
 
 
-def test_voxel_movement(controller, main_window=None):
+def test_voxel_movement(controller, main_window=None, mode='simple'):
     """
-    Simple test sequence to verify voxel movement.
+    Test sequence for 3D voxel movement with laser/camera automation.
 
     Args:
         controller: Position controller (used only for connection check)
         main_window: Main application window (optional, will search if not provided)
+        mode: 'simple' for quick test movements, 'volume_scan' for full serpentine scan
+
+    Modes:
+        'simple': Quick test with 5 movements (Z, X, Z, Y, Z) - ~30 seconds
+        'volume_scan': Full serpentine XY with Z-painting - ~2 minutes
 
     Run from Connection tab button or manually:
     >>> from tests.test_3d_movement_simple import test_voxel_movement
-    >>> test_voxel_movement(self.controller)
+    >>> test_voxel_movement(self.controller)  # Simple mode
+    >>> test_voxel_movement(self.controller, mode='volume_scan')  # Full scan
     """
+    mode_desc = "Simple Test" if mode == 'simple' else "Volume Scan (Serpentine Z-Painting)"
     print("\n" + "="*60)
-    print("3D Voxel Movement Test - Using MovementController")
+    print(f"3D Voxel Movement Test - {mode_desc}")
     print("="*60)
 
     if not controller or not controller.connection.is_connected():
@@ -504,53 +511,70 @@ def test_voxel_movement(controller, main_window=None):
     print("\n6. Capturing initial voxel state...")
     initial_voxels = capture_voxel_state(viz_window)
 
-    # Step 8: Move stage with specific sequence for voxel filling test
-    # Movements: Z=23, X=4.6, Z=19.5, Y=11.5, Z=22
-    print("\n7. Executing movement sequence using MovementController...")
-    print("   (MovementController emits motion_started/motion_stopped signals for frame buffering)")
+    # Step 8: Execute movement sequence based on mode
+    if mode == 'volume_scan':
+        # Full volume scan with serpentine XY and bidirectional Z-painting
+        print("\n7. Executing VOLUME SCAN movement sequence...")
+        print("   (Serpentine XY with bidirectional Z-painting)")
 
-    movements = []
-    voxel_states = {'initial': initial_voxels}
+        scan_results = execute_volume_scan_movements(
+            movement_controller=movement_controller,
+            position_controller=controller,
+            viz_window=viz_window
+        )
 
-    # Movement 1: Z to 23
-    print("\n   Movement 1: Z to 23.0mm...")
-    move_and_wait(movement_controller, 'z', 23.0)
-    smart_sleep(2, "Capturing voxel data after Z movement...")
-    movements.append(('Z', initial_z, 23.0))
-    voxel_states['after_z1'] = capture_voxel_state(viz_window)
-    print(f"   Voxel state after Z=23: {voxel_states['after_z1']}")
+        # Extract results for compatibility with rest of function
+        movements = [(m['z_direction'], m['z_start'], m['z_end']) for m in scan_results['movements']]
+        voxel_states = scan_results['voxel_states']
+        voxel_states['initial'] = initial_voxels
 
-    # Movement 2: X to 4.6
-    print("\n   Movement 2: X to 4.6mm...")
-    move_and_wait(movement_controller, 'x', 4.6)
-    smart_sleep(2, "Capturing voxel data after X movement...")
-    movements.append(('X', 4.0, 4.6))
-    voxel_states['after_x'] = capture_voxel_state(viz_window)
-    print(f"   Voxel state after X=4.6: {voxel_states['after_x']}")
+    else:
+        # Simple test movements: Z=23, X=4.6, Z=19.5, Y=11.5, Z=22
+        print("\n7. Executing SIMPLE TEST movement sequence...")
+        print("   (MovementController emits motion_started/motion_stopped signals for frame buffering)")
 
-    # Movement 3: Z to 19.5
-    print("\n   Movement 3: Z to 19.5mm...")
-    move_and_wait(movement_controller, 'z', 19.5)
-    smart_sleep(2, "Capturing voxel data after Z movement...")
-    movements.append(('Z', 23.0, 19.5))
-    voxel_states['after_z2'] = capture_voxel_state(viz_window)
-    print(f"   Voxel state after Z=19.5: {voxel_states['after_z2']}")
+        movements = []
+        voxel_states = {'initial': initial_voxels}
 
-    # Movement 4: Y to 11.5
-    print("\n   Movement 4: Y to 11.5mm...")
-    move_and_wait(movement_controller, 'y', 11.5)
-    smart_sleep(2, "Capturing voxel data after Y movement...")
-    movements.append(('Y', 13.9, 11.5))
-    voxel_states['after_y'] = capture_voxel_state(viz_window)
-    print(f"   Voxel state after Y=11.5: {voxel_states['after_y']}")
+        # Movement 1: Z to 23
+        print("\n   Movement 1: Z to 23.0mm...")
+        move_and_wait(movement_controller, 'z', 23.0)
+        smart_sleep(2, "Capturing voxel data after Z movement...")
+        movements.append(('Z', initial_z, 23.0))
+        voxel_states['after_z1'] = capture_voxel_state(viz_window)
+        print(f"   Voxel state after Z=23: {voxel_states['after_z1']}")
 
-    # Movement 5: Z to 22
-    print("\n   Movement 5: Z to 22.0mm...")
-    move_and_wait(movement_controller, 'z', 22.0)
-    smart_sleep(2, "Capturing voxel data after Z movement...")
-    movements.append(('Z', 19.5, 22.0))
-    voxel_states['after_z3'] = capture_voxel_state(viz_window)
-    print(f"   Voxel state after Z=22: {voxel_states['after_z3']}")
+        # Movement 2: X to 4.6
+        print("\n   Movement 2: X to 4.6mm...")
+        move_and_wait(movement_controller, 'x', 4.6)
+        smart_sleep(2, "Capturing voxel data after X movement...")
+        movements.append(('X', 4.0, 4.6))
+        voxel_states['after_x'] = capture_voxel_state(viz_window)
+        print(f"   Voxel state after X=4.6: {voxel_states['after_x']}")
+
+        # Movement 3: Z to 19.5
+        print("\n   Movement 3: Z to 19.5mm...")
+        move_and_wait(movement_controller, 'z', 19.5)
+        smart_sleep(2, "Capturing voxel data after Z movement...")
+        movements.append(('Z', 23.0, 19.5))
+        voxel_states['after_z2'] = capture_voxel_state(viz_window)
+        print(f"   Voxel state after Z=19.5: {voxel_states['after_z2']}")
+
+        # Movement 4: Y to 11.5
+        print("\n   Movement 4: Y to 11.5mm...")
+        move_and_wait(movement_controller, 'y', 11.5)
+        smart_sleep(2, "Capturing voxel data after Y movement...")
+        movements.append(('Y', 13.9, 11.5))
+        voxel_states['after_y'] = capture_voxel_state(viz_window)
+        print(f"   Voxel state after Y=11.5: {voxel_states['after_y']}")
+
+        # Movement 5: Z to 22
+        print("\n   Movement 5: Z to 22.0mm...")
+        move_and_wait(movement_controller, 'z', 22.0)
+        smart_sleep(2, "Capturing voxel data after Z movement...")
+        movements.append(('Z', 19.5, 22.0))
+        voxel_states['after_z3'] = capture_voxel_state(viz_window)
+        print(f"   Voxel state after Z=22: {voxel_states['after_z3']}")
 
     # Step 9: Capture final state at moved position
     print("\n8. Capturing final state at moved position...")
@@ -766,6 +790,187 @@ def export_test_data(movements, initial, x_move, y_move, z_move, final_moved, fi
 
     print(f"\nTest data exported to: {filename}")
     return filename
+
+
+def generate_volume_scan_path(config=None):
+    """
+    Generate optimal scan path using serpentine XY with alternating Z.
+
+    This implements bidirectional Z-painting for efficient 3D volume acquisition:
+    - Alternating Z direction at each XY position (eliminates Z repositioning)
+    - Serpentine XY pattern (eliminates return-to-start movements)
+
+    Args:
+        config: Dict with scan parameters, or None for defaults
+
+    Returns:
+        List of (x_pos, y_pos, z_start, z_end) tuples
+    """
+    # Default volume scan configuration
+    if config is None:
+        config = {
+            'x_min': 4.0, 'x_max': 4.6,
+            'y_min': 11.5, 'y_max': 13.9,
+            'z_min': 19.5, 'z_max': 23.0,
+            'xy_step': 0.47,  # ~10% overlap with 0.52mm FOV
+        }
+
+    positions = []
+
+    # Calculate grid
+    x_positions = []
+    x = config['x_min']
+    while x <= config['x_max']:
+        x_positions.append(x)
+        x += config['xy_step']
+
+    y_positions = []
+    y = config['y_min']
+    while y <= config['y_max']:
+        y_positions.append(y)
+        y += config['xy_step']
+
+    # Generate serpentine path with alternating Z direction
+    z_direction = 1  # Start painting upward
+
+    for y_idx, y_pos in enumerate(y_positions):
+        # Alternate X direction for serpentine pattern
+        if y_idx % 2 == 0:
+            x_range = x_positions
+        else:
+            x_range = list(reversed(x_positions))
+
+        for x_pos in x_range:
+            if z_direction == 1:
+                z_start, z_end = config['z_min'], config['z_max']
+            else:
+                z_start, z_end = config['z_max'], config['z_min']
+
+            positions.append((x_pos, y_pos, z_start, z_end))
+            z_direction *= -1  # Alternate Z direction
+
+    print(f"   Generated scan path: {len(positions)} positions")
+    print(f"   X: {len(x_positions)} steps ({config['x_min']:.1f} to {config['x_max']:.1f} mm)")
+    print(f"   Y: {len(y_positions)} steps ({config['y_min']:.1f} to {config['y_max']:.1f} mm)")
+    print(f"   Z: {config['z_min']:.1f} to {config['z_max']:.1f} mm (bidirectional painting)")
+
+    return positions
+
+
+def execute_volume_scan_movements(movement_controller, position_controller, viz_window=None, config=None):
+    """
+    Execute volume scan using serpentine XY with bidirectional Z-painting.
+
+    This is the movement portion of a full volume scan, designed to be called
+    from within the test_voxel_movement workflow which handles laser/camera setup.
+
+    Args:
+        movement_controller: MovementController instance
+        position_controller: PositionController instance
+        viz_window: 3D visualization window (optional, for voxel state capture)
+        config: Dict with scan parameters, or None for defaults
+
+    Returns:
+        Dict with scan results including movements and voxel states
+    """
+    print("\n" + "="*60)
+    print("VOLUME SCAN - Serpentine XY with Bidirectional Z-Painting")
+    print("="*60)
+
+    # Generate scan path
+    positions = generate_volume_scan_path(config)
+    total_positions = len(positions)
+
+    # Estimate scan time
+    z_range = abs(positions[0][3] - positions[0][2]) if positions else 3.5
+    z_paint_speed = 0.735  # mm/s from timing analysis
+    xy_move_time = 2.5  # seconds per XY move
+    settle_time = 0.3  # seconds
+
+    z_paint_time = (z_range / z_paint_speed) * total_positions
+    total_xy_time = xy_move_time * total_positions
+    total_settle = settle_time * total_positions
+    est_time_s = z_paint_time + total_xy_time + total_settle
+
+    print(f"\n   Estimated scan time: {est_time_s/60:.1f} minutes")
+    print(f"   Z-paint speed: {z_paint_speed} mm/s")
+
+    movements = []
+    voxel_states = {'initial': capture_voxel_state(viz_window)}
+
+    for idx, (x_pos, y_pos, z_start, z_end) in enumerate(positions):
+        progress_pct = (idx / total_positions) * 100
+        print(f"\n   Position {idx+1}/{total_positions} ({progress_pct:.0f}%): "
+              f"X={x_pos:.2f}, Y={y_pos:.2f}, Z={z_start:.1f}→{z_end:.1f}")
+
+        # Step 1: Move to XY position and Z start
+        print(f"      Moving to XY + Z_start...")
+
+        # Get current position
+        current_pos = movement_controller.get_position()
+        current_x = current_pos.x if current_pos else x_pos
+        current_y = current_pos.y if current_pos else y_pos
+        current_z = current_pos.z if current_pos else z_start
+
+        # Move X if needed
+        if abs(current_x - x_pos) > 0.01:
+            move_and_wait(movement_controller, 'x', x_pos)
+
+        # Move Y if needed
+        if abs(current_y - y_pos) > 0.01:
+            move_and_wait(movement_controller, 'y', y_pos)
+
+        # Move to Z start if needed
+        current_pos = movement_controller.get_position()
+        current_z = current_pos.z if current_pos else z_start
+        if abs(current_z - z_start) > 0.01:
+            move_and_wait(movement_controller, 'z', z_start)
+
+        # Wait for any pending movements to complete
+        if hasattr(position_controller, 'wait_for_movement_complete'):
+            position_controller.wait_for_movement_complete(timeout=15.0)
+
+        # Settle time
+        smart_sleep(settle_time, "Settling...")
+
+        # Step 2: Z-paint (move to z_end while camera captures)
+        print(f"      Z-painting: {z_start:.1f} → {z_end:.1f} mm")
+        move_and_wait(movement_controller, 'z', z_end, timeout=15.0)
+
+        # Record movement
+        movements.append({
+            'position': idx + 1,
+            'x': x_pos, 'y': y_pos,
+            'z_start': z_start, 'z_end': z_end,
+            'z_direction': 'up' if z_end > z_start else 'down'
+        })
+
+        # Capture voxel state every few positions
+        if idx % 3 == 0 or idx == total_positions - 1:
+            state_key = f'pos_{idx+1}'
+            voxel_states[state_key] = capture_voxel_state(viz_window)
+            print(f"      Voxel state: {voxel_states[state_key]}")
+
+        # Process GUI events
+        process_gui_events()
+
+    print("\n" + "="*60)
+    print("VOLUME SCAN COMPLETE")
+    print("="*60)
+    print(f"   Completed {total_positions} positions")
+    print(f"   Total movements recorded: {len(movements)}")
+
+    return {
+        'movements': movements,
+        'voxel_states': voxel_states,
+        'total_positions': total_positions,
+        'config': config or {
+            'x_min': 4.0, 'x_max': 4.6,
+            'y_min': 11.5, 'y_max': 13.9,
+            'z_min': 19.5, 'z_max': 23.0,
+            'xy_step': 0.47
+        }
+    }
 
 
 def export_test_data_v2(movements, voxel_states, final_moved):

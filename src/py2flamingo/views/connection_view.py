@@ -865,18 +865,14 @@ class ConnectionView(QWidget):
     def _on_volume_scan_clicked(self) -> None:
         """Handle volume scan button click.
 
-        Runs optimal volume scan using bidirectional Z-painting with serpentine XY tiling.
+        Runs the test_voxel_movement function in 'volume_scan' mode, which handles:
+        - Laser setup (Laser 4 at 14.4% power)
+        - Camera live view start
+        - 3D visualization population
+        - Serpentine XY movement with bidirectional Z-painting
+        - Cleanup (stop live view, disable laser, return to start position)
         """
-        from PyQt5.QtWidgets import QMessageBox, QApplication, QProgressDialog
-        from pathlib import Path
-        import importlib.util
-        # Direct import to avoid loading broken workflow_facade dependencies in __init__.py
-        workflow_path = Path(__file__).parent.parent / 'workflows' / 'volume_scan_workflow.py'
-        spec = importlib.util.spec_from_file_location("volume_scan_workflow", workflow_path)
-        vsw_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(vsw_module)
-        VolumeScanWorkflow = vsw_module.VolumeScanWorkflow
-        VolumeScanConfig = vsw_module.VolumeScanConfig
+        from PyQt5.QtWidgets import QMessageBox, QApplication
 
         self._logger.info("Volume Scan button clicked")
 
@@ -897,118 +893,42 @@ class ConnectionView(QWidget):
             self._show_message("Could not find main application window", is_error=True)
             return
 
-        # Check if 3D visualization is open
+        # Check if required windows are open (test function will handle the rest)
+        camera_viewer_open = False
         viz_3d_open = False
+
+        if hasattr(main_window, 'camera_live_viewer'):
+            camera_viewer_open = main_window.camera_live_viewer and main_window.camera_live_viewer.isVisible()
+
         if hasattr(main_window, 'sample_3d_visualization_window'):
             viz_3d_open = main_window.sample_3d_visualization_window and main_window.sample_3d_visualization_window.isVisible()
 
-        if not viz_3d_open:
-            self._show_message("Please open 3D Sample Visualization first", is_error=True)
+        if not camera_viewer_open or not viz_3d_open:
+            missing = []
+            if not camera_viewer_open:
+                missing.append("Camera Live Viewer")
+            if not viz_3d_open:
+                missing.append("3D Sample Visualization")
+
+            self._show_message(f"Please open these windows first:\n• {chr(10).join('• ' + w for w in missing)}", is_error=True)
             return
-
-        # Check if camera live viewer is open and streaming
-        camera_viewer_open = False
-        live_view_streaming = False
-        if hasattr(main_window, 'camera_live_viewer'):
-            camera_viewer = main_window.camera_live_viewer
-            camera_viewer_open = camera_viewer and camera_viewer.isVisible()
-            if camera_viewer_open and hasattr(camera_viewer, 'camera_controller'):
-                # Check if camera is in LIVE_VIEW state or streaming
-                from py2flamingo.controllers.camera_controller import CameraState
-                live_view_streaming = (
-                    camera_viewer.camera_controller._state == CameraState.LIVE_VIEW or
-                    (hasattr(camera_viewer.camera_controller, 'camera_service') and
-                     camera_viewer.camera_controller.camera_service._streaming)
-                )
-
-        if not camera_viewer_open:
-            self._show_message("Please open Camera Live Viewer first", is_error=True)
-            return
-
-        if not live_view_streaming:
-            self._show_message("Please start Live View before running scan", is_error=True)
-            return
-
-        # Check if any lasers/LED are enabled (for imaging)
-        illumination_enabled = False
-        illumination_source = None
-        if hasattr(main_window, 'camera_live_viewer') and main_window.camera_live_viewer:
-            camera_viewer = main_window.camera_live_viewer
-            # Find the laser/LED control panel
-            laser_panel = None
-            if hasattr(camera_viewer, 'laser_led_panel'):
-                laser_panel = camera_viewer.laser_led_panel
-            else:
-                # Search in children
-                from PyQt5.QtWidgets import QWidget
-                for child in camera_viewer.findChildren(QWidget):
-                    if child.__class__.__name__ == 'LaserLEDControlPanel':
-                        laser_panel = child
-                        break
-
-            if laser_panel and hasattr(laser_panel, '_source_button_group'):
-                checked_button = laser_panel._source_button_group.checkedButton()
-                if checked_button:
-                    illumination_enabled = True
-                    source_id = laser_panel._source_button_group.id(checked_button)
-                    if source_id == -1:
-                        illumination_source = "LED"
-                    else:
-                        illumination_source = f"Laser {source_id}"
-
-        if not illumination_enabled:
-            # Warn but don't block - user might want to proceed anyway
-            from PyQt5.QtWidgets import QMessageBox
-            result = self._create_topmost_messagebox(
-                QMessageBox.Warning,
-                "No Illumination Enabled",
-                "No illumination source is currently enabled.",
-                "The volume scan will run, but no image data will be captured.\n\n"
-                "To capture image data:\n"
-                "1. In Camera Live Viewer, check a laser or LED checkbox\n"
-                "2. Set appropriate power levels\n"
-                "3. Verify you can see the sample in live view\n\n"
-                "Continue without illumination?"
-            ).exec_()
-
-            if result != QMessageBox.Yes:
-                return
-        else:
-            self._logger.info(f"Illumination source enabled: {illumination_source}")
-
-        # Get movement controller from stage_control_view
-        movement_controller = None
-        if hasattr(main_window, 'stage_control_view') and main_window.stage_control_view:
-            movement_controller = getattr(main_window.stage_control_view, 'movement_controller', None)
-
-        if not movement_controller:
-            self._show_message("Movement controller not available", is_error=True)
-            return
-
-        # Create config
-        config = VolumeScanConfig()
-
-        # Calculate estimated time
-        workflow = VolumeScanWorkflow(
-            movement_controller=movement_controller,
-            position_controller=self._position_controller,
-            config=config
-        )
-        est_time_s = workflow.estimate_scan_time()
-        est_time_m = est_time_s / 60
 
         # Show confirmation dialog (with stay-on-top to appear above camera viewer)
         msg = self._create_topmost_messagebox(
             QMessageBox.Question,
             "Run Volume Scan",
-            "This will run an optimal volume scan:",
-            f"Volume bounds:\n"
-            f"  X: {config.x_min:.1f} → {config.x_max:.1f} mm\n"
-            f"  Y: {config.y_min:.1f} → {config.y_max:.1f} mm\n"
-            f"  Z: {config.z_min:.1f} → {config.z_max:.1f} mm\n\n"
-            f"Step size: {config.xy_step:.2f} mm\n"
-            f"Estimated time: {est_time_m:.1f} minutes\n\n"
-            f"Strategy: Bidirectional Z-painting with serpentine XY\n\n"
+            "This will run an automated volume scan:",
+            "The scan will:\n"
+            "1. Move to starting position (X=4, Y=13.9, Z=20.2)\n"
+            "2. Enable Laser 4 (640nm) at 14.4% power\n"
+            "3. Start live view and 3D population\n"
+            "4. Execute serpentine XY scan with Z-painting\n"
+            "   • 12 positions (2 X steps × 6 Y steps)\n"
+            "   • Bidirectional Z-painting at each position\n"
+            "5. Stop population and live view\n"
+            "6. Disable laser\n"
+            "7. Return to starting position\n\n"
+            "Estimated time: ~2 minutes\n\n"
             "Continue?"
         )
 
@@ -1020,72 +940,32 @@ class ConnectionView(QWidget):
         self.volume_scan_btn.setEnabled(False)
         self.volume_scan_btn.setText("Scanning...")
 
-        # Store workflow reference
-        self._volume_scan_workflow = workflow
+        try:
+            # Import and run the test function in volume_scan mode
+            from tests.test_3d_movement_simple import test_voxel_movement
 
-        # Create progress dialog
-        self._scan_progress = QProgressDialog(
-            "Starting volume scan...",
-            "Cancel",
-            0, 100,
-            self
-        )
-        self._scan_progress.setWindowTitle("Volume Scan Progress")
-        self._scan_progress.setMinimumDuration(0)
-        self._scan_progress.setAutoClose(False)
-        self._scan_progress.setAutoReset(False)
-        # Ensure progress dialog stays on top of camera viewer
-        self._scan_progress.setWindowFlags(
-            self._scan_progress.windowFlags() | Qt.WindowStaysOnTopHint
-        )
+            self._logger.info("Starting volume scan via test_voxel_movement(mode='volume_scan')")
 
-        # Connect signals
-        workflow.scan_started.connect(self._on_scan_started)
-        workflow.scan_progress.connect(self._on_scan_progress)
-        workflow.scan_position.connect(self._on_scan_position)
-        workflow.scan_completed.connect(self._on_scan_completed)
-        workflow.scan_cancelled.connect(self._on_scan_cancelled)
-        workflow.scan_error.connect(self._on_scan_error)
-        self._scan_progress.canceled.connect(workflow.cancel)
+            # Run the test - it handles everything: laser, camera, movements, cleanup
+            success = test_voxel_movement(self._position_controller, main_window, mode='volume_scan')
 
-        # Start scan
-        self._logger.info("Starting volume scan workflow")
-        workflow.start()
+            if success:
+                self._show_message("Volume scan completed successfully!", is_error=False)
+                self._logger.info("Volume scan completed")
+            else:
+                self._show_message("Volume scan completed with warnings. Check console output.", is_error=True)
+                self._logger.warning("Volume scan completed with warnings")
 
-    def _on_scan_started(self) -> None:
-        """Handle scan started signal."""
-        self._logger.info("Volume scan started")
-        self._show_message("Volume scan started", is_error=False)
-
-    def _on_scan_progress(self, current: int, total: int, percent: float) -> None:
-        """Handle scan progress signal."""
-        if hasattr(self, '_scan_progress') and self._scan_progress:
-            self._scan_progress.setValue(int(percent))
-            self._scan_progress.setLabelText(
-                f"Scanning position {current}/{total} ({percent:.1f}%)"
-            )
-
-    def _on_scan_position(self, x: float, y: float, z_start: float, z_end: float) -> None:
-        """Handle scan position signal - update 3D visualization."""
-        self._logger.debug(f"Scan position: X={x:.2f}, Y={y:.2f}, Z={z_start:.1f}→{z_end:.1f}")
-
-    def _on_scan_completed(self) -> None:
-        """Handle scan completed signal."""
-        self._logger.info("Volume scan completed")
-        self._show_message("Volume scan completed successfully!", is_error=False)
-        self._cleanup_scan()
-
-    def _on_scan_cancelled(self) -> None:
-        """Handle scan cancelled signal."""
-        self._logger.info("Volume scan cancelled")
-        self._show_message("Volume scan cancelled", is_error=False)
-        self._cleanup_scan()
-
-    def _on_scan_error(self, error_msg: str) -> None:
-        """Handle scan error signal."""
-        self._logger.error(f"Volume scan error: {error_msg}")
-        self._show_message(f"Volume scan error: {error_msg}", is_error=True)
-        self._cleanup_scan()
+        except ImportError as e:
+            self._logger.error(f"Could not import test module: {e}")
+            self._show_message("Test module not found. Make sure tests/test_3d_movement_simple.py exists.", is_error=True)
+        except Exception as e:
+            self._logger.error(f"Error during volume scan: {e}", exc_info=True)
+            self._show_message(f"Volume scan failed: {e}", is_error=True)
+        finally:
+            # Re-enable button
+            self.volume_scan_btn.setEnabled(True)
+            self.volume_scan_btn.setText("Run Volume Scan")
 
     def _cleanup_scan(self) -> None:
         """Clean up after scan completes/cancels/errors."""
