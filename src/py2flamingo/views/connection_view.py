@@ -332,6 +332,40 @@ class ConnectionView(QWidget):
             self.voxel_test_btn.setEnabled(False)
             self.volume_scan_btn.setEnabled(False)
 
+    def _create_topmost_messagebox(self, icon, title: str, text: str,
+                                     informative_text: str = None,
+                                     buttons=None) -> 'QMessageBox':
+        """Create a QMessageBox that stays on top of all windows.
+
+        This ensures the dialog appears above windows with WindowStaysOnTopHint
+        (like Camera Live Viewer).
+
+        Args:
+            icon: QMessageBox icon (e.g., QMessageBox.Question)
+            title: Window title
+            text: Main message text
+            informative_text: Optional additional text
+            buttons: QMessageBox buttons (default: Yes|No)
+
+        Returns:
+            Configured QMessageBox ready to exec_()
+        """
+        from PyQt5.QtWidgets import QMessageBox
+
+        msg = QMessageBox(self)
+        msg.setIcon(icon)
+        msg.setWindowTitle(title)
+        msg.setText(text)
+        if informative_text:
+            msg.setInformativeText(informative_text)
+        msg.setStandardButtons(buttons or (QMessageBox.Yes | QMessageBox.No))
+        msg.setDefaultButton(QMessageBox.No)
+
+        # Critical: Set WindowStaysOnTopHint so dialog appears above camera viewer
+        msg.setWindowFlags(msg.windowFlags() | Qt.WindowStaysOnTopHint)
+
+        return msg
+
     def _show_message(self, message: str, is_error: bool = False) -> None:
         """Display feedback message with appropriate color coding.
 
@@ -741,12 +775,11 @@ class ConnectionView(QWidget):
             self._logger.error("Failed to find MainWindow or workflow_view")
             return
 
-        # Show confirmation dialog
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Question)
-        msg.setWindowTitle("Run 3D Voxel Movement Test")
-        msg.setText("This will run an automated test sequence:")
-        msg.setInformativeText(
+        # Show confirmation dialog (with stay-on-top to appear above camera viewer)
+        msg = self._create_topmost_messagebox(
+            QMessageBox.Question,
+            "Run 3D Voxel Movement Test",
+            "This will run an automated test sequence:",
             "1. Query and store current stage position\n"
             "2. Enable Laser 4 (640nm) at 14.4% power\n"
             "3. Start live view\n"
@@ -760,8 +793,6 @@ class ConnectionView(QWidget):
             "The test takes about 60 seconds.\n\n"
             "Continue?"
         )
-        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        msg.setDefaultButton(QMessageBox.No)
 
         if msg.exec_() != QMessageBox.Yes:
             self._logger.info("User cancelled voxel test")
@@ -896,12 +927,11 @@ class ConnectionView(QWidget):
         est_time_s = workflow.estimate_scan_time()
         est_time_m = est_time_s / 60
 
-        # Show confirmation dialog
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Question)
-        msg.setWindowTitle("Run Volume Scan")
-        msg.setText("This will run an optimal volume scan:")
-        msg.setInformativeText(
+        # Show confirmation dialog (with stay-on-top to appear above camera viewer)
+        msg = self._create_topmost_messagebox(
+            QMessageBox.Question,
+            "Run Volume Scan",
+            "This will run an optimal volume scan:",
             f"Volume bounds:\n"
             f"  X: {config.x_min:.1f} → {config.x_max:.1f} mm\n"
             f"  Y: {config.y_min:.1f} → {config.y_max:.1f} mm\n"
@@ -911,8 +941,6 @@ class ConnectionView(QWidget):
             f"Strategy: Bidirectional Z-painting with serpentine XY\n\n"
             "Continue?"
         )
-        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        msg.setDefaultButton(QMessageBox.No)
 
         if msg.exec_() != QMessageBox.Yes:
             self._logger.info("User cancelled volume scan")
@@ -936,6 +964,10 @@ class ConnectionView(QWidget):
         self._scan_progress.setMinimumDuration(0)
         self._scan_progress.setAutoClose(False)
         self._scan_progress.setAutoReset(False)
+        # Ensure progress dialog stays on top of camera viewer
+        self._scan_progress.setWindowFlags(
+            self._scan_progress.windowFlags() | Qt.WindowStaysOnTopHint
+        )
 
         # Connect signals
         workflow.scan_started.connect(self._on_scan_started)

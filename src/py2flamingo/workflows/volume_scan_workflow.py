@@ -253,20 +253,29 @@ class VolumeScanWorkflow(QObject):
 
         # Move to XY position and Z start together using move_to_position
         # This handles the movement lock properly for multi-axis moves
-        logger.debug(f"Moving to XY: ({x:.2f}, {y:.2f}), Z start: {z_start:.1f}")
+        logger.info(f"[Workflow] Step 1: Moving to XY=({x:.2f}, {y:.2f}), Z_start={z_start:.1f}")
 
         target_position = Position(x=x, y=y, z=z_start, r=current_r)
         self.position_controller.move_to_position(target_position, validate=True)
+        logger.info("[Workflow] Step 2: move_to_position returned, calling wait_for_movement_complete...")
+
+        # CRITICAL: Wait for movement to complete before starting Z-paint
+        # move_to_position returns immediately (async), so we must wait
+        if not self.position_controller.wait_for_movement_complete(timeout=15.0):
+            raise RuntimeError("Timeout waiting for XY+Z positioning to complete")
+        logger.info("[Workflow] Step 3: wait_for_movement_complete returned True")
 
         # Settle after XY+Z positioning
+        logger.info(f"[Workflow] Step 4: Settling for {self.config.settle_time_s}s")
         time.sleep(self.config.settle_time_s)
 
         # Emit position signal (for 3D viewer to know where we're painting)
         self.scan_position.emit(x, y, z_start, z_end)
 
         # Execute Z-paint (move to z_end while capturing)
-        logger.debug(f"Z-painting: {z_start:.1f} → {z_end:.1f}")
+        logger.info(f"[Workflow] Step 5: Starting Z-paint from {z_start:.1f} to {z_end:.1f}")
         self.movement_controller.move_absolute('z', z_end)
+        logger.info("[Workflow] Step 6: Z-paint move_absolute returned")
 
         # The Z movement will take time - during this time,
         # the camera should be capturing frames and the 3D viewer

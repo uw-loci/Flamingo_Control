@@ -767,6 +767,7 @@ class PositionController:
                 self.logger.info("No axes needed to move - already at target position")
                 self._current_position = position
                 self._movement_lock.release()
+                self.logger.info("move_to_position returning (no movement, lock released)")
                 return
 
             # Create axis name mapping for logging (AxisCode values are integers, not objects)
@@ -782,6 +783,9 @@ class PositionController:
             # Wait for motion complete in background thread
             # Only query the axes that actually moved
             self._wait_for_motion_complete_async(position, moved_axes=moved_axes)
+
+            # NOTE: Lock is still held - will be released by background thread when motion completes
+            self.logger.info(f"move_to_position returning (lock held={self._movement_lock.locked()}, will be released by wait thread)")
 
         except Exception as e:
             # Release lock on error
@@ -1029,6 +1033,55 @@ class PositionController:
             True if emergency stop is active
         """
         return self._emergency_stop_active
+
+    def wait_for_movement_complete(self, timeout: float = 15.0) -> bool:
+        """
+        Block until the current movement completes.
+
+        This method waits for the movement lock to become available,
+        which indicates that any in-progress movement has finished.
+
+        Args:
+            timeout: Maximum time to wait in seconds (default: 15s)
+
+        Returns:
+            True if movement completed, False if timed out
+        """
+        import time
+        start_time = time.time()
+
+        self.logger.info(f"wait_for_movement_complete called (timeout={timeout}s)")
+
+        # If lock is not held, movement is already complete
+        if self._movement_lock.acquire(blocking=False):
+            self._movement_lock.release()
+            self.logger.info("wait_for_movement_complete: Lock was available, returning immediately")
+            return True
+
+        # Wait for lock to become available
+        self.logger.info(f"wait_for_movement_complete: Lock is held, waiting up to {timeout}s...")
+
+        while time.time() - start_time < timeout:
+            if self._movement_lock.acquire(blocking=True, timeout=0.5):
+                self._movement_lock.release()
+                elapsed = time.time() - start_time
+                self.logger.info(f"wait_for_movement_complete: Lock acquired after {elapsed:.2f}s - movement complete")
+                return True
+
+        self.logger.warning(f"wait_for_movement_complete: Timeout after {timeout}s - movement may still be in progress")
+        return False
+
+    def is_movement_in_progress(self) -> bool:
+        """
+        Check if a movement is currently in progress.
+
+        Returns:
+            True if movement is in progress (lock is held)
+        """
+        if self._movement_lock.acquire(blocking=False):
+            self._movement_lock.release()
+            return False
+        return True
 
     def _query_position_after_move(self, moved_axes: Optional[List[int]], target_position: Position) -> Position:
         """
