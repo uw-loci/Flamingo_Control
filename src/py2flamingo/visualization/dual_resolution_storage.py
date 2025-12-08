@@ -413,10 +413,14 @@ class DualResolutionVoxelStorage:
         ]
 
         # Track max value from DISPLAY data (what user sees in napari)
+        # PERFORMANCE: Only log significant changes (>20%) to reduce log spam
         display_max = int(np.max(self.display_cache[channel_id]))
-        if display_max > self.channel_max_values[channel_id]:
+        old_max = self.channel_max_values[channel_id]
+        if display_max > old_max:
             self.channel_max_values[channel_id] = display_max
-            logger.info(f"Channel {channel_id} display max updated to {display_max}")
+            # Only log if this is a significant increase (>20%) or first non-zero value
+            if old_max == 0 or display_max > old_max * 1.2:
+                logger.debug(f"Channel {channel_id} display max updated to {display_max}")
 
         self.display_dirty[channel_id] = False
         return self.display_cache[channel_id]

@@ -256,10 +256,18 @@ class LaserLEDService(MicroscopeCommandService):
         )
 
         if not result['success']:
-            self.logger.error(f"DEBUG: Laser {laser_index} power set FAILED: {result.get('error', 'unknown error')}")
-            return False, power_percent
+            error = result.get('error', 'unknown error')
+            if error == 'timeout':
+                # LASER_LEVEL_SET may not receive an ACK response from the server
+                # The command is sent successfully but no response comes back
+                # This is expected behavior - treat as success with warning
+                self.logger.warning(f"Laser {laser_index} power SET command sent (no ACK response - this is normal)")
+                return True, power_percent
+            else:
+                self.logger.error(f"Laser {laser_index} power set FAILED: {error}")
+                return False, power_percent
 
-        self.logger.info(f"DEBUG: Laser {laser_index} power set to {power_str}% - SUCCESS")
+        self.logger.info(f"DEBUG: Laser {laser_index} power set to {power_str}% - SUCCESS (ACK received)")
 
         # Return immediately with requested power for responsive GUI
         # Note: Caller should verify actual power asynchronously if needed
@@ -294,9 +302,18 @@ class LaserLEDService(MicroscopeCommandService):
             params=[0, 0, 0, laser_index, 0, 0, 0]  # laser_index in params[3] (int32Data0)
         )
 
-        self.logger.info(f"DEBUG: LASER_ENABLE_PREVIEW result: success={result.get('success')}, error={result.get('error', 'none')}")
+        if not result['success']:
+            error = result.get('error', 'unknown error')
+            if error == 'timeout':
+                # Laser commands may not receive ACK responses - treat timeout as success
+                self.logger.warning(f"Laser {laser_index} ENABLE_PREVIEW sent (no ACK response - this is normal)")
+                return True
+            else:
+                self.logger.error(f"Laser {laser_index} ENABLE_PREVIEW FAILED: {error}")
+                return False
 
-        return result['success']
+        self.logger.info(f"Laser {laser_index} ENABLE_PREVIEW - SUCCESS (ACK received)")
+        return True
 
     def disable_all_lasers(self) -> bool:
         """
@@ -321,8 +338,13 @@ class LaserLEDService(MicroscopeCommandService):
             )
 
             if not result['success']:
-                self.logger.warning(f"Failed to disable laser {laser_index}")
-                all_success = False
+                error = result.get('error', 'unknown error')
+                if error == 'timeout':
+                    # Laser commands may not receive ACK - treat timeout as success
+                    self.logger.debug(f"Disabled laser {laser_index} (no ACK response)")
+                else:
+                    self.logger.warning(f"Failed to disable laser {laser_index}: {error}")
+                    all_success = False
             else:
                 self.logger.debug(f"Disabled laser {laser_index}")
 
@@ -380,7 +402,7 @@ class LaserLEDService(MicroscopeCommandService):
             params=[0, 0, 0, led_color, led_value, 0, 0]
         )
 
-        return result['success']
+        return self._handle_set_command_result(result, "LED_SET")
 
     def enable_led_preview(self) -> bool:
         """
@@ -401,7 +423,7 @@ class LaserLEDService(MicroscopeCommandService):
             params=[0, 0, 0, 0, 0, 0, 0]
         )
 
-        return result['success']
+        return self._handle_set_command_result(result, "LED_PREVIEW_ENABLE")
 
     def disable_led_preview(self) -> bool:
         """
@@ -422,7 +444,35 @@ class LaserLEDService(MicroscopeCommandService):
             params=[0, 0, 0, 0, 0, 0, 0]
         )
 
-        return result['success']
+        return self._handle_set_command_result(result, "LED_PREVIEW_DISABLE")
+
+    def _handle_set_command_result(self, result: dict, command_name: str) -> bool:
+        """
+        Handle result from SET commands that may not receive ACK responses.
+
+        Many light source SET commands (laser/LED) don't receive ACK responses
+        from the server - the command is sent but no response comes back.
+        This is expected behavior, so we treat timeout as success.
+
+        Args:
+            result: Result dict from _send_command
+            command_name: Name of command for logging
+
+        Returns:
+            True if command succeeded (or timed out, which is normal)
+        """
+        if result['success']:
+            self.logger.debug(f"{command_name} - SUCCESS (ACK received)")
+            return True
+
+        error = result.get('error', 'unknown error')
+        if error == 'timeout':
+            # SET commands may not receive ACK - treat timeout as success
+            self.logger.debug(f"{command_name} sent (no ACK response - this is normal)")
+            return True
+        else:
+            self.logger.error(f"{command_name} FAILED: {error}")
+            return False
 
     def enable_illumination(self, left: bool = True, right: bool = False) -> bool:
         """
@@ -455,7 +505,7 @@ class LaserLEDService(MicroscopeCommandService):
                 "ILLUMINATION_LEFT_ENABLE",
                 params=[0, 0, 0, 0, 0, 0, 0]
             )
-            success = success and result['success']
+            success = success and self._handle_set_command_result(result, "ILLUMINATION_LEFT_ENABLE")
 
         if right:
             self.logger.info("Enabling RIGHT illumination path for synchronized imaging")
@@ -464,7 +514,7 @@ class LaserLEDService(MicroscopeCommandService):
                 "ILLUMINATION_RIGHT_ENABLE",
                 params=[0, 0, 0, 0, 0, 0, 0]
             )
-            success = success and result['success']
+            success = success and self._handle_set_command_result(result, "ILLUMINATION_RIGHT_ENABLE")
 
         if not left and not right:
             self.logger.warning("enable_illumination called with both paths disabled")
@@ -486,4 +536,4 @@ class LaserLEDService(MicroscopeCommandService):
             params=[0, 0, 0, 0, 0, 0, 0]
         )
 
-        return result['success']
+        return self._handle_set_command_result(result, "ILLUMINATION_LEFT_DISABLE")

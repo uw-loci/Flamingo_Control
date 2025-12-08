@@ -2081,12 +2081,19 @@ class Sample3DVisualizationWindow(QWidget):
             self.channel_layers[channel_id].contrast_limits = (min_val, max_val)
             logger.debug(f"Channel {channel_id} contrast: {min_val} - {max_val}")
 
-    def _update_contrast_slider_range(self, channel_id: int):
+    def _update_contrast_slider_range(self, channel_id: int, force_napari_update: bool = False):
         """
         Update contrast slider range based on maximum value recorded.
 
         Sets the slider max to the current max intensity value for the channel,
         making it easier to adjust contrast for the actual data range.
+
+        PERFORMANCE: Only updates napari layer contrast when slider actually changes,
+        to avoid redundant renders. The .data assignment already triggers a render.
+
+        Args:
+            channel_id: Channel to update
+            force_napari_update: Force napari contrast update even if slider unchanged
         """
         if channel_id not in self.channel_controls:
             return
@@ -2102,9 +2109,11 @@ class Sample3DVisualizationWindow(QWidget):
         controls = self.channel_controls[channel_id]
         slider = controls['contrast_range']
 
-        # Only update if max changed significantly
+        # Only update if max changed significantly (>20% change to reduce UI updates)
+        # This prevents cascading updates when max increases slightly with each frame
         current_max = slider.maximum()
-        if slider_max > current_max or slider_max < current_max * 0.5:
+        threshold_ratio = 1.2  # 20% change threshold
+        if slider_max > current_max * threshold_ratio or slider_max < current_max / threshold_ratio:
             # Update slider range
             slider.blockSignals(True)
             current_value = slider.value()
@@ -2115,11 +2124,13 @@ class Sample3DVisualizationWindow(QWidget):
             controls['contrast_label'].setText(f"{current_value[0]} - {new_max_val}")
             slider.blockSignals(False)
 
-            # Also update napari layer
+            # Update napari layer contrast_limits
+            # PERFORMANCE: Only do this when slider changes, not on every viz update
+            # The .data assignment already triggers a render; avoid double-render
             if channel_id in self.channel_layers:
                 self.channel_layers[channel_id].contrast_limits = (current_value[0], new_max_val)
 
-            logger.info(f"Channel {channel_id} contrast range updated: 0 - {slider_max} (max value: {max_value})")
+            logger.debug(f"Channel {channel_id} contrast range updated: 0 - {slider_max} (max value: {max_value})")
 
     def _on_display_settings_changed(self):
         """Handle display setting changes."""
@@ -2180,22 +2191,14 @@ class Sample3DVisualizationWindow(QWidget):
                         ch_id, self.last_stage_position
                     )
 
-                    # Log voxel count only when it changes (reduce spam)
-                    non_zero = np.count_nonzero(volume)
-                    if not hasattr(self, '_last_logged_voxels'):
-                        self._last_logged_voxels = {}
-                    if non_zero != self._last_logged_voxels.get(ch_id, 0):
-                        if non_zero > 0:
-                            logger.info(f"Visualization update: Channel {ch_id} has {non_zero} non-zero voxels in display")
-                        self._last_logged_voxels[ch_id] = non_zero
-
                     # Update layer data
                     self.channel_layers[ch_id].data = volume
 
                     # Update contrast slider range based on actual display values
+                    # PERFORMANCE: This is throttled to only update on significant changes
                     self._update_contrast_slider_range(ch_id)
 
-            # Update memory usage
+            # Update memory usage (less frequently - only label updates, cheap)
             memory_stats = self.voxel_storage.get_memory_usage()
             self.memory_label.setText(f"Memory: {memory_stats['total_mb']:.1f} MB")
             self.voxel_count_label.setText(f"Voxels: {memory_stats['storage_voxels']:,}")
@@ -2531,6 +2534,12 @@ class Sample3DVisualizationWindow(QWidget):
             self.populate_timer.setInterval(20)  # 20ms = 50 Hz during motion
             logger.info(f"Increased populate rate to 50 Hz for motion capture")
 
+        # CRITICAL: Pause visualization updates during motion to free up CPU for frame capture
+        # The visualization can catch up after motion completes
+        if hasattr(self, 'update_timer') and self.update_timer.isActive():
+            self.update_timer.stop()
+            logger.info(f"Paused visualization updates during motion for better frame capture")
+
         logger.info(f"Motion started on {axis_name} - buffering frames. "
                    f"Start position: X={start_pos[0]:.3f}, Y={start_pos[1]:.3f}, "
                    f"Z={start_pos[2]:.3f}, R={start_pos[3]:.1f}°" if start_pos else
@@ -2581,6 +2590,11 @@ class Sample3DVisualizationWindow(QWidget):
         if self.populate_timer.isActive():
             self.populate_timer.setInterval(100)  # 100ms = 10 Hz normal rate
             logger.info(f"Restored populate rate to 10 Hz")
+
+        # Resume visualization updates (paused during motion for better frame capture)
+        if hasattr(self, 'update_timer') and not self.update_timer.isActive():
+            self.update_timer.start()
+            logger.info(f"Resumed visualization updates after motion")
 
         # Process all buffered frames with interpolated positions
         if mt['frame_buffer']:

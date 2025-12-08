@@ -220,7 +220,18 @@ class MessageDispatcher:
         self._stats['messages_received'] += 1
         command_code = message.command_code
 
+        # Log laser/LED command responses at INFO level for debugging
+        LASER_LED_COMMANDS = {0x2001, 0x2002, 0x2004, 0x2005, 0x2007, 0x4001, 0x4002, 0x4003}
+        if command_code in LASER_LED_COMMANDS:
+            logger.info(f"[RX] Laser/LED response received: code=0x{command_code:04X} ({message.command_name}), "
+                       f"status={message.status_code}, int32Data0={message.int32_data0}")
+
         with self._lock:
+            # Log pending requests when receiving laser commands (for debugging)
+            if command_code in LASER_LED_COMMANDS:
+                pending_codes = list(self._pending_requests.keys())
+                logger.info(f"[RX] Pending requests: {[f'0x{c:04X}' for c in pending_codes]}")
+
             # Check if this is a response to a pending request
             if command_code in self._pending_requests:
                 try:
@@ -228,7 +239,7 @@ class MessageDispatcher:
                     self._stats['responses_dispatched'] += 1
                     # Remove from pending after delivering
                     del self._pending_requests[command_code]
-                    logger.debug(f"Dispatched response for 0x{command_code:04X}")
+                    logger.info(f"[RX] Dispatched response for 0x{command_code:04X} to waiting caller")
                     return
                 except queue.Full:
                     logger.error(f"Response queue full for 0x{command_code:04X}")
@@ -257,7 +268,11 @@ class MessageDispatcher:
                 logger.warning(f"Unsolicited queue full, dropping 0x{command_code:04X}")
         else:
             # This could be a response that arrived after timeout
-            logger.debug(f"Unhandled message 0x{command_code:04X} (late response?)")
+            # Log at INFO for laser commands to help diagnose timing issues
+            if command_code in LASER_LED_COMMANDS:
+                logger.warning(f"[RX] Unhandled laser/LED message 0x{command_code:04X} - possible late response or no pending request")
+            else:
+                logger.debug(f"Unhandled message 0x{command_code:04X} (late response?)")
 
     def get_stats(self) -> Dict[str, int]:
         """Get dispatch statistics."""

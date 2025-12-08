@@ -96,8 +96,8 @@ class LaserCommands:
     """
 
     # Laser power commands
-    LEVEL_SET = 0x2001  # 8193 - Set laser power level (GET also uses this)
-    LEVEL_GET = 0x2001  # 8193 - Get laser power level (same as SET)
+    LEVEL_SET = 0x2001  # 8193 - Set laser power level
+    LEVEL_GET = 0x2002  # 8194 - Get laser power level
 
     # Laser enable/disable commands
     PREVIEW_ENABLE = 0x2004  # 8196 - Enable laser preview mode (external trigger)

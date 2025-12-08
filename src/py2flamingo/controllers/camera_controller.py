@@ -63,7 +63,11 @@ class CameraController(QObject):
         self._state = CameraState.IDLE
 
         # Image buffering
-        self._max_buffer_frames = 10
+        # Buffer size for frame history - needs to hold all frames during Z-paint motion
+        # At 50 FPS camera, 10 seconds of motion = 500 frames
+        # Each frame is ~8MB (2048x2048 uint16), so 500 frames = ~4GB max
+        # Using 300 frames = ~2.4GB max (safer for memory, covers ~6s of motion)
+        self._max_buffer_frames = 300
         self._frame_buffer = deque(maxlen=self._max_buffer_frames)
 
         # Display parameters
