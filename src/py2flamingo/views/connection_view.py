@@ -906,6 +906,76 @@ class ConnectionView(QWidget):
             self._show_message("Please open 3D Sample Visualization first", is_error=True)
             return
 
+        # Check if camera live viewer is open and streaming
+        camera_viewer_open = False
+        live_view_streaming = False
+        if hasattr(main_window, 'camera_live_viewer'):
+            camera_viewer = main_window.camera_live_viewer
+            camera_viewer_open = camera_viewer and camera_viewer.isVisible()
+            if camera_viewer_open and hasattr(camera_viewer, 'camera_controller'):
+                # Check if camera is in LIVE_VIEW state or streaming
+                from py2flamingo.controllers.camera_controller import CameraState
+                live_view_streaming = (
+                    camera_viewer.camera_controller._state == CameraState.LIVE_VIEW or
+                    (hasattr(camera_viewer.camera_controller, 'camera_service') and
+                     camera_viewer.camera_controller.camera_service._streaming)
+                )
+
+        if not camera_viewer_open:
+            self._show_message("Please open Camera Live Viewer first", is_error=True)
+            return
+
+        if not live_view_streaming:
+            self._show_message("Please start Live View before running scan", is_error=True)
+            return
+
+        # Check if any lasers/LED are enabled (for imaging)
+        illumination_enabled = False
+        illumination_source = None
+        if hasattr(main_window, 'camera_live_viewer') and main_window.camera_live_viewer:
+            camera_viewer = main_window.camera_live_viewer
+            # Find the laser/LED control panel
+            laser_panel = None
+            if hasattr(camera_viewer, 'laser_led_panel'):
+                laser_panel = camera_viewer.laser_led_panel
+            else:
+                # Search in children
+                from PyQt5.QtWidgets import QWidget
+                for child in camera_viewer.findChildren(QWidget):
+                    if child.__class__.__name__ == 'LaserLEDControlPanel':
+                        laser_panel = child
+                        break
+
+            if laser_panel and hasattr(laser_panel, '_source_button_group'):
+                checked_button = laser_panel._source_button_group.checkedButton()
+                if checked_button:
+                    illumination_enabled = True
+                    source_id = laser_panel._source_button_group.id(checked_button)
+                    if source_id == -1:
+                        illumination_source = "LED"
+                    else:
+                        illumination_source = f"Laser {source_id}"
+
+        if not illumination_enabled:
+            # Warn but don't block - user might want to proceed anyway
+            from PyQt5.QtWidgets import QMessageBox
+            result = self._create_topmost_messagebox(
+                QMessageBox.Warning,
+                "No Illumination Enabled",
+                "No illumination source is currently enabled.",
+                "The volume scan will run, but no image data will be captured.\n\n"
+                "To capture image data:\n"
+                "1. In Camera Live Viewer, check a laser or LED checkbox\n"
+                "2. Set appropriate power levels\n"
+                "3. Verify you can see the sample in live view\n\n"
+                "Continue without illumination?"
+            ).exec_()
+
+            if result != QMessageBox.Yes:
+                return
+        else:
+            self._logger.info(f"Illumination source enabled: {illumination_source}")
+
         # Get movement controller from stage_control_view
         movement_controller = None
         if hasattr(main_window, 'stage_control_view') and main_window.stage_control_view:
