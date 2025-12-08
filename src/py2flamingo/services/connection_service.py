@@ -508,6 +508,34 @@ class MVCConnectionService:
         from py2flamingo.models.connection import ConnectionState
         return self.model.status.state == ConnectionState.CONNECTED
 
+    @property
+    def has_async_reader(self) -> bool:
+        """Check if async socket reader is active (delegates to tcp_connection)."""
+        return (self.tcp_connection is not None and
+                hasattr(self.tcp_connection, 'has_async_reader') and
+                self.tcp_connection.has_async_reader)
+
+    def pause_async_reader(self) -> bool:
+        """Pause async reader for synchronous operations."""
+        if self.tcp_connection and hasattr(self.tcp_connection, 'pause_async_reader'):
+            return self.tcp_connection.pause_async_reader()
+        return False
+
+    def resume_async_reader(self) -> bool:
+        """Resume async reader after synchronous operations."""
+        if self.tcp_connection and hasattr(self.tcp_connection, 'resume_async_reader'):
+            return self.tcp_connection.resume_async_reader()
+        return False
+
+    def send_command_async(self, command_bytes: bytes, expected_response_code: int,
+                          timeout: float = 3.0):
+        """Send command via async reader (delegates to tcp_connection)."""
+        if self.tcp_connection and hasattr(self.tcp_connection, 'send_command_async'):
+            return self.tcp_connection.send_command_async(
+                command_bytes, expected_response_code, timeout
+            )
+        return None
+
     def send_command(self, cmd: 'Command', timeout: float = 5.0) -> bytes:
         """
         Send encoded command and get response.
