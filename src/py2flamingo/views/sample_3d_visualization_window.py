@@ -1536,16 +1536,19 @@ class Sample3DVisualizationWindow(QWidget):
 
     def _add_xy_focus_frame(self):
         """
-        Add XY focus frame showing where the camera/objective is capturing.
+        Add XY focus frame showing where the camera/objective focal plane is.
 
-        The frame is a bright yellow border at the OBJECTIVE position (back wall, Z=0),
+        The frame is a bright yellow border at the FOCAL PLANE position,
         showing the camera's field of view. This is FIXED - it does not move with the
         sample holder. The objective and camera are stationary; only the sample moves.
 
         The frame is positioned:
-        - Z: At Z=0 (back wall where objective is located)
+        - Z: At the focal plane (from calibration, or center of Z range ~19mm)
         - Y: At the objective focal plane (Y=7mm in chamber coordinates)
         - X: Centered in the chamber (or at calibrated position)
+
+        Note: The objective housing is at Z=12.5mm (back wall), but the focal plane
+        where things are actually in focus is further into the chamber (~19mm).
         """
         if not self.viewer:
             return
@@ -1558,20 +1561,21 @@ class Sample3DVisualizationWindow(QWidget):
         edge_width = focus_config.get('edge_width', 3)
         opacity = focus_config.get('opacity', 0.9)
 
-        # FIXED position at objective - does NOT follow sample holder
-        # Z = minimum Z (back wall where objective is)
-        z_mm = self.coord_mapper.z_range_mm[0]  # Back wall (Z=0 in napari)
-
+        # FIXED position at focal plane - does NOT follow sample holder
         # Y = objective focal plane (fixed at 7mm in chamber coordinates)
         chamber_y_mm = self.OBJECTIVE_CHAMBER_Y_MM  # 7.0 mm
 
-        # X = center of chamber (or use calibration if available)
+        # X and Z from calibration, or use defaults
         if self.objective_xy_calibration:
-            # Use calibrated X position
+            # Use calibrated position (from when sample holder tip was in focus)
             x_mm = self.objective_xy_calibration['x']
+            z_mm = self.objective_xy_calibration['z']
+            logger.info(f"Using calibrated focal plane: X={x_mm:.2f}, Z={z_mm:.2f} mm")
         else:
-            # Default to center of X range
+            # Default to center of X and Z ranges
             x_mm = (self.coord_mapper.x_range_mm[0] + self.coord_mapper.x_range_mm[1]) / 2
+            z_mm = (self.coord_mapper.z_range_mm[0] + self.coord_mapper.z_range_mm[1]) / 2
+            logger.info(f"Using default focal plane (center): X={x_mm:.2f}, Z={z_mm:.2f} mm")
 
         # FOV half-widths
         # FOV X maps to physical X, FOV Y maps to chamber Y (vertical in the frame)
@@ -1617,7 +1621,7 @@ class Sample3DVisualizationWindow(QWidget):
         """
         Update XY focus frame position based on calibration.
 
-        The focus frame is at a FIXED position (objective location) and only needs
+        The focus frame is at a FIXED position (focal plane) and only needs
         to be updated when the calibration changes, not when the stage moves.
         """
         if not self.viewer or 'XY Focus Frame' not in self.viewer.layers:
@@ -1628,15 +1632,16 @@ class Sample3DVisualizationWindow(QWidget):
         fov_x_mm = focus_config.get('field_of_view_x_mm', 0.52)
         fov_y_mm = focus_config.get('field_of_view_y_mm', 0.52)
 
-        # FIXED position at objective
-        z_mm = self.coord_mapper.z_range_mm[0]  # Back wall
+        # FIXED position at focal plane (NOT back wall)
         chamber_y_mm = self.OBJECTIVE_CHAMBER_Y_MM  # 7.0 mm
 
-        # X from calibration or center
+        # X and Z from calibration or use defaults
         if self.objective_xy_calibration:
             x_mm = self.objective_xy_calibration['x']
+            z_mm = self.objective_xy_calibration['z']  # Use calibrated Z (focal plane)
         else:
             x_mm = (self.coord_mapper.x_range_mm[0] + self.coord_mapper.x_range_mm[1]) / 2
+            z_mm = (self.coord_mapper.z_range_mm[0] + self.coord_mapper.z_range_mm[1]) / 2  # Center of Z range
 
         # FOV half-widths
         half_fov_x = fov_x_mm / 2
