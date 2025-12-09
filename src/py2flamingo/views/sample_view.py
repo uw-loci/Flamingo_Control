@@ -449,7 +449,7 @@ class SampleView(QWidget):
         """Connect controller signals."""
         # Camera signals
         if self.camera_controller:
-            self.camera_controller.frame_received.connect(self._on_frame_received)
+            self.camera_controller.new_image.connect(self._on_frame_received)
             self.camera_controller.state_changed.connect(self._on_camera_state_changed)
 
         # Movement signals
