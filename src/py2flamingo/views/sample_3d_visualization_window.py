@@ -1583,7 +1583,7 @@ class Sample3DVisualizationWindow(QWidget):
         half_fov_y = fov_y_mm / 2
 
         # Frame corners in physical mm (X, chamber_Y, Z)
-        # The frame is in the XY plane at Z=0 (back wall)
+        # The frame is in the XY plane at the focal plane Z depth
         corners_mm = [
             (x_mm - half_fov_x, chamber_y_mm - half_fov_y, z_mm),  # bottom-left
             (x_mm + half_fov_x, chamber_y_mm - half_fov_y, z_mm),  # bottom-right
