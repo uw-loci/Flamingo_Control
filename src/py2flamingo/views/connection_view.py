@@ -213,6 +213,20 @@ class ConnectionView(QWidget):
         self.volume_scan_btn.setEnabled(False)  # Enabled when connected
         debug_layout.addWidget(self.volume_scan_btn)
 
+        # Calibrate Objective Center button
+        self.calibrate_objective_btn = QPushButton("Calibrate Objective Center")
+        self.calibrate_objective_btn.setToolTip(
+            "Calibrate the objective XY center position:\n"
+            "1. Use Live View to find the tip of the sample holder\n"
+            "2. Center the tip in the camera view\n"
+            "3. Press OK to save this as the 'Tip of sample mount' position\n\n"
+            "This calibration is used to show where the camera is\n"
+            "capturing in the 3D visualization (yellow focus frame)."
+        )
+        self.calibrate_objective_btn.clicked.connect(self._on_calibrate_objective_clicked)
+        self.calibrate_objective_btn.setEnabled(False)  # Enabled when connected
+        debug_layout.addWidget(self.calibrate_objective_btn)
+
         debug_layout.addStretch()
         layout.addLayout(debug_layout)
 
@@ -318,6 +332,7 @@ class ConnectionView(QWidget):
             self.save_settings_btn.setEnabled(True)
             self.voxel_test_btn.setEnabled(True)
             self.volume_scan_btn.setEnabled(True)
+            self.calibrate_objective_btn.setEnabled(True)
         else:
             # Disconnected state
             self.status_label.setText("Status: Not connected")
@@ -331,6 +346,7 @@ class ConnectionView(QWidget):
             self.save_settings_btn.setEnabled(False)
             self.voxel_test_btn.setEnabled(False)
             self.volume_scan_btn.setEnabled(False)
+            self.calibrate_objective_btn.setEnabled(False)
 
     def _create_topmost_messagebox(self, icon, title: str, text: str,
                                      informative_text: str = None,
@@ -975,6 +991,97 @@ class ConnectionView(QWidget):
             self._scan_progress.close()
             self._scan_progress = None
         self._volume_scan_workflow = None
+
+    def _on_calibrate_objective_clicked(self) -> None:
+        """Handle calibrate objective center button click.
+
+        Shows a dialog explaining the calibration procedure, then saves
+        the current stage position as the 'Tip of sample mount' preset.
+        This calibration is used to position the XY focus frame in the
+        3D visualization, showing where the camera is capturing.
+        """
+        from PyQt5.QtWidgets import QMessageBox, QApplication
+
+        self._logger.info("Calibrate Objective Center button clicked")
+
+        # Check if connected
+        if not self._position_controller or not self._position_controller.connection.is_connected():
+            self._show_message("Must be connected to calibrate", is_error=True)
+            return
+
+        # Show instructions dialog
+        msg = self._create_topmost_messagebox(
+            QMessageBox.Information,
+            "Calibrate Objective XY Center",
+            "This calibration helps show where the camera is capturing in 3D.",
+            "Instructions:\n\n"
+            "1. Open the Camera Live View\n"
+            "2. Use the stage controls to move until you can see\n"
+            "   the very tip of the sample holder (fine extension)\n"
+            "3. Center the tip in the camera view\n"
+            "4. Click OK to save this position\n\n"
+            "Note: Rotation (R) should not affect centering.\n"
+            "The tip should appear in the same place regardless\n"
+            "of the rotation angle.\n\n"
+            "This position will be saved as 'Tip of sample mount'\n"
+            "in the position presets and loaded automatically.\n\n"
+            "Is the sample holder tip centered in Live View?",
+            buttons=QMessageBox.Ok | QMessageBox.Cancel
+        )
+
+        if msg.exec_() != QMessageBox.Ok:
+            self._logger.info("User cancelled objective calibration")
+            return
+
+        try:
+            # Get current stage position
+            position = self._position_controller.get_current_position()
+
+            if position is None:
+                self._show_message("Could not get current stage position", is_error=True)
+                return
+
+            # Save the calibration
+            from py2flamingo.services.position_preset_service import PositionPresetService
+            from py2flamingo.models.microscope import Position
+
+            preset_service = PositionPresetService()
+            preset_name = "Tip of sample mount"
+
+            # Create Position object
+            pos = Position(x=position.x, y=position.y, z=position.z, r=position.r)
+
+            # Save to presets
+            preset_service.save_preset(
+                preset_name, pos,
+                "Calibration point: sample holder tip centered in live view"
+            )
+
+            self._logger.info(f"Saved objective calibration: X={position.x:.3f}, Y={position.y:.3f}, "
+                            f"Z={position.z:.3f}, R={position.r:.2f}")
+
+            # Update 3D visualization if it's open
+            app = QApplication.instance()
+            for widget in app.topLevelWidgets():
+                if widget.__class__.__name__ == 'MainWindow':
+                    if hasattr(widget, 'sample_3d_visualization_window'):
+                        viz_window = widget.sample_3d_visualization_window
+                        if viz_window:
+                            viz_window.set_objective_calibration(
+                                position.x, position.y, position.z, position.r
+                            )
+                            self._logger.info("Updated 3D visualization with new calibration")
+                    break
+
+            self._show_message(
+                f"Calibration saved!\n"
+                f"Position: X={position.x:.3f}, Y={position.y:.3f}, Z={position.z:.3f} mm",
+                is_error=False
+            )
+
+        except Exception as e:
+            self._logger.error(f"Error saving objective calibration: {e}", exc_info=True)
+            self._show_message(f"Failed to save calibration: {e}", is_error=True)
 
     def _on_config_selected(self, config_name: str) -> None:
         """Handle configuration selection from dropdown.

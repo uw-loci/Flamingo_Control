@@ -165,4 +165,5 @@ sample_txt/
 # Temporary screenshots in root only
 /Capture.PNG
 claude-reports/
+claude-report/
 logs/

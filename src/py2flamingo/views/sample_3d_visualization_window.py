@@ -31,6 +31,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from visualization.dual_resolution_storage import DualResolutionVoxelStorage, DualResolutionConfig
 from visualization.coordinate_transforms import CoordinateTransformer, PhysicalToNapariMapper
 from visualization.sparse_volume_renderer import SparseVolumeRenderer
+from py2flamingo.services.position_preset_service import PositionPresetService
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,11 @@ class Sample3DVisualizationWindow(QWidget):
         # At stage Y=7.45mm, the extension tip is centered at the objective focal plane
         self.STAGE_Y_AT_OBJECTIVE = 7.45  # mm - calibration reference
         self.OBJECTIVE_CHAMBER_Y_MM = 7.0  # mm - objective focal plane in chamber coordinates
+
+        # XY Focus Frame calibration - where the objective optical axis intersects the sample
+        # This is calibrated by finding the tip of the sample holder when centered in live view
+        self.objective_xy_calibration = None  # Will be loaded from position presets
+        self._load_objective_calibration()
 
         # Cache previous sample data bounds for efficient clearing (dense array optimization)
         self.previous_sample_bounds = {}  # {ch_id: (z_start, z_end, y_start, y_end, x_start, x_end)}
@@ -246,6 +252,75 @@ class Sample3DVisualizationWindow(QWidget):
             logger.warning("Using default 3D visualization config")
 
         return config
+
+    def _load_objective_calibration(self):
+        """
+        Load objective XY calibration from position presets.
+
+        The calibration point is saved as "Tip of sample mount" in position presets.
+        This represents the stage position when the sample holder tip is centered
+        in the live view - i.e., where the optical axis intersects the sample plane.
+        """
+        try:
+            preset_service = PositionPresetService()
+            preset_name = self.config.get('focus_frame', {}).get(
+                'calibration_preset_name', 'Tip of sample mount'
+            )
+
+            if preset_service.preset_exists(preset_name):
+                preset = preset_service.get_preset(preset_name)
+                self.objective_xy_calibration = {
+                    'x': preset.x,
+                    'y': preset.y,
+                    'z': preset.z,
+                    'r': preset.r
+                }
+                logger.info(f"Loaded objective calibration from '{preset_name}': "
+                          f"X={preset.x:.3f}, Y={preset.y:.3f}, Z={preset.z:.3f}")
+            else:
+                # Use default center position if not calibrated
+                self.objective_xy_calibration = {
+                    'x': self.config['stage_control']['x_default_mm'],
+                    'y': self.config['stage_control']['y_default_mm'],
+                    'z': self.config['stage_control']['z_default_mm'],
+                    'r': 0
+                }
+                logger.info(f"No '{preset_name}' calibration found, using defaults")
+        except Exception as e:
+            logger.warning(f"Failed to load objective calibration: {e}")
+            self.objective_xy_calibration = None
+
+    def set_objective_calibration(self, x: float, y: float, z: float, r: float = 0):
+        """
+        Set and save the objective XY calibration point.
+
+        Args:
+            x, y, z: Stage position in mm when sample holder tip is centered in live view
+            r: Rotation angle (stored but not critical for calibration)
+        """
+        from py2flamingo.models.microscope import Position
+
+        self.objective_xy_calibration = {'x': x, 'y': y, 'z': z, 'r': r}
+
+        # Save to position presets
+        try:
+            preset_service = PositionPresetService()
+            preset_name = self.config.get('focus_frame', {}).get(
+                'calibration_preset_name', 'Tip of sample mount'
+            )
+            position = Position(x=x, y=y, z=z, r=r)
+            preset_service.save_preset(
+                preset_name, position,
+                "Calibration point: sample holder tip centered in live view"
+            )
+            logger.info(f"Saved objective calibration to '{preset_name}': "
+                      f"X={x:.3f}, Y={y:.3f}, Z={z:.3f}")
+        except Exception as e:
+            logger.error(f"Failed to save objective calibration: {e}")
+
+        # Update focus frame if it exists
+        if self.viewer and 'XY Focus Frame' in self.viewer.layers:
+            self._update_xy_focus_frame()
 
     def _init_storage(self):
         """Initialize the dual-resolution storage system using coordinate mapper dimensions."""
@@ -1149,6 +1224,9 @@ class Sample3DVisualizationWindow(QWidget):
         # This shows the detection light path direction
         self._add_objective_indicator()
 
+        # Add XY focus frame showing where the camera is capturing
+        self._add_xy_focus_frame()
+
     def _add_chamber_wireframe(self):
         """Add chamber wireframe as box edges using shapes layer."""
         if not self.viewer:
@@ -1456,6 +1534,123 @@ class Sample3DVisualizationWindow(QWidget):
 
         logger.info(f"Added rotation indicator at Y=0 (top), following holder at Z={holder_z}, X={holder_x}")
 
+    def _add_xy_focus_frame(self):
+        """
+        Add XY focus frame showing where the camera live view is capturing.
+
+        The frame is a bright yellow border showing the camera's field of view
+        at the current Z position. It's one voxel deep and updates with stage movement.
+        """
+        if not self.viewer:
+            return
+
+        # Get focus frame configuration
+        focus_config = self.config.get('focus_frame', {})
+        fov_x_mm = focus_config.get('field_of_view_x_mm', 0.52)
+        fov_y_mm = focus_config.get('field_of_view_y_mm', 0.52)
+        frame_color = focus_config.get('color', '#FFFF00')
+        edge_width = focus_config.get('edge_width', 3)
+        opacity = focus_config.get('opacity', 0.9)
+
+        # Get current stage position from sliders
+        x_mm = self.position_sliders['x_slider'].value() / 1000.0
+        y_mm = self.position_sliders['y_slider'].value() / 1000.0
+        z_mm = self.position_sliders['z_slider'].value() / 1000.0
+
+        # Calculate frame corners in physical coordinates
+        # The frame is centered on the current XZ position at the current Y (chamber Y)
+        # Convert stage Y to chamber Y for positioning
+        chamber_y_mm = self._stage_y_to_chamber_y(y_mm)
+
+        # FOV half-widths
+        half_fov_x = fov_x_mm / 2
+        half_fov_z = fov_y_mm / 2  # Camera Y maps to stage Z (into objective)
+
+        # Frame corners in physical mm (X, chamber_Y, Z)
+        # The frame is in the XZ plane at the chamber Y position
+        corners_mm = [
+            (x_mm - half_fov_x, chamber_y_mm, z_mm - half_fov_z),  # bottom-left
+            (x_mm + half_fov_x, chamber_y_mm, z_mm - half_fov_z),  # bottom-right
+            (x_mm + half_fov_x, chamber_y_mm, z_mm + half_fov_z),  # top-right
+            (x_mm - half_fov_x, chamber_y_mm, z_mm + half_fov_z),  # top-left
+        ]
+
+        # Convert to napari coordinates (Z, Y, X) order
+        napari_corners = []
+        for cx, cy, cz in corners_mm:
+            napari_x, napari_y, napari_z = self.coord_mapper.physical_to_napari(cx, cy, cz)
+            napari_corners.append([napari_z, napari_y, napari_x])
+
+        # Create frame edges (rectangle outline)
+        frame_edges = [
+            [napari_corners[0], napari_corners[1]],  # bottom edge
+            [napari_corners[1], napari_corners[2]],  # right edge
+            [napari_corners[2], napari_corners[3]],  # top edge
+            [napari_corners[3], napari_corners[0]],  # left edge
+        ]
+
+        self.viewer.add_shapes(
+            data=frame_edges,
+            shape_type='line',
+            name='XY Focus Frame',
+            edge_color=frame_color,
+            edge_width=edge_width,
+            opacity=opacity
+        )
+
+        logger.info(f"Added XY focus frame at X={x_mm:.2f}, Y={chamber_y_mm:.2f}, Z={z_mm:.2f} mm "
+                   f"(FOV: {fov_x_mm:.2f}x{fov_y_mm:.2f} mm)")
+
+    def _update_xy_focus_frame(self):
+        """
+        Update XY focus frame position based on current stage position.
+
+        Called when stage moves to keep the frame showing where the camera is capturing.
+        """
+        if not self.viewer or 'XY Focus Frame' not in self.viewer.layers:
+            return
+
+        # Get focus frame configuration
+        focus_config = self.config.get('focus_frame', {})
+        fov_x_mm = focus_config.get('field_of_view_x_mm', 0.52)
+        fov_y_mm = focus_config.get('field_of_view_y_mm', 0.52)
+
+        # Get current stage position
+        x_mm = self.last_stage_position.get('x', self.position_sliders['x_slider'].value() / 1000.0)
+        y_mm = self.last_stage_position.get('y', self.position_sliders['y_slider'].value() / 1000.0)
+        z_mm = self.last_stage_position.get('z', self.position_sliders['z_slider'].value() / 1000.0)
+
+        # Convert stage Y to chamber Y
+        chamber_y_mm = self._stage_y_to_chamber_y(y_mm)
+
+        # FOV half-widths
+        half_fov_x = fov_x_mm / 2
+        half_fov_z = fov_y_mm / 2
+
+        # Frame corners in physical mm
+        corners_mm = [
+            (x_mm - half_fov_x, chamber_y_mm, z_mm - half_fov_z),
+            (x_mm + half_fov_x, chamber_y_mm, z_mm - half_fov_z),
+            (x_mm + half_fov_x, chamber_y_mm, z_mm + half_fov_z),
+            (x_mm - half_fov_x, chamber_y_mm, z_mm + half_fov_z),
+        ]
+
+        # Convert to napari coordinates
+        napari_corners = []
+        for cx, cy, cz in corners_mm:
+            napari_x, napari_y, napari_z = self.coord_mapper.physical_to_napari(cx, cy, cz)
+            napari_corners.append([napari_z, napari_y, napari_x])
+
+        # Update frame edges
+        frame_edges = [
+            [napari_corners[0], napari_corners[1]],
+            [napari_corners[1], napari_corners[2]],
+            [napari_corners[2], napari_corners[3]],
+            [napari_corners[3], napari_corners[0]],
+        ]
+
+        self.viewer.layers['XY Focus Frame'].data = frame_edges
+
     def _stage_y_to_chamber_y(self, stage_y_mm: float) -> float:
         """
         Convert stage Y position to chamber Y coordinate.
@@ -1523,6 +1718,9 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Update fine extension position
         self._update_fine_extension()
+
+        # Update XY focus frame position
+        self._update_xy_focus_frame()
 
     def _update_fine_extension(self):
         """

@@ -100,7 +100,8 @@ stage_control:
 
   # Axis inversion defaults (user preferences for stage control)
   # Set these based on your microscope's stage configuration
-  invert_x_default: false     # If true, moving slider right moves stage left
+  # X is inverted: low stage X values (e.g., X=4) are on the RIGHT side of the chamber
+  invert_x_default: true      # If true, X axis is mirrored (low X on right, high X on left)
   invert_z_default: false     # If true, moving slider right moves stage backward
 
   # Y-axis rotation configuration
@@ -222,6 +223,20 @@ data_persistence:
   # Export formats
   supported_export_formats: ["tiff", "hdf5", "zarr", "npy"]
   default_export_format: "tiff"
+
+# XY Focus Frame - shows current live view position in 3D
+focus_frame:
+  # Camera field of view (estimated from pixel_to_micron ~0.65 and 2048x2048 sensor)
+  field_of_view_x_mm: 0.52  # ~520 micrometers horizontal FOV
+  field_of_view_y_mm: 0.52  # ~520 micrometers vertical FOV (in stage Y direction)
+
+  # Frame appearance
+  color: "#FFFF00"  # Bright yellow (same as fine extension)
+  edge_width: 3
+  opacity: 0.9
+
+  # Calibration preset name
+  calibration_preset_name: "Tip of sample mount"
 
 # Future multicamera support placeholder
 multicamera:
