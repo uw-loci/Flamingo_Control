@@ -28,7 +28,7 @@ from py2flamingo.services import (
 from py2flamingo.controllers import ConnectionController, WorkflowController, PositionController
 from py2flamingo.controllers.movement_controller import MovementController
 from py2flamingo.controllers.camera_controller import CameraController
-from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, ImageControlsWindow, StageControlView
+from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, ImageControlsWindow, StageControlView, SampleView
 from py2flamingo.views.camera_live_viewer import CameraLiveViewer
 from py2flamingo.views.stage_chamber_visualization_window import StageChamberVisualizationWindow
 from py2flamingo.views.sample_3d_visualization_window import Sample3DVisualizationWindow
@@ -102,6 +102,7 @@ class FlamingoApplication:
         self.image_controls_window: Optional[ImageControlsWindow] = None
         self.stage_chamber_visualization_window: Optional[StageChamberVisualizationWindow] = None
         self.sample_3d_visualization_window: Optional[Sample3DVisualizationWindow] = None
+        self.sample_view: Optional['SampleView'] = None  # Unified sample viewing interface
 
         # Setup logging
         self.logger = logging.getLogger(__name__)
@@ -334,6 +335,11 @@ class FlamingoApplication:
             )
             self.logger.debug("Connected workflow_stopped to status indicator service")
 
+        # Connect Sample View request signal
+        if hasattr(self.connection_view, 'sample_view_requested'):
+            self.connection_view.sample_view_requested.connect(self._open_sample_view)
+            self.logger.debug("Connected sample_view_requested signal")
+
         self.logger.info("Application dependencies setup complete")
 
 
@@ -399,6 +405,28 @@ class FlamingoApplication:
         self.logger.info("Connection closed - disabling stage controls")
         if self.stage_control_view:
             self.stage_control_view._set_controls_enabled(False)
+
+    def _open_sample_view(self):
+        """Open the integrated Sample View window.
+
+        Creates the SampleView if it doesn't exist, then shows and raises it.
+        """
+        self.logger.info("Opening Sample View")
+
+        if self.sample_view is None:
+            self.logger.debug("Creating new SampleView instance")
+            self.sample_view = SampleView(
+                camera_controller=self.camera_controller,
+                movement_controller=self.movement_controller,
+                laser_led_controller=self.laser_led_controller,
+                voxel_storage=getattr(self, 'voxel_storage', None),
+                image_controls_window=self.image_controls_window,
+            )
+
+        self.sample_view.show()
+        self.sample_view.raise_()
+        self.sample_view.activateWindow()
+        self.logger.debug("Sample View shown and raised")
 
     def create_main_window(self):
         """Create main application window by composing views.

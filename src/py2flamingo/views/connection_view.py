@@ -31,6 +31,7 @@ class ConnectionView(QWidget):
 
     # Signals
     connection_established = pyqtSignal()  # Emitted when connection succeeds
+    sample_view_requested = pyqtSignal()  # Emitted when user clicks "Open Sample View"
 
     def __init__(self, controller, config_manager=None, position_controller=None):
         """Initialize connection view with controller.
@@ -153,6 +154,20 @@ class ConnectionView(QWidget):
             button_layout.addWidget(self.save_config_btn)
 
         layout.addLayout(button_layout)
+
+        # Sample View launcher (prominent button when connected)
+        sample_view_layout = QHBoxLayout()
+        self.sample_view_btn = QPushButton("Open Sample View")
+        self.sample_view_btn.setToolTip("Open integrated sample viewing interface")
+        self.sample_view_btn.setStyleSheet(
+            "QPushButton { background-color: #2196F3; color: white; "
+            "font-weight: bold; font-size: 11pt; padding: 10px; }"
+            "QPushButton:disabled { background-color: #ccc; color: #666; }"
+        )
+        self.sample_view_btn.clicked.connect(self._on_sample_view_clicked)
+        self.sample_view_btn.setEnabled(False)  # Enable when connected
+        sample_view_layout.addWidget(self.sample_view_btn)
+        layout.addLayout(sample_view_layout)
 
         # Debug tools section (compact grid layout for narrow window)
         debug_group = QGroupBox("Debug Tools")
@@ -311,6 +326,7 @@ class ConnectionView(QWidget):
             self.voxel_test_btn.setEnabled(True)
             self.volume_scan_btn.setEnabled(True)
             self.calibrate_objective_btn.setEnabled(True)
+            self.sample_view_btn.setEnabled(True)
         else:
             # Disconnected state
             self.status_label.setText("Status: Not connected")
@@ -325,6 +341,12 @@ class ConnectionView(QWidget):
             self.voxel_test_btn.setEnabled(False)
             self.volume_scan_btn.setEnabled(False)
             self.calibrate_objective_btn.setEnabled(False)
+            self.sample_view_btn.setEnabled(False)
+
+    def _on_sample_view_clicked(self) -> None:
+        """Handle Sample View button click - emit signal to open Sample View."""
+        self._logger.info("Sample View button clicked")
+        self.sample_view_requested.emit()
 
     def _create_topmost_messagebox(self, icon, title: str, text: str,
                                      informative_text: str = None,

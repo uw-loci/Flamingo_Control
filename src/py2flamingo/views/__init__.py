@@ -10,6 +10,7 @@ from .workflow_view import WorkflowView
 from .sample_info_view import SampleInfoView
 from .stage_control_view import StageControlView
 from .image_controls_window import ImageControlsWindow
+from .sample_view import SampleView
 
 __all__ = [
     'ConnectionView',
@@ -17,4 +18,5 @@ __all__ = [
     'SampleInfoView',
     'StageControlView',
     'ImageControlsWindow',
+    'SampleView',
 ]
