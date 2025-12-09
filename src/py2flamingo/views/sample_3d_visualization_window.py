@@ -1536,10 +1536,16 @@ class Sample3DVisualizationWindow(QWidget):
 
     def _add_xy_focus_frame(self):
         """
-        Add XY focus frame showing where the camera live view is capturing.
+        Add XY focus frame showing where the camera/objective is capturing.
 
-        The frame is a bright yellow border showing the camera's field of view
-        at the current Z position. It's one voxel deep and updates with stage movement.
+        The frame is a bright yellow border at the OBJECTIVE position (back wall, Z=0),
+        showing the camera's field of view. This is FIXED - it does not move with the
+        sample holder. The objective and camera are stationary; only the sample moves.
+
+        The frame is positioned:
+        - Z: At Z=0 (back wall where objective is located)
+        - Y: At the objective focal plane (Y=7mm in chamber coordinates)
+        - X: Centered in the chamber (or at calibrated position)
         """
         if not self.viewer:
             return
@@ -1552,27 +1558,33 @@ class Sample3DVisualizationWindow(QWidget):
         edge_width = focus_config.get('edge_width', 3)
         opacity = focus_config.get('opacity', 0.9)
 
-        # Get current stage position from sliders
-        x_mm = self.position_sliders['x_slider'].value() / 1000.0
-        y_mm = self.position_sliders['y_slider'].value() / 1000.0
-        z_mm = self.position_sliders['z_slider'].value() / 1000.0
+        # FIXED position at objective - does NOT follow sample holder
+        # Z = minimum Z (back wall where objective is)
+        z_mm = self.coord_mapper.z_range_mm[0]  # Back wall (Z=0 in napari)
 
-        # Calculate frame corners in physical coordinates
-        # The frame is centered on the current XZ position at the current Y (chamber Y)
-        # Convert stage Y to chamber Y for positioning
-        chamber_y_mm = self._stage_y_to_chamber_y(y_mm)
+        # Y = objective focal plane (fixed at 7mm in chamber coordinates)
+        chamber_y_mm = self.OBJECTIVE_CHAMBER_Y_MM  # 7.0 mm
+
+        # X = center of chamber (or use calibration if available)
+        if self.objective_xy_calibration:
+            # Use calibrated X position
+            x_mm = self.objective_xy_calibration['x']
+        else:
+            # Default to center of X range
+            x_mm = (self.coord_mapper.x_range_mm[0] + self.coord_mapper.x_range_mm[1]) / 2
 
         # FOV half-widths
+        # FOV X maps to physical X, FOV Y maps to chamber Y (vertical in the frame)
         half_fov_x = fov_x_mm / 2
-        half_fov_z = fov_y_mm / 2  # Camera Y maps to stage Z (into objective)
+        half_fov_y = fov_y_mm / 2
 
         # Frame corners in physical mm (X, chamber_Y, Z)
-        # The frame is in the XZ plane at the chamber Y position
+        # The frame is in the XY plane at Z=0 (back wall)
         corners_mm = [
-            (x_mm - half_fov_x, chamber_y_mm, z_mm - half_fov_z),  # bottom-left
-            (x_mm + half_fov_x, chamber_y_mm, z_mm - half_fov_z),  # bottom-right
-            (x_mm + half_fov_x, chamber_y_mm, z_mm + half_fov_z),  # top-right
-            (x_mm - half_fov_x, chamber_y_mm, z_mm + half_fov_z),  # top-left
+            (x_mm - half_fov_x, chamber_y_mm - half_fov_y, z_mm),  # bottom-left
+            (x_mm + half_fov_x, chamber_y_mm - half_fov_y, z_mm),  # bottom-right
+            (x_mm + half_fov_x, chamber_y_mm + half_fov_y, z_mm),  # top-right
+            (x_mm - half_fov_x, chamber_y_mm + half_fov_y, z_mm),  # top-left
         ]
 
         # Convert to napari coordinates (Z, Y, X) order
@@ -1598,14 +1610,15 @@ class Sample3DVisualizationWindow(QWidget):
             opacity=opacity
         )
 
-        logger.info(f"Added XY focus frame at X={x_mm:.2f}, Y={chamber_y_mm:.2f}, Z={z_mm:.2f} mm "
+        logger.info(f"Added XY focus frame at OBJECTIVE position: X={x_mm:.2f}, Y={chamber_y_mm:.2f}, Z={z_mm:.2f} mm "
                    f"(FOV: {fov_x_mm:.2f}x{fov_y_mm:.2f} mm)")
 
     def _update_xy_focus_frame(self):
         """
-        Update XY focus frame position based on current stage position.
+        Update XY focus frame position based on calibration.
 
-        Called when stage moves to keep the frame showing where the camera is capturing.
+        The focus frame is at a FIXED position (objective location) and only needs
+        to be updated when the calibration changes, not when the stage moves.
         """
         if not self.viewer or 'XY Focus Frame' not in self.viewer.layers:
             return
@@ -1615,24 +1628,26 @@ class Sample3DVisualizationWindow(QWidget):
         fov_x_mm = focus_config.get('field_of_view_x_mm', 0.52)
         fov_y_mm = focus_config.get('field_of_view_y_mm', 0.52)
 
-        # Get current stage position
-        x_mm = self.last_stage_position.get('x', self.position_sliders['x_slider'].value() / 1000.0)
-        y_mm = self.last_stage_position.get('y', self.position_sliders['y_slider'].value() / 1000.0)
-        z_mm = self.last_stage_position.get('z', self.position_sliders['z_slider'].value() / 1000.0)
+        # FIXED position at objective
+        z_mm = self.coord_mapper.z_range_mm[0]  # Back wall
+        chamber_y_mm = self.OBJECTIVE_CHAMBER_Y_MM  # 7.0 mm
 
-        # Convert stage Y to chamber Y
-        chamber_y_mm = self._stage_y_to_chamber_y(y_mm)
+        # X from calibration or center
+        if self.objective_xy_calibration:
+            x_mm = self.objective_xy_calibration['x']
+        else:
+            x_mm = (self.coord_mapper.x_range_mm[0] + self.coord_mapper.x_range_mm[1]) / 2
 
         # FOV half-widths
         half_fov_x = fov_x_mm / 2
-        half_fov_z = fov_y_mm / 2
+        half_fov_y = fov_y_mm / 2
 
         # Frame corners in physical mm
         corners_mm = [
-            (x_mm - half_fov_x, chamber_y_mm, z_mm - half_fov_z),
-            (x_mm + half_fov_x, chamber_y_mm, z_mm - half_fov_z),
-            (x_mm + half_fov_x, chamber_y_mm, z_mm + half_fov_z),
-            (x_mm - half_fov_x, chamber_y_mm, z_mm + half_fov_z),
+            (x_mm - half_fov_x, chamber_y_mm - half_fov_y, z_mm),
+            (x_mm + half_fov_x, chamber_y_mm - half_fov_y, z_mm),
+            (x_mm + half_fov_x, chamber_y_mm + half_fov_y, z_mm),
+            (x_mm - half_fov_x, chamber_y_mm + half_fov_y, z_mm),
         ]
 
         # Convert to napari coordinates
@@ -1650,6 +1665,8 @@ class Sample3DVisualizationWindow(QWidget):
         ]
 
         self.viewer.layers['XY Focus Frame'].data = frame_edges
+
+        logger.info(f"Updated XY focus frame to X={x_mm:.2f}, Y={chamber_y_mm:.2f}, Z={z_mm:.2f} mm")
 
     def _stage_y_to_chamber_y(self, stage_y_mm: float) -> float:
         """
@@ -1719,8 +1736,8 @@ class Sample3DVisualizationWindow(QWidget):
         # Update fine extension position
         self._update_fine_extension()
 
-        # Update XY focus frame position
-        self._update_xy_focus_frame()
+        # NOTE: XY focus frame is NOT updated here - it's FIXED at the objective position
+        # and only updates when calibration changes (via set_objective_calibration)
 
     def _update_fine_extension(self):
         """
