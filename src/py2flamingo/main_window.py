@@ -164,8 +164,8 @@ class MainWindow(QMainWindow):
             screen_width = available_geometry.width()
             screen_height = available_geometry.height()
 
-            # Set window to 90% of screen height and reasonable width
-            target_width = min(900, int(screen_width * 0.6))  # Max 900px or 60% width (compact UI)
+            # Set window to 90% of screen height and compact width
+            target_width = min(600, int(screen_width * 0.4))  # Max 600px or 40% width (compact UI)
             target_height = int(screen_height * 0.9)  # 90% of screen height
 
             self.resize(target_width, target_height)

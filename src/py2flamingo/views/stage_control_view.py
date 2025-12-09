@@ -320,7 +320,7 @@ class StageControlView(QWidget):
         position_layout.addRow("Rotation:", self.r_pos_label)
 
         group.setLayout(position_layout)
-        group.setMaximumWidth(220)
+        group.setMaximumWidth(180)
         group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         return group
 
@@ -471,7 +471,7 @@ class StageControlView(QWidget):
         layout.addWidget(self.goto_position_btn)
 
         group.setLayout(layout)
-        group.setMaximumWidth(400)
+        group.setMaximumWidth(340)
         group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         return group
 
@@ -585,7 +585,7 @@ class StageControlView(QWidget):
         layout.addWidget(self.show_history_btn)
 
         group.setLayout(layout)
-        group.setMaximumWidth(250)
+        group.setMaximumWidth(220)
         group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         return group
 
@@ -638,7 +638,7 @@ class StageControlView(QWidget):
         layout.addWidget(self.estop_btn)
 
         group.setLayout(layout)
-        group.setMaximumWidth(600)
+        group.setMaximumWidth(500)
         group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         return group
 
@@ -684,7 +684,7 @@ class StageControlView(QWidget):
         self.preset_list.itemSelectionChanged.connect(self._on_preset_selection_changed)
 
         group.setLayout(layout)
-        group.setMaximumWidth(500)
+        group.setMaximumWidth(420)
         group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         return group
 
@@ -713,7 +713,7 @@ class StageControlView(QWidget):
         layout.addWidget(self.message_label)
 
         group.setLayout(layout)
-        group.setMaximumWidth(600)
+        group.setMaximumWidth(500)
         group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         return group
 

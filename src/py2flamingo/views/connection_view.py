@@ -105,20 +105,20 @@ class ConnectionView(QWidget):
 
         # IP address input
         ip_layout = QHBoxLayout()
-        ip_label = QLabel("IP Address:")
-        ip_label.setMinimumWidth(80)
+        ip_label = QLabel("IP:")
+        ip_label.setMinimumWidth(30)
         ip_layout.addWidget(ip_label)
 
         self.ip_input = QLineEdit()
         self.ip_input.setText("127.0.0.1")  # Default
-        self.ip_input.setPlaceholderText("e.g., 192.168.1.100")
+        self.ip_input.setPlaceholderText("192.168.1.100")
         ip_layout.addWidget(self.ip_input)
         connection_layout.addLayout(ip_layout)
 
         # Port input
         port_layout = QHBoxLayout()
         port_label = QLabel("Port:")
-        port_label.setMinimumWidth(80)
+        port_label.setMinimumWidth(30)
         port_layout.addWidget(port_label)
 
         self.port_input = QSpinBox()
@@ -154,81 +154,59 @@ class ConnectionView(QWidget):
 
         layout.addLayout(button_layout)
 
-        # Debug tools section (add after main buttons)
-        debug_layout = QHBoxLayout()
+        # Debug tools section (compact grid layout for narrow window)
+        debug_group = QGroupBox("Debug Tools")
+        debug_main_layout = QVBoxLayout()
+        debug_main_layout.setSpacing(4)
 
-        # Command selector
+        # Command selector row
+        cmd_layout = QHBoxLayout()
         self.debug_command_combo = QComboBox()
-        # Working commands (tested and confirmed)
-        self.debug_command_combo.addItem("✓ SYSTEM_STATE_GET (40967)", (40967, "SYSTEM_STATE_GET"))
-        self.debug_command_combo.addItem("✓ CAMERA_PIXEL_FIELD_OF_VIEW_GET (12343)", (12343, "CAMERA_PIXEL_FIELD_OF_VIEW_GET"))
-        self.debug_command_combo.addItem("✓ CAMERA_IMAGE_SIZE_GET (12327)", (12327, "CAMERA_IMAGE_SIZE_GET"))
-        self.debug_command_combo.addItem("✓ CAMERA_WORK_FLOW_STOP (12293)", (12293, "CAMERA_WORK_FLOW_STOP"))
-        # Now working with params[3] (int32Data0) = 1 for X-axis
-        self.debug_command_combo.addItem("✓ STAGE_POSITION_GET X-axis (24584)", (24584, "STAGE_POSITION_GET"))
-        self.debug_command_combo.setToolTip("✓ = Confirmed working\nNote: STAGE_POSITION_GET uses params[3] (int32Data0) to specify axis (1=X, 2=Y, 3=Z, 4=R)\nPosition returned in 72-byte data buffer")
-        self.debug_command_combo.setEnabled(False)  # Enabled when connected
-        debug_layout.addWidget(QLabel("Test Command:"))
-        debug_layout.addWidget(self.debug_command_combo)
+        self.debug_command_combo.addItem("SYSTEM_STATE_GET", (40967, "SYSTEM_STATE_GET"))
+        self.debug_command_combo.addItem("CAMERA_FOV_GET", (12343, "CAMERA_PIXEL_FIELD_OF_VIEW_GET"))
+        self.debug_command_combo.addItem("CAMERA_SIZE_GET", (12327, "CAMERA_IMAGE_SIZE_GET"))
+        self.debug_command_combo.addItem("STAGE_POS_GET", (24584, "STAGE_POSITION_GET"))
+        self.debug_command_combo.setToolTip("Select command to send")
+        self.debug_command_combo.setEnabled(False)
+        cmd_layout.addWidget(self.debug_command_combo)
 
-        # Query button
-        self.debug_query_btn = QPushButton("Send Command")
-        self.debug_query_btn.setToolTip("Send selected command and show raw response (for maintainer)")
+        self.debug_query_btn = QPushButton("Send")
+        self.debug_query_btn.setToolTip("Send selected command")
         self.debug_query_btn.clicked.connect(self._on_debug_query_clicked)
-        self.debug_query_btn.setEnabled(False)  # Enabled when connected
-        debug_layout.addWidget(self.debug_query_btn)
+        self.debug_query_btn.setEnabled(False)
+        self.debug_query_btn.setMaximumWidth(60)
+        cmd_layout.addWidget(self.debug_query_btn)
 
-        # Save Settings Test button
-        self.save_settings_btn = QPushButton("Save Settings to Microscope")
-        self.save_settings_btn.setToolTip("Test SCOPE_SETTINGS_SAVE command - sends current settings back to microscope")
+        self.save_settings_btn = QPushButton("Save Settings")
+        self.save_settings_btn.setToolTip("Save settings to microscope")
         self.save_settings_btn.clicked.connect(self._on_save_settings_clicked)
-        self.save_settings_btn.setEnabled(False)  # Enabled when connected
-        debug_layout.addWidget(self.save_settings_btn)
+        self.save_settings_btn.setEnabled(False)
+        cmd_layout.addWidget(self.save_settings_btn)
+        debug_main_layout.addLayout(cmd_layout)
 
-        # 3D Voxel Movement Test button
-        self.voxel_test_btn = QPushButton("Test 3D Voxel Movement")
-        self.voxel_test_btn.setToolTip(
-            "Run automated test sequence for 3D visualization voxel movement:\n"
-            "• Enables laser 4 (640nm)\n"
-            "• Starts live view\n"
-            "• Opens 3D viewer and populates from live\n"
-            "• Moves stage in X, Y, Z\n"
-            "• Returns to original position\n"
-            "• Exports diagnostic data"
-        )
+        # Action buttons row
+        action_layout = QHBoxLayout()
+        self.voxel_test_btn = QPushButton("3D Voxel Test")
+        self.voxel_test_btn.setToolTip("Run 3D voxel movement test")
         self.voxel_test_btn.clicked.connect(self._on_voxel_test_clicked)
-        self.voxel_test_btn.setEnabled(False)  # Enabled when connected
-        debug_layout.addWidget(self.voxel_test_btn)
+        self.voxel_test_btn.setEnabled(False)
+        action_layout.addWidget(self.voxel_test_btn)
 
-        # Volume Scan button
-        self.volume_scan_btn = QPushButton("Run Volume Scan")
-        self.volume_scan_btn.setToolTip(
-            "Run optimal volume scan using bidirectional Z-painting:\n"
-            "• Serpentine XY tiling pattern\n"
-            "• Alternating Z direction at each position\n"
-            "• Volume: X(4.0-4.6), Y(11.5-13.9), Z(19.5-23.0) mm\n"
-            "• Estimated time: ~7 minutes"
-        )
+        self.volume_scan_btn = QPushButton("Volume Scan")
+        self.volume_scan_btn.setToolTip("Run volume scan")
         self.volume_scan_btn.clicked.connect(self._on_volume_scan_clicked)
-        self.volume_scan_btn.setEnabled(False)  # Enabled when connected
-        debug_layout.addWidget(self.volume_scan_btn)
+        self.volume_scan_btn.setEnabled(False)
+        action_layout.addWidget(self.volume_scan_btn)
 
-        # Calibrate Objective Center button
-        self.calibrate_objective_btn = QPushButton("Calibrate Objective Center")
-        self.calibrate_objective_btn.setToolTip(
-            "Calibrate the objective XY center position:\n"
-            "1. Use Live View to find the tip of the sample holder\n"
-            "2. Center the tip in the camera view\n"
-            "3. Press OK to save this as the 'Tip of sample mount' position\n\n"
-            "This calibration is used to show where the camera is\n"
-            "capturing in the 3D visualization (yellow focus frame)."
-        )
+        self.calibrate_objective_btn = QPushButton("Calibrate")
+        self.calibrate_objective_btn.setToolTip("Calibrate objective center")
         self.calibrate_objective_btn.clicked.connect(self._on_calibrate_objective_clicked)
-        self.calibrate_objective_btn.setEnabled(False)  # Enabled when connected
-        debug_layout.addWidget(self.calibrate_objective_btn)
+        self.calibrate_objective_btn.setEnabled(False)
+        action_layout.addWidget(self.calibrate_objective_btn)
+        debug_main_layout.addLayout(action_layout)
 
-        debug_layout.addStretch()
-        layout.addLayout(debug_layout)
+        debug_group.setLayout(debug_main_layout)
+        layout.addWidget(debug_group)
 
         # Status display
         self.status_label = QLabel("Status: Not connected")

@@ -116,13 +116,9 @@ class SampleInfoView(QWidget):
         group = QGroupBox("Network Share Configuration")
         layout = QVBoxLayout()
 
-        # Info text
-        info = QLabel(
-            "<b>Important:</b> Paths must be accessible from the microscope PC.<br>"
-            "Configure the network share base path (UNC format)."
-        )
-        info.setWordWrap(True)
-        info.setStyleSheet("color: #d35400; padding: 5px; background-color: #fef5e7;")
+        # Info text (compact)
+        info = QLabel("<b>Note:</b> Paths must be accessible from microscope PC.")
+        info.setStyleSheet("color: #d35400; padding: 3px;")
         layout.addWidget(info)
 
         # Network share base path
@@ -152,16 +148,9 @@ class SampleInfoView(QWidget):
 
         layout.addLayout(mount_layout)
 
-        # Warning about mount point
-        mount_warning = QLabel(
-            "⚠ Local Mount Point must be where the network share is mounted/mapped on YOUR PC. "
-            "Example: If \\\\192.168.1.2\\CTLSM1 is mapped to Z:\\, enter Z:\\"
-        )
-        mount_warning.setWordWrap(True)
-        mount_warning.setStyleSheet(
-            "color: #d35400; font-size: 9pt; padding: 3px; "
-            "background-color: #fef5e7; border-left: 3px solid #d35400;"
-        )
+        # Warning about mount point (compact)
+        mount_warning = QLabel("⚠ Mount Point = where network share is mapped locally")
+        mount_warning.setStyleSheet("color: #d35400; font-size: 9pt; padding: 2px;")
         layout.addWidget(mount_warning)
 
         group.setLayout(layout)
@@ -224,12 +213,9 @@ class SampleInfoView(QWidget):
         btn_layout.addStretch()
         create_dir_layout.addLayout(btn_layout)
 
-        # Warning label
-        create_warning = QLabel(
-            "⚠ Only creates locally! Directory must be within the network share to be accessible to microscope."
-        )
-        create_warning.setWordWrap(True)
-        create_warning.setStyleSheet("color: #d35400; font-size: 9pt; font-style: italic;")
+        # Warning label (compact)
+        create_warning = QLabel("⚠ Creates locally only")
+        create_warning.setStyleSheet("color: #d35400; font-size: 9pt;")
         create_dir_layout.addWidget(create_warning)
 
         layout.addLayout(create_dir_layout)
@@ -247,27 +233,17 @@ class SampleInfoView(QWidget):
         Returns:
             QGroupBox with usage information
         """
-        group = QGroupBox("Usage Information")
+        group = QGroupBox("Quick Reference")
         layout = QVBoxLayout()
+        layout.setSpacing(2)
 
         info_text = QLabel(
-            "<b>Network Share Base:</b> The base UNC path that the microscope PC can access.<br>"
-            "<b>Local Mount Point:</b> (Optional) Where the share is mounted/mapped on YOUR PC.<br>"
-            "<b>Subdirectory:</b> Relative path appended to network share base.<br>"
-            "<b>Sample Name:</b> Used to identify and organize acquired images.<br><br>"
-            "<b>Example Configuration:</b><br>"
-            "• Network Share: <code>\\\\192.168.1.2\\CTLSM1</code><br>"
-            "• Local Mount: <code>Z:\\</code> (if share is mapped to Z: drive)<br>"
-            "• Subdirectory: <code>data/sample1</code><br>"
-            "• Result: Microscope saves to <code>\\\\192.168.1.2\\CTLSM1\\data\\sample1</code><br><br>"
-            "<b>⚠ Important:</b><br>"
-            "• The microscope saves the data, so paths must be from its perspective<br>"
-            "• Local Mount Point MUST be the actual network share (mapped or direct)<br>"
-            "• Creating directories locally only works if mount point is correctly configured<br>"
-            "• Directories created must be INSIDE the shared folder to be accessible"
+            "<b>Network Share:</b> UNC path (e.g., \\\\192.168.1.2\\CTLSM1)<br>"
+            "<b>Mount Point:</b> Local mapping (e.g., Z:\\)<br>"
+            "<b>Subdirectory:</b> Relative path for data"
         )
         info_text.setWordWrap(True)
-        info_text.setStyleSheet("color: #555; font-size: 9pt; padding: 10px;")
+        info_text.setStyleSheet("color: #555; font-size: 9pt; padding: 4px;")
         layout.addWidget(info_text)
 
         group.setLayout(layout)

@@ -60,7 +60,7 @@ class WorkflowView(QWidget):
 
         self.browse_btn = QPushButton("Browse...")
         self.browse_btn.clicked.connect(self._on_browse_clicked)
-        self.browse_btn.setMaximumWidth(100)
+        self.browse_btn.setMaximumWidth(80)
         file_layout.addWidget(self.browse_btn)
 
         layout.addLayout(file_layout)
