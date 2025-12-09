@@ -247,27 +247,21 @@ class LaserLEDService(MicroscopeCommandService):
 
         self.logger.info(f"DEBUG: Sending LASER_LEVEL_SET with int32Data0={laser_index}, buffer='{power_str}'")
 
-        # Send command and wait for response
+        # Send command - fire-and-forget (laser commands don't send ACK responses)
         result = self._send_command(
             LaserLEDCommandCode.LASER_LEVEL_SET,
             f"LASER_{laser_index}_LEVEL_SET",
             params=[0, 0, 0, laser_index, 0, 0, 0],  # laser_index in params[3] (int32Data0)
-            data=power_str
+            data=power_str,
+            wait_for_response=False  # Laser commands are fire-and-forget
         )
 
         if not result['success']:
             error = result.get('error', 'unknown error')
-            if error == 'timeout':
-                # LASER_LEVEL_SET may not receive an ACK response from the server
-                # The command is sent successfully but no response comes back
-                # This is expected behavior - treat as success with warning
-                self.logger.warning(f"Laser {laser_index} power SET command sent (no ACK response - this is normal)")
-                return True, power_percent
-            else:
-                self.logger.error(f"Laser {laser_index} power set FAILED: {error}")
-                return False, power_percent
+            self.logger.error(f"Laser {laser_index} power set FAILED: {error}")
+            return False, power_percent
 
-        self.logger.info(f"DEBUG: Laser {laser_index} power set to {power_str}% - SUCCESS (ACK received)")
+        self.logger.info(f"Laser {laser_index} power set to {power_str}%")
 
         # Return immediately with requested power for responsive GUI
         # Note: Caller should verify actual power asynchronously if needed
@@ -294,25 +288,21 @@ class LaserLEDService(MicroscopeCommandService):
             return False
 
         self.logger.info(f"Enabling laser {laser_index} preview mode")
-        self.logger.info(f"DEBUG: Sending LASER_ENABLE_PREVIEW command with int32Data0={laser_index}")
 
+        # Send command - fire-and-forget (laser commands don't send ACK responses)
         result = self._send_command(
             LaserLEDCommandCode.LASER_ENABLE_PREVIEW,
             f"LASER_{laser_index}_ENABLE_PREVIEW",
-            params=[0, 0, 0, laser_index, 0, 0, 0]  # laser_index in params[3] (int32Data0)
+            params=[0, 0, 0, laser_index, 0, 0, 0],  # laser_index in params[3] (int32Data0)
+            wait_for_response=False  # Laser commands are fire-and-forget
         )
 
         if not result['success']:
             error = result.get('error', 'unknown error')
-            if error == 'timeout':
-                # Laser commands may not receive ACK responses - treat timeout as success
-                self.logger.warning(f"Laser {laser_index} ENABLE_PREVIEW sent (no ACK response - this is normal)")
-                return True
-            else:
-                self.logger.error(f"Laser {laser_index} ENABLE_PREVIEW FAILED: {error}")
-                return False
+            self.logger.error(f"Laser {laser_index} ENABLE_PREVIEW FAILED: {error}")
+            return False
 
-        self.logger.info(f"Laser {laser_index} ENABLE_PREVIEW - SUCCESS (ACK received)")
+        self.logger.info(f"Laser {laser_index} ENABLE_PREVIEW sent")
         return True
 
     def disable_all_lasers(self) -> bool:
@@ -330,21 +320,19 @@ class LaserLEDService(MicroscopeCommandService):
         all_success = True
 
         # Disable each laser individually with laser number in int32Data0
+        # Fire-and-forget mode - don't wait for responses that never come
         for laser_index in range(1, 5):  # Lasers 1-4
             result = self._send_command(
                 LaserLEDCommandCode.LASER_DISABLE_ALL,
                 f"LASER_DISABLE_ALL (Laser {laser_index})",
-                params=[0, 0, 0, laser_index, 0, 0, 0]  # int32Data0 = laser_index
+                params=[0, 0, 0, laser_index, 0, 0, 0],  # int32Data0 = laser_index
+                wait_for_response=False  # Laser commands are fire-and-forget
             )
 
             if not result['success']:
                 error = result.get('error', 'unknown error')
-                if error == 'timeout':
-                    # Laser commands may not receive ACK - treat timeout as success
-                    self.logger.debug(f"Disabled laser {laser_index} (no ACK response)")
-                else:
-                    self.logger.warning(f"Failed to disable laser {laser_index}: {error}")
-                    all_success = False
+                self.logger.warning(f"Failed to disable laser {laser_index}: {error}")
+                all_success = False
             else:
                 self.logger.debug(f"Disabled laser {laser_index}")
 

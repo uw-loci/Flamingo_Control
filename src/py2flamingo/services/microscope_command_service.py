@@ -154,7 +154,8 @@ class MicroscopeCommandService:
         params: Optional[List[int]] = None,
         value: float = 0.0,
         data: bytes = b'',
-        additional_data_size: int = 0
+        additional_data_size: int = 0,
+        wait_for_response: bool = True
     ) -> Dict[str, Any]:
         """
         Send an action command (non-query).
@@ -169,6 +170,8 @@ class MicroscopeCommandService:
             value: Optional double value
             data: Optional data payload (72 bytes max)
             additional_data_size: Size of additional data to follow
+            wait_for_response: If False, send command without waiting for response
+                              (fire-and-forget mode for laser commands that don't ACK)
 
         Returns:
             Dict with 'success' and optional 'error'
@@ -212,7 +215,8 @@ class MicroscopeCommandService:
             # Check if async reader is available
             if hasattr(self.connection, 'has_async_reader') and self.connection.has_async_reader:
                 return self._send_via_async_reader(
-                    cmd_bytes, command_code, command_name, timeout=3.0
+                    cmd_bytes, command_code, command_name, timeout=3.0,
+                    wait_for_response=wait_for_response
                 )
 
             # Fall back to synchronous mode
@@ -227,6 +231,15 @@ class MicroscopeCommandService:
             # Send command
             command_socket.sendall(cmd_bytes)
             self.logger.debug(f"Sent {command_name} (code {command_code:#06x})")
+
+            # Fire-and-forget mode: don't wait for response
+            # Used for laser commands (0x20xx) that never send ACK responses
+            if not wait_for_response:
+                self.logger.debug(f"{command_name} sent (fire-and-forget, no response expected)")
+                return {
+                    'success': True,
+                    'fire_and_forget': True
+                }
 
             # Read 128-byte response
             ack_response = self._receive_full_bytes(command_socket, 128, timeout=3.0)
@@ -363,7 +376,8 @@ class MicroscopeCommandService:
         cmd_bytes: bytes,
         command_code: int,
         command_name: str,
-        timeout: float = 3.0
+        timeout: float = 3.0,
+        wait_for_response: bool = True
     ) -> Dict[str, Any]:
         """
         Send command via async reader and convert response.
@@ -376,13 +390,30 @@ class MicroscopeCommandService:
             command_code: Command code for response matching
             command_name: Human-readable name for logging
             timeout: Response timeout in seconds
+            wait_for_response: If False, send without waiting (fire-and-forget)
 
         Returns:
             Dict with 'success', 'parsed', 'raw_response' matching
             the synchronous _send_command format.
         """
         try:
-            # Send via async reader
+            # Fire-and-forget mode: send without waiting for response
+            if not wait_for_response:
+                # Send directly via socket without registering for response
+                command_socket = self.connection._command_socket
+                if command_socket is None:
+                    return {
+                        'success': False,
+                        'error': 'Command socket not available'
+                    }
+                command_socket.sendall(cmd_bytes)
+                self.logger.debug(f"{command_name} sent (fire-and-forget via async path)")
+                return {
+                    'success': True,
+                    'fire_and_forget': True
+                }
+
+            # Send via async reader and wait for response
             response = self.connection.send_command_async(
                 cmd_bytes, command_code, timeout=timeout
             )
