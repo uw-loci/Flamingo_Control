@@ -232,7 +232,7 @@ focus_frame:
 
   # Frame appearance
   color: "#FFFF00"  # Bright yellow (same as fine extension)
-  edge_width: 3
+  edge_width: 1
   opacity: 0.9
 
   # Calibration preset name
