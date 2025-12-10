@@ -28,6 +28,14 @@ from PyQt5.QtGui import QPixmap, QImage, QFont
 from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
 from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR, WARNING_BG
 
+# Try to import napari
+try:
+    import napari
+    NAPARI_AVAILABLE = True
+except ImportError:
+    NAPARI_AVAILABLE = False
+    napari = None
+
 
 class ViewerControlsDialog(QDialog):
     """Placeholder dialog for advanced viewer controls.
@@ -132,6 +140,9 @@ class SampleView(QWidget):
             for i in range(4)
         }
 
+        # Napari viewer (will be initialized after UI setup)
+        self.viewer: Optional['napari.Viewer'] = None
+
         # Setup window - sized for 3-column layout
         self.setWindowTitle("Sample View")
         self.setMinimumSize(1000, 800)
@@ -145,6 +156,9 @@ class SampleView(QWidget):
 
         # Initialize stage limits
         self._init_stage_limits()
+
+        # Initialize napari viewer
+        self._init_napari_viewer()
 
         self.logger.info("SampleView initialized")
 
@@ -527,9 +541,9 @@ class SampleView(QWidget):
 
     def _create_channel_controls(self) -> QGroupBox:
         """Create channel visibility and contrast controls for 4 viewer channels."""
-        group = QGroupBox("Channels")
-        layout = QGridLayout()
-        layout.setSpacing(4)
+        group = QGroupBox("Viewer Channels")
+        layout = QVBoxLayout()
+        layout.setSpacing(2)
         layout.setContentsMargins(6, 6, 6, 6)
 
         # Channel names/colors matching the laser wavelengths
@@ -544,38 +558,33 @@ class SampleView(QWidget):
         self.channel_checkboxes: Dict[int, QCheckBox] = {}
         self.channel_contrast_sliders: Dict[int, QSlider] = {}
 
-        # Header row
-        layout.addWidget(QLabel("Vis"), 0, 0)
-        layout.addWidget(QLabel("Channel"), 0, 1)
-        layout.addWidget(QLabel("Contrast"), 0, 2)
-
         for i, (name, color) in enumerate(channel_info):
-            row = i + 1
+            row_layout = QHBoxLayout()
+            row_layout.setSpacing(4)
 
-            # Visibility checkbox
-            checkbox = QCheckBox()
+            # Visibility checkbox with channel name (compact)
+            checkbox = QCheckBox(name)
             checkbox.setChecked(True)
+            checkbox.setStyleSheet(f"QCheckBox {{ color: {color}; font-weight: bold; }}")
             checkbox.stateChanged.connect(
                 lambda state, ch=i: self._on_channel_visibility_changed(ch, state)
             )
+            checkbox.setMinimumWidth(100)
             self.channel_checkboxes[i] = checkbox
-            layout.addWidget(checkbox, row, 0)
+            row_layout.addWidget(checkbox)
 
-            # Channel name with color indicator
-            label = QLabel(name)
-            label.setStyleSheet(f"color: {color}; font-weight: bold;")
-            layout.addWidget(label, row, 1)
-
-            # Contrast slider
+            # Contrast slider (takes remaining space)
             slider = QSlider(Qt.Horizontal)
             slider.setRange(0, 100)
             slider.setValue(50)  # Default contrast
-            slider.setMaximumWidth(100)
+            slider.setToolTip(f"Adjust contrast for {name}")
             slider.valueChanged.connect(
                 lambda val, ch=i: self._on_channel_contrast_changed(ch, val)
             )
             self.channel_contrast_sliders[i] = slider
-            layout.addWidget(slider, row, 2)
+            row_layout.addWidget(slider, stretch=1)
+
+            layout.addLayout(row_layout)
 
         group.setLayout(layout)
         return group
@@ -836,14 +845,40 @@ class SampleView(QWidget):
         visible = (state == Qt.Checked)
         self._channel_states[channel]['visible'] = visible
         self.logger.debug(f"Channel {channel} visibility: {visible}")
-        # TODO: Update viewer channel visibility
+
+        # Update napari layer visibility
+        if self.viewer:
+            layer_name = f"Channel {channel + 1}"
+            if layer_name in self.viewer.layers:
+                self.viewer.layers[layer_name].visible = visible
 
     def _on_channel_contrast_changed(self, channel: int, value: int) -> None:
         """Handle channel contrast slider change."""
-        # Map 0-100 slider to contrast adjustment
+        # Map 0-100 slider to contrast range
+        # At 50 (default), use full range [0, 65535]
+        # Lower values compress the range (increase contrast)
+        # Higher values expand the range (decrease contrast)
         self._channel_states[channel]['contrast'] = value
-        self.logger.debug(f"Channel {channel} contrast: {value}")
-        # TODO: Update viewer channel contrast
+
+        # Calculate contrast limits based on slider value
+        # value 0 = very high contrast (narrow range)
+        # value 50 = normal (full range)
+        # value 100 = low contrast (expanded range)
+        if value <= 50:
+            # Compress range: at 0, range is [0, 6553], at 50, range is [0, 65535]
+            max_val = int(65535 * (value / 50.0)) if value > 0 else 6553
+            contrast_limits = [0, max_val]
+        else:
+            # For values > 50, keep full range but could adjust brightness
+            contrast_limits = [0, 65535]
+
+        # Update napari layer contrast
+        if self.viewer:
+            layer_name = f"Channel {channel + 1}"
+            if layer_name in self.viewer.layers:
+                self.viewer.layers[layer_name].contrast_limits = contrast_limits
+
+        self.logger.debug(f"Channel {channel} contrast: {value}, limits: {contrast_limits}")
 
     # ========== Dialog Launchers ==========
 
@@ -874,6 +909,150 @@ class SampleView(QWidget):
         """Open export data dialog."""
         self.logger.info("Export Data clicked (not yet implemented)")
         # TODO: Open export dialog
+
+    # ========== Napari Integration ==========
+
+    def _init_napari_viewer(self) -> None:
+        """Initialize the napari viewer and embed it in the 3D view section."""
+        if not NAPARI_AVAILABLE:
+            self.logger.warning("napari not available - 3D visualization disabled")
+            return
+
+        try:
+            # Create napari viewer with 3D display
+            self.viewer = napari.Viewer(ndisplay=3, show=False)
+
+            # Enable axis display
+            self.viewer.axes.visible = True
+            self.viewer.axes.labels = True
+            self.viewer.axes.colored = True
+
+            # Set initial camera orientation for good 3D perspective
+            self.viewer.camera.angles = (45, 30, 0)
+            self.viewer.camera.zoom = 2.0
+
+            # Get the napari Qt widget
+            napari_window = self.viewer.window
+            viewer_widget = napari_window._qt_viewer
+
+            # Replace placeholder with actual viewer
+            if hasattr(self, 'viewer_placeholder') and self.viewer_placeholder:
+                parent_widget = self.viewer_placeholder.parent()
+                if parent_widget:
+                    layout = parent_widget.layout()
+                    if layout:
+                        layout.replaceWidget(self.viewer_placeholder, viewer_widget)
+                        self.viewer_placeholder.deleteLater()
+                        self.viewer_placeholder = None
+
+            # Setup data layers for 4 channels
+            self._setup_napari_layers()
+
+            self.logger.info("napari viewer initialized successfully")
+
+        except Exception as e:
+            self.logger.error(f"Failed to initialize napari viewer: {e}")
+            self.viewer = None
+
+    def _setup_napari_layers(self) -> None:
+        """Setup napari layers for multi-channel data."""
+        if not self.viewer:
+            return
+
+        # Get dimensions from config
+        stage_config = self._config.get('stage_control', {})
+        x_range = stage_config.get('x_range_mm', [1.0, 12.31])
+        y_range = stage_config.get('y_range_mm', [0.0, 14.0])
+        z_range = stage_config.get('z_range_mm', [12.5, 26.0])
+
+        # Calculate dimensions in voxels (using 50um voxel size)
+        voxel_size_mm = 0.050  # 50um
+        dims_voxels = (
+            int((z_range[1] - z_range[0]) / voxel_size_mm),  # Z
+            int((y_range[1] - y_range[0]) / voxel_size_mm),  # Y
+            int((x_range[1] - x_range[0]) / voxel_size_mm),  # X
+        )
+
+        # Channel colors matching laser wavelengths
+        channel_colors = [
+            'magenta',   # 405nm - violet/magenta
+            'cyan',      # 488nm - cyan
+            'green',     # 561nm - green
+            'red',       # 640nm - red
+        ]
+
+        # Create empty data arrays and add layers for each channel
+        for ch_id in range(4):
+            # Create empty data array
+            empty_data = np.zeros(dims_voxels, dtype=np.uint16)
+
+            # Add image layer
+            layer_name = f"Channel {ch_id + 1}"
+            self.viewer.add_image(
+                empty_data,
+                name=layer_name,
+                colormap=channel_colors[ch_id],
+                blending='additive',
+                visible=True,
+                contrast_limits=[0, 65535],
+            )
+
+        self.logger.info(f"Created {4} napari layers with dimensions {dims_voxels}")
+
+    def _update_plane_views(self) -> None:
+        """Update the MIP (Maximum Intensity Projection) plane views from voxel data."""
+        if not self.voxel_storage:
+            return
+
+        try:
+            # Get current data from voxel storage (if available)
+            # This would typically come from the DualResolutionVoxelStorage
+            data = self.voxel_storage.get_display_data() if hasattr(self.voxel_storage, 'get_display_data') else None
+
+            if data is None or data.size == 0:
+                return
+
+            # Generate MIP projections
+            # XZ plane (top-down) - project along Y axis (axis 1)
+            xz_mip = np.max(data, axis=1)
+            self._update_plane_label(self.xz_plane_label, xz_mip, "XZ")
+
+            # XY plane (front view) - project along Z axis (axis 0)
+            xy_mip = np.max(data, axis=0)
+            self._update_plane_label(self.xy_plane_label, xy_mip, "XY")
+
+            # YZ plane (side view) - project along X axis (axis 2)
+            yz_mip = np.max(data, axis=2)
+            self._update_plane_label(self.yz_plane_label, yz_mip, "YZ")
+
+        except Exception as e:
+            self.logger.error(f"Error updating plane views: {e}")
+
+    def _update_plane_label(self, label: QLabel, data: np.ndarray, plane_name: str) -> None:
+        """Update a plane view label with MIP data."""
+        try:
+            # Normalize to 0-255
+            if data.max() > data.min():
+                normalized = ((data.astype(np.float32) - data.min()) /
+                             (data.max() - data.min()) * 255).astype(np.uint8)
+            else:
+                normalized = np.zeros(data.shape, dtype=np.uint8)
+
+            # Convert to QImage
+            height, width = normalized.shape
+            qimage = QImage(normalized.data, width, height, width, QImage.Format_Grayscale8)
+
+            # Scale to fit label
+            pixmap = QPixmap.fromImage(qimage)
+            scaled = pixmap.scaled(
+                label.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            label.setPixmap(scaled)
+
+        except Exception as e:
+            self.logger.error(f"Error updating {plane_name} plane label: {e}")
 
     # ========== Public Methods ==========
 
