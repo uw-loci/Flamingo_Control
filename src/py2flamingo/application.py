@@ -415,12 +415,18 @@ class FlamingoApplication:
 
         if self.sample_view is None:
             self.logger.debug("Creating new SampleView instance")
+            # Get voxel_storage from 3D visualization window if available
+            voxel_storage = None
+            if self.sample_3d_visualization_window:
+                voxel_storage = getattr(self.sample_3d_visualization_window, 'voxel_storage', None)
+
             self.sample_view = SampleView(
                 camera_controller=self.camera_controller,
                 movement_controller=self.movement_controller,
                 laser_led_controller=self.laser_led_controller,
-                voxel_storage=getattr(self, 'voxel_storage', None),
+                voxel_storage=voxel_storage,
                 image_controls_window=self.image_controls_window,
+                sample_3d_window=self.sample_3d_visualization_window,
             )
 
         self.sample_view.show()

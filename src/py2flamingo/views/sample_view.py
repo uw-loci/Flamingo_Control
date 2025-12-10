@@ -95,6 +95,7 @@ class SampleView(QWidget):
         laser_led_controller,
         voxel_storage=None,
         image_controls_window=None,
+        sample_3d_window=None,
         parent=None
     ):
         """
@@ -106,6 +107,7 @@ class SampleView(QWidget):
             laser_led_controller: LaserLEDController instance
             voxel_storage: Optional DualResolutionVoxelStorage instance
             image_controls_window: Optional ImageControlsWindow for advanced settings
+            sample_3d_window: Optional Sample3DVisualizationWindow for sharing visualization
             parent: Parent widget
         """
         super().__init__(parent)
@@ -115,6 +117,7 @@ class SampleView(QWidget):
         self.laser_led_controller = laser_led_controller
         self.voxel_storage = voxel_storage
         self.image_controls_window = image_controls_window
+        self.sample_3d_window = sample_3d_window
         self.logger = logging.getLogger(__name__)
 
         # Display state
@@ -948,10 +951,15 @@ class SampleView(QWidget):
             # Setup data layers for 4 channels
             self._setup_napari_layers()
 
+            # Setup chamber visualization (wireframe, holder, objective)
+            self._setup_chamber_visualization()
+
             self.logger.info("napari viewer initialized successfully")
 
         except Exception as e:
             self.logger.error(f"Failed to initialize napari viewer: {e}")
+            import traceback
+            traceback.print_exc()
             self.viewer = None
 
     def _setup_napari_layers(self) -> None:
@@ -959,19 +967,23 @@ class SampleView(QWidget):
         if not self.viewer:
             return
 
-        # Get dimensions from config
-        stage_config = self._config.get('stage_control', {})
-        x_range = stage_config.get('x_range_mm', [1.0, 12.31])
-        y_range = stage_config.get('y_range_mm', [0.0, 14.0])
-        z_range = stage_config.get('z_range_mm', [12.5, 26.0])
+        # Get dimensions from voxel_storage if available, otherwise use config
+        if self.voxel_storage and hasattr(self.voxel_storage, 'display_dims'):
+            dims_voxels = self.voxel_storage.display_dims
+        else:
+            # Fallback: Get dimensions from config
+            stage_config = self._config.get('stage_control', {})
+            x_range = stage_config.get('x_range_mm', [1.0, 12.31])
+            y_range = stage_config.get('y_range_mm', [0.0, 14.0])
+            z_range = stage_config.get('z_range_mm', [12.5, 26.0])
 
-        # Calculate dimensions in voxels (using 50um voxel size)
-        voxel_size_mm = 0.050  # 50um
-        dims_voxels = (
-            int((z_range[1] - z_range[0]) / voxel_size_mm),  # Z
-            int((y_range[1] - y_range[0]) / voxel_size_mm),  # Y
-            int((x_range[1] - x_range[0]) / voxel_size_mm),  # X
-        )
+            # Calculate dimensions in voxels (using 50um voxel size)
+            voxel_size_mm = 0.050  # 50um
+            dims_voxels = (
+                int((z_range[1] - z_range[0]) / voxel_size_mm),  # Z
+                int((y_range[1] - y_range[0]) / voxel_size_mm),  # Y
+                int((x_range[1] - x_range[0]) / voxel_size_mm),  # X
+            )
 
         # Channel colors matching laser wavelengths
         channel_colors = [
@@ -998,6 +1010,138 @@ class SampleView(QWidget):
             )
 
         self.logger.info(f"Created {4} napari layers with dimensions {dims_voxels}")
+
+    def _setup_chamber_visualization(self) -> None:
+        """Setup chamber wireframe, sample holder, and objective indicator."""
+        if not self.viewer:
+            return
+
+        # Get dimensions
+        if self.voxel_storage and hasattr(self.voxel_storage, 'display_dims'):
+            dims = self.voxel_storage.display_dims
+        else:
+            # Fallback to config-based dimensions
+            stage_config = self._config.get('stage_control', {})
+            x_range = stage_config.get('x_range_mm', [1.0, 12.31])
+            y_range = stage_config.get('y_range_mm', [0.0, 14.0])
+            z_range = stage_config.get('z_range_mm', [12.5, 26.0])
+            voxel_size_mm = 0.050
+            dims = (
+                int((z_range[1] - z_range[0]) / voxel_size_mm),
+                int((y_range[1] - y_range[0]) / voxel_size_mm),
+                int((x_range[1] - x_range[0]) / voxel_size_mm),
+            )
+
+        # Add chamber wireframe
+        self._add_chamber_wireframe(dims)
+
+        # Add objective indicator
+        self._add_objective_indicator(dims)
+
+        self.logger.info("Chamber visualization setup complete")
+
+    def _add_chamber_wireframe(self, dims: tuple) -> None:
+        """Add chamber wireframe as box edges using shapes layer."""
+        if not self.viewer:
+            return
+
+        # Define the 8 corners of the box in napari (Z, Y, X) order
+        corners = np.array([
+            [0, 0, 0],                              # Back-bottom-left
+            [dims[0]-1, 0, 0],                      # Front-bottom-left
+            [dims[0]-1, 0, dims[2]-1],              # Front-bottom-right
+            [0, 0, dims[2]-1],                      # Back-bottom-right
+            [0, dims[1]-1, 0],                      # Back-top-left
+            [dims[0]-1, dims[1]-1, 0],              # Front-top-left
+            [dims[0]-1, dims[1]-1, dims[2]-1],      # Front-top-right
+            [0, dims[1]-1, dims[2]-1]               # Back-top-right
+        ])
+
+        # Z edges (Axis 0 - Yellow)
+        z_edges = [
+            [corners[0], corners[1]],
+            [corners[3], corners[2]],
+            [corners[4], corners[5]],
+            [corners[7], corners[6]]
+        ]
+
+        # Y edges (Axis 1 - Magenta)
+        y_edges = [
+            [corners[0], corners[4]],
+            [corners[1], corners[5]],
+            [corners[2], corners[6]],
+            [corners[3], corners[7]]
+        ]
+
+        # X edges (Axis 2 - Cyan)
+        x_edges = [
+            [corners[0], corners[3]],
+            [corners[1], corners[2]],
+            [corners[4], corners[7]],
+            [corners[5], corners[6]]
+        ]
+
+        # Add Z edges (yellow)
+        self.viewer.add_shapes(
+            data=z_edges,
+            shape_type='line',
+            name='Chamber Z-edges',
+            edge_color='#8B8B00',
+            edge_width=2,
+            opacity=0.6
+        )
+
+        # Add Y edges (magenta)
+        self.viewer.add_shapes(
+            data=y_edges,
+            shape_type='line',
+            name='Chamber Y-edges',
+            edge_color='#8B008B',
+            edge_width=2,
+            opacity=0.6
+        )
+
+        # Add X edges (cyan)
+        self.viewer.add_shapes(
+            data=x_edges,
+            shape_type='line',
+            name='Chamber X-edges',
+            edge_color='#008B8B',
+            edge_width=2,
+            opacity=0.6
+        )
+
+    def _add_objective_indicator(self, dims: tuple) -> None:
+        """Add objective position indicator as a circle on the back wall."""
+        if not self.viewer:
+            return
+
+        # Objective is at the center of the back wall (Z=0)
+        center_y = dims[1] // 2  # Middle Y (vertical)
+        center_x = dims[2] // 2  # Middle X (horizontal)
+
+        # Create circle points
+        radius = 15  # voxels
+        num_points = 32
+        circle_points = []
+        for i in range(num_points):
+            angle = 2 * np.pi * i / num_points
+            y = center_y + radius * np.sin(angle)
+            x = center_x + radius * np.cos(angle)
+            circle_points.append([0, y, x])  # Z=0 (back wall)
+
+        # Close the circle
+        circle_points.append(circle_points[0])
+
+        # Add objective circle
+        self.viewer.add_shapes(
+            data=[circle_points],
+            shape_type='path',
+            name='Objective',
+            edge_color='#00FF00',
+            edge_width=3,
+            opacity=0.8
+        )
 
     def _update_plane_views(self) -> None:
         """Update the MIP (Maximum Intensity Projection) plane views from voxel data."""
