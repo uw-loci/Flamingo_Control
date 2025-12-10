@@ -76,10 +76,10 @@ class SampleView(QWidget):
         # Position slider scale factors (for int conversion)
         self._slider_scale = 1000  # 3 decimal places
 
-        # Setup window
+        # Setup window - sized for 3-column layout
         self.setWindowTitle("Sample View")
-        self.setMinimumSize(1200, 850)
-        self.resize(1400, 950)
+        self.setMinimumSize(1000, 800)
+        self.resize(1200, 900)
 
         # Setup UI
         self._setup_ui()
@@ -94,72 +94,83 @@ class SampleView(QWidget):
 
     def _setup_ui(self) -> None:
         """Create and layout all UI components."""
-        main_layout = QVBoxLayout()
+        main_layout = QHBoxLayout()
         main_layout.setSpacing(8)
         main_layout.setContentsMargins(8, 8, 8, 8)
 
-        # ========== TOP SECTION: Live + 3D + Controls ==========
-        top_section = QHBoxLayout()
-
-        # ----- Left Column: Live Camera + Display Controls + Illumination -----
+        # ========== LEFT COLUMN: Live Camera + Display + Illumination ==========
         left_column = QVBoxLayout()
         left_column.setSpacing(6)
 
-        # Live Camera Feed
+        # Live Camera Feed (4:3 aspect ratio)
         left_column.addWidget(self._create_live_feed_section())
 
         # Display Controls (embedded)
         left_column.addWidget(self._create_display_controls())
 
-        # Illumination Controls
+        # Illumination Controls (with minimum width to prevent squishing)
         left_column.addWidget(self._create_illumination_section())
+
+        left_column.addStretch()
 
         left_widget = QWidget()
         left_widget.setLayout(left_column)
-        left_widget.setMaximumWidth(680)
-        top_section.addWidget(left_widget)
+        left_widget.setMinimumWidth(350)  # Prevent illumination from squishing
+        left_widget.setMaximumWidth(420)
+        main_layout.addWidget(left_widget)
 
-        # ----- Right Column: 3D View + Position Sliders -----
+        # ========== CENTER COLUMN: 3D View (tall/vertical) ==========
+        center_column = QVBoxLayout()
+        center_column.setSpacing(6)
+
+        # 3D Volume View (tall for vertical chamber)
+        center_column.addWidget(self._create_3d_view_section(), stretch=1)
+
+        # Position Sliders below 3D view
+        center_column.addWidget(self._create_position_sliders())
+
+        center_widget = QWidget()
+        center_widget.setLayout(center_column)
+        main_layout.addWidget(center_widget, stretch=1)
+
+        # ========== RIGHT COLUMN: Plane Views (stacked vertically) ==========
         right_column = QVBoxLayout()
         right_column.setSpacing(6)
 
-        # 3D Volume View (placeholder for now)
-        right_column.addWidget(self._create_3d_view_section(), stretch=1)
+        # Plane views with proportions based on stage dimensions
+        right_column.addWidget(self._create_plane_views_section())
 
-        # Position Sliders
-        right_column.addWidget(self._create_position_sliders())
+        # Workflow Progress at bottom of right column
+        right_column.addWidget(self._create_workflow_progress())
+
+        # Button bar
+        right_column.addWidget(self._create_button_bar())
 
         right_widget = QWidget()
         right_widget.setLayout(right_column)
-        top_section.addWidget(right_widget, stretch=1)
-
-        main_layout.addLayout(top_section, stretch=1)
-
-        # ========== MIDDLE SECTION: Plane Views ==========
-        main_layout.addWidget(self._create_plane_views_section())
-
-        # ========== BOTTOM SECTION: Workflow + Buttons ==========
-        main_layout.addWidget(self._create_workflow_progress())
-        main_layout.addWidget(self._create_button_bar())
+        right_widget.setMinimumWidth(320)
+        right_widget.setMaximumWidth(450)
+        main_layout.addWidget(right_widget)
 
         self.setLayout(main_layout)
 
     def _create_live_feed_section(self) -> QGroupBox:
-        """Create the live camera feed display section."""
+        """Create the live camera feed display section with 4:3 aspect ratio."""
         group = QGroupBox("Live Camera Feed")
         layout = QVBoxLayout()
         layout.setSpacing(4)
 
-        # Image display label
+        # Image display label - constrained to 4:3 aspect ratio
+        # Using 320x240 as base size that scales up to fit available space
         self.live_image_label = QLabel("No image - Start live view from main window")
         self.live_image_label.setAlignment(Qt.AlignCenter)
-        self.live_image_label.setMinimumSize(640, 480)
-        self.live_image_label.setMaximumSize(640, 480)
+        self.live_image_label.setMinimumSize(320, 240)  # 4:3 minimum
+        self.live_image_label.setFixedSize(360, 270)    # 4:3 fixed size for compact layout
         self.live_image_label.setStyleSheet(
             "QLabel { background-color: black; color: gray; border: 1px solid #444; }"
         )
         self.live_image_label.setScaledContents(False)
-        layout.addWidget(self.live_image_label)
+        layout.addWidget(self.live_image_label, alignment=Qt.AlignCenter)
 
         # Status row
         status_layout = QHBoxLayout()
@@ -227,7 +238,7 @@ class SampleView(QWidget):
         return widget
 
     def _create_illumination_section(self) -> QGroupBox:
-        """Create illumination controls section."""
+        """Create illumination controls section with minimum width to prevent squishing."""
         group = QGroupBox("Illumination")
 
         # Use the existing LaserLEDControlPanel
@@ -235,27 +246,32 @@ class SampleView(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
 
         self.laser_led_panel = LaserLEDControlPanel(self.laser_led_controller)
+        self.laser_led_panel.setMinimumWidth(320)  # Prevent squishing
         layout.addWidget(self.laser_led_panel)
 
         group.setLayout(layout)
+        group.setMinimumWidth(340)  # Ensure group doesn't squish
         return group
 
     def _create_3d_view_section(self) -> QGroupBox:
-        """Create 3D volume view section (placeholder for napari)."""
+        """Create 3D volume view section (placeholder for napari) - tall/vertical."""
         group = QGroupBox("3D Volume View")
         layout = QVBoxLayout()
 
-        # Placeholder for napari viewer
+        # Placeholder for napari viewer - tall layout for vertical sample chamber
+        # Chamber dimensions: X ~11mm, Y ~20mm (vertical), Z ~13.5mm
         self.viewer_placeholder = QLabel("3D Napari Viewer\n(Will be integrated)")
         self.viewer_placeholder.setAlignment(Qt.AlignCenter)
         self.viewer_placeholder.setStyleSheet(
             "QLabel { background-color: #1a1a2e; color: #888; "
             "border: 2px dashed #444; font-size: 14pt; }"
         )
-        self.viewer_placeholder.setMinimumHeight(400)
+        self.viewer_placeholder.setMinimumSize(250, 450)  # Tall/vertical orientation
+        self.viewer_placeholder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.viewer_placeholder)
 
         group.setLayout(layout)
+        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         return group
 
     def _create_position_sliders(self) -> QGroupBox:
@@ -336,49 +352,63 @@ class SampleView(QWidget):
         return group
 
     def _create_plane_views_section(self) -> QWidget:
-        """Create the three MIP plane views section."""
-        widget = QWidget()
-        layout = QHBoxLayout()
-        layout.setSpacing(8)
+        """Create the three MIP plane views section with proportions based on stage dimensions.
 
-        # XZ Plane (Top-Down)
+        Stage dimensions: X ~11mm, Y ~20mm (vertical), Z ~13.5mm
+        - XZ (Top-Down): ~square (11:13.5)
+        - XY (Front View): tall (11:20)
+        - YZ (Side View): tall (13.5:20)
+        """
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setSpacing(6)
+
+        # XZ Plane (Top-Down) - approximately square (X:11mm x Z:13.5mm)
         xz_group = QGroupBox("XZ Plane (Top-Down)")
         xz_layout = QVBoxLayout()
+        xz_layout.setContentsMargins(4, 4, 4, 4)
         self.xz_plane_label = QLabel("MIP View\n(Click to move X,Z)")
         self.xz_plane_label.setAlignment(Qt.AlignCenter)
-        self.xz_plane_label.setMinimumSize(400, 180)
+        # Aspect ~11:13.5 ≈ 0.81, use 130x160 (scaled)
+        self.xz_plane_label.setFixedSize(130, 160)
         self.xz_plane_label.setStyleSheet(
             "QLabel { background-color: #1a1a1a; color: #666; border: 1px solid #444; }"
         )
-        xz_layout.addWidget(self.xz_plane_label)
+        xz_layout.addWidget(self.xz_plane_label, alignment=Qt.AlignCenter)
         xz_group.setLayout(xz_layout)
         layout.addWidget(xz_group)
 
-        # XY Plane (Side View)
-        xy_group = QGroupBox("XY Plane (Side View)")
+        # XY Plane (Front View) - tall and thin (X:11mm x Y:20mm)
+        xy_group = QGroupBox("XY Plane (Front View)")
         xy_layout = QVBoxLayout()
+        xy_layout.setContentsMargins(4, 4, 4, 4)
         self.xy_plane_label = QLabel("MIP View\n(Click to move X,Y)")
         self.xy_plane_label.setAlignment(Qt.AlignCenter)
-        self.xy_plane_label.setMinimumSize(400, 180)
+        # Aspect ~11:20 ≈ 0.55, use 110x200 (scaled)
+        self.xy_plane_label.setFixedSize(110, 200)
         self.xy_plane_label.setStyleSheet(
             "QLabel { background-color: #1a1a1a; color: #666; border: 1px solid #444; }"
         )
-        xy_layout.addWidget(self.xy_plane_label)
+        xy_layout.addWidget(self.xy_plane_label, alignment=Qt.AlignCenter)
         xy_group.setLayout(xy_layout)
         layout.addWidget(xy_group)
 
-        # YZ Plane (End View)
-        yz_group = QGroupBox("YZ Plane (End View)")
+        # YZ Plane (Side View) - tall (Z:13.5mm x Y:20mm, Y vertical)
+        yz_group = QGroupBox("YZ Plane (Side View)")
         yz_layout = QVBoxLayout()
+        yz_layout.setContentsMargins(4, 4, 4, 4)
         self.yz_plane_label = QLabel("MIP View\n(Click to move Y,Z)")
         self.yz_plane_label.setAlignment(Qt.AlignCenter)
-        self.yz_plane_label.setMinimumSize(280, 180)
+        # Aspect ~13.5:20 ≈ 0.675, use 135x200 (scaled)
+        self.yz_plane_label.setFixedSize(135, 200)
         self.yz_plane_label.setStyleSheet(
             "QLabel { background-color: #1a1a1a; color: #666; border: 1px solid #444; }"
         )
-        yz_layout.addWidget(self.yz_plane_label)
+        yz_layout.addWidget(self.yz_plane_label, alignment=Qt.AlignCenter)
         yz_group.setLayout(yz_layout)
         layout.addWidget(yz_group)
+
+        layout.addStretch()
 
         widget.setLayout(layout)
         return widget
