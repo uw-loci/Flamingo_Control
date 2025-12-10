@@ -13,17 +13,63 @@ Combines all elements needed for sample viewing and interaction:
 
 import logging
 import numpy as np
+import yaml
+from pathlib import Path
 from typing import Optional, Dict, Any
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGroupBox, QSlider, QComboBox, QCheckBox, QProgressBar,
-    QSplitter, QSizePolicy, QFrame
+    QSplitter, QSizePolicy, QFrame, QSpinBox, QDialog,
+    QDialogButtonBox, QGridLayout
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer, pyqtSignal
 from PyQt5.QtGui import QPixmap, QImage, QFont
 
 from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
 from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR, WARNING_BG
+
+
+class ViewerControlsDialog(QDialog):
+    """Placeholder dialog for advanced viewer controls.
+
+    Will be implemented later with full viewer settings including:
+    - Opacity per channel
+    - Rendering mode (MIP, additive, etc.)
+    - 3D visualization settings
+    - Export options
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Viewer Controls")
+        self.setMinimumSize(400, 300)
+
+        layout = QVBoxLayout()
+
+        # Placeholder content
+        placeholder = QLabel(
+            "Viewer Controls\n\n"
+            "This dialog will provide advanced controls for:\n"
+            "• Channel opacity adjustments\n"
+            "• Rendering modes (MIP, Volume, etc.)\n"
+            "• 3D visualization settings\n"
+            "• Camera/view angle controls\n"
+            "• Export and snapshot options\n\n"
+            "(Coming soon)"
+        )
+        placeholder.setAlignment(Qt.AlignCenter)
+        placeholder.setStyleSheet(
+            "QLabel { background-color: #f5f5f5; padding: 20px; "
+            "border: 2px dashed #ccc; border-radius: 8px; }"
+        )
+        layout.addWidget(placeholder)
+
+        # Button box
+        button_box = QDialogButtonBox(QDialogButtonBox.Close)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+        self.setLayout(layout)
 
 
 class SampleView(QWidget):
@@ -76,6 +122,16 @@ class SampleView(QWidget):
         # Position slider scale factors (for int conversion)
         self._slider_scale = 1000  # 3 decimal places
 
+        # Load visualization config for axis inversion settings
+        self._config = self._load_visualization_config()
+        self._invert_x = self._config.get('stage_control', {}).get('invert_x_default', False)
+
+        # Channel visibility/contrast state for 4 viewers
+        self._channel_states = {
+            i: {'visible': True, 'contrast_min': 0, 'contrast_max': 65535}
+            for i in range(4)
+        }
+
         # Setup window - sized for 3-column layout
         self.setWindowTitle("Sample View")
         self.setMinimumSize(1000, 800)
@@ -92,6 +148,26 @@ class SampleView(QWidget):
 
         self.logger.info("SampleView initialized")
 
+    def _load_visualization_config(self) -> Dict[str, Any]:
+        """Load visualization config from YAML file."""
+        config_path = Path(__file__).parent.parent / "configs" / "visualization_3d_config.yaml"
+        try:
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                self.logger.info(f"Loaded visualization config from {config_path}")
+                return config
+        except Exception as e:
+            self.logger.warning(f"Could not load visualization config: {e}")
+
+        # Return default config if file not found
+        return {
+            'stage_control': {
+                'invert_x_default': False,
+                'invert_z_default': False,
+            }
+        }
+
     def _setup_ui(self) -> None:
         """Create and layout all UI components."""
         main_layout = QHBoxLayout()
@@ -105,18 +181,26 @@ class SampleView(QWidget):
         # Live Camera Feed (4:3 aspect ratio)
         left_column.addWidget(self._create_live_feed_section())
 
-        # Display Controls (embedded)
-        left_column.addWidget(self._create_display_controls())
+        # Min-Max Range Control with editable fields (replaces old display controls)
+        left_column.addWidget(self._create_range_controls())
 
-        # Illumination Controls (with minimum width to prevent squishing)
+        # Illumination Controls (moved up, no stretch before)
         left_column.addWidget(self._create_illumination_section())
+
+        # Live Display button at bottom of left column
+        self.live_display_btn = QPushButton("Live Display")
+        self.live_display_btn.clicked.connect(self._on_live_display_clicked)
+        self.live_display_btn.setStyleSheet(
+            "QPushButton { padding: 6px 12px; }"
+        )
+        left_column.addWidget(self.live_display_btn)
 
         left_column.addStretch()
 
         left_widget = QWidget()
         left_widget.setLayout(left_column)
-        left_widget.setMinimumWidth(350)  # Prevent illumination from squishing
-        left_widget.setMaximumWidth(420)
+        left_widget.setMinimumWidth(380)
+        left_widget.setMaximumWidth(450)
         main_layout.addWidget(left_widget)
 
         # ========== CENTER COLUMN: 3D View (tall/vertical) ==========
@@ -133,14 +217,22 @@ class SampleView(QWidget):
         center_widget.setLayout(center_column)
         main_layout.addWidget(center_widget, stretch=1)
 
-        # ========== RIGHT COLUMN: Plane Views (stacked vertically) ==========
+        # ========== RIGHT COLUMN: Plane Views + Channel Controls ==========
         right_column = QVBoxLayout()
         right_column.setSpacing(6)
 
-        # Plane views with proportions based on stage dimensions
+        # Plane views with XY and YZ side by side (XZ on top)
         right_column.addWidget(self._create_plane_views_section())
 
-        # Workflow Progress at bottom of right column
+        # Channel controls for 4 viewers (contrast + visibility)
+        right_column.addWidget(self._create_channel_controls())
+
+        # Viewer Controls button
+        self.viewer_controls_btn = QPushButton("Viewer Controls")
+        self.viewer_controls_btn.clicked.connect(self._on_viewer_controls_clicked)
+        right_column.addWidget(self.viewer_controls_btn)
+
+        # Workflow Progress
         right_column.addWidget(self._create_workflow_progress())
 
         # Button bar
@@ -148,8 +240,8 @@ class SampleView(QWidget):
 
         right_widget = QWidget()
         right_widget.setLayout(right_column)
-        right_widget.setMinimumWidth(320)
-        right_widget.setMaximumWidth(450)
+        right_widget.setMinimumWidth(340)
+        right_widget.setMaximumWidth(500)
         main_layout.addWidget(right_widget)
 
         self.setLayout(main_layout)
@@ -189,51 +281,66 @@ class SampleView(QWidget):
         group.setLayout(layout)
         return group
 
-    def _create_display_controls(self) -> QWidget:
-        """Create embedded display controls for live view."""
+    def _create_range_controls(self) -> QWidget:
+        """Create Min-Max range control with editable text fields and combined slider."""
         widget = QWidget()
-        layout = QHBoxLayout()
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(8)
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(4, 4, 4, 4)
+        main_layout.setSpacing(4)
 
-        # Colormap selector
-        layout.addWidget(QLabel("Display:"))
+        # Row 1: Colormap + Auto checkbox
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
+
+        row1.addWidget(QLabel("Display:"))
         self.colormap_combo = QComboBox()
         self.colormap_combo.addItems(["Grayscale", "Hot", "Viridis", "Plasma", "Inferno"])
         self.colormap_combo.setCurrentText("Grayscale")
         self.colormap_combo.currentTextChanged.connect(self._on_colormap_changed)
-        self.colormap_combo.setMaximumWidth(100)
-        layout.addWidget(self.colormap_combo)
+        self.colormap_combo.setMaximumWidth(90)
+        row1.addWidget(self.colormap_combo)
 
-        # Auto-scale checkbox
         self.auto_scale_checkbox = QCheckBox("Auto")
         self.auto_scale_checkbox.setChecked(True)
         self.auto_scale_checkbox.stateChanged.connect(self._on_auto_scale_changed)
-        layout.addWidget(self.auto_scale_checkbox)
+        row1.addWidget(self.auto_scale_checkbox)
 
-        # Min intensity
-        layout.addWidget(QLabel("Min:"))
-        self.min_intensity_slider = QSlider(Qt.Horizontal)
-        self.min_intensity_slider.setRange(0, 65535)
-        self.min_intensity_slider.setValue(0)
-        self.min_intensity_slider.setMaximumWidth(80)
-        self.min_intensity_slider.valueChanged.connect(self._on_min_intensity_changed)
-        self.min_intensity_slider.setEnabled(False)
-        layout.addWidget(self.min_intensity_slider)
+        row1.addStretch()
+        main_layout.addLayout(row1)
 
-        # Max intensity
-        layout.addWidget(QLabel("Max:"))
-        self.max_intensity_slider = QSlider(Qt.Horizontal)
-        self.max_intensity_slider.setRange(0, 65535)
-        self.max_intensity_slider.setValue(65535)
-        self.max_intensity_slider.setMaximumWidth(80)
-        self.max_intensity_slider.valueChanged.connect(self._on_max_intensity_changed)
-        self.max_intensity_slider.setEnabled(False)
-        layout.addWidget(self.max_intensity_slider)
+        # Row 2: Min spinbox + range slider + Max spinbox
+        row2 = QHBoxLayout()
+        row2.setSpacing(4)
 
-        layout.addStretch()
+        # Min value spinbox (editable)
+        self.min_intensity_spinbox = QSpinBox()
+        self.min_intensity_spinbox.setRange(0, 65535)
+        self.min_intensity_spinbox.setValue(0)
+        self.min_intensity_spinbox.setMaximumWidth(70)
+        self.min_intensity_spinbox.setEnabled(False)
+        self.min_intensity_spinbox.valueChanged.connect(self._on_min_spinbox_changed)
+        row2.addWidget(self.min_intensity_spinbox)
 
-        widget.setLayout(layout)
+        # Combined range slider (shows the range visually)
+        self.range_slider = QSlider(Qt.Horizontal)
+        self.range_slider.setRange(0, 65535)
+        self.range_slider.setValue(32767)  # Middle position
+        self.range_slider.setEnabled(False)
+        self.range_slider.setToolTip("Drag to adjust range center")
+        row2.addWidget(self.range_slider, stretch=1)
+
+        # Max value spinbox (editable)
+        self.max_intensity_spinbox = QSpinBox()
+        self.max_intensity_spinbox.setRange(0, 65535)
+        self.max_intensity_spinbox.setValue(65535)
+        self.max_intensity_spinbox.setMaximumWidth(70)
+        self.max_intensity_spinbox.setEnabled(False)
+        self.max_intensity_spinbox.valueChanged.connect(self._on_max_spinbox_changed)
+        row2.addWidget(self.max_intensity_spinbox)
+
+        main_layout.addLayout(row2)
+
+        widget.setLayout(main_layout)
         widget.setStyleSheet("background-color: #f0f0f0; border-radius: 4px;")
         return widget
 
@@ -355,22 +462,23 @@ class SampleView(QWidget):
         """Create the three MIP plane views section with proportions based on stage dimensions.
 
         Stage dimensions: X ~11mm, Y ~20mm (vertical), Z ~13.5mm
-        - XZ (Top-Down): ~square (11:13.5)
-        - XY (Front View): tall (11:20)
-        - YZ (Side View): tall (13.5:20)
+        - XZ (Top-Down): ~square (11:13.5) - on top
+        - XY (Front View): tall (11:20) - bottom left
+        - YZ (Side View): tall (13.5:20) - bottom right, side by side with XY
         """
         widget = QWidget()
         layout = QVBoxLayout()
-        layout.setSpacing(6)
+        layout.setSpacing(4)
+        layout.setContentsMargins(0, 0, 0, 0)
 
-        # XZ Plane (Top-Down) - approximately square (X:11mm x Z:13.5mm)
+        # XZ Plane (Top-Down) - approximately square, centered on top
         xz_group = QGroupBox("XZ Plane (Top-Down)")
         xz_layout = QVBoxLayout()
         xz_layout.setContentsMargins(4, 4, 4, 4)
         self.xz_plane_label = QLabel("MIP View\n(Click to move X,Z)")
         self.xz_plane_label.setAlignment(Qt.AlignCenter)
-        # Aspect ~11:13.5 ≈ 0.81, use 130x160 (scaled)
-        self.xz_plane_label.setFixedSize(130, 160)
+        # Aspect ~11:13.5 ≈ 0.81, use 180x220 (enlarged)
+        self.xz_plane_label.setFixedSize(180, 220)
         self.xz_plane_label.setStyleSheet(
             "QLabel { background-color: #1a1a1a; color: #666; border: 1px solid #444; }"
         )
@@ -378,40 +486,99 @@ class SampleView(QWidget):
         xz_group.setLayout(xz_layout)
         layout.addWidget(xz_group)
 
+        # Bottom row: XY and YZ side by side (both tall)
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(4)
+
         # XY Plane (Front View) - tall and thin (X:11mm x Y:20mm)
-        xy_group = QGroupBox("XY Plane (Front View)")
+        xy_group = QGroupBox("XY Plane (Front)")
         xy_layout = QVBoxLayout()
         xy_layout.setContentsMargins(4, 4, 4, 4)
         self.xy_plane_label = QLabel("MIP View\n(Click to move X,Y)")
         self.xy_plane_label.setAlignment(Qt.AlignCenter)
-        # Aspect ~11:20 ≈ 0.55, use 110x200 (scaled)
-        self.xy_plane_label.setFixedSize(110, 200)
+        # Aspect ~11:20 ≈ 0.55, use 130x240 (enlarged)
+        self.xy_plane_label.setFixedSize(130, 240)
         self.xy_plane_label.setStyleSheet(
             "QLabel { background-color: #1a1a1a; color: #666; border: 1px solid #444; }"
         )
         xy_layout.addWidget(self.xy_plane_label, alignment=Qt.AlignCenter)
         xy_group.setLayout(xy_layout)
-        layout.addWidget(xy_group)
+        bottom_row.addWidget(xy_group)
 
         # YZ Plane (Side View) - tall (Z:13.5mm x Y:20mm, Y vertical)
-        yz_group = QGroupBox("YZ Plane (Side View)")
+        yz_group = QGroupBox("YZ Plane (Side)")
         yz_layout = QVBoxLayout()
         yz_layout.setContentsMargins(4, 4, 4, 4)
         self.yz_plane_label = QLabel("MIP View\n(Click to move Y,Z)")
         self.yz_plane_label.setAlignment(Qt.AlignCenter)
-        # Aspect ~13.5:20 ≈ 0.675, use 135x200 (scaled)
-        self.yz_plane_label.setFixedSize(135, 200)
+        # Aspect ~13.5:20 ≈ 0.675, use 160x240 (enlarged)
+        self.yz_plane_label.setFixedSize(160, 240)
         self.yz_plane_label.setStyleSheet(
             "QLabel { background-color: #1a1a1a; color: #666; border: 1px solid #444; }"
         )
         yz_layout.addWidget(self.yz_plane_label, alignment=Qt.AlignCenter)
         yz_group.setLayout(yz_layout)
-        layout.addWidget(yz_group)
+        bottom_row.addWidget(yz_group)
 
-        layout.addStretch()
+        layout.addLayout(bottom_row)
 
         widget.setLayout(layout)
         return widget
+
+    def _create_channel_controls(self) -> QGroupBox:
+        """Create channel visibility and contrast controls for 4 viewer channels."""
+        group = QGroupBox("Channels")
+        layout = QGridLayout()
+        layout.setSpacing(4)
+        layout.setContentsMargins(6, 6, 6, 6)
+
+        # Channel names/colors matching the laser wavelengths
+        channel_info = [
+            ("Ch1 (405nm)", "#9370DB"),  # Violet
+            ("Ch2 (488nm)", "#00CED1"),  # Cyan
+            ("Ch3 (561nm)", "#32CD32"),  # Green
+            ("Ch4 (640nm)", "#DC143C"),  # Red
+        ]
+
+        # Store widget references
+        self.channel_checkboxes: Dict[int, QCheckBox] = {}
+        self.channel_contrast_sliders: Dict[int, QSlider] = {}
+
+        # Header row
+        layout.addWidget(QLabel("Vis"), 0, 0)
+        layout.addWidget(QLabel("Channel"), 0, 1)
+        layout.addWidget(QLabel("Contrast"), 0, 2)
+
+        for i, (name, color) in enumerate(channel_info):
+            row = i + 1
+
+            # Visibility checkbox
+            checkbox = QCheckBox()
+            checkbox.setChecked(True)
+            checkbox.stateChanged.connect(
+                lambda state, ch=i: self._on_channel_visibility_changed(ch, state)
+            )
+            self.channel_checkboxes[i] = checkbox
+            layout.addWidget(checkbox, row, 0)
+
+            # Channel name with color indicator
+            label = QLabel(name)
+            label.setStyleSheet(f"color: {color}; font-weight: bold;")
+            layout.addWidget(label, row, 1)
+
+            # Contrast slider
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(0, 100)
+            slider.setValue(50)  # Default contrast
+            slider.setMaximumWidth(100)
+            slider.valueChanged.connect(
+                lambda val, ch=i: self._on_channel_contrast_changed(ch, val)
+            )
+            self.channel_contrast_sliders[i] = slider
+            layout.addWidget(slider, row, 2)
+
+        group.setLayout(layout)
+        return group
 
     def _create_workflow_progress(self) -> QWidget:
         """Create workflow progress bar (placeholder - not connected)."""
@@ -448,17 +615,13 @@ class SampleView(QWidget):
         """Create dialog launcher button bar."""
         widget = QWidget()
         layout = QHBoxLayout()
-        layout.setSpacing(12)
+        layout.setSpacing(8)
+        layout.setContentsMargins(0, 4, 0, 4)
 
         # Saved Positions button
         self.saved_positions_btn = QPushButton("Saved Positions")
         self.saved_positions_btn.clicked.connect(self._on_saved_positions_clicked)
         layout.addWidget(self.saved_positions_btn)
-
-        # Image Settings button (advanced controls)
-        self.image_settings_btn = QPushButton("Image Settings")
-        self.image_settings_btn.clicked.connect(self._on_image_settings_clicked)
-        layout.addWidget(self.image_settings_btn)
 
         # Stage Control button
         self.stage_control_btn = QPushButton("Stage Control")
@@ -514,12 +677,25 @@ class SampleView(QWidget):
                     max_label = slider.property('max_label')
                     decimals = slider.property('decimals')
 
-                    if min_label:
-                        min_label.setText(f"{min_val:.{decimals}f}")
-                    if max_label:
-                        max_label.setText(f"{max_val:.{decimals}f}")
+                    # For X axis: if inverted, swap the displayed labels (high on left, low on right)
+                    if axis_id == 'x' and self._invert_x:
+                        # Inverted: show max on left, min on right
+                        if min_label:
+                            min_label.setText(f"{max_val:.{decimals}f}")
+                        if max_label:
+                            max_label.setText(f"{min_val:.{decimals}f}")
+                        # Mark slider as inverted for value display
+                        slider.setProperty('inverted', True)
+                        slider.setInvertedAppearance(True)
+                    else:
+                        # Normal: show min on left, max on right
+                        if min_label:
+                            min_label.setText(f"{min_val:.{decimals}f}")
+                        if max_label:
+                            max_label.setText(f"{max_val:.{decimals}f}")
+                        slider.setProperty('inverted', False)
 
-            self.logger.info("Stage limits initialized for position sliders")
+            self.logger.info(f"Stage limits initialized (X inverted: {self._invert_x})")
 
         except Exception as e:
             self.logger.error(f"Error initializing stage limits: {e}")
@@ -633,19 +809,41 @@ class SampleView(QWidget):
     def _on_auto_scale_changed(self, state: int) -> None:
         """Handle auto-scale checkbox change."""
         self._auto_scale = (state == Qt.Checked)
-        self.min_intensity_slider.setEnabled(not self._auto_scale)
-        self.max_intensity_slider.setEnabled(not self._auto_scale)
+        enabled = not self._auto_scale
+        self.min_intensity_spinbox.setEnabled(enabled)
+        self.max_intensity_spinbox.setEnabled(enabled)
+        self.range_slider.setEnabled(enabled)
         self._update_live_display()
 
-    def _on_min_intensity_changed(self, value: int) -> None:
-        """Handle min intensity slider change."""
+    def _on_min_spinbox_changed(self, value: int) -> None:
+        """Handle min intensity spinbox change."""
         self._intensity_min = value
+        # Ensure min doesn't exceed max
+        if value > self._intensity_max:
+            self.max_intensity_spinbox.setValue(value)
         self._update_live_display()
 
-    def _on_max_intensity_changed(self, value: int) -> None:
-        """Handle max intensity slider change."""
+    def _on_max_spinbox_changed(self, value: int) -> None:
+        """Handle max intensity spinbox change."""
         self._intensity_max = value
+        # Ensure max doesn't go below min
+        if value < self._intensity_min:
+            self.min_intensity_spinbox.setValue(value)
         self._update_live_display()
+
+    def _on_channel_visibility_changed(self, channel: int, state: int) -> None:
+        """Handle channel visibility checkbox change."""
+        visible = (state == Qt.Checked)
+        self._channel_states[channel]['visible'] = visible
+        self.logger.debug(f"Channel {channel} visibility: {visible}")
+        # TODO: Update viewer channel visibility
+
+    def _on_channel_contrast_changed(self, channel: int, value: int) -> None:
+        """Handle channel contrast slider change."""
+        # Map 0-100 slider to contrast adjustment
+        self._channel_states[channel]['contrast'] = value
+        self.logger.debug(f"Channel {channel} contrast: {value}")
+        # TODO: Update viewer channel contrast
 
     # ========== Dialog Launchers ==========
 
@@ -654,13 +852,18 @@ class SampleView(QWidget):
         self.logger.info("Saved Positions clicked (not yet implemented)")
         # TODO: Open saved positions dialog
 
-    def _on_image_settings_clicked(self) -> None:
-        """Open image controls window for advanced settings."""
+    def _on_live_display_clicked(self) -> None:
+        """Open Live Display (image controls) window for advanced settings."""
         if self.image_controls_window:
             self.image_controls_window.show()
             self.image_controls_window.raise_()
         else:
-            self.logger.info("Image Settings clicked (window not available)")
+            self.logger.info("Live Display clicked (window not available)")
+
+    def _on_viewer_controls_clicked(self) -> None:
+        """Open viewer controls dialog (placeholder)."""
+        dialog = ViewerControlsDialog(self)
+        dialog.exec_()
 
     def _on_stage_control_clicked(self) -> None:
         """Focus the main window Stage Control tab."""

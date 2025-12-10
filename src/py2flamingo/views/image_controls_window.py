@@ -72,7 +72,7 @@ class ImageControlsWindow(QWidget):
 
         # Make window stay on top but not modal
         self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint)
-        self.setWindowTitle("Image Controls")
+        self.setWindowTitle("Live Display")
 
     def _setup_ui(self) -> None:
         """Create and layout all UI components."""
