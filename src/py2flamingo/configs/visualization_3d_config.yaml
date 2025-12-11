@@ -132,6 +132,7 @@ coordinate_mapping:
 channels:
   # Laser line channel configurations
   # These represent fluorescent signals excited by different laser wavelengths
+  # Contrast limits define default display range for 16-bit images (0-65535)
   - id: 0
     name: "405nm (DAPI)"
     default_colormap: "blue"
@@ -139,6 +140,8 @@ channels:
     update_strategy: "maximum"  # Maximum intensity projection for fluorescence
     blend_mode: "additive"
     opacity: 0.8
+    default_contrast_min: 0
+    default_contrast_max: 65535
 
   - id: 1
     name: "488nm (GFP)"
@@ -147,6 +150,8 @@ channels:
     update_strategy: "maximum"
     blend_mode: "additive"
     opacity: 0.8
+    default_contrast_min: 0
+    default_contrast_max: 65535
 
   - id: 2
     name: "561nm (RFP)"
@@ -155,6 +160,8 @@ channels:
     update_strategy: "maximum"
     blend_mode: "additive"
     opacity: 0.8
+    default_contrast_min: 0
+    default_contrast_max: 65535
 
   - id: 3
     name: "640nm (Far-Red)"
@@ -163,6 +170,16 @@ channels:
     update_strategy: "maximum"
     blend_mode: "additive"
     opacity: 0.8
+    default_contrast_min: 0
+    default_contrast_max: 65535
+
+# Live view display settings
+live_display:
+  # Default contrast limits for live camera feed
+  default_contrast_min: 0
+  default_contrast_max: 65535
+  # Auto-scale by default
+  auto_scale: true
 
 rotation:
   # Rotation handling parameters

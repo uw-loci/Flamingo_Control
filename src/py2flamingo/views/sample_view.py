@@ -361,11 +361,8 @@ class SampleView(QWidget):
         self._config = self._load_visualization_config()
         self._invert_x = self._config.get('stage_control', {}).get('invert_x_default', False)
 
-        # Channel visibility/contrast state for 4 viewers
-        self._channel_states = {
-            i: {'visible': True, 'contrast_min': 0, 'contrast_max': 65535}
-            for i in range(4)
-        }
+        # Channel visibility/contrast state for 4 viewers - load from config
+        self._channel_states = self._load_channel_settings_from_config()
 
         # Live view state
         self._live_view_active = False
@@ -416,6 +413,51 @@ class SampleView(QWidget):
                 'invert_z_default': False,
             }
         }
+
+    def _load_channel_settings_from_config(self) -> Dict[int, Dict[str, Any]]:
+        """Load channel settings (contrast, visibility) from visualization config.
+
+        Returns:
+            Dictionary mapping channel index to settings dict with:
+            - visible: bool
+            - contrast_min: int
+            - contrast_max: int
+        """
+        channel_states = {}
+        channels_config = self._config.get('channels', [])
+
+        for i in range(4):
+            # Find channel config by id
+            channel_config = None
+            for ch in channels_config:
+                if ch.get('id') == i:
+                    channel_config = ch
+                    break
+
+            if channel_config:
+                channel_states[i] = {
+                    'visible': channel_config.get('default_visible', True),
+                    'contrast_min': channel_config.get('default_contrast_min', 0),
+                    'contrast_max': channel_config.get('default_contrast_max', 65535),
+                }
+                self.logger.debug(f"Loaded channel {i} settings from config: {channel_states[i]}")
+            else:
+                # Default if not in config
+                channel_states[i] = {
+                    'visible': True,
+                    'contrast_min': 0,
+                    'contrast_max': 65535,
+                }
+
+        # Also load live display settings for the main display
+        live_config = self._config.get('live_display', {})
+        self._intensity_min = live_config.get('default_contrast_min', 0)
+        self._intensity_max = live_config.get('default_contrast_max', 65535)
+        self._auto_scale = live_config.get('auto_scale', True)
+
+        self.logger.info(f"Loaded channel and live display settings from config")
+
+        return channel_states
 
     def _setup_ui(self) -> None:
         """Create and layout all UI components."""
@@ -925,7 +967,7 @@ class SampleView(QWidget):
         self.logger.info("SampleView signals connected")
 
     def _init_stage_limits(self) -> None:
-        """Initialize stage limits from movement controller."""
+        """Initialize stage limits from movement controller and set current positions."""
         if not self.movement_controller:
             return
 
@@ -970,8 +1012,63 @@ class SampleView(QWidget):
 
             self.logger.info(f"Stage limits initialized (X inverted: {self._invert_x})")
 
+            # Query and set CURRENT stage position (critical for safety!)
+            self._load_current_positions()
+
         except Exception as e:
             self.logger.error(f"Error initializing stage limits: {e}")
+
+    def _load_current_positions(self) -> None:
+        """Load current stage positions from movement controller and update sliders.
+
+        This is critical for safety - sliders must reflect actual stage position,
+        not default values that could cause dangerous movements.
+        """
+        if not self.movement_controller:
+            self.logger.warning("No movement controller - cannot load current positions")
+            return
+
+        try:
+            # Get current position from controller (returns Position object)
+            current_pos = self.movement_controller.get_position()
+
+            if current_pos is None:
+                self.logger.warning("Could not retrieve current position from controller")
+                return
+
+            # Extract positions (current_pos is a Position object when axis=None)
+            positions = {
+                'x': current_pos.x,
+                'y': current_pos.y,
+                'z': current_pos.z,
+                'r': current_pos.r
+            }
+
+            self.logger.info(f"Loading current positions: X={positions['x']:.3f}, "
+                           f"Y={positions['y']:.3f}, Z={positions['z']:.3f}, R={positions['r']:.2f}")
+
+            # Update each slider to current position
+            for axis_id, value in positions.items():
+                if axis_id in self.position_sliders and value is not None:
+                    slider = self.position_sliders[axis_id]
+                    label = self.position_labels[axis_id]
+
+                    # Block signals to prevent triggering movement commands
+                    slider.blockSignals(True)
+                    slider.setValue(int(value * self._slider_scale))
+                    slider.blockSignals(False)
+
+                    # Update value label
+                    unit = slider.property('unit')
+                    decimals = slider.property('decimals')
+                    label.setText(f"{value:.{decimals}f} {unit}")
+
+            self.logger.info("Slider positions initialized from current stage position")
+
+        except Exception as e:
+            self.logger.error(f"Error loading current positions: {e}")
+            import traceback
+            traceback.print_exc()
 
     # ========== Slot Handlers ==========
 
