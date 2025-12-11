@@ -24,6 +24,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, pyqtSignal
 from PyQt5.QtGui import QPixmap, QImage, QFont
+from superqt import QRangeSlider
 
 from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
 from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR, WARNING_BG
@@ -588,7 +589,7 @@ class SampleView(QWidget):
         return group
 
     def _create_range_controls(self) -> QWidget:
-        """Create Min-Max range control with editable text fields and combined slider."""
+        """Create Min-Max range control with dual-handle slider and editable spinboxes."""
         widget = QWidget()
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(4, 4, 4, 4)
@@ -614,7 +615,7 @@ class SampleView(QWidget):
         row1.addStretch()
         main_layout.addLayout(row1)
 
-        # Row 2: Min spinbox + range slider + Max spinbox
+        # Row 2: Min spinbox + dual-handle range slider + Max spinbox
         row2 = QHBoxLayout()
         row2.setSpacing(4)
 
@@ -627,12 +628,13 @@ class SampleView(QWidget):
         self.min_intensity_spinbox.valueChanged.connect(self._on_min_spinbox_changed)
         row2.addWidget(self.min_intensity_spinbox)
 
-        # Combined range slider (shows the range visually)
-        self.range_slider = QSlider(Qt.Horizontal)
+        # Dual-handle range slider (from superqt)
+        self.range_slider = QRangeSlider(Qt.Horizontal)
         self.range_slider.setRange(0, 65535)
-        self.range_slider.setValue(32767)  # Middle position
+        self.range_slider.setValue((0, 65535))  # (min, max) tuple
         self.range_slider.setEnabled(False)
-        self.range_slider.setToolTip("Drag to adjust range center")
+        self.range_slider.setToolTip("Drag handles to adjust contrast range")
+        self.range_slider.valueChanged.connect(self._on_range_slider_changed)
         row2.addWidget(self.range_slider, stretch=1)
 
         # Max value spinbox (editable)
@@ -852,38 +854,61 @@ class SampleView(QWidget):
         layout.setSpacing(2)
         layout.setContentsMargins(6, 6, 6, 6)
 
-        # Channel names/colors matching the laser wavelengths
-        channel_info = [
-            ("Ch1 (405nm)", "#9370DB"),  # Violet
-            ("Ch2 (488nm)", "#00CED1"),  # Cyan
-            ("Ch3 (561nm)", "#32CD32"),  # Green
-            ("Ch4 (640nm)", "#DC143C"),  # Red
+        # Get channel names from visualization config (wavelengths)
+        # Falls back to default names if config not available
+        channels_config = self._config.get('channels', [])
+        default_channel_info = [
+            {"name": "405nm", "color": "#9370DB"},  # Violet
+            {"name": "488nm", "color": "#00CED1"},  # Cyan
+            {"name": "561nm", "color": "#32CD32"},  # Green
+            {"name": "640nm", "color": "#DC143C"},  # Red
         ]
 
         # Store widget references
         self.channel_checkboxes: Dict[int, QCheckBox] = {}
-        self.channel_contrast_sliders: Dict[int, QSlider] = {}
+        self.channel_contrast_sliders: Dict[int, QRangeSlider] = {}
 
-        for i, (name, color) in enumerate(channel_info):
+        for i in range(4):
+            # Get channel config or use default
+            if i < len(channels_config):
+                ch_config = channels_config[i]
+                # Extract wavelength from name like "405nm (DAPI)" -> "405nm"
+                name = ch_config.get('name', default_channel_info[i]['name'])
+                if '(' in name:
+                    name = name.split('(')[0].strip()
+            else:
+                name = default_channel_info[i]['name']
+
+            # Get colormap color for the channel
+            colormap = channels_config[i].get('default_colormap', 'gray') if i < len(channels_config) else 'gray'
+            colormap_colors = {
+                'blue': '#9370DB', 'green': '#32CD32', 'red': '#DC143C',
+                'magenta': '#FF00FF', 'cyan': '#00CED1', 'gray': '#808080'
+            }
+            color = colormap_colors.get(colormap, default_channel_info[i]['color'])
+
             row_layout = QHBoxLayout()
             row_layout.setSpacing(4)
 
-            # Visibility checkbox with channel name (compact)
+            # Visibility checkbox with wavelength name
             checkbox = QCheckBox(name)
-            checkbox.setChecked(True)
+            checkbox.setChecked(self._channel_states[i].get('visible', True))
             checkbox.setStyleSheet(f"QCheckBox {{ color: {color}; font-weight: bold; }}")
             checkbox.stateChanged.connect(
                 lambda state, ch=i: self._on_channel_visibility_changed(ch, state)
             )
-            checkbox.setMinimumWidth(100)
+            checkbox.setMinimumWidth(70)
             self.channel_checkboxes[i] = checkbox
             row_layout.addWidget(checkbox)
 
-            # Contrast slider (takes remaining space)
-            slider = QSlider(Qt.Horizontal)
-            slider.setRange(0, 100)
-            slider.setValue(50)  # Default contrast
-            slider.setToolTip(f"Adjust contrast for {name}")
+            # Dual-handle contrast range slider
+            slider = QRangeSlider(Qt.Horizontal)
+            slider.setRange(0, 65535)
+            # Load initial values from channel state
+            min_val = self._channel_states[i].get('contrast_min', 0)
+            max_val = self._channel_states[i].get('contrast_max', 65535)
+            slider.setValue((min_val, max_val))
+            slider.setToolTip(f"Adjust contrast range for {name}")
             slider.valueChanged.connect(
                 lambda val, ch=i: self._on_channel_contrast_changed(ch, val)
             )
@@ -1221,19 +1246,41 @@ class SampleView(QWidget):
         self._update_live_display()
 
     def _on_min_spinbox_changed(self, value: int) -> None:
-        """Handle min intensity spinbox change."""
+        """Handle min intensity spinbox change - update slider and display."""
         self._intensity_min = value
         # Ensure min doesn't exceed max
         if value > self._intensity_max:
             self.max_intensity_spinbox.setValue(value)
+        # Sync range slider with spinboxes
+        self.range_slider.blockSignals(True)
+        self.range_slider.setValue((self._intensity_min, self._intensity_max))
+        self.range_slider.blockSignals(False)
         self._update_live_display()
 
     def _on_max_spinbox_changed(self, value: int) -> None:
-        """Handle max intensity spinbox change."""
+        """Handle max intensity spinbox change - update slider and display."""
         self._intensity_max = value
         # Ensure max doesn't go below min
         if value < self._intensity_min:
             self.min_intensity_spinbox.setValue(value)
+        # Sync range slider with spinboxes
+        self.range_slider.blockSignals(True)
+        self.range_slider.setValue((self._intensity_min, self._intensity_max))
+        self.range_slider.blockSignals(False)
+        self._update_live_display()
+
+    def _on_range_slider_changed(self, value: tuple) -> None:
+        """Handle range slider change - update spinboxes and display."""
+        min_val, max_val = value
+        self._intensity_min = min_val
+        self._intensity_max = max_val
+        # Sync spinboxes with slider
+        self.min_intensity_spinbox.blockSignals(True)
+        self.max_intensity_spinbox.blockSignals(True)
+        self.min_intensity_spinbox.setValue(min_val)
+        self.max_intensity_spinbox.setValue(max_val)
+        self.min_intensity_spinbox.blockSignals(False)
+        self.max_intensity_spinbox.blockSignals(False)
         self._update_live_display()
 
     def _on_channel_visibility_changed(self, channel: int, state: int) -> None:
@@ -1249,34 +1296,25 @@ class SampleView(QWidget):
             if layer_name in viewer.layers:
                 viewer.layers[layer_name].visible = visible
 
-    def _on_channel_contrast_changed(self, channel: int, value: int) -> None:
-        """Handle channel contrast slider change."""
-        # Map 0-100 slider to contrast range
-        # At 50 (default), use full range [0, 65535]
-        # Lower values compress the range (increase contrast)
-        # Higher values expand the range (decrease contrast)
-        self._channel_states[channel]['contrast'] = value
+    def _on_channel_contrast_changed(self, channel: int, value: tuple) -> None:
+        """Handle channel contrast range slider change.
 
-        # Calculate contrast limits based on slider value
-        # value 0 = very high contrast (narrow range)
-        # value 50 = normal (full range)
-        # value 100 = low contrast (expanded range)
-        if value <= 50:
-            # Compress range: at 0, range is [0, 6553], at 50, range is [0, 65535]
-            max_val = int(65535 * (value / 50.0)) if value > 0 else 6553
-            contrast_limits = [0, max_val]
-        else:
-            # For values > 50, keep full range but could adjust brightness
-            contrast_limits = [0, 65535]
+        Args:
+            channel: Channel index (0-3)
+            value: Tuple of (min, max) contrast values from QRangeSlider
+        """
+        min_val, max_val = value
+        self._channel_states[channel]['contrast_min'] = min_val
+        self._channel_states[channel]['contrast_max'] = max_val
 
         # Update napari layer contrast via the 3D window's viewer
         viewer = self._get_viewer()
         if viewer:
             layer_name = f"Channel {channel + 1}"
             if layer_name in viewer.layers:
-                viewer.layers[layer_name].contrast_limits = contrast_limits
+                viewer.layers[layer_name].contrast_limits = [min_val, max_val]
 
-        self.logger.debug(f"Channel {channel} contrast: {value}, limits: {contrast_limits}")
+        self.logger.debug(f"Channel {channel} contrast range: [{min_val}, {max_val}]")
 
     def _get_viewer(self):
         """Get the napari viewer from the 3D window."""
@@ -1463,6 +1501,11 @@ class SampleView(QWidget):
                 self.live_status_label.setText("Status: Idle")
                 self.logger.info("Live view stopped")
             else:
+                # Re-enable the selected light source before starting camera
+                # (it was disabled when live view stopped previously)
+                if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+                    self.laser_led_panel.restore_checked_illumination()
+
                 # Start live view
                 self.camera_controller.start_live_view()
                 self._live_view_active = True

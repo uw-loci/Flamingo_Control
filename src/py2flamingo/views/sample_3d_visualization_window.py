@@ -1162,7 +1162,7 @@ class Sample3DVisualizationWindow(QWidget):
             # Default napari view is often upside down, so we need to set a proper orientation
             # Camera angles: (azimuth, elevation) in degrees
             self.viewer.camera.angles = (45, 30, 0)  # Good 3D perspective
-            self.viewer.camera.zoom = 1.6  # Zoomed out to fit entire chamber
+            self.viewer.camera.zoom = 1.57  # Zoomed out to fit entire chamber
 
             # Embed viewer in our widget FIRST before adding layers
             # This ensures the viewer is properly initialized
@@ -2378,7 +2378,7 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Reset camera to default view
         self.viewer.camera.angles = (45, 30, 0)
-        self.viewer.camera.zoom = 1.6
+        self.viewer.camera.zoom = 1.57
         self.viewer.reset_view()
 
     def _on_rendering_mode_changed(self, mode: str):
