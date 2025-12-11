@@ -225,6 +225,7 @@ The layout went through several iterations based on user feedback:
 | 2655535 | Refactor Sample View to reuse existing implementations |
 | 9c1bde3 | Add 2D slice plane viewers with colored borders and overlays |
 | 2cb6a40 | Add zoom display and improve Sample View compactness |
+| 8e3d709 | Fix Sample View to load real values on initialization (safety fix) |
 
 ---
 
@@ -240,6 +241,32 @@ The layout went through several iterations based on user feedback:
 **Fix:** Refactored to embed `Sample3DVisualizationWindow.viewer.window._qt_viewer`
 **Commit:** 2655535
 
+### 3. Position Sliders Showing Max Values (Safety Issue)
+**Cause:** Sliders initialized with hardcoded values (50000) instead of querying actual stage position
+**Risk:** User opening Sample View could accidentally move stage to dangerous position
+**Fix:** Added `_load_current_positions()` method that queries `movement_controller.get_position()` on init
+**Commit:** 8e3d709
+
+**Code added:**
+```python
+def _load_current_positions(self) -> None:
+    """Load current stage positions from movement controller and update sliders.
+
+    This is critical for safety - sliders must reflect actual stage position,
+    not default values that could cause dangerous movements.
+    """
+    current_pos = self.movement_controller.get_position()
+    for axis_id, value in positions.items():
+        slider.blockSignals(True)  # Prevent triggering movement
+        slider.setValue(int(value * self._slider_scale))
+        slider.blockSignals(False)
+```
+
+### 4. Contrast Settings Not Persisted
+**Cause:** Contrast min/max values were hardcoded, not configurable
+**Fix:** Added `default_contrast_min` and `default_contrast_max` to each channel in `visualization_3d_config.yaml`
+**Commit:** 8e3d709
+
 ---
 
 ## Testing Notes
@@ -251,6 +278,9 @@ The layout went through several iterations based on user feedback:
 - [x] Light source switching works from embedded panel
 - [x] Position sliders send movement commands
 - [x] Zoom level displays in status bar
+- [x] Position sliders load current stage position on init
+- [x] Laser power levels load from controller
+- [x] Contrast settings load from visualization config
 
 ### Known Limitations
 - 2D slice viewers show placeholder images (MIP projection not yet connected)
