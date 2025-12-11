@@ -1,7 +1,7 @@
 # Claude Report: Sample View Implementation
 
 **Date:** 2025-12-11
-**Commits:** b967b66 through 2cb6a40 (11 commits)
+**Commits:** b967b66 through 9db5e27 (15 commits)
 **Purpose:** Create a unified Sample View interface combining all sample interaction controls in one window
 
 ---
@@ -25,7 +25,7 @@ The Sample View is a new unified interface that consolidates microscope sample i
 - Embeds the existing `Sample3DVisualizationWindow` napari viewer
 - Shares the same `voxel_storage` for volume data
 - Displays zoom level in status bar
-- Zoom set to 1.6 for better chamber visibility
+- Zoom set to 1.57 for optimal chamber visibility
 
 ### 2. Live Camera Feed (Reused)
 - Uses existing `CameraController.start_live_view()` and `stop_live_view()`
@@ -119,7 +119,7 @@ class SampleView(QWidget):
 - Added "Sample View" button to open new interface
 
 #### `src/py2flamingo/views/sample_3d_visualization_window.py`
-- Changed zoom from 2.0 to 1.6 for better chamber visibility
+- Changed zoom from 2.0 to 1.57 for optimal chamber visibility
 
 #### `src/py2flamingo/views/laser_led_control_panel.py`
 - Removed verbose "Select a light source..." text
@@ -226,6 +226,9 @@ The layout went through several iterations based on user feedback:
 | 9c1bde3 | Add 2D slice plane viewers with colored borders and overlays |
 | 2cb6a40 | Add zoom display and improve Sample View compactness |
 | 8e3d709 | Fix Sample View to load real values on initialization (safety fix) |
+| eadb843 | Update claude-report with safety fix documentation |
+| da05700 | Add Populate/Clear buttons, hook up Saved Positions/Stage Control/Export |
+| 9db5e27 | Fix light source sync, add range sliders, use wavelength names |
 
 ---
 
@@ -267,6 +270,57 @@ def _load_current_positions(self) -> None:
 **Fix:** Added `default_contrast_min` and `default_contrast_max` to each channel in `visualization_3d_config.yaml`
 **Commit:** 8e3d709
 
+### 5. Light Source Not Enabling on Start Live View
+**Cause:** When user clicked "Start Live", camera started but laser was not re-enabled (only ALL_DISABLE sent on stop, no enable on start)
+**Symptom:** UI showed laser selected but no illumination occurred
+**Fix:** Added call to `laser_led_panel.restore_checked_illumination()` in `_on_live_view_toggle()` before starting camera
+**Commit:** 9db5e27
+
+**Code added:**
+```python
+def _on_live_view_toggle(self) -> None:
+    """Toggle live view on/off."""
+    if not self._live_view_active:
+        # Re-enable the selected light source before starting camera
+        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+            self.laser_led_panel.restore_checked_illumination()
+        self.camera_controller.start_live_view()
+```
+
+### 6. Contrast Sliders Only Had Single Handle
+**Cause:** Used standard `QSlider` which only supports one value, not min/max range
+**Fix:** Replaced with `QRangeSlider` from superqt library for dual-handle min/max control
+**Commit:** 9db5e27
+
+**Features added:**
+- Dual-handle sliders for both Live Display and Channel contrast controls
+- Bidirectional sync between sliders and spinboxes
+- Signal blocking to prevent feedback loops during updates
+
+### 7. Channel Names Used Generic Labels (Ch1, Ch2)
+**Cause:** Hardcoded channel names instead of reading from config
+**Fix:** Load wavelength names from `visualization_3d_config.yaml` channels section, extract wavelength portion (e.g., "405nm (DAPI)" → "405nm")
+**Commit:** 9db5e27
+
+### 8. Missing Data Collection Buttons
+**Cause:** "Populate from Live View" and "Clear Data" buttons were not implemented
+**Fix:** Added buttons that forward to Sample3DVisualizationWindow's existing functionality
+**Commit:** da05700
+
+**Buttons added:**
+- "Populate from Live" - Green toggle button, syncs with sample_3d_window.populate_button
+- "Clear Data" - Orange button, calls sample_3d_window._on_clear_data()
+
+### 9. Utility Buttons Not Connected
+**Cause:** Saved Positions, Stage Control, Export Data buttons had no handlers
+**Fix:** Connected each to appropriate functionality
+**Commit:** da05700
+
+**Connections:**
+- Saved Positions → Opens `PositionHistoryDialog`
+- Stage Control → Opens `StageChamberVisualizationWindow`
+- Export Data → File dialog for TIFF/NPY export of voxel data
+
 ---
 
 ## Testing Notes
@@ -276,11 +330,19 @@ def _load_current_positions(self) -> None:
 - [x] 3D napari viewer displays and shares voxel_storage
 - [x] Live camera feed starts/stops correctly
 - [x] Light source switching works from embedded panel
+- [x] Light source re-enables when Start Live clicked
 - [x] Position sliders send movement commands
-- [x] Zoom level displays in status bar
+- [x] Zoom level displays in status bar (1.57)
 - [x] Position sliders load current stage position on init
 - [x] Laser power levels load from controller
 - [x] Contrast settings load from visualization config
+- [x] Range sliders with dual handles for min/max contrast
+- [x] Channel labels show wavelength names (405nm, 488nm, etc.)
+- [x] Populate from Live button syncs with 3D window
+- [x] Clear Data button clears voxel storage
+- [x] Saved Positions opens position history dialog
+- [x] Stage Control opens stage visualization window
+- [x] Export Data saves voxel data to file
 
 ### Known Limitations
 - 2D slice viewers show placeholder images (MIP projection not yet connected)
@@ -295,4 +357,4 @@ def _load_current_positions(self) -> None:
 2. **Overlay Synchronization**: Update holder/objective overlays when positions change
 3. **Viewer Controls**: Implement napari layer controls, colormap settings
 4. **Channel Selection**: Add per-viewer channel controls
-5. **Zoom Optimization**: Determine optimal zoom level for different chamber sizes
+5. **Live Display Settings Dialog**: Implement contrast controls in the settings popup
