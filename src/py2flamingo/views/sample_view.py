@@ -28,13 +28,8 @@ from PyQt5.QtGui import QPixmap, QImage, QFont
 from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
 from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR, WARNING_BG
 
-# Try to import napari
-try:
-    import napari
-    NAPARI_AVAILABLE = True
-except ImportError:
-    NAPARI_AVAILABLE = False
-    napari = None
+# Import camera state for live view control
+from py2flamingo.controllers.camera_controller import CameraState
 
 
 class ViewerControlsDialog(QDialog):
@@ -143,8 +138,8 @@ class SampleView(QWidget):
             for i in range(4)
         }
 
-        # Napari viewer (will be initialized after UI setup)
-        self.viewer: Optional['napari.Viewer'] = None
+        # Live view state
+        self._live_view_active = False
 
         # Setup window - sized for 3-column layout
         self.setWindowTitle("Sample View")
@@ -160,8 +155,11 @@ class SampleView(QWidget):
         # Initialize stage limits
         self._init_stage_limits()
 
-        # Initialize napari viewer
-        self._init_napari_viewer()
+        # Embed 3D viewer from existing window (if available)
+        self._embed_3d_viewer()
+
+        # Update live view button state
+        self._update_live_view_state()
 
         self.logger.info("SampleView initialized")
 
@@ -198,19 +196,33 @@ class SampleView(QWidget):
         # Live Camera Feed (4:3 aspect ratio)
         left_column.addWidget(self._create_live_feed_section())
 
-        # Min-Max Range Control with editable fields (replaces old display controls)
-        left_column.addWidget(self._create_range_controls())
+        # Display controls row: Range controls + Settings button
+        display_row = QHBoxLayout()
+        display_row.addWidget(self._create_range_controls(), stretch=1)
 
-        # Illumination Controls (moved up, no stretch before)
+        # Small "Live View Settings" button next to display controls
+        self.live_settings_btn = QPushButton("Settings")
+        self.live_settings_btn.setToolTip("Open Live View Settings dialog")
+        self.live_settings_btn.clicked.connect(self._on_live_settings_clicked)
+        self.live_settings_btn.setMaximumWidth(70)
+        self.live_settings_btn.setStyleSheet("QPushButton { padding: 4px 8px; font-size: 9pt; }")
+        display_row.addWidget(self.live_settings_btn)
+
+        left_column.addLayout(display_row)
+
+        # Illumination Controls
         left_column.addWidget(self._create_illumination_section())
 
-        # Live Display button at bottom of left column
-        self.live_display_btn = QPushButton("Live Display")
-        self.live_display_btn.clicked.connect(self._on_live_display_clicked)
-        self.live_display_btn.setStyleSheet(
-            "QPushButton { padding: 6px 12px; }"
+        # Live View toggle button (red when stopped, blue when active)
+        self.live_view_toggle_btn = QPushButton("Start Live View")
+        self.live_view_toggle_btn.setCheckable(True)
+        self.live_view_toggle_btn.clicked.connect(self._on_live_view_toggle)
+        self.live_view_toggle_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; "
+            f"font-weight: bold; padding: 8px 16px; }}"
+            f"QPushButton:checked {{ background-color: #2196F3; }}"
         )
-        left_column.addWidget(self.live_display_btn)
+        left_column.addWidget(self.live_view_toggle_btn)
 
         left_column.addStretch()
 
@@ -849,11 +861,12 @@ class SampleView(QWidget):
         self._channel_states[channel]['visible'] = visible
         self.logger.debug(f"Channel {channel} visibility: {visible}")
 
-        # Update napari layer visibility
-        if self.viewer:
+        # Update napari layer visibility via the 3D window's viewer
+        viewer = self._get_viewer()
+        if viewer:
             layer_name = f"Channel {channel + 1}"
-            if layer_name in self.viewer.layers:
-                self.viewer.layers[layer_name].visible = visible
+            if layer_name in viewer.layers:
+                viewer.layers[layer_name].visible = visible
 
     def _on_channel_contrast_changed(self, channel: int, value: int) -> None:
         """Handle channel contrast slider change."""
@@ -875,13 +888,20 @@ class SampleView(QWidget):
             # For values > 50, keep full range but could adjust brightness
             contrast_limits = [0, 65535]
 
-        # Update napari layer contrast
-        if self.viewer:
+        # Update napari layer contrast via the 3D window's viewer
+        viewer = self._get_viewer()
+        if viewer:
             layer_name = f"Channel {channel + 1}"
-            if layer_name in self.viewer.layers:
-                self.viewer.layers[layer_name].contrast_limits = contrast_limits
+            if layer_name in viewer.layers:
+                viewer.layers[layer_name].contrast_limits = contrast_limits
 
         self.logger.debug(f"Channel {channel} contrast: {value}, limits: {contrast_limits}")
+
+    def _get_viewer(self):
+        """Get the napari viewer from the 3D window."""
+        if self.sample_3d_window:
+            return getattr(self.sample_3d_window, 'viewer', None)
+        return None
 
     # ========== Dialog Launchers ==========
 
@@ -889,14 +909,6 @@ class SampleView(QWidget):
         """Open saved positions dialog."""
         self.logger.info("Saved Positions clicked (not yet implemented)")
         # TODO: Open saved positions dialog
-
-    def _on_live_display_clicked(self) -> None:
-        """Open Live Display (image controls) window for advanced settings."""
-        if self.image_controls_window:
-            self.image_controls_window.show()
-            self.image_controls_window.raise_()
-        else:
-            self.logger.info("Live Display clicked (window not available)")
 
     def _on_viewer_controls_clicked(self) -> None:
         """Open viewer controls dialog (placeholder)."""
@@ -913,29 +925,23 @@ class SampleView(QWidget):
         self.logger.info("Export Data clicked (not yet implemented)")
         # TODO: Open export dialog
 
-    # ========== Napari Integration ==========
+    # ========== 3D Viewer Integration (reuses existing Sample3DVisualizationWindow) ==========
 
-    def _init_napari_viewer(self) -> None:
-        """Initialize the napari viewer and embed it in the 3D view section."""
-        if not NAPARI_AVAILABLE:
-            self.logger.warning("napari not available - 3D visualization disabled")
+    def _embed_3d_viewer(self) -> None:
+        """Embed the napari viewer from the existing Sample3DVisualizationWindow."""
+        if not self.sample_3d_window:
+            self.logger.warning("No sample_3d_window available - 3D viewer not embedded")
             return
 
         try:
-            # Create napari viewer with 3D display
-            self.viewer = napari.Viewer(ndisplay=3, show=False)
-
-            # Enable axis display
-            self.viewer.axes.visible = True
-            self.viewer.axes.labels = True
-            self.viewer.axes.colored = True
-
-            # Set initial camera orientation for good 3D perspective
-            self.viewer.camera.angles = (45, 30, 0)
-            self.viewer.camera.zoom = 2.0
+            # Get the viewer from the existing 3D window
+            viewer = getattr(self.sample_3d_window, 'viewer', None)
+            if not viewer:
+                self.logger.warning("Sample3DVisualizationWindow has no viewer")
+                return
 
             # Get the napari Qt widget
-            napari_window = self.viewer.window
+            napari_window = viewer.window
             viewer_widget = napari_window._qt_viewer
 
             # Replace placeholder with actual viewer
@@ -948,200 +954,80 @@ class SampleView(QWidget):
                         self.viewer_placeholder.deleteLater()
                         self.viewer_placeholder = None
 
-            # Setup data layers for 4 channels
-            self._setup_napari_layers()
-
-            # Setup chamber visualization (wireframe, holder, objective)
-            self._setup_chamber_visualization()
-
-            self.logger.info("napari viewer initialized successfully")
+            self.logger.info("Embedded existing 3D viewer from Sample3DVisualizationWindow")
 
         except Exception as e:
-            self.logger.error(f"Failed to initialize napari viewer: {e}")
+            self.logger.error(f"Failed to embed 3D viewer: {e}")
             import traceback
             traceback.print_exc()
-            self.viewer = None
 
-    def _setup_napari_layers(self) -> None:
-        """Setup napari layers for multi-channel data."""
-        if not self.viewer:
+    # ========== Live View Control ==========
+
+    def _on_live_view_toggle(self) -> None:
+        """Toggle live view on/off."""
+        if not self.camera_controller:
+            self.logger.warning("No camera controller available")
             return
 
-        # Get dimensions from voxel_storage if available, otherwise use config
-        if self.voxel_storage and hasattr(self.voxel_storage, 'display_dims'):
-            dims_voxels = self.voxel_storage.display_dims
+        try:
+            if self._live_view_active:
+                # Stop live view
+                self.camera_controller.stop_live_view()
+                self._live_view_active = False
+                self.live_view_toggle_btn.setChecked(False)
+                self.live_view_toggle_btn.setText("Start Live View")
+                self.live_view_toggle_btn.setStyleSheet(
+                    f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; "
+                    f"font-weight: bold; padding: 8px 16px; }}"
+                )
+                self.logger.info("Live view stopped")
+            else:
+                # Start live view
+                self.camera_controller.start_live_view()
+                self._live_view_active = True
+                self.live_view_toggle_btn.setChecked(True)
+                self.live_view_toggle_btn.setText("Stop Live View")
+                self.live_view_toggle_btn.setStyleSheet(
+                    f"QPushButton {{ background-color: #2196F3; color: white; "
+                    f"font-weight: bold; padding: 8px 16px; }}"
+                )
+                self.logger.info("Live view started")
+        except Exception as e:
+            self.logger.error(f"Error toggling live view: {e}")
+
+    def _update_live_view_state(self) -> None:
+        """Update the live view button state based on camera controller state."""
+        if not self.camera_controller:
+            return
+
+        try:
+            is_live = self.camera_controller.state == CameraState.LIVE_VIEW
+            self._live_view_active = is_live
+
+            if is_live:
+                self.live_view_toggle_btn.setChecked(True)
+                self.live_view_toggle_btn.setText("Stop Live View")
+                self.live_view_toggle_btn.setStyleSheet(
+                    f"QPushButton {{ background-color: #2196F3; color: white; "
+                    f"font-weight: bold; padding: 8px 16px; }}"
+                )
+            else:
+                self.live_view_toggle_btn.setChecked(False)
+                self.live_view_toggle_btn.setText("Start Live View")
+                self.live_view_toggle_btn.setStyleSheet(
+                    f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; "
+                    f"font-weight: bold; padding: 8px 16px; }}"
+                )
+        except Exception as e:
+            self.logger.error(f"Error updating live view state: {e}")
+
+    def _on_live_settings_clicked(self) -> None:
+        """Open Live Display (image controls) window for advanced settings."""
+        if self.image_controls_window:
+            self.image_controls_window.show()
+            self.image_controls_window.raise_()
         else:
-            # Fallback: Get dimensions from config
-            stage_config = self._config.get('stage_control', {})
-            x_range = stage_config.get('x_range_mm', [1.0, 12.31])
-            y_range = stage_config.get('y_range_mm', [0.0, 14.0])
-            z_range = stage_config.get('z_range_mm', [12.5, 26.0])
-
-            # Calculate dimensions in voxels (using 50um voxel size)
-            voxel_size_mm = 0.050  # 50um
-            dims_voxels = (
-                int((z_range[1] - z_range[0]) / voxel_size_mm),  # Z
-                int((y_range[1] - y_range[0]) / voxel_size_mm),  # Y
-                int((x_range[1] - x_range[0]) / voxel_size_mm),  # X
-            )
-
-        # Channel colors matching laser wavelengths
-        channel_colors = [
-            'magenta',   # 405nm - violet/magenta
-            'cyan',      # 488nm - cyan
-            'green',     # 561nm - green
-            'red',       # 640nm - red
-        ]
-
-        # Create empty data arrays and add layers for each channel
-        for ch_id in range(4):
-            # Create empty data array
-            empty_data = np.zeros(dims_voxels, dtype=np.uint16)
-
-            # Add image layer
-            layer_name = f"Channel {ch_id + 1}"
-            self.viewer.add_image(
-                empty_data,
-                name=layer_name,
-                colormap=channel_colors[ch_id],
-                blending='additive',
-                visible=True,
-                contrast_limits=[0, 65535],
-            )
-
-        self.logger.info(f"Created {4} napari layers with dimensions {dims_voxels}")
-
-    def _setup_chamber_visualization(self) -> None:
-        """Setup chamber wireframe, sample holder, and objective indicator."""
-        if not self.viewer:
-            return
-
-        # Get dimensions
-        if self.voxel_storage and hasattr(self.voxel_storage, 'display_dims'):
-            dims = self.voxel_storage.display_dims
-        else:
-            # Fallback to config-based dimensions
-            stage_config = self._config.get('stage_control', {})
-            x_range = stage_config.get('x_range_mm', [1.0, 12.31])
-            y_range = stage_config.get('y_range_mm', [0.0, 14.0])
-            z_range = stage_config.get('z_range_mm', [12.5, 26.0])
-            voxel_size_mm = 0.050
-            dims = (
-                int((z_range[1] - z_range[0]) / voxel_size_mm),
-                int((y_range[1] - y_range[0]) / voxel_size_mm),
-                int((x_range[1] - x_range[0]) / voxel_size_mm),
-            )
-
-        # Add chamber wireframe
-        self._add_chamber_wireframe(dims)
-
-        # Add objective indicator
-        self._add_objective_indicator(dims)
-
-        self.logger.info("Chamber visualization setup complete")
-
-    def _add_chamber_wireframe(self, dims: tuple) -> None:
-        """Add chamber wireframe as box edges using shapes layer."""
-        if not self.viewer:
-            return
-
-        # Define the 8 corners of the box in napari (Z, Y, X) order
-        corners = np.array([
-            [0, 0, 0],                              # Back-bottom-left
-            [dims[0]-1, 0, 0],                      # Front-bottom-left
-            [dims[0]-1, 0, dims[2]-1],              # Front-bottom-right
-            [0, 0, dims[2]-1],                      # Back-bottom-right
-            [0, dims[1]-1, 0],                      # Back-top-left
-            [dims[0]-1, dims[1]-1, 0],              # Front-top-left
-            [dims[0]-1, dims[1]-1, dims[2]-1],      # Front-top-right
-            [0, dims[1]-1, dims[2]-1]               # Back-top-right
-        ])
-
-        # Z edges (Axis 0 - Yellow)
-        z_edges = [
-            [corners[0], corners[1]],
-            [corners[3], corners[2]],
-            [corners[4], corners[5]],
-            [corners[7], corners[6]]
-        ]
-
-        # Y edges (Axis 1 - Magenta)
-        y_edges = [
-            [corners[0], corners[4]],
-            [corners[1], corners[5]],
-            [corners[2], corners[6]],
-            [corners[3], corners[7]]
-        ]
-
-        # X edges (Axis 2 - Cyan)
-        x_edges = [
-            [corners[0], corners[3]],
-            [corners[1], corners[2]],
-            [corners[4], corners[7]],
-            [corners[5], corners[6]]
-        ]
-
-        # Add Z edges (yellow)
-        self.viewer.add_shapes(
-            data=z_edges,
-            shape_type='line',
-            name='Chamber Z-edges',
-            edge_color='#8B8B00',
-            edge_width=2,
-            opacity=0.6
-        )
-
-        # Add Y edges (magenta)
-        self.viewer.add_shapes(
-            data=y_edges,
-            shape_type='line',
-            name='Chamber Y-edges',
-            edge_color='#8B008B',
-            edge_width=2,
-            opacity=0.6
-        )
-
-        # Add X edges (cyan)
-        self.viewer.add_shapes(
-            data=x_edges,
-            shape_type='line',
-            name='Chamber X-edges',
-            edge_color='#008B8B',
-            edge_width=2,
-            opacity=0.6
-        )
-
-    def _add_objective_indicator(self, dims: tuple) -> None:
-        """Add objective position indicator as a circle on the back wall."""
-        if not self.viewer:
-            return
-
-        # Objective is at the center of the back wall (Z=0)
-        center_y = dims[1] // 2  # Middle Y (vertical)
-        center_x = dims[2] // 2  # Middle X (horizontal)
-
-        # Create circle points
-        radius = 15  # voxels
-        num_points = 32
-        circle_points = []
-        for i in range(num_points):
-            angle = 2 * np.pi * i / num_points
-            y = center_y + radius * np.sin(angle)
-            x = center_x + radius * np.cos(angle)
-            circle_points.append([0, y, x])  # Z=0 (back wall)
-
-        # Close the circle
-        circle_points.append(circle_points[0])
-
-        # Add objective circle
-        self.viewer.add_shapes(
-            data=[circle_points],
-            shape_type='path',
-            name='Objective',
-            edge_color='#00FF00',
-            edge_width=3,
-            opacity=0.8
-        )
+            self.logger.info("Live View Settings clicked (window not available)")
 
     def _update_plane_views(self) -> None:
         """Update the MIP (Maximum Intensity Projection) plane views from voxel data."""
