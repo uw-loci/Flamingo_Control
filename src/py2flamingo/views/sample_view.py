@@ -12,6 +12,7 @@ Combines all elements needed for sample viewing and interaction:
 """
 
 import logging
+import time
 import numpy as np
 import yaml
 from pathlib import Path
@@ -351,6 +352,15 @@ class SampleView(QWidget):
         self._auto_scale = True
         self._intensity_min = 0
         self._intensity_max = 65535
+
+        # Auto-contrast algorithm parameters
+        self._auto_contrast_interval = 1.0  # seconds between adjustments
+        self._saturation_threshold = 0.20  # 20% of pixels saturated triggers raise
+        self._low_brightness_threshold = 0.05  # <5% bright pixels triggers lower
+        self._brightness_reference = 0.70  # 70% of max is "bright"
+        self._saturation_percentile = 0.95  # pixels >= 95% of max are "saturated"
+        self._last_contrast_adjustment = 0.0  # timestamp of last adjustment
+        self._auto_contrast_max = 65535  # current auto-determined max (min stays 0)
 
         # Stage limits (will be populated from movement controller)
         self._stage_limits = None
@@ -1148,8 +1158,9 @@ class SampleView(QWidget):
 
             # Apply intensity scaling
             if self._auto_scale:
-                img_min = np.min(image)
-                img_max = np.max(image)
+                # Use stabilized auto-contrast (adjusts at most once per interval)
+                img_min = 0  # Always use 0 as min for consistency
+                img_max = self._calculate_auto_contrast(image)
             else:
                 img_min = self._intensity_min
                 img_max = self._intensity_max
@@ -1177,6 +1188,70 @@ class SampleView(QWidget):
 
         except Exception as e:
             self.logger.error(f"Error updating live display: {e}")
+
+    def _calculate_auto_contrast(self, image: np.ndarray) -> int:
+        """Calculate auto-contrast max value with stabilization.
+
+        Uses a percentage-based algorithm that only adjusts once per interval:
+        - If >20% pixels are saturated (>=95% of current max): raise max to 95% of top 5% mean
+        - If <5% pixels are above 70% of current max: lower max by 10%
+        - Otherwise: keep current max (stable)
+
+        Args:
+            image: The current camera frame
+
+        Returns:
+            The contrast max value to use for display
+        """
+        current_time = time.time()
+        time_since_last = current_time - self._last_contrast_adjustment
+
+        # Only recalculate if enough time has passed
+        if time_since_last < self._auto_contrast_interval:
+            return self._auto_contrast_max
+
+        # Calculate pixel statistics
+        total_pixels = image.size
+        current_max = self._auto_contrast_max
+
+        # Count saturated pixels (>= 95% of current max)
+        saturation_level = current_max * self._saturation_percentile
+        saturated_count = np.sum(image >= saturation_level)
+        saturated_ratio = saturated_count / total_pixels
+
+        if saturated_ratio > self._saturation_threshold:
+            # Too many saturated pixels - raise max to 95% of top 5% mean
+            # This allows large jumps when transitioning to heavily stained areas
+            top_5_percent_count = max(1, int(total_pixels * 0.05))
+            # Use partition for efficiency (faster than full sort)
+            top_values = np.partition(image.ravel(), -top_5_percent_count)[-top_5_percent_count:]
+            top_5_mean = np.mean(top_values)
+            new_max = int(top_5_mean / 0.95)  # Set so top 5% mean is at 95%
+            new_max = min(65535, max(1000, new_max))  # Clamp to reasonable range
+
+            if new_max != self._auto_contrast_max:
+                self.logger.debug(f"Auto-contrast: raising max {self._auto_contrast_max} -> {new_max} "
+                                 f"(saturated: {saturated_ratio:.1%}, top 5% mean: {top_5_mean:.0f})")
+                self._auto_contrast_max = new_max
+                self._last_contrast_adjustment = current_time
+        else:
+            # Check if we should lower the max (image is too dark)
+            brightness_level = current_max * self._brightness_reference
+            bright_count = np.sum(image > brightness_level)
+            bright_ratio = bright_count / total_pixels
+
+            if bright_ratio < self._low_brightness_threshold:
+                # Too few bright pixels - lower max by 10%
+                new_max = int(current_max * 0.90)
+                new_max = max(1000, new_max)  # Don't go below 1000
+
+                if new_max != self._auto_contrast_max:
+                    self.logger.debug(f"Auto-contrast: lowering max {self._auto_contrast_max} -> {new_max} "
+                                     f"(bright pixels: {bright_ratio:.1%})")
+                    self._auto_contrast_max = new_max
+                    self._last_contrast_adjustment = current_time
+
+        return self._auto_contrast_max
 
     @pyqtSlot(object)
     def _on_camera_state_changed(self, state) -> None:
