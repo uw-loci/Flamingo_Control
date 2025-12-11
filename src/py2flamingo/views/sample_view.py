@@ -927,28 +927,63 @@ class SampleView(QWidget):
         return widget
 
     def _create_button_bar(self) -> QWidget:
-        """Create dialog launcher button bar."""
+        """Create dialog launcher button bar with data collection controls."""
         widget = QWidget()
-        layout = QHBoxLayout()
-        layout.setSpacing(8)
+        layout = QVBoxLayout()
+        layout.setSpacing(4)
         layout.setContentsMargins(0, 4, 0, 4)
+
+        # Row 1: Data collection buttons (most important - prominent styling)
+        data_row = QHBoxLayout()
+        data_row.setSpacing(8)
+
+        # Populate from Live View toggle button
+        self.populate_btn = QPushButton("Populate from Live")
+        self.populate_btn.setCheckable(True)
+        self.populate_btn.setToolTip("Capture frames from Live View and accumulate into 3D volume")
+        self.populate_btn.clicked.connect(self._on_populate_toggled)
+        self.populate_btn.setStyleSheet(
+            "QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 8px 16px; }"
+            "QPushButton:checked { background-color: #f44336; }"
+            "QPushButton:hover { background-color: #45a049; }"
+            "QPushButton:checked:hover { background-color: #da190b; }"
+        )
+        data_row.addWidget(self.populate_btn)
+
+        # Clear Data button
+        self.clear_data_btn = QPushButton("Clear Data")
+        self.clear_data_btn.setToolTip("Clear all accumulated 3D volume data")
+        self.clear_data_btn.clicked.connect(self._on_clear_data_clicked)
+        self.clear_data_btn.setStyleSheet(
+            "QPushButton { background-color: #ff9800; color: white; font-weight: bold; padding: 8px 16px; }"
+            "QPushButton:hover { background-color: #f57c00; }"
+        )
+        data_row.addWidget(self.clear_data_btn)
+
+        data_row.addStretch()
+        layout.addLayout(data_row)
+
+        # Row 2: Navigation buttons
+        nav_row = QHBoxLayout()
+        nav_row.setSpacing(8)
 
         # Saved Positions button
         self.saved_positions_btn = QPushButton("Saved Positions")
         self.saved_positions_btn.clicked.connect(self._on_saved_positions_clicked)
-        layout.addWidget(self.saved_positions_btn)
+        nav_row.addWidget(self.saved_positions_btn)
 
         # Stage Control button
         self.stage_control_btn = QPushButton("Stage Control")
         self.stage_control_btn.clicked.connect(self._on_stage_control_clicked)
-        layout.addWidget(self.stage_control_btn)
+        nav_row.addWidget(self.stage_control_btn)
 
         # Export Data button
         self.export_data_btn = QPushButton("Export Data")
         self.export_data_btn.clicked.connect(self._on_export_data_clicked)
-        layout.addWidget(self.export_data_btn)
+        nav_row.addWidget(self.export_data_btn)
 
-        layout.addStretch()
+        nav_row.addStretch()
+        layout.addLayout(nav_row)
 
         widget.setLayout(layout)
         return widget
@@ -1253,8 +1288,17 @@ class SampleView(QWidget):
 
     def _on_saved_positions_clicked(self) -> None:
         """Open saved positions dialog."""
-        self.logger.info("Saved Positions clicked (not yet implemented)")
-        # TODO: Open saved positions dialog
+        from py2flamingo.views.position_history_dialog import PositionHistoryDialog
+
+        if not self.movement_controller:
+            self.logger.warning("No movement controller - cannot open position history")
+            return
+
+        try:
+            dialog = PositionHistoryDialog(self.movement_controller, parent=self)
+            dialog.exec_()
+        except Exception as e:
+            self.logger.error(f"Error opening position history: {e}")
 
     def _on_viewer_controls_clicked(self) -> None:
         """Open viewer controls dialog (placeholder)."""
@@ -1262,14 +1306,104 @@ class SampleView(QWidget):
         dialog.exec_()
 
     def _on_stage_control_clicked(self) -> None:
-        """Focus the main window Stage Control tab."""
-        self.logger.info("Stage Control clicked (not yet implemented)")
-        # TODO: Focus main window Stage Control tab
+        """Open the Stage Chamber Visualization window."""
+        # Try to find and show the stage chamber visualization window
+        from PyQt5.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app:
+            for widget in app.topLevelWidgets():
+                if widget.__class__.__name__ == 'StageChamberVisualizationWindow':
+                    widget.show()
+                    widget.raise_()
+                    widget.activateWindow()
+                    self.logger.info("Opened Stage Chamber Visualization window")
+                    return
+
+        self.logger.info("Stage Chamber Visualization window not available")
 
     def _on_export_data_clicked(self) -> None:
-        """Open export data dialog."""
-        self.logger.info("Export Data clicked (not yet implemented)")
-        # TODO: Open export dialog
+        """Export accumulated 3D data to file."""
+        if not self.sample_3d_window:
+            self.logger.warning("No 3D window - cannot export data")
+            return
+
+        # Forward to 3D window's export if available
+        if hasattr(self.sample_3d_window, 'export_data'):
+            self.sample_3d_window.export_data()
+        else:
+            from PyQt5.QtWidgets import QFileDialog, QMessageBox
+
+            # Basic export dialog
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Export 3D Data", "",
+                "TIFF Stack (*.tif);;NumPy Array (*.npy);;All Files (*)"
+            )
+            if file_path:
+                try:
+                    if self.voxel_storage:
+                        data = self.voxel_storage.get_display_data()
+                        if data is not None and data.size > 0:
+                            if file_path.endswith('.npy'):
+                                np.save(file_path, data)
+                            else:
+                                import tifffile
+                                tifffile.imwrite(file_path, data)
+                            self.logger.info(f"Exported data to {file_path}")
+                            QMessageBox.information(self, "Export Complete",
+                                                  f"Data exported to:\n{file_path}")
+                        else:
+                            QMessageBox.warning(self, "No Data",
+                                              "No data to export. Use 'Populate from Live' first.")
+                except Exception as e:
+                    self.logger.error(f"Export failed: {e}")
+                    QMessageBox.critical(self, "Export Error", f"Failed to export: {e}")
+
+    # ========== Data Collection Controls ==========
+
+    def _on_populate_toggled(self, checked: bool) -> None:
+        """Handle populate from live view start/stop."""
+        if not self.sample_3d_window:
+            self.logger.warning("No 3D window - cannot populate")
+            self.populate_btn.setChecked(False)
+            return
+
+        # Forward to the 3D window's populate functionality
+        if hasattr(self.sample_3d_window, 'populate_button'):
+            # Sync state with the 3D window's button
+            self.sample_3d_window.populate_button.setChecked(checked)
+            if checked:
+                self.populate_btn.setText("Stop Populating")
+                self.logger.info("Started populating from live view")
+            else:
+                self.populate_btn.setText("Populate from Live")
+                self.logger.info("Stopped populating from live view")
+        else:
+            self.logger.warning("3D window has no populate_button")
+            self.populate_btn.setChecked(False)
+
+    def _on_clear_data_clicked(self) -> None:
+        """Clear all accumulated 3D data."""
+        if not self.sample_3d_window:
+            self.logger.warning("No 3D window - cannot clear data")
+            return
+
+        # Forward to the 3D window's clear functionality
+        if hasattr(self.sample_3d_window, '_on_clear_data'):
+            self.sample_3d_window._on_clear_data()
+        elif hasattr(self.sample_3d_window, 'clear_button'):
+            self.sample_3d_window.clear_button.click()
+        else:
+            # Direct clear if voxel storage available
+            from PyQt5.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self, "Clear Data",
+                "Are you sure you want to clear all accumulated data?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                if self.voxel_storage and hasattr(self.voxel_storage, 'clear'):
+                    self.voxel_storage.clear()
+                    self.logger.info("Cleared all visualization data")
 
     # ========== 3D Viewer Integration (reuses existing Sample3DVisualizationWindow) ==========
 
