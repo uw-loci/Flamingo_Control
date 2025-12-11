@@ -390,6 +390,11 @@ class SampleView(QWidget):
         # Update live view button state
         self._update_live_view_state()
 
+        # Timer to update zoom display and other info
+        self._info_timer = QTimer(self)
+        self._info_timer.timeout.connect(self._update_info_displays)
+        self._info_timer.start(500)  # Update every 500ms
+
         self.logger.info("SampleView initialized")
 
     def _load_visualization_config(self) -> Dict[str, Any]:
@@ -442,15 +447,16 @@ class SampleView(QWidget):
         # Illumination Controls
         left_column.addWidget(self._create_illumination_section())
 
-        # Live View toggle button (red when stopped, blue when active)
-        self.live_view_toggle_btn = QPushButton("Start Live View")
+        # Live View toggle button (red when stopped, blue when active) - compact
+        self.live_view_toggle_btn = QPushButton("Start Live")
         self.live_view_toggle_btn.setCheckable(True)
         self.live_view_toggle_btn.clicked.connect(self._on_live_view_toggle)
         self.live_view_toggle_btn.setStyleSheet(
             f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; "
-            f"font-weight: bold; padding: 8px 16px; }}"
+            f"font-weight: bold; padding: 6px 12px; font-size: 10pt; }}"
             f"QPushButton:checked {{ background-color: #2196F3; }}"
         )
+        self.live_view_toggle_btn.setMaximumWidth(120)
         left_column.addWidget(self.live_view_toggle_btn)
 
         left_column.addStretch()
@@ -634,6 +640,12 @@ class SampleView(QWidget):
         self.viewer_placeholder.setMinimumSize(250, 450)  # Tall/vertical orientation
         self.viewer_placeholder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.viewer_placeholder)
+
+        # Zoom display label
+        self.zoom_label = QLabel("Zoom: --")
+        self.zoom_label.setStyleSheet("color: #888; font-size: 9pt;")
+        self.zoom_label.setAlignment(Qt.AlignRight)
+        layout.addWidget(self.zoom_label)
 
         group.setLayout(layout)
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -1212,22 +1224,24 @@ class SampleView(QWidget):
                 self.camera_controller.stop_live_view()
                 self._live_view_active = False
                 self.live_view_toggle_btn.setChecked(False)
-                self.live_view_toggle_btn.setText("Start Live View")
+                self.live_view_toggle_btn.setText("Start Live")
                 self.live_view_toggle_btn.setStyleSheet(
                     f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; "
-                    f"font-weight: bold; padding: 8px 16px; }}"
+                    f"font-weight: bold; padding: 6px 12px; font-size: 10pt; }}"
                 )
+                self.live_status_label.setText("Status: Idle")
                 self.logger.info("Live view stopped")
             else:
                 # Start live view
                 self.camera_controller.start_live_view()
                 self._live_view_active = True
                 self.live_view_toggle_btn.setChecked(True)
-                self.live_view_toggle_btn.setText("Stop Live View")
+                self.live_view_toggle_btn.setText("Stop Live")
                 self.live_view_toggle_btn.setStyleSheet(
                     f"QPushButton {{ background-color: #2196F3; color: white; "
-                    f"font-weight: bold; padding: 8px 16px; }}"
+                    f"font-weight: bold; padding: 6px 12px; font-size: 10pt; }}"
                 )
+                self.live_status_label.setText("Status: Streaming")
                 self.logger.info("Live view started")
         except Exception as e:
             self.logger.error(f"Error toggling live view: {e}")
@@ -1243,20 +1257,46 @@ class SampleView(QWidget):
 
             if is_live:
                 self.live_view_toggle_btn.setChecked(True)
-                self.live_view_toggle_btn.setText("Stop Live View")
+                self.live_view_toggle_btn.setText("Stop Live")
                 self.live_view_toggle_btn.setStyleSheet(
                     f"QPushButton {{ background-color: #2196F3; color: white; "
-                    f"font-weight: bold; padding: 8px 16px; }}"
+                    f"font-weight: bold; padding: 6px 12px; font-size: 10pt; }}"
                 )
+                self.live_status_label.setText("Status: Streaming")
             else:
                 self.live_view_toggle_btn.setChecked(False)
-                self.live_view_toggle_btn.setText("Start Live View")
+                self.live_view_toggle_btn.setText("Start Live")
                 self.live_view_toggle_btn.setStyleSheet(
                     f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; "
-                    f"font-weight: bold; padding: 8px 16px; }}"
+                    f"font-weight: bold; padding: 6px 12px; font-size: 10pt; }}"
                 )
+                self.live_status_label.setText("Status: Idle")
         except Exception as e:
             self.logger.error(f"Error updating live view state: {e}")
+
+    def _update_zoom_display(self) -> None:
+        """Update the zoom level display from napari viewer."""
+        viewer = self._get_viewer()
+        if viewer and hasattr(viewer, 'camera'):
+            zoom = viewer.camera.zoom
+            self.zoom_label.setText(f"Zoom: {zoom:.2f}")
+        else:
+            self.zoom_label.setText("Zoom: --")
+
+    def _update_info_displays(self) -> None:
+        """Periodically update zoom and FPS displays."""
+        # Update zoom
+        self._update_zoom_display()
+
+        # Update FPS from camera controller if live
+        if self._live_view_active and self.camera_controller:
+            fps = getattr(self.camera_controller, '_current_fps', None)
+            if fps is not None:
+                self.fps_label.setText(f"FPS: {fps:.1f}")
+            else:
+                self.fps_label.setText("FPS: --")
+        elif not self._live_view_active:
+            self.fps_label.setText("FPS: --")
 
     def _on_live_settings_clicked(self) -> None:
         """Open Live Display (image controls) window for advanced settings."""

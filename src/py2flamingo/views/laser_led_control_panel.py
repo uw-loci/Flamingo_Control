@@ -85,14 +85,8 @@ class LaserLEDControlPanel(QWidget):
 
         # Title
         title = QLabel("<b>Light Source Control</b>")
-        title.setStyleSheet("font-size: 12pt;")
+        title.setStyleSheet("font-size: 11pt;")
         main_layout.addWidget(title)
-
-        # Info label
-        info = QLabel("Select a light source for live view and adjust power/intensity:")
-        info.setWordWrap(True)
-        info.setStyleSheet("color: #666; font-style: italic; font-size: 9pt;")
-        main_layout.addWidget(info)
 
         # Lasers section
         lasers_group = self._create_lasers_section()
