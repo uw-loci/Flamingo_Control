@@ -15,7 +15,7 @@ import logging
 import numpy as np
 import yaml
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGroupBox, QSlider, QComboBox, QCheckBox, QProgressBar,
@@ -30,6 +30,235 @@ from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR, WARNING_BG
 
 # Import camera state for live view control
 from py2flamingo.controllers.camera_controller import CameraState
+
+# Axis colors matching napari 3D viewer
+AXIS_COLORS = {
+    'x': '#008B8B',  # Cyan
+    'y': '#8B008B',  # Magenta
+    'z': '#8B8B00',  # Yellow/Olive
+}
+
+
+class SlicePlaneViewer(QFrame):
+    """2D slice plane viewer with colored borders and overlays.
+
+    Shows MIP projection with sample holder, objective, and viewing frame positions.
+    Border colors match the napari 3D viewer axis colors.
+    """
+
+    # Signal emitted when user clicks to move (axis1_value, axis2_value)
+    position_clicked = pyqtSignal(float, float)
+
+    def __init__(self, plane: str, h_axis: str, v_axis: str,
+                 width: int, height: int, parent=None):
+        """
+        Initialize slice plane viewer.
+
+        Args:
+            plane: Plane identifier ('xz', 'xy', 'yz')
+            h_axis: Horizontal axis ('x', 'y', or 'z')
+            v_axis: Vertical axis ('x', 'y', or 'z')
+            width: Widget width in pixels
+            height: Widget height in pixels
+            parent: Parent widget
+        """
+        super().__init__(parent)
+
+        self.plane = plane
+        self.h_axis = h_axis
+        self.v_axis = v_axis
+        self._width = width
+        self._height = height
+
+        # Physical coordinate ranges (will be set from config)
+        self.h_range = (0.0, 1.0)  # (min, max) in mm
+        self.v_range = (0.0, 1.0)  # (min, max) in mm
+
+        # Current MIP data
+        self._mip_data: Optional[np.ndarray] = None
+        self._contrast_limits = (0, 65535)
+
+        # Overlay positions (in physical coordinates, mm)
+        self._holder_pos: Optional[Tuple[float, float]] = None  # (h, v)
+        self._objective_pos: Optional[Tuple[float, float]] = None
+        self._frame_pos: Optional[Tuple[float, float, float, float]] = None  # (h1, v1, h2, v2)
+
+        # Setup UI
+        self._setup_ui()
+
+    def _setup_ui(self):
+        """Setup the viewer UI with colored borders."""
+        self.setFixedSize(self._width, self._height)
+
+        # Get border colors from axis
+        h_color = AXIS_COLORS.get(self.h_axis, '#444')
+        v_color = AXIS_COLORS.get(self.v_axis, '#444')
+
+        # Create colored border using stylesheet
+        # Left/Right borders use horizontal axis color, Top/Bottom use vertical axis color
+        self.setStyleSheet(f"""
+            SlicePlaneViewer {{
+                background-color: #1a1a1a;
+                border-left: 3px solid {h_color};
+                border-right: 3px solid {h_color};
+                border-top: 3px solid {v_color};
+                border-bottom: 3px solid {v_color};
+            }}
+        """)
+
+        # Image label for MIP display
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setStyleSheet("background-color: transparent; border: none;")
+        self.image_label.setText(f"{self.plane.upper()}\n(Click to move)")
+        self.image_label.setStyleSheet("color: #666; background-color: transparent;")
+        layout.addWidget(self.image_label)
+
+        self.setLayout(layout)
+
+        # Enable mouse tracking for click-to-move
+        self.setMouseTracking(True)
+        self.image_label.setMouseTracking(True)
+
+    def set_ranges(self, h_range: Tuple[float, float], v_range: Tuple[float, float]):
+        """Set the physical coordinate ranges for the axes."""
+        self.h_range = h_range
+        self.v_range = v_range
+
+    def set_contrast_limits(self, limits: Tuple[int, int]):
+        """Set contrast limits for MIP display."""
+        self._contrast_limits = limits
+        self._update_display()
+
+    def set_mip_data(self, data: np.ndarray):
+        """Set the MIP data to display."""
+        self._mip_data = data
+        self._update_display()
+
+    def set_holder_position(self, h: float, v: float):
+        """Set the sample holder position (in physical coordinates)."""
+        self._holder_pos = (h, v)
+        self._update_display()
+
+    def set_objective_position(self, h: float, v: float):
+        """Set the objective position (in physical coordinates)."""
+        self._objective_pos = (h, v)
+        self._update_display()
+
+    def set_frame_position(self, h1: float, v1: float, h2: float, v2: float):
+        """Set the viewing frame position (rectangle in physical coordinates)."""
+        self._frame_pos = (h1, v1, h2, v2)
+        self._update_display()
+
+    def _update_display(self):
+        """Update the display with current MIP data and overlays."""
+        # Create image from MIP data
+        display_width = self._width - 6  # Account for borders
+        display_height = self._height - 6
+
+        if self._mip_data is not None and self._mip_data.size > 0:
+            # Apply contrast limits
+            data = self._mip_data.astype(np.float32)
+            min_val, max_val = self._contrast_limits
+            if max_val > min_val:
+                data = np.clip((data - min_val) / (max_val - min_val), 0, 1)
+            else:
+                data = np.zeros_like(data)
+
+            # Convert to 8-bit
+            data_8bit = (data * 255).astype(np.uint8)
+
+            # Create QImage
+            h, w = data_8bit.shape
+            qimage = QImage(data_8bit.data, w, h, w, QImage.Format_Grayscale8)
+            pixmap = QPixmap.fromImage(qimage)
+
+            # Scale to fit
+            scaled = pixmap.scaled(display_width, display_height,
+                                   Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        else:
+            # Create empty pixmap
+            scaled = QPixmap(display_width, display_height)
+            scaled.fill(Qt.black)
+
+        # Draw overlays on the pixmap
+        from PyQt5.QtGui import QPainter, QPen, QColor
+        painter = QPainter(scaled)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Calculate scale factors
+        img_w = scaled.width()
+        img_h = scaled.height()
+        h_scale = img_w / (self.h_range[1] - self.h_range[0]) if self.h_range[1] != self.h_range[0] else 1
+        v_scale = img_h / (self.v_range[1] - self.v_range[0]) if self.v_range[1] != self.v_range[0] else 1
+
+        def to_pixel(h_coord, v_coord):
+            """Convert physical coordinates to pixel coordinates."""
+            px = int((h_coord - self.h_range[0]) * h_scale)
+            py = int((v_coord - self.v_range[0]) * v_scale)
+            return px, py
+
+        # Draw objective (green circle)
+        if self._objective_pos:
+            pen = QPen(QColor('#00FF00'))
+            pen.setWidth(2)
+            painter.setPen(pen)
+            px, py = to_pixel(*self._objective_pos)
+            painter.drawEllipse(px - 8, py - 8, 16, 16)
+
+        # Draw sample holder (white rectangle outline)
+        if self._holder_pos:
+            pen = QPen(QColor('#FFFFFF'))
+            pen.setWidth(1)
+            painter.setPen(pen)
+            px, py = to_pixel(*self._holder_pos)
+            # Draw as small cross
+            painter.drawLine(px - 5, py, px + 5, py)
+            painter.drawLine(px, py - 5, px, py + 5)
+
+        # Draw viewing frame (cyan dashed rectangle)
+        if self._frame_pos:
+            pen = QPen(QColor('#00FFFF'))
+            pen.setWidth(1)
+            pen.setStyle(Qt.DashLine)
+            painter.setPen(pen)
+            px1, py1 = to_pixel(self._frame_pos[0], self._frame_pos[1])
+            px2, py2 = to_pixel(self._frame_pos[2], self._frame_pos[3])
+            painter.drawRect(min(px1, px2), min(py1, py2),
+                           abs(px2 - px1), abs(py2 - py1))
+
+        painter.end()
+
+        self.image_label.setPixmap(scaled)
+
+    def mousePressEvent(self, event):
+        """Handle mouse click for click-to-move."""
+        if event.button() == Qt.LeftButton:
+            # Convert click position to physical coordinates
+            pos = event.pos()
+
+            # Account for border
+            x = pos.x() - 3
+            y = pos.y() - 3
+
+            # Get image dimensions
+            pixmap = self.image_label.pixmap()
+            if pixmap:
+                img_w = pixmap.width()
+                img_h = pixmap.height()
+
+                # Calculate physical coordinates
+                h_coord = self.h_range[0] + (x / img_w) * (self.h_range[1] - self.h_range[0])
+                v_coord = self.v_range[0] + (y / img_h) * (self.v_range[1] - self.v_range[0])
+
+                # Emit signal with coordinates
+                self.position_clicked.emit(h_coord, v_coord)
+
+        super().mousePressEvent(event)
 
 
 class ViewerControlsDialog(QDialog):
@@ -491,27 +720,37 @@ class SampleView(QWidget):
         """Create the three MIP plane views section with proportions based on stage dimensions.
 
         Stage dimensions: X ~11mm, Y ~20mm (vertical), Z ~13.5mm
-        - XZ (Top-Down): ~square (11:13.5) - on top
-        - XY (Front View): tall (11:20) - bottom left
-        - YZ (Side View): tall (13.5:20) - bottom right, side by side with XY
+        - XZ (Top-Down): ~square (11:13.5) - on top, X horizontal, Z vertical
+        - XY (Front View): tall (11:20) - bottom left, X horizontal, Y vertical
+        - YZ (Side View): tall (13.5:20) - bottom right, Z horizontal, Y vertical
+
+        Borders are colored to match napari axis colors:
+        - X: Cyan (#008B8B)
+        - Y: Magenta (#8B008B)
+        - Z: Yellow (#8B8B00)
         """
         widget = QWidget()
         layout = QVBoxLayout()
         layout.setSpacing(4)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # XZ Plane (Top-Down) - approximately square, centered on top
+        # Get stage ranges from config
+        stage_config = self._config.get('stage_control', {})
+        x_range = tuple(stage_config.get('x_range_mm', [1.0, 12.31]))
+        y_range = tuple(stage_config.get('y_range_mm', [5.0, 25.0]))
+        z_range = tuple(stage_config.get('z_range_mm', [12.5, 26.0]))
+
+        # XZ Plane (Top-Down) - X horizontal, Z vertical
         xz_group = QGroupBox("XZ Plane (Top-Down)")
         xz_layout = QVBoxLayout()
         xz_layout.setContentsMargins(4, 4, 4, 4)
-        self.xz_plane_label = QLabel("MIP View\n(Click to move X,Z)")
-        self.xz_plane_label.setAlignment(Qt.AlignCenter)
-        # Aspect ~11:13.5 ≈ 0.81, use 180x220 (enlarged)
-        self.xz_plane_label.setFixedSize(180, 220)
-        self.xz_plane_label.setStyleSheet(
-            "QLabel { background-color: #1a1a1a; color: #666; border: 1px solid #444; }"
+        # Aspect ~11:13.5 ≈ 0.81, use 180x220
+        self.xz_plane_viewer = SlicePlaneViewer('xz', 'x', 'z', 180, 220)
+        self.xz_plane_viewer.set_ranges(x_range, z_range)
+        self.xz_plane_viewer.position_clicked.connect(
+            lambda h, v: self._on_plane_click('xz', h, v)
         )
-        xz_layout.addWidget(self.xz_plane_label, alignment=Qt.AlignCenter)
+        xz_layout.addWidget(self.xz_plane_viewer, alignment=Qt.AlignCenter)
         xz_group.setLayout(xz_layout)
         layout.addWidget(xz_group)
 
@@ -519,33 +758,31 @@ class SampleView(QWidget):
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(4)
 
-        # XY Plane (Front View) - tall and thin (X:11mm x Y:20mm)
+        # XY Plane (Front View) - X horizontal, Y vertical
         xy_group = QGroupBox("XY Plane (Front)")
         xy_layout = QVBoxLayout()
         xy_layout.setContentsMargins(4, 4, 4, 4)
-        self.xy_plane_label = QLabel("MIP View\n(Click to move X,Y)")
-        self.xy_plane_label.setAlignment(Qt.AlignCenter)
-        # Aspect ~11:20 ≈ 0.55, use 130x240 (enlarged)
-        self.xy_plane_label.setFixedSize(130, 240)
-        self.xy_plane_label.setStyleSheet(
-            "QLabel { background-color: #1a1a1a; color: #666; border: 1px solid #444; }"
+        # Aspect ~11:20 ≈ 0.55, use 130x240
+        self.xy_plane_viewer = SlicePlaneViewer('xy', 'x', 'y', 130, 240)
+        self.xy_plane_viewer.set_ranges(x_range, y_range)
+        self.xy_plane_viewer.position_clicked.connect(
+            lambda h, v: self._on_plane_click('xy', h, v)
         )
-        xy_layout.addWidget(self.xy_plane_label, alignment=Qt.AlignCenter)
+        xy_layout.addWidget(self.xy_plane_viewer, alignment=Qt.AlignCenter)
         xy_group.setLayout(xy_layout)
         bottom_row.addWidget(xy_group)
 
-        # YZ Plane (Side View) - tall (Z:13.5mm x Y:20mm, Y vertical)
+        # YZ Plane (Side View) - Z horizontal, Y vertical
         yz_group = QGroupBox("YZ Plane (Side)")
         yz_layout = QVBoxLayout()
         yz_layout.setContentsMargins(4, 4, 4, 4)
-        self.yz_plane_label = QLabel("MIP View\n(Click to move Y,Z)")
-        self.yz_plane_label.setAlignment(Qt.AlignCenter)
-        # Aspect ~13.5:20 ≈ 0.675, use 160x240 (enlarged)
-        self.yz_plane_label.setFixedSize(160, 240)
-        self.yz_plane_label.setStyleSheet(
-            "QLabel { background-color: #1a1a1a; color: #666; border: 1px solid #444; }"
+        # Aspect ~13.5:20 ≈ 0.675, use 160x240
+        self.yz_plane_viewer = SlicePlaneViewer('yz', 'z', 'y', 160, 240)
+        self.yz_plane_viewer.set_ranges(z_range, y_range)
+        self.yz_plane_viewer.position_clicked.connect(
+            lambda h, v: self._on_plane_click('yz', h, v)
         )
-        yz_layout.addWidget(self.yz_plane_label, alignment=Qt.AlignCenter)
+        yz_layout.addWidget(self.yz_plane_viewer, alignment=Qt.AlignCenter)
         yz_group.setLayout(yz_layout)
         bottom_row.addWidget(yz_group)
 
@@ -1029,6 +1266,31 @@ class SampleView(QWidget):
         else:
             self.logger.info("Live View Settings clicked (window not available)")
 
+    def _on_plane_click(self, plane: str, h_coord: float, v_coord: float) -> None:
+        """Handle click-to-move from plane viewers."""
+        if not self.movement_controller:
+            return
+
+        try:
+            # Map plane coordinates to axis movements
+            if plane == 'xz':
+                # XZ plane: h=X, v=Z
+                self.movement_controller.move_absolute('x', h_coord, verify=False)
+                self.movement_controller.move_absolute('z', v_coord, verify=False)
+                self.logger.info(f"Moving to X={h_coord:.3f}, Z={v_coord:.3f}")
+            elif plane == 'xy':
+                # XY plane: h=X, v=Y
+                self.movement_controller.move_absolute('x', h_coord, verify=False)
+                self.movement_controller.move_absolute('y', v_coord, verify=False)
+                self.logger.info(f"Moving to X={h_coord:.3f}, Y={v_coord:.3f}")
+            elif plane == 'yz':
+                # YZ plane: h=Z, v=Y
+                self.movement_controller.move_absolute('z', h_coord, verify=False)
+                self.movement_controller.move_absolute('y', v_coord, verify=False)
+                self.logger.info(f"Moving to Z={h_coord:.3f}, Y={v_coord:.3f}")
+        except Exception as e:
+            self.logger.error(f"Error moving from plane click: {e}")
+
     def _update_plane_views(self) -> None:
         """Update the MIP (Maximum Intensity Projection) plane views from voxel data."""
         if not self.voxel_storage:
@@ -1036,53 +1298,73 @@ class SampleView(QWidget):
 
         try:
             # Get current data from voxel storage (if available)
-            # This would typically come from the DualResolutionVoxelStorage
             data = self.voxel_storage.get_display_data() if hasattr(self.voxel_storage, 'get_display_data') else None
 
             if data is None or data.size == 0:
                 return
 
-            # Generate MIP projections
+            # Get contrast limits from 3D viewer (use first channel as reference)
+            contrast_limits = (0, 65535)
+            viewer = self._get_viewer()
+            if viewer and len(viewer.layers) > 0:
+                for layer in viewer.layers:
+                    if hasattr(layer, 'contrast_limits'):
+                        contrast_limits = tuple(layer.contrast_limits)
+                        break
+
+            # Generate MIP projections and update viewers
+            # Data is in (Z, Y, X) order
+
             # XZ plane (top-down) - project along Y axis (axis 1)
             xz_mip = np.max(data, axis=1)
-            self._update_plane_label(self.xz_plane_label, xz_mip, "XZ")
+            self.xz_plane_viewer.set_contrast_limits(contrast_limits)
+            self.xz_plane_viewer.set_mip_data(xz_mip)
 
             # XY plane (front view) - project along Z axis (axis 0)
             xy_mip = np.max(data, axis=0)
-            self._update_plane_label(self.xy_plane_label, xy_mip, "XY")
+            self.xy_plane_viewer.set_contrast_limits(contrast_limits)
+            self.xy_plane_viewer.set_mip_data(xy_mip)
 
             # YZ plane (side view) - project along X axis (axis 2)
             yz_mip = np.max(data, axis=2)
-            self._update_plane_label(self.yz_plane_label, yz_mip, "YZ")
+            self.yz_plane_viewer.set_contrast_limits(contrast_limits)
+            self.yz_plane_viewer.set_mip_data(yz_mip)
 
         except Exception as e:
             self.logger.error(f"Error updating plane views: {e}")
 
-    def _update_plane_label(self, label: QLabel, data: np.ndarray, plane_name: str) -> None:
-        """Update a plane view label with MIP data."""
+    def _update_plane_overlays(self) -> None:
+        """Update overlay positions on all plane viewers."""
+        if not self.sample_3d_window:
+            return
+
         try:
-            # Normalize to 0-255
-            if data.max() > data.min():
-                normalized = ((data.astype(np.float32) - data.min()) /
-                             (data.max() - data.min()) * 255).astype(np.uint8)
-            else:
-                normalized = np.zeros(data.shape, dtype=np.uint8)
+            # Get current stage position from movement controller
+            if self.movement_controller:
+                pos = self.movement_controller.get_current_position()
+                if pos:
+                    x, y, z = pos.get('x', 0), pos.get('y', 0), pos.get('z', 0)
 
-            # Convert to QImage
-            height, width = normalized.shape
-            qimage = QImage(normalized.data, width, height, width, QImage.Format_Grayscale8)
+                    # Update holder position on each plane
+                    self.xz_plane_viewer.set_holder_position(x, z)
+                    self.xy_plane_viewer.set_holder_position(x, y)
+                    self.yz_plane_viewer.set_holder_position(z, y)
 
-            # Scale to fit label
-            pixmap = QPixmap.fromImage(qimage)
-            scaled = pixmap.scaled(
-                label.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-            label.setPixmap(scaled)
+            # Get objective position from config
+            stage_config = self._config.get('stage_control', {})
+            obj_x = (stage_config.get('x_range_mm', [1, 12.31])[0] +
+                     stage_config.get('x_range_mm', [1, 12.31])[1]) / 2
+            obj_y = (stage_config.get('y_range_mm', [5, 25])[0] +
+                     stage_config.get('y_range_mm', [5, 25])[1]) / 2
+            obj_z = stage_config.get('z_range_mm', [12.5, 26])[0]  # Objective at back
+
+            # Update objective position on each plane
+            self.xz_plane_viewer.set_objective_position(obj_x, obj_z)
+            self.xy_plane_viewer.set_objective_position(obj_x, obj_y)
+            self.yz_plane_viewer.set_objective_position(obj_z, obj_y)
 
         except Exception as e:
-            self.logger.error(f"Error updating {plane_name} plane label: {e}")
+            self.logger.error(f"Error updating plane overlays: {e}")
 
     # ========== Public Methods ==========
 
