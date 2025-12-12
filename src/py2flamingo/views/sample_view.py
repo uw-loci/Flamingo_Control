@@ -21,10 +21,10 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGroupBox, QSlider, QComboBox, QCheckBox, QProgressBar,
     QSplitter, QSizePolicy, QFrame, QSpinBox, QDialog,
-    QDialogButtonBox, QGridLayout
+    QDialogButtonBox, QGridLayout, QLineEdit
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, pyqtSignal
-from PyQt5.QtGui import QPixmap, QImage, QFont
+from PyQt5.QtGui import QPixmap, QImage, QFont, QDoubleValidator
 from superqt import QRangeSlider
 
 from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
@@ -713,7 +713,7 @@ class SampleView(QWidget):
 
         # Store slider references
         self.position_sliders: Dict[str, QSlider] = {}
-        self.position_labels: Dict[str, QLabel] = {}
+        self.position_edits: Dict[str, QLineEdit] = {}
 
         # Create slider for each axis
         axes = [
@@ -760,27 +760,77 @@ class SampleView(QWidget):
             max_label.setMinimumWidth(50)
             row.addWidget(max_label)
 
-            # Current value label
-            value_label = QLabel(f"50.000 {unit}")
-            value_label.setStyleSheet(
+            # Current value - editable field with validation
+            value_edit = QLineEdit(f"50.000")
+            value_edit.setStyleSheet(
                 "background-color: #e3f2fd; padding: 4px; "
                 "border: 1px solid #2196f3; border-radius: 3px; "
-                "font-weight: bold; min-width: 80px;"
+                "font-weight: bold; min-width: 70px; max-width: 80px;"
             )
-            value_label.setAlignment(Qt.AlignCenter)
-            self.position_labels[axis_id] = value_label
-            row.addWidget(value_label)
+            value_edit.setAlignment(Qt.AlignCenter)
+            # Validator will be set when limits are known
+            validator = QDoubleValidator(0.0, 100.0, decimals)
+            validator.setNotation(QDoubleValidator.StandardNotation)
+            value_edit.setValidator(validator)
+            value_edit.editingFinished.connect(
+                lambda a=axis_id: self._on_position_edit_finished(a)
+            )
+            self.position_edits[axis_id] = value_edit
+            row.addWidget(value_edit)
+
+            # Unit label
+            unit_label = QLabel(unit)
+            unit_label.setStyleSheet("font-weight: bold; min-width: 20px;")
+            row.addWidget(unit_label)
 
             # Store min/max labels for later updates
             slider.setProperty('min_label', min_label)
             slider.setProperty('max_label', max_label)
             slider.setProperty('unit', unit)
             slider.setProperty('decimals', decimals)
+            slider.setProperty('value_edit', value_edit)
 
             layout.addLayout(row)
 
         group.setLayout(layout)
         return group
+
+    def _on_position_edit_finished(self, axis: str) -> None:
+        """Handle position edit field value change (when user presses Enter or focus leaves)."""
+        if axis not in self.position_edits:
+            return
+
+        edit = self.position_edits[axis]
+        slider = self.position_sliders[axis]
+
+        try:
+            # Parse the entered value
+            value_text = edit.text().strip()
+            value = float(value_text)
+
+            # Clamp to valid range
+            min_val = slider.minimum() / self._slider_scale
+            max_val = slider.maximum() / self._slider_scale
+            clamped_value = max(min_val, min(max_val, value))
+
+            # Update the edit field if value was clamped
+            decimals = slider.property('decimals')
+            if clamped_value != value:
+                edit.setText(f"{clamped_value:.{decimals}f}")
+
+            # Update slider (without triggering movement yet)
+            slider.blockSignals(True)
+            slider.setValue(int(clamped_value * self._slider_scale))
+            slider.blockSignals(False)
+
+            # Send movement command
+            self._send_position_command(axis, clamped_value)
+
+        except ValueError:
+            # Invalid input - restore from slider
+            current_value = slider.value() / self._slider_scale
+            decimals = slider.property('decimals')
+            edit.setText(f"{current_value:.{decimals}f}")
 
     def _create_plane_views_section(self) -> QWidget:
         """Create the three MIP plane views section with proportions based on stage dimensions.
@@ -1057,6 +1107,13 @@ class SampleView(QWidget):
                     slider.setMinimum(int(min_val * self._slider_scale))
                     slider.setMaximum(int(max_val * self._slider_scale))
 
+                    # Update edit field validator with actual limits
+                    if axis_id in self.position_edits:
+                        edit = self.position_edits[axis_id]
+                        validator = edit.validator()
+                        if validator:
+                            validator.setRange(min_val, max_val, validator.decimals())
+
                     # Update min/max labels
                     min_label = slider.property('min_label')
                     max_label = slider.property('max_label')
@@ -1121,17 +1178,18 @@ class SampleView(QWidget):
             for axis_id, value in positions.items():
                 if axis_id in self.position_sliders and value is not None:
                     slider = self.position_sliders[axis_id]
-                    label = self.position_labels[axis_id]
+                    edit = self.position_edits[axis_id]
 
                     # Block signals to prevent triggering movement commands
                     slider.blockSignals(True)
                     slider.setValue(int(value * self._slider_scale))
                     slider.blockSignals(False)
 
-                    # Update value label
-                    unit = slider.property('unit')
+                    # Update value edit field (unit is now a separate label)
                     decimals = slider.property('decimals')
-                    label.setText(f"{value:.{decimals}f} {unit}")
+                    edit.blockSignals(True)
+                    edit.setText(f"{value:.{decimals}f}")
+                    edit.blockSignals(False)
 
             self.logger.info("Slider positions initialized from current stage position")
 
@@ -1268,43 +1326,53 @@ class SampleView(QWidget):
         for axis_id, value in positions.items():
             if axis_id in self.position_sliders:
                 slider = self.position_sliders[axis_id]
-                label = self.position_labels[axis_id]
+                edit = self.position_edits[axis_id]
 
                 # Block signals to prevent feedback loop
                 slider.blockSignals(True)
                 slider.setValue(int(value * self._slider_scale))
                 slider.blockSignals(False)
 
-                # Update value label
-                unit = slider.property('unit')
+                # Update value edit field
                 decimals = slider.property('decimals')
-                label.setText(f"{value:.{decimals}f} {unit}")
+                edit.blockSignals(True)
+                edit.setText(f"{value:.{decimals}f}")
+                edit.blockSignals(False)
 
     def _on_position_slider_changed(self, axis: str, value: int) -> None:
         """Handle position slider value change (during drag)."""
         if axis in self.position_sliders:
             slider = self.position_sliders[axis]
-            label = self.position_labels[axis]
+            edit = self.position_edits[axis]
 
             real_value = value / self._slider_scale
-            unit = slider.property('unit')
             decimals = slider.property('decimals')
-            label.setText(f"{real_value:.{decimals}f} {unit}")
+            edit.blockSignals(True)
+            edit.setText(f"{real_value:.{decimals}f}")
+            edit.blockSignals(False)
 
     def _on_position_slider_released(self, axis: str) -> None:
         """Handle position slider release - send move command."""
-        if not self.movement_controller:
-            return
-
         if axis in self.position_sliders:
             slider = self.position_sliders[axis]
             real_value = slider.value() / self._slider_scale
+            self._send_position_command(axis, real_value)
 
-            try:
-                self.movement_controller.move_absolute(axis, real_value, verify=False)
-                self.logger.info(f"Moving {axis.upper()} to {real_value:.3f}")
-            except Exception as e:
-                self.logger.error(f"Error moving {axis}: {e}")
+    def _send_position_command(self, axis: str, value: float) -> None:
+        """Send a movement command to the specified axis.
+
+        Args:
+            axis: The axis to move ('x', 'y', 'z', or 'r')
+            value: The target position value
+        """
+        if not self.movement_controller:
+            return
+
+        try:
+            self.movement_controller.move_absolute(axis, value, verify=False)
+            self.logger.info(f"Moving {axis.upper()} to {value:.3f}")
+        except Exception as e:
+            self.logger.error(f"Error moving {axis}: {e}")
 
     def _on_colormap_changed(self, colormap: str) -> None:
         """Handle colormap selection change."""
