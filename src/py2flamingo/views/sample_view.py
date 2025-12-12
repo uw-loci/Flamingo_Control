@@ -1650,10 +1650,22 @@ class SampleView(QWidget):
 
             self.logger.info("Embedded existing 3D viewer from Sample3DVisualizationWindow")
 
+            # Reset camera to desired zoom/angles after embedding
+            # Use a short delay to ensure widget is fully settled after re-parenting
+            QTimer.singleShot(100, self._reset_viewer_camera)
+
         except Exception as e:
             self.logger.error(f"Failed to embed 3D viewer: {e}")
             import traceback
             traceback.print_exc()
+
+    def _reset_viewer_camera(self) -> None:
+        """Reset the napari viewer camera to optimal view settings."""
+        viewer = self._get_viewer()
+        if viewer and hasattr(viewer, 'camera'):
+            viewer.camera.angles = (45, 30, 0)  # Good 3D perspective
+            viewer.camera.zoom = 1.57  # Zoomed out to fit entire chamber
+            self.logger.info("Reset viewer camera: angles=(45,30,0), zoom=1.57")
 
     # ========== Live View Control ==========
 

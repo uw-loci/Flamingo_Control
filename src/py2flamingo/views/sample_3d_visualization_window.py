@@ -3271,8 +3271,9 @@ class Sample3DVisualizationWindow(QWidget):
                 return 2  # 561nm (RFP)
             elif active_source == "laser_4":
                 return 3  # 640nm (Far-Red)
-            elif active_source == "led":
+            elif active_source and active_source.startswith("led_"):
                 # LED/brightfield maps to channel 0 (shared with 405nm)
+                # LED active_source is "led_R", "led_G", "led_B", or "led_W"
                 # This allows testing with brightfield when no fluorescent sample available
                 return 0
             else:
