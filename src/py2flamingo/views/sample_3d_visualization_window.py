@@ -2404,11 +2404,21 @@ class Sample3DVisualizationWindow(QWidget):
             # Always use transformed volume based on last_stage_position
             # This ensures consistent display regardless of pending_stage_update state
             # The transform accounts for stage movement relative to the reference position
+
+            # Get holder position for rotation center (rotation axis is the sample holder)
+            holder_pos_voxels = None
+            if hasattr(self, 'holder_position') and self.holder_position:
+                holder_pos_voxels = np.array([
+                    self.holder_position['x'],
+                    self.holder_position['y'],
+                    self.holder_position['z']
+                ])
+
             for ch_id in range(self.voxel_storage.num_channels):
                 if ch_id in self.channel_layers:
-                    # Get transformed display volume
+                    # Get transformed display volume (rotation around holder axis)
                     volume = self.voxel_storage.get_display_volume_transformed(
-                        ch_id, self.last_stage_position
+                        ch_id, self.last_stage_position, holder_pos_voxels
                     )
 
                     # Update layer data
@@ -2485,13 +2495,23 @@ class Sample3DVisualizationWindow(QWidget):
 
             # Update each channel with transformed data
             # Data is stored in SAMPLE coordinates, transform to CHAMBER coordinates for display
+
+            # Get holder position for rotation center (rotation axis is the sample holder)
+            holder_pos_voxels = None
+            if hasattr(self, 'holder_position') and self.holder_position:
+                holder_pos_voxels = np.array([
+                    self.holder_position['x'],
+                    self.holder_position['y'],
+                    self.holder_position['z']
+                ])
+
             for ch_id in range(self.voxel_storage.num_channels):
                 if not self.voxel_storage.has_data(ch_id):
                     continue
 
-                # Get transformed volume (sample coords -> chamber coords)
+                # Get transformed volume (sample coords -> chamber coords, rotation around holder)
                 volume = self.voxel_storage.get_display_volume_transformed(
-                    ch_id, stage_pos
+                    ch_id, stage_pos, holder_pos_voxels
                 )
 
                 # Update napari layer

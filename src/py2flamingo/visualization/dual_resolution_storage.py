@@ -549,7 +549,8 @@ class DualResolutionVoxelStorage:
             self.data_collection_positions.pop(0)
 
     def get_display_volume_transformed(self, channel_id: int,
-                                      current_stage_pos: dict) -> np.ndarray:
+                                      current_stage_pos: dict,
+                                      holder_position_voxels: np.ndarray = None) -> np.ndarray:
         """
         Get display volume with all voxels transformed to current stage position.
 
@@ -564,6 +565,8 @@ class DualResolutionVoxelStorage:
         Args:
             channel_id: Channel to get volume for
             current_stage_pos: Dictionary with 'x', 'y', 'z', 'r' keys
+            holder_position_voxels: Optional holder position in voxel coords (X, Y, Z).
+                                   Used as rotation center for Y-axis rotation.
 
         Returns:
             Transformed display volume
@@ -608,7 +611,8 @@ class DualResolutionVoxelStorage:
             # Need to recalculate rotated base volume
             logger.info(f"Transform: Calculating rotated base volume (rotation delta={dr:.1f}°)")
             volume = self.get_display_volume(channel_id)
-            center_voxels = self._get_rotation_center_voxels()
+            # Use holder position as rotation center if provided (rotation axis is the holder)
+            center_voxels = self._get_rotation_center_voxels(holder_position_voxels)
 
             if abs(dr) > 0.01:
                 # Apply rotation only (no translation)
@@ -655,18 +659,38 @@ class DualResolutionVoxelStorage:
 
         return translated
 
-    def _get_rotation_center_voxels(self) -> np.ndarray:
+    def _get_rotation_center_voxels(self, holder_position_voxels: np.ndarray = None) -> np.ndarray:
         """
         Get rotation center in display voxel coordinates.
 
+        The rotation axis is the sample holder, which rotates around the Y-axis.
+        For Y-axis rotation, the center should be at the holder's X,Z position.
+
+        Args:
+            holder_position_voxels: Optional (X, Y, Z) holder position in voxel coords.
+                                   If provided, uses holder's X,Z for rotation center.
+                                   If None, uses sample_region_center from config.
+
         Returns:
-            Center coordinates in voxels
+            Center coordinates in voxels (Z, Y, X) order for napari
         """
-        # Use sample region center from config
+        # Use sample region center from config as default
         center_um = np.array(self.config.sample_region_center)
 
         # Convert to display voxels
         center_voxels = self.world_to_display_voxel(center_um)
+
+        # If holder position provided, use its X,Z as rotation center
+        # (Y position doesn't matter for Y-axis rotation)
+        if holder_position_voxels is not None:
+            # holder_position_voxels is in (X, Y, Z) order from napari coordinates
+            # center_voxels is in (Z, Y, X) order for transform
+            holder_x = holder_position_voxels[0]  # X from holder
+            holder_z = holder_position_voxels[2]  # Z from holder
+            # Update center to use holder's X,Z position (rotation axis)
+            center_voxels[0] = holder_z  # Z position of rotation axis
+            center_voxels[2] = holder_x  # X position of rotation axis
+            logger.debug(f"Rotation center set to holder position: Z={holder_z:.1f}, X={holder_x:.1f} voxels")
 
         return center_voxels
 
