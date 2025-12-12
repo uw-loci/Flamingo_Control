@@ -500,14 +500,14 @@ class SampleView(QWidget):
         # Illumination Controls
         left_column.addWidget(self._create_illumination_section())
 
-        # Live View toggle button (red when stopped, blue when active) - compact
+        # Live View toggle button (green when stopped, red when active) - compact
         self.live_view_toggle_btn = QPushButton("Start Live")
         self.live_view_toggle_btn.setCheckable(True)
         self.live_view_toggle_btn.clicked.connect(self._on_live_view_toggle)
         self.live_view_toggle_btn.setStyleSheet(
-            f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; "
+            f"QPushButton {{ background-color: {SUCCESS_COLOR}; color: white; "
             f"font-weight: bold; padding: 6px 12px; font-size: 10pt; }}"
-            f"QPushButton:checked {{ background-color: #2196F3; }}"
+            f"QPushButton:checked {{ background-color: {ERROR_COLOR}; }}"
         )
         self.live_view_toggle_btn.setMaximumWidth(120)
         left_column.addWidget(self.live_view_toggle_btn)
@@ -1570,7 +1570,7 @@ class SampleView(QWidget):
                 self.live_view_toggle_btn.setChecked(False)
                 self.live_view_toggle_btn.setText("Start Live")
                 self.live_view_toggle_btn.setStyleSheet(
-                    f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; "
+                    f"QPushButton {{ background-color: {SUCCESS_COLOR}; color: white; "
                     f"font-weight: bold; padding: 6px 12px; font-size: 10pt; }}"
                 )
                 self.live_status_label.setText("Status: Idle")
@@ -1587,7 +1587,7 @@ class SampleView(QWidget):
                 self.live_view_toggle_btn.setChecked(True)
                 self.live_view_toggle_btn.setText("Stop Live")
                 self.live_view_toggle_btn.setStyleSheet(
-                    f"QPushButton {{ background-color: #2196F3; color: white; "
+                    f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; "
                     f"font-weight: bold; padding: 6px 12px; font-size: 10pt; }}"
                 )
                 self.live_status_label.setText("Status: Streaming")
@@ -1608,7 +1608,7 @@ class SampleView(QWidget):
                 self.live_view_toggle_btn.setChecked(True)
                 self.live_view_toggle_btn.setText("Stop Live")
                 self.live_view_toggle_btn.setStyleSheet(
-                    f"QPushButton {{ background-color: #2196F3; color: white; "
+                    f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; "
                     f"font-weight: bold; padding: 6px 12px; font-size: 10pt; }}"
                 )
                 self.live_status_label.setText("Status: Streaming")
@@ -1616,7 +1616,7 @@ class SampleView(QWidget):
                 self.live_view_toggle_btn.setChecked(False)
                 self.live_view_toggle_btn.setText("Start Live")
                 self.live_view_toggle_btn.setStyleSheet(
-                    f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; "
+                    f"QPushButton {{ background-color: {SUCCESS_COLOR}; color: white; "
                     f"font-weight: bold; padding: 6px 12px; font-size: 10pt; }}"
                 )
                 self.live_status_label.setText("Status: Idle")
