@@ -29,6 +29,11 @@ class LaserLEDControlPanel(QWidget):
     - Automatic preview mode enabling
     """
 
+    # Button ID for LED in the source button group.
+    # IMPORTANT: Cannot use -1 because Qt auto-assigns IDs starting from -1.
+    # Using a large negative number to avoid collision with laser indices (1-4).
+    LED_BUTTON_ID = -100
+
     def __init__(self, laser_led_controller: LaserLEDController):
         """
         Initialize laser/LED control panel.
@@ -206,8 +211,8 @@ class LaserLEDControlPanel(QWidget):
 
         # Checkbox for selecting LED as light source (with mutual exclusivity managed manually)
         self._led_radio = QCheckBox()
-        # Use ID -1 for LED
-        self._source_button_group.addButton(self._led_radio, -1)
+        # Use constant LED_BUTTON_ID for LED (not -1, which Qt auto-assigns)
+        self._source_button_group.addButton(self._led_radio, self.LED_BUTTON_ID)
         layout.addWidget(self._led_radio, row, 0, Qt.AlignCenter)
 
         # Combobox for LED color selection
@@ -516,7 +521,7 @@ class LaserLEDControlPanel(QWidget):
                 self.laser_led_controller.enable_laser_for_preview_async(laser_number, self._laser_path)
 
             else:
-                # This shouldn't happen (source_id < -1), but log for debugging
+                # This shouldn't happen - all buttons should be LED or lasers (1-4)
                 self.logger.warning(f"Unhandled source button with ID {source_id}")
 
         else:
@@ -621,14 +626,17 @@ class LaserLEDControlPanel(QWidget):
             return "none"
 
         source_id = self._source_button_group.id(checked_button)
-        if source_id == -1:  # LED (get color from combobox)
+        if source_id == self.LED_BUTTON_ID:  # LED (get color from combobox)
             led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
             color_names = ["red", "green", "blue", "white"]
             return f"led_{color_names[led_color]}"
-        else:
-            # Button ID IS the laser number (1-4) - set from laser.index
+        elif source_id >= 1:  # Laser (button IDs are laser.index: 1-4)
             laser_number = source_id
             return f"laser_{laser_number}"
+        else:
+            # Unknown source (shouldn't happen)
+            self.logger.warning(f"Unknown source button ID: {source_id}")
+            return "none"
 
     def is_source_active(self) -> bool:
         """Check if any light source is currently active."""
@@ -648,20 +656,20 @@ class LaserLEDControlPanel(QWidget):
 
         source_id = self._source_button_group.id(checked_button)
 
-        if source_id == -1:  # LED
+        if source_id == self.LED_BUTTON_ID:  # LED
             # Get LED color from combobox
             led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
             color_names = ["red", "green", "blue", "white"]
             color_name = color_names[led_color]
 
-            # Get LED intensity from slider
+            # Get LED intensity from slider and set it in the controller
             intensity = self._led_slider.value() if self._led_slider else 50
+            self.laser_led_controller.set_led_intensity(led_color, float(intensity))
 
             self.logger.info(f"Restoring LED illumination: {color_name} at {intensity}%")
-            self.laser_led_controller.enable_led_preview(led_color, intensity)
+            self.laser_led_controller.enable_led_for_preview(led_color)
 
-        else:  # Laser
-            # source_id IS the laser number (1-4) - button IDs are set from laser.index
+        elif source_id >= 1:  # Laser (button IDs are laser.index: 1-4)
             laser_number = source_id
 
             # Get laser power from slider (sliders are keyed by laser.index, same as source_id)
@@ -674,3 +682,7 @@ class LaserLEDControlPanel(QWidget):
             # First ensure power is set in controller's cache, then enable
             self.laser_led_controller.set_laser_power(laser_number, power)
             self.laser_led_controller.enable_laser_for_preview(laser_number, self._laser_path)
+
+        else:
+            # Unknown source ID (shouldn't happen with proper button setup)
+            self.logger.warning(f"Cannot restore illumination - unknown source ID: {source_id}")

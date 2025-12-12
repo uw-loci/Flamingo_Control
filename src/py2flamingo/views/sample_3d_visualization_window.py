@@ -2987,7 +2987,7 @@ class Sample3DVisualizationWindow(QWidget):
             # Check if Live View is actually running
             if not self.camera_controller.is_live_view_active():
                 if self._populate_tick_count % 10 == 0:
-                    logger.warning(f"Tick {self._populate_tick_count}: Live View not active")
+                    logger.debug(f"Tick {self._populate_tick_count}: Live View not active")
                 return
 
             # Get current stage position

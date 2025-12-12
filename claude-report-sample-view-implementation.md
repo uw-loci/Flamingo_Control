@@ -1,7 +1,7 @@
 # Claude Report: Sample View Implementation
 
 **Date:** 2025-12-11 (Updated: 2025-12-12)
-**Commits:** b967b66 through fbcd014 (20+ commits)
+**Commits:** b967b66 through fbcd014 (20+ commits), plus pending fixes
 **Purpose:** Create a unified Sample View interface combining all sample interaction controls in one window
 
 ---
@@ -309,6 +309,23 @@ The layout went through several iterations based on user feedback:
 **Fix:** Added `_reset_viewer_camera()` method called via `QTimer.singleShot(100ms)` after embedding
 **Commit:** 5af3435
 
+### 14. Log Spam "Tick XXX: Live View not active"
+**Cause:** When populate timer runs but live view is stopped, warning logged every 10 ticks
+**Symptom:** Console flooded with WARNING-level messages during normal operation
+**Fix:** Changed `logger.warning()` to `logger.debug()` at line 2990 in sample_3d_visualization_window.py
+**Commit:** (pending)
+
+### 15. LED Button ID Auto-Assignment Bug (Invalid laser index: 0)
+**Cause:** Qt's `QButtonGroup.addButton(button, -1)` auto-assigns IDs starting from -1, not preserving the -1 value. LED button got ID 0, which caused `restore_checked_illumination()` to fall through to laser handling with index 0.
+**Symptom:** Selecting LED caused "Invalid laser index: 0" error when live view restarted
+**Fix:**
+- Added `LED_BUTTON_ID = -100` class constant (large negative to avoid Qt auto-assignment)
+- Updated `addButton()` call to use `self.LED_BUTTON_ID`
+- Fixed `get_selected_source()` and `restore_checked_illumination()` to check for `LED_BUTTON_ID`
+- Fixed `restore_checked_illumination()` to call correct method `enable_led_for_preview()` instead of non-existent `enable_led_preview()`
+- Added explicit `elif source_id >= 1` checks for laser handling to prevent invalid indices
+**Commit:** (pending)
+
 ---
 
 ## Testing Notes
@@ -336,11 +353,12 @@ The layout went through several iterations based on user feedback:
 - [x] LED maps to Channel 0 for brightfield testing
 - [x] Viewer Controls dialog with full napari layer controls
 - [x] Napari zoom initializes correctly to 1.57
+- [x] LED selection and restore works correctly (button ID fix)
+- [x] Rotation uses sample holder position as rotation center
 
 ### Known Limitations
 - 2D slice viewers show placeholder images (MIP projection not yet connected)
 - Click-to-move on slice viewers sends commands but overlay positions not updated in real-time
-- Rotation around sample holder axis needs investigation
 
 ---
 
@@ -348,6 +366,5 @@ The layout went through several iterations based on user feedback:
 
 1. **MIP Projection Updates**: Connect 2D slice viewers to voxel_storage for real-time MIP rendering
 2. **Overlay Synchronization**: Update holder/objective overlays when positions change
-3. **Rotation Fix**: Ensure rotation transforms around sample holder axis, not chamber center
-4. **Channel Selection**: Add per-viewer channel controls
-5. **Live Display Settings Dialog**: Implement contrast controls in the settings popup
+3. **Channel Selection**: Add per-viewer channel controls
+4. **Live Display Settings Dialog**: Implement contrast controls in the settings popup
