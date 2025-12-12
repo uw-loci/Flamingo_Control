@@ -978,11 +978,12 @@ class SampleView(QWidget):
             row_layout.addWidget(checkbox)
 
             # Dual-handle contrast range slider
+            # Range is 0-500 for typical fluorescence/brightfield (not full 16-bit)
             slider = QRangeSlider(Qt.Horizontal)
-            slider.setRange(0, 65535)
-            # Load initial values from channel state
-            min_val = self._channel_states[i].get('contrast_min', 0)
-            max_val = self._channel_states[i].get('contrast_max', 65535)
+            slider.setRange(0, 500)
+            # Load initial values from channel state (clamped to slider range)
+            min_val = min(self._channel_states[i].get('contrast_min', 0), 500)
+            max_val = min(self._channel_states[i].get('contrast_max', 500), 500)
             slider.setValue((min_val, max_val))
             slider.setToolTip(f"Adjust contrast range for {name}")
             # Style the range slider handles to be visible

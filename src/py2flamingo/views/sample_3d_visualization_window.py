@@ -3244,10 +3244,11 @@ class Sample3DVisualizationWindow(QWidget):
 
     def _detect_active_channel(self) -> Optional[int]:
         """
-        Detect which fluorescence channel is currently active.
+        Detect which light source channel is currently active.
 
         Returns:
-            Channel ID (0-3) for lasers, None for LED/brightfield
+            Channel ID (0-3) for lasers or LED, None if no light source active.
+            LED maps to channel 0 (same as 405nm) to allow brightfield testing.
         """
         # Check if laser/LED controller is available
         if not hasattr(self, 'laser_led_controller') or self.laser_led_controller is None:
@@ -3261,7 +3262,7 @@ class Sample3DVisualizationWindow(QWidget):
                 logger.debug("No light source active")
                 return None
 
-            # Map laser to channel
+            # Map light source to channel
             if active_source == "laser_1":
                 return 0  # 405nm (DAPI)
             elif active_source == "laser_2":
@@ -3271,8 +3272,9 @@ class Sample3DVisualizationWindow(QWidget):
             elif active_source == "laser_4":
                 return 3  # 640nm (Far-Red)
             elif active_source == "led":
-                # LED/brightfield - skip 3D accumulation
-                return None
+                # LED/brightfield maps to channel 0 (shared with 405nm)
+                # This allows testing with brightfield when no fluorescent sample available
+                return 0
             else:
                 logger.warning(f"Unknown light source: {active_source}, defaulting to channel 0")
                 return 0

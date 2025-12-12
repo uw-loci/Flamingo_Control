@@ -132,7 +132,8 @@ coordinate_mapping:
 channels:
   # Laser line channel configurations
   # These represent fluorescent signals excited by different laser wavelengths
-  # Contrast limits define default display range for 16-bit images (0-65535)
+  # Channel 0 (405nm) also accepts LED/brightfield data for testing
+  # Contrast limits define default display range (0-500 for typical fluorescence/brightfield)
   - id: 0
     name: "405nm (DAPI)"
     default_colormap: "blue"
@@ -141,7 +142,7 @@ channels:
     blend_mode: "additive"
     opacity: 0.8
     default_contrast_min: 0
-    default_contrast_max: 65535
+    default_contrast_max: 500
 
   - id: 1
     name: "488nm (GFP)"
@@ -151,7 +152,7 @@ channels:
     blend_mode: "additive"
     opacity: 0.8
     default_contrast_min: 0
-    default_contrast_max: 65535
+    default_contrast_max: 500
 
   - id: 2
     name: "561nm (RFP)"
@@ -161,7 +162,7 @@ channels:
     blend_mode: "additive"
     opacity: 0.8
     default_contrast_min: 0
-    default_contrast_max: 65535
+    default_contrast_max: 500
 
   - id: 3
     name: "640nm (Far-Red)"
@@ -171,7 +172,7 @@ channels:
     blend_mode: "additive"
     opacity: 0.8
     default_contrast_min: 0
-    default_contrast_max: 65535
+    default_contrast_max: 500
 
 # Live view display settings
 live_display:
