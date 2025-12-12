@@ -296,11 +296,12 @@ class LaserLEDControlPanel(QWidget):
         # If a laser is currently active, re-enable it with new path
         checked_button = self._source_button_group.checkedButton()
         if checked_button and checked_button != self._led_radio:
-            # This is a laser button
+            # This is a laser button - convert button ID (0-3) to laser number (1-4)
             source_id = self._source_button_group.id(checked_button)
-            if source_id >= 1:  # Laser
-                self.logger.info(f"Re-enabling laser {source_id} with {path_name} path")
-                self.laser_led_controller.enable_laser_for_preview(source_id, self._laser_path)
+            if source_id >= 0:  # Laser (button IDs are 0-3)
+                laser_number = source_id + 1
+                self.logger.info(f"Re-enabling laser {laser_number} with {path_name} path")
+                self.laser_led_controller.enable_laser_for_preview(laser_number, self._laser_path)
 
     def _on_laser_power_slider_changed(self, laser_index: int, value: int) -> None:
         """Handle laser power slider change (while dragging)."""
@@ -503,17 +504,19 @@ class LaserLEDControlPanel(QWidget):
                 # Use async method to avoid blocking UI
                 self.laser_led_controller.enable_led_for_preview_async(led_color)
 
-            elif source_id >= 1:  # Laser (laser indices are typically 1, 2, 3, 4)
+            elif source_id >= 0:  # Laser (button IDs are 0-3, protocol expects 1-4)
                 # Laser selected - show path selection
                 if self._path_group:
                     self._path_group.setVisible(True)
 
+                # Convert button ID (0-3) to laser number (1-4) for protocol
+                laser_number = source_id + 1
                 # Enable laser with current path selection (async for responsiveness)
-                self.logger.info(f"Laser {source_id} selected for preview on {self._laser_path.upper()} path")
-                self.laser_led_controller.enable_laser_for_preview_async(source_id, self._laser_path)
+                self.logger.info(f"Laser {laser_number} selected for preview on {self._laser_path.upper()} path")
+                self.laser_led_controller.enable_laser_for_preview_async(laser_number, self._laser_path)
 
             else:
-                # This shouldn't happen, but log for debugging
+                # This shouldn't happen (source_id < -1), but log for debugging
                 self.logger.warning(f"Unhandled source button with ID {source_id}")
 
         else:
@@ -623,7 +626,9 @@ class LaserLEDControlPanel(QWidget):
             color_names = ["red", "green", "blue", "white"]
             return f"led_{color_names[led_color]}"
         else:
-            return f"laser_{source_id}"
+            # Convert button ID (0-3) to laser number (1-4) for consistent naming
+            laser_number = source_id + 1
+            return f"laser_{laser_number}"
 
     def is_source_active(self) -> bool:
         """Check if any light source is currently active."""
@@ -656,13 +661,16 @@ class LaserLEDControlPanel(QWidget):
             self.laser_led_controller.enable_led_preview(led_color, intensity)
 
         else:  # Laser
-            # Get laser power from slider
+            # source_id is the button group ID (0-3), but protocol expects laser numbers 1-4
+            laser_number = source_id + 1
+
+            # Get laser power from slider (sliders are keyed by source_id, not laser_number)
             if source_id in self._laser_sliders:
                 power = self._laser_sliders[source_id].value()
             else:
                 power = 5.0  # Default power
 
-            self.logger.info(f"Restoring laser {source_id} illumination at {power}% on {self._laser_path} path")
+            self.logger.info(f"Restoring laser {laser_number} illumination at {power}% on {self._laser_path} path")
             # First ensure power is set in controller's cache, then enable
-            self.laser_led_controller.set_laser_power(source_id, power)
-            self.laser_led_controller.enable_laser_for_preview(source_id, self._laser_path)
+            self.laser_led_controller.set_laser_power(laser_number, power)
+            self.laser_led_controller.enable_laser_for_preview(laser_number, self._laser_path)
