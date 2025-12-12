@@ -1,7 +1,7 @@
 # Claude Report: Sample View Implementation
 
-**Date:** 2025-12-11
-**Commits:** b967b66 through 9db5e27 (15 commits)
+**Date:** 2025-12-11 (Updated: 2025-12-12)
+**Commits:** b967b66 through fbcd014 (20+ commits)
 **Purpose:** Create a unified Sample View interface combining all sample interaction controls in one window
 
 ---
@@ -26,12 +26,14 @@ The Sample View is a new unified interface that consolidates microscope sample i
 - Shares the same `voxel_storage` for volume data
 - Displays zoom level in status bar
 - Zoom set to 1.57 for optimal chamber visibility
+- Camera reset after embedding to ensure proper initialization
 
 ### 2. Live Camera Feed (Reused)
 - Uses existing `CameraController.start_live_view()` and `stop_live_view()`
 - Connects to `CameraController.new_image` signal for frame updates
 - Displays FPS counter and frame status
 - 4:3 aspect ratio (360×270 pixels)
+- Auto-contrast with stabilization (1-second timer, percentage-based adjustments)
 
 ### 3. 2D Slice Plane Viewers (New)
 Three plane viewers showing MIP projections:
@@ -58,13 +60,30 @@ Three plane viewers showing MIP projections:
 - Editable text fields for precise positioning
 - X-axis respects inverted setting from config
 
+### 6. Viewer Controls Dialog (New - 2025-12-12)
+Full implementation with tabbed interface:
+
+**Channels Tab** (per channel: 405nm, 488nm, 561nm, 640nm):
+- Visibility toggle (checkbox)
+- Colormap selector (blue, cyan, green, red, magenta, yellow, gray)
+- Opacity slider (0-100%)
+- Contrast range slider (QRangeSlider 0-65535)
+
+**Display Tab**:
+- Rendering mode selector (mip, minip, average, iso)
+- Chamber wireframe visibility toggle
+- Objective position indicator toggle
+- XY Focus Frame visibility toggle
+- Coordinate axes visibility toggle
+- Reset View button (camera angles + zoom reset)
+
 ---
 
 ## Files Created/Modified
 
 ### New Files
 
-#### `src/py2flamingo/views/sample_view.py` (~1400 lines)
+#### `src/py2flamingo/views/sample_view.py` (~2000 lines)
 
 Main classes:
 
@@ -73,39 +92,23 @@ class SlicePlaneViewer(QFrame):
     """2D slice plane viewer with colored borders and overlays."""
     position_clicked = pyqtSignal(float, float)
 
-    def __init__(self, plane: str, h_axis: str, v_axis: str,
-                 width: int, height: int, parent=None):
-        # Colored borders matching napari axis colors
-        self.setStyleSheet(f"""
-            SlicePlaneViewer {{
-                border-left: 3px solid {h_color};
-                border-right: 3px solid {h_color};
-                border-top: 3px solid {v_color};
-                border-bottom: 3px solid {v_color};
-            }}
-        """)
-```
-
-```python
 class ViewerControlsDialog(QDialog):
-    """Placeholder dialog for viewer-specific settings."""
-    # Future: napari layer controls, colormap settings, etc.
-```
+    """Dialog for controlling napari viewer settings.
 
-```python
+    Provides controls for:
+    - Channel visibility, colormap, opacity, and contrast
+    - Rendering mode (MIP, Volume, etc.)
+    - Display settings (chamber wireframe, objective indicator)
+    - Camera/view reset
+    """
+    channel_visibility_changed = pyqtSignal(int, bool)
+    channel_colormap_changed = pyqtSignal(int, str)
+    channel_opacity_changed = pyqtSignal(int, float)
+    channel_contrast_changed = pyqtSignal(int, tuple)
+    rendering_mode_changed = pyqtSignal(str)
+
 class SampleView(QWidget):
     """Unified sample viewing and interaction interface."""
-
-    def __init__(self, camera_controller, movement_controller,
-                 laser_led_controller, voxel_storage=None,
-                 image_controls_window=None, sample_3d_window=None, parent=None):
-        # Reuses existing window implementations
-
-    def _embed_3d_viewer(self) -> None:
-        """Embed napari viewer from existing Sample3DVisualizationWindow."""
-        viewer = self.sample_3d_window.viewer
-        viewer_widget = viewer.window._qt_viewer
-        # Replace placeholder with actual widget
 ```
 
 ### Modified Files
@@ -120,10 +123,12 @@ class SampleView(QWidget):
 
 #### `src/py2flamingo/views/sample_3d_visualization_window.py`
 - Changed zoom from 2.0 to 1.57 for optimal chamber visibility
+- Fixed LED channel detection (`led_R/G/B/W` instead of `led`)
 
 #### `src/py2flamingo/views/laser_led_control_panel.py`
 - Removed verbose "Select a light source..." text
 - Reduced title font from 12pt to 11pt
+- Fixed laser index mapping (button IDs are 1-based from `laser.index`)
 
 #### `src/py2flamingo/views/image_controls_window.py`
 - Renamed window title to "Live Display"
@@ -166,6 +171,18 @@ class SampleView(QWidget):
 **Decision:** Clicking on 2D slice views sends position commands
 
 **Rationale:** Provides intuitive navigation without needing separate joystick controls
+
+### 5. Laser Index Mapping
+**Decision:** Button IDs use `laser.index` directly (1-based)
+
+| Button ID | Protocol Laser | Napari Channel |
+|-----------|----------------|----------------|
+| 1 | Laser 1 (405nm) | Channel 0 |
+| 2 | Laser 2 (488nm) | Channel 1 |
+| 3 | Laser 3 (561nm) | Channel 2 |
+| 4 | Laser 4 (640nm) | Channel 3 |
+
+**Rationale:** UI shows lasers 1-4, protocol expects 1-4, napari uses 0-3 internally
 
 ---
 
@@ -210,25 +227,13 @@ The layout went through several iterations based on user feedback:
 
 ---
 
-## Commit History
+## Recent Commits (2025-12-12)
 
 | Commit | Description |
 |--------|-------------|
-| b967b66 | Compact GUI layout to two-thirds width (900px → 600px) |
-| 1094e17 | Replace GUI_REDESIGN_PLAN with SAMPLE_VIEW_DESIGN |
-| 10dc178 | Add SampleView - integrated sample interaction window |
-| b75c19a | Fix: Use correct signal name (new_image) in SampleView |
-| cc2b743 | Fix Sample View layout proportions for vertical chamber |
-| e2ca9b1 | Enhance Sample View layout and controls |
-| 8fc116b | Integrate napari viewer and improve Sample View controls |
-| 576b7f5 | Connect Sample View to actual backend components |
-| 2655535 | Refactor Sample View to reuse existing implementations |
-| 9c1bde3 | Add 2D slice plane viewers with colored borders and overlays |
-| 2cb6a40 | Add zoom display and improve Sample View compactness |
-| 8e3d709 | Fix Sample View to load real values on initialization (safety fix) |
-| eadb843 | Update claude-report with safety fix documentation |
-| da05700 | Add Populate/Clear buttons, hook up Saved Positions/Stage Control/Export |
-| 9db5e27 | Fix light source sync, add range sliders, use wavelength names |
+| 3fb04f3 | Fix laser index mapping - button IDs are already 1-based |
+| 5af3435 | Fix LED channel detection and napari zoom initialization |
+| fbcd014 | Implement ViewerControlsDialog with full napari layer controls |
 
 ---
 
@@ -250,56 +255,25 @@ The layout went through several iterations based on user feedback:
 **Fix:** Added `_load_current_positions()` method that queries `movement_controller.get_position()` on init
 **Commit:** 8e3d709
 
-**Code added:**
-```python
-def _load_current_positions(self) -> None:
-    """Load current stage positions from movement controller and update sliders.
-
-    This is critical for safety - sliders must reflect actual stage position,
-    not default values that could cause dangerous movements.
-    """
-    current_pos = self.movement_controller.get_position()
-    for axis_id, value in positions.items():
-        slider.blockSignals(True)  # Prevent triggering movement
-        slider.setValue(int(value * self._slider_scale))
-        slider.blockSignals(False)
-```
-
 ### 4. Contrast Settings Not Persisted
 **Cause:** Contrast min/max values were hardcoded, not configurable
 **Fix:** Added `default_contrast_min` and `default_contrast_max` to each channel in `visualization_3d_config.yaml`
 **Commit:** 8e3d709
 
 ### 5. Light Source Not Enabling on Start Live View
-**Cause:** When user clicked "Start Live", camera started but laser was not re-enabled (only ALL_DISABLE sent on stop, no enable on start)
+**Cause:** When user clicked "Start Live", camera started but laser was not re-enabled
 **Symptom:** UI showed laser selected but no illumination occurred
-**Fix:** Added call to `laser_led_panel.restore_checked_illumination()` in `_on_live_view_toggle()` before starting camera
+**Fix:** Added call to `laser_led_panel.restore_checked_illumination()` in `_on_live_view_toggle()`
 **Commit:** 9db5e27
-
-**Code added:**
-```python
-def _on_live_view_toggle(self) -> None:
-    """Toggle live view on/off."""
-    if not self._live_view_active:
-        # Re-enable the selected light source before starting camera
-        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
-            self.laser_led_panel.restore_checked_illumination()
-        self.camera_controller.start_live_view()
-```
 
 ### 6. Contrast Sliders Only Had Single Handle
 **Cause:** Used standard `QSlider` which only supports one value, not min/max range
 **Fix:** Replaced with `QRangeSlider` from superqt library for dual-handle min/max control
 **Commit:** 9db5e27
 
-**Features added:**
-- Dual-handle sliders for both Live Display and Channel contrast controls
-- Bidirectional sync between sliders and spinboxes
-- Signal blocking to prevent feedback loops during updates
-
 ### 7. Channel Names Used Generic Labels (Ch1, Ch2)
 **Cause:** Hardcoded channel names instead of reading from config
-**Fix:** Load wavelength names from `visualization_3d_config.yaml` channels section, extract wavelength portion (e.g., "405nm (DAPI)" → "405nm")
+**Fix:** Load wavelength names from `visualization_3d_config.yaml` channels section
 **Commit:** 9db5e27
 
 ### 8. Missing Data Collection Buttons
@@ -307,19 +281,33 @@ def _on_live_view_toggle(self) -> None:
 **Fix:** Added buttons that forward to Sample3DVisualizationWindow's existing functionality
 **Commit:** da05700
 
-**Buttons added:**
-- "Populate from Live" - Green toggle button, syncs with sample_3d_window.populate_button
-- "Clear Data" - Orange button, calls sample_3d_window._on_clear_data()
-
 ### 9. Utility Buttons Not Connected
 **Cause:** Saved Positions, Stage Control, Export Data buttons had no handlers
 **Fix:** Connected each to appropriate functionality
 **Commit:** da05700
 
-**Connections:**
-- Saved Positions → Opens `PositionHistoryDialog`
-- Stage Control → Opens `StageChamberVisualizationWindow`
-- Export Data → File dialog for TIFF/NPY export of voxel data
+### 10. Auto-Contrast Flickering
+**Cause:** Per-frame min/max calculation caused constant flickering
+**Fix:** Implemented stabilized algorithm with 1-second timer and percentage-based thresholds:
+- If >20% pixels saturated: raise max to 95% of top 5% mean
+- If <5% pixels above 70% of max: lower max by 10%
+**Commit:** 37672d3
+
+### 11. Laser Index Off-by-One Error
+**Cause:** Button group IDs assumed to be 0-3, but actually set from `laser.index` (1-4)
+**Symptom:** `Invalid laser index: 0` errors, wrong lasers activated
+**Fix:** Removed erroneous `+1` conversion in 4 places (`_on_source_clicked`, `_on_path_selection_changed`, `get_selected_source`, `restore_checked_illumination`)
+**Commit:** 3fb04f3
+
+### 12. LED Channel Detection Failure
+**Cause:** Detection checked for `active_source == "led"` but LED stores as `"led_R"`, `"led_G"`, etc.
+**Fix:** Changed to `active_source.startswith("led_")` for proper pattern matching
+**Commit:** 5af3435
+
+### 13. Napari Zoom Not Initializing
+**Cause:** Zoom set in Sample3DVisualizationWindow was reset when widget re-parented to SampleView
+**Fix:** Added `_reset_viewer_camera()` method called via `QTimer.singleShot(100ms)` after embedding
+**Commit:** 5af3435
 
 ---
 
@@ -343,11 +331,16 @@ def _on_live_view_toggle(self) -> None:
 - [x] Saved Positions opens position history dialog
 - [x] Stage Control opens stage visualization window
 - [x] Export Data saves voxel data to file
+- [x] Auto-contrast stabilization (no flickering)
+- [x] Editable position fields with validation
+- [x] LED maps to Channel 0 for brightfield testing
+- [x] Viewer Controls dialog with full napari layer controls
+- [x] Napari zoom initializes correctly to 1.57
 
 ### Known Limitations
 - 2D slice viewers show placeholder images (MIP projection not yet connected)
 - Click-to-move on slice viewers sends commands but overlay positions not updated in real-time
-- Viewer Controls dialog is a placeholder
+- Rotation around sample holder axis needs investigation
 
 ---
 
@@ -355,6 +348,6 @@ def _on_live_view_toggle(self) -> None:
 
 1. **MIP Projection Updates**: Connect 2D slice viewers to voxel_storage for real-time MIP rendering
 2. **Overlay Synchronization**: Update holder/objective overlays when positions change
-3. **Viewer Controls**: Implement napari layer controls, colormap settings
+3. **Rotation Fix**: Ensure rotation transforms around sample holder axis, not chamber center
 4. **Channel Selection**: Add per-viewer channel controls
 5. **Live Display Settings Dialog**: Implement contrast controls in the settings popup
