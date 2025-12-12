@@ -644,6 +644,22 @@ class SampleView(QWidget):
         self.range_slider.setValue((0, 65535))  # (min, max) tuple
         self.range_slider.setEnabled(False)
         self.range_slider.setToolTip("Drag handles to adjust contrast range")
+        # Style the range slider handles to be visible
+        self.range_slider.setStyleSheet("""
+            QRangeSlider {
+                qproperty-barColor: #2196F3;
+            }
+            QRangeSlider::handle {
+                background: #1976D2;
+                border: 2px solid #0D47A1;
+                border-radius: 6px;
+                width: 12px;
+                height: 12px;
+            }
+            QRangeSlider::handle:hover {
+                background: #1565C0;
+            }
+        """)
         self.range_slider.valueChanged.connect(self._on_range_slider_changed)
         row2.addWidget(self.range_slider, stretch=1)
 
@@ -969,6 +985,22 @@ class SampleView(QWidget):
             max_val = self._channel_states[i].get('contrast_max', 65535)
             slider.setValue((min_val, max_val))
             slider.setToolTip(f"Adjust contrast range for {name}")
+            # Style the range slider handles to be visible
+            slider.setStyleSheet("""
+                QRangeSlider {
+                    qproperty-barColor: #2196F3;
+                }
+                QRangeSlider::handle {
+                    background: #1976D2;
+                    border: 2px solid #0D47A1;
+                    border-radius: 6px;
+                    width: 12px;
+                    height: 12px;
+                }
+                QRangeSlider::handle:hover {
+                    background: #1565C0;
+                }
+            """)
             slider.valueChanged.connect(
                 lambda val, ch=i: self._on_channel_contrast_changed(ch, val)
             )
