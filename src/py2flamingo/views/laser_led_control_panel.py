@@ -296,10 +296,10 @@ class LaserLEDControlPanel(QWidget):
         # If a laser is currently active, re-enable it with new path
         checked_button = self._source_button_group.checkedButton()
         if checked_button and checked_button != self._led_radio:
-            # This is a laser button - convert button ID (0-3) to laser number (1-4)
+            # This is a laser button - button ID IS the laser number (1-4)
             source_id = self._source_button_group.id(checked_button)
-            if source_id >= 0:  # Laser (button IDs are 0-3)
-                laser_number = source_id + 1
+            if source_id >= 1:  # Laser (button IDs are laser.index: 1, 2, 3, 4)
+                laser_number = source_id
                 self.logger.info(f"Re-enabling laser {laser_number} with {path_name} path")
                 self.laser_led_controller.enable_laser_for_preview(laser_number, self._laser_path)
 
@@ -504,13 +504,13 @@ class LaserLEDControlPanel(QWidget):
                 # Use async method to avoid blocking UI
                 self.laser_led_controller.enable_led_for_preview_async(led_color)
 
-            elif source_id >= 0:  # Laser (button IDs are 0-3, protocol expects 1-4)
+            elif source_id >= 1:  # Laser (button IDs are laser.index: 1, 2, 3, 4)
                 # Laser selected - show path selection
                 if self._path_group:
                     self._path_group.setVisible(True)
 
-                # Convert button ID (0-3) to laser number (1-4) for protocol
-                laser_number = source_id + 1
+                # Button ID IS the laser number (1-4) - set from laser.index in _create_lasers_section
+                laser_number = source_id
                 # Enable laser with current path selection (async for responsiveness)
                 self.logger.info(f"Laser {laser_number} selected for preview on {self._laser_path.upper()} path")
                 self.laser_led_controller.enable_laser_for_preview_async(laser_number, self._laser_path)
@@ -626,8 +626,8 @@ class LaserLEDControlPanel(QWidget):
             color_names = ["red", "green", "blue", "white"]
             return f"led_{color_names[led_color]}"
         else:
-            # Convert button ID (0-3) to laser number (1-4) for consistent naming
-            laser_number = source_id + 1
+            # Button ID IS the laser number (1-4) - set from laser.index
+            laser_number = source_id
             return f"laser_{laser_number}"
 
     def is_source_active(self) -> bool:
@@ -661,12 +661,12 @@ class LaserLEDControlPanel(QWidget):
             self.laser_led_controller.enable_led_preview(led_color, intensity)
 
         else:  # Laser
-            # source_id is the button group ID (0-3), but protocol expects laser numbers 1-4
-            laser_number = source_id + 1
+            # source_id IS the laser number (1-4) - button IDs are set from laser.index
+            laser_number = source_id
 
-            # Get laser power from slider (sliders are keyed by source_id, not laser_number)
-            if source_id in self._laser_sliders:
-                power = self._laser_sliders[source_id].value()
+            # Get laser power from slider (sliders are keyed by laser.index, same as source_id)
+            if laser_number in self._laser_sliders:
+                power = self._laser_sliders[laser_number].value()
             else:
                 power = 5.0  # Default power
 
