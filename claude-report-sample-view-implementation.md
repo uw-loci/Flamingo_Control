@@ -1,7 +1,7 @@
 # Claude Report: Sample View Implementation
 
 **Date:** 2025-12-11 (Updated: 2025-12-12)
-**Commits:** b967b66 through fbcd014 (20+ commits), plus pending fixes
+**Commits:** b967b66 through 67b18f9 (25+ commits)
 **Purpose:** Create a unified Sample View interface combining all sample interaction controls in one window
 
 ---
@@ -56,7 +56,8 @@ Three plane viewers showing MIP projections:
 - Reduced title font size for compactness
 
 ### 5. Position Controls (New)
-- Min-Max range sliders for X, Y, Z axes
+- Min-Max range sliders for X, Y, Z, R axes
+- Color-coded to match napari axis colors (X=cyan, Y=magenta, Z=yellow, R=gray)
 - Editable text fields for precise positioning
 - X-axis respects inverted setting from config
 
@@ -234,6 +235,9 @@ The layout went through several iterations based on user feedback:
 | 3fb04f3 | Fix laser index mapping - button IDs are already 1-based |
 | 5af3435 | Fix LED channel detection and napari zoom initialization |
 | fbcd014 | Implement ViewerControlsDialog with full napari layer controls |
+| 11dce4c | Fix LED button ID auto-assignment bug and reduce log spam |
+| 3014c0c | Make objective indicator more visible and remove initial camera rotation |
+| 67b18f9 | Color-code XYZ position sliders to match napari axis colors |
 
 ---
 
@@ -313,7 +317,7 @@ The layout went through several iterations based on user feedback:
 **Cause:** When populate timer runs but live view is stopped, warning logged every 10 ticks
 **Symptom:** Console flooded with WARNING-level messages during normal operation
 **Fix:** Changed `logger.warning()` to `logger.debug()` at line 2990 in sample_3d_visualization_window.py
-**Commit:** (pending)
+**Commit:** 11dce4c
 
 ### 15. LED Button ID Auto-Assignment Bug (Invalid laser index: 0)
 **Cause:** Qt's `QButtonGroup.addButton(button, -1)` auto-assigns IDs starting from -1, not preserving the -1 value. LED button got ID 0, which caused `restore_checked_illumination()` to fall through to laser handling with index 0.
@@ -324,7 +328,27 @@ The layout went through several iterations based on user feedback:
 - Fixed `get_selected_source()` and `restore_checked_illumination()` to check for `LED_BUTTON_ID`
 - Fixed `restore_checked_illumination()` to call correct method `enable_led_for_preview()` instead of non-existent `enable_led_preview()`
 - Added explicit `elif source_id >= 1` checks for laser handling to prevent invalid indices
-**Commit:** (pending)
+**Commit:** 11dce4c
+
+### 16. Objective Indicator Too Dim
+**Cause:** Objective circle had thin lines (`edge_width=1`), dim color (`#666600`), and low opacity (`0.3`)
+**Symptom:** Objective position indicator barely visible in 3D viewer
+**Fix:** Increased `edge_width` to 3, changed color to bright gold (`#FFCC00`), increased opacity to 0.7
+**Commit:** 3014c0c
+
+### 17. Sample Chamber Rotated on Startup
+**Cause:** Camera angles initialized to `(45, 30, 0)` providing 3D perspective, but appeared oddly rotated
+**Fix:** Changed camera angles to `(0, 0, 0)` for straight-on view with no initial rotation
+**Commit:** 3014c0c
+
+### 18. Position Sliders Not Color-Coded
+**Cause:** XYZ position sliders had default gray styling, inconsistent with napari axis colors
+**Fix:** Added color styling to match napari axis colors:
+- X: Cyan (#008B8B) - label and slider groove/handle
+- Y: Magenta (#8B008B) - label and slider groove/handle
+- Z: Yellow (#8B8B00) - label and slider groove/handle
+- R: Gray (no napari equivalent)
+**Commit:** 67b18f9
 
 ---
 
@@ -355,6 +379,9 @@ The layout went through several iterations based on user feedback:
 - [x] Napari zoom initializes correctly to 1.57
 - [x] LED selection and restore works correctly (button ID fix)
 - [x] Rotation uses sample holder position as rotation center
+- [x] Objective indicator visible (thicker, brighter gold)
+- [x] Camera starts with straight-on view (no rotation)
+- [x] Position sliders color-coded to match napari axes (X=cyan, Y=magenta, Z=yellow)
 
 ### Known Limitations
 - 2D slice viewers show placeholder images (MIP projection not yet connected)
