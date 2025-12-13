@@ -1161,7 +1161,7 @@ class Sample3DVisualizationWindow(QWidget):
             # Set initial camera orientation
             # Default napari view is often upside down, so we need to set a proper orientation
             # Camera angles: (azimuth, elevation) in degrees
-            self.viewer.camera.angles = (45, 30, 0)  # Good 3D perspective
+            self.viewer.camera.angles = (0, 0, 0)  # Straight-on view (no rotation)
             self.viewer.camera.zoom = 1.57  # Zoomed out to fit entire chamber
 
             # Embed viewer in our widget FIRST before adding layers
@@ -1480,15 +1480,15 @@ class Sample3DVisualizationWindow(QWidget):
             # Napari coordinates in (Z, Y, X) order - circle in YX plane at Z=0
             circle_points.append([z_objective, y, x])
 
-        # Add as thin line circle (less obtrusive than bright points)
+        # Add as visible circle (thicker and brighter for visibility)
         self.viewer.add_shapes(
             data=[[circle_points[i], circle_points[(i+1) % len(circle_points)]]
                   for i in range(len(circle_points))],
             shape_type='line',
             name='Objective',
-            edge_color='#666600',  # Dim yellow/olive (less bright)
-            edge_width=1,
-            opacity=0.3
+            edge_color='#FFCC00',  # Bright gold/yellow for visibility
+            edge_width=3,
+            opacity=0.7
         )
 
         logger.info(f"Added objective indicator at Z=0 (back wall), center Y={center_y}, X={center_x}")
@@ -2377,7 +2377,7 @@ class Sample3DVisualizationWindow(QWidget):
             return
 
         # Reset camera to default view
-        self.viewer.camera.angles = (45, 30, 0)
+        self.viewer.camera.angles = (0, 0, 0)  # Straight-on view (no rotation)
         self.viewer.camera.zoom = 1.57
         self.viewer.reset_view()
 
