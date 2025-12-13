@@ -753,65 +753,55 @@ class ConnectionView(QWidget):
             self._show_message(f"Save failed: {e}", is_error=True)
 
     def _on_voxel_test_clicked(self) -> None:
-        """Handle 3D voxel movement test button click.
+        """Handle 3D voxel rotation test button click.
 
-        Runs automated test sequence for debugging voxel movement in 3D visualization.
+        Runs automated test sequence using Sample View for debugging rotation issues.
+        Test collects data along Y axis then applies 90° rotation to verify transform.
         """
-        from PyQt5.QtCore import QTimer
         from PyQt5.QtWidgets import QMessageBox, QApplication
-        import time
 
-        self._logger.info("3D Voxel Movement Test button clicked")
+        self._logger.info("3D Voxel Rotation Test button clicked")
 
         # Check if connected
         if not self._position_controller or not self._position_controller.connection.is_connected():
             self._show_message("Must be connected to run test", is_error=True)
             return
 
-        # Find the main window (MainWindow class has views)
+        # Find the main window
         app = QApplication.instance()
         main_window = None
-        workflow_view = None
 
-        # Look for the MainWindow which contains the views
         for widget in app.topLevelWidgets():
-            if widget.__class__.__name__ == 'MainWindow':
+            if hasattr(widget, 'sample_view') or hasattr(widget, '_open_sample_view'):
                 main_window = widget
-                if hasattr(widget, 'workflow_view'):
-                    workflow_view = widget.workflow_view
-                break
-            # Also check for workflow_view directly
-            elif hasattr(widget, 'workflow_view'):
-                main_window = widget
-                workflow_view = widget.workflow_view
                 break
 
-        if not main_window or not workflow_view:
+        if not main_window:
             self._show_message("Could not find main application window", is_error=True)
-            self._logger.error("Failed to find MainWindow or workflow_view")
+            self._logger.error("Failed to find main window with sample_view")
             return
 
-        # Show confirmation dialog (with stay-on-top to appear above camera viewer)
+        # Show confirmation dialog
         msg = self._create_topmost_messagebox(
             QMessageBox.Question,
-            "Run 3D Voxel Movement Test",
-            "This will run an automated test sequence:",
-            "1. Query and store current stage position\n"
-            "2. Enable Laser 4 (640nm) at 14.4% power\n"
-            "3. Start live view\n"
-            "4. Open 3D visualization window\n"
-            "5. Start populating from live view\n"
-            "6. Move stage ~0.5mm in X, Y, and Z\n"
-            "7. Stop population and live view\n"
-            "8. Disable laser\n"
-            "9. Return to original position\n"
-            "10. Export diagnostic data\n\n"
+            "Run 3D Voxel Rotation Test",
+            "This will run an automated test sequence using Sample View:",
+            "1. Open Sample View\n"
+            "2. Configure Red LED at 50% intensity\n"
+            "3. Move to test position (X=6.86, Z=18.6 mm)\n"
+            "4. Start live view and 3D population\n"
+            "5. Collect data along Y axis (16 -> 11 mm)\n"
+            "6. Record voxel counts before rotation\n"
+            "7. Apply 90° rotation\n"
+            "8. Check if data survives rotation\n"
+            "9. Export diagnostic data\n"
+            "10. Return to original position\n\n"
             "The test takes about 60 seconds.\n\n"
             "Continue?"
         )
 
         if msg.exec_() != QMessageBox.Yes:
-            self._logger.info("User cancelled voxel test")
+            self._logger.info("User cancelled voxel rotation test")
             return
 
         # Disable button during test
@@ -819,64 +809,31 @@ class ConnectionView(QWidget):
         self.voxel_test_btn.setText("Test Running...")
 
         try:
-            # Import and run the test
-            from tests.test_3d_movement_simple import test_voxel_movement
+            # Import and run the new rotation test
+            from tests.test_3d_voxel_rotation import test_3d_voxel_rotation
 
-            # Check if required windows are already open
-            camera_viewer_open = False
-            viz_3d_open = False
+            # Run test (uses QTimer internally for async operation)
+            test_3d_voxel_rotation(main_window)
 
-            if main_window:
-                # Check Camera Live Viewer
-                if hasattr(main_window, 'camera_live_viewer'):
-                    camera_viewer_open = main_window.camera_live_viewer and main_window.camera_live_viewer.isVisible()
-
-                # Check 3D Visualization
-                if hasattr(main_window, 'sample_3d_visualization_window'):
-                    viz_3d_open = main_window.sample_3d_visualization_window and main_window.sample_3d_visualization_window.isVisible()
-
-            if not camera_viewer_open or not viz_3d_open:
-                missing = []
-                if not camera_viewer_open:
-                    missing.append("Camera Live Viewer")
-                if not viz_3d_open:
-                    missing.append("3D Sample Visualization")
-
-                self._show_message(f"Please open these windows first:\n• {chr(10).join('• ' + w for w in missing)}", is_error=True)
-                self.voxel_test_btn.setEnabled(True)
-                self.voxel_test_btn.setText("Test 3D Voxel Movement")
-                return
-
-            # IMPORTANT: Run test in main thread, NOT a background thread!
-            # Qt widgets can only be manipulated from the main GUI thread.
-            # The test uses process_gui_events() to keep the GUI responsive during sleeps.
-            try:
-                # Pass both the position controller and main window to the test
-                success = test_voxel_movement(self._position_controller, main_window)
-
-                self._show_message(
-                    "3D Voxel Movement Test completed successfully!\nCheck exported data in tests/voxel_test_results/" if success
-                    else "Test completed with warnings. Check logs.",
-                    is_error=not success
-                )
-            except Exception as e:
-                self._logger.error(f"Error running voxel test: {e}", exc_info=True)
-                self._show_message(f"Test failed: {e}", is_error=True)
-            finally:
-                # Re-enable button
-                self.voxel_test_btn.setEnabled(True)
-                self.voxel_test_btn.setText("Test 3D Voxel Movement")
+            # Re-enable button after a delay (test runs async)
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(70000, lambda: self._reset_voxel_test_button())
 
         except ImportError as e:
             self._logger.error(f"Could not import test module: {e}")
-            self._show_message("Test module not found. Make sure tests/test_3d_movement_simple.py exists.", is_error=True)
+            self._show_message("Test module not found. Make sure tests/test_3d_voxel_rotation.py exists.", is_error=True)
             self.voxel_test_btn.setEnabled(True)
-            self.voxel_test_btn.setText("Test 3D Voxel Movement")
+            self.voxel_test_btn.setText("3D Voxel Test")
         except Exception as e:
             self._logger.error(f"Error starting test: {e}", exc_info=True)
             self._show_message(f"Failed to start test: {e}", is_error=True)
             self.voxel_test_btn.setEnabled(True)
-            self.voxel_test_btn.setText("Test 3D Voxel Movement")
+            self.voxel_test_btn.setText("3D Voxel Test")
+
+    def _reset_voxel_test_button(self) -> None:
+        """Reset voxel test button after async test completes."""
+        self.voxel_test_btn.setEnabled(True)
+        self.voxel_test_btn.setText("3D Voxel Test")
 
     def _on_volume_scan_clicked(self) -> None:
         """Handle volume scan button click.
