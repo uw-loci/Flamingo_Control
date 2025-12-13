@@ -2816,11 +2816,16 @@ class Sample3DVisualizationWindow(QWidget):
 
         # Log motion summary
         if mt['start_position'] and end_pos:
-            delta_z = end_pos[2] - mt['start_position'][2]
+            # Map axis name to position tuple index
+            axis_indices = {'X': 0, 'Y': 1, 'Z': 2, 'R': 3}
+            axis_idx = axis_indices.get(axis_name, 2)  # Default to Z if unknown
+            axis_unit = '°' if axis_name == 'R' else 'mm'
+
+            delta = end_pos[axis_idx] - mt['start_position'][axis_idx]
             duration = mt['end_time'] - mt['start_time']
             logger.info(f"Motion stopped on {axis_name}. "
-                       f"Moved Z from {mt['start_position'][2]:.3f} to {end_pos[2]:.3f}mm "
-                       f"(delta={delta_z:.3f}mm) in {duration:.2f}s. "
+                       f"Moved {axis_name} from {mt['start_position'][axis_idx]:.3f} to {end_pos[axis_idx]:.3f}{axis_unit} "
+                       f"(delta={delta:.3f}{axis_unit}) in {duration:.2f}s. "
                        f"Buffered {len(mt['frame_buffer'])} frames for interpolation.")
         else:
             logger.info(f"Motion stopped on {axis_name}. "
