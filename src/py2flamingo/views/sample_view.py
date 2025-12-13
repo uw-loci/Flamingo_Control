@@ -1094,9 +1094,13 @@ class SampleView(QWidget):
             row = QHBoxLayout()
             row.setSpacing(8)
 
-            # Axis label
+            # Get axis color (XYZ have colors, R doesn't)
+            axis_color = AXIS_COLORS.get(axis_id, '#666666')
+
+            # Axis label with color
             axis_label = QLabel(f"<b>{axis_name}:</b>")
             axis_label.setMinimumWidth(25)
+            axis_label.setStyleSheet(f"color: {axis_color}; font-size: 11pt;")
             row.addWidget(axis_label)
 
             # Min value label
@@ -1106,12 +1110,34 @@ class SampleView(QWidget):
             min_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             row.addWidget(min_label)
 
-            # Slider
+            # Slider with colored groove
             slider = QSlider(Qt.Horizontal)
             slider.setMinimum(0)
             slider.setMaximum(100000)  # Will be updated with real limits
             slider.setValue(50000)
             slider.setTickPosition(QSlider.TicksBelow)
+            # Style the slider with axis color
+            slider.setStyleSheet(f"""
+                QSlider::groove:horizontal {{
+                    border: 1px solid {axis_color};
+                    height: 6px;
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                        stop:0 #333, stop:1 {axis_color});
+                    margin: 2px 0;
+                    border-radius: 3px;
+                }}
+                QSlider::handle:horizontal {{
+                    background: {axis_color};
+                    border: 1px solid #333;
+                    width: 14px;
+                    margin: -5px 0;
+                    border-radius: 7px;
+                }}
+                QSlider::handle:horizontal:hover {{
+                    background: white;
+                    border: 2px solid {axis_color};
+                }}
+            """)
             slider.valueChanged.connect(
                 lambda val, a=axis_id: self._on_position_slider_changed(a, val)
             )
