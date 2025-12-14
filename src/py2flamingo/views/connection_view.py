@@ -767,18 +767,20 @@ class ConnectionView(QWidget):
             self._show_message("Must be connected to run test", is_error=True)
             return
 
-        # Find the main window
-        app = QApplication.instance()
+        # Find the main window and FlamingoApplication
+        qt_app = QApplication.instance()
         main_window = None
+        flamingo_app = None
 
-        for widget in app.topLevelWidgets():
-            if hasattr(widget, 'sample_view') or hasattr(widget, '_open_sample_view'):
+        for widget in qt_app.topLevelWidgets():
+            if widget.__class__.__name__ == 'MainWindow' and hasattr(widget, 'app'):
                 main_window = widget
+                flamingo_app = widget.app
                 break
 
-        if not main_window:
+        if not main_window or not flamingo_app:
             self._show_message("Could not find main application window", is_error=True)
-            self._logger.error("Failed to find main window with sample_view")
+            self._logger.error("Failed to find MainWindow with app reference")
             return
 
         # Show confirmation dialog
@@ -812,8 +814,8 @@ class ConnectionView(QWidget):
             # Import and run the new rotation test
             from tests.test_3d_voxel_rotation import test_3d_voxel_rotation
 
-            # Run test (uses QTimer internally for async operation)
-            test_3d_voxel_rotation(main_window)
+            # Run test with FlamingoApplication (has sample_view, sample_3d_visualization_window, etc.)
+            test_3d_voxel_rotation(flamingo_app)
 
             # Re-enable button after a delay (test runs async)
             from PyQt5.QtCore import QTimer

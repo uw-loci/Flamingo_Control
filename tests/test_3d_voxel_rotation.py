@@ -33,12 +33,12 @@ TEST_ROTATION = 90.0     # degrees - clean rotation for debugging
 LED_INTENSITY = 50.0     # percent
 
 
-def test_3d_voxel_rotation(main_window):
+def test_3d_voxel_rotation(app):
     """
     Test 3D voxel rotation using Sample View interface.
 
     Args:
-        main_window: Reference to the FlamingoApplication main window
+        app: Reference to the FlamingoApplication instance
     """
 
     print("\n" + "="*60)
@@ -62,8 +62,8 @@ def test_3d_voxel_rotation(main_window):
         print("\n[Step 1] Opening Sample View...")
 
         # Open Sample View via application method
-        if hasattr(main_window, '_open_sample_view'):
-            main_window._open_sample_view()
+        if hasattr(app, '_open_sample_view'):
+            app._open_sample_view()
             print("  Sample View opened")
         else:
             print("  ERROR: Could not find _open_sample_view method")
@@ -76,7 +76,7 @@ def test_3d_voxel_rotation(main_window):
         nonlocal initial_position
         print("\n[Step 2] Querying current stage position...")
 
-        sample_view = main_window.sample_view
+        sample_view = app.sample_view
         if sample_view and sample_view.movement_controller:
             position = sample_view.movement_controller.get_position()
             if position:
@@ -95,7 +95,7 @@ def test_3d_voxel_rotation(main_window):
         """Step 3: Configure Red LED at 50% intensity"""
         print("\n[Step 3] Configuring Red LED at 50%...")
 
-        sample_view = main_window.sample_view
+        sample_view = app.sample_view
         if sample_view and hasattr(sample_view, 'laser_led_panel'):
             panel = sample_view.laser_led_panel
 
@@ -127,7 +127,7 @@ def test_3d_voxel_rotation(main_window):
         print("\n[Step 4] Moving to start position...")
         print(f"  Target: X={TEST_X_POSITION}, Y={TEST_Y_START}, Z={TEST_Z_POSITION}")
 
-        sample_view = main_window.sample_view
+        sample_view = app.sample_view
         if sample_view and sample_view.movement_controller:
             mc = sample_view.movement_controller
 
@@ -163,7 +163,7 @@ def test_3d_voxel_rotation(main_window):
         """Step 5: Start Live View"""
         print("\n[Step 5] Starting Live View...")
 
-        sample_view = main_window.sample_view
+        sample_view = app.sample_view
         if sample_view and hasattr(sample_view, 'live_view_btn'):
             # Click Live View button if not already active
             if sample_view.camera_controller and not sample_view.camera_controller.is_live_view_active():
@@ -180,7 +180,7 @@ def test_3d_voxel_rotation(main_window):
         """Step 6: Start populating 3D view"""
         print("\n[Step 6] Starting 3D population...")
 
-        sample_view = main_window.sample_view
+        sample_view = app.sample_view
         if sample_view and hasattr(sample_view, 'populate_btn'):
             if not sample_view.populate_btn.isChecked():
                 sample_view.populate_btn.click()
@@ -197,7 +197,7 @@ def test_3d_voxel_rotation(main_window):
         print("\n[Step 7] Collecting data along Y axis...")
         print(f"  Moving Y from {TEST_Y_START} to {TEST_Y_END} mm")
 
-        sample_view = main_window.sample_view
+        sample_view = app.sample_view
         if sample_view and sample_view.movement_controller:
             mc = sample_view.movement_controller
 
@@ -219,8 +219,8 @@ def test_3d_voxel_rotation(main_window):
         print("\n[Step 8] Recording voxel counts before rotation...")
 
         # Access voxel storage
-        if main_window.sample_3d_visualization_window:
-            viz = main_window.sample_3d_visualization_window
+        if app.sample_3d_visualization_window:
+            viz = app.sample_3d_visualization_window
             if hasattr(viz, 'voxel_storage') and viz.voxel_storage:
                 storage = viz.voxel_storage
 
@@ -248,7 +248,7 @@ def test_3d_voxel_rotation(main_window):
         """Step 9: Stop populating before rotation"""
         print("\n[Step 9] Stopping 3D population...")
 
-        sample_view = main_window.sample_view
+        sample_view = app.sample_view
         if sample_view and hasattr(sample_view, 'populate_btn'):
             if sample_view.populate_btn.isChecked():
                 sample_view.populate_btn.click()
@@ -260,7 +260,7 @@ def test_3d_voxel_rotation(main_window):
         """Step 10: Apply 90° rotation"""
         print(f"\n[Step 10] Applying {TEST_ROTATION}° rotation...")
 
-        sample_view = main_window.sample_view
+        sample_view = app.sample_view
         if sample_view and sample_view.movement_controller:
             mc = sample_view.movement_controller
 
@@ -281,13 +281,13 @@ def test_3d_voxel_rotation(main_window):
         print("\n[Step 11] Checking voxels after rotation...")
 
         # Access voxel storage
-        if main_window.sample_3d_visualization_window:
-            viz = main_window.sample_3d_visualization_window
+        if app.sample_3d_visualization_window:
+            viz = app.sample_3d_visualization_window
             if hasattr(viz, 'voxel_storage') and viz.voxel_storage:
                 storage = viz.voxel_storage
 
                 # Get current stage position for transform
-                sample_view = main_window.sample_view
+                sample_view = app.sample_view
                 stage_pos = None
                 if sample_view and sample_view.movement_controller:
                     pos = sample_view.movement_controller.get_position()
@@ -329,8 +329,8 @@ def test_3d_voxel_rotation(main_window):
         """Step 12: Export voxel data for analysis"""
         print("\n[Step 12] Exporting voxel data...")
 
-        if main_window.sample_3d_visualization_window:
-            viz = main_window.sample_3d_visualization_window
+        if app.sample_3d_visualization_window:
+            viz = app.sample_3d_visualization_window
             export_voxel_data(viz, "rotation_test")
 
         QTimer.singleShot(1000, step13_stop_live_view)
@@ -339,7 +339,7 @@ def test_3d_voxel_rotation(main_window):
         """Step 13: Stop Live View"""
         print("\n[Step 13] Stopping Live View...")
 
-        sample_view = main_window.sample_view
+        sample_view = app.sample_view
         if sample_view and sample_view.camera_controller:
             if sample_view.camera_controller.is_live_view_active():
                 if hasattr(sample_view, 'live_view_btn'):
@@ -353,7 +353,7 @@ def test_3d_voxel_rotation(main_window):
         nonlocal initial_position
         print("\n[Step 14] Returning to original position...")
 
-        sample_view = main_window.sample_view
+        sample_view = app.sample_view
         if sample_view and sample_view.movement_controller:
             mc = sample_view.movement_controller
 

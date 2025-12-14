@@ -470,7 +470,8 @@ class FlamingoApplication:
             camera_live_viewer=self.camera_live_viewer,
             image_controls_window=self.image_controls_window,
             stage_chamber_visualization_window=self.stage_chamber_visualization_window,
-            sample_3d_visualization_window=self.sample_3d_visualization_window
+            sample_3d_visualization_window=self.sample_3d_visualization_window,
+            app=self  # Pass FlamingoApplication reference for accessing sample_view etc.
         )
         self.main_window.setWindowTitle("Flamingo Microscope Control")
         # Window size is automatically set based on screen dimensions

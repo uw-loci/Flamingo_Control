@@ -55,7 +55,8 @@ class MainWindow(QMainWindow):
                  camera_live_viewer=None,
                  image_controls_window=None,
                  stage_chamber_visualization_window=None,
-                 sample_3d_visualization_window=None):
+                 sample_3d_visualization_window=None,
+                 app=None):
         """Initialize main window with view components.
 
         Args:
@@ -68,9 +69,11 @@ class MainWindow(QMainWindow):
             image_controls_window: Optional ImageControlsWindow instance
             stage_chamber_visualization_window: Optional StageChamberVisualizationWindow instance
             sample_3d_visualization_window: Optional Sample3DVisualizationWindow instance
+            app: Optional FlamingoApplication instance for accessing app-level resources
         """
         super().__init__()
 
+        self.app = app  # Reference to FlamingoApplication for accessing sample_view etc.
         self.connection_view = connection_view
         self.workflow_view = workflow_view
         self.sample_info_view = sample_info_view
