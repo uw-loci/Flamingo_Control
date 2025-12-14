@@ -123,41 +123,46 @@ def test_3d_voxel_rotation(app):
         QTimer.singleShot(1000, step4_move_to_start_position)
 
     def step4_move_to_start_position():
-        """Step 4: Move to starting position"""
+        """Step 4: Move to starting position (sequenced with QTimer)"""
         print("\n[Step 4] Moving to start position...")
         print(f"  Target: X={TEST_X_POSITION}, Y={TEST_Y_START}, Z={TEST_Z_POSITION}")
 
         sample_view = app.sample_view
-        if sample_view and sample_view.movement_controller:
-            mc = sample_view.movement_controller
+        if not (sample_view and sample_view.movement_controller):
+            print("  ERROR: No movement controller")
+            QTimer.singleShot(1000, step5_start_live_view)
+            return
 
-            # Move X axis
+        mc = sample_view.movement_controller
+
+        def move_x():
             print("  Moving X axis...")
             mc.move_absolute('x', TEST_X_POSITION)
-            time.sleep(2)
+            QTimer.singleShot(3000, move_z)
 
-            # Move Z axis
+        def move_z():
             print("  Moving Z axis...")
             mc.move_absolute('z', TEST_Z_POSITION)
-            time.sleep(2)
+            QTimer.singleShot(3000, move_y)
 
-            # Move Y axis to start
+        def move_y():
             print("  Moving Y axis...")
             mc.move_absolute('y', TEST_Y_START)
-            time.sleep(2)
+            QTimer.singleShot(3000, move_r)
 
-            # Set rotation to 0
+        def move_r():
             print("  Setting rotation to 0°...")
             mc.move_absolute('r', 0.0)
-            time.sleep(1)
+            QTimer.singleShot(5000, verify_position)  # Longer for rotation
 
-            # Verify position
+        def verify_position():
             position = mc.get_position()
             if position:
                 print(f"  Actual position: X={position.x:.3f}, Y={position.y:.3f}, "
                       f"Z={position.z:.3f}, R={position.r:.1f}°")
+            QTimer.singleShot(1000, step5_start_live_view)
 
-        QTimer.singleShot(1000, step5_start_live_view)
+        move_x()
 
     def step5_start_live_view():
         """Step 5: Start Live View"""
@@ -193,25 +198,32 @@ def test_3d_voxel_rotation(app):
         QTimer.singleShot(2000, step7_move_y_axis)
 
     def step7_move_y_axis():
-        """Step 7: Move Y axis to collect data along rotation axis"""
+        """Step 7: Move Y axis to collect data along rotation axis (async)"""
         print("\n[Step 7] Collecting data along Y axis...")
         print(f"  Moving Y from {TEST_Y_START} to {TEST_Y_END} mm")
 
         sample_view = app.sample_view
-        if sample_view and sample_view.movement_controller:
-            mc = sample_view.movement_controller
+        if not (sample_view and sample_view.movement_controller):
+            print("  ERROR: No movement controller")
+            QTimer.singleShot(2000, step8_record_voxel_counts)
+            return
 
-            # Move in small increments to collect data along path
-            y_positions = np.linspace(TEST_Y_START, TEST_Y_END, 6)  # 6 positions
+        mc = sample_view.movement_controller
+        y_positions = list(np.linspace(TEST_Y_START, TEST_Y_END, 6))  # 6 positions
+        current_step = [0]  # Use list to allow modification in nested function
 
-            for i, y_pos in enumerate(y_positions):
-                print(f"  Step {i+1}/6: Moving to Y={y_pos:.3f} mm...")
+        def move_next_y():
+            if current_step[0] < len(y_positions):
+                y_pos = y_positions[current_step[0]]
+                print(f"  Step {current_step[0]+1}/6: Moving to Y={y_pos:.3f} mm...")
                 mc.move_absolute('y', y_pos)
-                time.sleep(1.5)  # Allow time for data collection
+                current_step[0] += 1
+                QTimer.singleShot(2000, move_next_y)  # Wait for move + data collection
+            else:
+                print("  Y axis scan complete")
+                QTimer.singleShot(2000, step8_record_voxel_counts)
 
-            print("  Y axis scan complete")
-
-        QTimer.singleShot(2000, step8_record_voxel_counts)
+        move_next_y()
 
     def step8_record_voxel_counts():
         """Step 8: Record voxel counts before rotation"""
@@ -257,23 +269,26 @@ def test_3d_voxel_rotation(app):
         QTimer.singleShot(1000, step10_apply_rotation)
 
     def step10_apply_rotation():
-        """Step 10: Apply 90° rotation"""
+        """Step 10: Apply 90° rotation (async)"""
         print(f"\n[Step 10] Applying {TEST_ROTATION}° rotation...")
 
         sample_view = app.sample_view
-        if sample_view and sample_view.movement_controller:
-            mc = sample_view.movement_controller
+        if not (sample_view and sample_view.movement_controller):
+            print("  ERROR: No movement controller")
+            QTimer.singleShot(3000, step11_check_voxels_after_rotation)
+            return
 
-            print(f"  Rotating stage to {TEST_ROTATION}°...")
-            mc.move_absolute('r', TEST_ROTATION)
-            time.sleep(3)  # Allow time for rotation and transform
+        mc = sample_view.movement_controller
+        print(f"  Rotating stage to {TEST_ROTATION}°...")
+        mc.move_absolute('r', TEST_ROTATION)
 
-            # Verify rotation
+        def verify_rotation():
             position = mc.get_position()
             if position:
                 print(f"  Actual rotation: {position.r:.1f}°")
+            QTimer.singleShot(3000, step11_check_voxels_after_rotation)
 
-        QTimer.singleShot(3000, step11_check_voxels_after_rotation)
+        QTimer.singleShot(5000, verify_rotation)  # 5s for rotation
 
     def step11_check_voxels_after_rotation():
         """Step 11: Check voxel counts after rotation"""
@@ -349,33 +364,45 @@ def test_3d_voxel_rotation(app):
         QTimer.singleShot(1000, step14_return_to_origin)
 
     def step14_return_to_origin():
-        """Step 14: Return to original position"""
+        """Step 14: Return to original position (async, sequenced)"""
         nonlocal initial_position
         print("\n[Step 14] Returning to original position...")
 
         sample_view = app.sample_view
-        if sample_view and sample_view.movement_controller:
-            mc = sample_view.movement_controller
+        if not (sample_view and sample_view.movement_controller):
+            print("  ERROR: No movement controller")
+            QTimer.singleShot(1000, step15_final_summary)
+            return
 
-            print(f"  Moving to: X={initial_position['x']:.3f}, Y={initial_position['y']:.3f}, "
-                  f"Z={initial_position['z']:.3f}, R={initial_position['r']:.1f}°")
+        mc = sample_view.movement_controller
+        print(f"  Moving to: X={initial_position['x']:.3f}, Y={initial_position['y']:.3f}, "
+              f"Z={initial_position['z']:.3f}, R={initial_position['r']:.1f}°")
 
-            # Move rotation back first
+        def return_r():
+            print("  Returning rotation...")
             mc.move_absolute('r', initial_position['r'])
-            time.sleep(2)
+            QTimer.singleShot(8000, return_x)  # Long delay for ~199° rotation
 
+        def return_x():
+            print("  Returning X...")
             mc.move_absolute('x', initial_position['x'])
-            time.sleep(1)
+            QTimer.singleShot(3000, return_y)
 
+        def return_y():
+            print("  Returning Y...")
             mc.move_absolute('y', initial_position['y'])
-            time.sleep(1)
+            QTimer.singleShot(3000, return_z)
 
+        def return_z():
+            print("  Returning Z...")
             mc.move_absolute('z', initial_position['z'])
-            time.sleep(1)
+            QTimer.singleShot(3000, finish_return)
 
+        def finish_return():
             print("  Stage returned to original position")
+            QTimer.singleShot(1000, step15_final_summary)
 
-        QTimer.singleShot(1000, step15_final_summary)
+        return_r()
 
     def step15_final_summary():
         """Step 15: Print final summary"""
