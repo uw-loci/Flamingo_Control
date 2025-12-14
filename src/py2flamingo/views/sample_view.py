@@ -553,7 +553,11 @@ class ViewerControlsDialog(QDialog):
         """Reset camera to default orientation and zoom."""
         viewer = self._get_viewer()
         if viewer:
-            viewer.camera.angles = (0, 0, 0)  # Straight-on view
+            # Set front view: looking along Z axis (napari axis 0), with Y (axis 1) pointing up
+            viewer.camera.set_view_direction(
+                view_direction=(1, 0, 0),
+                up_direction=(0, -1, 0)
+            )
             viewer.camera.zoom = 1.57
             viewer.reset_view()
 
@@ -2044,9 +2048,15 @@ class SampleView(QWidget):
         """Reset the napari viewer camera to optimal view settings."""
         viewer = self._get_viewer()
         if viewer and hasattr(viewer, 'camera'):
-            viewer.camera.angles = (0, 0, 0)  # Straight-on view (no rotation)
+            # Set front view: looking along Z axis (napari axis 0), with Y (axis 1) pointing up
+            # view_direction (1, 0, 0) = looking into the volume from front
+            # up_direction (0, -1, 0) = Y axis points up on screen
+            viewer.camera.set_view_direction(
+                view_direction=(1, 0, 0),
+                up_direction=(0, -1, 0)
+            )
             viewer.camera.zoom = 1.57  # Zoomed out to fit entire chamber
-            self.logger.info("Reset viewer camera: angles=(0,0,0), zoom=1.57")
+            self.logger.info("Reset viewer camera: front view, zoom=1.57")
 
     # ========== Live View Control ==========
 

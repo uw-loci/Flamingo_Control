@@ -1159,9 +1159,13 @@ class Sample3DVisualizationWindow(QWidget):
             # Note: Axis 0=X, Axis 1=Y (vertical), Axis 2=Z (depth)
 
             # Set initial camera orientation
-            # Default napari view is often upside down, so we need to set a proper orientation
-            # Camera angles: (azimuth, elevation) in degrees
-            self.viewer.camera.angles = (0, 0, 0)  # Straight-on view (no rotation)
+            # Set front view: looking along Z axis (napari axis 0), with Y (axis 1) pointing up
+            # view_direction (1, 0, 0) = looking into the volume from front
+            # up_direction (0, -1, 0) = Y axis points up on screen
+            self.viewer.camera.set_view_direction(
+                view_direction=(1, 0, 0),
+                up_direction=(0, -1, 0)
+            )
             self.viewer.camera.zoom = 1.57  # Zoomed out to fit entire chamber
 
             # Embed viewer in our widget FIRST before adding layers
@@ -2376,8 +2380,13 @@ class Sample3DVisualizationWindow(QWidget):
         if not self.viewer:
             return
 
-        # Reset camera to default view
-        self.viewer.camera.angles = (0, 0, 0)  # Straight-on view (no rotation)
+        # Reset camera to default front view
+        # view_direction (1, 0, 0) = looking into the volume from front (along Z axis)
+        # up_direction (0, -1, 0) = Y axis points up on screen
+        self.viewer.camera.set_view_direction(
+            view_direction=(1, 0, 0),
+            up_direction=(0, -1, 0)
+        )
         self.viewer.camera.zoom = 1.57
         self.viewer.reset_view()
 
