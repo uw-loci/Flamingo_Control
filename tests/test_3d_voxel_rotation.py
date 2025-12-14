@@ -133,22 +133,22 @@ def test_3d_voxel_rotation(app):
 
             # Move X axis
             print("  Moving X axis...")
-            mc.move_to_position('X', TEST_X_POSITION)
+            mc.move_absolute('x', TEST_X_POSITION)
             time.sleep(2)
 
             # Move Z axis
             print("  Moving Z axis...")
-            mc.move_to_position('Z', TEST_Z_POSITION)
+            mc.move_absolute('z', TEST_Z_POSITION)
             time.sleep(2)
 
             # Move Y axis to start
             print("  Moving Y axis...")
-            mc.move_to_position('Y', TEST_Y_START)
+            mc.move_absolute('y', TEST_Y_START)
             time.sleep(2)
 
             # Set rotation to 0
             print("  Setting rotation to 0°...")
-            mc.move_to_position('R', 0.0)
+            mc.move_absolute('r', 0.0)
             time.sleep(1)
 
             # Verify position
@@ -206,7 +206,7 @@ def test_3d_voxel_rotation(app):
 
             for i, y_pos in enumerate(y_positions):
                 print(f"  Step {i+1}/6: Moving to Y={y_pos:.3f} mm...")
-                mc.move_to_position('Y', y_pos)
+                mc.move_absolute('y', y_pos)
                 time.sleep(1.5)  # Allow time for data collection
 
             print("  Y axis scan complete")
@@ -265,7 +265,7 @@ def test_3d_voxel_rotation(app):
             mc = sample_view.movement_controller
 
             print(f"  Rotating stage to {TEST_ROTATION}°...")
-            mc.move_to_position('R', TEST_ROTATION)
+            mc.move_absolute('r', TEST_ROTATION)
             time.sleep(3)  # Allow time for rotation and transform
 
             # Verify rotation
@@ -361,16 +361,16 @@ def test_3d_voxel_rotation(app):
                   f"Z={initial_position['z']:.3f}, R={initial_position['r']:.1f}°")
 
             # Move rotation back first
-            mc.move_to_position('R', initial_position['r'])
+            mc.move_absolute('r', initial_position['r'])
             time.sleep(2)
 
-            mc.move_to_position('X', initial_position['x'])
+            mc.move_absolute('x', initial_position['x'])
             time.sleep(1)
 
-            mc.move_to_position('Y', initial_position['y'])
+            mc.move_absolute('y', initial_position['y'])
             time.sleep(1)
 
-            mc.move_to_position('Z', initial_position['z'])
+            mc.move_absolute('z', initial_position['z'])
             time.sleep(1)
 
             print("  Stage returned to original position")
