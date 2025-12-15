@@ -355,16 +355,20 @@ class CoordinateTransformer:
         offset_voxels = np.array(stage_offset_mm) * 1000.0 / voxel_size_um
         T3[:3, 3] = offset_voxels
 
-        # Combine transformations in correct order
+        # Combine transformations in correct order (forward transform)
+        # This is the geometric transform that maps input coords to output coords
         combined = T3 @ T2 @ R @ T1
 
-        # Apply transformation using scipy
-        # Note: scipy expects the inverse transformation matrix
-        # and we transpose the rotation part
+        # scipy's affine_transform: output[i] = input[M @ coords + offset]
+        # This means scipy needs the INVERSE transformation (output to input)
+        # to correctly map where each output pixel comes from in the input
+        combined_inv = np.linalg.inv(combined)
+
+        # Apply transformation using scipy with the inverse matrix
         transformed = affine_transform(
             volume,
-            combined[:3, :3].T,  # Transpose for scipy convention
-            offset=combined[:3, 3],
+            combined_inv[:3, :3],  # Inverse rotation/scale matrix
+            offset=combined_inv[:3, 3],  # Inverse offset
             order=1,  # Linear interpolation
             mode='constant',
             cval=0
