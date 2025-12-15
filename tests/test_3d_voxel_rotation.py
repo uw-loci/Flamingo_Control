@@ -244,15 +244,15 @@ def test_3d_voxel_rotation(app):
         print("\n[Step 5] Starting Live View...")
 
         sample_view = app.sample_view
-        if sample_view and hasattr(sample_view, 'live_view_btn'):
+        if sample_view and hasattr(sample_view, 'live_view_toggle_btn'):
             # Click Live View button if not already active
             if sample_view.camera_controller and not sample_view.camera_controller.is_live_view_active():
-                sample_view.live_view_btn.click()
+                sample_view.live_view_toggle_btn.click()
                 print("  Live View started")
             else:
                 print("  Live View already active")
         else:
-            print("  WARNING: Could not find live_view_btn")
+            print("  WARNING: Could not find live_view_toggle_btn")
 
         QTimer.singleShot(2000, step6_start_populating)
 

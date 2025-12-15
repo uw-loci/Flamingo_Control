@@ -1061,11 +1061,36 @@ class SampleView(QWidget):
         self.viewer_placeholder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.viewer_placeholder)
 
-        # Zoom display label
+        # Zoom display row with reset button
+        zoom_row = QHBoxLayout()
+        zoom_row.addStretch()
+
         self.zoom_label = QLabel("Zoom: --")
         self.zoom_label.setStyleSheet("color: #888; font-size: 9pt;")
-        self.zoom_label.setAlignment(Qt.AlignRight)
-        layout.addWidget(self.zoom_label)
+        zoom_row.addWidget(self.zoom_label)
+
+        # Reset view button next to zoom
+        self.reset_view_btn = QPushButton("⟲ Reset")
+        self.reset_view_btn.setToolTip("Reset camera zoom to default")
+        self.reset_view_btn.setMaximumWidth(70)
+        self.reset_view_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 9pt;
+                padding: 2px 6px;
+                border: 1px solid #666;
+                border-radius: 3px;
+                background: #3a3a5a;
+                color: #ccc;
+            }
+            QPushButton:hover {
+                background: #4a4a7a;
+                color: #fff;
+            }
+        """)
+        self.reset_view_btn.clicked.connect(self._on_reset_zoom_clicked)
+        zoom_row.addWidget(self.reset_view_btn)
+
+        layout.addLayout(zoom_row)
 
         group.setLayout(layout)
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -2124,6 +2149,14 @@ class SampleView(QWidget):
             self.zoom_label.setText(f"Zoom: {zoom:.2f}")
         else:
             self.zoom_label.setText("Zoom: --")
+
+    def _on_reset_zoom_clicked(self) -> None:
+        """Reset camera zoom to default value."""
+        viewer = self._get_viewer()
+        if viewer and hasattr(viewer, 'camera'):
+            viewer.camera.zoom = 1.57
+            self._update_zoom_display()
+            self.logger.info("Reset camera zoom to 1.57")
 
     def _update_info_displays(self) -> None:
         """Periodically update zoom and FPS displays."""
