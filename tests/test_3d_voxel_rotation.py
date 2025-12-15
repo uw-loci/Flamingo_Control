@@ -179,17 +179,12 @@ def test_3d_voxel_rotation(app):
         if sample_view and hasattr(sample_view, 'laser_led_panel'):
             panel = sample_view.laser_led_panel
 
-            # Select LED radio button
-            if hasattr(panel, '_led_radio') and panel._led_radio:
-                panel._led_radio.setChecked(True)
-                print("  LED radio button selected")
-
-            # Set LED color to Red (index 0)
+            # Set LED color to Red (index 0) FIRST, before enabling
             if hasattr(panel, '_led_combobox') and panel._led_combobox:
                 panel._led_combobox.setCurrentIndex(0)  # Red
                 print("  LED color set to Red")
 
-            # Set LED intensity to 50%
+            # Set LED intensity to 50% BEFORE enabling
             if hasattr(panel, '_led_slider') and panel._led_slider:
                 panel._led_slider.setValue(int(LED_INTENSITY))
                 print(f"  LED intensity set to {LED_INTENSITY}%")
@@ -197,6 +192,12 @@ def test_3d_voxel_rotation(app):
             # Also set via spinbox if available
             if hasattr(panel, '_led_spinbox') and panel._led_spinbox:
                 panel._led_spinbox.setValue(LED_INTENSITY)
+
+            # NOW click the LED radio button - use .click() to trigger buttonClicked signal
+            # (setChecked() doesn't trigger the signal that actually sends command to server)
+            if hasattr(panel, '_led_radio') and panel._led_radio:
+                panel._led_radio.click()
+                print("  LED radio button clicked (enabling LED)")
         else:
             print("  WARNING: Could not access laser_led_panel")
 

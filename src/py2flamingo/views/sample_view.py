@@ -550,14 +550,11 @@ class ViewerControlsDialog(QDialog):
             viewer.axes.visible = visible
 
     def _on_reset_view(self) -> None:
-        """Reset camera to default orientation and zoom."""
+        """Reset camera zoom (preserves orientation from 3D window)."""
         viewer = self._get_viewer()
         if viewer:
-            # Reset camera: 0,0,0 at back-left, objective at back
-            # angles = (roll, pitch, yaw) - yaw=180 rotates view so origin is at back
-            viewer.camera.angles = (0, 0, 180)
+            # Only set zoom - don't override camera.angles as 3D window has correct orientation
             viewer.camera.zoom = 1.57
-            viewer.reset_view()
 
     def _sync_from_viewer(self) -> None:
         """Sync dialog controls with current napari viewer state."""
@@ -2043,14 +2040,12 @@ class SampleView(QWidget):
             traceback.print_exc()
 
     def _reset_viewer_camera(self) -> None:
-        """Reset the napari viewer camera to optimal view settings."""
+        """Reset the napari viewer camera zoom (preserves orientation from 3D window)."""
         viewer = self._get_viewer()
         if viewer and hasattr(viewer, 'camera'):
-            # Reset camera: 0,0,0 at back-left, objective at back
-            # angles = (roll, pitch, yaw) - yaw=180 rotates view so origin is at back
-            viewer.camera.angles = (0, 0, 180)
-            viewer.camera.zoom = 1.57  # Zoomed out to fit entire chamber
-            self.logger.info("Reset viewer camera: back-left origin view, zoom=1.57")
+            # Only set zoom - don't override camera.angles as 3D window has correct orientation
+            viewer.camera.zoom = 1.57
+            self.logger.info("Reset viewer camera zoom to 1.57")
 
     # ========== Live View Control ==========
 
