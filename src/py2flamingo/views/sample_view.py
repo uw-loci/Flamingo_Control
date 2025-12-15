@@ -550,11 +550,14 @@ class ViewerControlsDialog(QDialog):
             viewer.axes.visible = visible
 
     def _on_reset_view(self) -> None:
-        """Reset camera zoom level."""
+        """Reset camera to default orientation and zoom."""
         viewer = self._get_viewer()
         if viewer:
-            # Only reset zoom - don't call reset_view() as it changes camera orientation
+            # Reset camera: 0,0,0 at back-left, objective at back
+            # angles = (roll, pitch, yaw) - yaw=180 rotates view so origin is at back
+            viewer.camera.angles = (0, 0, 180)
             viewer.camera.zoom = 1.57
+            viewer.reset_view()
 
     def _sync_from_viewer(self) -> None:
         """Sync dialog controls with current napari viewer state."""
@@ -2030,8 +2033,9 @@ class SampleView(QWidget):
 
             self.logger.info("Embedded existing 3D viewer from Sample3DVisualizationWindow")
 
-            # Don't reset camera after embedding - preserve the 3D window's current view orientation
-            # The 3D window already has the correct camera setup
+            # Reset camera to desired zoom/angles after embedding
+            # Use a short delay to ensure widget is fully settled after re-parenting
+            QTimer.singleShot(100, self._reset_viewer_camera)
 
         except Exception as e:
             self.logger.error(f"Failed to embed 3D viewer: {e}")
@@ -2042,9 +2046,11 @@ class SampleView(QWidget):
         """Reset the napari viewer camera to optimal view settings."""
         viewer = self._get_viewer()
         if viewer and hasattr(viewer, 'camera'):
-            # Reset camera to default view with zoom to fit chamber
-            viewer.camera.zoom = 1.57
-            self.logger.info("Reset viewer camera: default view, zoom=1.57")
+            # Reset camera: 0,0,0 at back-left, objective at back
+            # angles = (roll, pitch, yaw) - yaw=180 rotates view so origin is at back
+            viewer.camera.angles = (0, 0, 180)
+            viewer.camera.zoom = 1.57  # Zoomed out to fit entire chamber
+            self.logger.info("Reset viewer camera: back-left origin view, zoom=1.57")
 
     # ========== Live View Control ==========
 

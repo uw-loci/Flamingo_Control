@@ -459,24 +459,22 @@ class Sample3DVisualizationWindow(QWidget):
 
         scale_layout.addStretch()
 
-        # Reset view button with clear label
-        self.quick_reset_btn = QPushButton("⟲ Reset View")
-        self.quick_reset_btn.setToolTip("Reset camera to default isometric view (0,0,0 at back-left)")
-        self.quick_reset_btn.setMinimumWidth(90)
+        # Small reset view button (compact, right side near viewer)
+        self.quick_reset_btn = QPushButton("⟲")  # Reset icon
+        self.quick_reset_btn.setToolTip("Reset view to default orientation")
+        self.quick_reset_btn.setFixedSize(24, 24)
         self.quick_reset_btn.setStyleSheet("""
             QPushButton {
-                font-size: 11px;
+                font-size: 14px;
                 font-weight: bold;
-                padding: 4px 8px;
                 border: 1px solid #666;
                 border-radius: 4px;
-                background: #3a3a5a;
-                color: #ddd;
+                background: #444;
+                color: #ccc;
             }
             QPushButton:hover {
-                background: #4a4a7a;
+                background: #555;
                 color: #fff;
-                border-color: #888;
             }
         """)
         self.quick_reset_btn.clicked.connect(self._on_reset_view)
@@ -1182,8 +1180,10 @@ class Sample3DVisualizationWindow(QWidget):
             self.viewer.axes.colored = True
             # Note: Axis 0=X, Axis 1=Y (vertical), Axis 2=Z (depth)
 
-            # Set zoom to fit entire chamber (don't override camera angles - use napari defaults)
-            self.viewer.camera.zoom = 1.57
+            # Set initial camera orientation - view from front with 0,0,0 at back-left
+            # angles = (roll, pitch, yaw) - yaw=180 rotates view so origin is at back
+            self.viewer.camera.angles = (0, 0, 180)
+            self.viewer.camera.zoom = 1.57  # Zoomed out to fit entire chamber
 
             # Embed viewer in our widget FIRST before adding layers
             # This ensures the viewer is properly initialized
@@ -2397,8 +2397,11 @@ class Sample3DVisualizationWindow(QWidget):
         if not self.viewer:
             return
 
-        # Only reset zoom - don't call reset_view() as it changes camera orientation
+        # Reset camera: 0,0,0 at back-left, objective at back
+        # angles = (roll, pitch, yaw) - yaw=180 rotates view so origin is at back
+        self.viewer.camera.angles = (0, 0, 180)
         self.viewer.camera.zoom = 1.57
+        self.viewer.reset_view()
 
     def _on_rendering_mode_changed(self, mode: str):
         """Handle rendering mode changes."""
