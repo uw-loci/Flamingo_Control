@@ -34,6 +34,10 @@ def safe_move(mc, axis, position, callback, retry_count=0):
     """
     Safely execute a move with retry on 'Movement already in progress' error.
 
+    Since move_absolute() is ASYNCHRONOUS (returns immediately after sending command),
+    we wait for motion completion by polling is_waiting_for_motion() with an initial
+    delay to let the background wait thread start.
+
     Args:
         mc: MovementController instance
         axis: Axis to move ('x', 'y', 'z', 'r')
@@ -45,9 +49,11 @@ def safe_move(mc, axis, position, callback, retry_count=0):
 
     try:
         mc.move_absolute(axis, position)
-        # Move command accepted - wait for completion then callback
+        # Move command sent - wait for background thread to start, then poll for completion
         pc = mc.position_controller
-        wait_for_motion_complete(pc, callback)
+        # Delay 300ms to let _wait_for_motion_complete_async spawn its thread
+        # and call motion_tracker.wait_for_motion_complete() before we start polling
+        QTimer.singleShot(300, lambda: wait_for_motion_complete(pc, callback))
     except RuntimeError as e:
         if "already in progress" in str(e).lower() and retry_count < max_retries:
             # Motion still in progress - wait and retry
