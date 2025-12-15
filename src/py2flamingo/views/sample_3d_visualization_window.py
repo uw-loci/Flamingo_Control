@@ -458,6 +458,28 @@ class Sample3DVisualizationWindow(QWidget):
         scale_layout.addWidget(self.scale_label)
 
         scale_layout.addStretch()
+
+        # Small reset view button (compact, right side near viewer)
+        self.quick_reset_btn = QPushButton("⟲")  # Reset icon
+        self.quick_reset_btn.setToolTip("Reset view to default orientation")
+        self.quick_reset_btn.setFixedSize(24, 24)
+        self.quick_reset_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 14px;
+                font-weight: bold;
+                border: 1px solid #666;
+                border-radius: 4px;
+                background: #444;
+                color: #ccc;
+            }
+            QPushButton:hover {
+                background: #555;
+                color: #fff;
+            }
+        """)
+        self.quick_reset_btn.clicked.connect(self._on_reset_view)
+        scale_layout.addWidget(self.quick_reset_btn)
+
         viewer_layout.addLayout(scale_layout)
 
         if NAPARI_AVAILABLE:
@@ -1158,9 +1180,9 @@ class Sample3DVisualizationWindow(QWidget):
             self.viewer.axes.colored = True
             # Note: Axis 0=X, Axis 1=Y (vertical), Axis 2=Z (depth)
 
-            # Set initial camera orientation - straight-on default view
-            # This shows the chamber with objective at back (correct physical orientation)
-            self.viewer.camera.angles = (0, 0, 0)
+            # Set initial camera orientation - view from front with 0,0,0 at back-left
+            # angles = (roll, pitch, yaw) - yaw=180 rotates view so origin is at back
+            self.viewer.camera.angles = (0, 0, 180)
             self.viewer.camera.zoom = 1.57  # Zoomed out to fit entire chamber
 
             # Embed viewer in our widget FIRST before adding layers
@@ -2375,8 +2397,9 @@ class Sample3DVisualizationWindow(QWidget):
         if not self.viewer:
             return
 
-        # Reset camera to default straight-on view (objective at back)
-        self.viewer.camera.angles = (0, 0, 0)
+        # Reset camera: 0,0,0 at back-left, objective at back
+        # angles = (roll, pitch, yaw) - yaw=180 rotates view so origin is at back
+        self.viewer.camera.angles = (0, 0, 180)
         self.viewer.camera.zoom = 1.57
         self.viewer.reset_view()
 
