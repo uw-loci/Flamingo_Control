@@ -430,9 +430,11 @@ def test_3d_voxel_rotation(app):
         sample_view = app.sample_view
         if sample_view and sample_view.camera_controller:
             if sample_view.camera_controller.is_live_view_active():
-                if hasattr(sample_view, 'live_view_btn'):
-                    sample_view.live_view_btn.click()
+                if hasattr(sample_view, 'live_view_toggle_btn'):
+                    sample_view.live_view_toggle_btn.click()
                     print("  Live View stopped")
+                else:
+                    print("  WARNING: Could not find live_view_toggle_btn")
 
         QTimer.singleShot(1000, step14_return_to_origin)
 
