@@ -1071,7 +1071,7 @@ class SampleView(QWidget):
 
         # Reset view button next to zoom
         self.reset_view_btn = QPushButton("⟲ Reset")
-        self.reset_view_btn.setToolTip("Reset camera zoom to default")
+        self.reset_view_btn.setToolTip("Reset camera view to defaults (orientation and zoom)")
         self.reset_view_btn.setMaximumWidth(70)
         self.reset_view_btn.setStyleSheet("""
             QPushButton {
@@ -2151,12 +2151,13 @@ class SampleView(QWidget):
             self.zoom_label.setText("Zoom: --")
 
     def _on_reset_zoom_clicked(self) -> None:
-        """Reset camera zoom to default value."""
+        """Reset camera view to defaults (orientation and zoom)."""
         viewer = self._get_viewer()
         if viewer and hasattr(viewer, 'camera'):
-            viewer.camera.zoom = 1.57
+            viewer.reset_view()  # Reset orientation to napari defaults
+            viewer.camera.zoom = 1.57  # Set zoom after reset
             self._update_zoom_display()
-            self.logger.info("Reset camera zoom to 1.57")
+            self.logger.info("Reset camera view to defaults (orientation + zoom=1.57)")
 
     def _update_info_displays(self) -> None:
         """Periodically update zoom and FPS displays."""
