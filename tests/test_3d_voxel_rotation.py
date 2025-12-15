@@ -30,16 +30,19 @@ MOTION_WAIT_TIMEOUT = 15000  # ms - max time to wait for motion
 MOTION_SETTLE_DELAY = 500  # ms - delay after motion completes before next move
 
 
-def safe_move(mc, axis, position, callback, retry_count=0):
+def safe_move_via_ui(sample_view, axis, position, callback, retry_count=0):
     """
-    Safely execute a move with retry on 'Movement already in progress' error.
+    Safely execute a move using Sample View's UI method (same as slider release).
+
+    This uses sample_view._send_position_command() which is exactly what happens
+    when the user releases a position slider, ensuring we test the actual UI code path.
 
     Since move_absolute() is ASYNCHRONOUS (returns immediately after sending command),
     we wait for motion completion by polling is_waiting_for_motion() with an initial
     delay to let the background wait thread start.
 
     Args:
-        mc: MovementController instance
+        sample_view: SampleView instance
         axis: Axis to move ('x', 'y', 'z', 'r')
         position: Target position
         callback: Function to call after move completes
@@ -48,9 +51,10 @@ def safe_move(mc, axis, position, callback, retry_count=0):
     max_retries = 10  # Max retries (10 * 500ms = 5s max wait)
 
     try:
-        mc.move_absolute(axis, position)
+        # Use UI method - same as slider release
+        sample_view._send_position_command(axis, position)
         # Move command sent - wait for background thread to start, then poll for completion
-        pc = mc.position_controller
+        pc = sample_view.movement_controller.position_controller
         # Delay 300ms to let _wait_for_motion_complete_async spawn its thread
         # and call motion_tracker.wait_for_motion_complete() before we start polling
         QTimer.singleShot(300, lambda: wait_for_motion_complete(pc, callback))
@@ -58,7 +62,7 @@ def safe_move(mc, axis, position, callback, retry_count=0):
         if "already in progress" in str(e).lower() and retry_count < max_retries:
             # Motion still in progress - wait and retry
             print(f"    (waiting for previous motion to finish, retry {retry_count + 1})")
-            QTimer.singleShot(500, lambda: safe_move(mc, axis, position, callback, retry_count + 1))
+            QTimer.singleShot(500, lambda: safe_move_via_ui(sample_view, axis, position, callback, retry_count + 1))
         else:
             # Other error or max retries - log and continue
             print(f"    ERROR: {e}")
@@ -199,7 +203,7 @@ def test_3d_voxel_rotation(app):
         QTimer.singleShot(1000, step4_move_to_start_position)
 
     def step4_move_to_start_position():
-        """Step 4: Move to starting position (with safe_move retry logic)"""
+        """Step 4: Move to starting position (using UI's _send_position_command)"""
         print("\n[Step 4] Moving to start position...")
         print(f"  Target: X={TEST_X_POSITION}, Y={TEST_Y_START}, Z={TEST_Z_POSITION}, R=0°")
 
@@ -209,26 +213,24 @@ def test_3d_voxel_rotation(app):
             QTimer.singleShot(1000, step5_start_live_view)
             return
 
-        mc = sample_view.movement_controller
-
         def move_x():
             print("  Moving X axis...")
-            safe_move(mc, 'x', TEST_X_POSITION, move_z)
+            safe_move_via_ui(sample_view, 'x', TEST_X_POSITION, move_z)
 
         def move_z():
             print("  Moving Z axis...")
-            safe_move(mc, 'z', TEST_Z_POSITION, move_y)
+            safe_move_via_ui(sample_view, 'z', TEST_Z_POSITION, move_y)
 
         def move_y():
             print("  Moving Y axis...")
-            safe_move(mc, 'y', TEST_Y_START, move_r)
+            safe_move_via_ui(sample_view, 'y', TEST_Y_START, move_r)
 
         def move_r():
             print("  Setting rotation to 0°...")
-            safe_move(mc, 'r', 0.0, verify_position)
+            safe_move_via_ui(sample_view, 'r', 0.0, verify_position)
 
         def verify_position():
-            position = mc.get_position()
+            position = sample_view.movement_controller.get_position()
             if position:
                 print(f"  Actual position: X={position.x:.3f}, Y={position.y:.3f}, "
                       f"Z={position.z:.3f}, R={position.r:.1f}°")
@@ -270,7 +272,7 @@ def test_3d_voxel_rotation(app):
         QTimer.singleShot(2000, step7_move_y_axis)
 
     def step7_move_y_axis():
-        """Step 7: Move Y axis to collect data along rotation axis (with safe_move)"""
+        """Step 7: Move Y axis to collect data along rotation axis (via UI)"""
         print("\n[Step 7] Collecting data along Y axis...")
         print(f"  Moving Y from {TEST_Y_START} to {TEST_Y_END} mm")
 
@@ -280,7 +282,6 @@ def test_3d_voxel_rotation(app):
             QTimer.singleShot(2000, step8_record_voxel_counts)
             return
 
-        mc = sample_view.movement_controller
         y_positions = list(np.linspace(TEST_Y_START, TEST_Y_END, 6))  # 6 positions
         current_step = [0]  # Use list to allow modification in nested function
 
@@ -289,8 +290,8 @@ def test_3d_voxel_rotation(app):
                 y_pos = y_positions[current_step[0]]
                 print(f"  Step {current_step[0]+1}/6: Moving to Y={y_pos:.3f} mm...")
                 current_step[0] += 1
-                # Use safe_move with data collection delay after
-                safe_move(mc, 'y', y_pos, lambda: QTimer.singleShot(1000, move_next_y))
+                # Use UI method with data collection delay after
+                safe_move_via_ui(sample_view, 'y', y_pos, lambda: QTimer.singleShot(1000, move_next_y))
             else:
                 print("  Y axis scan complete")
                 QTimer.singleShot(2000, step8_record_voxel_counts)
@@ -341,7 +342,7 @@ def test_3d_voxel_rotation(app):
         QTimer.singleShot(1000, step10_apply_rotation)
 
     def step10_apply_rotation():
-        """Step 10: Apply 90° rotation (with safe_move)"""
+        """Step 10: Apply 90° rotation (via UI)"""
         print(f"\n[Step 10] Applying {TEST_ROTATION}° rotation...")
 
         sample_view = app.sample_view
@@ -350,17 +351,16 @@ def test_3d_voxel_rotation(app):
             QTimer.singleShot(3000, step11_check_voxels_after_rotation)
             return
 
-        mc = sample_view.movement_controller
         print(f"  Rotating stage to {TEST_ROTATION}°...")
 
         def verify_rotation():
-            position = mc.get_position()
+            position = sample_view.movement_controller.get_position()
             if position:
                 print(f"  Actual rotation: {position.r:.1f}°")
             # Extra delay for rotation transform processing
             QTimer.singleShot(3000, step11_check_voxels_after_rotation)
 
-        safe_move(mc, 'r', TEST_ROTATION, verify_rotation)
+        safe_move_via_ui(sample_view, 'r', TEST_ROTATION, verify_rotation)
 
     def step11_check_voxels_after_rotation():
         """Step 11: Check voxel counts after rotation"""
@@ -436,7 +436,7 @@ def test_3d_voxel_rotation(app):
         QTimer.singleShot(1000, step14_return_to_origin)
 
     def step14_return_to_origin():
-        """Step 14: Return to original position (with safe_move)"""
+        """Step 14: Return to original position (via UI)"""
         nonlocal initial_position
         print("\n[Step 14] Returning to original position...")
 
@@ -446,25 +446,24 @@ def test_3d_voxel_rotation(app):
             QTimer.singleShot(1000, step15_final_summary)
             return
 
-        mc = sample_view.movement_controller
         print(f"  Moving to: X={initial_position['x']:.3f}, Y={initial_position['y']:.3f}, "
               f"Z={initial_position['z']:.3f}, R={initial_position['r']:.1f}°")
 
         def return_r():
             print("  Returning rotation...")
-            safe_move(mc, 'r', initial_position['r'], return_x)
+            safe_move_via_ui(sample_view, 'r', initial_position['r'], return_x)
 
         def return_x():
             print("  Returning X...")
-            safe_move(mc, 'x', initial_position['x'], return_y)
+            safe_move_via_ui(sample_view, 'x', initial_position['x'], return_y)
 
         def return_y():
             print("  Returning Y...")
-            safe_move(mc, 'y', initial_position['y'], return_z)
+            safe_move_via_ui(sample_view, 'y', initial_position['y'], return_z)
 
         def return_z():
             print("  Returning Z...")
-            safe_move(mc, 'z', initial_position['z'], finish_return)
+            safe_move_via_ui(sample_view, 'z', initial_position['z'], finish_return)
 
         def finish_return():
             print("  Stage returned to original position")
