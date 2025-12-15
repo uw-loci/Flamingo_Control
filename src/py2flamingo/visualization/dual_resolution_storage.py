@@ -638,8 +638,10 @@ class DualResolutionVoxelStorage:
         # Incremental shifts cause data loss at boundaries when shifting back
         from scipy.ndimage import shift
 
-        # Full offset from reference in ZYX order, Y inverted
-        offset_voxels = np.array([dz, -dy, dx]) * 1000 / self.config.display_voxel_size[0]
+        # Full offset from reference in ZYX order
+        # Y should NOT be inverted here - the storage already accounts for direction
+        # When stage Y decreases (sample moves up), data should shift UP in display (lower napari Y)
+        offset_voxels = np.array([dz, dy, dx]) * 1000 / self.config.display_voxel_size[0]
 
         # Check if translation is significant
         if np.max(np.abs(offset_voxels)) < 0.5:
