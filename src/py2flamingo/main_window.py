@@ -179,11 +179,13 @@ class MainWindow(QMainWindow):
             self.move(x, y)
 
     def _setup_menu(self):
-        """Create menu bar with File, View, and Help menus.
+        """Create menu bar with File, View, Tools, Extensions, and Help menus.
 
         Creates:
         - File menu with Exit action
         - View menu with Image Controls action
+        - Tools menu with debug/test functions (requires connection)
+        - Extensions menu with advanced features (requires connection + Sample View)
         - Help menu with About action
         """
         menubar = self.menuBar()
@@ -232,6 +234,36 @@ class MainWindow(QMainWindow):
             sample_3d_action.triggered.connect(self._show_sample_3d_visualization)
             view_menu.addAction(sample_3d_action)
 
+        # Tools menu (requires connection)
+        tools_menu = menubar.addMenu("&Tools")
+
+        self.voxel_test_action = QAction("3D &Voxel Test", self)
+        self.voxel_test_action.setStatusTip("Run 3D voxel movement and rotation test")
+        self.voxel_test_action.triggered.connect(self._on_voxel_test)
+        self.voxel_test_action.setEnabled(False)
+        tools_menu.addAction(self.voxel_test_action)
+
+        self.volume_scan_action = QAction("&Volume Scan", self)
+        self.volume_scan_action.setStatusTip("Run volume scan with serpentine movement")
+        self.volume_scan_action.triggered.connect(self._on_volume_scan)
+        self.volume_scan_action.setEnabled(False)
+        tools_menu.addAction(self.volume_scan_action)
+
+        self.calibrate_action = QAction("&Calibrate Objective...", self)
+        self.calibrate_action.setStatusTip("Calibrate objective center position")
+        self.calibrate_action.triggered.connect(self._on_calibrate_objective)
+        self.calibrate_action.setEnabled(False)
+        tools_menu.addAction(self.calibrate_action)
+
+        # Extensions menu (requires connection + Sample View open)
+        extensions_menu = menubar.addMenu("&Extensions")
+
+        self.led_2d_overview_action = QAction("&LED 2D Overview...", self)
+        self.led_2d_overview_action.setStatusTip("Create 2D focus-stacked overview maps at two rotation angles")
+        self.led_2d_overview_action.triggered.connect(self._on_led_2d_overview)
+        self.led_2d_overview_action.setEnabled(False)
+        extensions_menu.addAction(self.led_2d_overview_action)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -278,6 +310,203 @@ class MainWindow(QMainWindow):
             self.sample_3d_visualization_window.show()
             self.sample_3d_visualization_window.raise_()  # Bring to front
             self.sample_3d_visualization_window.activateWindow()  # Give it focus
+
+    # ========== Tools Menu Handlers ==========
+
+    def update_menu_states(self, connected: bool = False):
+        """Update Tools and Extensions menu item states based on connection and Sample View.
+
+        Args:
+            connected: Whether microscope is connected
+        """
+        # Tools menu requires connection
+        self.voxel_test_action.setEnabled(connected)
+        self.volume_scan_action.setEnabled(connected)
+        self.calibrate_action.setEnabled(connected)
+
+        # Extensions menu requires connection AND Sample View open
+        sample_view_open = self.app is not None and self.app.sample_view is not None
+        self.led_2d_overview_action.setEnabled(connected and sample_view_open)
+
+    def _on_voxel_test(self):
+        """Handle 3D voxel rotation test menu action."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("3D Voxel Rotation Test menu action triggered")
+
+        if not self.app:
+            QMessageBox.warning(self, "Error", "Application not available")
+            return
+
+        # Disable action during test
+        self.voxel_test_action.setEnabled(False)
+        self.voxel_test_action.setText("3D Voxel Test (Running...)")
+
+        try:
+            from tests.test_3d_voxel_rotation import test_3d_voxel_rotation
+
+            # Ensure Sample View is open
+            if self.app.sample_view is None:
+                self.app._open_sample_view()
+
+            # Run test with FlamingoApplication
+            test_3d_voxel_rotation(self.app)
+
+            # Re-enable action after delay (test runs async)
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(70000, self._reset_voxel_test_action)
+
+        except ImportError as e:
+            logger.error(f"Could not import test module: {e}")
+            QMessageBox.critical(self, "Error", "Test module not found.")
+            self._reset_voxel_test_action()
+        except Exception as e:
+            logger.error(f"Error starting test: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to start test: {e}")
+            self._reset_voxel_test_action()
+
+    def _reset_voxel_test_action(self):
+        """Reset voxel test action after async test completes."""
+        self.voxel_test_action.setEnabled(True)
+        self.voxel_test_action.setText("3D &Voxel Test")
+
+    def _on_volume_scan(self):
+        """Handle volume scan menu action."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("Volume Scan menu action triggered")
+
+        if not self.app:
+            QMessageBox.warning(self, "Error", "Application not available")
+            return
+
+        # Disable action during scan
+        self.volume_scan_action.setEnabled(False)
+        self.volume_scan_action.setText("Volume Scan (Running...)")
+
+        try:
+            from tests.test_3d_movement_simple import test_voxel_movement
+
+            # Get position controller from app
+            position_controller = getattr(self.app, 'position_controller', None)
+            if not position_controller:
+                raise RuntimeError("Position controller not available")
+
+            # Run the volume scan
+            success = test_voxel_movement(position_controller, self, mode='volume_scan')
+
+            if success:
+                QMessageBox.information(self, "Success", "Volume scan completed successfully!")
+            else:
+                QMessageBox.warning(self, "Warning", "Volume scan completed with warnings.")
+
+        except ImportError as e:
+            logger.error(f"Could not import test module: {e}")
+            QMessageBox.critical(self, "Error", "Test module not found.")
+        except Exception as e:
+            logger.error(f"Error during volume scan: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Volume scan failed: {e}")
+        finally:
+            self._reset_volume_scan_action()
+
+    def _reset_volume_scan_action(self):
+        """Reset volume scan action after scan completes."""
+        self.volume_scan_action.setEnabled(True)
+        self.volume_scan_action.setText("&Volume Scan")
+
+    def _on_calibrate_objective(self):
+        """Handle calibrate objective menu action."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("Calibrate Objective menu action triggered")
+
+        if not self.app:
+            QMessageBox.warning(self, "Error", "Application not available")
+            return
+
+        # Show instructions dialog
+        reply = QMessageBox.information(
+            self,
+            "Calibrate Objective XY Center",
+            "This calibration helps show where the camera is capturing in 3D.\n\n"
+            "Instructions:\n\n"
+            "1. Open the Camera Live View\n"
+            "2. Use the stage controls to move until you can see\n"
+            "   the very tip of the sample holder (fine extension)\n"
+            "3. Center the tip in the camera view\n"
+            "4. Click OK to save this position\n\n"
+            "Note: Rotation (R) should not affect centering.",
+            QMessageBox.Ok | QMessageBox.Cancel
+        )
+
+        if reply != QMessageBox.Ok:
+            return
+
+        try:
+            # Get current position from movement controller
+            movement_controller = getattr(self.app, 'movement_controller', None)
+            if not movement_controller:
+                raise RuntimeError("Movement controller not available")
+
+            current_pos = movement_controller.get_current_position()
+            if not current_pos:
+                raise RuntimeError("Could not read current position")
+
+            # Save as preset
+            preset_service = getattr(self.app, 'position_preset_service', None)
+            if preset_service:
+                preset_service.save_preset(
+                    name="Tip of sample mount",
+                    position=current_pos,
+                    description="Calibrated objective center position"
+                )
+                logger.info(f"Saved calibration: {current_pos}")
+                QMessageBox.information(
+                    self, "Calibration Saved",
+                    f"Position saved:\nX={current_pos.x:.3f}, Y={current_pos.y:.3f}, "
+                    f"Z={current_pos.z:.3f}, R={current_pos.r:.1f}°"
+                )
+            else:
+                QMessageBox.warning(self, "Warning", "Preset service not available")
+
+        except Exception as e:
+            logger.error(f"Error during calibration: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Calibration failed: {e}")
+
+    # ========== Extensions Menu Handlers ==========
+
+    def _on_led_2d_overview(self):
+        """Handle LED 2D Overview menu action."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("LED 2D Overview menu action triggered")
+
+        if not self.app or not self.app.sample_view:
+            QMessageBox.warning(
+                self, "Sample View Required",
+                "Please open the Sample View before using this extension."
+            )
+            return
+
+        try:
+            from py2flamingo.views.dialogs.led_2d_overview_dialog import LED2DOverviewDialog
+
+            dialog = LED2DOverviewDialog(
+                app=self.app,
+                parent=self
+            )
+            dialog.exec_()
+
+        except ImportError as e:
+            logger.error(f"Could not import LED 2D Overview dialog: {e}")
+            QMessageBox.critical(
+                self, "Error",
+                "LED 2D Overview dialog not available.\n"
+                "The extension may not be fully implemented yet."
+            )
+        except Exception as e:
+            logger.error(f"Error opening LED 2D Overview: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to open dialog: {e}")
 
     def _on_tab_changed(self, index: int) -> None:
         """Handle tab change event - log which tab user switched to.

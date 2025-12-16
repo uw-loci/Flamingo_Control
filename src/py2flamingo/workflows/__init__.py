@@ -94,6 +94,10 @@ from .volume_scan_workflow import (
     run_volume_scan,
 )
 
+# LED2DOverviewWorkflow is imported directly from its module to avoid
+# circular import issues:
+#   from py2flamingo.workflows.led_2d_overview_workflow import LED2DOverviewWorkflow
+
 # Define public API
 __all__ = [
     # Main facade

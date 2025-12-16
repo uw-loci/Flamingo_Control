@@ -214,10 +214,14 @@ class Position(ValidatedModel):
 
     Enhanced version of the original Position class that includes
     validation and metadata support.
+
+    Note: Default values are required because this class inherits from
+    ValidatedModel/BaseModel which have fields with defaults. Python 3.12+
+    enforces that non-default fields cannot follow default fields.
     """
-    x: float
-    y: float
-    z: float
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
     r: float = 0.0  # Rotation in degrees
     name: Optional[str] = None  # Optional position name/label
     stage_limits: Optional[StageLimits] = field(default=None, repr=False)
@@ -367,7 +371,7 @@ class StageVelocity:
 @dataclass
 class Stage(ValidatedModel):
     """Complete stage model with position, limits, and configuration."""
-    current_position: Position
+    current_position: Position = field(default_factory=Position)
     home_position: Optional[Position] = None
     limits: Optional[StageLimits] = None
     velocity: StageVelocity = field(default_factory=StageVelocity)

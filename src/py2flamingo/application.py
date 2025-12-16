@@ -351,6 +351,10 @@ class FlamingoApplication:
         """
         self.logger.info("Connection established - enabling stage controls")
 
+        # Update main window menu states
+        if self.main_window:
+            self.main_window.update_menu_states(connected=True)
+
         # Reinitialize motion tracker now that connection is established
         if self.position_controller:
             self.position_controller.reinitialize_motion_tracker()
@@ -403,6 +407,11 @@ class FlamingoApplication:
         Disables controls when disconnected from microscope.
         """
         self.logger.info("Connection closed - disabling stage controls")
+
+        # Update main window menu states
+        if self.main_window:
+            self.main_window.update_menu_states(connected=False)
+
         if self.stage_control_view:
             self.stage_control_view._set_controls_enabled(False)
 
@@ -433,6 +442,11 @@ class FlamingoApplication:
         self.sample_view.raise_()
         self.sample_view.activateWindow()
         self.logger.debug("Sample View shown and raised")
+
+        # Update menu states now that Sample View is open
+        if self.main_window and self.connection_service:
+            connected = self.connection_service.is_connected()
+            self.main_window.update_menu_states(connected=connected)
 
     def create_main_window(self):
         """Create main application window by composing views.

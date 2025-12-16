@@ -5,7 +5,7 @@ snapshots, z-stacks, tile scans, and time-lapse acquisitions.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List, Union, Tuple
 from enum import Enum
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -380,9 +380,9 @@ class WorkflowStep:
 @dataclass
 class Workflow(ValidatedModel):
     """Complete workflow model for acquisition sequences."""
-    workflow_type: WorkflowType
-    name: str
-    start_position: Position
+    workflow_type: WorkflowType = WorkflowType.SNAPSHOT
+    name: str = ""
+    start_position: Position = field(default_factory=Position)
     end_position: Optional[Position] = None
 
     # Settings for different workflow types

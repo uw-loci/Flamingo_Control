@@ -188,7 +188,7 @@ class PulseSettings:
 @dataclass
 class LaserSettings(ValidatedModel):
     """Current laser settings."""
-    power_setpoint_mw: float
+    power_setpoint_mw: float = 0.0
     mode: LaserMode = LaserMode.CW
     enabled: bool = False
     pulse_settings: Optional[PulseSettings] = None
@@ -269,12 +269,12 @@ class LaserSafetyStatus:
 @dataclass
 class Laser(ValidatedModel):
     """Complete laser model with settings, limits, and state."""
-    name: str
-    channel_id: int
-    laser_type: LaserType
-    power_limits: PowerLimits
-    settings: LaserSettings
-    calibration: LaserCalibration
+    name: str = ""
+    channel_id: int = 0
+    laser_type: LaserType = LaserType.DIODE
+    power_limits: PowerLimits = field(default_factory=PowerLimits)
+    settings: LaserSettings = field(default_factory=LaserSettings)
+    calibration: LaserCalibration = field(default_factory=LaserCalibration)
     state: LaserState = LaserState.OFF
     safety_status: LaserSafetyStatus = field(default_factory=LaserSafetyStatus)
     warmup_time_seconds: float = 0.0

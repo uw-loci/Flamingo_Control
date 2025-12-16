@@ -289,3 +289,67 @@ def get_workflow_summary(workflow_dict: Dict[str, Any]) -> Dict[str, Any]:
             summary['start_angle'] = start.get('Angle (degrees)', 'N/A')
 
     return summary
+
+
+class WorkflowParser:
+    """Object-oriented wrapper for workflow parsing utilities.
+
+    Provides a class-based interface to the workflow parsing functions
+    for use cases that prefer object-oriented patterns.
+    """
+
+    def parse_file(self, path: Union[str, Path]) -> Dict[str, Any]:
+        """Parse a workflow file.
+
+        Args:
+            path: Path to workflow file
+
+        Returns:
+            Parsed workflow dictionary
+        """
+        return parse_workflow_file(path)
+
+    def validate(self, workflow_dict: Dict[str, Any]) -> Tuple[bool, List[str]]:
+        """Validate a workflow dictionary.
+
+        Args:
+            workflow_dict: Workflow dictionary to validate
+
+        Returns:
+            Tuple of (is_valid, error_list)
+        """
+        return validate_workflow(workflow_dict)
+
+    def get_preview(self, path: Union[str, Path], max_lines: int = 20) -> str:
+        """Get workflow file preview.
+
+        Args:
+            path: Path to workflow file
+            max_lines: Maximum lines to include
+
+        Returns:
+            Preview text
+        """
+        return get_workflow_preview(path, max_lines)
+
+    def read_as_bytes(self, path: Union[str, Path]) -> bytes:
+        """Read workflow file as bytes.
+
+        Args:
+            path: Path to workflow file
+
+        Returns:
+            Workflow file contents as bytes
+        """
+        return read_workflow_as_bytes(path)
+
+    def get_summary(self, workflow_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Get workflow summary.
+
+        Args:
+            workflow_dict: Parsed workflow dictionary
+
+        Returns:
+            Summary dictionary
+        """
+        return get_workflow_summary(workflow_dict)
