@@ -132,6 +132,13 @@ class ConnectionService:
 
             self._command_service = MicroscopeCommandService(ConnectionWrapper(self))
 
+            # Validate server is actually responding before starting threads
+            # This catches cases where TCP connects but server software isn't running
+            if not self._validate_server_responding():
+                self.logger.error("Server not responding to commands - disconnecting")
+                self._cleanup_sockets()
+                return False
+
             # Start communication threads
             self._start_threads()
 
@@ -143,7 +150,78 @@ class ConnectionService:
             self.logger.error(f"Connection failed: {e}")
             self._cleanup_sockets()
             return False
-    
+
+    def _validate_server_responding(self, timeout: float = 3.0) -> bool:
+        """
+        Validate that the server is actually responding to commands.
+
+        Sends a SYSTEM_STATE_GET command and waits for a response.
+        This catches cases where TCP connection succeeds but the
+        Flamingo server software isn't actually running.
+
+        Args:
+            timeout: Maximum time to wait for response in seconds
+
+        Returns:
+            bool: True if server responds, False otherwise
+        """
+        import struct
+
+        SYSTEM_STATE_GET = 0xa007  # 40967
+        START_MARKER = 0xF321E654
+        END_MARKER = 0xFEDC4321
+
+        self.logger.info("Validating server is responding...")
+
+        try:
+            # Build a simple SYSTEM_STATE_GET command
+            # Protocol format: start marker, code, status, 7 params, double, count, 72-byte data, end marker
+            cmd_bytes = struct.pack(
+                "I I I I I I I I I I d I 72s I",
+                START_MARKER,     # Start marker
+                SYSTEM_STATE_GET, # Command code
+                0,                # Status
+                0, 0, 0, 0, 0, 0, 0,  # 7 parameter fields
+                0.0,              # Double value
+                0,                # Count
+                b'\x00' * 72,     # Data bytes
+                END_MARKER        # End marker
+            )
+
+            # Send command
+            self.nuc_client.sendall(cmd_bytes)
+            self.logger.debug(f"Sent SYSTEM_STATE_GET validation command ({len(cmd_bytes)} bytes)")
+
+            # Wait for 128-byte response with timeout
+            response = self._receive_full_response(self.nuc_client, 128, timeout=timeout)
+
+            # Verify we got a valid response (check start/end markers)
+            if len(response) >= 128:
+                resp_start, resp_code = struct.unpack_from("I I", response, 0)
+                resp_end = struct.unpack_from("I", response, 124)[0]
+
+                if resp_start == START_MARKER and resp_end == END_MARKER:
+                    self.logger.info(f"Server validated - received response to command 0x{resp_code:04x}")
+                    return True
+                else:
+                    self.logger.warning(
+                        f"Invalid response markers: start=0x{resp_start:08x}, end=0x{resp_end:08x}"
+                    )
+                    return False
+            else:
+                self.logger.warning(f"Response too short: {len(response)} bytes")
+                return False
+
+        except socket.timeout:
+            self.logger.error(f"Server validation timed out after {timeout}s - server not responding")
+            return False
+        except ConnectionError as e:
+            self.logger.error(f"Server validation failed - connection error: {e}")
+            return False
+        except Exception as e:
+            self.logger.error(f"Server validation failed - unexpected error: {e}")
+            return False
+
     def disconnect(self) -> None:
         """Disconnect from the microscope and cleanup."""
         if self._connected:
@@ -591,28 +669,45 @@ class MVCConnectionService:
 
         data = b''
         start_time = time.time()
+        original_timeout = sock.gettimeout()
 
-        while len(data) < expected_size:
-            # Check timeout
-            elapsed = time.time() - start_time
-            if elapsed > timeout:
-                raise socket.timeout(
-                    f"Partial receive timeout: got {len(data)}/{expected_size} bytes"
-                )
+        try:
+            while len(data) < expected_size:
+                # Check overall timeout
+                elapsed = time.time() - start_time
+                remaining_time = timeout - elapsed
+                if remaining_time <= 0:
+                    raise socket.timeout(
+                        f"Partial receive timeout: got {len(data)}/{expected_size} bytes"
+                    )
 
-            # Receive chunk
-            remaining = expected_size - len(data)
-            chunk = sock.recv(remaining)
+                # Set socket timeout to remaining time (capped at 1 second for responsiveness)
+                sock.settimeout(min(remaining_time, 1.0))
 
-            if not chunk:
-                # Connection closed
-                raise ConnectionError(
-                    f"Connection closed during receive: got {len(data)}/{expected_size} bytes"
-                )
+                # Receive chunk
+                try:
+                    remaining = expected_size - len(data)
+                    chunk = sock.recv(remaining)
+                except socket.timeout:
+                    # Check if overall timeout exceeded
+                    if time.time() - start_time >= timeout:
+                        raise socket.timeout(
+                            f"Receive timeout: got {len(data)}/{expected_size} bytes after {timeout}s"
+                        )
+                    continue  # Keep trying within overall timeout
 
-            data += chunk
+                if not chunk:
+                    # Connection closed
+                    raise ConnectionError(
+                        f"Connection closed during receive: got {len(data)}/{expected_size} bytes"
+                    )
 
-        return data
+                data += chunk
+
+            return data
+        finally:
+            # Restore original socket timeout
+            sock.settimeout(original_timeout)
 
     def _update_error_state(self, error_msg: str) -> None:
         """Update model to ERROR state."""
