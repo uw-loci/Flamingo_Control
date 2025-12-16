@@ -1,20 +1,19 @@
 """LED 2D Overview Dialog.
 
 Configuration dialog for the LED 2D Overview extension that creates
-focus-stacked 2D maps at two rotation angles.
+2D overview maps at two rotation angles.
 """
 
 import logging
-from typing import Optional, List, Tuple, NamedTuple
+from typing import Optional, List, Tuple
 from dataclasses import dataclass
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
-    QLabel, QLineEdit, QPushButton, QDoubleSpinBox, QSpinBox,
-    QMessageBox, QFrame, QSizePolicy
+    QLabel, QPushButton, QDoubleSpinBox, QComboBox,
+    QMessageBox, QSizePolicy
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
 
 
 @dataclass
@@ -45,9 +44,6 @@ class ScanConfiguration:
     """Complete scan configuration for LED 2D Overview."""
     bounding_box: BoundingBox
     starting_r: float  # Rotation angle in degrees
-    z_stack_range: float  # +/- mm from center
-    z_step_size: float  # um
-    tile_overlap: float  # percentage
     led_name: str
     led_intensity: float
 
@@ -55,20 +51,21 @@ class ScanConfiguration:
 class LED2DOverviewDialog(QDialog):
     """Configuration dialog for LED 2D Overview scans.
 
-    This dialog allows users to:
+    This is a non-modal dialog that allows users to:
     - Define 2-3 bounding points (A, B, optional C)
-    - Set scan parameters (rotation, Z-stack, tile overlap)
+    - Load saved position presets into points
+    - Set starting rotation angle
     - Preview the tile grid layout
     - Start the scan
 
-    The scan creates two 2D focus-stacked maps at R and R+90 degrees.
+    The scan creates two 2D overview maps at R and R+90 degrees.
     """
 
     # Emitted when user requests to start scan
     scan_requested = pyqtSignal(object)  # ScanConfiguration
 
-    # Default FOV for N7 camera (mm per pixel * pixels)
-    DEFAULT_FOV_MM = 0.5182  # mm
+    # Default FOV for N7 camera (mm)
+    DEFAULT_FOV_MM = 0.5182
 
     def __init__(self, app, parent=None):
         """Initialize the dialog.
@@ -81,13 +78,38 @@ class LED2DOverviewDialog(QDialog):
         self._app = app
         self._logger = logging.getLogger(__name__)
 
-        self.setWindowTitle("LED 2D Overview")
-        self.setMinimumWidth(500)
-        self.setModal(True)
+        # Stage limits (will be loaded from settings)
+        self._stage_limits = {
+            'x': {'min': 0.0, 'max': 26.0},
+            'y': {'min': 0.0, 'max': 26.0},
+            'z': {'min': 0.0, 'max': 26.0},
+            'r': {'min': -720.0, 'max': 720.0}
+        }
 
+        self.setWindowTitle("LED 2D Overview")
+        self.setMinimumWidth(520)
+        # Non-modal so user can interact with Sample View
+        self.setModal(False)
+        # Keep on top but allow interaction with other windows
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+
+        self._load_stage_limits()
         self._setup_ui()
         self._load_current_settings()
+        self._refresh_presets()
         self._update_scan_info()
+
+    def _load_stage_limits(self):
+        """Load stage limits from microscope settings."""
+        try:
+            if self._app and hasattr(self._app, 'microscope_settings'):
+                limits = self._app.microscope_settings.get_stage_limits()
+                self._stage_limits = limits
+                self._logger.info(f"Loaded stage limits: X[{limits['x']['min']}-{limits['x']['max']}], "
+                                 f"Y[{limits['y']['min']}-{limits['y']['max']}], "
+                                 f"Z[{limits['z']['min']}-{limits['z']['max']}]")
+        except Exception as e:
+            self._logger.warning(f"Could not load stage limits: {e}")
 
     def _setup_ui(self):
         """Create the dialog UI."""
@@ -130,7 +152,7 @@ class LED2DOverviewDialog(QDialog):
         button_layout.addWidget(self.start_btn)
 
         self.close_btn = QPushButton("Close")
-        self.close_btn.clicked.connect(self.reject)
+        self.close_btn.clicked.connect(self.close)
         button_layout.addWidget(self.close_btn)
 
         layout.addLayout(button_layout)
@@ -141,6 +163,35 @@ class LED2DOverviewDialog(QDialog):
         """Create the bounding points input group."""
         group = QGroupBox("Bounding Points")
         layout = QVBoxLayout()
+
+        # Preset loading row
+        preset_layout = QHBoxLayout()
+        preset_layout.addWidget(QLabel("Load preset into:"))
+
+        self.preset_target_combo = QComboBox()
+        self.preset_target_combo.addItem("Point A")
+        self.preset_target_combo.addItem("Point B")
+        self.preset_target_combo.addItem("Point C")
+        self.preset_target_combo.setToolTip("Select which point to load the preset into")
+        preset_layout.addWidget(self.preset_target_combo)
+
+        self.preset_combo = QComboBox()
+        self.preset_combo.setToolTip("Select a saved position preset")
+        self.preset_combo.setMinimumWidth(150)
+        preset_layout.addWidget(self.preset_combo)
+
+        self.load_preset_btn = QPushButton("Load")
+        self.load_preset_btn.setToolTip("Load selected preset into target point")
+        self.load_preset_btn.clicked.connect(self._on_load_preset)
+        preset_layout.addWidget(self.load_preset_btn)
+
+        self.refresh_presets_btn = QPushButton("Refresh")
+        self.refresh_presets_btn.setToolTip("Refresh preset list")
+        self.refresh_presets_btn.clicked.connect(self._refresh_presets)
+        preset_layout.addWidget(self.refresh_presets_btn)
+
+        preset_layout.addStretch()
+        layout.addLayout(preset_layout)
 
         # Create point input rows
         grid = QGridLayout()
@@ -155,13 +206,11 @@ class LED2DOverviewDialog(QDialog):
 
         # Point A
         self.point_a_label = QLabel("Point A:")
-        self.point_a_x = QDoubleSpinBox()
-        self.point_a_y = QDoubleSpinBox()
-        self.point_a_z = QDoubleSpinBox()
+        self.point_a_x = self._create_coord_spinbox('x')
+        self.point_a_y = self._create_coord_spinbox('y')
+        self.point_a_z = self._create_coord_spinbox('z')
         self.point_a_btn = QPushButton("Get Pos")
-        self._setup_coordinate_spinbox(self.point_a_x)
-        self._setup_coordinate_spinbox(self.point_a_y)
-        self._setup_coordinate_spinbox(self.point_a_z)
+        self.point_a_btn.setToolTip("Get current stage position")
         self.point_a_btn.clicked.connect(lambda: self._get_current_position('A'))
         grid.addWidget(self.point_a_label, 1, 0)
         grid.addWidget(self.point_a_x, 1, 1)
@@ -171,13 +220,11 @@ class LED2DOverviewDialog(QDialog):
 
         # Point B
         self.point_b_label = QLabel("Point B:")
-        self.point_b_x = QDoubleSpinBox()
-        self.point_b_y = QDoubleSpinBox()
-        self.point_b_z = QDoubleSpinBox()
+        self.point_b_x = self._create_coord_spinbox('x')
+        self.point_b_y = self._create_coord_spinbox('y')
+        self.point_b_z = self._create_coord_spinbox('z')
         self.point_b_btn = QPushButton("Get Pos")
-        self._setup_coordinate_spinbox(self.point_b_x)
-        self._setup_coordinate_spinbox(self.point_b_y)
-        self._setup_coordinate_spinbox(self.point_b_z)
+        self.point_b_btn.setToolTip("Get current stage position")
         self.point_b_btn.clicked.connect(lambda: self._get_current_position('B'))
         grid.addWidget(self.point_b_label, 2, 0)
         grid.addWidget(self.point_b_x, 2, 1)
@@ -187,26 +234,26 @@ class LED2DOverviewDialog(QDialog):
 
         # Point C (optional)
         self.point_c_label = QLabel("Point C:")
-        self.point_c_x = QDoubleSpinBox()
-        self.point_c_y = QDoubleSpinBox()
-        self.point_c_z = QDoubleSpinBox()
+        self.point_c_x = self._create_coord_spinbox('x', optional=True)
+        self.point_c_y = self._create_coord_spinbox('y', optional=True)
+        self.point_c_z = self._create_coord_spinbox('z', optional=True)
         self.point_c_btn = QPushButton("Get Pos")
+        self.point_c_btn.setToolTip("Get current stage position")
         self.point_c_clear = QPushButton("Clear")
-        self._setup_coordinate_spinbox(self.point_c_x, optional=True)
-        self._setup_coordinate_spinbox(self.point_c_y, optional=True)
-        self._setup_coordinate_spinbox(self.point_c_z, optional=True)
+        self.point_c_clear.setToolTip("Clear Point C")
         self.point_c_btn.clicked.connect(lambda: self._get_current_position('C'))
         self.point_c_clear.clicked.connect(self._clear_point_c)
 
-        c_layout = QHBoxLayout()
-        c_layout.addWidget(self.point_c_btn)
-        c_layout.addWidget(self.point_c_clear)
+        c_btn_layout = QHBoxLayout()
+        c_btn_layout.setSpacing(4)
+        c_btn_layout.addWidget(self.point_c_btn)
+        c_btn_layout.addWidget(self.point_c_clear)
 
         grid.addWidget(self.point_c_label, 3, 0)
         grid.addWidget(self.point_c_x, 3, 1)
         grid.addWidget(self.point_c_y, 3, 2)
         grid.addWidget(self.point_c_z, 3, 3)
-        grid.addLayout(c_layout, 3, 4)
+        grid.addLayout(c_btn_layout, 3, 4)
 
         layout.addLayout(grid)
 
@@ -218,18 +265,34 @@ class LED2DOverviewDialog(QDialog):
         group.setLayout(layout)
         return group
 
-    def _setup_coordinate_spinbox(self, spinbox: QDoubleSpinBox, optional: bool = False):
-        """Configure a coordinate spinbox."""
-        spinbox.setRange(-50.0, 50.0)
+    def _create_coord_spinbox(self, axis: str, optional: bool = False) -> QDoubleSpinBox:
+        """Create a coordinate spinbox with stage limits.
+
+        Args:
+            axis: 'x', 'y', or 'z'
+            optional: If True, allow special "not set" value
+        """
+        spinbox = QDoubleSpinBox()
+
+        limits = self._stage_limits.get(axis, {'min': 0.0, 'max': 26.0})
+        min_val = limits['min']
+        max_val = limits['max']
+
+        if optional:
+            # For optional fields, use a value below min to indicate "not set"
+            spinbox.setRange(min_val - 1, max_val)
+            spinbox.setSpecialValueText("--")
+            spinbox.setValue(min_val - 1)  # Start as "not set"
+        else:
+            spinbox.setRange(min_val, max_val)
+            spinbox.setValue(min_val)
+
         spinbox.setDecimals(3)
         spinbox.setSingleStep(0.1)
         spinbox.setSuffix(" mm")
-        if optional:
-            spinbox.setSpecialValueText("--")
-            spinbox.setValue(spinbox.minimum())
-        else:
-            spinbox.setValue(0.0)
         spinbox.valueChanged.connect(self._update_scan_info)
+
+        return spinbox
 
     def _create_settings_group(self) -> QGroupBox:
         """Create the scan settings group."""
@@ -237,56 +300,23 @@ class LED2DOverviewDialog(QDialog):
         layout = QGridLayout()
         layout.setSpacing(8)
 
-        row = 0
-
         # Starting R
-        layout.addWidget(QLabel("Starting R:"), row, 0)
+        layout.addWidget(QLabel("Starting R:"), 0, 0)
         self.starting_r = QDoubleSpinBox()
-        self.starting_r.setRange(-180.0, 180.0)
+        r_limits = self._stage_limits.get('r', {'min': -720.0, 'max': 720.0})
+        self.starting_r.setRange(r_limits['min'], r_limits['max'])
         self.starting_r.setDecimals(1)
         self.starting_r.setSingleStep(1.0)
         self.starting_r.setSuffix("°")
         self.starting_r.setValue(0.0)
         self.starting_r.setToolTip("First rotation angle (second will be +90°)")
-        layout.addWidget(self.starting_r, row, 1)
-        row += 1
+        layout.addWidget(self.starting_r, 0, 1)
 
-        # Z Stack Range
-        layout.addWidget(QLabel("Z Stack Range:"), row, 0)
-        self.z_stack_range = QDoubleSpinBox()
-        self.z_stack_range.setRange(0.1, 5.0)
-        self.z_stack_range.setDecimals(2)
-        self.z_stack_range.setSingleStep(0.1)
-        self.z_stack_range.setSuffix(" mm")
-        self.z_stack_range.setValue(0.5)
-        self.z_stack_range.setToolTip("+/- distance from center Z for focus stacking")
-        self.z_stack_range.valueChanged.connect(self._update_scan_info)
-        layout.addWidget(self.z_stack_range, row, 1)
-        layout.addWidget(QLabel("(+/-)"), row, 2)
-        row += 1
-
-        # Z Step Size
-        layout.addWidget(QLabel("Z Step Size:"), row, 0)
-        self.z_step_size = QSpinBox()
-        self.z_step_size.setRange(10, 500)
-        self.z_step_size.setSingleStep(10)
-        self.z_step_size.setSuffix(" µm")
-        self.z_step_size.setValue(50)
-        self.z_step_size.setToolTip("Distance between Z positions in focus stack")
-        self.z_step_size.valueChanged.connect(self._update_scan_info)
-        layout.addWidget(self.z_step_size, row, 1)
-        row += 1
-
-        # Tile Overlap
-        layout.addWidget(QLabel("Tile Overlap:"), row, 0)
-        self.tile_overlap = QSpinBox()
-        self.tile_overlap.setRange(0, 50)
-        self.tile_overlap.setSingleStep(5)
-        self.tile_overlap.setSuffix(" %")
-        self.tile_overlap.setValue(10)
-        self.tile_overlap.setToolTip("Percentage overlap between adjacent tiles")
-        self.tile_overlap.valueChanged.connect(self._update_scan_info)
-        layout.addWidget(self.tile_overlap, row, 1)
+        # Get current R button
+        self.get_r_btn = QPushButton("Get Current R")
+        self.get_r_btn.setToolTip("Set starting R to current rotation")
+        self.get_r_btn.clicked.connect(self._get_current_r)
+        layout.addWidget(self.get_r_btn, 0, 2)
 
         group.setLayout(layout)
         return group
@@ -318,17 +348,71 @@ class LED2DOverviewDialog(QDialog):
         group = QGroupBox("Scan Info")
         layout = QVBoxLayout()
 
-        # Info display (calculated based on settings)
         self.tiles_label = QLabel("Tiles: calculating...")
         self.total_tiles_label = QLabel("Total tiles: calculating...")
-        self.est_time_label = QLabel("Est. time: calculating...")
+        self.region_label = QLabel("Region: --")
 
         layout.addWidget(self.tiles_label)
         layout.addWidget(self.total_tiles_label)
-        layout.addWidget(self.est_time_label)
+        layout.addWidget(self.region_label)
 
         group.setLayout(layout)
         return group
+
+    def _refresh_presets(self):
+        """Refresh the preset combo box from PositionPresetService."""
+        self.preset_combo.clear()
+        self.preset_combo.addItem("-- Select preset --")
+
+        try:
+            from py2flamingo.services.position_preset_service import PositionPresetService
+            preset_service = PositionPresetService()
+            preset_names = preset_service.get_preset_names()
+
+            for name in preset_names:
+                self.preset_combo.addItem(name)
+
+            self._logger.info(f"Loaded {len(preset_names)} position presets")
+        except Exception as e:
+            self._logger.error(f"Error loading presets: {e}")
+
+    def _on_load_preset(self):
+        """Load selected preset into target point."""
+        preset_name = self.preset_combo.currentText()
+        if preset_name == "-- Select preset --":
+            return
+
+        target = self.preset_target_combo.currentText()  # "Point A", "Point B", or "Point C"
+
+        try:
+            from py2flamingo.services.position_preset_service import PositionPresetService
+            preset_service = PositionPresetService()
+            preset = preset_service.get_preset(preset_name)
+
+            if preset is None:
+                QMessageBox.warning(self, "Error", f"Preset '{preset_name}' not found")
+                return
+
+            # Load into the appropriate point
+            if target == "Point A":
+                self.point_a_x.setValue(preset.x)
+                self.point_a_y.setValue(preset.y)
+                self.point_a_z.setValue(preset.z)
+            elif target == "Point B":
+                self.point_b_x.setValue(preset.x)
+                self.point_b_y.setValue(preset.y)
+                self.point_b_z.setValue(preset.z)
+            elif target == "Point C":
+                self.point_c_x.setValue(preset.x)
+                self.point_c_y.setValue(preset.y)
+                self.point_c_z.setValue(preset.z)
+
+            self._logger.info(f"Loaded preset '{preset_name}' into {target}")
+            self._update_scan_info()
+
+        except Exception as e:
+            self._logger.error(f"Error loading preset: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to load preset: {e}")
 
     def _get_current_position(self, point: str):
         """Get current stage position and fill in the corresponding point.
@@ -372,11 +456,39 @@ class LED2DOverviewDialog(QDialog):
             self._logger.error(f"Error getting position: {e}")
             QMessageBox.warning(self, "Error", f"Failed to get position: {e}")
 
+    def _get_current_r(self):
+        """Get current rotation and set starting R."""
+        if not self._app or not self._app.sample_view:
+            QMessageBox.warning(self, "Error", "Sample View not available")
+            return
+
+        movement_controller = self._app.sample_view.movement_controller
+        if not movement_controller:
+            QMessageBox.warning(self, "Error", "Movement controller not available")
+            return
+
+        try:
+            pos = movement_controller.get_current_position()
+            if pos is None:
+                QMessageBox.warning(self, "Error", "Could not read stage position")
+                return
+
+            self.starting_r.setValue(pos.r)
+            self._logger.info(f"Set Starting R to {pos.r:.1f}°")
+
+        except Exception as e:
+            self._logger.error(f"Error getting rotation: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to get rotation: {e}")
+
     def _clear_point_c(self):
         """Clear Point C values."""
-        self.point_c_x.setValue(self.point_c_x.minimum())
-        self.point_c_y.setValue(self.point_c_y.minimum())
-        self.point_c_z.setValue(self.point_c_z.minimum())
+        # Set to special "not set" value (min - 1)
+        x_min = self._stage_limits['x']['min']
+        y_min = self._stage_limits['y']['min']
+        z_min = self._stage_limits['z']['min']
+        self.point_c_x.setValue(x_min - 1)
+        self.point_c_y.setValue(y_min - 1)
+        self.point_c_z.setValue(z_min - 1)
         self._update_scan_info()
 
     def _load_current_settings(self):
@@ -391,7 +503,6 @@ class LED2DOverviewDialog(QDialog):
             if panel:
                 source = panel.get_selected_source()
                 self.led_info_label.setText(f"LED: {source}")
-                # TODO: Get intensity value from panel
                 self.intensity_info_label.setText("Intensity: (using current setting)")
             else:
                 self.led_info_label.setText("LED: Panel not available")
@@ -399,6 +510,17 @@ class LED2DOverviewDialog(QDialog):
         except Exception as e:
             self._logger.error(f"Error loading LED settings: {e}")
             self.led_info_label.setText(f"LED: Error - {e}")
+
+    def _is_point_set(self, x_spinbox: QDoubleSpinBox, y_spinbox: QDoubleSpinBox, z_spinbox: QDoubleSpinBox) -> bool:
+        """Check if a point has valid values (not the "not set" special value)."""
+        x_min = self._stage_limits['x']['min']
+        y_min = self._stage_limits['y']['min']
+        z_min = self._stage_limits['z']['min']
+
+        # If any coordinate is at the special "not set" value (min - 1), point is not set
+        return (x_spinbox.value() >= x_min and
+                y_spinbox.value() >= y_min and
+                z_spinbox.value() >= z_min)
 
     def _get_bounding_box(self) -> Optional[BoundingBox]:
         """Calculate bounding box from entered points.
@@ -422,10 +544,8 @@ class LED2DOverviewDialog(QDialog):
             self.point_b_z.value()
         ))
 
-        # Point C (optional - only include if not at minimum)
-        if (self.point_c_x.value() > self.point_c_x.minimum() or
-            self.point_c_y.value() > self.point_c_y.minimum() or
-            self.point_c_z.value() > self.point_c_z.minimum()):
+        # Point C (optional - only include if set)
+        if self._is_point_set(self.point_c_x, self.point_c_y, self.point_c_z):
             points.append((
                 self.point_c_x.value(),
                 self.point_c_y.value(),
@@ -446,7 +566,7 @@ class LED2DOverviewDialog(QDialog):
         )
 
     def _calculate_tile_count(self, bbox: BoundingBox) -> Tuple[int, int]:
-        """Calculate number of tiles needed.
+        """Calculate number of tiles needed (no overlap).
 
         Args:
             bbox: Bounding box for scan region
@@ -455,20 +575,12 @@ class LED2DOverviewDialog(QDialog):
             Tuple of (tiles_x, tiles_y)
         """
         fov = self.DEFAULT_FOV_MM
-        overlap = self.tile_overlap.value() / 100.0
-        effective_step = fov * (1 - overlap)
 
-        # Calculate tiles needed in each dimension
-        tiles_x = max(1, int((bbox.width / effective_step) + 1))
-        tiles_y = max(1, int((bbox.height / effective_step) + 1))
+        # No overlap - tiles are adjacent
+        tiles_x = max(1, int((bbox.width / fov) + 1))
+        tiles_y = max(1, int((bbox.height / fov) + 1))
 
         return tiles_x, tiles_y
-
-    def _calculate_z_positions(self) -> int:
-        """Calculate number of Z positions in the stack."""
-        z_range_mm = self.z_stack_range.value() * 2  # +/- range
-        z_step_mm = self.z_step_size.value() / 1000.0  # convert um to mm
-        return max(1, int(z_range_mm / z_step_mm) + 1)
 
     def _update_scan_info(self):
         """Update the scan info display based on current settings."""
@@ -477,7 +589,7 @@ class LED2DOverviewDialog(QDialog):
         if bbox is None:
             self.tiles_label.setText("Tiles: Enter bounding points")
             self.total_tiles_label.setText("Total tiles: --")
-            self.est_time_label.setText("Est. time: --")
+            self.region_label.setText("Region: --")
             self.start_btn.setEnabled(False)
             self.preview_btn.setEnabled(False)
             return
@@ -486,20 +598,13 @@ class LED2DOverviewDialog(QDialog):
         tiles_per_view = tiles_x * tiles_y
         total_tiles = tiles_per_view * 2  # Two rotation angles
 
-        z_positions = self._calculate_z_positions()
-
-        # Estimate time: ~2 seconds per tile (Z-stack + movement)
-        # This is a rough estimate
-        est_seconds = total_tiles * z_positions * 0.3 + total_tiles * 1.5
-        est_minutes = est_seconds / 60.0
-
         self.tiles_label.setText(f"Tiles: {tiles_x} x {tiles_y} = {tiles_per_view} tiles per view")
-        self.total_tiles_label.setText(f"Total tiles: {total_tiles} (2 rotations), {z_positions} Z positions each")
-
-        if est_minutes < 1:
-            self.est_time_label.setText(f"Est. time: ~{int(est_seconds)} seconds")
-        else:
-            self.est_time_label.setText(f"Est. time: ~{est_minutes:.1f} minutes")
+        self.total_tiles_label.setText(f"Total tiles: {total_tiles} (2 rotations)")
+        self.region_label.setText(
+            f"Region: X [{bbox.x_min:.2f} to {bbox.x_max:.2f}], "
+            f"Y [{bbox.y_min:.2f} to {bbox.y_max:.2f}], "
+            f"Z [{bbox.z_min:.2f} to {bbox.z_max:.2f}] mm"
+        )
 
         self.start_btn.setEnabled(True)
         self.preview_btn.setEnabled(True)
@@ -536,11 +641,8 @@ class LED2DOverviewDialog(QDialog):
         return ScanConfiguration(
             bounding_box=bbox,
             starting_r=self.starting_r.value(),
-            z_stack_range=self.z_stack_range.value(),
-            z_step_size=self.z_step_size.value(),
-            tile_overlap=self.tile_overlap.value(),
             led_name=self.led_info_label.text().replace("LED: ", ""),
-            led_intensity=0.0  # TODO: Get actual intensity
+            led_intensity=0.0  # Using current setting
         )
 
     def _on_preview_clicked(self):
@@ -561,18 +663,19 @@ class LED2DOverviewDialog(QDialog):
             preview = LED2DOverviewResultWindow(
                 config=config,
                 preview_mode=True,
-                parent=self
+                parent=None  # Independent window
             )
             preview.show()
 
         except ImportError as e:
             self._logger.error(f"Could not import result window: {e}")
+            bbox = config.bounding_box
+            tiles_x, tiles_y = self._calculate_tile_count(bbox)
             QMessageBox.information(
                 self, "Preview",
                 f"Preview not yet implemented.\n\n"
                 f"Configuration:\n"
-                f"- Tiles: {self._calculate_tile_count(config.bounding_box)}\n"
-                f"- Z positions: {self._calculate_z_positions()}\n"
+                f"- Tiles: {tiles_x} x {tiles_y}\n"
                 f"- Rotations: {config.starting_r}° and {config.starting_r + 90}°"
             )
 
@@ -591,7 +694,6 @@ class LED2DOverviewDialog(QDialog):
         bbox = config.bounding_box
         tiles_x, tiles_y = self._calculate_tile_count(bbox)
         total_tiles = tiles_x * tiles_y * 2
-        z_positions = self._calculate_z_positions()
 
         reply = QMessageBox.question(
             self,
@@ -601,9 +703,8 @@ class LED2DOverviewDialog(QDialog):
             f"        Y [{bbox.y_min:.2f} to {bbox.y_max:.2f}] mm\n"
             f"        Z [{bbox.z_min:.2f} to {bbox.z_max:.2f}] mm\n\n"
             f"Tiles: {tiles_x} x {tiles_y} = {tiles_x * tiles_y} per rotation\n"
-            f"Z-stack: {z_positions} positions per tile\n"
             f"Rotations: {config.starting_r}° and {config.starting_r + 90}°\n\n"
-            f"Total operations: {total_tiles * z_positions} frame captures\n\n"
+            f"Total: {total_tiles} tiles\n\n"
             "Continue?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
@@ -614,7 +715,7 @@ class LED2DOverviewDialog(QDialog):
 
         self._logger.info(f"Starting LED 2D Overview scan with config: {config}")
 
-        # Emit signal and close dialog
+        # Emit signal
         self.scan_requested.emit(config)
 
         try:
@@ -623,11 +724,10 @@ class LED2DOverviewDialog(QDialog):
             workflow = LED2DOverviewWorkflow(
                 app=self._app,
                 config=config,
-                parent=self
+                parent=None  # Independent
             )
 
-            # Close this dialog and run workflow
-            self.accept()
+            # Don't close dialog - user might want to run again
             workflow.start()
 
         except ImportError as e:

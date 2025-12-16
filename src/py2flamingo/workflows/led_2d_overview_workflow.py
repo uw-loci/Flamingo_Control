@@ -1,14 +1,17 @@
 """LED 2D Overview Workflow.
 
-Executes the LED 2D Overview scan, creating focus-stacked 2D maps
+Executes the LED 2D Overview scan, creating 2D overview maps
 at two rotation angles (R and R+90 degrees).
+
+This creates a rough overview of the sample by capturing one image
+per tile position with no overlap or focus stacking.
 """
 
 import logging
 import time
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Optional, List, Tuple, Dict, Any
+from typing import Optional, List, Tuple
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 from PyQt5.QtWidgets import QApplication
 
@@ -20,9 +23,8 @@ class TileResult:
     """Result for a single tile."""
     x: float
     y: float
-    z_best: float
+    z: float
     image: np.ndarray
-    focus_score: float
     tile_x_idx: int
     tile_y_idx: int
 
@@ -40,11 +42,10 @@ class RotationResult:
 class LED2DOverviewWorkflow(QObject):
     """Workflow for LED 2D Overview scans.
 
-    Creates focus-stacked 2D maps at two rotation angles by:
+    Creates 2D overview maps at two rotation angles by:
     1. Moving to each tile position in a serpentine pattern
-    2. Capturing a Z-stack at each position
-    3. Selecting the best-focused frame using Laplacian variance
-    4. Stitching tiles into a single image for each rotation
+    2. Capturing a single image at each position
+    3. Assembling tiles into a grid for each rotation
 
     Signals:
         scan_started: Emitted when scan begins
@@ -52,7 +53,7 @@ class LED2DOverviewWorkflow(QObject):
         tile_completed: (rotation_idx: int, tile_idx: int, total_tiles: int)
         rotation_completed: (rotation_idx: int, RotationResult)
         scan_completed: (results: List[RotationResult])
-        scan_cancelled: Emitted if cancelled (partial results in last rotation_completed)
+        scan_cancelled: Emitted if cancelled
         scan_error: (error_message: str)
     """
 
@@ -88,7 +89,7 @@ class LED2DOverviewWorkflow(QObject):
         self._current_tile_idx = 0
 
         # Tile positions for current rotation
-        self._tile_positions: List[Tuple[float, float]] = []
+        self._tile_positions: List[Tuple[float, float, float, int, int]] = []  # (x, y, z, tile_x_idx, tile_y_idx)
         self._tiles_x = 0
         self._tiles_y = 0
 
@@ -110,35 +111,39 @@ class LED2DOverviewWorkflow(QObject):
             getattr(self._app, 'position_controller', None)
         )
 
-    def _generate_tile_positions(self) -> List[Tuple[float, float]]:
+    def _generate_tile_positions(self) -> List[Tuple[float, float, float, int, int]]:
         """Generate tile positions using serpentine pattern.
 
         Returns:
-            List of (x, y) positions in serpentine order
+            List of (x, y, z, tile_x_idx, tile_y_idx) positions
         """
         bbox = self._config.bounding_box
         fov = self.DEFAULT_FOV_MM
-        overlap = self._config.tile_overlap / 100.0
-        effective_step = fov * (1 - overlap)
+
+        # No overlap - tiles are adjacent
+        step = fov
 
         # Generate X positions
         x_positions = []
         x = bbox.x_min
-        while x <= bbox.x_max + effective_step / 2:
+        while x <= bbox.x_max + step / 2:
             x_positions.append(x)
-            x += effective_step
+            x += step
 
         # Generate Y positions
         y_positions = []
         y = bbox.y_min
-        while y <= bbox.y_max + effective_step / 2:
+        while y <= bbox.y_max + step / 2:
             y_positions.append(y)
-            y += effective_step
+            y += step
 
         self._tiles_x = len(x_positions)
         self._tiles_y = len(y_positions)
 
-        # Generate serpentine path
+        # Use center Z from bounding box
+        z_center = (bbox.z_min + bbox.z_max) / 2
+
+        # Generate serpentine path with tile indices
         positions = []
         for y_idx, y_pos in enumerate(y_positions):
             if y_idx % 2 == 0:
@@ -147,32 +152,10 @@ class LED2DOverviewWorkflow(QObject):
                 x_range = list(reversed(list(enumerate(x_positions))))
 
             for x_idx, x_pos in x_range:
-                positions.append((x_pos, y_pos))
+                positions.append((x_pos, y_pos, z_center, x_idx, y_idx))
 
         logger.info(f"Generated {len(positions)} tile positions "
                    f"({self._tiles_x} x {self._tiles_y})")
-
-        return positions
-
-    def _generate_z_positions(self) -> List[float]:
-        """Generate Z positions for the focus stack.
-
-        Returns:
-            List of Z positions centered around bounding box center
-        """
-        bbox = self._config.bounding_box
-        z_center = (bbox.z_min + bbox.z_max) / 2
-        z_range = self._config.z_stack_range  # +/- range
-        z_step_mm = self._config.z_step_size / 1000.0  # um to mm
-
-        positions = []
-        z = z_center - z_range
-        while z <= z_center + z_range + z_step_mm / 2:
-            positions.append(z)
-            z += z_step_mm
-
-        logger.info(f"Generated {len(positions)} Z positions "
-                   f"from {positions[0]:.3f} to {positions[-1]:.3f} mm")
 
         return positions
 
@@ -257,7 +240,7 @@ class LED2DOverviewWorkflow(QObject):
             self._finish_rotation()
             return
 
-        x, y = self._tile_positions[self._current_tile_idx]
+        x, y, z, tile_x_idx, tile_y_idx = self._tile_positions[self._current_tile_idx]
         total_tiles = len(self._tile_positions)
 
         # Calculate overall progress
@@ -272,10 +255,10 @@ class LED2DOverviewWorkflow(QObject):
         )
 
         logger.debug(f"Scanning tile {self._current_tile_idx + 1}/{total_tiles}: "
-                    f"X={x:.3f}, Y={y:.3f}")
+                    f"X={x:.3f}, Y={y:.3f}, Z={z:.3f}")
 
         try:
-            tile_result = self._capture_tile(x, y)
+            tile_result = self._capture_tile(x, y, z, tile_x_idx, tile_y_idx)
 
             if tile_result:
                 self._results[self._current_rotation_idx].tiles.append(tile_result)
@@ -299,33 +282,33 @@ class LED2DOverviewWorkflow(QObject):
             self.scan_error.emit(str(e))
             self._running = False
 
-    def _capture_tile(self, x: float, y: float) -> Optional[TileResult]:
-        """Capture a single tile with Z-stack focus detection.
+    def _capture_tile(self, x: float, y: float, z: float,
+                      tile_x_idx: int, tile_y_idx: int) -> Optional[TileResult]:
+        """Capture a single tile image.
 
         Args:
             x: X position in mm
             y: Y position in mm
+            z: Z position in mm
+            tile_x_idx: Tile X index for grid placement
+            tile_y_idx: Tile Y index for grid placement
 
         Returns:
-            TileResult with best-focused image, or None on failure
+            TileResult with captured image, or None on failure
         """
-        from py2flamingo.utils.focus_detection import find_best_focus
         from py2flamingo.models.microscope import Position
 
         movement_controller, camera_controller, position_controller = self._get_controllers()
 
-        # Generate Z positions
-        z_positions = self._generate_z_positions()
-
         # Get current rotation
         try:
             current_pos = movement_controller.get_current_position()
-            current_r = current_pos.r if current_pos else 0.0
+            current_r = current_pos.r if current_pos else self._rotation_angles[self._current_rotation_idx]
         except:
             current_r = self._rotation_angles[self._current_rotation_idx]
 
-        # Move to tile position (X, Y, first Z)
-        target = Position(x=x, y=y, z=z_positions[0], r=current_r)
+        # Move to tile position
+        target = Position(x=x, y=y, z=z, r=current_r)
 
         if position_controller:
             position_controller.move_to_position(target, validate=True)
@@ -333,70 +316,38 @@ class LED2DOverviewWorkflow(QObject):
         else:
             movement_controller.move_absolute('x', x)
             movement_controller.move_absolute('y', y)
-            movement_controller.move_absolute('z', z_positions[0])
+            movement_controller.move_absolute('z', z)
             time.sleep(2.0)
 
-        # Capture Z-stack
-        images = []
-        for z in z_positions:
-            if self._cancelled:
-                return None
+        # Small settling delay
+        time.sleep(0.2)
 
-            # Move to Z position
-            movement_controller.move_absolute('z', z)
-            time.sleep(0.15)  # Small delay for settling
+        # Capture frame
+        frame = camera_controller.get_current_frame()
+        if frame is None:
+            logger.warning(f"No frame captured for tile at ({x:.3f}, {y:.3f})")
+            # Create blank placeholder
+            frame = np.zeros((100, 100), dtype=np.uint8)
 
-            # Capture frame
-            frame = camera_controller.get_current_frame()
-            if frame is not None:
-                images.append(frame.copy())
-            else:
-                # If no frame, create blank
-                images.append(np.zeros((100, 100), dtype=np.uint8))
-
-        if not images:
-            logger.warning(f"No images captured for tile at ({x:.3f}, {y:.3f})")
-            return None
-
-        # Find best focus
-        try:
-            best_idx, best_z, best_image = find_best_focus(images, z_positions)
-            focus_score = 0.0  # Could calculate actual score here
-
-            # Calculate tile indices for stitching
-            # This is approximate - actual indices depend on serpentine pattern
-            bbox = self._config.bounding_box
-            fov = self.DEFAULT_FOV_MM
-            overlap = self._config.tile_overlap / 100.0
-            effective_step = fov * (1 - overlap)
-
-            tile_x_idx = int((x - bbox.x_min) / effective_step + 0.5)
-            tile_y_idx = int((y - bbox.y_min) / effective_step + 0.5)
-
-            return TileResult(
-                x=x,
-                y=y,
-                z_best=best_z,
-                image=best_image,
-                focus_score=focus_score,
-                tile_x_idx=tile_x_idx,
-                tile_y_idx=tile_y_idx
-            )
-
-        except Exception as e:
-            logger.error(f"Error finding best focus: {e}")
-            return None
+        return TileResult(
+            x=x,
+            y=y,
+            z=z,
+            image=frame.copy(),
+            tile_x_idx=tile_x_idx,
+            tile_y_idx=tile_y_idx
+        )
 
     def _finish_rotation(self):
         """Finish the current rotation and move to next."""
         rotation_result = self._results[self._current_rotation_idx]
 
-        # Stitch tiles
+        # Assemble tiles into grid
         try:
-            stitched = self._stitch_tiles(rotation_result)
-            rotation_result.stitched_image = stitched
+            assembled = self._assemble_tiles(rotation_result)
+            rotation_result.stitched_image = assembled
         except Exception as e:
-            logger.error(f"Error stitching tiles: {e}")
+            logger.error(f"Error assembling tiles: {e}")
 
         self.rotation_completed.emit(self._current_rotation_idx, rotation_result)
 
@@ -406,14 +357,14 @@ class LED2DOverviewWorkflow(QObject):
         self._current_rotation_idx += 1
         QTimer.singleShot(500, self._start_rotation)
 
-    def _stitch_tiles(self, result: RotationResult) -> Optional[np.ndarray]:
-        """Stitch tiles into a single image.
+    def _assemble_tiles(self, result: RotationResult) -> Optional[np.ndarray]:
+        """Assemble tiles into a single grid image.
 
         Args:
             result: RotationResult containing tiles
 
         Returns:
-            Stitched image as numpy array, or None on failure
+            Assembled image as numpy array, or None on failure
         """
         if not result.tiles:
             return None
@@ -422,16 +373,9 @@ class LED2DOverviewWorkflow(QObject):
         first_tile = result.tiles[0].image
         tile_h, tile_w = first_tile.shape[:2]
 
-        # Calculate overlap in pixels
-        overlap_pct = self._config.tile_overlap / 100.0
-        overlap_px = int(tile_w * overlap_pct)
-
-        # Calculate output dimensions
-        effective_tile_w = tile_w - overlap_px
-        effective_tile_h = tile_h - overlap_px
-
-        output_w = effective_tile_w * result.tiles_x + overlap_px
-        output_h = effective_tile_h * result.tiles_y + overlap_px
+        # No overlap - tiles are adjacent
+        output_w = tile_w * result.tiles_x
+        output_h = tile_h * result.tiles_y
 
         # Create output array
         if len(first_tile.shape) == 3:
@@ -441,15 +385,17 @@ class LED2DOverviewWorkflow(QObject):
 
         # Place tiles
         for tile in result.tiles:
-            x_offset = tile.tile_x_idx * effective_tile_w
-            y_offset = tile.tile_y_idx * effective_tile_h
+            x_offset = tile.tile_x_idx * tile_w
+            y_offset = tile.tile_y_idx * tile_h
 
             # Ensure we don't exceed bounds
             x_end = min(x_offset + tile_w, output_w)
             y_end = min(y_offset + tile_h, output_h)
 
-            tile_crop = tile.image[:y_end - y_offset, :x_end - x_offset]
-            output[y_offset:y_end, x_offset:x_end] = tile_crop
+            tile_crop_w = x_end - x_offset
+            tile_crop_h = y_end - y_offset
+
+            output[y_offset:y_end, x_offset:x_end] = tile.image[:tile_crop_h, :tile_crop_w]
 
         return output
 

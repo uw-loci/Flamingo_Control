@@ -318,7 +318,7 @@ class LED2DOverviewResultWindow(QWidget):
                     result1.tiles_y
                 )
                 # Set tile coordinates
-                coords = [(t.x, t.y, t.z_best) for t in result1.tiles]
+                coords = [(t.x, t.y, t.z) for t in result1.tiles]
                 self.left_panel.set_tile_coordinates(coords)
 
         # Display second rotation
@@ -332,7 +332,7 @@ class LED2DOverviewResultWindow(QWidget):
                     result2.tiles_x,
                     result2.tiles_y
                 )
-                coords = [(t.x, t.y, t.z_best) for t in result2.tiles]
+                coords = [(t.x, t.y, t.z) for t in result2.tiles]
                 self.right_panel.set_tile_coordinates(coords)
 
         # Update info text
@@ -400,8 +400,8 @@ class LED2DOverviewResultWindow(QWidget):
             lines.append(f"  Tiles: {result.tiles_x} x {result.tiles_y} = {len(result.tiles)}")
 
             if result.tiles:
-                z_values = [t.z_best for t in result.tiles]
-                lines.append(f"  Z range: {min(z_values):.3f} to {max(z_values):.3f} mm")
+                z_values = [t.z for t in result.tiles]
+                lines.append(f"  Z: {z_values[0]:.3f} mm")
 
         if self._config:
             bbox = self._config.bounding_box
