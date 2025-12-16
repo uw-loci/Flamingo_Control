@@ -448,7 +448,7 @@ class MainWindow(QMainWindow):
             if not movement_controller:
                 raise RuntimeError("Movement controller not available")
 
-            current_pos = movement_controller.get_current_position()
+            current_pos = movement_controller.get_position()
             if not current_pos:
                 raise RuntimeError("Could not read current position")
 

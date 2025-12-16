@@ -2257,9 +2257,9 @@ class SampleView(QWidget):
         try:
             # Get current stage position from movement controller
             if self.movement_controller:
-                pos = self.movement_controller.get_current_position()
+                pos = self.movement_controller.get_position()
                 if pos:
-                    x, y, z = pos.get('x', 0), pos.get('y', 0), pos.get('z', 0)
+                    x, y, z = pos.x, pos.y, pos.z
 
                     # Update holder position on each plane
                     self.xz_plane_viewer.set_holder_position(x, z)

@@ -302,7 +302,7 @@ class LED2DOverviewWorkflow(QObject):
 
         # Get current rotation
         try:
-            current_pos = movement_controller.get_current_position()
+            current_pos = movement_controller.get_position()
             current_r = current_pos.r if current_pos else self._rotation_angles[self._current_rotation_idx]
         except:
             current_r = self._rotation_angles[self._current_rotation_idx]

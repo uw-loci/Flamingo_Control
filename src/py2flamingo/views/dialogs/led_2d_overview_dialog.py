@@ -430,7 +430,7 @@ class LED2DOverviewDialog(QDialog):
             return
 
         try:
-            pos = movement_controller.get_current_position()
+            pos = movement_controller.get_position()
             if pos is None:
                 QMessageBox.warning(self, "Error", "Could not read stage position")
                 return
@@ -468,7 +468,7 @@ class LED2DOverviewDialog(QDialog):
             return
 
         try:
-            pos = movement_controller.get_current_position()
+            pos = movement_controller.get_position()
             if pos is None:
                 QMessageBox.warning(self, "Error", "Could not read stage position")
                 return
