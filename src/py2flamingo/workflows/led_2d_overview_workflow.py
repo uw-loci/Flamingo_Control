@@ -282,21 +282,22 @@ class LED2DOverviewWorkflow(QObject):
             self.scan_error.emit(str(e))
             self._running = False
 
-    def _capture_tile(self, x: float, y: float, z: float,
+    def _capture_tile(self, x: float, y: float, z_center: float,
                       tile_x_idx: int, tile_y_idx: int) -> Optional[TileResult]:
-        """Capture a single tile image.
+        """Capture a tile with Z-stack and select best focus.
 
         Args:
             x: X position in mm
             y: Y position in mm
-            z: Z position in mm
+            z_center: Center Z position in mm
             tile_x_idx: Tile X index for grid placement
             tile_y_idx: Tile Y index for grid placement
 
         Returns:
-            TileResult with captured image, or None on failure
+            TileResult with best-focused image, or None on failure
         """
         from py2flamingo.models.microscope import Position
+        from py2flamingo.utils.focus_detection import variance_of_laplacian
 
         movement_controller, camera_controller, position_controller = self._get_controllers()
 
@@ -307,8 +308,8 @@ class LED2DOverviewWorkflow(QObject):
         except:
             current_r = self._rotation_angles[self._current_rotation_idx]
 
-        # Move to tile position
-        target = Position(x=x, y=y, z=z, r=current_r)
+        # Move to XY position first
+        target = Position(x=x, y=y, z=z_center, r=current_r)
 
         if position_controller:
             position_controller.move_to_position(target, validate=True)
@@ -316,29 +317,78 @@ class LED2DOverviewWorkflow(QObject):
         else:
             movement_controller.move_absolute('x', x)
             movement_controller.move_absolute('y', y)
-            movement_controller.move_absolute('z', z)
+            movement_controller.move_absolute('z', z_center)
             time.sleep(2.0)
 
-        # Small settling delay
-        time.sleep(0.2)
+        # Calculate Z positions for stack
+        z_range = self._config.z_stack_range
+        z_step = self._config.z_step_size
+        z_positions = []
+        z = z_center - z_range
+        while z <= z_center + z_range:
+            z_positions.append(z)
+            z += z_step
 
-        # Capture frame - get_latest_frame returns (image, header, frame_number) tuple
-        frame_data = camera_controller.get_latest_frame()
-        if frame_data is None:
-            logger.warning(f"No frame captured for tile at ({x:.3f}, {y:.3f})")
-            # Create blank placeholder
-            frame = np.zeros((100, 100), dtype=np.uint8)
+        logger.debug(f"Capturing Z-stack: {len(z_positions)} planes from {z_positions[0]:.3f} to {z_positions[-1]:.3f}")
+
+        # Capture frames at each Z position
+        frames = []  # List of (z, image, focus_score)
+        for z_pos in z_positions:
+            # Move to Z
+            movement_controller.move_absolute('z', z_pos)
+            time.sleep(0.15)  # Small settling delay
+
+            # Capture frame
+            frame_data = camera_controller.get_latest_frame()
+            if frame_data is not None:
+                image = frame_data[0]
+                focus_score = variance_of_laplacian(image)
+                frames.append((z_pos, image.copy(), focus_score))
+
+        if not frames:
+            logger.warning(f"No frames captured for tile at ({x:.3f}, {y:.3f})")
+            return TileResult(
+                x=x, y=y, z=z_center,
+                image=np.zeros((100, 100), dtype=np.uint8),
+                tile_x_idx=tile_x_idx, tile_y_idx=tile_y_idx
+            )
+
+        # Check if focus stacking is requested
+        if self._config.use_focus_stacking:
+            # TODO: Implement full focus stacking (combine best-focused regions)
+            best_frame = self._focus_stack_frames(frames)
+            best_z = z_center  # Focus-stacked image represents composite
         else:
-            frame = frame_data[0]  # Extract image array from tuple
+            # Select single best-focused frame
+            best_z, best_frame, best_score = max(frames, key=lambda f: f[2])
+            logger.debug(f"Best focus at Z={best_z:.3f} (score={best_score:.1f})")
 
         return TileResult(
             x=x,
             y=y,
-            z=z,
-            image=frame.copy(),
+            z=best_z,
+            image=best_frame,
             tile_x_idx=tile_x_idx,
             tile_y_idx=tile_y_idx
         )
+
+    def _focus_stack_frames(self, frames: list) -> np.ndarray:
+        """Combine frames using focus stacking.
+
+        TODO: Implement proper focus stacking that combines
+        the best-focused regions from each frame.
+
+        Args:
+            frames: List of (z, image, focus_score) tuples
+
+        Returns:
+            Focus-stacked composite image
+        """
+        # For now, just return the best-focused frame
+        # TODO: Implement Laplacian pyramid blending or similar
+        logger.warning("Focus stacking not yet implemented - using best single frame")
+        _, best_frame, _ = max(frames, key=lambda f: f[2])
+        return best_frame
 
     def _finish_rotation(self):
         """Finish the current rotation and move to next."""
@@ -425,12 +475,13 @@ class LED2DOverviewWorkflow(QObject):
         try:
             from py2flamingo.views.dialogs.led_2d_overview_result import LED2DOverviewResultWindow
 
-            result_window = LED2DOverviewResultWindow(
+            # Keep reference to prevent garbage collection
+            self._result_window = LED2DOverviewResultWindow(
                 results=self._results,
                 config=self._config,
                 parent=None  # Make it independent window
             )
-            result_window.show()
+            self._result_window.show()
 
         except ImportError as e:
             logger.error(f"Could not import result window: {e}")
