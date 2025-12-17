@@ -3,8 +3,13 @@
 Executes the LED 2D Overview scan, creating 2D overview maps
 at two rotation angles (R and R+90 degrees).
 
-This creates a rough overview of the sample by capturing one image
-per tile position with no overlap or focus stacking.
+At each rotation, the workflow:
+- Tiles across the visible face of the sample (X-Y for R, Z-Y for R+90)
+- Captures a Z-stack at each tile and selects the best-focused frame
+- Assembles tiles into a grid image
+
+The bounding box dimensions are swapped for the rotated view because
+rotating the sample 90 degrees swaps X and Z from the camera's perspective.
 """
 
 import logging
@@ -39,13 +44,30 @@ class RotationResult:
     tiles_y: int = 0
 
 
+@dataclass
+class EffectiveBoundingBox:
+    """Bounding box with swapped dimensions for rotation.
+
+    For R=0°: tile_x/y define the tiling grid, z_min/max define Z-stack
+    For R=90°: original Z becomes tile_x, original X becomes z depth
+    """
+    tile_x_min: float
+    tile_x_max: float
+    tile_y_min: float
+    tile_y_max: float
+    z_min: float
+    z_max: float
+
+
 class LED2DOverviewWorkflow(QObject):
     """Workflow for LED 2D Overview scans.
 
     Creates 2D overview maps at two rotation angles by:
-    1. Moving to each tile position in a serpentine pattern
-    2. Capturing a single image at each position
-    3. Assembling tiles into a grid for each rotation
+    1. For each rotation, calculating the effective bounding box
+       (swapping X and Z dimensions for the rotated view)
+    2. Moving to each tile position in a serpentine pattern
+    3. Capturing a Z-stack at each position and selecting best focus
+    4. Assembling tiles into a grid for each rotation
 
     Signals:
         scan_started: Emitted when scan begins
@@ -88,16 +110,52 @@ class LED2DOverviewWorkflow(QObject):
         self._current_rotation_idx = 0
         self._current_tile_idx = 0
 
-        # Tile positions for current rotation
-        self._tile_positions: List[Tuple[float, float, float, int, int]] = []  # (x, y, z, tile_x_idx, tile_y_idx)
+        # Tile positions for CURRENT rotation (regenerated for each rotation)
+        self._tile_positions: List[Tuple[float, float, float, int, int]] = []
         self._tiles_x = 0
         self._tiles_y = 0
+        self._current_effective_bbox: Optional[EffectiveBoundingBox] = None
 
         # Calculate rotation angles
         self._rotation_angles = [
             config.starting_r,
             config.starting_r + 90.0
         ]
+
+    def _get_effective_bbox(self, rotation_idx: int) -> EffectiveBoundingBox:
+        """Get the effective bounding box for a rotation.
+
+        At R=0°: Use original bbox (tile X-Y, Z-stack through Z)
+        At R=90°: Swap X and Z (tile Z-Y, Z-stack through X)
+
+        Args:
+            rotation_idx: 0 for first rotation, 1 for rotated view
+
+        Returns:
+            EffectiveBoundingBox with appropriate dimensions
+        """
+        bbox = self._config.bounding_box
+
+        if rotation_idx == 0:
+            # First rotation: tile across X-Y, Z-stack through Z
+            return EffectiveBoundingBox(
+                tile_x_min=bbox.x_min,
+                tile_x_max=bbox.x_max,
+                tile_y_min=bbox.y_min,
+                tile_y_max=bbox.y_max,
+                z_min=bbox.z_min,
+                z_max=bbox.z_max
+            )
+        else:
+            # Rotated view: original Z becomes X (tiling), original X becomes Z (depth)
+            return EffectiveBoundingBox(
+                tile_x_min=bbox.z_min,
+                tile_x_max=bbox.z_max,
+                tile_y_min=bbox.y_min,
+                tile_y_max=bbox.y_max,
+                z_min=bbox.x_min,
+                z_max=bbox.x_max
+            )
 
     def _get_controllers(self):
         """Get required controllers from app."""
@@ -111,37 +169,40 @@ class LED2DOverviewWorkflow(QObject):
             getattr(self._app, 'position_controller', None)
         )
 
-    def _generate_tile_positions(self) -> List[Tuple[float, float, float, int, int]]:
+    def _generate_tile_positions(self, effective_bbox: EffectiveBoundingBox) -> List[Tuple[float, float, float, int, int]]:
         """Generate tile positions using serpentine pattern.
+
+        Args:
+            effective_bbox: The effective bounding box for this rotation
+                           (with X/Z swapped for rotated view)
 
         Returns:
             List of (x, y, z, tile_x_idx, tile_y_idx) positions
         """
-        bbox = self._config.bounding_box
         fov = self.DEFAULT_FOV_MM
 
         # No overlap - tiles are adjacent
         step = fov
 
-        # Generate X positions
+        # Generate X positions (using effective tile_x range)
         x_positions = []
-        x = bbox.x_min
-        while x <= bbox.x_max + step / 2:
+        x = effective_bbox.tile_x_min
+        while x <= effective_bbox.tile_x_max + step / 2:
             x_positions.append(x)
             x += step
 
-        # Generate Y positions
+        # Generate Y positions (Y is unchanged between rotations)
         y_positions = []
-        y = bbox.y_min
-        while y <= bbox.y_max + step / 2:
+        y = effective_bbox.tile_y_min
+        while y <= effective_bbox.tile_y_max + step / 2:
             y_positions.append(y)
             y += step
 
         self._tiles_x = len(x_positions)
         self._tiles_y = len(y_positions)
 
-        # Use center Z from bounding box
-        z_center = (bbox.z_min + bbox.z_max) / 2
+        # Use center Z from effective bounding box (this is the Z-stack center)
+        z_center = (effective_bbox.z_min + effective_bbox.z_max) / 2
 
         # Generate serpentine path with tile indices
         positions = []
@@ -155,7 +216,10 @@ class LED2DOverviewWorkflow(QObject):
                 positions.append((x_pos, y_pos, z_center, x_idx, y_idx))
 
         logger.info(f"Generated {len(positions)} tile positions "
-                   f"({self._tiles_x} x {self._tiles_y})")
+                   f"({self._tiles_x} x {self._tiles_y}) for effective bbox: "
+                   f"X=[{effective_bbox.tile_x_min:.2f}, {effective_bbox.tile_x_max:.2f}], "
+                   f"Y=[{effective_bbox.tile_y_min:.2f}, {effective_bbox.tile_y_max:.2f}], "
+                   f"Z-stack=[{effective_bbox.z_min:.2f}, {effective_bbox.z_max:.2f}]")
 
         return positions
 
@@ -170,11 +234,16 @@ class LED2DOverviewWorkflow(QObject):
         self._results = []
         self._current_rotation_idx = 0
 
-        # Generate tile positions
-        self._tile_positions = self._generate_tile_positions()
+        # Calculate total tiles across both rotations
+        total_tiles = 0
+        for i in range(len(self._rotation_angles)):
+            eff_bbox = self._get_effective_bbox(i)
+            fov = self.DEFAULT_FOV_MM
+            tiles_x = max(1, int((eff_bbox.tile_x_max - eff_bbox.tile_x_min) / fov) + 1)
+            tiles_y = max(1, int((eff_bbox.tile_y_max - eff_bbox.tile_y_min) / fov) + 1)
+            total_tiles += tiles_x * tiles_y
 
-        total_tiles = len(self._tile_positions) * len(self._rotation_angles)
-        logger.info(f"Starting LED 2D Overview: {total_tiles} total tiles, "
+        logger.info(f"Starting LED 2D Overview: ~{total_tiles} total tiles, "
                    f"rotations: {self._rotation_angles}")
 
         self.scan_started.emit()
@@ -206,6 +275,12 @@ class LED2DOverviewWorkflow(QObject):
             f"Moving to rotation {rotation}°",
             (self._current_rotation_idx / len(self._rotation_angles)) * 100
         )
+
+        # Get effective bounding box for this rotation (X/Z swapped for rotated view)
+        self._current_effective_bbox = self._get_effective_bbox(self._current_rotation_idx)
+
+        # Generate tile positions for this rotation
+        self._tile_positions = self._generate_tile_positions(self._current_effective_bbox)
 
         # Create result container for this rotation
         self._results.append(RotationResult(
@@ -320,12 +395,13 @@ class LED2DOverviewWorkflow(QObject):
             movement_controller.move_absolute('z', z_center)
             time.sleep(2.0)
 
-        # Calculate Z positions for stack using bounding box Z range
-        bbox = self._config.bounding_box
+        # Calculate Z positions for stack using effective bounding box Z range
+        # (For rotated view, this is the original X range swapped to Z)
+        eff_bbox = self._current_effective_bbox
         z_step = self._config.z_step_size
         z_positions = []
-        z = bbox.z_min
-        while z <= bbox.z_max:
+        z = eff_bbox.z_min
+        while z <= eff_bbox.z_max:
             z_positions.append(z)
             z += z_step
 

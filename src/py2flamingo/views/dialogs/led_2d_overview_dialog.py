@@ -608,7 +608,12 @@ class LED2DOverviewDialog(QDialog):
         return tiles_x, tiles_y
 
     def _update_scan_info(self):
-        """Update the scan info display based on current settings."""
+        """Update the scan info display based on current settings.
+
+        Shows tile counts for both rotations:
+        - R: Tiles across X-Y, Z-stack through Z
+        - R+90: Tiles across Z-Y (swapped), Z-stack through X (swapped)
+        """
         bbox = self._get_bounding_box()
 
         if bbox is None:
@@ -620,23 +625,39 @@ class LED2DOverviewDialog(QDialog):
             self.preview_btn.setEnabled(False)
             return
 
-        tiles_x, tiles_y = self._calculate_tile_count(bbox)
-        tiles_per_view = tiles_x * tiles_y
-        total_tiles = tiles_per_view * 2  # Two rotation angles
-
-        # Calculate Z planes from bounding box depth
-        z_depth = bbox.z_max - bbox.z_min
+        fov = self.DEFAULT_FOV_MM
         z_step = self.z_step_size.value()
-        z_planes = max(1, int(z_depth / z_step) + 1)
-        total_frames = total_tiles * z_planes
 
-        self.tiles_label.setText(f"Tiles: {tiles_x} x {tiles_y} = {tiles_per_view} tiles per view")
-        self.total_tiles_label.setText(f"Total tiles: {total_tiles} (2 rotations)")
-        self.z_planes_label.setText(f"Z planes: {z_planes} per tile ({total_frames} total frames)")
+        # Rotation 1 (R): tile across X-Y, Z-stack through Z
+        tiles_x_r1 = max(1, int((bbox.width / fov) + 1))
+        tiles_y_r1 = max(1, int((bbox.height / fov) + 1))
+        tiles_r1 = tiles_x_r1 * tiles_y_r1
+        z_depth_r1 = bbox.z_max - bbox.z_min
+        z_planes_r1 = max(1, int(z_depth_r1 / z_step) + 1)
+
+        # Rotation 2 (R+90): tile across Z-Y (X and Z swapped), Z-stack through X
+        tiles_x_r2 = max(1, int((bbox.depth / fov) + 1))  # Original Z becomes X
+        tiles_y_r2 = tiles_y_r1  # Y unchanged
+        tiles_r2 = tiles_x_r2 * tiles_y_r2
+        z_depth_r2 = bbox.width  # Original X becomes Z depth
+        z_planes_r2 = max(1, int(z_depth_r2 / z_step) + 1)
+
+        total_tiles = tiles_r1 + tiles_r2
+        total_frames = (tiles_r1 * z_planes_r1) + (tiles_r2 * z_planes_r2)
+
+        self.tiles_label.setText(
+            f"R: {tiles_x_r1}×{tiles_y_r1}={tiles_r1} tiles, {z_planes_r1} Z planes  |  "
+            f"R+90: {tiles_x_r2}×{tiles_y_r2}={tiles_r2} tiles, {z_planes_r2} Z planes"
+        )
+        self.total_tiles_label.setText(f"Total: {total_tiles} tiles, {total_frames} frames")
+        self.z_planes_label.setText(
+            f"Z step: {z_step*1000:.0f} µm  |  "
+            f"R depth: {z_depth_r1:.2f} mm  |  R+90 depth: {z_depth_r2:.2f} mm"
+        )
         self.region_label.setText(
-            f"Region: X [{bbox.x_min:.2f} to {bbox.x_max:.2f}], "
-            f"Y [{bbox.y_min:.2f} to {bbox.y_max:.2f}], "
-            f"Z [{bbox.z_min:.2f} to {bbox.z_max:.2f}] mm"
+            f"Bbox: X [{bbox.x_min:.2f}, {bbox.x_max:.2f}], "
+            f"Y [{bbox.y_min:.2f}, {bbox.y_max:.2f}], "
+            f"Z [{bbox.z_min:.2f}, {bbox.z_max:.2f}] mm"
         )
 
         self.start_btn.setEnabled(True)
