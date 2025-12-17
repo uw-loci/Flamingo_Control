@@ -46,7 +46,6 @@ class ScanConfiguration:
     starting_r: float  # Rotation angle in degrees
     led_name: str
     led_intensity: float
-    z_stack_range: float = 0.5  # +/- mm from center Z
     z_step_size: float = 0.050  # mm (50 um default)
     use_focus_stacking: bool = False  # If True, use full focus stacking (TODO)
 
@@ -321,21 +320,8 @@ class LED2DOverviewDialog(QDialog):
         self.get_r_btn.clicked.connect(self._get_current_r)
         layout.addWidget(self.get_r_btn, 0, 2)
 
-        # Z-stack range
-        layout.addWidget(QLabel("Z Stack Range:"), 1, 0)
-        self.z_stack_range = QDoubleSpinBox()
-        self.z_stack_range.setRange(0.1, 5.0)
-        self.z_stack_range.setDecimals(2)
-        self.z_stack_range.setSingleStep(0.1)
-        self.z_stack_range.setSuffix(" mm")
-        self.z_stack_range.setValue(0.5)
-        self.z_stack_range.setToolTip("+/- range from center Z for focus search")
-        self.z_stack_range.valueChanged.connect(self._update_scan_info)
-        layout.addWidget(self.z_stack_range, 1, 1)
-        layout.addWidget(QLabel("(±)"), 1, 2)
-
         # Z step size
-        layout.addWidget(QLabel("Z Step Size:"), 2, 0)
+        layout.addWidget(QLabel("Z Step Size:"), 1, 0)
         self.z_step_size = QDoubleSpinBox()
         self.z_step_size.setRange(0.010, 0.500)
         self.z_step_size.setDecimals(3)
@@ -344,7 +330,7 @@ class LED2DOverviewDialog(QDialog):
         self.z_step_size.setValue(0.050)
         self.z_step_size.setToolTip("Z step size for focus search (50 µm default)")
         self.z_step_size.valueChanged.connect(self._update_scan_info)
-        layout.addWidget(self.z_step_size, 2, 1)
+        layout.addWidget(self.z_step_size, 1, 1)
 
         # Focus stacking checkbox
         self.focus_stacking_checkbox = QCheckBox("Use focus stacking (slower)")
@@ -353,7 +339,7 @@ class LED2DOverviewDialog(QDialog):
             "If unchecked, uses single best-focused frame per tile."
         )
         self.focus_stacking_checkbox.setChecked(False)
-        layout.addWidget(self.focus_stacking_checkbox, 3, 0, 1, 3)
+        layout.addWidget(self.focus_stacking_checkbox, 2, 0, 1, 3)
 
         group.setLayout(layout)
         return group
@@ -638,10 +624,10 @@ class LED2DOverviewDialog(QDialog):
         tiles_per_view = tiles_x * tiles_y
         total_tiles = tiles_per_view * 2  # Two rotation angles
 
-        # Calculate Z planes
-        z_range = self.z_stack_range.value()
+        # Calculate Z planes from bounding box depth
+        z_depth = bbox.z_max - bbox.z_min
         z_step = self.z_step_size.value()
-        z_planes = int((2 * z_range) / z_step) + 1
+        z_planes = max(1, int(z_depth / z_step) + 1)
         total_frames = total_tiles * z_planes
 
         self.tiles_label.setText(f"Tiles: {tiles_x} x {tiles_y} = {tiles_per_view} tiles per view")
@@ -690,7 +676,6 @@ class LED2DOverviewDialog(QDialog):
             starting_r=self.starting_r.value(),
             led_name=self.led_info_label.text().replace("LED: ", ""),
             led_intensity=0.0,  # Using current setting
-            z_stack_range=self.z_stack_range.value(),
             z_step_size=self.z_step_size.value(),
             use_focus_stacking=self.focus_stacking_checkbox.isChecked()
         )

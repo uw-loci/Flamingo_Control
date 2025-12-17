@@ -320,12 +320,12 @@ class LED2DOverviewWorkflow(QObject):
             movement_controller.move_absolute('z', z_center)
             time.sleep(2.0)
 
-        # Calculate Z positions for stack
-        z_range = self._config.z_stack_range
+        # Calculate Z positions for stack using bounding box Z range
+        bbox = self._config.bounding_box
         z_step = self._config.z_step_size
         z_positions = []
-        z = z_center - z_range
-        while z <= z_center + z_range:
+        z = bbox.z_min
+        while z <= bbox.z_max:
             z_positions.append(z)
             z += z_step
 
