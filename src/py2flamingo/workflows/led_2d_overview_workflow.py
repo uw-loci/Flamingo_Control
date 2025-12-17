@@ -456,16 +456,19 @@ class LED2DOverviewWorkflow(QObject):
             TileResult with best-focused image, or None on failure
         """
         from py2flamingo.utils.focus_detection import variance_of_laplacian
+        from py2flamingo.services.stage_service import StageService, AxisCode
 
-        movement_controller, camera_controller, _ = self._get_controllers()
+        _, camera_controller, _ = self._get_controllers()
 
-        # Move to XY position using movement_controller directly
-        # (avoids race conditions with position_controller's movement lock)
+        # Get stage service for direct movement (bypasses position_controller lock)
+        stage_service = StageService(self._app.connection_service)
+
+        # Move to XY position using stage service directly
         logger.debug(f"Moving to tile position X={x:.3f}, Y={y:.3f}")
-        movement_controller.move_absolute('x', x)
-        time.sleep(0.3)  # Wait for X move
-        movement_controller.move_absolute('y', y)
-        time.sleep(0.3)  # Wait for Y move
+        stage_service.move_to_position(AxisCode.X_AXIS, x)
+        time.sleep(0.5)  # Wait for X move
+        stage_service.move_to_position(AxisCode.Y_AXIS, y)
+        time.sleep(0.5)  # Wait for Y move
 
         # Calculate Z positions for stack using effective bounding box Z range
         # (For rotated view, this is the original X range swapped to Z)
@@ -482,9 +485,9 @@ class LED2DOverviewWorkflow(QObject):
         # Capture frames at each Z position
         frames = []  # List of (z, image, focus_score)
         for z_pos in z_positions:
-            # Move to Z
-            movement_controller.move_absolute('z', z_pos)
-            time.sleep(0.2)  # Wait for Z move and settling
+            # Move to Z using stage service directly
+            stage_service.move_to_position(AxisCode.Z_AXIS, z_pos)
+            time.sleep(0.25)  # Wait for Z move and settling
 
             # Capture frame
             frame_data = camera_controller.get_latest_frame()
