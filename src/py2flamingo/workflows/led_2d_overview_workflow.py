@@ -455,29 +455,17 @@ class LED2DOverviewWorkflow(QObject):
         Returns:
             TileResult with best-focused image, or None on failure
         """
-        from py2flamingo.models.microscope import Position
         from py2flamingo.utils.focus_detection import variance_of_laplacian
 
-        movement_controller, camera_controller, position_controller = self._get_controllers()
+        movement_controller, camera_controller, _ = self._get_controllers()
 
-        # Get current rotation
-        try:
-            current_pos = movement_controller.get_position()
-            current_r = current_pos.r if current_pos else self._rotation_angles[self._current_rotation_idx]
-        except:
-            current_r = self._rotation_angles[self._current_rotation_idx]
-
-        # Move to XY position first
-        target = Position(x=x, y=y, z=z_center, r=current_r)
-
-        if position_controller:
-            position_controller.move_to_position(target, validate=True)
-            position_controller.wait_for_movement_complete(timeout=10.0)
-        else:
-            movement_controller.move_absolute('x', x)
-            movement_controller.move_absolute('y', y)
-            movement_controller.move_absolute('z', z_center)
-            time.sleep(2.0)
+        # Move to XY position using movement_controller directly
+        # (avoids race conditions with position_controller's movement lock)
+        logger.debug(f"Moving to tile position X={x:.3f}, Y={y:.3f}")
+        movement_controller.move_absolute('x', x)
+        time.sleep(0.3)  # Wait for X move
+        movement_controller.move_absolute('y', y)
+        time.sleep(0.3)  # Wait for Y move
 
         # Calculate Z positions for stack using effective bounding box Z range
         # (For rotated view, this is the original X range swapped to Z)
@@ -496,7 +484,7 @@ class LED2DOverviewWorkflow(QObject):
         for z_pos in z_positions:
             # Move to Z
             movement_controller.move_absolute('z', z_pos)
-            time.sleep(0.15)  # Small settling delay
+            time.sleep(0.2)  # Wait for Z move and settling
 
             # Capture frame
             frame_data = camera_controller.get_latest_frame()
