@@ -322,12 +322,14 @@ class LED2DOverviewWorkflow(QObject):
         # Small settling delay
         time.sleep(0.2)
 
-        # Capture frame
-        frame = camera_controller.get_current_frame()
-        if frame is None:
+        # Capture frame - get_latest_frame returns (image, header, frame_number) tuple
+        frame_data = camera_controller.get_latest_frame()
+        if frame_data is None:
             logger.warning(f"No frame captured for tile at ({x:.3f}, {y:.3f})")
             # Create blank placeholder
             frame = np.zeros((100, 100), dtype=np.uint8)
+        else:
+            frame = frame_data[0]  # Extract image array from tuple
 
         return TileResult(
             x=x,
