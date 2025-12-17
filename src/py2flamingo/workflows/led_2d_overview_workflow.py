@@ -116,17 +116,79 @@ class LED2DOverviewWorkflow(QObject):
         self._tiles_y = 0
         self._current_effective_bbox: Optional[EffectiveBoundingBox] = None
 
-        # Calculate rotation angles
-        self._rotation_angles = [
-            config.starting_r,
-            config.starting_r + 90.0
-        ]
+        # Get tip position for rotation axis (required for second rotation)
+        self._tip_position = self._get_tip_position()
+
+        # Calculate rotation angles - only include second rotation if tip is calibrated
+        if self._tip_position is not None:
+            self._rotation_angles = [
+                config.starting_r,
+                config.starting_r + 90.0
+            ]
+            logger.info(f"Tip position found at X={self._tip_position[0]:.3f}, Z={self._tip_position[1]:.3f} - "
+                       f"will scan both rotations")
+        else:
+            self._rotation_angles = [config.starting_r]
+            logger.warning("Tip position not calibrated - only scanning first rotation. "
+                          "Use Tools > Calibrate to enable second rotation.")
+
+    def _get_tip_position(self) -> Optional[Tuple[float, float]]:
+        """Get the sample holder tip position from presets.
+
+        The tip position defines the Y-axis rotation center in the X-Z plane.
+
+        Returns:
+            Tuple of (x, z) for tip position, or None if not calibrated
+        """
+        try:
+            from py2flamingo.services.position_preset_service import PositionPresetService
+            preset_service = PositionPresetService()
+            preset = preset_service.get_preset("Tip of sample mount")
+
+            if preset is not None:
+                return (preset.x, preset.z)
+            else:
+                logger.warning("'Tip of sample mount' preset not found")
+                return None
+        except Exception as e:
+            logger.error(f"Error loading tip position: {e}")
+            return None
+
+    def _rotate_point_90(self, x: float, z: float) -> Tuple[float, float]:
+        """Rotate a point 90° around the tip position.
+
+        Uses the sample holder tip as the rotation axis. When the sample
+        rotates 90°, points transform around this axis.
+
+        For 90° rotation around (x_tip, z_tip):
+            x' = x_tip + (z - z_tip)
+            z' = z_tip - (x - x_tip)
+
+        Args:
+            x: Original X coordinate
+            z: Original Z coordinate
+
+        Returns:
+            Tuple of (x_new, z_new) after rotation
+        """
+        if self._tip_position is None:
+            # No tip calibrated - shouldn't happen but return original
+            return (x, z)
+
+        x_tip, z_tip = self._tip_position
+
+        # 90° rotation around tip
+        x_new = x_tip + (z - z_tip)
+        z_new = z_tip - (x - x_tip)
+
+        return (x_new, z_new)
 
     def _get_effective_bbox(self, rotation_idx: int) -> EffectiveBoundingBox:
         """Get the effective bounding box for a rotation.
 
         At R=0°: Use original bbox (tile X-Y, Z-stack through Z)
-        At R=90°: Swap X and Z (tile Z-Y, Z-stack through X)
+        At R=90°: Transform bbox corners around tip position, then determine
+                  new tiling and Z-stack ranges
 
         Args:
             rotation_idx: 0 for first rotation, 1 for rotated view
@@ -147,14 +209,36 @@ class LED2DOverviewWorkflow(QObject):
                 z_max=bbox.z_max
             )
         else:
-            # Rotated view: original Z becomes X (tiling), original X becomes Z (depth)
+            # Rotated view: transform all 4 corners of the X-Z bounding box
+            # and find the new extents
+            corners = [
+                (bbox.x_min, bbox.z_min),
+                (bbox.x_min, bbox.z_max),
+                (bbox.x_max, bbox.z_min),
+                (bbox.x_max, bbox.z_max),
+            ]
+
+            rotated_corners = [self._rotate_point_90(x, z) for x, z in corners]
+
+            # Extract new X and Z ranges from rotated corners
+            new_x_coords = [c[0] for c in rotated_corners]
+            new_z_coords = [c[1] for c in rotated_corners]
+
+            new_x_min = min(new_x_coords)
+            new_x_max = max(new_x_coords)
+            new_z_min = min(new_z_coords)
+            new_z_max = max(new_z_coords)
+
+            logger.info(f"Rotated bbox: X=[{new_x_min:.2f}, {new_x_max:.2f}], "
+                       f"Z=[{new_z_min:.2f}, {new_z_max:.2f}] (tip at X={self._tip_position[0]:.2f}, Z={self._tip_position[1]:.2f})")
+
             return EffectiveBoundingBox(
-                tile_x_min=bbox.z_min,
-                tile_x_max=bbox.z_max,
-                tile_y_min=bbox.y_min,
+                tile_x_min=new_x_min,
+                tile_x_max=new_x_max,
+                tile_y_min=bbox.y_min,  # Y unchanged
                 tile_y_max=bbox.y_max,
-                z_min=bbox.x_min,
-                z_max=bbox.x_max
+                z_min=new_z_min,
+                z_max=new_z_max
             )
 
     def _get_controllers(self):

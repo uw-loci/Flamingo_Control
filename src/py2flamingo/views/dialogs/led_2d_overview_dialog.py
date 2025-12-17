@@ -607,12 +607,34 @@ class LED2DOverviewDialog(QDialog):
 
         return tiles_x, tiles_y
 
+    def _get_tip_position(self):
+        """Get sample holder tip position from presets.
+
+        Returns:
+            Tuple of (x, z) or None if not calibrated
+        """
+        try:
+            from py2flamingo.services.position_preset_service import PositionPresetService
+            preset_service = PositionPresetService()
+            preset = preset_service.get_preset("Tip of sample mount")
+            if preset:
+                return (preset.x, preset.z)
+            return None
+        except Exception:
+            return None
+
+    def _rotate_point_90(self, x: float, z: float, tip_x: float, tip_z: float):
+        """Rotate a point 90° around the tip position."""
+        x_new = tip_x + (z - tip_z)
+        z_new = tip_z - (x - tip_x)
+        return (x_new, z_new)
+
     def _update_scan_info(self):
         """Update the scan info display based on current settings.
 
-        Shows tile counts for both rotations:
+        Shows tile counts for both rotations if tip is calibrated:
         - R: Tiles across X-Y, Z-stack through Z
-        - R+90: Tiles across Z-Y (swapped), Z-stack through X (swapped)
+        - R+90: Transformed bbox around tip, different tile/Z-stack ranges
         """
         bbox = self._get_bounding_box()
 
@@ -635,25 +657,57 @@ class LED2DOverviewDialog(QDialog):
         z_depth_r1 = bbox.z_max - bbox.z_min
         z_planes_r1 = max(1, int(z_depth_r1 / z_step) + 1)
 
-        # Rotation 2 (R+90): tile across Z-Y (X and Z swapped), Z-stack through X
-        tiles_x_r2 = max(1, int((bbox.depth / fov) + 1))  # Original Z becomes X
-        tiles_y_r2 = tiles_y_r1  # Y unchanged
-        tiles_r2 = tiles_x_r2 * tiles_y_r2
-        z_depth_r2 = bbox.width  # Original X becomes Z depth
-        z_planes_r2 = max(1, int(z_depth_r2 / z_step) + 1)
+        # Check if tip is calibrated for second rotation
+        tip_pos = self._get_tip_position()
 
-        total_tiles = tiles_r1 + tiles_r2
-        total_frames = (tiles_r1 * z_planes_r1) + (tiles_r2 * z_planes_r2)
+        if tip_pos is not None:
+            tip_x, tip_z = tip_pos
 
-        self.tiles_label.setText(
-            f"R: {tiles_x_r1}×{tiles_y_r1}={tiles_r1} tiles, {z_planes_r1} Z planes  |  "
-            f"R+90: {tiles_x_r2}×{tiles_y_r2}={tiles_r2} tiles, {z_planes_r2} Z planes"
-        )
-        self.total_tiles_label.setText(f"Total: {total_tiles} tiles, {total_frames} frames")
-        self.z_planes_label.setText(
-            f"Z step: {z_step*1000:.0f} µm  |  "
-            f"R depth: {z_depth_r1:.2f} mm  |  R+90 depth: {z_depth_r2:.2f} mm"
-        )
+            # Transform bbox corners for rotated view
+            corners = [
+                (bbox.x_min, bbox.z_min),
+                (bbox.x_min, bbox.z_max),
+                (bbox.x_max, bbox.z_min),
+                (bbox.x_max, bbox.z_max),
+            ]
+            rotated = [self._rotate_point_90(x, z, tip_x, tip_z) for x, z in corners]
+            new_x_min = min(c[0] for c in rotated)
+            new_x_max = max(c[0] for c in rotated)
+            new_z_min = min(c[1] for c in rotated)
+            new_z_max = max(c[1] for c in rotated)
+
+            # Rotation 2 (R+90): transformed bbox
+            tiles_x_r2 = max(1, int(((new_x_max - new_x_min) / fov) + 1))
+            tiles_y_r2 = tiles_y_r1  # Y unchanged
+            tiles_r2 = tiles_x_r2 * tiles_y_r2
+            z_depth_r2 = new_z_max - new_z_min
+            z_planes_r2 = max(1, int(z_depth_r2 / z_step) + 1)
+
+            total_tiles = tiles_r1 + tiles_r2
+            total_frames = (tiles_r1 * z_planes_r1) + (tiles_r2 * z_planes_r2)
+
+            self.tiles_label.setText(
+                f"R: {tiles_x_r1}×{tiles_y_r1}={tiles_r1} tiles  |  "
+                f"R+90: {tiles_x_r2}×{tiles_y_r2}={tiles_r2} tiles"
+            )
+            self.total_tiles_label.setText(f"Total: {total_tiles} tiles, {total_frames} frames (2 rotations)")
+            self.z_planes_label.setText(
+                f"Z planes: R={z_planes_r1} ({z_depth_r1:.2f}mm), R+90={z_planes_r2} ({z_depth_r2:.2f}mm)"
+            )
+        else:
+            # No tip calibrated - single rotation only
+            total_frames = tiles_r1 * z_planes_r1
+
+            self.tiles_label.setText(
+                f"R: {tiles_x_r1}×{tiles_y_r1}={tiles_r1} tiles, {z_planes_r1} Z planes"
+            )
+            self.total_tiles_label.setText(
+                f"Total: {tiles_r1} tiles, {total_frames} frames (1 rotation only)"
+            )
+            self.z_planes_label.setText(
+                f"⚠ Tip not calibrated - use Tools > Calibrate for R+90 view"
+            )
+
         self.region_label.setText(
             f"Bbox: X [{bbox.x_min:.2f}, {bbox.x_max:.2f}], "
             f"Y [{bbox.y_min:.2f}, {bbox.y_max:.2f}], "
