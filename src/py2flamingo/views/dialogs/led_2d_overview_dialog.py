@@ -660,12 +660,13 @@ class LED2DOverviewDialog(QDialog):
             from py2flamingo.views.dialogs.led_2d_overview_result import LED2DOverviewResultWindow
 
             # Create preview window showing empty tile grid
-            preview = LED2DOverviewResultWindow(
+            # Keep reference to prevent garbage collection
+            self._preview_window = LED2DOverviewResultWindow(
                 config=config,
                 preview_mode=True,
                 parent=None  # Independent window
             )
-            preview.show()
+            self._preview_window.show()
 
         except ImportError as e:
             self._logger.error(f"Could not import result window: {e}")
@@ -721,14 +722,15 @@ class LED2DOverviewDialog(QDialog):
         try:
             from py2flamingo.workflows.led_2d_overview_workflow import LED2DOverviewWorkflow
 
-            workflow = LED2DOverviewWorkflow(
+            # Keep reference to prevent garbage collection
+            self._workflow = LED2DOverviewWorkflow(
                 app=self._app,
                 config=config,
-                parent=None  # Independent
+                parent=self  # Parent to dialog so it stays alive
             )
 
             # Don't close dialog - user might want to run again
-            workflow.start()
+            self._workflow.start()
 
         except ImportError as e:
             self._logger.error(f"Could not import workflow: {e}")
