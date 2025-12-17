@@ -554,6 +554,12 @@ class FlamingoApplication:
         if self.geometry_manager:
             self.logger.info("Saving window geometry...")
             try:
+                # Explicitly save SampleView geometry if it exists and is visible
+                # (hideEvent may not fire during app shutdown)
+                if self.sample_view and self.sample_view.isVisible():
+                    self.geometry_manager.save_geometry("SampleView", self.sample_view)
+                    self.logger.debug("Saved SampleView geometry during shutdown")
+
                 self.geometry_manager.save_all()
             except Exception as e:
                 self.logger.error(f"Error saving window geometry: {e}")

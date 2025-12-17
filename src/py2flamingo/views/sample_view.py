@@ -24,7 +24,7 @@ from PyQt5.QtWidgets import (
     QDialogButtonBox, QGridLayout, QLineEdit, QTabWidget
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, pyqtSignal
-from PyQt5.QtGui import QPixmap, QImage, QFont, QDoubleValidator, QShowEvent, QCloseEvent
+from PyQt5.QtGui import QPixmap, QImage, QFont, QDoubleValidator, QShowEvent, QCloseEvent, QHideEvent
 
 if TYPE_CHECKING:
     from py2flamingo.services.window_geometry_manager import WindowGeometryManager
@@ -2315,6 +2315,15 @@ class SampleView(QWidget):
             self._geometry_manager.restore_geometry("SampleView", self)
             self._geometry_restored = True
             self.logger.info("Restored SampleView geometry")
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        """Handle window hide event - save geometry when hidden."""
+        # Save geometry when hiding (ensures it's saved before app closes)
+        if self._geometry_manager:
+            self._geometry_manager.save_geometry("SampleView", self)
+            self.logger.debug("Saved SampleView geometry on hide")
+
+        super().hideEvent(event)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Handle window close event - save geometry."""
