@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
     QMessageBox, QSizePolicy
 )
 from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QShowEvent, QCloseEvent, QHideEvent
 
 
 @dataclass
@@ -79,6 +80,7 @@ class LED2DOverviewDialog(QDialog):
         super().__init__(parent)
         self._app = app
         self._logger = logging.getLogger(__name__)
+        self._geometry_restored = False
 
         # Stage limits (will be loaded from settings)
         self._stage_limits = {
@@ -852,3 +854,36 @@ class LED2DOverviewDialog(QDialog):
         except Exception as e:
             self._logger.error(f"Error starting scan: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to start scan: {e}")
+
+    # ========== Window Events ==========
+
+    def showEvent(self, event: QShowEvent) -> None:
+        """Handle dialog show event - restore geometry on first show."""
+        super().showEvent(event)
+
+        # Restore geometry on first show
+        if not self._geometry_restored and self._app and hasattr(self._app, 'geometry_manager'):
+            geometry_manager = self._app.geometry_manager
+            if geometry_manager:
+                geometry_manager.restore_geometry("LED2DOverviewDialog", self)
+                self._geometry_restored = True
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        """Handle dialog hide event - save geometry when hidden."""
+        # Save geometry when hiding
+        if self._app and hasattr(self._app, 'geometry_manager'):
+            geometry_manager = self._app.geometry_manager
+            if geometry_manager:
+                geometry_manager.save_geometry("LED2DOverviewDialog", self)
+
+        super().hideEvent(event)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Handle dialog close event - save geometry."""
+        # Save geometry when closing
+        if self._app and hasattr(self._app, 'geometry_manager'):
+            geometry_manager = self._app.geometry_manager
+            if geometry_manager:
+                geometry_manager.save_geometry("LED2DOverviewDialog", self)
+
+        super().closeEvent(event)

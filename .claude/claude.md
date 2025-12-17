@@ -998,12 +998,12 @@ self.my_window = MyWindow(
 - `StageChamberVisualizationWindow`
 - `Sample3DVisualizationWindow` (with splitter)
 - `SampleView`
+- `LED2DOverviewDialog` (uses `app.geometry_manager`)
 
 #### Windows NOT Yet Implemented (lower priority)
 
 - `LED2DOverviewResultWindow` - dynamically created, needs geometry_manager passed through
 - `PositionHistoryDialog` - modal dialog
-- `LED2DOverviewDialog` - non-modal dialog
 
 ---
 
