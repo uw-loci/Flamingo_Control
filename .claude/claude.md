@@ -928,5 +928,84 @@ stats = connection.get_async_stats()
 
 ---
 
-**Last Updated:** 2024-12-06
+## UI Development Guidelines
+
+### Window Geometry Persistence
+
+**IMPORTANT:** All new windows and dialogs must implement geometry persistence so users don't have to reposition them every time they open.
+
+#### Required Implementation Pattern
+
+Every new `QWidget`-based window or `QDialog` should:
+
+1. **Accept `geometry_manager` parameter in `__init__`:**
+```python
+def __init__(self, ..., geometry_manager: 'WindowGeometryManager' = None, parent=None):
+    super().__init__(parent)
+    self._geometry_manager = geometry_manager
+    self._geometry_restored = False
+```
+
+2. **Add `showEvent` to restore geometry on first show:**
+```python
+def showEvent(self, event: QShowEvent) -> None:
+    super().showEvent(event)
+    if not self._geometry_restored and self._geometry_manager:
+        self._geometry_manager.restore_geometry("UniqueWindowName", self)
+        self._geometry_restored = True
+```
+
+3. **Add `hideEvent` and/or `closeEvent` to save geometry:**
+```python
+def hideEvent(self, event: QHideEvent) -> None:
+    if self._geometry_manager:
+        self._geometry_manager.save_geometry("UniqueWindowName", self)
+    super().hideEvent(event)
+
+def closeEvent(self, event: QCloseEvent) -> None:
+    if self._geometry_manager:
+        self._geometry_manager.save_geometry("UniqueWindowName", self)
+    event.accept()
+```
+
+4. **For windows with QSplitters, also save/restore splitter state:**
+```python
+# In showEvent:
+self._geometry_manager.restore_splitter_state("WindowName", "splitter_id", self.splitter)
+
+# In closeEvent/hideEvent:
+self._geometry_manager.save_splitter_state("WindowName", "splitter_id", self.splitter)
+```
+
+5. **Pass geometry_manager when creating the window** (usually in `FlamingoApplication`):
+```python
+self.my_window = MyWindow(
+    ...,
+    geometry_manager=self.geometry_manager
+)
+```
+
+#### Key Files
+
+- **Service:** `src/py2flamingo/services/window_geometry_manager.py`
+- **Storage:** `window_geometry.json` (auto-created in project root)
+
+#### Windows Currently Implementing Geometry Persistence
+
+- `MainWindow`
+- `CameraLiveViewer`
+- `ImageControlsWindow`
+- `StageChamberVisualizationWindow`
+- `Sample3DVisualizationWindow` (with splitter)
+- `SampleView`
+
+#### Windows NOT Yet Implemented (lower priority)
+
+- `LED2DOverviewResultWindow` - dynamically created, needs geometry_manager passed through
+- `PositionHistoryDialog` - modal dialog
+- `LED2DOverviewDialog` - non-modal dialog
+
+---
+
+**Last Updated:** 2025-12-17
 **Maintained By:** Claude Code assistant
