@@ -21,6 +21,11 @@ from py2flamingo.controllers.camera_controller import CameraController, CameraSt
 from py2flamingo.services.camera_service import ImageHeader
 from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR
 
+# Import conditionally to avoid circular imports
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from py2flamingo.services.window_geometry_manager import WindowGeometryManager
+
 
 class CameraLiveViewer(QWidget):
     """
@@ -37,7 +42,9 @@ class CameraLiveViewer(QWidget):
     # Class variable to remember last snapshot directory across instances
     _last_snapshot_directory: Optional[str] = None
 
-    def __init__(self, camera_controller: CameraController, laser_led_controller=None, image_controls_window=None, parent=None):
+    def __init__(self, camera_controller: CameraController, laser_led_controller=None,
+                 image_controls_window=None, geometry_manager: 'WindowGeometryManager' = None,
+                 parent=None):
         """
         Initialize camera live viewer.
 
@@ -45,6 +52,7 @@ class CameraLiveViewer(QWidget):
             camera_controller: CameraController instance
             laser_led_controller: Optional LaserLEDController for light source control
             image_controls_window: Optional ImageControlsWindow for slider feedback
+            geometry_manager: Optional WindowGeometryManager for saving/restoring geometry
             parent: Parent widget
         """
         super().__init__(parent)
@@ -52,6 +60,8 @@ class CameraLiveViewer(QWidget):
         self.camera_controller = camera_controller
         self.laser_led_controller = laser_led_controller
         self.image_controls_window = image_controls_window
+        self._geometry_manager = geometry_manager
+        self._geometry_restored = False
         self.logger = logging.getLogger(__name__)
 
         # Display state
@@ -896,9 +906,15 @@ class CameraLiveViewer(QWidget):
         """
         Handle window show event.
 
-        Unblock laser/LED signals and load actual powers from hardware.
+        Restores geometry on first show, unblocks laser/LED signals,
+        and loads actual powers from hardware.
         """
         super().showEvent(event)
+
+        # Restore geometry on first show
+        if not self._geometry_restored and self._geometry_manager:
+            self._geometry_manager.restore_geometry("CameraLiveViewer", self)
+            self._geometry_restored = True
 
         # Unblock signals that may have been blocked during hide
         if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
@@ -933,9 +949,13 @@ class CameraLiveViewer(QWidget):
         """
         Handle window hide event.
 
-        Block all laser/LED control signals to prevent spurious commands
-        during Qt widget cleanup/state management.
+        Saves geometry and blocks all laser/LED control signals to prevent
+        spurious commands during Qt widget cleanup/state management.
         """
+        # Save geometry when hiding
+        if self._geometry_manager:
+            self._geometry_manager.save_geometry("CameraLiveViewer", self)
+
         # Block ALL signals from laser/LED control panel widgets to prevent
         # Qt widget state changes from triggering unwanted LED_SET commands
         if hasattr(self, 'laser_led_panel') and self.laser_led_panel:

@@ -16,9 +16,11 @@ from PyQt5.QtWidgets import (
     QAction, QMessageBox, QScrollArea, QApplication
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QShowEvent, QCloseEvent
 
 from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, ImageControlsWindow, StageControlView
 from py2flamingo.views.camera_live_viewer import CameraLiveViewer
+from py2flamingo.services.window_geometry_manager import WindowGeometryManager
 
 
 class MainWindow(QMainWindow):
@@ -56,7 +58,8 @@ class MainWindow(QMainWindow):
                  image_controls_window=None,
                  stage_chamber_visualization_window=None,
                  sample_3d_visualization_window=None,
-                 app=None):
+                 app=None,
+                 geometry_manager: Optional[WindowGeometryManager] = None):
         """Initialize main window with view components.
 
         Args:
@@ -70,10 +73,13 @@ class MainWindow(QMainWindow):
             stage_chamber_visualization_window: Optional StageChamberVisualizationWindow instance
             sample_3d_visualization_window: Optional Sample3DVisualizationWindow instance
             app: Optional FlamingoApplication instance for accessing app-level resources
+            geometry_manager: Optional WindowGeometryManager for saving/restoring geometry
         """
         super().__init__()
 
         self.app = app  # Reference to FlamingoApplication for accessing sample_view etc.
+        self._geometry_manager = geometry_manager
+        self._geometry_restored = False
         self.connection_view = connection_view
         self.workflow_view = workflow_view
         self.sample_info_view = sample_info_view
@@ -521,12 +527,28 @@ class MainWindow(QMainWindow):
         tab_name = self.tabs.tabText(index)
         logger.info(f"User switched to tab: {tab_name}")
 
-    def closeEvent(self, event):
+    def showEvent(self, event: QShowEvent) -> None:
+        """Handle window show event - restore geometry on first show.
+
+        Args:
+            event: QShowEvent instance
+        """
+        super().showEvent(event)
+
+        # Restore geometry only on first show
+        if not self._geometry_restored and self._geometry_manager:
+            restored = self._geometry_manager.restore_geometry("MainWindow", self)
+            if restored:
+                import logging
+                logging.getLogger(__name__).info("Restored MainWindow geometry from saved state")
+            self._geometry_restored = True
+
+    def closeEvent(self, event: QCloseEvent) -> None:
         """Handle window close event.
 
         This method is called when the user closes the main window.
-        It properly closes all child windows and stops background threads
-        before exiting the application.
+        It saves window geometry, properly closes all child windows,
+        and stops background threads before exiting the application.
 
         Args:
             event: QCloseEvent instance
@@ -534,6 +556,14 @@ class MainWindow(QMainWindow):
         import logging
         logger = logging.getLogger(__name__)
         logger.info("Main window closing - cleaning up...")
+
+        # Save window geometry before closing
+        if self._geometry_manager:
+            try:
+                self._geometry_manager.save_geometry("MainWindow", self)
+                logger.info("Saved MainWindow geometry")
+            except Exception as e:
+                logger.error(f"Error saving MainWindow geometry: {e}")
 
         # Stop camera acquisition if running
         if self.camera_live_viewer is not None:

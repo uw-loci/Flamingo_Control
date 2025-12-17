@@ -7,7 +7,7 @@ color mapping, intensity scaling, and zoom.
 """
 
 import logging
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGroupBox, QSlider, QCheckBox, QComboBox, QButtonGroup,
@@ -15,6 +15,9 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QEvent
 from PyQt5.QtGui import QCloseEvent, QShowEvent, QHideEvent
+
+if TYPE_CHECKING:
+    from py2flamingo.services.window_geometry_manager import WindowGeometryManager
 
 
 class ImageControlsWindow(QWidget):
@@ -46,16 +49,19 @@ class ImageControlsWindow(QWidget):
     zoom_changed = pyqtSignal(float)  # zoom as percentage (1.0 = 100%)
     crosshair_changed = pyqtSignal(bool)
 
-    def __init__(self, parent=None):
+    def __init__(self, geometry_manager: 'WindowGeometryManager' = None, parent=None):
         """
         Initialize image controls window.
 
         Args:
+            geometry_manager: Optional WindowGeometryManager for saving/restoring geometry
             parent: Parent widget (optional)
         """
         super().__init__(parent)
 
         self.logger = logging.getLogger(__name__)
+        self._geometry_manager = geometry_manager
+        self._geometry_restored = False
 
         # State
         self._rotation = 0
@@ -473,12 +479,22 @@ class ImageControlsWindow(QWidget):
         return self._show_crosshair
 
     def showEvent(self, event: QShowEvent) -> None:
-        """Handle window show event - log when window is opened."""
+        """Handle window show event - restore geometry and log."""
         super().showEvent(event)
+
+        # Restore geometry on first show
+        if not self._geometry_restored and self._geometry_manager:
+            self._geometry_manager.restore_geometry("ImageControlsWindow", self)
+            self._geometry_restored = True
+
         self.logger.info("Image Controls window opened")
 
     def hideEvent(self, event: QHideEvent) -> None:
-        """Handle window hide event - log when window is hidden."""
+        """Handle window hide event - save geometry and log."""
+        # Save geometry when hiding
+        if self._geometry_manager:
+            self._geometry_manager.save_geometry("ImageControlsWindow", self)
+
         super().hideEvent(event)
         self.logger.info("Image Controls window hidden")
 

@@ -10,6 +10,7 @@ integrated with the Stage Control tab.
 
 import logging
 import math
+from typing import TYPE_CHECKING
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QGroupBox, QGridLayout, QMessageBox
 )
@@ -18,6 +19,9 @@ from PyQt5.QtGui import QFont, QShowEvent, QHideEvent
 
 from py2flamingo.views.widgets.stage_chamber_visualization import StageChamberVisualizationWidget
 from py2flamingo.models import Position
+
+if TYPE_CHECKING:
+    from py2flamingo.services.window_geometry_manager import WindowGeometryManager
 
 
 class StageChamberVisualizationWindow(QWidget):
@@ -35,18 +39,22 @@ class StageChamberVisualizationWindow(QWidget):
     - Automatic enable/disable based on motion state
     """
 
-    def __init__(self, movement_controller, parent=None):
+    def __init__(self, movement_controller, geometry_manager: 'WindowGeometryManager' = None,
+                 parent=None):
         """
         Initialize stage chamber visualization window.
 
         Args:
             movement_controller: MovementController instance for position updates
+            geometry_manager: Optional WindowGeometryManager for saving/restoring geometry
             parent: Parent widget (optional)
         """
         super().__init__(parent)
 
         self.logger = logging.getLogger(__name__)
         self.movement_controller = movement_controller
+        self._geometry_manager = geometry_manager
+        self._geometry_restored = False
 
         # Get stage limits from movement controller
         self.stage_limits = self.movement_controller.get_stage_limits()
@@ -588,12 +596,22 @@ class StageChamberVisualizationWindow(QWidget):
         self.logger.debug(f"Position updated: X={x:.2f}, Y={y:.2f}, Z={z:.2f}, R={r:.2f}")
 
     def showEvent(self, event: QShowEvent) -> None:
-        """Handle window show event - log when window is opened."""
+        """Handle window show event - restore geometry and log."""
         super().showEvent(event)
+
+        # Restore geometry on first show
+        if not self._geometry_restored and self._geometry_manager:
+            self._geometry_manager.restore_geometry("StageChamberVisualizationWindow", self)
+            self._geometry_restored = True
+
         self.logger.info("Stage chamber visualization window opened")
 
     def hideEvent(self, event: QHideEvent) -> None:
-        """Handle window hide event - log when window is hidden."""
+        """Handle window hide event - save geometry and log."""
+        # Save geometry when hiding
+        if self._geometry_manager:
+            self._geometry_manager.save_geometry("StageChamberVisualizationWindow", self)
+
         super().hideEvent(event)
         self.logger.info("Stage chamber visualization window hidden")
 
@@ -606,6 +624,10 @@ class StageChamberVisualizationWindow(QWidget):
             self.logger.debug("Stage chamber visualization window deactivated")
 
     def closeEvent(self, event) -> None:
-        """Handle window close event."""
+        """Handle window close event - save geometry."""
+        # Save geometry on close
+        if self._geometry_manager:
+            self._geometry_manager.save_geometry("StageChamberVisualizationWindow", self)
+
         self.logger.info("Stage chamber visualization window closed")
         event.accept()

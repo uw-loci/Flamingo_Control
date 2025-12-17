@@ -23,7 +23,7 @@ from py2flamingo.models import (
 )
 from py2flamingo.services import (
     MVCConnectionService, MVCWorkflowService, StatusService, ConfigurationManager,
-    StatusIndicatorService
+    StatusIndicatorService, WindowGeometryManager
 )
 from py2flamingo.controllers import ConnectionController, WorkflowController, PositionController
 from py2flamingo.controllers.movement_controller import MovementController
@@ -86,6 +86,7 @@ class FlamingoApplication:
         self.status_service: Optional[StatusService] = None
         self.status_indicator_service: Optional[StatusIndicatorService] = None
         self.config_manager: Optional[ConfigurationManager] = None
+        self.geometry_manager: Optional[WindowGeometryManager] = None
 
         # Controllers layer components
         self.connection_controller: Optional[ConnectionController] = None
@@ -164,6 +165,10 @@ class FlamingoApplication:
             config_file="saved_configurations.json"
         )
 
+        self.geometry_manager = WindowGeometryManager(
+            config_file="window_geometry.json"
+        )
+
         # Controllers layer - coordinate services and views
         self.logger.debug("Creating controllers layer components...")
         self.connection_controller = ConnectionController(
@@ -232,7 +237,7 @@ class FlamingoApplication:
 
         # Create independent image controls window FIRST
         self.logger.debug("Creating image controls window...")
-        self.image_controls_window = ImageControlsWindow()
+        self.image_controls_window = ImageControlsWindow(geometry_manager=self.geometry_manager)
         # Window starts hidden - user can open it via menu
         self.image_controls_window.hide()
 
@@ -241,7 +246,8 @@ class FlamingoApplication:
         self.camera_live_viewer = CameraLiveViewer(
             camera_controller=self.camera_controller,
             laser_led_controller=self.laser_led_controller,
-            image_controls_window=self.image_controls_window
+            image_controls_window=self.image_controls_window,
+            geometry_manager=self.geometry_manager
         )
 
         # Camera live viewer also starts hidden - user can open it via menu
@@ -250,7 +256,8 @@ class FlamingoApplication:
         # Create stage chamber visualization window
         self.logger.debug("Creating stage chamber visualization window...")
         self.stage_chamber_visualization_window = StageChamberVisualizationWindow(
-            movement_controller=self.movement_controller
+            movement_controller=self.movement_controller,
+            geometry_manager=self.geometry_manager
         )
         # Window starts hidden - user can open it via menu
         self.stage_chamber_visualization_window.hide()
@@ -260,7 +267,8 @@ class FlamingoApplication:
         self.sample_3d_visualization_window = Sample3DVisualizationWindow(
             movement_controller=self.movement_controller,
             camera_controller=self.camera_controller,
-            laser_led_controller=self.laser_led_controller
+            laser_led_controller=self.laser_led_controller,
+            geometry_manager=self.geometry_manager
         )
         # Window starts hidden - user can open it via menu
         self.sample_3d_visualization_window.hide()
@@ -436,6 +444,7 @@ class FlamingoApplication:
                 voxel_storage=voxel_storage,
                 image_controls_window=self.image_controls_window,
                 sample_3d_window=self.sample_3d_visualization_window,
+                geometry_manager=self.geometry_manager,
             )
 
         self.sample_view.show()
@@ -485,7 +494,8 @@ class FlamingoApplication:
             image_controls_window=self.image_controls_window,
             stage_chamber_visualization_window=self.stage_chamber_visualization_window,
             sample_3d_visualization_window=self.sample_3d_visualization_window,
-            app=self  # Pass FlamingoApplication reference for accessing sample_view etc.
+            app=self,  # Pass FlamingoApplication reference for accessing sample_view etc.
+            geometry_manager=self.geometry_manager
         )
         self.main_window.setWindowTitle("Flamingo Microscope Control")
         # Window size is automatically set based on screen dimensions
@@ -531,6 +541,7 @@ class FlamingoApplication:
         """Clean up resources before application exit.
 
         This method:
+        - Saves window geometry state
         - Disconnects from microscope if connected
         - Cleans up network resources
         - Logs shutdown
@@ -538,6 +549,14 @@ class FlamingoApplication:
         Called automatically at application exit.
         """
         self.logger.info("Shutting down application...")
+
+        # Save window geometry state
+        if self.geometry_manager:
+            self.logger.info("Saving window geometry...")
+            try:
+                self.geometry_manager.save_all()
+            except Exception as e:
+                self.logger.error(f"Error saving window geometry: {e}")
 
         # Disconnect if connected
         if self.connection_service and self.connection_service.is_connected():

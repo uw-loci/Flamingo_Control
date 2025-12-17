@@ -6,15 +6,18 @@ import numpy as np
 import time
 import yaml
 from pathlib import Path
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, TYPE_CHECKING
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QGroupBox, QSlider, QCheckBox, QComboBox, QSpinBox,
     QSplitter, QTabWidget, QGridLayout, QMessageBox
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QMutex, QMutexLocker
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QShowEvent
 import logging
+
+if TYPE_CHECKING:
+    from py2flamingo.services.window_geometry_manager import WindowGeometryManager
 
 try:
     import napari
@@ -55,12 +58,15 @@ class Sample3DVisualizationWindow(QWidget):
     channel_visibility_changed = pyqtSignal(int, bool)
     stage_position_update_signal = pyqtSignal(object)  # Thread-safe stage position updates
 
-    def __init__(self, movement_controller=None, camera_controller=None, laser_led_controller=None, parent=None):
+    def __init__(self, movement_controller=None, camera_controller=None, laser_led_controller=None,
+                 geometry_manager: 'WindowGeometryManager' = None, parent=None):
         super().__init__(parent)
 
         self.movement_controller = movement_controller
         self.camera_controller = camera_controller
         self.laser_led_controller = laser_led_controller
+        self._geometry_manager = geometry_manager
+        self._geometry_restored = False
 
         # Load configuration
         self.config = self._load_config()
@@ -403,11 +409,11 @@ class Sample3DVisualizationWindow(QWidget):
         main_layout = QHBoxLayout(self)
 
         # Create splitter for resizable panels
-        splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter = QSplitter(Qt.Horizontal)
 
         # Left panel: Controls
         control_panel = self._create_control_panel()
-        splitter.addWidget(control_panel)
+        self.main_splitter.addWidget(control_panel)
 
         # Right panel: Status bar + Napari viewer
         viewer_container = QWidget()
@@ -494,10 +500,10 @@ class Sample3DVisualizationWindow(QWidget):
             msg_label.setAlignment(Qt.AlignCenter)
             viewer_layout.addWidget(msg_label)
 
-        splitter.addWidget(viewer_container)
-        splitter.setSizes([270, 930])  # Reduced control panel to 2/3 width
+        self.main_splitter.addWidget(viewer_container)
+        self.main_splitter.setSizes([270, 930])  # Reduced control panel to 2/3 width
 
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(self.main_splitter)
 
     def _create_control_panel(self) -> QWidget:
         """Create the control panel with tabs."""
@@ -3359,8 +3365,30 @@ class Sample3DVisualizationWindow(QWidget):
         else:
             return image
 
+    def showEvent(self, event: QShowEvent) -> None:
+        """Handle window show event - restore geometry on first show."""
+        super().showEvent(event)
+
+        # Restore geometry on first show
+        if not self._geometry_restored and self._geometry_manager:
+            self._geometry_manager.restore_geometry("Sample3DVisualizationWindow", self)
+            # Restore splitter state
+            if hasattr(self, 'main_splitter'):
+                self._geometry_manager.restore_splitter_state(
+                    "Sample3DVisualizationWindow", "main_splitter", self.main_splitter
+                )
+            self._geometry_restored = True
+
     def closeEvent(self, event):
-        """Handle window close event."""
+        """Handle window close event - save geometry."""
+        # Save geometry and splitter state
+        if self._geometry_manager:
+            self._geometry_manager.save_geometry("Sample3DVisualizationWindow", self)
+            if hasattr(self, 'main_splitter'):
+                self._geometry_manager.save_splitter_state(
+                    "Sample3DVisualizationWindow", "main_splitter", self.main_splitter
+                )
+
         # Stop populating
         if self.is_populating:
             self.populate_button.setChecked(False)

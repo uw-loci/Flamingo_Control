@@ -16,7 +16,7 @@ import time
 import numpy as np
 import yaml
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, TYPE_CHECKING
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGroupBox, QSlider, QComboBox, QCheckBox, QProgressBar,
@@ -24,7 +24,10 @@ from PyQt5.QtWidgets import (
     QDialogButtonBox, QGridLayout, QLineEdit, QTabWidget
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, pyqtSignal
-from PyQt5.QtGui import QPixmap, QImage, QFont, QDoubleValidator
+from PyQt5.QtGui import QPixmap, QImage, QFont, QDoubleValidator, QShowEvent, QCloseEvent
+
+if TYPE_CHECKING:
+    from py2flamingo.services.window_geometry_manager import WindowGeometryManager
 from superqt import QRangeSlider
 
 from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
@@ -672,6 +675,7 @@ class SampleView(QWidget):
         voxel_storage=None,
         image_controls_window=None,
         sample_3d_window=None,
+        geometry_manager: 'WindowGeometryManager' = None,
         parent=None
     ):
         """
@@ -684,6 +688,7 @@ class SampleView(QWidget):
             voxel_storage: Optional DualResolutionVoxelStorage instance
             image_controls_window: Optional ImageControlsWindow for advanced settings
             sample_3d_window: Optional Sample3DVisualizationWindow for sharing visualization
+            geometry_manager: Optional WindowGeometryManager for saving/restoring geometry
             parent: Parent widget
         """
         super().__init__(parent)
@@ -694,6 +699,8 @@ class SampleView(QWidget):
         self.voxel_storage = voxel_storage
         self.image_controls_window = image_controls_window
         self.sample_3d_window = sample_3d_window
+        self._geometry_manager = geometry_manager
+        self._geometry_restored = False
         self.logger = logging.getLogger(__name__)
 
         # Display state
@@ -2296,3 +2303,24 @@ class SampleView(QWidget):
         self.workflow_status_label.setText(f"Workflow: {status}")
         self.workflow_progress_bar.setValue(progress)
         self.time_remaining_label.setText(time_remaining)
+
+    # ========== Window Events ==========
+
+    def showEvent(self, event: QShowEvent) -> None:
+        """Handle window show event - restore geometry on first show."""
+        super().showEvent(event)
+
+        # Restore geometry on first show
+        if not self._geometry_restored and self._geometry_manager:
+            self._geometry_manager.restore_geometry("SampleView", self)
+            self._geometry_restored = True
+            self.logger.info("Restored SampleView geometry")
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Handle window close event - save geometry."""
+        # Save geometry
+        if self._geometry_manager:
+            self._geometry_manager.save_geometry("SampleView", self)
+            self.logger.info("Saved SampleView geometry")
+
+        event.accept()
