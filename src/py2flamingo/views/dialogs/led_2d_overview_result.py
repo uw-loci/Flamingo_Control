@@ -346,12 +346,10 @@ class LED2DOverviewResultWindow(QWidget):
 
         # Calculate tile dimensions
         bbox = self._config.bounding_box
-        fov = 0.5182  # mm
-        overlap = self._config.tile_overlap / 100.0
-        effective_step = fov * (1 - overlap)
+        fov = 0.5182  # mm (no overlap - tiles are adjacent)
 
-        tiles_x = max(1, int((bbox.width / effective_step) + 1))
-        tiles_y = max(1, int((bbox.height / effective_step) + 1))
+        tiles_x = max(1, int((bbox.width / fov) + 1))
+        tiles_y = max(1, int((bbox.height / fov) + 1))
 
         # Create preview images (gray grids)
         preview_w = tiles_x * 100
