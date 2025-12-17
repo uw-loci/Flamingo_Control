@@ -602,7 +602,15 @@ class LED2DOverviewWorkflow(QObject):
     def _finish_completed(self):
         """Finish the scan successfully."""
         self._running = False
-        logger.info(f"LED 2D Overview completed: {len(self._results)} rotations")
+
+        # Log summary
+        total_tiles = sum(len(r.tiles) for r in self._results)
+        logger.info(f"LED 2D Overview completed: {len(self._results)} rotations, {total_tiles} total tiles captured")
+
+        for i, result in enumerate(self._results):
+            logger.info(f"  Rotation {i+1}: {result.rotation_angle}°, {len(result.tiles)} tiles, "
+                       f"grid {result.tiles_x}x{result.tiles_y}")
+
         self.scan_completed.emit(self._results)
 
         # Show results window
@@ -620,8 +628,21 @@ class LED2DOverviewWorkflow(QObject):
 
     def _show_results(self):
         """Show the results window."""
+        logger.info("Attempting to show results window...")
+
+        if not self._results:
+            logger.warning("No results to show!")
+            return
+
+        # Check if any results have tiles
+        total_tiles = sum(len(r.tiles) for r in self._results)
+        if total_tiles == 0:
+            logger.warning("Results exist but no tiles were captured!")
+            return
+
         try:
             from py2flamingo.views.dialogs.led_2d_overview_result import LED2DOverviewResultWindow
+            logger.info("LED2DOverviewResultWindow imported successfully")
 
             # Keep reference to prevent garbage collection
             self._result_window = LED2DOverviewResultWindow(
@@ -629,12 +650,20 @@ class LED2DOverviewWorkflow(QObject):
                 config=self._config,
                 parent=None  # Make it independent window
             )
+            logger.info(f"Result window created: {self._result_window}")
+
             self._result_window.show()
+            logger.info("Result window show() called")
+
+            # Ensure window is raised and activated
+            self._result_window.raise_()
+            self._result_window.activateWindow()
+            logger.info("Result window raised and activated")
 
         except ImportError as e:
-            logger.error(f"Could not import result window: {e}")
+            logger.error(f"Could not import result window: {e}", exc_info=True)
         except Exception as e:
-            logger.error(f"Error showing results: {e}")
+            logger.error(f"Error showing results: {e}", exc_info=True)
 
     @property
     def is_running(self) -> bool:
