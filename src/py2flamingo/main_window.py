@@ -491,11 +491,13 @@ class MainWindow(QMainWindow):
         try:
             from py2flamingo.views.dialogs.led_2d_overview_dialog import LED2DOverviewDialog
 
-            dialog = LED2DOverviewDialog(
+            # Create non-modal dialog (use show() not exec_())
+            # Keep reference to prevent garbage collection
+            self._led_2d_overview_dialog = LED2DOverviewDialog(
                 app=self.app,
-                parent=self
+                parent=None  # No parent so it's independent window
             )
-            dialog.exec_()
+            self._led_2d_overview_dialog.show()
 
         except ImportError as e:
             logger.error(f"Could not import LED 2D Overview dialog: {e}")
