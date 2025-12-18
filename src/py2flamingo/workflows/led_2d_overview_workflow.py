@@ -307,6 +307,72 @@ class LED2DOverviewWorkflow(QObject):
 
         return positions
 
+    def _enable_led(self) -> bool:
+        """Enable the LED for imaging.
+
+        Returns:
+            True if LED enabled successfully
+        """
+        led_name = self._config.led_name
+        if not led_name or led_name.lower() in ('none', '--', 'sample view not open'):
+            logger.warning(f"No valid LED configured (led_name='{led_name}')")
+            return False
+
+        # Map LED name to color index
+        led_map = {
+            'led_red': 0, 'led_r': 0, 'red': 0,
+            'led_green': 1, 'led_g': 1, 'green': 1,
+            'led_blue': 2, 'led_b': 2, 'blue': 2,
+            'led_white': 3, 'led_w': 3, 'white': 3,
+        }
+
+        led_lower = led_name.lower().replace(' ', '_')
+        led_color = led_map.get(led_lower)
+
+        if led_color is None:
+            logger.warning(f"Unknown LED name: '{led_name}'")
+            return False
+
+        try:
+            # Get laser/LED controller from sample view
+            if not self._app or not self._app.sample_view:
+                logger.error("Sample view not available for LED control")
+                return False
+
+            laser_led_controller = self._app.sample_view.laser_led_controller
+            if not laser_led_controller:
+                logger.error("Laser/LED controller not available")
+                return False
+
+            # Enable the LED
+            color_names = ['Red', 'Green', 'Blue', 'White']
+            logger.info(f"Enabling {color_names[led_color]} LED for scan...")
+            success = laser_led_controller.enable_led_for_preview(led_color)
+
+            if success:
+                logger.info(f"{color_names[led_color]} LED enabled successfully")
+            else:
+                logger.error(f"Failed to enable {color_names[led_color]} LED")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error enabling LED: {e}")
+            return False
+
+    def _disable_led(self):
+        """Disable the LED after imaging."""
+        try:
+            if not self._app or not self._app.sample_view:
+                return
+
+            laser_led_controller = self._app.sample_view.laser_led_controller
+            if laser_led_controller:
+                logger.info("Disabling LED after scan...")
+                laser_led_controller.disable_all_light_sources()
+        except Exception as e:
+            logger.error(f"Error disabling LED: {e}")
+
     def start(self):
         """Start the scan workflow."""
         if self._running:
@@ -329,6 +395,13 @@ class LED2DOverviewWorkflow(QObject):
 
         logger.info(f"Starting LED 2D Overview: ~{total_tiles} total tiles, "
                    f"rotations: {self._rotation_angles}")
+
+        # Enable the LED before starting
+        if not self._enable_led():
+            logger.error("Failed to enable LED - scan may produce black images!")
+            self.scan_error.emit("LED could not be enabled. Check light source settings.")
+            self._running = False
+            return
 
         self.scan_started.emit()
 
@@ -606,6 +679,9 @@ class LED2DOverviewWorkflow(QObject):
         """Finish the scan successfully."""
         self._running = False
 
+        # Disable LED
+        self._disable_led()
+
         # Log summary
         total_tiles = sum(len(r.tiles) for r in self._results)
         logger.info(f"LED 2D Overview completed: {len(self._results)} rotations, {total_tiles} total tiles captured")
@@ -622,6 +698,10 @@ class LED2DOverviewWorkflow(QObject):
     def _finish_cancelled(self):
         """Finish the scan due to cancellation."""
         self._running = False
+
+        # Disable LED
+        self._disable_led()
+
         logger.info("LED 2D Overview cancelled")
         self.scan_cancelled.emit()
 

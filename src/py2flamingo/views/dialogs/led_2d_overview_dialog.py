@@ -538,6 +538,9 @@ class LED2DOverviewDialog(QDialog):
             self._logger.error(f"Error loading LED settings: {e}")
             self.led_info_label.setText(f"LED: Error - {e}")
 
+        # Update start button state after LED info changes
+        self._update_start_button_state()
+
     def _is_point_set(self, x_spinbox: QDoubleSpinBox, y_spinbox: QDoubleSpinBox, z_spinbox: QDoubleSpinBox) -> bool:
         """Check if a point has valid values (not the "not set" special value)."""
         x_min = self._stage_limits['x']['min']
@@ -716,8 +719,9 @@ class LED2DOverviewDialog(QDialog):
             f"Z [{bbox.z_min:.2f}, {bbox.z_max:.2f}] mm"
         )
 
-        self.start_btn.setEnabled(True)
-        self.preview_btn.setEnabled(True)
+        # Update button states based on full validation
+        self._update_start_button_state()
+        self.preview_btn.setEnabled(True)  # Preview doesn't need LED/live view
 
     def _validate_configuration(self) -> Optional[str]:
         """Validate the current configuration.
@@ -725,6 +729,7 @@ class LED2DOverviewDialog(QDialog):
         Returns:
             Error message string if invalid, None if valid
         """
+        # Check bounding box
         bbox = self._get_bounding_box()
         if bbox is None:
             return "Please enter at least two bounding points"
@@ -732,7 +737,27 @@ class LED2DOverviewDialog(QDialog):
         if bbox.width < 0.001 and bbox.height < 0.001:
             return "Bounding box is too small (points are nearly identical)"
 
+        # Check LED source
+        led_text = self.led_info_label.text().replace("LED: ", "").lower()
+        if led_text in ('none', '--', 'sample view not open', 'panel not available'):
+            return "No light source selected. Please select an LED in the Sample View."
+
+        # Check if live viewer is active
+        if self._app and self._app.sample_view:
+            camera_controller = self._app.sample_view.camera_controller
+            if camera_controller and not camera_controller.is_live_view_active():
+                return "Live viewer is not active. Please start the live viewer in Sample View."
+
         return None
+
+    def _update_start_button_state(self):
+        """Update Start button enabled state based on validation."""
+        error = self._validate_configuration()
+        self.start_btn.setEnabled(error is None)
+        if error:
+            self.start_btn.setToolTip(error)
+        else:
+            self.start_btn.setToolTip("Start the LED 2D Overview scan")
 
     def _get_configuration(self) -> Optional[ScanConfiguration]:
         """Get the current scan configuration.

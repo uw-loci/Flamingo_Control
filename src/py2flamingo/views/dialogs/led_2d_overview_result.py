@@ -14,15 +14,114 @@ from PyQt5.QtWidgets import (
     QScrollArea, QSplitter, QGroupBox, QFileDialog, QMessageBox,
     QSizePolicy, QFrame
 )
-from PyQt5.QtCore import Qt, QSize
-from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont
+from PyQt5.QtCore import Qt, QSize, QPoint, QPointF
+from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QWheelEvent, QMouseEvent
 
 
 logger = logging.getLogger(__name__)
 
 
+class ZoomableImageLabel(QLabel):
+    """Image label with zoom and pan support."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._zoom = 1.0
+        self._min_zoom = 0.1
+        self._max_zoom = 10.0
+        self._pan_start = QPoint()
+        self._panning = False
+        self._original_pixmap: Optional[QPixmap] = None
+
+        self.setMouseTracking(True)
+        self.setCursor(Qt.OpenHandCursor)
+
+    def setPixmap(self, pixmap: QPixmap):
+        """Set the pixmap and store original for zooming."""
+        self._original_pixmap = pixmap
+        self._update_display()
+
+    def _update_display(self):
+        """Update display with current zoom level."""
+        if self._original_pixmap is None:
+            return
+
+        # Scale pixmap
+        scaled_size = self._original_pixmap.size() * self._zoom
+        scaled = self._original_pixmap.scaled(
+            scaled_size,
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
+        super().setPixmap(scaled)
+
+    def wheelEvent(self, event: QWheelEvent):
+        """Handle mouse wheel for zoom."""
+        # Zoom in/out
+        delta = event.angleDelta().y()
+        if delta > 0:
+            self._zoom = min(self._max_zoom, self._zoom * 1.15)
+        else:
+            self._zoom = max(self._min_zoom, self._zoom / 1.15)
+
+        self._update_display()
+        event.accept()
+
+    def mousePressEvent(self, event: QMouseEvent):
+        """Start panning on left click."""
+        if event.button() == Qt.LeftButton:
+            self._panning = True
+            self._pan_start = event.pos()
+            self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        """Stop panning."""
+        if event.button() == Qt.LeftButton:
+            self._panning = False
+            self.setCursor(Qt.OpenHandCursor)
+            event.accept()
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        """Pan while dragging."""
+        if self._panning:
+            delta = event.pos() - self._pan_start
+            self._pan_start = event.pos()
+
+            # Get parent scroll area and adjust scrollbars
+            scroll_area = self.parent()
+            if scroll_area and hasattr(scroll_area, 'parent'):
+                scroll_area = scroll_area.parent()
+                if isinstance(scroll_area, QScrollArea):
+                    h_bar = scroll_area.horizontalScrollBar()
+                    v_bar = scroll_area.verticalScrollBar()
+                    h_bar.setValue(h_bar.value() - delta.x())
+                    v_bar.setValue(v_bar.value() - delta.y())
+            event.accept()
+
+    def reset_zoom(self):
+        """Reset zoom to 100%."""
+        self._zoom = 1.0
+        self._update_display()
+
+    def fit_to_view(self, view_size: QSize):
+        """Fit image to view size."""
+        if self._original_pixmap is None:
+            return
+
+        img_size = self._original_pixmap.size()
+        scale_x = view_size.width() / img_size.width()
+        scale_y = view_size.height() / img_size.height()
+        self._zoom = min(scale_x, scale_y) * 0.95  # 95% to leave margin
+        self._update_display()
+
+    @property
+    def zoom_level(self) -> float:
+        return self._zoom
+
+
 class ImagePanel(QWidget):
-    """Widget displaying a single image with coordinate overlay."""
+    """Widget displaying a single image with coordinate overlay and zoom/pan."""
 
     def __init__(self, title: str = "", parent=None):
         super().__init__(parent)
@@ -40,31 +139,49 @@ class ImagePanel(QWidget):
     def _setup_ui(self):
         layout = QVBoxLayout()
         layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
 
         # Title label
         self.title_label = QLabel(self._title)
         self.title_label.setAlignment(Qt.AlignCenter)
-        self.title_label.setStyleSheet("font-weight: bold; font-size: 12pt;")
+        self.title_label.setStyleSheet("font-weight: bold; font-size: 11pt;")
         layout.addWidget(self.title_label)
 
-        # Image label with scroll area
+        # Scroll area with zoomable image
         self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setWidgetResizable(False)  # Don't auto-resize for zoom
         self.scroll_area.setAlignment(Qt.AlignCenter)
+        self.scroll_area.setMinimumSize(200, 200)
 
-        self.image_label = QLabel()
+        self.image_label = ZoomableImageLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setMinimumSize(100, 100)
-        self.image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.scroll_area.setWidget(self.image_label)
-        layout.addWidget(self.scroll_area)
+        layout.addWidget(self.scroll_area, stretch=1)
 
-        # Info label
-        self.info_label = QLabel("No image")
-        self.info_label.setAlignment(Qt.AlignCenter)
-        self.info_label.setStyleSheet("color: gray;")
-        layout.addWidget(self.info_label)
+        # Zoom controls row
+        zoom_layout = QHBoxLayout()
+        zoom_layout.setSpacing(4)
+
+        self.zoom_label = QLabel("100%")
+        self.zoom_label.setStyleSheet("color: gray; font-size: 9pt;")
+        zoom_layout.addWidget(self.zoom_label)
+
+        zoom_layout.addStretch()
+
+        fit_btn = QPushButton("Fit")
+        fit_btn.setFixedWidth(40)
+        fit_btn.setToolTip("Fit image to view")
+        fit_btn.clicked.connect(self._fit_to_view)
+        zoom_layout.addWidget(fit_btn)
+
+        reset_btn = QPushButton("1:1")
+        reset_btn.setFixedWidth(40)
+        reset_btn.setToolTip("Reset to 100% zoom")
+        reset_btn.clicked.connect(self._reset_zoom)
+        zoom_layout.addWidget(reset_btn)
+
+        layout.addLayout(zoom_layout)
 
         self.setLayout(layout)
 
@@ -72,6 +189,21 @@ class ImagePanel(QWidget):
         """Set the panel title."""
         self._title = title
         self.title_label.setText(title)
+
+    def _fit_to_view(self):
+        """Fit image to scroll area size."""
+        self.image_label.fit_to_view(self.scroll_area.size())
+        self._update_zoom_label()
+
+    def _reset_zoom(self):
+        """Reset to 100% zoom."""
+        self.image_label.reset_zoom()
+        self._update_zoom_label()
+
+    def _update_zoom_label(self):
+        """Update zoom percentage display."""
+        zoom_pct = int(self.image_label.zoom_level * 100)
+        self.zoom_label.setText(f"{zoom_pct}%")
 
     def set_image(self, image: Optional[np.ndarray], tiles_x: int = 0, tiles_y: int = 0):
         """Set the image to display.
@@ -88,7 +220,6 @@ class ImagePanel(QWidget):
         if image is None:
             self._pixmap = None
             self.image_label.clear()
-            self.info_label.setText("No image")
             return
 
         # Convert numpy array to QPixmap
@@ -99,7 +230,7 @@ class ImagePanel(QWidget):
             self._draw_grid_overlay()
 
         self.image_label.setPixmap(self._pixmap)
-        self.info_label.setText(f"Size: {image.shape[1]} x {image.shape[0]} pixels")
+        self._update_zoom_label()
 
     def set_tile_coordinates(self, coords: List[tuple]):
         """Set tile coordinate data for overlay.
@@ -180,18 +311,28 @@ class ImagePanel(QWidget):
         if self._tile_coords:
             font = QFont("Courier", 8)
             painter.setFont(font)
-            painter.setPen(QColor(255, 255, 255))
 
             for idx, (x, y, z) in enumerate(self._tile_coords):
                 tile_x_idx = idx % self._tiles_x
                 tile_y_idx = idx // self._tiles_x
 
                 # Position text in tile
-                text_x = int(tile_x_idx * tile_w + 4)
-                text_y = int(tile_y_idx * tile_h + 14)
+                text_x = int(tile_x_idx * tile_w + 3)
+                text_y = int(tile_y_idx * tile_h + 12)
 
-                text = f"Z:{z:.2f}"
+                # Draw X,Y coordinates with shadow for readability
+                text = f"X:{x:.2f}"
+                text2 = f"Y:{y:.2f}"
+
+                # Shadow
+                painter.setPen(QColor(0, 0, 0))
+                painter.drawText(text_x + 1, text_y + 1, text)
+                painter.drawText(text_x + 1, text_y + 13, text2)
+
+                # Text
+                painter.setPen(QColor(255, 255, 255))
                 painter.drawText(text_x, text_y, text)
+                painter.drawText(text_x, text_y + 12, text2)
 
         painter.end()
 
@@ -254,18 +395,18 @@ class LED2DOverviewResultWindow(QWidget):
         # Set equal split
         splitter.setSizes([400, 400])
 
-        layout.addWidget(splitter)
+        layout.addWidget(splitter, stretch=1)
 
-        # Info section
-        info_group = QGroupBox("Scan Information")
-        info_layout = QVBoxLayout()
+        # Compact info row (single line)
+        info_layout = QHBoxLayout()
+        info_layout.setContentsMargins(4, 2, 4, 2)
 
         self.info_text = QLabel("No scan data")
-        self.info_text.setWordWrap(True)
+        self.info_text.setStyleSheet("color: #666; font-size: 9pt;")
         info_layout.addWidget(self.info_text)
 
-        info_group.setLayout(info_layout)
-        layout.addWidget(info_group)
+        info_layout.addStretch()
+        layout.addLayout(info_layout)
 
         # Button row
         button_layout = QHBoxLayout()
@@ -387,27 +528,25 @@ class LED2DOverviewResultWindow(QWidget):
         )
 
     def _update_info_text(self):
-        """Update the info text with scan details."""
+        """Update the info text with scan details (compact single line)."""
         if not self._results:
             return
 
-        lines = []
+        parts = []
+        total_tiles = 0
 
         for i, result in enumerate(self._results):
-            lines.append(f"Rotation {i+1}: {result.rotation_angle}°")
-            lines.append(f"  Tiles: {result.tiles_x} x {result.tiles_y} = {len(result.tiles)}")
-
-            if result.tiles:
-                z_values = [t.z for t in result.tiles]
-                lines.append(f"  Z: {z_values[0]:.3f} mm")
+            total_tiles += len(result.tiles)
+            parts.append(f"R{i+1}={result.rotation_angle}° ({result.tiles_x}x{result.tiles_y})")
 
         if self._config:
             bbox = self._config.bounding_box
-            lines.append("")
-            lines.append(f"Region: X [{bbox.x_min:.2f} to {bbox.x_max:.2f}], "
-                        f"Y [{bbox.y_min:.2f} to {bbox.y_max:.2f}] mm")
+            parts.append(f"X:[{bbox.x_min:.2f}-{bbox.x_max:.2f}]")
+            parts.append(f"Y:[{bbox.y_min:.2f}-{bbox.y_max:.2f}]mm")
 
-        self.info_text.setText("\n".join(lines))
+        parts.append(f"Total: {total_tiles} tiles")
+
+        self.info_text.setText(" | ".join(parts))
 
     def _toggle_grid(self):
         """Toggle grid overlay."""
