@@ -463,12 +463,18 @@ class LED2DOverviewWorkflow(QObject):
 
     def _scan_next_tile(self):
         """Scan the next tile position."""
+        # Guard against re-entry
+        if not self._running:
+            logger.warning("_scan_next_tile called but scan not running - ignoring")
+            return
+
         if self._cancelled:
             self._finish_cancelled()
             return
 
         if self._current_tile_idx >= len(self._tile_positions):
             # Finished this rotation
+            logger.info(f"All {len(self._tile_positions)} tiles complete for rotation {self._current_rotation_idx}")
             self._finish_rotation()
             return
 
@@ -486,8 +492,9 @@ class LED2DOverviewWorkflow(QObject):
             percent
         )
 
-        logger.debug(f"Scanning tile {self._current_tile_idx + 1}/{total_tiles}: "
-                    f"X={x:.3f}, Y={y:.3f}, Z={z:.3f}")
+        # Log every 10th tile at INFO level to track progress
+        if self._current_tile_idx % 10 == 0:
+            logger.info(f"Tile {self._current_tile_idx + 1}/{total_tiles}: X={x:.3f}, Y={y:.3f}")
 
         try:
             tile_result = self._capture_tile(x, y, z, tile_x_idx, tile_y_idx)
@@ -503,14 +510,12 @@ class LED2DOverviewWorkflow(QObject):
 
             self._current_tile_idx += 1
 
-            # Process Qt events to keep UI responsive
-            QApplication.processEvents()
-
-            # Schedule next tile
-            QTimer.singleShot(100, self._scan_next_tile)
+            # Schedule next tile (no processEvents - let event loop handle it naturally)
+            if self._running:
+                QTimer.singleShot(50, self._scan_next_tile)
 
         except Exception as e:
-            logger.error(f"Error capturing tile: {e}")
+            logger.error(f"Error capturing tile: {e}", exc_info=True)
             self.scan_error.emit(str(e))
             self._running = False
 
@@ -557,6 +562,9 @@ class LED2DOverviewWorkflow(QObject):
 
         # Capture frames at each Z position
         frames = []  # List of (z, image, focus_score)
+        frames_captured = 0
+        frames_failed = 0
+
         for z_pos in z_positions:
             # Move to Z using stage service directly
             stage_service.move_to_position(AxisCode.Z_AXIS, z_pos)
@@ -568,9 +576,16 @@ class LED2DOverviewWorkflow(QObject):
                 image = frame_data[0]
                 focus_score = variance_of_laplacian(image)
                 frames.append((z_pos, image.copy(), focus_score))
+                frames_captured += 1
+            else:
+                frames_failed += 1
+
+        # Log capture results
+        if frames_failed > 0:
+            logger.warning(f"Tile ({x:.2f}, {y:.2f}): {frames_captured}/{len(z_positions)} frames captured, {frames_failed} failed")
 
         if not frames:
-            logger.warning(f"No frames captured for tile at ({x:.3f}, {y:.3f})")
+            logger.warning(f"No frames captured for tile at ({x:.3f}, {y:.3f}) - using placeholder")
             return TileResult(
                 x=x, y=y, z=z_center,
                 image=np.zeros((100, 100), dtype=np.uint8),
@@ -616,12 +631,15 @@ class LED2DOverviewWorkflow(QObject):
 
     def _finish_rotation(self):
         """Finish the current rotation and move to next."""
+        logger.info(f"=== Finishing rotation {self._current_rotation_idx} ===")
+
         rotation_result = self._results[self._current_rotation_idx]
 
         # Assemble tiles into grid
         try:
             assembled = self._assemble_tiles(rotation_result)
             rotation_result.stitched_image = assembled
+            logger.info(f"Assembled {len(rotation_result.tiles)} tiles into image")
         except Exception as e:
             logger.error(f"Error assembling tiles: {e}")
 
@@ -631,6 +649,7 @@ class LED2DOverviewWorkflow(QObject):
                    f"with {len(rotation_result.tiles)} tiles")
 
         self._current_rotation_idx += 1
+        logger.info(f"Moving to rotation index {self._current_rotation_idx} (total: {len(self._rotation_angles)})")
         QTimer.singleShot(500, self._start_rotation)
 
     def _assemble_tiles(self, result: RotationResult) -> Optional[np.ndarray]:
