@@ -544,9 +544,9 @@ class LED2DOverviewWorkflow(QObject):
         # Move to XY position using stage service directly
         logger.debug(f"Moving to tile position X={x:.3f}, Y={y:.3f}")
         stage_service.move_to_position(AxisCode.X_AXIS, x)
-        time.sleep(0.5)  # Wait for X move
+        time.sleep(0.05)  # Brief pause for command processing
         stage_service.move_to_position(AxisCode.Y_AXIS, y)
-        time.sleep(0.5)  # Wait for Y move
+        time.sleep(0.1)  # Wait for XY moves to complete
 
         # Calculate Z positions for stack using effective bounding box Z range
         # (For rotated view, this is the original X range swapped to Z)
@@ -568,9 +568,9 @@ class LED2DOverviewWorkflow(QObject):
         for z_pos in z_positions:
             # Move to Z using stage service directly
             stage_service.move_to_position(AxisCode.Z_AXIS, z_pos)
-            time.sleep(0.25)  # Wait for Z move and settling
+            time.sleep(0.02)  # Minimal delay - just grab live frame
 
-            # Capture frame
+            # Capture frame from live view
             frame_data = camera_controller.get_latest_frame()
             if frame_data is not None:
                 image = frame_data[0]
