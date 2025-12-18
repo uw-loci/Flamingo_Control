@@ -5,12 +5,10 @@ Handles all stage-related commands including position queries,
 movement control, and motion monitoring.
 """
 
-import socket
 from typing import Optional, Dict, Any
 
 from py2flamingo.services.microscope_command_service import MicroscopeCommandService
 from py2flamingo.models.microscope import Position
-from py2flamingo.core.tcp_protocol import CommandDataBits
 
 
 class StageCommandCode:
@@ -402,6 +400,9 @@ class StageService(MicroscopeCommandService):
         """
         Send stage movement command.
 
+        Uses the base class _send_command() which properly handles async reader
+        integration when active.
+
         Args:
             command_code: Command code from StageCommandCode
             command_name: Human-readable command name for logging
@@ -411,63 +412,19 @@ class StageService(MicroscopeCommandService):
         Returns:
             Dict with 'success' and optional 'error'
         """
-        if not self.connection.is_connected():
-            return {
-                'success': False,
-                'error': 'Not connected to microscope'
-            }
-
-        try:
-            # Encode command with movement parameters
-            # params[3] (int32Data0) = axis code, doubleData = position
-            cmd_bytes = self.connection.encoder.encode_command(
-                code=command_code,
-                status=0,
-                params=[
-                    0,     # params[0] (hardwareID) - not used
-                    0,     # params[1] (subsystemID) - not used
-                    0,     # params[2] (clientID) - not used
-                    axis,  # params[3] (int32Data0) = axis code (1=X, 2=Y, 3=Z, 4=R)
-                    0,     # params[4] (int32Data1)
-                    0,     # params[5] (int32Data2)
-                    CommandDataBits.TRIGGER_CALL_BACK  # params[6] = flag
-                ],
-                value=position_mm,  # doubleData = position in mm
-                data=b''
-            )
-
-            # Get command socket
-            command_socket = self.connection._command_socket
-            if command_socket is None:
-                return {
-                    'success': False,
-                    'error': 'Command socket not available'
-                }
-
-            # Send command
-            command_socket.sendall(cmd_bytes)
-            self.logger.debug(f"Sent {command_name} (axis={axis}, position={position_mm}mm)")
-
-            # Read acknowledgment (movement commands return immediately)
-            ack_response = self._receive_full_bytes(command_socket, 128, timeout=3.0)
-
-            # Parse response
-            parsed = self._parse_response(ack_response)
-
-            return {
-                'success': True,
-                'parsed': parsed
-            }
-
-        except (socket.timeout, TimeoutError) as e:
-            self.logger.error(f"Timeout sending {command_name}")
-            return {
-                'success': False,
-                'error': 'timeout'
-            }
-        except Exception as e:
-            self.logger.error(f"Error in {command_name}: {e}", exc_info=True)
-            return {
-                'success': False,
-                'error': str(e)
-            }
+        # Use base class _send_command which handles async reader properly
+        # params[3] (int32Data0) = axis code
+        return self._send_command(
+            command_code=command_code,
+            command_name=command_name,
+            params=[
+                0,     # params[0] (hardwareID) - not used
+                0,     # params[1] (subsystemID) - not used
+                0,     # params[2] (clientID) - not used
+                axis,  # params[3] (int32Data0) = axis code (1=X, 2=Y, 3=Z, 4=R)
+                0,     # params[4] (int32Data1)
+                0,     # params[5] (int32Data2)
+                0      # params[6] will be set to TRIGGER_CALL_BACK by _send_command
+            ],
+            value=position_mm  # doubleData = position in mm
+        )
