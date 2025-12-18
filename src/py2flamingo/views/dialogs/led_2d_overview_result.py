@@ -28,13 +28,19 @@ class ZoomableImageLabel(QLabel):
         super().__init__(parent)
         self._zoom = 1.0
         self._min_zoom = 0.1
-        self._max_zoom = 10.0
+        self._max_zoom = 20.0  # Allow more zoom for small images
         self._pan_start = QPoint()
         self._panning = False
         self._original_pixmap: Optional[QPixmap] = None
+        self._scroll_area: Optional[QScrollArea] = None
 
         self.setMouseTracking(True)
         self.setCursor(Qt.OpenHandCursor)
+        self.setAlignment(Qt.AlignCenter)
+
+    def set_scroll_area(self, scroll_area: QScrollArea):
+        """Set reference to parent scroll area for panning."""
+        self._scroll_area = scroll_area
 
     def setPixmap(self, pixmap: QPixmap):
         """Set the pixmap and store original for zooming."""
@@ -47,31 +53,42 @@ class ZoomableImageLabel(QLabel):
             return
 
         # Scale pixmap
-        scaled_size = self._original_pixmap.size() * self._zoom
+        new_width = int(self._original_pixmap.width() * self._zoom)
+        new_height = int(self._original_pixmap.height() * self._zoom)
+
+        if new_width < 1 or new_height < 1:
+            return
+
         scaled = self._original_pixmap.scaled(
-            scaled_size,
+            new_width, new_height,
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation
         )
         super().setPixmap(scaled)
 
+        # Resize the label to match the scaled pixmap
+        self.setFixedSize(scaled.size())
+
     def wheelEvent(self, event: QWheelEvent):
         """Handle mouse wheel for zoom."""
-        # Zoom in/out
         delta = event.angleDelta().y()
-        if delta > 0:
-            self._zoom = min(self._max_zoom, self._zoom * 1.15)
-        else:
-            self._zoom = max(self._min_zoom, self._zoom / 1.15)
+        old_zoom = self._zoom
 
-        self._update_display()
+        if delta > 0:
+            self._zoom = min(self._max_zoom, self._zoom * 1.2)
+        else:
+            self._zoom = max(self._min_zoom, self._zoom / 1.2)
+
+        if self._zoom != old_zoom:
+            self._update_display()
+
         event.accept()
 
     def mousePressEvent(self, event: QMouseEvent):
         """Start panning on left click."""
         if event.button() == Qt.LeftButton:
             self._panning = True
-            self._pan_start = event.pos()
+            self._pan_start = event.globalPos()
             self.setCursor(Qt.ClosedHandCursor)
             event.accept()
 
@@ -84,19 +101,14 @@ class ZoomableImageLabel(QLabel):
 
     def mouseMoveEvent(self, event: QMouseEvent):
         """Pan while dragging."""
-        if self._panning:
-            delta = event.pos() - self._pan_start
-            self._pan_start = event.pos()
+        if self._panning and self._scroll_area:
+            delta = event.globalPos() - self._pan_start
+            self._pan_start = event.globalPos()
 
-            # Get parent scroll area and adjust scrollbars
-            scroll_area = self.parent()
-            if scroll_area and hasattr(scroll_area, 'parent'):
-                scroll_area = scroll_area.parent()
-                if isinstance(scroll_area, QScrollArea):
-                    h_bar = scroll_area.horizontalScrollBar()
-                    v_bar = scroll_area.verticalScrollBar()
-                    h_bar.setValue(h_bar.value() - delta.x())
-                    v_bar.setValue(v_bar.value() - delta.y())
+            h_bar = self._scroll_area.horizontalScrollBar()
+            v_bar = self._scroll_area.verticalScrollBar()
+            h_bar.setValue(h_bar.value() - delta.x())
+            v_bar.setValue(v_bar.value() - delta.y())
             event.accept()
 
     def reset_zoom(self):
@@ -105,14 +117,24 @@ class ZoomableImageLabel(QLabel):
         self._update_display()
 
     def fit_to_view(self, view_size: QSize):
-        """Fit image to view size."""
+        """Fit image to view size, scaling up if needed."""
         if self._original_pixmap is None:
             return
 
-        img_size = self._original_pixmap.size()
-        scale_x = view_size.width() / img_size.width()
-        scale_y = view_size.height() / img_size.height()
-        self._zoom = min(scale_x, scale_y) * 0.95  # 95% to leave margin
+        img_w = self._original_pixmap.width()
+        img_h = self._original_pixmap.height()
+
+        if img_w <= 0 or img_h <= 0:
+            return
+
+        # Calculate zoom to fit, allowing scale up for small images
+        scale_x = (view_size.width() - 20) / img_w  # Leave margin
+        scale_y = (view_size.height() - 20) / img_h
+        self._zoom = min(scale_x, scale_y)
+
+        # Ensure minimum reasonable zoom
+        self._zoom = max(0.1, self._zoom)
+
         self._update_display()
 
     @property
@@ -152,9 +174,10 @@ class ImagePanel(QWidget):
         self.scroll_area.setWidgetResizable(False)  # Don't auto-resize for zoom
         self.scroll_area.setAlignment(Qt.AlignCenter)
         self.scroll_area.setMinimumSize(200, 200)
+        self.scroll_area.setStyleSheet("background-color: #2a2a2a;")  # Dark background
 
         self.image_label = ZoomableImageLabel()
-        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.set_scroll_area(self.scroll_area)  # Connect for panning
 
         self.scroll_area.setWidget(self.image_label)
         layout.addWidget(self.scroll_area, stretch=1)
@@ -191,8 +214,10 @@ class ImagePanel(QWidget):
         self.title_label.setText(title)
 
     def _fit_to_view(self):
-        """Fit image to scroll area size."""
-        self.image_label.fit_to_view(self.scroll_area.size())
+        """Fit image to scroll area viewport size."""
+        # Use viewport size, not scroll area size
+        viewport_size = self.scroll_area.viewport().size()
+        self.image_label.fit_to_view(viewport_size)
         self._update_zoom_label()
 
     def _reset_zoom(self):
@@ -230,6 +255,11 @@ class ImagePanel(QWidget):
             self._draw_grid_overlay()
 
         self.image_label.setPixmap(self._pixmap)
+
+        # Auto-fit to view after a short delay (allows layout to settle)
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(100, self._fit_to_view)
+
         self._update_zoom_label()
 
     def set_tile_coordinates(self, coords: List[tuple]):
