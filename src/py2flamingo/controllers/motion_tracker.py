@@ -64,6 +64,7 @@ class MotionTracker:
         # Async mode support
         self._callback_queue: Optional[queue.Queue] = None
         self._callback_registered = False
+        self._queue_full_count = 0  # Throttle warning spam
 
     def _use_async_mode(self) -> bool:
         """Check if async mode should be used."""
@@ -74,7 +75,7 @@ class MotionTracker:
     def _setup_async_callback(self) -> None:
         """Register callback handler for STAGE_MOTION_STOPPED."""
         if not self._callback_registered and self._use_async_mode():
-            self._callback_queue = queue.Queue(maxsize=10)
+            self._callback_queue = queue.Queue(maxsize=100)  # Larger for Z-stack operations
             self.connection.register_callback(
                 self.STAGE_MOTION_STOPPED,
                 self._on_motion_stopped_callback
@@ -106,7 +107,10 @@ class MotionTracker:
                 self._callback_queue.put_nowait(message)
                 self.logger.debug(f"Queued STAGE_MOTION_STOPPED callback (status={message.status_code})")
         except queue.Full:
-            self.logger.warning("Motion callback queue full - dropping message")
+            self._queue_full_count += 1
+            # Only log every 10th occurrence to reduce spam
+            if self._queue_full_count % 10 == 1:
+                self.logger.warning(f"Motion callback queue full - dropped {self._queue_full_count} messages (rapid Z-stack?)")
 
     def cancel_wait(self) -> None:
         """
