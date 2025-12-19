@@ -676,9 +676,13 @@ class LED2DOverviewWorkflow(QObject):
         first_tile = result.tiles[0].image
         tile_h, tile_w = first_tile.shape[:2]
 
+        # Calculate actual grid dimensions from tile indices
+        actual_tiles_x = max(t.tile_x_idx for t in result.tiles) + 1
+        actual_tiles_y = max(t.tile_y_idx for t in result.tiles) + 1
+
         # No overlap - tiles are adjacent
-        output_w = tile_w * result.tiles_x
-        output_h = tile_h * result.tiles_y
+        output_w = tile_w * actual_tiles_x
+        output_h = tile_h * actual_tiles_y
 
         # Create output array
         if len(first_tile.shape) == 3:

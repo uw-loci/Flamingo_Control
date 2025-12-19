@@ -27,7 +27,7 @@ class ZoomableImageLabel(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._zoom = 1.0
-        self._min_zoom = 0.1
+        self._min_zoom = 0.01  # Allow zoom out to 1% for large tile grids
         self._max_zoom = 20.0  # Allow more zoom for small images
         self._pan_start = QPoint()
         self._panning = False
@@ -567,7 +567,13 @@ class LED2DOverviewResultWindow(QWidget):
 
         for i, result in enumerate(self._results):
             total_tiles += len(result.tiles)
-            parts.append(f"R{i+1}={result.rotation_angle}° ({result.tiles_x}x{result.tiles_y})")
+            # Calculate actual tile dimensions from tile indices
+            if result.tiles:
+                max_x = max(t.tile_x_idx for t in result.tiles) + 1
+                max_y = max(t.tile_y_idx for t in result.tiles) + 1
+                parts.append(f"R{i+1}={result.rotation_angle}° ({max_x}x{max_y})")
+            else:
+                parts.append(f"R{i+1}={result.rotation_angle}° (no tiles)")
 
         if self._config:
             bbox = self._config.bounding_box
