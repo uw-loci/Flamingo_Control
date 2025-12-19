@@ -701,6 +701,7 @@ class SampleView(QWidget):
         self.sample_3d_window = sample_3d_window
         self._geometry_manager = geometry_manager
         self._geometry_restored = False
+        self._dialog_state_restored = False
         self.logger = logging.getLogger(__name__)
 
         # Display state
@@ -1754,10 +1755,18 @@ class SampleView(QWidget):
 
     @pyqtSlot(object)
     def _on_camera_state_changed(self, state) -> None:
-        """Handle camera state change."""
+        """Handle camera state change.
+
+        Updates both the status label and the live view button to reflect
+        the actual camera state. This ensures the GUI stays in sync when
+        the camera is controlled externally (e.g., by workflows).
+        """
         state_names = {0: "Idle", 1: "Starting", 2: "Running", 3: "Stopping"}
         state_name = state_names.get(state.value if hasattr(state, 'value') else state, "Unknown")
         self.live_status_label.setText(f"Status: {state_name}")
+
+        # Also update the live view button to match actual camera state
+        self._update_live_view_state()
 
     @pyqtSlot(float, float, float, float)
     def _on_position_changed(self, x: float, y: float, z: float, r: float) -> None:
@@ -2307,7 +2316,7 @@ class SampleView(QWidget):
     # ========== Window Events ==========
 
     def showEvent(self, event: QShowEvent) -> None:
-        """Handle window show event - restore geometry on first show."""
+        """Handle window show event - restore geometry and dialog state on first show."""
         super().showEvent(event)
 
         # Restore geometry on first show
@@ -2316,20 +2325,132 @@ class SampleView(QWidget):
             self._geometry_restored = True
             self.logger.info("Restored SampleView geometry")
 
+        # Restore dialog state on first show
+        if not self._dialog_state_restored and self._geometry_manager:
+            self._restore_dialog_state()
+            self._dialog_state_restored = True
+
+        # Load laser powers from hardware (every time window is shown)
+        if self.laser_led_controller:
+            self.logger.info("Loading laser powers from hardware...")
+            self.laser_led_controller.load_laser_powers_from_hardware()
+
     def hideEvent(self, event: QHideEvent) -> None:
-        """Handle window hide event - save geometry when hidden."""
-        # Save geometry when hiding (ensures it's saved before app closes)
+        """Handle window hide event - save geometry and dialog state when hidden."""
+        # Save geometry and dialog state when hiding
         if self._geometry_manager:
             self._geometry_manager.save_geometry("SampleView", self)
-            self.logger.debug("Saved SampleView geometry on hide")
+            self._save_dialog_state()
+            self._geometry_manager.save_all()
+            self.logger.debug("Saved SampleView geometry and dialog state on hide")
 
         super().hideEvent(event)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """Handle window close event - save geometry."""
-        # Save geometry
+        """Handle window close event - save geometry and dialog state."""
+        # Save geometry and dialog state
         if self._geometry_manager:
             self._geometry_manager.save_geometry("SampleView", self)
-            self.logger.info("Saved SampleView geometry")
+            self._save_dialog_state()
+            self._geometry_manager.save_all()
+            self.logger.info("Saved SampleView geometry and dialog state")
 
         event.accept()
+
+    # ========== Dialog State Persistence ==========
+
+    def _save_dialog_state(self) -> None:
+        """Save dialog state (display settings and illumination selections) for persistence.
+
+        Saves:
+        - Display settings: colormap, auto-scale, intensity min/max
+        - Illumination selections: laser/LED checkboxes, LED color, LED intensity, light path
+
+        Does NOT save (these are reset or loaded from hardware):
+        - Stage positions (loaded from current hardware state)
+        - Laser power values (loaded from hardware)
+        - "Populate from live" checkbox (always starts unchecked)
+        - 3D view camera position (always resets)
+        """
+        if not self._geometry_manager:
+            return
+
+        state = {}
+
+        # Display settings
+        state["colormap"] = self.colormap_combo.currentText()
+        state["auto_scale"] = self.auto_scale_checkbox.isChecked()
+        state["intensity_min"] = self.min_intensity_spinbox.value()
+        state["intensity_max"] = self.max_intensity_spinbox.value()
+
+        # Illumination selections from the laser/LED panel
+        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+            state["illumination"] = self.laser_led_panel.get_illumination_selection_state()
+
+        self._geometry_manager.save_dialog_state("SampleView", state)
+        self.logger.debug(f"Saved dialog state: colormap={state['colormap']}, "
+                         f"auto_scale={state['auto_scale']}, "
+                         f"intensity={state['intensity_min']}-{state['intensity_max']}")
+
+    def _restore_dialog_state(self) -> None:
+        """Restore dialog state (display settings and illumination selections) from persistence.
+
+        Restores:
+        - Display settings: colormap, auto-scale, intensity min/max
+        - Illumination selections: laser/LED checkboxes, LED color, LED intensity, light path
+
+        Does NOT restore (intentionally):
+        - Stage positions (current hardware state is used)
+        - Laser power values (loaded from hardware separately)
+        - "Populate from live" checkbox (always starts unchecked)
+        - 3D view camera position (always starts in reset position)
+        """
+        if not self._geometry_manager:
+            return
+
+        state = self._geometry_manager.restore_dialog_state("SampleView")
+        if not state:
+            self.logger.debug("No saved dialog state to restore")
+            return
+
+        # Restore display settings (block signals to prevent side effects)
+        if "colormap" in state:
+            self.colormap_combo.blockSignals(True)
+            self.colormap_combo.setCurrentText(state["colormap"])
+            self._colormap = state["colormap"]
+            self.colormap_combo.blockSignals(False)
+
+        if "auto_scale" in state:
+            self.auto_scale_checkbox.blockSignals(True)
+            self.auto_scale_checkbox.setChecked(state["auto_scale"])
+            self._auto_scale = state["auto_scale"]
+            self.auto_scale_checkbox.blockSignals(False)
+
+            # Enable/disable intensity controls based on auto-scale
+            manual_enabled = not state["auto_scale"]
+            self.min_intensity_spinbox.setEnabled(manual_enabled)
+            self.max_intensity_spinbox.setEnabled(manual_enabled)
+            self.range_slider.setEnabled(manual_enabled)
+
+        if "intensity_min" in state and "intensity_max" in state:
+            self.min_intensity_spinbox.blockSignals(True)
+            self.max_intensity_spinbox.blockSignals(True)
+            self.range_slider.blockSignals(True)
+
+            self._intensity_min = state["intensity_min"]
+            self._intensity_max = state["intensity_max"]
+            self.min_intensity_spinbox.setValue(state["intensity_min"])
+            self.max_intensity_spinbox.setValue(state["intensity_max"])
+            self.range_slider.setValue((state["intensity_min"], state["intensity_max"]))
+
+            self.min_intensity_spinbox.blockSignals(False)
+            self.max_intensity_spinbox.blockSignals(False)
+            self.range_slider.blockSignals(False)
+
+        # Restore illumination selections
+        if "illumination" in state and hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+            self.laser_led_panel.restore_illumination_selection_state(state["illumination"])
+
+        self.logger.info(f"Restored dialog state: colormap={state.get('colormap')}, "
+                        f"auto_scale={state.get('auto_scale')}, "
+                        f"intensity={state.get('intensity_min')}-{state.get('intensity_max')}")

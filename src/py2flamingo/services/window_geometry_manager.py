@@ -104,7 +104,8 @@ class WindowGeometryManager:
             windows[window_id] = {
                 "geometry": None,
                 "state": None,
-                "splitters": {}
+                "splitters": {},
+                "dialog_state": {}
             }
         return windows[window_id]
 
@@ -241,6 +242,51 @@ class WindowGeometryManager:
         except Exception as e:
             logger.error(f"Error restoring splitter state: {e}")
             return False
+
+    def save_dialog_state(self, window_id: str, state: Dict[str, Any]) -> None:
+        """Save custom dialog state to storage.
+
+        This allows dialogs to persist arbitrary settings (e.g., selected options,
+        checkbox states, combo box selections) alongside their geometry.
+
+        Args:
+            window_id: Unique identifier for the window
+            state: Dictionary containing dialog-specific state to persist
+        """
+        try:
+            window_data = self._get_window_data(window_id)
+            window_data["dialog_state"] = state
+            logger.debug(f"Saved dialog state for '{window_id}': {list(state.keys())}")
+
+        except Exception as e:
+            logger.error(f"Error saving dialog state for '{window_id}': {e}")
+
+    def restore_dialog_state(self, window_id: str) -> Dict[str, Any]:
+        """Restore custom dialog state from storage.
+
+        Args:
+            window_id: Unique identifier for the window
+
+        Returns:
+            Dictionary containing saved dialog state, or empty dict if none exists
+        """
+        try:
+            windows = self._data.get("windows", {})
+            if window_id not in windows:
+                logger.debug(f"No saved dialog state for '{window_id}'")
+                return {}
+
+            window_data = windows[window_id]
+            state = window_data.get("dialog_state", {})
+
+            if state:
+                logger.debug(f"Restored dialog state for '{window_id}': {list(state.keys())}")
+
+            return state
+
+        except Exception as e:
+            logger.error(f"Error restoring dialog state for '{window_id}': {e}")
+            return {}
 
     def save_all(self) -> None:
         """Save all pending geometry data to disk.

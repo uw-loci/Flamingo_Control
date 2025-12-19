@@ -8,6 +8,8 @@ Provides UI controls for:
 """
 
 import logging
+from typing import Any, Dict
+
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
     QRadioButton, QCheckBox, QButtonGroup, QGroupBox, QGridLayout, QComboBox, QDoubleSpinBox
@@ -588,21 +590,27 @@ class LaserLEDControlPanel(QWidget):
         """
         Update UI when preview is disabled.
 
-        Note: Checkboxes are NOT unchecked - they remember the user's desired state.
-        When live view restarts, checked sources will be automatically re-enabled.
+        Unchecks all checkboxes to reflect actual hardware state.
+        The GUI should always show what's actually active, not what
+        the user previously wanted.
         """
-        # Don't uncheck checkboxes - remember user's intent for when live view restarts
+        # Uncheck all checkboxes to reflect actual hardware state
+        for button in self._source_button_group.buttons():
+            if button.isChecked():
+                button.blockSignals(True)  # Prevent triggering enable sequence
+                button.setChecked(False)
+                button.blockSignals(False)
 
         # Hide path selection when nothing is active
         if self._path_group:
             self._path_group.setVisible(False)
 
-        self._status_label.setText("Illumination off (live view stopped) - restart to restore")
+        self._status_label.setText("Illumination off - select a light source to enable")
         self._status_label.setStyleSheet(
             f"background-color: {WARNING_BG}; color: #856404; padding: 8px; "
             f"border: 1px solid #ffc107; border-radius: 4px; font-weight: bold;"
         )
-        self.logger.info("Preview disabled (checkboxes left checked to remember user intent)")
+        self.logger.info("Preview disabled - checkboxes unchecked to reflect actual state")
 
     @pyqtSlot(str)
     def _on_error(self, error_message: str) -> None:
@@ -641,6 +649,97 @@ class LaserLEDControlPanel(QWidget):
     def is_source_active(self) -> bool:
         """Check if any light source is currently active."""
         return self.laser_led_controller.is_preview_active()
+
+    def get_illumination_selection_state(self) -> Dict[str, Any]:
+        """Get the current illumination selection state for persistence.
+
+        Returns a dictionary containing:
+        - selected_lasers: List of checked laser indices
+        - led_selected: Whether LED checkbox is checked
+        - led_color: Current LED color index (0=Red, 1=Green, 2=Blue, 3=White)
+        - led_intensity: Current LED intensity value
+        - light_path: Current light path selection ("left" or "right")
+
+        Note: Laser power values are NOT included - they should be loaded from hardware.
+        """
+        state = {}
+
+        # Get checked laser indices
+        selected_lasers = []
+        for laser_index, checkbox in self._laser_radios.items():
+            if checkbox.isChecked():
+                selected_lasers.append(laser_index)
+        state["selected_lasers"] = selected_lasers
+
+        # LED selection state
+        state["led_selected"] = self._led_radio.isChecked() if self._led_radio else False
+        state["led_color"] = self._led_combobox.currentIndex() if self._led_combobox else 0
+        state["led_intensity"] = self._led_slider.value() if self._led_slider else 50
+
+        # Light path selection
+        state["light_path"] = self._laser_path
+
+        return state
+
+    def restore_illumination_selection_state(self, state: Dict[str, Any]) -> None:
+        """Restore illumination selection state from persistence.
+
+        Args:
+            state: Dictionary containing saved illumination state (from get_illumination_selection_state)
+
+        Note: This only restores UI selections (checkboxes, combos, light path).
+        It does NOT enable any light sources - that happens when Start Live is clicked.
+        Laser power values should be loaded separately from hardware.
+        """
+        if not state:
+            return
+
+        self.logger.debug(f"Restoring illumination selection state: {state}")
+
+        # Block signals during restoration to prevent side effects
+        # Restore LED state first (before lasers, in case we need mutual exclusivity)
+        if self._led_radio and "led_selected" in state:
+            self._led_radio.blockSignals(True)
+            self._led_radio.setChecked(state["led_selected"])
+            self._led_radio.blockSignals(False)
+
+        if self._led_combobox and "led_color" in state:
+            self._led_combobox.blockSignals(True)
+            self._led_combobox.setCurrentIndex(state["led_color"])
+            self._led_combobox.blockSignals(False)
+
+        if self._led_slider and "led_intensity" in state:
+            self._led_slider.blockSignals(True)
+            self._led_slider.setValue(state["led_intensity"])
+            self._led_slider.blockSignals(False)
+            # Also update spinbox
+            if self._led_spinbox:
+                self._led_spinbox.blockSignals(True)
+                self._led_spinbox.setValue(float(state["led_intensity"]))
+                self._led_spinbox.blockSignals(False)
+
+        # Restore laser selections (note: mutual exclusivity means only one should be checked)
+        selected_lasers = state.get("selected_lasers", [])
+        for laser_index, checkbox in self._laser_radios.items():
+            checkbox.blockSignals(True)
+            checkbox.setChecked(laser_index in selected_lasers)
+            checkbox.blockSignals(False)
+
+        # Restore light path selection
+        if "light_path" in state:
+            self._laser_path = state["light_path"]
+            if self._left_path_radio and self._right_path_radio:
+                self._left_path_radio.blockSignals(True)
+                self._right_path_radio.blockSignals(True)
+                if state["light_path"] == "left":
+                    self._left_path_radio.setChecked(True)
+                else:
+                    self._right_path_radio.setChecked(True)
+                self._left_path_radio.blockSignals(False)
+                self._right_path_radio.blockSignals(False)
+
+        self.logger.info(f"Restored illumination selections: lasers={selected_lasers}, "
+                        f"led={state.get('led_selected')}, path={state.get('light_path')}")
 
     def restore_checked_illumination(self) -> None:
         """
