@@ -558,6 +558,14 @@ class LED2DOverviewWorkflow(QObject):
             z_positions.append(z)
             z += z_step
 
+        # Cap at 10 Z positions for speed - this is a quick overview, not precision imaging
+        MAX_Z_POSITIONS = 10
+        if len(z_positions) > MAX_Z_POSITIONS:
+            # Subsample evenly across the range
+            indices = np.linspace(0, len(z_positions) - 1, MAX_Z_POSITIONS, dtype=int)
+            z_positions = [z_positions[i] for i in indices]
+            logger.info(f"Capped Z-stack to {MAX_Z_POSITIONS} planes for speed")
+
         logger.debug(f"Capturing Z-stack: {len(z_positions)} planes from {z_positions[0]:.3f} to {z_positions[-1]:.3f}")
 
         # Capture frames at each Z position

@@ -322,15 +322,15 @@ class LED2DOverviewDialog(QDialog):
         self.get_r_btn.clicked.connect(self._get_current_r)
         layout.addWidget(self.get_r_btn, 0, 2)
 
-        # Z step size
+        # Z step size - larger default for fast overview
         layout.addWidget(QLabel("Z Step Size:"), 1, 0)
         self.z_step_size = QDoubleSpinBox()
-        self.z_step_size.setRange(0.010, 0.500)
+        self.z_step_size.setRange(0.050, 1.000)
         self.z_step_size.setDecimals(3)
-        self.z_step_size.setSingleStep(0.010)
+        self.z_step_size.setSingleStep(0.050)
         self.z_step_size.setSuffix(" mm")
-        self.z_step_size.setValue(0.050)
-        self.z_step_size.setToolTip("Z step size for focus search (50 µm default)")
+        self.z_step_size.setValue(0.250)  # 250µm default for fast scan (~6 Z planes)
+        self.z_step_size.setToolTip("Z step size for focus search (250 µm default for speed)")
         self.z_step_size.valueChanged.connect(self._update_scan_info)
         layout.addWidget(self.z_step_size, 1, 1)
 
