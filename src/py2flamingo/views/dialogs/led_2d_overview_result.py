@@ -396,10 +396,6 @@ class LED2DOverviewResultWindow(QWidget):
         self.setWindowTitle("LED 2D Overview - Results" if not preview_mode else "LED 2D Overview - Preview")
         self.setMinimumSize(800, 500)
 
-        # Make window stay on top if previewing
-        if preview_mode:
-            self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
-
         self._setup_ui()
 
         if results:

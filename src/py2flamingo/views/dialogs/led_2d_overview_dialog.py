@@ -92,10 +92,8 @@ class LED2DOverviewDialog(QDialog):
 
         self.setWindowTitle("LED 2D Overview")
         self.setMinimumWidth(520)
-        # Non-modal so user can interact with Sample View
+        # Non-modal so user can interact with Sample View and other dialogs
         self.setModal(False)
-        # Keep on top but allow interaction with other windows
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
 
         self._load_stage_limits()
         self._setup_ui()
