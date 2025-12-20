@@ -561,7 +561,8 @@ class MainWindow(QMainWindow):
         if self._geometry_manager:
             try:
                 self._geometry_manager.save_geometry("MainWindow", self)
-                logger.info("Saved MainWindow geometry")
+                self._geometry_manager.save_all()  # Persist to disk
+                logger.info("Saved MainWindow geometry and persisted to disk")
             except Exception as e:
                 logger.error(f"Error saving MainWindow geometry: {e}")
 

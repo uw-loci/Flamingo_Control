@@ -1693,6 +1693,7 @@ class SampleView(QWidget):
         """Calculate auto-contrast max value with stabilization.
 
         Uses a percentage-based algorithm that only adjusts once per interval:
+        - If image max is much lower than current max: jump directly to data-based value
         - If >20% pixels are saturated (>=95% of current max): raise max to 95% of top 5% mean
         - If <5% pixels are above 70% of current max: lower max by 10%
         - Otherwise: keep current max (stable)
@@ -1713,6 +1714,23 @@ class SampleView(QWidget):
         # Calculate pixel statistics
         total_pixels = image.size
         current_max = self._auto_contrast_max
+
+        # Quick check: if image is very dark compared to current_max, jump directly
+        # This handles the case where we start at 65535 but sample is dim
+        image_actual_max = int(np.max(image))
+        if image_actual_max < current_max * 0.1:  # Actual max is less than 10% of display max
+            # Image is very dark - set max based on actual data
+            # Use 99th percentile for robustness against hot pixels
+            p99 = np.percentile(image, 99)
+            new_max = int(p99 / 0.85)  # Set so 99th percentile is at 85% brightness
+            new_max = max(100, min(65535, new_max))  # Clamp to reasonable range
+
+            if new_max < current_max * 0.5:  # Only jump if it's a significant change
+                self.logger.info(f"Auto-contrast: quick adjustment {current_max} -> {new_max} "
+                                f"(image max={image_actual_max}, p99={p99:.0f})")
+                self._auto_contrast_max = new_max
+                self._last_contrast_adjustment = current_time
+                return self._auto_contrast_max
 
         # Count saturated pixels (>= 95% of current max)
         saturation_level = current_max * self._saturation_percentile
