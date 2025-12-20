@@ -866,7 +866,17 @@ class LED2DOverviewDialog(QDialog):
 
         # Confirm start
         bbox = config.bounding_box
-        tiles_x, tiles_y = self._calculate_tile_count(bbox)
+        tile_count = self._calculate_tile_count(bbox)
+        if tile_count is None:
+            QMessageBox.critical(
+                self,
+                "Cannot Start Scan",
+                "Field of View (FOV) could not be determined from camera.\n\n"
+                "The camera returned invalid image dimensions (0x0).\n"
+                "Please ensure the camera is properly connected and configured."
+            )
+            return
+        tiles_x, tiles_y = tile_count
         total_tiles = tiles_x * tiles_y * 2
 
         reply = QMessageBox.question(
