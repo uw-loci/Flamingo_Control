@@ -136,9 +136,16 @@ class CameraService(MicroscopeCommandService):
         self._frame_buffer_lock = threading.Lock()
         self._frame_buffer = deque(maxlen=20)  # Keep last 20 frames max
 
+        # Cached image size from live streaming (when camera query returns 0x0)
+        self._cached_image_size: Optional[Tuple[int, int]] = None
+
     def get_image_size(self) -> Tuple[int, int]:
         """
         Get camera image dimensions in pixels.
+
+        First queries the camera directly. If the camera returns 0x0
+        (which can happen when not streaming), uses cached size from
+        previous live streaming session if available.
 
         Returns:
             Tuple of (width, height) in pixels, e.g., (2048, 2048)
@@ -163,6 +170,17 @@ class CameraService(MicroscopeCommandService):
         params = result['parsed']['params']
         width = params[3]   # X dimension in Param[3]
         height = params[4]  # Y dimension in Param[4]
+
+        # If camera returns 0x0, try cached value from live streaming
+        if width == 0 or height == 0:
+            if self._cached_image_size:
+                width, height = self._cached_image_size
+                self.logger.info(f"Camera returned 0x0, using cached size: {width}x{height} pixels")
+            else:
+                self.logger.warning("Camera returned 0x0 and no cached size available")
+        else:
+            # Update cache with fresh value
+            self._cached_image_size = (width, height)
 
         self.logger.info(f"Camera image size: {width}x{height} pixels")
         return (width, height)
@@ -538,6 +556,10 @@ class CameraService(MicroscopeCommandService):
 
                 if frames_received == 0:
                     self.logger.info(f"First frame received! Size: {header.image_width}x{header.image_height}, {header.image_size} bytes")
+                    # Cache the image size for later use when query returns 0x0
+                    if header.image_width > 0 and header.image_height > 0:
+                        self._cached_image_size = (header.image_width, header.image_height)
+                        self.logger.debug(f"Cached image size: {header.image_width}x{header.image_height}")
 
                 # Read image data (16-bit pixels)
                 image_data_bytes = self._receive_exact(self._data_socket, header.image_size)
