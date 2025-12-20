@@ -257,26 +257,9 @@ class StageService(MicroscopeCommandService):
                     )
                     return None
 
-                # CRITICAL SAFETY CHECK: Validate position is within hardware limits
-                # This prevents accepting corrupted/invalid responses that could damage hardware
-                valid_ranges = {
-                    1: (1.0, 12.31),    # X-axis limits (mm)
-                    2: (5.0, 25.0),     # Y-axis limits (mm)
-                    3: (12.5, 26.0),    # Z-axis limits (mm)
-                    4: (-720.0, 720.0)  # R-axis limits (degrees)
-                }
-
-                if axis in valid_ranges:
-                    min_val, max_val = valid_ranges[axis]
-                    if not (min_val <= position <= max_val):
-                        self.logger.error(
-                            f"**SAFETY VIOLATION** {axis_name} position {position:.3f} is OUT OF RANGE "
-                            f"({min_val}-{max_val}) - This likely indicates a communication error. "
-                            f"REJECTING invalid position to prevent hardware damage!"
-                        )
-                        return None
-
-                self.logger.info(f"{axis_name}-axis position: {position} mm")
+                # Log position from hardware - trust the hardware response
+                # Stage limits vary by microscope and should not be hardcoded here
+                self.logger.info(f"{axis_name}-axis position: {position:.3f} mm")
                 return float(position)
             except Exception as e:
                 self.logger.error(f"Failed to parse position from doubleData field: {e}")
