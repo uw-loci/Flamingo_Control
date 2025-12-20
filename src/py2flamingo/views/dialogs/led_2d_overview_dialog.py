@@ -67,8 +67,7 @@ class LED2DOverviewDialog(QDialog):
     # Emitted when user requests to start scan
     scan_requested = pyqtSignal(object)  # ScanConfiguration
 
-    # Default FOV for N7 camera (mm)
-    DEFAULT_FOV_MM = 0.5182
+    # No hardcoded FOV - must be queried from camera to avoid equipment damage
 
     def __init__(self, app, parent=None):
         """Initialize the dialog.
@@ -593,16 +592,43 @@ class LED2DOverviewDialog(QDialog):
             z_min=min(z_coords), z_max=max(z_coords)
         )
 
-    def _calculate_tile_count(self, bbox: BoundingBox) -> Tuple[int, int]:
+    def _get_actual_fov(self) -> Optional[float]:
+        """Get actual field of view from camera.
+
+        Returns:
+            FOV in mm, or None if it cannot be determined
+        """
+        try:
+            if not self._app or not hasattr(self._app, 'camera_service') or not self._app.camera_service:
+                return None
+
+            pixel_size_mm = self._app.camera_service.get_pixel_field_of_view()
+            width, height = self._app.camera_service.get_image_size()
+            frame_size = min(width, height)
+
+            if frame_size <= 0 or pixel_size_mm <= 0:
+                return None
+
+            fov = pixel_size_mm * frame_size
+            if fov < 0.01 or fov > 50:
+                return None
+
+            return fov
+        except Exception:
+            return None
+
+    def _calculate_tile_count(self, bbox: BoundingBox) -> Optional[Tuple[int, int]]:
         """Calculate number of tiles needed (no overlap).
 
         Args:
             bbox: Bounding box for scan region
 
         Returns:
-            Tuple of (tiles_x, tiles_y)
+            Tuple of (tiles_x, tiles_y), or None if FOV is unknown
         """
-        fov = self.DEFAULT_FOV_MM
+        fov = self._get_actual_fov()
+        if fov is None:
+            return None
 
         # No overlap - tiles are adjacent
         tiles_x = max(1, int((bbox.width / fov) + 1))
@@ -650,7 +676,19 @@ class LED2DOverviewDialog(QDialog):
             self.preview_btn.setEnabled(False)
             return
 
-        fov = self.DEFAULT_FOV_MM
+        # Get actual FOV from camera - required for safe operation
+        fov = self._get_actual_fov()
+        if fov is None:
+            self.tiles_label.setText("Tiles: ⚠ FOV unknown - camera not ready")
+            self.total_tiles_label.setText("Total tiles: Cannot calculate")
+            self.z_planes_label.setText("Z planes: --")
+            self.region_label.setText(
+                f"Region: X={bbox.width:.2f}mm, Y={bbox.height:.2f}mm, Z={bbox.z_max-bbox.z_min:.2f}mm"
+            )
+            self.start_btn.setEnabled(False)
+            self.preview_btn.setEnabled(False)
+            return
+
         z_step = self.z_step_size.value()
 
         # Rotation 1 (R): tile across X-Y, Z-stack through Z

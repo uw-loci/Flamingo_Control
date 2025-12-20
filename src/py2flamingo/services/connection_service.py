@@ -932,12 +932,15 @@ class MVCConnectionService:
                 try:
                     tube = float(scope_settings['Type']['Tube lens design focal length (mm)'])
                     obj = float(scope_settings['Type']['Objective lens magnification'])
-                    cam_um = 6.5  # Camera pixel size in micrometers (typical value)
+                    # Get camera pixel size from settings, or use common sensor value
+                    cam_um = float(scope_settings.get('Camera', {}).get('Physical pixel size (µm)', 6.5))
                     image_pixel_size = (cam_um / (obj * (tube / 200))) / 1000.0  # Convert to mm
-                    self.logger.info(f"Calculated pixel size: {image_pixel_size:.6f} mm")
+                    self.logger.info(f"Calculated pixel size: {image_pixel_size:.6f} mm "
+                                    f"(cam={cam_um}µm, obj={obj}x, tube={tube}mm)")
                 except (KeyError, ValueError, TypeError) as e:
-                    self.logger.warning(f"Could not calculate pixel size: {e}")
-                    image_pixel_size = 0.000488  # Default fallback value
+                    self.logger.error(f"Could not calculate pixel size: {e}")
+                    # Do not use fallback - return None to indicate unknown
+                    image_pixel_size = None
 
             self.logger.info("Successfully retrieved microscope settings")
             return image_pixel_size, scope_settings

@@ -266,10 +266,14 @@ class ImagePanel(QWidget):
         """Set tile coordinate data for overlay.
 
         Args:
-            coords: List of (x, y, z) tuples for each tile
+            coords: List of (x, y, tile_x_idx, tile_y_idx) tuples for each tile.
+                    The tile indices are used to position the labels correctly
+                    regardless of the order tiles were captured (e.g., serpentine).
         """
         self._tile_coords = coords
-        if self._pixmap and self._show_grid:
+        if self._image is not None and self._show_grid:
+            # Regenerate pixmap from original image to avoid double-drawing
+            self._pixmap = self._array_to_pixmap(self._image)
             self._draw_grid_overlay()
             self.image_label.setPixmap(self._pixmap)
 
@@ -277,7 +281,12 @@ class ImagePanel(QWidget):
         """Enable or disable grid overlay."""
         self._show_grid = show
         if self._image is not None:
-            self.set_image(self._image, self._tiles_x, self._tiles_y)
+            # Regenerate pixmap from original image
+            self._pixmap = self._array_to_pixmap(self._image)
+            # Draw grid with coordinates if enabled
+            if self._show_grid and self._tiles_x > 0 and self._tiles_y > 0:
+                self._draw_grid_overlay()
+            self.image_label.setPixmap(self._pixmap)
 
     def _array_to_pixmap(self, image: np.ndarray) -> QPixmap:
         """Convert numpy array to QPixmap."""
@@ -342,9 +351,13 @@ class ImagePanel(QWidget):
             font = QFont("Courier", 8)
             painter.setFont(font)
 
-            for idx, (x, y, z) in enumerate(self._tile_coords):
-                tile_x_idx = idx % self._tiles_x
-                tile_y_idx = idx // self._tiles_x
+            for coord in self._tile_coords:
+                # Support both formats: (x, y, tile_x_idx, tile_y_idx) or legacy (x, y, z)
+                if len(coord) >= 4:
+                    x, y, tile_x_idx, tile_y_idx = coord[:4]
+                else:
+                    # Legacy format - shouldn't happen with fixed code
+                    continue
 
                 # Position text in tile
                 text_x = int(tile_x_idx * tile_w + 3)
@@ -484,8 +497,8 @@ class LED2DOverviewResultWindow(QWidget):
                     result1.tiles_x,
                     result1.tiles_y
                 )
-                # Set tile coordinates
-                coords = [(t.x, t.y, t.z) for t in result1.tiles]
+                # Set tile coordinates with grid indices for correct label positioning
+                coords = [(t.x, t.y, t.tile_x_idx, t.tile_y_idx) for t in result1.tiles]
                 self.left_panel.set_tile_coordinates(coords)
 
         # Display second rotation
@@ -499,7 +512,8 @@ class LED2DOverviewResultWindow(QWidget):
                     result2.tiles_x,
                     result2.tiles_y
                 )
-                coords = [(t.x, t.y, t.z) for t in result2.tiles]
+                # Set tile coordinates with grid indices for correct label positioning
+                coords = [(t.x, t.y, t.tile_x_idx, t.tile_y_idx) for t in result2.tiles]
                 self.right_panel.set_tile_coordinates(coords)
 
         # Update info text

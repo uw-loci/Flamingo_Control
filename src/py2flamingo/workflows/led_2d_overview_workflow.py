@@ -87,8 +87,8 @@ class LED2DOverviewWorkflow(QObject):
     scan_cancelled = pyqtSignal()
     scan_error = pyqtSignal(str)
 
-    # Default FOV for N7 camera (fallback if can't query from hardware)
-    DEFAULT_FOV_MM = 0.5182
+    # No default FOV - must be queried from hardware to avoid damage
+    # If FOV cannot be determined, the workflow will not start
 
     def __init__(self, app, config, parent=None):
         """Initialize the workflow.
@@ -135,49 +135,52 @@ class LED2DOverviewWorkflow(QObject):
             logger.warning("Tip position not calibrated - only scanning first rotation. "
                           "Use Tools > Calibrate to enable second rotation.")
 
-    def _calculate_actual_fov(self) -> float:
+    def _calculate_actual_fov(self) -> Optional[float]:
         """Calculate the actual field of view from microscope settings.
 
         Queries the camera service for pixel size and frame size to calculate
-        the true FOV. Falls back to DEFAULT_FOV_MM if query fails or returns invalid values.
+        the true FOV. Returns None if FOV cannot be determined - the workflow
+        must not proceed with unknown FOV to avoid potential equipment damage.
 
         Returns:
-            Field of view in mm
+            Field of view in mm, or None if it cannot be determined
         """
         try:
-            if self._app and hasattr(self._app, 'camera_service') and self._app.camera_service:
-                # Get pixel size from camera service
-                pixel_size_mm = self._app.camera_service.get_pixel_field_of_view()
+            if not self._app or not hasattr(self._app, 'camera_service') or not self._app.camera_service:
+                logger.error("Camera service not available - cannot determine FOV")
+                return None
 
-                # Get frame size from camera service
-                width, height = self._app.camera_service.get_image_size()
-                frame_size = min(width, height)  # Use smaller dimension for FOV
+            # Get pixel size from camera service
+            pixel_size_mm = self._app.camera_service.get_pixel_field_of_view()
 
-                # Validate values - camera might return 0 if not properly initialized
-                if frame_size <= 0 or pixel_size_mm <= 0:
-                    logger.warning(f"Invalid camera values: frame_size={frame_size}, "
-                                  f"pixel_size={pixel_size_mm} - using default FOV")
-                    return self.DEFAULT_FOV_MM
+            # Get frame size from camera service
+            width, height = self._app.camera_service.get_image_size()
+            frame_size = min(width, height)  # Use smaller dimension for FOV
 
-                actual_fov = pixel_size_mm * frame_size
+            # Validate values - camera might return 0 if not properly initialized
+            if frame_size <= 0:
+                logger.error(f"Invalid frame size from camera: {frame_size} - cannot determine FOV")
+                return None
 
-                # Sanity check - FOV should be reasonable (0.1mm to 10mm typically)
-                if actual_fov < 0.01 or actual_fov > 50:
-                    logger.warning(f"Calculated FOV {actual_fov:.4f}mm seems unreasonable - using default")
-                    return self.DEFAULT_FOV_MM
+            if pixel_size_mm <= 0:
+                logger.error(f"Invalid pixel size from camera: {pixel_size_mm} - cannot determine FOV")
+                return None
 
-                logger.info(f"Calculated actual FOV: {actual_fov:.4f} mm "
-                           f"(pixel_size={pixel_size_mm:.6f} mm, frame={frame_size}px)")
-                logger.info(f"  vs DEFAULT_FOV_MM: {self.DEFAULT_FOV_MM:.4f} mm "
-                           f"(ratio: {actual_fov / self.DEFAULT_FOV_MM:.2f}x)")
+            actual_fov = pixel_size_mm * frame_size
 
-                return actual_fov
+            # Sanity check - FOV should be reasonable (0.01mm to 50mm typically)
+            if actual_fov < 0.01 or actual_fov > 50:
+                logger.error(f"Calculated FOV {actual_fov:.4f}mm is outside reasonable range (0.01-50mm)")
+                return None
+
+            logger.info(f"Calculated actual FOV: {actual_fov:.4f} mm "
+                       f"(pixel_size={pixel_size_mm:.6f} mm, frame={frame_size}px)")
+
+            return actual_fov
 
         except Exception as e:
-            logger.warning(f"Could not calculate actual FOV: {e}")
-
-        logger.info(f"Using default FOV: {self.DEFAULT_FOV_MM:.4f} mm")
-        return self.DEFAULT_FOV_MM
+            logger.error(f"Failed to calculate FOV: {e}")
+            return None
 
     def _get_tip_position(self) -> Optional[Tuple[float, float]]:
         """Get the sample holder tip position from presets.
@@ -427,6 +430,15 @@ class LED2DOverviewWorkflow(QObject):
         """Start the scan workflow."""
         if self._running:
             logger.warning("Scan already running")
+            return
+
+        # CRITICAL: Abort if FOV could not be determined - using wrong FOV could damage equipment
+        if self._actual_fov_mm is None:
+            error_msg = ("Cannot start scan: Field of View (FOV) could not be determined from camera. "
+                        "This is required to calculate safe stage movements. "
+                        "Please ensure the camera is properly initialized and try again.")
+            logger.error(error_msg)
+            self.scan_error.emit(error_msg)
             return
 
         self._running = True
