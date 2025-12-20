@@ -87,7 +87,7 @@ class LED2DOverviewWorkflow(QObject):
     scan_cancelled = pyqtSignal()
     scan_error = pyqtSignal(str)
 
-    # Default FOV for N7 camera
+    # Default FOV for N7 camera (fallback if can't query from hardware)
     DEFAULT_FOV_MM = 0.5182
 
     def __init__(self, app, config, parent=None):
@@ -116,6 +116,9 @@ class LED2DOverviewWorkflow(QObject):
         self._tiles_y = 0
         self._current_effective_bbox: Optional[EffectiveBoundingBox] = None
 
+        # Calculate actual FOV from microscope settings
+        self._actual_fov_mm = self._calculate_actual_fov()
+
         # Get tip position for rotation axis (required for second rotation)
         self._tip_position = self._get_tip_position()
 
@@ -131,6 +134,39 @@ class LED2DOverviewWorkflow(QObject):
             self._rotation_angles = [config.starting_r]
             logger.warning("Tip position not calibrated - only scanning first rotation. "
                           "Use Tools > Calibrate to enable second rotation.")
+
+    def _calculate_actual_fov(self) -> float:
+        """Calculate the actual field of view from microscope settings.
+
+        Queries the camera service for pixel size and frame size to calculate
+        the true FOV. Falls back to DEFAULT_FOV_MM if query fails.
+
+        Returns:
+            Field of view in mm
+        """
+        try:
+            if self._app and hasattr(self._app, 'camera_service') and self._app.camera_service:
+                # Get pixel size from camera service
+                pixel_size_mm = self._app.camera_service.get_pixel_field_of_view()
+
+                # Get frame size from camera service
+                width, height = self._app.camera_service.get_image_size()
+                frame_size = min(width, height)  # Use smaller dimension for FOV
+
+                actual_fov = pixel_size_mm * frame_size
+
+                logger.info(f"Calculated actual FOV: {actual_fov:.4f} mm "
+                           f"(pixel_size={pixel_size_mm:.6f} mm, frame={frame_size}px)")
+                logger.info(f"  vs DEFAULT_FOV_MM: {self.DEFAULT_FOV_MM:.4f} mm "
+                           f"(ratio: {actual_fov / self.DEFAULT_FOV_MM:.2f}x)")
+
+                return actual_fov
+
+        except Exception as e:
+            logger.warning(f"Could not calculate actual FOV: {e}")
+
+        logger.info(f"Using default FOV: {self.DEFAULT_FOV_MM:.4f} mm")
+        return self.DEFAULT_FOV_MM
 
     def _get_tip_position(self) -> Optional[Tuple[float, float]]:
         """Get the sample holder tip position from presets.
@@ -263,10 +299,13 @@ class LED2DOverviewWorkflow(QObject):
         Returns:
             List of (x, y, z, tile_x_idx, tile_y_idx) positions
         """
-        fov = self.DEFAULT_FOV_MM
+        # Use actual FOV calculated from microscope settings
+        fov = self._actual_fov_mm
 
         # No overlap - tiles are adjacent
         step = fov
+
+        logger.debug(f"Tile step size: {step:.4f} mm (FOV={fov:.4f} mm)")
 
         # Generate X positions (using effective tile_x range)
         x_positions = []
@@ -384,17 +423,17 @@ class LED2DOverviewWorkflow(QObject):
         self._results = []
         self._current_rotation_idx = 0
 
-        # Calculate total tiles across both rotations
+        # Calculate total tiles across both rotations using actual FOV
         total_tiles = 0
+        fov = self._actual_fov_mm
         for i in range(len(self._rotation_angles)):
             eff_bbox = self._get_effective_bbox(i)
-            fov = self.DEFAULT_FOV_MM
             tiles_x = max(1, int((eff_bbox.tile_x_max - eff_bbox.tile_x_min) / fov) + 1)
             tiles_y = max(1, int((eff_bbox.tile_y_max - eff_bbox.tile_y_min) / fov) + 1)
             total_tiles += tiles_x * tiles_y
 
         logger.info(f"Starting LED 2D Overview: ~{total_tiles} total tiles, "
-                   f"rotations: {self._rotation_angles}")
+                   f"rotations: {self._rotation_angles}, FOV: {fov:.4f} mm")
 
         # Enable the LED before starting
         if not self._enable_led():

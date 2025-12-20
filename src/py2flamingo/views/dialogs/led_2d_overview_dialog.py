@@ -864,6 +864,11 @@ class LED2DOverviewDialog(QDialog):
                 parent=self  # Parent to dialog so it stays alive
             )
 
+            # Connect workflow completion signals to stop live view
+            self._workflow.scan_completed.connect(self._on_workflow_completed)
+            self._workflow.scan_cancelled.connect(self._on_workflow_completed)
+            self._workflow.scan_error.connect(self._on_workflow_error)
+
             # Don't close dialog - user might want to run again
             self._workflow.start()
 
@@ -877,6 +882,35 @@ class LED2DOverviewDialog(QDialog):
         except Exception as e:
             self._logger.error(f"Error starting scan: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to start scan: {e}")
+
+    def _on_workflow_completed(self, *args) -> None:
+        """Handle workflow completion (success or cancel) - stop live view."""
+        self._logger.info("Workflow completed - stopping live view in SampleView")
+        self._stop_sample_view_live()
+
+    def _on_workflow_error(self, error_msg: str) -> None:
+        """Handle workflow error - stop live view."""
+        self._logger.error(f"Workflow error: {error_msg} - stopping live view")
+        self._stop_sample_view_live()
+
+    def _stop_sample_view_live(self) -> None:
+        """Stop the live view in SampleView and update button state."""
+        if not self._app or not self._app.sample_view:
+            self._logger.warning("Cannot stop live view - SampleView not available")
+            return
+
+        sample_view = self._app.sample_view
+
+        # Stop camera live view
+        if sample_view.camera_controller:
+            try:
+                sample_view.camera_controller.stop_live_view()
+                self._logger.info("Camera live view stopped")
+            except Exception as e:
+                self._logger.error(f"Error stopping camera: {e}")
+
+        # Update SampleView button state
+        sample_view._update_live_view_state()
 
     # ========== Window Events ==========
 
