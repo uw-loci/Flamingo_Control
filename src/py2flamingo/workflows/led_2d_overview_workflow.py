@@ -139,7 +139,7 @@ class LED2DOverviewWorkflow(QObject):
         """Calculate the actual field of view from microscope settings.
 
         Queries the camera service for pixel size and frame size to calculate
-        the true FOV. Falls back to DEFAULT_FOV_MM if query fails.
+        the true FOV. Falls back to DEFAULT_FOV_MM if query fails or returns invalid values.
 
         Returns:
             Field of view in mm
@@ -153,7 +153,18 @@ class LED2DOverviewWorkflow(QObject):
                 width, height = self._app.camera_service.get_image_size()
                 frame_size = min(width, height)  # Use smaller dimension for FOV
 
+                # Validate values - camera might return 0 if not properly initialized
+                if frame_size <= 0 or pixel_size_mm <= 0:
+                    logger.warning(f"Invalid camera values: frame_size={frame_size}, "
+                                  f"pixel_size={pixel_size_mm} - using default FOV")
+                    return self.DEFAULT_FOV_MM
+
                 actual_fov = pixel_size_mm * frame_size
+
+                # Sanity check - FOV should be reasonable (0.1mm to 10mm typically)
+                if actual_fov < 0.01 or actual_fov > 50:
+                    logger.warning(f"Calculated FOV {actual_fov:.4f}mm seems unreasonable - using default")
+                    return self.DEFAULT_FOV_MM
 
                 logger.info(f"Calculated actual FOV: {actual_fov:.4f} mm "
                            f"(pixel_size={pixel_size_mm:.6f} mm, frame={frame_size}px)")
