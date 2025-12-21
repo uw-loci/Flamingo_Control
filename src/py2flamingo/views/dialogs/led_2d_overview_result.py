@@ -12,7 +12,7 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QSplitter, QGroupBox, QFileDialog, QMessageBox,
-    QSizePolicy, QFrame
+    QSizePolicy, QFrame, QComboBox
 )
 from PyQt5.QtCore import Qt, QSize, QPoint, QPointF
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QWheelEvent, QMouseEvent
@@ -449,6 +449,17 @@ class LED2DOverviewResultWindow(QWidget):
 
         # Button row
         button_layout = QHBoxLayout()
+
+        # Visualization type dropdown
+        viz_label = QLabel("Visualization:")
+        button_layout.addWidget(viz_label)
+
+        self.viz_combo = QComboBox()
+        self.viz_combo.setMinimumWidth(150)
+        self._populate_visualization_types()
+        self.viz_combo.currentTextChanged.connect(self._on_visualization_changed)
+        button_layout.addWidget(self.viz_combo)
+
         button_layout.addStretch()
 
         # Toggle grid button
@@ -486,17 +497,17 @@ class LED2DOverviewResultWindow(QWidget):
             self.info_text.setText("No results to display")
             return
 
+        # Get the currently selected visualization type
+        viz_type = self.viz_combo.currentData() or "best_focus"
+
         # Display first rotation
         if len(self._results) >= 1:
             result1 = self._results[0]
             self.left_panel.set_title(f"R = {result1.rotation_angle}°")
 
-            if result1.stitched_image is not None:
-                self.left_panel.set_image(
-                    result1.stitched_image,
-                    result1.tiles_x,
-                    result1.tiles_y
-                )
+            img1 = result1.stitched_images.get(viz_type)
+            if img1 is not None:
+                self.left_panel.set_image(img1, result1.tiles_x, result1.tiles_y)
                 # Set tile coordinates with grid indices for correct label positioning
                 coords = [(t.x, t.y, t.tile_x_idx, t.tile_y_idx) for t in result1.tiles]
                 self.left_panel.set_tile_coordinates(coords)
@@ -506,12 +517,9 @@ class LED2DOverviewResultWindow(QWidget):
             result2 = self._results[1]
             self.right_panel.set_title(f"R = {result2.rotation_angle}°")
 
-            if result2.stitched_image is not None:
-                self.right_panel.set_image(
-                    result2.stitched_image,
-                    result2.tiles_x,
-                    result2.tiles_y
-                )
+            img2 = result2.stitched_images.get(viz_type)
+            if img2 is not None:
+                self.right_panel.set_image(img2, result2.tiles_x, result2.tiles_y)
                 # Set tile coordinates with grid indices for correct label positioning
                 coords = [(t.x, t.y, t.tile_x_idx, t.tile_y_idx) for t in result2.tiles]
                 self.right_panel.set_tile_coordinates(coords)
@@ -593,6 +601,47 @@ class LED2DOverviewResultWindow(QWidget):
         parts.append(f"Total: {total_tiles} tiles")
 
         self.info_text.setText(" | ".join(parts))
+
+    def _populate_visualization_types(self):
+        """Populate the visualization type dropdown."""
+        from py2flamingo.workflows.led_2d_overview_workflow import VISUALIZATION_TYPES
+
+        self.viz_combo.clear()
+        for viz_type, display_name in VISUALIZATION_TYPES:
+            self.viz_combo.addItem(display_name, viz_type)
+
+        # Default to "Best Focus"
+        self.viz_combo.setCurrentIndex(0)
+
+    def _on_visualization_changed(self, display_name: str):
+        """Handle visualization type change."""
+        viz_type = self.viz_combo.currentData()
+        if viz_type:
+            logger.info(f"Switching to visualization: {viz_type} ({display_name})")
+            self._display_visualization(viz_type)
+
+    def _display_visualization(self, visualization_type: str):
+        """Display the selected visualization type for both panels.
+
+        Args:
+            visualization_type: The visualization type key (e.g., "best_focus", "min_intensity")
+        """
+        if not self._results:
+            return
+
+        # Display first rotation
+        if len(self._results) >= 1:
+            result1 = self._results[0]
+            img1 = result1.stitched_images.get(visualization_type)
+            if img1 is not None:
+                self.left_panel.set_image(img1, result1.tiles_x, result1.tiles_y)
+
+        # Display second rotation
+        if len(self._results) >= 2:
+            result2 = self._results[1]
+            img2 = result2.stitched_images.get(visualization_type)
+            if img2 is not None:
+                self.right_panel.set_image(img2, result2.tiles_x, result2.tiles_y)
 
     def _toggle_grid(self):
         """Toggle grid overlay."""

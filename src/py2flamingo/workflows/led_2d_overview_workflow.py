@@ -23,25 +23,51 @@ from PyQt5.QtWidgets import QApplication
 logger = logging.getLogger(__name__)
 
 
+# Visualization types available for LED 2D overview
+VISUALIZATION_TYPES = [
+    ("best_focus", "Best Focus"),
+    ("min_intensity", "Minimum Intensity"),
+    ("max_intensity", "Maximum Intensity"),
+    ("mean_intensity", "Mean Intensity"),
+]
+
+
 @dataclass
 class TileResult:
-    """Result for a single tile."""
+    """Result for a single tile.
+
+    Stores multiple visualization types for the same tile position.
+    The 'images' dict maps visualization type to the corresponding image.
+    """
     x: float
     y: float
     z: float
-    image: np.ndarray
     tile_x_idx: int
     tile_y_idx: int
+    images: dict = field(default_factory=dict)  # visualization_type -> np.ndarray
+
+    @property
+    def image(self) -> np.ndarray:
+        """Return best_focus image for backwards compatibility."""
+        return self.images.get("best_focus", np.zeros((100, 100), dtype=np.uint16))
 
 
 @dataclass
 class RotationResult:
-    """Result for a single rotation angle."""
+    """Result for a single rotation angle.
+
+    Stores multiple stitched images, one per visualization type.
+    """
     rotation_angle: float
     tiles: List[TileResult] = field(default_factory=list)
-    stitched_image: Optional[np.ndarray] = None
+    stitched_images: dict = field(default_factory=dict)  # visualization_type -> np.ndarray
     tiles_x: int = 0
     tiles_y: int = 0
+
+    @property
+    def stitched_image(self) -> Optional[np.ndarray]:
+        """Return best_focus stitched image for backwards compatibility."""
+        return self.stitched_images.get("best_focus")
 
 
 @dataclass
@@ -656,29 +682,35 @@ class LED2DOverviewWorkflow(QObject):
 
         if not frames:
             logger.warning(f"No frames captured for tile at ({x:.3f}, {y:.3f}) - using placeholder")
+            placeholder = np.zeros((100, 100), dtype=np.uint16)
             return TileResult(
                 x=x, y=y, z=z_center,
-                image=np.zeros((100, 100), dtype=np.uint8),
-                tile_x_idx=tile_x_idx, tile_y_idx=tile_y_idx
+                tile_x_idx=tile_x_idx, tile_y_idx=tile_y_idx,
+                images={vtype: placeholder.copy() for vtype, _ in VISUALIZATION_TYPES}
             )
 
-        # Check if focus stacking is requested
+        # Calculate all visualization types from the captured frames
+        images = self._calculate_projections(frames)
+
+        # Check if focus stacking is requested for best_focus
         if self._config.use_focus_stacking:
             # TODO: Implement full focus stacking (combine best-focused regions)
             best_frame = self._focus_stack_frames(frames)
             best_z = z_center  # Focus-stacked image represents composite
+            images["best_focus"] = best_frame
         else:
             # Select single best-focused frame
             best_z, best_frame, best_score = max(frames, key=lambda f: f[2])
             logger.debug(f"Best focus at Z={best_z:.3f} (score={best_score:.1f})")
+            images["best_focus"] = best_frame
 
         return TileResult(
             x=x,
             y=y,
             z=best_z,
-            image=best_frame,
             tile_x_idx=tile_x_idx,
-            tile_y_idx=tile_y_idx
+            tile_y_idx=tile_y_idx,
+            images=images
         )
 
     def _focus_stack_frames(self, frames: list) -> np.ndarray:
@@ -699,17 +731,48 @@ class LED2DOverviewWorkflow(QObject):
         _, best_frame, _ = max(frames, key=lambda f: f[2])
         return best_frame
 
+    def _calculate_projections(self, frames: list) -> dict:
+        """Calculate all projection types from captured Z-stack frames.
+
+        Args:
+            frames: List of (z, image, focus_score) tuples
+
+        Returns:
+            Dictionary mapping visualization type to projected image
+        """
+        if not frames:
+            return {}
+
+        # Stack all images for projection calculations
+        images = [frame[1] for frame in frames]
+        stack = np.stack(images, axis=0)  # Shape: (num_frames, height, width)
+
+        projections = {}
+
+        # Minimum intensity projection - useful for seeing through bright spots
+        projections["min_intensity"] = np.min(stack, axis=0).astype(np.uint16)
+
+        # Maximum intensity projection - shows brightest features
+        projections["max_intensity"] = np.max(stack, axis=0).astype(np.uint16)
+
+        # Mean intensity projection - average view
+        projections["mean_intensity"] = np.mean(stack, axis=0).astype(np.uint16)
+
+        # Note: best_focus is added separately after this method returns
+
+        return projections
+
     def _finish_rotation(self):
         """Finish the current rotation and move to next."""
         logger.info(f"=== Finishing rotation {self._current_rotation_idx} ===")
 
         rotation_result = self._results[self._current_rotation_idx]
 
-        # Assemble tiles into grid
+        # Assemble tiles into grid for each visualization type
         try:
-            assembled = self._assemble_tiles(rotation_result)
-            rotation_result.stitched_image = assembled
-            logger.info(f"Assembled {len(rotation_result.tiles)} tiles into image")
+            stitched_images = self._assemble_all_visualizations(rotation_result)
+            rotation_result.stitched_images = stitched_images
+            logger.info(f"Assembled {len(rotation_result.tiles)} tiles into {len(stitched_images)} visualizations")
         except Exception as e:
             logger.error(f"Error assembling tiles: {e}")
 
@@ -722,11 +785,29 @@ class LED2DOverviewWorkflow(QObject):
         logger.info(f"Moving to rotation index {self._current_rotation_idx} (total: {len(self._rotation_angles)})")
         QTimer.singleShot(500, self._start_rotation)
 
-    def _assemble_tiles(self, result: RotationResult) -> Optional[np.ndarray]:
+    def _assemble_all_visualizations(self, result: RotationResult) -> dict:
+        """Assemble tiles for all visualization types.
+
+        Args:
+            result: RotationResult containing tiles
+
+        Returns:
+            Dictionary mapping visualization type to assembled image
+        """
+        stitched = {}
+        for viz_type, _ in VISUALIZATION_TYPES:
+            assembled = self._assemble_tiles(result, viz_type)
+            if assembled is not None:
+                stitched[viz_type] = assembled
+        return stitched
+
+    def _assemble_tiles(self, result: RotationResult,
+                        visualization_type: str = "best_focus") -> Optional[np.ndarray]:
         """Assemble tiles into a single grid image.
 
         Args:
             result: RotationResult containing tiles
+            visualization_type: Which visualization to assemble (e.g., "best_focus", "min_intensity")
 
         Returns:
             Assembled image as numpy array, or None on failure
@@ -735,7 +816,12 @@ class LED2DOverviewWorkflow(QObject):
             return None
 
         # Get tile dimensions from first tile
-        first_tile = result.tiles[0].image
+        first_tile_images = result.tiles[0].images
+        if visualization_type not in first_tile_images:
+            logger.warning(f"Visualization type '{visualization_type}' not available in tiles")
+            return None
+
+        first_tile = first_tile_images[visualization_type]
         tile_h, tile_w = first_tile.shape[:2]
 
         # Calculate actual grid dimensions from tile indices
@@ -754,6 +840,10 @@ class LED2DOverviewWorkflow(QObject):
 
         # Place tiles
         for tile in result.tiles:
+            tile_img = tile.images.get(visualization_type)
+            if tile_img is None:
+                continue
+
             x_offset = tile.tile_x_idx * tile_w
             y_offset = tile.tile_y_idx * tile_h
 
@@ -764,7 +854,7 @@ class LED2DOverviewWorkflow(QObject):
             tile_crop_w = x_end - x_offset
             tile_crop_h = y_end - y_offset
 
-            output[y_offset:y_end, x_offset:x_end] = tile.image[:tile_crop_h, :tile_crop_w]
+            output[y_offset:y_end, x_offset:x_end] = tile_img[:tile_crop_h, :tile_crop_w]
 
         return output
 
