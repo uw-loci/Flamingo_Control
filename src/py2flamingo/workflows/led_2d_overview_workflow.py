@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 # Visualization types available for LED 2D overview
 VISUALIZATION_TYPES = [
     ("best_focus", "Best Focus"),
+    ("focus_stack", "Extended Depth of Focus"),
     ("min_intensity", "Minimum Intensity"),
     ("max_intensity", "Maximum Intensity"),
     ("mean_intensity", "Mean Intensity"),
@@ -714,10 +715,10 @@ class LED2DOverviewWorkflow(QObject):
         )
 
     def _focus_stack_frames(self, frames: list) -> np.ndarray:
-        """Combine frames using focus stacking.
+        """Combine frames using focus stacking (extended depth of focus).
 
-        TODO: Implement proper focus stacking that combines
-        the best-focused regions from each frame.
+        Combines the best-focused regions from each frame in the Z-stack
+        to create a single all-in-focus composite image.
 
         Args:
             frames: List of (z, image, focus_score) tuples
@@ -725,11 +726,8 @@ class LED2DOverviewWorkflow(QObject):
         Returns:
             Focus-stacked composite image
         """
-        # For now, just return the best-focused frame
-        # TODO: Implement Laplacian pyramid blending or similar
-        logger.warning("Focus stacking not yet implemented - using best single frame")
-        _, best_frame, _ = max(frames, key=lambda f: f[2])
-        return best_frame
+        images = [frame[1] for frame in frames]
+        return self._compute_focus_stack(images)
 
     def _calculate_projections(self, frames: list) -> dict:
         """Calculate all projection types from captured Z-stack frames.
@@ -758,9 +756,84 @@ class LED2DOverviewWorkflow(QObject):
         # Mean intensity projection - average view
         projections["mean_intensity"] = np.mean(stack, axis=0).astype(np.uint16)
 
+        # Extended Depth of Focus (focus stacking)
+        # Combines best-focused regions from each Z-plane
+        projections["focus_stack"] = self._compute_focus_stack(images)
+
         # Note: best_focus is added separately after this method returns
 
         return projections
+
+    def _compute_focus_stack(self, images: list) -> np.ndarray:
+        """Compute extended depth of focus by combining best-focused regions.
+
+        Uses local variance of Laplacian as focus measure, then selects
+        pixels from the frame with highest local sharpness at each position.
+
+        Args:
+            images: List of 2D numpy arrays (Z-stack frames)
+
+        Returns:
+            Focus-stacked composite image
+        """
+        from scipy import ndimage
+
+        if len(images) == 1:
+            return images[0].astype(np.uint16)
+
+        height, width = images[0].shape
+        num_frames = len(images)
+
+        # Laplacian kernel for edge detection (focus measure)
+        laplacian_kernel = np.array([[0, 1, 0],
+                                      [1, -4, 1],
+                                      [0, 1, 0]], dtype=np.float32)
+
+        # Calculate local focus measure for each frame
+        # Use local variance of Laplacian response as sharpness indicator
+        focus_measures = []
+
+        for img in images:
+            # Convert to float for processing
+            img_float = img.astype(np.float32)
+
+            # Apply Laplacian filter
+            laplacian = ndimage.convolve(img_float, laplacian_kernel, mode='reflect')
+
+            # Calculate local variance using a uniform filter
+            # This gives us a per-pixel sharpness measure
+            kernel_size = 9  # Size of local neighborhood for variance calculation
+            local_mean = ndimage.uniform_filter(laplacian, size=kernel_size, mode='reflect')
+            local_sq_mean = ndimage.uniform_filter(laplacian**2, size=kernel_size, mode='reflect')
+            local_variance = local_sq_mean - local_mean**2
+
+            # Ensure non-negative variance
+            local_variance = np.maximum(local_variance, 0)
+
+            focus_measures.append(local_variance)
+
+        # Stack focus measures: shape (num_frames, height, width)
+        focus_stack = np.stack(focus_measures, axis=0)
+
+        # Find which frame has the best focus at each pixel
+        best_frame_idx = np.argmax(focus_stack, axis=0)  # Shape: (height, width)
+
+        # Build the output image by selecting pixels from best-focused frames
+        # Create index arrays for advanced indexing
+        row_idx, col_idx = np.meshgrid(np.arange(height), np.arange(width), indexing='ij')
+
+        # Stack original images
+        image_stack = np.stack(images, axis=0)  # Shape: (num_frames, height, width)
+
+        # Select pixels from best frame at each position
+        result = image_stack[best_frame_idx, row_idx, col_idx]
+
+        # Optional: Apply slight smoothing to reduce artifacts at frame boundaries
+        # result = ndimage.median_filter(result, size=3)
+
+        logger.debug(f"Focus stacking: combined {num_frames} frames using local variance method")
+
+        return result.astype(np.uint16)
 
     def _finish_rotation(self):
         """Finish the current rotation and move to next."""
