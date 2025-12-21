@@ -343,6 +343,25 @@ class FlamingoApplication:
             )
             self.logger.debug("Connected workflow_stopped to status indicator service")
 
+        # Connect workflow view to position controller for "Use Current Position" button
+        if hasattr(self.workflow_view, 'set_position_callback') and self.position_controller:
+            self.workflow_view.set_position_callback(
+                self.position_controller.get_current_position
+            )
+            self.logger.debug("Connected workflow view to position controller")
+
+        # Connect workflow view to connection state for enable/disable
+        if hasattr(self.connection_view, 'connection_established') and hasattr(self.workflow_view, 'update_for_connection_state'):
+            self.connection_view.connection_established.connect(
+                lambda: self.workflow_view.update_for_connection_state(True)
+            )
+            self.logger.debug("Connected connection_established to workflow view")
+        if hasattr(self.connection_view, 'connection_closed') and hasattr(self.workflow_view, 'update_for_connection_state'):
+            self.connection_view.connection_closed.connect(
+                lambda: self.workflow_view.update_for_connection_state(False)
+            )
+            self.logger.debug("Connected connection_closed to workflow view")
+
         # Connect Sample View request signal
         if hasattr(self.connection_view, 'sample_view_requested'):
             self.connection_view.sample_view_requested.connect(self._open_sample_view)

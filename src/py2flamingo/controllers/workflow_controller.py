@@ -264,6 +264,189 @@ class WorkflowController:
         else:
             return (True, [])
 
+    def start_workflow_from_ui(self, workflow) -> Tuple[bool, str]:
+        """
+        Start workflow from UI-built Workflow object.
+
+        Converts the Workflow object to workflow file format and sends it.
+
+        Args:
+            workflow: Workflow object from UI
+
+        Returns:
+            Tuple of (success, message)
+        """
+        # Check connection
+        if not self._is_connected():
+            return (False, "Must connect to server before starting workflow")
+
+        try:
+            # Convert workflow to file content
+            workflow_text = self._workflow_to_text(workflow)
+            workflow_data = workflow_text.encode('utf-8')
+
+            self._logger.info(f"Generated workflow ({len(workflow_data)} bytes):\n{workflow_text[:500]}...")
+
+            # Store as current workflow
+            self._current_workflow_data = workflow_data
+            self._current_workflow_path = None  # No file path for UI-built workflows
+
+            # Start the workflow
+            self._service.start_workflow(workflow_data)
+
+            # Mark workflow as started in model
+            if self._workflow_model:
+                self._workflow_model.mark_started()
+
+            workflow_name = workflow.name if hasattr(workflow, 'name') else "UI Workflow"
+            self._logger.info(f"Started workflow from UI: {workflow_name}")
+            return (True, f"Workflow started: {workflow_name}")
+
+        except ConnectionError:
+            self._logger.error("Not connected when starting workflow")
+            return (False, "Connection lost. Reconnect before starting workflow.")
+
+        except Exception as e:
+            self._logger.exception("Error starting workflow from UI")
+            return (False, f"Error starting workflow: {str(e)}")
+
+    def _workflow_to_text(self, workflow) -> str:
+        """
+        Convert Workflow object to workflow file text format.
+
+        Args:
+            workflow: Workflow object with all settings
+
+        Returns:
+            Workflow file content as string
+        """
+        lines = ["<Workflow Settings>"]
+
+        # Experiment Settings section
+        lines.append("    <Experiment Settings>")
+
+        # Get experiment settings from workflow
+        exp = workflow.experiment_settings if hasattr(workflow, 'experiment_settings') else None
+
+        # Stack settings for plane spacing
+        stack = workflow.stack_settings if hasattr(workflow, 'stack_settings') else None
+        plane_spacing = stack.z_step_um if stack else 1.0
+
+        lines.append(f"    Plane spacing (um) = {plane_spacing}")
+        lines.append("    Frame rate (f/s) = 100.0")  # Default
+        lines.append("    Exposure time (us) = 10000")  # Default
+        lines.append("    Duration (dd:hh:mm:ss) = 00:00:00:01")
+        lines.append("    Interval (dd:hh:mm:ss) = 00:00:00:01")
+        lines.append(f"    Sample = {exp.file_prefix if exp else ''}")
+        lines.append("    Number of angles = 1")
+        lines.append("    Angle step size = 0")
+        lines.append("    Region = ")
+        lines.append(f"    Save image drive = {str(exp.save_directory.parent) if exp else '/media/deploy/ctlsm1'}")
+        lines.append(f"    Save image directory = {exp.save_directory.name if exp else 'data'}")
+        lines.append(f"    Comments = {exp.comment if exp else ''}")
+        lines.append(f"    Save max projection = {'true' if exp and exp.max_projection_display else 'false'}")
+        lines.append(f"    Display max projection = {'true' if exp and exp.max_projection_display else 'true'}")
+        lines.append(f"    Save image data = {'Tiff' if exp and exp.save_data else 'NotSaved'}")
+        lines.append("    Save to subfolders = false")
+        lines.append(f"    Work flow live view enabled = {'true' if exp and exp.display_during_acquisition else 'true'}")
+        lines.append("    </Experiment Settings>")
+
+        # Camera Settings section
+        lines.append("")
+        lines.append("    <Camera Settings>")
+        lines.append("    Exposure time (us) = 10000")
+        lines.append("    Frame rate (f/s) = 100.0")
+        lines.append("    AOI width = 2048")
+        lines.append("    AOI height = 2048")
+        lines.append("    </Camera Settings>")
+
+        # Stack Settings section
+        lines.append("")
+        lines.append("    <Stack Settings>")
+        lines.append("    Stack index = ")
+
+        if stack:
+            z_range_mm = (stack.num_planes - 1) * stack.z_step_um / 1000.0
+            lines.append(f"    Change in Z axis (mm) = {z_range_mm:.6f}")
+            lines.append(f"    Number of planes = {stack.num_planes}")
+            lines.append(f"    Z stage velocity (mm/s) = {stack.z_velocity_mm_s}")
+        else:
+            lines.append("    Change in Z axis (mm) = 0.001")
+            lines.append("    Number of planes = 1")
+            lines.append("    Z stage velocity (mm/s) = 0.4")
+
+        lines.append("    Rotational stage velocity (°/s) = 0")
+        lines.append("    Auto update stack calculations = true")
+        lines.append("    Camera 1 capture percentage = 100")
+        lines.append("    Camera 1 capture mode = 0")
+        lines.append("    Stack option = None")
+        lines.append("    Stack option settings 1 = 0")
+        lines.append("    Stack option settings 2 = 0")
+        lines.append("    </Stack Settings>")
+
+        # Start Position section
+        lines.append("")
+        lines.append("    <Start Position>")
+        pos = workflow.start_position if hasattr(workflow, 'start_position') else None
+        if pos:
+            lines.append(f"    X (mm) = {pos.x:.6f}")
+            lines.append(f"    Y (mm) = {pos.y:.6f}")
+            lines.append(f"    Z (mm) = {pos.z:.6f}")
+            lines.append(f"    Angle (degrees) = {pos.r:.2f}")
+        else:
+            lines.append("    X (mm) = 0.0")
+            lines.append("    Y (mm) = 0.0")
+            lines.append("    Z (mm) = 10.0")
+            lines.append("    Angle (degrees) = 0.0")
+        lines.append("    </Start Position>")
+
+        # End Position section
+        lines.append("")
+        lines.append("    <End Position>")
+        end_pos = workflow.end_position if hasattr(workflow, 'end_position') and workflow.end_position else pos
+        if end_pos:
+            lines.append(f"    X (mm) = {end_pos.x:.6f}")
+            lines.append(f"    Y (mm) = {end_pos.y:.6f}")
+            lines.append(f"    Z (mm) = {end_pos.z:.6f}")
+            lines.append(f"    Angle (degrees) = {end_pos.r:.2f}")
+        else:
+            lines.append("    X (mm) = 0.0")
+            lines.append("    Y (mm) = 0.0")
+            lines.append("    Z (mm) = 10.0")
+            lines.append("    Angle (degrees) = 0.0")
+        lines.append("    </End Position>")
+
+        # Illumination Source section
+        lines.append("")
+        lines.append("    <Illumination Source>")
+        illum = workflow.illumination if hasattr(workflow, 'illumination') else None
+        if illum and illum.laser_enabled and illum.laser_channel:
+            # Format: "power on/off" where on/off is 1 or 0
+            lines.append(f"    {illum.laser_channel} = {illum.laser_power_mw:.2f} 1")
+        if illum and illum.led_enabled and illum.led_channel:
+            lines.append(f"    {illum.led_channel} = {illum.led_intensity_percent:.1f} 1")
+            lines.append("    LED selection = 0 0")  # Default to red
+        # Add defaults for other lasers (disabled)
+        lines.append("    LED DAC = 42000 0")
+        lines.append("    </Illumination Source>")
+
+        # Illumination Path section
+        lines.append("")
+        lines.append("    <Illumination Path>")
+        lines.append("    Left path = ON")
+        lines.append("    Right path = OFF")
+        lines.append("    </Illumination Path>")
+
+        # Illumination Options section
+        lines.append("")
+        lines.append("    <Illumination Options>")
+        lines.append("    Run stack with multiple lasers on = false")
+        lines.append("    </Illumination Options>")
+
+        lines.append("</Workflow Settings>")
+
+        return "\n".join(lines)
+
     def _is_connected(self) -> bool:
         """
         Check if currently connected to microscope.
