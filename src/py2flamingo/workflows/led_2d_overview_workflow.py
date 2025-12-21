@@ -143,6 +143,9 @@ class LED2DOverviewWorkflow(QObject):
         self._tiles_y = 0
         self._current_effective_bbox: Optional[EffectiveBoundingBox] = None
 
+        # Load axis inversion settings from visualization config
+        self._invert_x = self._load_invert_x_setting()
+
         # Calculate actual FOV from microscope settings
         self._actual_fov_mm = self._calculate_actual_fov()
 
@@ -208,6 +211,42 @@ class LED2DOverviewWorkflow(QObject):
         except Exception as e:
             logger.error(f"Failed to calculate FOV: {e}")
             return None
+
+    def _load_invert_x_setting(self) -> bool:
+        """Load the X-axis inversion setting from visualization config.
+
+        The microscope stage X-axis may be inverted relative to image display.
+        When invert_x is True, low X stage values appear on the right side
+        of the image, and high X values on the left.
+
+        Returns:
+            True if X-axis should be inverted for display
+        """
+        try:
+            from pathlib import Path
+            import yaml
+
+            # Look for config in standard locations
+            config_paths = [
+                Path(__file__).parent.parent / "configs" / "visualization_3d_config.yaml",
+                Path.cwd() / "configs" / "visualization_3d_config.yaml",
+            ]
+
+            for config_path in config_paths:
+                if config_path.exists():
+                    with open(config_path, 'r') as f:
+                        config = yaml.safe_load(f)
+
+                    invert_x = config.get('stage_control', {}).get('invert_x_default', False)
+                    logger.info(f"Loaded invert_x={invert_x} from {config_path.name}")
+                    return invert_x
+
+            logger.warning("Visualization config not found, using invert_x=False")
+            return False
+
+        except Exception as e:
+            logger.warning(f"Failed to load invert_x setting: {e}, using False")
+            return False
 
     def _get_tip_position(self) -> Optional[Tuple[float, float]]:
         """Get the sample holder tip position from presets.
@@ -912,12 +951,22 @@ class LED2DOverviewWorkflow(QObject):
             output = np.zeros((output_h, output_w), dtype=first_tile.dtype)
 
         # Place tiles
+        # If X-axis is inverted, flip tile X positions so low X stage values
+        # appear on the right side of the image (matching camera view)
         for tile in result.tiles:
             tile_img = tile.images.get(visualization_type)
             if tile_img is None:
                 continue
 
-            x_offset = tile.tile_x_idx * tile_w
+            # Calculate X offset, inverting if needed
+            if self._invert_x:
+                # Invert: tile_x_idx=0 goes on right, tile_x_idx=max goes on left
+                inverted_x_idx = (actual_tiles_x - 1) - tile.tile_x_idx
+                x_offset = inverted_x_idx * tile_w
+            else:
+                # Normal: tile_x_idx=0 goes on left
+                x_offset = tile.tile_x_idx * tile_w
+
             y_offset = tile.tile_y_idx * tile_h
 
             # Ensure we don't exceed bounds
@@ -929,6 +978,7 @@ class LED2DOverviewWorkflow(QObject):
 
             output[y_offset:y_end, x_offset:x_end] = tile_img[:tile_crop_h, :tile_crop_w]
 
+        logger.debug(f"Assembled tiles with invert_x={self._invert_x}")
         return output
 
     def _finish_completed(self):
