@@ -557,7 +557,16 @@ class MainWindow(QMainWindow):
         logger = logging.getLogger(__name__)
         logger.info("Main window closing - cleaning up...")
 
-        # Save window geometry before closing
+        # Close sample_view first so it can save its dialog state
+        # (must happen BEFORE save_all() is called)
+        if self.app and hasattr(self.app, 'sample_view') and self.app.sample_view is not None:
+            try:
+                self.app.sample_view.close()  # Triggers closeEvent which saves state
+                logger.info("Closed sample view (saved dialog state)")
+            except Exception as e:
+                logger.error(f"Error closing sample view: {e}")
+
+        # Save window geometry and persist ALL saved data to disk
         if self._geometry_manager:
             try:
                 self._geometry_manager.save_geometry("MainWindow", self)
