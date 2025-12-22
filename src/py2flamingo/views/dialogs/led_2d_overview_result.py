@@ -348,8 +348,16 @@ class ImagePanel(QWidget):
 
         # Draw coordinate labels if available
         if self._tile_coords:
-            font = QFont("Courier", 8)
+            # Calculate font size as 10% of tile height
+            font_size = max(8, int(tile_h * 0.10))  # Minimum 8pt for readability
+            font = QFont("Courier", font_size)
+            font.setBold(True)
             painter.setFont(font)
+
+            # Get font metrics for centering
+            from PyQt5.QtGui import QFontMetrics
+            fm = QFontMetrics(font)
+            line_height = fm.height()
 
             for coord in self._tile_coords:
                 # Support both formats: (x, y, tile_x_idx, tile_y_idx) or legacy (x, y, z)
@@ -359,23 +367,34 @@ class ImagePanel(QWidget):
                     # Legacy format - shouldn't happen with fixed code
                     continue
 
-                # Position text in tile
-                text_x = int(tile_x_idx * tile_w + 3)
-                text_y = int(tile_y_idx * tile_h + 12)
+                # Calculate tile center
+                tile_center_x = tile_x_idx * tile_w + tile_w / 2
+                tile_center_y = tile_y_idx * tile_h + tile_h / 2
 
-                # Draw X,Y coordinates with shadow for readability
-                text = f"X:{x:.2f}"
+                # Draw X,Y coordinates (two lines, centered in tile)
+                text1 = f"X:{x:.2f}"
                 text2 = f"Y:{y:.2f}"
 
-                # Shadow
-                painter.setPen(QColor(0, 0, 0))
-                painter.drawText(text_x + 1, text_y + 1, text)
-                painter.drawText(text_x + 1, text_y + 13, text2)
+                # Calculate text widths for horizontal centering
+                text1_width = fm.horizontalAdvance(text1)
+                text2_width = fm.horizontalAdvance(text2)
 
-                # Text
+                # Position text centered in tile (two lines stacked)
+                text1_x = int(tile_center_x - text1_width / 2)
+                text2_x = int(tile_center_x - text2_width / 2)
+                text1_y = int(tile_center_y - line_height / 2)
+                text2_y = int(tile_center_y + line_height / 2 + fm.descent())
+
+                # Shadow for readability (offset by 1-2 pixels based on font size)
+                shadow_offset = max(1, font_size // 8)
+                painter.setPen(QColor(0, 0, 0))
+                painter.drawText(text1_x + shadow_offset, text1_y + shadow_offset, text1)
+                painter.drawText(text2_x + shadow_offset, text2_y + shadow_offset, text2)
+
+                # White text
                 painter.setPen(QColor(255, 255, 255))
-                painter.drawText(text_x, text_y, text)
-                painter.drawText(text_x, text_y + 12, text2)
+                painter.drawText(text1_x, text1_y, text1)
+                painter.drawText(text2_x, text2_y, text2)
 
         painter.end()
 
