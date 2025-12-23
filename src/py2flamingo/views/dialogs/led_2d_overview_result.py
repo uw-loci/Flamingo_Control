@@ -351,9 +351,7 @@ class ImagePanel(QWidget):
 
         # Draw coordinate labels if available
         if self._tile_coords:
-            # Calculate font size as 10% of tile height
-            font_size = max(8, int(tile_h * 0.10))  # Minimum 8pt for readability
-            font = QFont("Courier", font_size)
+            font = QFont("Courier", 26)
             font.setBold(True)
             painter.setFont(font)
 
@@ -394,12 +392,6 @@ class ImagePanel(QWidget):
                 text2_x = int(tile_center_x - text2_width / 2)
                 text1_y = int(tile_center_y - line_height / 2)
                 text2_y = int(tile_center_y + line_height / 2 + fm.descent())
-
-                # Shadow for readability (offset by 1-2 pixels based on font size)
-                shadow_offset = max(1, font_size // 8)
-                painter.setPen(QColor(0, 0, 0))
-                painter.drawText(text1_x + shadow_offset, text1_y + shadow_offset, text1)
-                painter.drawText(text2_x + shadow_offset, text2_y + shadow_offset, text2)
 
                 # White text
                 painter.setPen(QColor(255, 255, 255))
