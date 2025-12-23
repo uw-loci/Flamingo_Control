@@ -64,6 +64,7 @@ class RotationResult:
     stitched_images: dict = field(default_factory=dict)  # visualization_type -> np.ndarray
     tiles_x: int = 0
     tiles_y: int = 0
+    invert_x: bool = False  # Whether X-axis is inverted for display
 
     @property
     def stitched_image(self) -> Optional[np.ndarray]:
@@ -571,7 +572,8 @@ class LED2DOverviewWorkflow(QObject):
         self._results.append(RotationResult(
             rotation_angle=rotation,
             tiles_x=self._tiles_x,
-            tiles_y=self._tiles_y
+            tiles_y=self._tiles_y,
+            invert_x=self._invert_x
         ))
 
         # Move to rotation angle

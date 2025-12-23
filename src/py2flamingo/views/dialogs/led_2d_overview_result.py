@@ -154,7 +154,8 @@ class ImagePanel(QWidget):
         self._show_grid = True
         self._tiles_x = 0
         self._tiles_y = 0
-        self._tile_coords: List[tuple] = []  # (x, y, z) for each tile
+        self._tile_coords: List[tuple] = []  # (x, y, tile_x_idx, tile_y_idx) for each tile
+        self._invert_x = False  # Whether X-axis is inverted for display
 
         self._setup_ui()
 
@@ -262,15 +263,17 @@ class ImagePanel(QWidget):
 
         self._update_zoom_label()
 
-    def set_tile_coordinates(self, coords: List[tuple]):
+    def set_tile_coordinates(self, coords: List[tuple], invert_x: bool = False):
         """Set tile coordinate data for overlay.
 
         Args:
             coords: List of (x, y, tile_x_idx, tile_y_idx) tuples for each tile.
                     The tile indices are used to position the labels correctly
                     regardless of the order tiles were captured (e.g., serpentine).
+            invert_x: Whether X-axis is inverted for display (low X on right)
         """
         self._tile_coords = coords
+        self._invert_x = invert_x
         if self._image is not None and self._show_grid:
             # Regenerate pixmap from original image to avoid double-drawing
             self._pixmap = self._array_to_pixmap(self._image)
@@ -367,8 +370,15 @@ class ImagePanel(QWidget):
                     # Legacy format - shouldn't happen with fixed code
                     continue
 
-                # Calculate tile center
-                tile_center_x = tile_x_idx * tile_w + tile_w / 2
+                # Calculate display X index (invert if needed to match tile placement)
+                if self._invert_x:
+                    # Invert: tile_x_idx=0 goes on right, tile_x_idx=max goes on left
+                    display_x_idx = (self._tiles_x - 1) - tile_x_idx
+                else:
+                    display_x_idx = tile_x_idx
+
+                # Calculate tile center using display position
+                tile_center_x = display_x_idx * tile_w + tile_w / 2
                 tile_center_y = tile_y_idx * tile_h + tile_h / 2
 
                 # Draw X,Y coordinates (two lines, centered in tile)
@@ -529,7 +539,7 @@ class LED2DOverviewResultWindow(QWidget):
                 self.left_panel.set_image(img1, result1.tiles_x, result1.tiles_y)
                 # Set tile coordinates with grid indices for correct label positioning
                 coords = [(t.x, t.y, t.tile_x_idx, t.tile_y_idx) for t in result1.tiles]
-                self.left_panel.set_tile_coordinates(coords)
+                self.left_panel.set_tile_coordinates(coords, invert_x=result1.invert_x)
 
         # Display second rotation
         if len(self._results) >= 2:
@@ -541,7 +551,7 @@ class LED2DOverviewResultWindow(QWidget):
                 self.right_panel.set_image(img2, result2.tiles_x, result2.tiles_y)
                 # Set tile coordinates with grid indices for correct label positioning
                 coords = [(t.x, t.y, t.tile_x_idx, t.tile_y_idx) for t in result2.tiles]
-                self.right_panel.set_tile_coordinates(coords)
+                self.right_panel.set_tile_coordinates(coords, invert_x=result2.invert_x)
 
         # Update info text
         self._update_info_text()
