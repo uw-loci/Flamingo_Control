@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (
     QScrollArea, QSplitter, QGroupBox, QFileDialog, QMessageBox,
     QSizePolicy, QFrame, QComboBox
 )
-from PyQt5.QtCore import Qt, QSize, QPoint, QPointF
+from PyQt5.QtCore import Qt, QSize, QPoint, QPointF, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QWheelEvent, QMouseEvent
 
 
@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 class ZoomableImageLabel(QLabel):
     """Image label with zoom and pan support."""
+
+    # Signal emitted when user clicks on a tile (tile_x_idx, tile_y_idx)
+    tile_clicked = pyqtSignal(int, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -33,10 +36,21 @@ class ZoomableImageLabel(QLabel):
         self._panning = False
         self._original_pixmap: Optional[QPixmap] = None
         self._scroll_area: Optional[QScrollArea] = None
+        self._tiles_x = 0
+        self._tiles_y = 0
+        self._invert_x = False
+        self._drag_distance = 0
+        self._click_start = QPoint()
 
         self.setMouseTracking(True)
         self.setCursor(Qt.OpenHandCursor)
         self.setAlignment(Qt.AlignCenter)
+
+    def set_tile_grid(self, tiles_x: int, tiles_y: int, invert_x: bool = False):
+        """Set tile grid dimensions for click detection."""
+        self._tiles_x = tiles_x
+        self._tiles_y = tiles_y
+        self._invert_x = invert_x
 
     def set_scroll_area(self, scroll_area: QScrollArea):
         """Set reference to parent scroll area for panning."""
@@ -89,21 +103,61 @@ class ZoomableImageLabel(QLabel):
         if event.button() == Qt.LeftButton:
             self._panning = True
             self._pan_start = event.globalPos()
+            self._click_start = event.pos()  # Track local position for click detection
+            self._drag_distance = 0
             self.setCursor(Qt.ClosedHandCursor)
             event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent):
-        """Stop panning."""
+        """Stop panning and detect clicks."""
         if event.button() == Qt.LeftButton:
             self._panning = False
             self.setCursor(Qt.OpenHandCursor)
+
+            # If mouse didn't move much, it's a click - select tile
+            if self._drag_distance < 5 and self._tiles_x > 0 and self._tiles_y > 0:
+                self._handle_tile_click(event.pos())
+
             event.accept()
+
+    def _handle_tile_click(self, pos: QPoint):
+        """Calculate which tile was clicked and emit signal."""
+        if self._original_pixmap is None:
+            return
+
+        # Convert click position to original image coordinates
+        img_x = pos.x() / self._zoom
+        img_y = pos.y() / self._zoom
+
+        # Calculate tile size in original image
+        img_w = self._original_pixmap.width()
+        img_h = self._original_pixmap.height()
+        tile_w = img_w / self._tiles_x
+        tile_h = img_h / self._tiles_y
+
+        # Calculate display tile index
+        display_x_idx = int(img_x / tile_w)
+        tile_y_idx = int(img_y / tile_h)
+
+        # Clamp to valid range
+        display_x_idx = max(0, min(display_x_idx, self._tiles_x - 1))
+        tile_y_idx = max(0, min(tile_y_idx, self._tiles_y - 1))
+
+        # Convert display index back to tile index if inverted
+        if self._invert_x:
+            tile_x_idx = (self._tiles_x - 1) - display_x_idx
+        else:
+            tile_x_idx = display_x_idx
+
+        logger.debug(f"Tile clicked: ({tile_x_idx}, {tile_y_idx})")
+        self.tile_clicked.emit(tile_x_idx, tile_y_idx)
 
     def mouseMoveEvent(self, event: QMouseEvent):
         """Pan while dragging."""
         if self._panning and self._scroll_area:
             delta = event.globalPos() - self._pan_start
             self._pan_start = event.globalPos()
+            self._drag_distance += abs(delta.x()) + abs(delta.y())
 
             h_bar = self._scroll_area.horizontalScrollBar()
             v_bar = self._scroll_area.verticalScrollBar()
@@ -145,6 +199,9 @@ class ZoomableImageLabel(QLabel):
 class ImagePanel(QWidget):
     """Widget displaying a single image with coordinate overlay and zoom/pan."""
 
+    # Signal emitted when tile selection changes
+    selection_changed = pyqtSignal()
+
     def __init__(self, title: str = "", parent=None):
         super().__init__(parent)
 
@@ -156,6 +213,8 @@ class ImagePanel(QWidget):
         self._tiles_y = 0
         self._tile_coords: List[tuple] = []  # (x, y, tile_x_idx, tile_y_idx) for each tile
         self._invert_x = False  # Whether X-axis is inverted for display
+        self._selected_tiles: set = set()  # Set of (tile_x_idx, tile_y_idx) tuples
+        self._tile_results: List = []  # Store TileResult objects for retrieval
 
         self._setup_ui()
 
@@ -179,6 +238,7 @@ class ImagePanel(QWidget):
 
         self.image_label = ZoomableImageLabel()
         self.image_label.set_scroll_area(self.scroll_area)  # Connect for panning
+        self.image_label.tile_clicked.connect(self._on_tile_clicked)
 
         self.scroll_area.setWidget(self.image_label)
         layout.addWidget(self.scroll_area, stretch=1)
@@ -243,6 +303,9 @@ class ImagePanel(QWidget):
         self._tiles_x = tiles_x
         self._tiles_y = tiles_y
 
+        # Update image label's tile grid for click detection
+        self.image_label.set_tile_grid(tiles_x, tiles_y, self._invert_x)
+
         if image is None:
             self._pixmap = None
             self.image_label.clear()
@@ -274,11 +337,67 @@ class ImagePanel(QWidget):
         """
         self._tile_coords = coords
         self._invert_x = invert_x
+        # Update image label's tile grid for click detection
+        self.image_label.set_tile_grid(self._tiles_x, self._tiles_y, invert_x)
         if self._image is not None and self._show_grid:
             # Regenerate pixmap from original image to avoid double-drawing
             self._pixmap = self._array_to_pixmap(self._image)
             self._draw_grid_overlay()
             self.image_label.setPixmap(self._pixmap)
+
+    def set_tile_results(self, tile_results: List):
+        """Store TileResult objects for retrieval when collecting tiles."""
+        self._tile_results = tile_results
+
+    def _on_tile_clicked(self, tile_x_idx: int, tile_y_idx: int):
+        """Handle tile click - toggle selection."""
+        tile_key = (tile_x_idx, tile_y_idx)
+        if tile_key in self._selected_tiles:
+            self._selected_tiles.discard(tile_key)
+            logger.debug(f"Deselected tile {tile_key}")
+        else:
+            self._selected_tiles.add(tile_key)
+            logger.debug(f"Selected tile {tile_key}")
+
+        # Redraw to show selection
+        self._redraw_overlay()
+        self.selection_changed.emit()
+
+    def _redraw_overlay(self):
+        """Redraw the grid and selection overlay."""
+        if self._image is None:
+            return
+        self._pixmap = self._array_to_pixmap(self._image)
+        if self._show_grid and self._tiles_x > 0 and self._tiles_y > 0:
+            self._draw_grid_overlay()
+        self.image_label.setPixmap(self._pixmap)
+
+    def select_all_tiles(self):
+        """Select all tiles."""
+        for y in range(self._tiles_y):
+            for x in range(self._tiles_x):
+                self._selected_tiles.add((x, y))
+        self._redraw_overlay()
+        self.selection_changed.emit()
+
+    def clear_selection(self):
+        """Clear all tile selections."""
+        self._selected_tiles.clear()
+        self._redraw_overlay()
+        self.selection_changed.emit()
+
+    def get_selected_tile_count(self) -> int:
+        """Get the number of selected tiles."""
+        return len(self._selected_tiles)
+
+    def get_selected_tiles(self) -> List:
+        """Get TileResult objects for selected tiles."""
+        selected = []
+        for tile in self._tile_results:
+            key = (tile.tile_x_idx, tile.tile_y_idx)
+            if key in self._selected_tiles:
+                selected.append(tile)
+        return selected
 
     def set_show_grid(self, show: bool):
         """Enable or disable grid overlay."""
@@ -349,9 +468,35 @@ class ImagePanel(QWidget):
             y = int(i * tile_h)
             painter.drawLine(0, y, w, y)
 
+        # Draw selection highlights
+        if self._selected_tiles:
+            from PyQt5.QtGui import QBrush
+            # Semi-transparent cyan overlay for selected tiles
+            painter.setBrush(QBrush(QColor(0, 255, 255, 80)))
+            # Thick cyan border
+            selection_pen = QPen(QColor(0, 255, 255, 255))
+            selection_pen.setWidth(4)
+            painter.setPen(selection_pen)
+
+            for tile_x_idx, tile_y_idx in self._selected_tiles:
+                # Calculate display position
+                if self._invert_x:
+                    display_x_idx = (self._tiles_x - 1) - tile_x_idx
+                else:
+                    display_x_idx = tile_x_idx
+
+                x_pos = int(display_x_idx * tile_w)
+                y_pos = int(tile_y_idx * tile_h)
+                painter.drawRect(x_pos, y_pos, int(tile_w), int(tile_h))
+
+            # Reset pen for grid lines
+            pen = QPen(QColor(255, 255, 0, 180))
+            pen.setWidth(1)
+            painter.setPen(pen)
+
         # Draw coordinate labels if available
         if self._tile_coords:
-            font = QFont("Courier", 26)
+            font = QFont("Courier", 260)
             font.setBold(True)
             painter.setFont(font)
 
@@ -446,10 +591,12 @@ class LED2DOverviewResultWindow(QWidget):
 
         # Left panel (first rotation)
         self.left_panel = ImagePanel("Rotation 1")
+        self.left_panel.selection_changed.connect(self._on_selection_changed)
         splitter.addWidget(self.left_panel)
 
         # Right panel (second rotation)
         self.right_panel = ImagePanel("Rotation 2")
+        self.right_panel.selection_changed.connect(self._on_selection_changed)
         splitter.addWidget(self.right_panel)
 
         # Set equal split
@@ -480,6 +627,43 @@ class LED2DOverviewResultWindow(QWidget):
         self._populate_visualization_types()
         self.viz_combo.currentTextChanged.connect(self._on_visualization_changed)
         button_layout.addWidget(self.viz_combo)
+
+        # Selection buttons
+        self.select_all_btn = QPushButton("Select All")
+        self.select_all_btn.setToolTip("Select all tiles for workflow collection")
+        self.select_all_btn.clicked.connect(self._on_select_all)
+        button_layout.addWidget(self.select_all_btn)
+
+        self.clear_selection_btn = QPushButton("Clear Selection")
+        self.clear_selection_btn.setToolTip("Deselect all tiles")
+        self.clear_selection_btn.clicked.connect(self._on_clear_selection)
+        button_layout.addWidget(self.clear_selection_btn)
+
+        # Collect tiles button
+        self.collect_btn = QPushButton("Collect tiles")
+        self.collect_btn.setToolTip("Create workflows for selected tiles")
+        self.collect_btn.setEnabled(False)  # Disabled until tiles are selected
+        self.collect_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                font-weight: bold;
+                padding: 4px 12px;
+            }
+            QPushButton:hover {
+                background-color: #2ecc71;
+            }
+            QPushButton:disabled {
+                background-color: #95a5a6;
+            }
+        """)
+        self.collect_btn.clicked.connect(self._on_collect_tiles)
+        button_layout.addWidget(self.collect_btn)
+
+        # Selection count label
+        self.selection_label = QLabel("0 tiles selected")
+        self.selection_label.setStyleSheet("color: #666; font-size: 9pt;")
+        button_layout.addWidget(self.selection_label)
 
         button_layout.addStretch()
 
@@ -532,6 +716,8 @@ class LED2DOverviewResultWindow(QWidget):
                 # Set tile coordinates with grid indices for correct label positioning
                 coords = [(t.x, t.y, t.tile_x_idx, t.tile_y_idx) for t in result1.tiles]
                 self.left_panel.set_tile_coordinates(coords, invert_x=result1.invert_x)
+                # Store tile results for workflow collection
+                self.left_panel.set_tile_results(result1.tiles)
 
         # Display second rotation
         if len(self._results) >= 2:
@@ -544,6 +730,8 @@ class LED2DOverviewResultWindow(QWidget):
                 # Set tile coordinates with grid indices for correct label positioning
                 coords = [(t.x, t.y, t.tile_x_idx, t.tile_y_idx) for t in result2.tiles]
                 self.right_panel.set_tile_coordinates(coords, invert_x=result2.invert_x)
+                # Store tile results for workflow collection
+                self.right_panel.set_tile_results(result2.tiles)
 
         # Update info text
         self._update_info_text()
@@ -669,6 +857,52 @@ class LED2DOverviewResultWindow(QWidget):
         show_grid = self.grid_btn.isChecked()
         self.left_panel.set_show_grid(show_grid)
         self.right_panel.set_show_grid(show_grid)
+
+    def _on_select_all(self):
+        """Select all tiles in both panels."""
+        self.left_panel.select_all_tiles()
+        self.right_panel.select_all_tiles()
+
+    def _on_clear_selection(self):
+        """Clear selection in both panels."""
+        self.left_panel.clear_selection()
+        self.right_panel.clear_selection()
+
+    def _on_selection_changed(self):
+        """Handle tile selection change - update UI state."""
+        left_count = self.left_panel.get_selected_tile_count()
+        right_count = self.right_panel.get_selected_tile_count()
+        total = left_count + right_count
+
+        self.selection_label.setText(f"{total} tiles selected")
+        self.collect_btn.setEnabled(total > 0)
+
+    def _on_collect_tiles(self):
+        """Open dialog to configure and collect workflows for selected tiles."""
+        # Gather selected tiles from both panels
+        left_tiles = self.left_panel.get_selected_tiles()
+        right_tiles = self.right_panel.get_selected_tiles()
+
+        if not left_tiles and not right_tiles:
+            QMessageBox.warning(self, "No Selection", "Please select at least one tile first.")
+            return
+
+        # Get rotation angles
+        left_rotation = self._results[0].rotation_angle if len(self._results) >= 1 else 0.0
+        right_rotation = self._results[1].rotation_angle if len(self._results) >= 2 else 90.0
+
+        # Open collection dialog
+        from py2flamingo.views.dialogs.tile_collection_dialog import TileCollectionDialog
+
+        dialog = TileCollectionDialog(
+            left_tiles=left_tiles,
+            right_tiles=right_tiles,
+            left_rotation=left_rotation,
+            right_rotation=right_rotation,
+            config=self._config,
+            parent=self
+        )
+        dialog.exec_()
 
     def _save_image(self, which: str):
         """Save image(s) to file.
