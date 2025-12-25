@@ -525,11 +525,17 @@ class LED2DOverviewWorkflow(QObject):
         logger.info(f"Starting LED 2D Overview: ~{total_tiles} total tiles, "
                    f"rotations: {self._rotation_angles}, FOV: {fov:.4f} mm")
 
+        # Lock microscope controls during acquisition
+        if self._app:
+            self._app.start_acquisition("LED 2D Overview")
+
         # Enable the LED before starting
         if not self._enable_led():
             logger.error("Failed to enable LED - scan may produce black images!")
             self.scan_error.emit("LED could not be enabled. Check light source settings.")
             self._running = False
+            if self._app:
+                self._app.stop_acquisition("LED 2D Overview")
             return
 
         self.scan_started.emit()
@@ -987,6 +993,10 @@ class LED2DOverviewWorkflow(QObject):
         """Finish the scan successfully."""
         self._running = False
 
+        # Unlock microscope controls
+        if self._app:
+            self._app.stop_acquisition("LED 2D Overview")
+
         # Disable LED
         self._disable_led()
 
@@ -1006,6 +1016,10 @@ class LED2DOverviewWorkflow(QObject):
     def _finish_cancelled(self):
         """Finish the scan due to cancellation."""
         self._running = False
+
+        # Unlock microscope controls
+        if self._app:
+            self._app.stop_acquisition("LED 2D Overview")
 
         # Disable LED
         self._disable_led()

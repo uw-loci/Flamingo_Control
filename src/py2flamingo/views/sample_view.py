@@ -2472,3 +2472,34 @@ class SampleView(QWidget):
         self.logger.info(f"Restored dialog state: colormap={state.get('colormap')}, "
                         f"auto_scale={state.get('auto_scale')}, "
                         f"intensity={state.get('intensity_min')}-{state.get('intensity_max')}")
+
+    # ========== Acquisition Lock Controls ==========
+
+    def set_stage_controls_enabled(self, enabled: bool) -> None:
+        """Enable or disable stage movement controls.
+
+        Called during acquisition processes (e.g., LED 2D Overview scan) to prevent
+        accidental stage movements that could interfere with the acquisition.
+
+        This only affects stage position controls - visualization and display
+        controls remain enabled.
+
+        Args:
+            enabled: True to enable controls, False to disable
+        """
+        self.logger.info(f"Stage controls {'enabled' if enabled else 'disabled'} (acquisition lock)")
+
+        # Disable/enable position sliders
+        if hasattr(self, 'position_sliders'):
+            for slider in self.position_sliders.values():
+                slider.setEnabled(enabled)
+
+        # Disable/enable position edit fields
+        if hasattr(self, 'position_edits'):
+            for edit in self.position_edits.values():
+                edit.setEnabled(enabled)
+
+        # Disable/enable illumination controls during acquisition
+        # (acquisition controls the LED, user shouldn't change it)
+        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+            self.laser_led_panel.setEnabled(enabled)

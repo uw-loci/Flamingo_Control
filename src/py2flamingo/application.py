@@ -16,6 +16,7 @@ import sys
 import logging
 from typing import Optional
 from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import QObject, pyqtSignal
 
 from py2flamingo.core import ProtocolEncoder, TCPConnection, QueueManager
 from py2flamingo.models import (
@@ -34,7 +35,7 @@ from py2flamingo.views.stage_chamber_visualization_window import StageChamberVis
 from py2flamingo.views.sample_3d_visualization_window import Sample3DVisualizationWindow
 
 
-class FlamingoApplication:
+class FlamingoApplication(QObject):
     """Main application class handling dependency injection and lifecycle.
 
     This class creates and wires all application components using dependency
@@ -52,10 +53,19 @@ class FlamingoApplication:
         ↓
     Main Window (composition of views)
 
+    Signals:
+        acquisition_started: Emitted when an acquisition process begins (e.g., LED 2D Overview scan)
+        acquisition_stopped: Emitted when an acquisition process ends
+
     Example:
         app = FlamingoApplication(default_ip="127.0.0.1", default_port=53717)
         sys.exit(app.run())
     """
+
+    # Signals for acquisition state management
+    # These are used to lock/unlock microscope controls during scanning operations
+    acquisition_started = pyqtSignal()
+    acquisition_stopped = pyqtSignal()
 
     def __init__(self, default_ip: Optional[str] = None, default_port: Optional[int] = None):
         """Initialize application with optional default connection settings.
@@ -64,8 +74,14 @@ class FlamingoApplication:
             default_ip: Default server IP address (None = user selects via GUI)
             default_port: Default server port (None = user selects via GUI)
         """
+        super().__init__()
+
         self.default_ip = default_ip
         self.default_port = default_port
+
+        # Acquisition state tracking
+        # When True, microscope controls should be disabled to prevent interference
+        self._acquisition_in_progress = False
 
         # Qt application
         self.qt_app: Optional[QApplication] = None
@@ -367,6 +383,27 @@ class FlamingoApplication:
             self.connection_view.sample_view_requested.connect(self._open_sample_view)
             self.logger.debug("Connected sample_view_requested signal")
 
+        # Connect acquisition lock signals to stage control view
+        if self.stage_control_view:
+            self.acquisition_started.connect(
+                lambda: self.stage_control_view._set_controls_enabled(False)
+            )
+            self.acquisition_stopped.connect(
+                lambda: self.stage_control_view._set_controls_enabled(True)
+            )
+            self.logger.debug("Connected acquisition signals to stage control view")
+
+        # Connect acquisition lock signals to stage chamber visualization
+        if self.stage_chamber_visualization_window:
+            if hasattr(self.stage_chamber_visualization_window, '_set_sliders_enabled'):
+                self.acquisition_started.connect(
+                    lambda: self.stage_chamber_visualization_window._set_sliders_enabled(False)
+                )
+                self.acquisition_stopped.connect(
+                    lambda: self.stage_chamber_visualization_window._set_sliders_enabled(True)
+                )
+                self.logger.debug("Connected acquisition signals to stage chamber visualization")
+
         self.logger.info("Application dependencies setup complete")
 
 
@@ -465,6 +502,15 @@ class FlamingoApplication:
                 sample_3d_window=self.sample_3d_visualization_window,
                 geometry_manager=self.geometry_manager,
             )
+
+            # Connect acquisition lock signals to Sample View
+            self.acquisition_started.connect(
+                lambda: self.sample_view.set_stage_controls_enabled(False)
+            )
+            self.acquisition_stopped.connect(
+                lambda: self.sample_view.set_stage_controls_enabled(True)
+            )
+            self.logger.debug("Connected acquisition signals to Sample View")
 
         self.sample_view.show()
         self.sample_view.raise_()
@@ -592,3 +638,58 @@ class FlamingoApplication:
                 self.logger.error(f"Error during disconnect: {e}")
 
         self.logger.info("Application shutdown complete")
+
+    # -------------------------------------------------------------------------
+    # Acquisition State Management
+    # -------------------------------------------------------------------------
+
+    @property
+    def is_acquisition_in_progress(self) -> bool:
+        """Check if an acquisition is currently in progress.
+
+        When True, microscope controls (stage movement, etc.) should be disabled
+        to prevent interference with the acquisition process.
+
+        Returns:
+            True if an acquisition is running, False otherwise
+        """
+        return self._acquisition_in_progress
+
+    def start_acquisition(self, source: str = "unknown") -> bool:
+        """Signal that an acquisition process is starting.
+
+        This locks microscope controls to prevent interference during scanning.
+        Views connected to the acquisition_started signal should disable
+        stage movement controls, position presets, etc.
+
+        Args:
+            source: Identifier for the acquisition source (for logging)
+
+        Returns:
+            True if acquisition started, False if already in progress
+        """
+        if self._acquisition_in_progress:
+            self.logger.warning(f"Acquisition already in progress, cannot start '{source}'")
+            return False
+
+        self._acquisition_in_progress = True
+        self.logger.info(f"Acquisition started: {source}")
+        self.acquisition_started.emit()
+        return True
+
+    def stop_acquisition(self, source: str = "unknown"):
+        """Signal that an acquisition process has ended.
+
+        This unlocks microscope controls. Views connected to the
+        acquisition_stopped signal should re-enable stage movement controls.
+
+        Args:
+            source: Identifier for the acquisition source (for logging)
+        """
+        if not self._acquisition_in_progress:
+            self.logger.debug(f"No acquisition in progress to stop ({source})")
+            return
+
+        self._acquisition_in_progress = False
+        self.logger.info(f"Acquisition stopped: {source}")
+        self.acquisition_stopped.emit()
