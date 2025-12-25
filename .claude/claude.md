@@ -1007,5 +1007,201 @@ self.my_window = MyWindow(
 
 ---
 
-**Last Updated:** 2025-12-17
+## Workflow System Reference
+
+### Comprehensive Workflow Documentation
+
+For detailed information about the Flamingo workflow system, refer to:
+
+**`/home/msnelson/LSControl/claude-reports/WORKFLOW_REFERENCE.md`**
+
+This reference document covers:
+- **Workflow file format** - Complete structure and syntax
+- **Field reference** - All fields with types, ranges, and validation rules
+- **TCP protocol integration** - How workflows are transmitted to the microscope
+- **Workflow types and flags** - cmdDataBits0 flag combinations for each workflow type
+- **Server-side validation** - What the C++ server validates and error messages
+- **Current implementation architecture** - Python component responsibilities
+- **Example workflows** - Snapshot, Z-Stack, and Tile scan templates
+- **Common issues** - Troubleshooting guide
+
+### Quick Reference
+
+#### Workflow Command Codes
+- `12292 (0x3004)` - WORKFLOW_START
+- `12293 (0x3005)` - WORKFLOW_STOP
+- `12331 (0x302B)` - CHECK_STACK
+
+#### cmdDataBits0 Flags for Workflows
+```python
+# DO NOT use TRIGGER_CALL_BACK (0x80000000) for workflow commands!
+EXPERIMENT_TIME_REMAINING   = 0x00000001  # Timelapse
+STAGE_POSITIONS_IN_BUFFER   = 0x00000002  # Multi-position
+MAX_PROJECTION              = 0x00000004  # Z-stack MIP
+SAVE_TO_DISK                = 0x00000008  # Save images
+STAGE_ZSWEEP                = 0x00000020  # Z-stack operation
+```
+
+#### Common Flag Combinations
+| Type | Flags | Value |
+|------|-------|-------|
+| Snapshot (save) | SAVE_TO_DISK | 0x00000008 |
+| Z-Stack (save) | ZSWEEP \| SAVE_TO_DISK | 0x00000028 |
+| Z-Stack with MIP | ZSWEEP \| MAX_PROJECTION \| SAVE_TO_DISK | 0x0000002C |
+
+#### Illumination Source Format
+```
+Laser 3 488 nm = 5.00 1    # "power on/off" format (5% power, enabled)
+LED_RGB_Board = 50.0 1     # 50% power, enabled
+```
+
+#### Data Save Locations
+
+Save paths are **embedded in workflow files**, NOT queried via TCP:
+- `SAVE_LOCATIONS_GET (0x6009)` = saved **stage positions** (NOT data directories)
+- No "list available drives" command exists
+
+Workflow fields:
+```
+Save image drive = /media/deploy/ctlsm1    # Base path (microscope perspective)
+Save image directory = experiment_01        # Subdirectory
+Save image data = Tiff                      # Format: NotSaved, Tiff, BigTiff, Raw
+Save to subfolders = true                   # Organize by S{sample}/t{timepoint}/
+```
+
+Server creates: `{drive}/{datetime}_{directory}/S001_t000001_V001_R0001_X001_Y001_C01_I0.tiff`
+
+---
+
+## Acquisition Lock System
+
+### Overview
+
+The application provides an **acquisition lock** mechanism to prevent accidental interference with scanning operations. When an acquisition is in progress (e.g., LED 2D Overview scan), microscope controls are automatically disabled while visualization controls remain enabled.
+
+**Important Terminology:**
+- **"Acquisition"** = Client-side scanning processes (LED 2D Overview, tile collection, etc.)
+- **"Workflow"** = Server-side Flamingo Workflow feature (reserved term - server handles its own locking)
+
+### Using the Acquisition Lock
+
+#### For New Scanning Functions
+
+Any new scanning/acquisition process should use the lock to prevent interference:
+
+```python
+def start_scan(self):
+    """Start a scanning operation."""
+    # Lock microscope controls at the start
+    if self._app:
+        self._app.start_acquisition("My Scan Name")
+
+    try:
+        # ... perform scanning operations ...
+        self._do_scan()
+    finally:
+        # ALWAYS unlock when done (success, error, or cancel)
+        if self._app:
+            self._app.stop_acquisition("My Scan Name")
+
+def cancel_scan(self):
+    """Cancel the scan."""
+    self._cancelled = True
+    # Unlock will happen in the scan completion handler
+```
+
+#### Key Methods (FlamingoApplication)
+
+```python
+# Check if acquisition is running
+if app.is_acquisition_in_progress:
+    # Don't start another acquisition
+    return
+
+# Start acquisition (returns False if already in progress)
+success = app.start_acquisition("LED 2D Overview")
+
+# Stop acquisition (safe to call even if not in progress)
+app.stop_acquisition("LED 2D Overview")
+```
+
+#### Signals
+
+```python
+# Connect to acquisition state changes
+app.acquisition_started.connect(self._on_acquisition_started)
+app.acquisition_stopped.connect(self._on_acquisition_stopped)
+
+def _on_acquisition_started(self):
+    self.my_stage_slider.setEnabled(False)
+
+def _on_acquisition_stopped(self):
+    self.my_stage_slider.setEnabled(True)
+```
+
+### Currently Connected Views
+
+The following views automatically disable controls during acquisition:
+
+| View | Controls Disabled |
+|------|-------------------|
+| **Sample View** | Position sliders (X,Y,Z,R), position edits, illumination panel |
+| **Stage Control View** | All movement controls (go-to buttons, jog buttons, spinboxes) |
+| **Stage Chamber Visualization** | Position sliders |
+
+### Adding Acquisition Lock to New Views
+
+For any new view with stage movement controls:
+
+1. **Add a disable method to your view:**
+```python
+def set_stage_controls_enabled(self, enabled: bool) -> None:
+    """Enable/disable stage controls during acquisition."""
+    self.x_slider.setEnabled(enabled)
+    self.y_slider.setEnabled(enabled)
+    # ... other movement controls
+    # Keep visualization controls enabled!
+```
+
+2. **Connect signals in FlamingoApplication.setup_dependencies():**
+```python
+# In setup_dependencies():
+if self.my_new_view:
+    self.acquisition_started.connect(
+        lambda: self.my_new_view.set_stage_controls_enabled(False)
+    )
+    self.acquisition_stopped.connect(
+        lambda: self.my_new_view.set_stage_controls_enabled(True)
+    )
+```
+
+Or for views created dynamically (like Sample View):
+```python
+# When creating the view:
+self.acquisition_started.connect(
+    lambda: self.my_view.set_stage_controls_enabled(False)
+)
+self.acquisition_stopped.connect(
+    lambda: self.my_view.set_stage_controls_enabled(True)
+)
+```
+
+### Controls That Should Remain Enabled
+
+During acquisition, these should **stay enabled** so users can monitor progress:
+- Napari 3D viewer and visualization
+- Image display and contrast adjustment
+- MIP visualization controls
+- Progress bars and status displays
+- Cancel buttons
+
+### Implementation Files
+
+- **State management:** `src/py2flamingo/application.py` (FlamingoApplication class)
+- **Example usage:** `src/py2flamingo/workflows/led_2d_overview_workflow.py`
+- **View integration:** `src/py2flamingo/views/sample_view.py` (set_stage_controls_enabled)
+
+---
+
+**Last Updated:** 2025-12-25
 **Maintained By:** Claude Code assistant
