@@ -264,14 +264,15 @@ class WorkflowController:
         else:
             return (True, [])
 
-    def start_workflow_from_ui(self, workflow) -> Tuple[bool, str]:
+    def start_workflow_from_ui(self, workflow, workflow_dict: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
         """
         Start workflow from UI-built Workflow object.
 
         Converts the Workflow object to workflow file format and sends it.
 
         Args:
-            workflow: Workflow object from UI
+            workflow: Workflow object from UI (or None if using workflow_dict)
+            workflow_dict: Optional complete workflow dictionary from view
 
         Returns:
             Tuple of (success, message)
@@ -282,7 +283,10 @@ class WorkflowController:
 
         try:
             # Convert workflow to file content
-            workflow_text = self._workflow_to_text(workflow)
+            if workflow_dict is not None:
+                workflow_text = self._workflow_dict_to_text(workflow_dict)
+            else:
+                workflow_text = self._workflow_to_text(workflow)
             workflow_data = workflow_text.encode('utf-8')
 
             self._logger.info(f"Generated workflow ({len(workflow_data)} bytes):\n{workflow_text[:500]}...")
@@ -441,6 +445,171 @@ class WorkflowController:
         lines.append("")
         lines.append("    <Illumination Options>")
         lines.append("    Run stack with multiple lasers on = false")
+        lines.append("    </Illumination Options>")
+
+        lines.append("</Workflow Settings>")
+
+        return "\n".join(lines)
+
+    def _workflow_dict_to_text(self, workflow_dict: Dict[str, Any]) -> str:
+        """
+        Convert workflow dictionary to workflow file text format.
+
+        This method handles the complete workflow dictionary format
+        from WorkflowView.get_workflow_dict().
+
+        Args:
+            workflow_dict: Complete workflow dictionary from UI
+
+        Returns:
+            Workflow file content as string
+        """
+        lines = ["<Workflow Settings>"]
+
+        # Experiment Settings section
+        lines.append("    <Experiment Settings>")
+        exp = workflow_dict.get('Experiment Settings', {})
+
+        # Plane spacing (from stack settings or default)
+        plane_spacing = exp.get('Plane spacing (um)', 1.0)
+        lines.append(f"    Plane spacing (um) = {plane_spacing}")
+
+        # Frame rate and exposure
+        frame_rate = exp.get('Frame rate (f/s)', 100.0)
+        exposure_time = exp.get('Exposure time (us)', 10000)
+        lines.append(f"    Frame rate (f/s) = {frame_rate:.1f}")
+        lines.append(f"    Exposure time (us) = {int(exposure_time)}")
+
+        # Time-lapse settings
+        duration = exp.get('Duration (dd:hh:mm:ss)', '00:00:00:01')
+        interval = exp.get('Interval (dd:hh:mm:ss)', '00:00:00:01')
+        lines.append(f"    Duration (dd:hh:mm:ss) = {duration}")
+        lines.append(f"    Interval (dd:hh:mm:ss) = {interval}")
+
+        # Sample name
+        sample = exp.get('Sample', '')
+        lines.append(f"    Sample = {sample}")
+
+        # Multi-angle settings
+        num_angles = exp.get('Number of angles', 1)
+        angle_step = exp.get('Angle step size', 0)
+        lines.append(f"    Number of angles = {num_angles}")
+        lines.append(f"    Angle step size = {angle_step}")
+
+        # Region
+        region = exp.get('Region', '')
+        lines.append(f"    Region = {region}")
+
+        # Save settings
+        save_drive = exp.get('Save image drive', '/media/deploy/ctlsm1')
+        save_dir = exp.get('Save image directory', 'data')
+        lines.append(f"    Save image drive = {save_drive}")
+        lines.append(f"    Save image directory = {save_dir}")
+
+        # Comments
+        comments = exp.get('Comments', '')
+        lines.append(f"    Comments = {comments}")
+
+        # Display/Save options
+        save_mip = exp.get('Save max projection', 'false')
+        display_mip = exp.get('Display max projection', 'true')
+        save_format = exp.get('Save image data', 'Tiff')
+        save_subfolders = exp.get('Save to subfolders', 'false')
+        live_view = exp.get('Work flow live view enabled', 'true')
+
+        lines.append(f"    Save max projection = {save_mip}")
+        lines.append(f"    Display max projection = {display_mip}")
+        lines.append(f"    Save image data = {save_format}")
+        lines.append(f"    Save to subfolders = {save_subfolders}")
+        lines.append(f"    Work flow live view enabled = {live_view}")
+
+        lines.append("    </Experiment Settings>")
+
+        # Camera Settings section
+        lines.append("")
+        lines.append("    <Camera Settings>")
+        cam = workflow_dict.get('Camera Settings', {})
+
+        cam_exposure = cam.get('Exposure time (us)', 10000)
+        cam_framerate = cam.get('Frame rate (f/s)', 100.0)
+        aoi_width = cam.get('AOI width', 2048)
+        aoi_height = cam.get('AOI height', 2048)
+
+        lines.append(f"    Exposure time (us) = {int(cam_exposure)}")
+        lines.append(f"    Frame rate (f/s) = {cam_framerate:.1f}")
+        lines.append(f"    AOI width = {aoi_width}")
+        lines.append(f"    AOI height = {aoi_height}")
+        lines.append("    </Camera Settings>")
+
+        # Stack Settings section
+        lines.append("")
+        lines.append("    <Stack Settings>")
+        stack = workflow_dict.get('Stack Settings', {})
+
+        lines.append("    Stack index = ")
+        lines.append(f"    Change in Z axis (mm) = {stack.get('Change in Z axis (mm)', 0.001):.6f}")
+        lines.append(f"    Number of planes = {stack.get('Number of planes', 1)}")
+        lines.append(f"    Z stage velocity (mm/s) = {stack.get('Z stage velocity (mm/s)', 0.4)}")
+        lines.append(f"    Rotational stage velocity (°/s) = {stack.get('Rotational stage velocity (°/s)', 0)}")
+        lines.append(f"    Auto update stack calculations = {stack.get('Auto update stack calculations', 'true')}")
+        lines.append(f"    Camera 1 capture percentage = {stack.get('Camera 1 capture percentage', 100)}")
+        lines.append(f"    Camera 1 capture mode = {stack.get('Camera 1 capture mode', 0)}")
+        lines.append(f"    Camera 2 capture percentage = {stack.get('Camera 2 capture percentage', 100)}")
+        lines.append(f"    Camera 2 capture mode = {stack.get('Camera 2 capture mode', 0)}")
+        lines.append(f"    Stack option = {stack.get('Stack option', 'None')}")
+        lines.append(f"    Stack option settings 1 = {stack.get('Stack option settings 1', 0)}")
+        lines.append(f"    Stack option settings 2 = {stack.get('Stack option settings 2', 0)}")
+        lines.append("    </Stack Settings>")
+
+        # Start Position section
+        lines.append("")
+        lines.append("    <Start Position>")
+        start_pos = workflow_dict.get('Start Position', {})
+        lines.append(f"    X (mm) = {start_pos.get('X (mm)', 0.0):.6f}")
+        lines.append(f"    Y (mm) = {start_pos.get('Y (mm)', 0.0):.6f}")
+        lines.append(f"    Z (mm) = {start_pos.get('Z (mm)', 10.0):.6f}")
+        lines.append(f"    Angle (degrees) = {start_pos.get('Angle (degrees)', 0.0):.2f}")
+        lines.append("    </Start Position>")
+
+        # End Position section
+        lines.append("")
+        lines.append("    <End Position>")
+        end_pos = workflow_dict.get('End Position', start_pos)
+        lines.append(f"    X (mm) = {end_pos.get('X (mm)', 0.0):.6f}")
+        lines.append(f"    Y (mm) = {end_pos.get('Y (mm)', 0.0):.6f}")
+        lines.append(f"    Z (mm) = {end_pos.get('Z (mm)', 10.0):.6f}")
+        lines.append(f"    Angle (degrees) = {end_pos.get('Angle (degrees)', 0.0):.2f}")
+        lines.append("    </End Position>")
+
+        # Illumination Source section
+        lines.append("")
+        lines.append("    <Illumination Source>")
+        illum = workflow_dict.get('Illumination Source', {})
+
+        # Write all illumination settings
+        for key, value in illum.items():
+            # Skip path settings - they go in Illumination Path
+            if key in ('Left path', 'Right path'):
+                continue
+            lines.append(f"    {key} = {value}")
+
+        lines.append("    </Illumination Source>")
+
+        # Illumination Path section
+        lines.append("")
+        lines.append("    <Illumination Path>")
+        left_path = illum.get('Left path', 'ON 1')
+        right_path = illum.get('Right path', 'OFF 0')
+        lines.append(f"    Left path = {left_path}")
+        lines.append(f"    Right path = {right_path}")
+        lines.append("    </Illumination Path>")
+
+        # Illumination Options section
+        lines.append("")
+        lines.append("    <Illumination Options>")
+        illum_opts = workflow_dict.get('Illumination Options', {})
+        multi_laser = illum_opts.get('Run stack with multiple lasers on', 'false')
+        lines.append(f"    Run stack with multiple lasers on = {multi_laser}")
         lines.append("    </Illumination Options>")
 
         lines.append("</Workflow Settings>")

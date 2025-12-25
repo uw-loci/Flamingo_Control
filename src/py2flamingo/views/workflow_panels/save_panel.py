@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QComboBox, QCheckBox, QGroupBox, QGridLayout
+    QLineEdit, QComboBox, QCheckBox, QGroupBox, QGridLayout, QPlainTextEdit
 )
 from PyQt5.QtCore import pyqtSignal
 
@@ -31,6 +31,7 @@ class SavePanel(QWidget):
     - Save location (drive/directory)
     - Save format selection
     - Save options (MIP, subfolders, etc.)
+    - Region and comments fields
 
     Signals:
         settings_changed: Emitted when save settings change
@@ -92,14 +93,21 @@ class SavePanel(QWidget):
         self._sample_name.textChanged.connect(self._on_settings_changed)
         options_layout.addWidget(self._sample_name, 2, 1)
 
+        # Region
+        options_layout.addWidget(QLabel("Region:"), 3, 0)
+        self._region = QLineEdit()
+        self._region.setPlaceholderText("Optional region identifier")
+        self._region.textChanged.connect(self._on_settings_changed)
+        options_layout.addWidget(self._region, 3, 1)
+
         # Save format
-        options_layout.addWidget(QLabel("Format:"), 3, 0)
+        options_layout.addWidget(QLabel("Format:"), 4, 0)
         self._format_combo = QComboBox()
         for display_name, _ in SAVE_FORMATS:
             self._format_combo.addItem(display_name)
         self._format_combo.setCurrentIndex(0)  # Default to TIFF
         self._format_combo.currentIndexChanged.connect(self._on_settings_changed)
-        options_layout.addWidget(self._format_combo, 3, 1)
+        options_layout.addWidget(self._format_combo, 4, 1)
 
         # Additional options row
         opts_row = QHBoxLayout()
@@ -121,13 +129,24 @@ class SavePanel(QWidget):
         opts_row.addWidget(self._save_subfolders)
 
         opts_row.addStretch()
-        options_layout.addLayout(opts_row, 4, 0, 1, 2)
+        options_layout.addLayout(opts_row, 5, 0, 1, 2)
 
         # Live view option
         self._live_view = QCheckBox("Enable Live View During Acquisition")
         self._live_view.setChecked(True)
         self._live_view.stateChanged.connect(self._on_settings_changed)
-        options_layout.addWidget(self._live_view, 5, 0, 1, 2)
+        options_layout.addWidget(self._live_view, 6, 0, 1, 2)
+
+        # Comments section (multi-line)
+        comments_label = QLabel("Comments:")
+        comments_label.setStyleSheet("margin-top: 8px;")
+        options_layout.addWidget(comments_label, 7, 0, 1, 2)
+
+        self._comments = QPlainTextEdit()
+        self._comments.setPlaceholderText("Enter any comments or notes about this acquisition...")
+        self._comments.setMaximumHeight(80)
+        self._comments.textChanged.connect(self._on_settings_changed)
+        options_layout.addWidget(self._comments, 8, 0, 1, 2)
 
         group_layout.addWidget(self._options_widget)
         group.setLayout(group_layout)
@@ -157,11 +176,13 @@ class SavePanel(QWidget):
             'save_drive': self._save_drive.text(),
             'save_directory': self._save_directory.text(),
             'sample_name': self._sample_name.text(),
+            'region': self._region.text(),
             'save_format': format_value,
             'save_mip': self._save_mip.isChecked(),
             'display_mip': self._display_mip.isChecked(),
             'save_subfolders': self._save_subfolders.isChecked(),
             'live_view': self._live_view.isChecked(),
+            'comments': self._comments.toPlainText(),
         }
 
     def get_workflow_save_dict(self) -> Dict[str, str]:
@@ -177,11 +198,13 @@ class SavePanel(QWidget):
             'Save image drive': settings['save_drive'],
             'Save image directory': settings['save_directory'],
             'Sample': settings['sample_name'],
+            'Region': settings['region'],
             'Save image data': settings['save_format'] if settings['save_enabled'] else 'NotSaved',
             'Save max projection': 'true' if settings['save_mip'] else 'false',
             'Display max projection': 'true' if settings['display_mip'] else 'false',
             'Save to subfolders': 'true' if settings['save_subfolders'] else 'false',
             'Work flow live view enabled': 'true' if settings['live_view'] else 'false',
+            'Comments': settings['comments'],
         }
 
         return workflow_dict
@@ -197,3 +220,39 @@ class SavePanel(QWidget):
     def set_sample_name(self, name: str) -> None:
         """Set sample name."""
         self._sample_name.setText(name)
+
+    def set_region(self, region: str) -> None:
+        """Set region identifier."""
+        self._region.setText(region)
+
+    def set_comments(self, comments: str) -> None:
+        """Set comments text."""
+        self._comments.setPlainText(comments)
+
+    def set_format(self, format_value: str) -> None:
+        """
+        Set save format.
+
+        Args:
+            format_value: Format value (Tiff, BigTiff, Raw, NotSaved)
+        """
+        for i, (_, value) in enumerate(SAVE_FORMATS):
+            if value == format_value:
+                self._format_combo.setCurrentIndex(i)
+                break
+
+    def set_save_mip(self, enabled: bool) -> None:
+        """Set save MIP option."""
+        self._save_mip.setChecked(enabled)
+
+    def set_display_mip(self, enabled: bool) -> None:
+        """Set display MIP option."""
+        self._display_mip.setChecked(enabled)
+
+    def set_save_subfolders(self, enabled: bool) -> None:
+        """Set save to subfolders option."""
+        self._save_subfolders.setChecked(enabled)
+
+    def set_live_view(self, enabled: bool) -> None:
+        """Set live view option."""
+        self._live_view.setChecked(enabled)

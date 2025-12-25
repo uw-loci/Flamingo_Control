@@ -9,11 +9,24 @@ from typing import Optional, Dict, Any
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QDoubleSpinBox, QSpinBox, QCheckBox, QGroupBox, QGridLayout
+    QDoubleSpinBox, QSpinBox, QCheckBox, QGroupBox, QGridLayout, QComboBox
 )
 from PyQt5.QtCore import pyqtSignal
 
 from py2flamingo.models.data.workflow import StackSettings
+
+
+# Stack option values
+STACK_OPTIONS = [
+    "None",
+    "ZStack",
+    "ZStack Movie",
+    "Tile",
+    "ZSweep",
+    "OPT",
+    "OPT ZStacks",
+    "Bidirectional"
+]
 
 
 class ZStackPanel(QWidget):
@@ -24,7 +37,10 @@ class ZStackPanel(QWidget):
     - Number of planes
     - Z step size (um)
     - Z velocity (mm/s)
-    - Bidirectional option
+    - Stack option dropdown (ZStack, Tile, OPT, etc.)
+    - Tile settings (when Tile option selected)
+    - Rotational stage velocity
+    - Return to start option
     - Calculated Z range display
 
     Signals:
@@ -90,19 +106,55 @@ class ZStackPanel(QWidget):
         self._z_velocity.valueChanged.connect(self._on_settings_changed)
         grid.addWidget(self._z_velocity, 3, 1)
 
+        # Stack option dropdown
+        grid.addWidget(QLabel("Stack Option:"), 4, 0)
+        self._stack_option = QComboBox()
+        self._stack_option.addItems(STACK_OPTIONS)
+        self._stack_option.setCurrentText("None")
+        self._stack_option.currentTextChanged.connect(self._on_stack_option_changed)
+        grid.addWidget(self._stack_option, 4, 1)
+
+        # Tile settings (only visible when Tile option selected)
+        self._tile_widget = QWidget()
+        tile_layout = QGridLayout(self._tile_widget)
+        tile_layout.setContentsMargins(0, 0, 0, 0)
+
+        tile_layout.addWidget(QLabel("Tiles X:"), 0, 0)
+        self._tiles_x = QSpinBox()
+        self._tiles_x.setRange(1, 100)
+        self._tiles_x.setValue(1)
+        self._tiles_x.valueChanged.connect(self._on_settings_changed)
+        tile_layout.addWidget(self._tiles_x, 0, 1)
+
+        tile_layout.addWidget(QLabel("Tiles Y:"), 1, 0)
+        self._tiles_y = QSpinBox()
+        self._tiles_y.setRange(1, 100)
+        self._tiles_y.setValue(1)
+        self._tiles_y.valueChanged.connect(self._on_settings_changed)
+        tile_layout.addWidget(self._tiles_y, 1, 1)
+
+        self._tile_widget.setVisible(False)
+        grid.addWidget(self._tile_widget, 5, 0, 1, 2)
+
+        # Rotational stage velocity
+        grid.addWidget(QLabel("Rotational Velocity:"), 6, 0)
+        self._rotational_velocity = QDoubleSpinBox()
+        self._rotational_velocity.setRange(0.0, 10.0)
+        self._rotational_velocity.setValue(0.0)
+        self._rotational_velocity.setDecimals(2)
+        self._rotational_velocity.setSingleStep(0.1)
+        self._rotational_velocity.setSuffix(" °/s")
+        self._rotational_velocity.valueChanged.connect(self._on_settings_changed)
+        grid.addWidget(self._rotational_velocity, 6, 1)
+
         # Estimated acquisition time
-        grid.addWidget(QLabel("Est. Time:"), 4, 0)
+        grid.addWidget(QLabel("Est. Time:"), 7, 0)
         self._time_label = QLabel("~5.0 s")
         self._time_label.setStyleSheet("color: #666;")
-        grid.addWidget(self._time_label, 4, 1)
+        grid.addWidget(self._time_label, 7, 1)
 
         # Options row
         opts_layout = QHBoxLayout()
-
-        self._bidirectional = QCheckBox("Bidirectional")
-        self._bidirectional.setToolTip("Acquire in both Z directions (faster)")
-        self._bidirectional.stateChanged.connect(self._on_settings_changed)
-        opts_layout.addWidget(self._bidirectional)
 
         self._return_to_start = QCheckBox("Return to Start")
         self._return_to_start.setChecked(True)
@@ -111,13 +163,26 @@ class ZStackPanel(QWidget):
         opts_layout.addWidget(self._return_to_start)
 
         opts_layout.addStretch()
-        grid.addLayout(opts_layout, 5, 0, 1, 2)
+        grid.addLayout(opts_layout, 8, 0, 1, 2)
 
         group.setLayout(grid)
         layout.addWidget(group)
 
         # Initial calculations
         self._update_calculations()
+
+    def _on_stack_option_changed(self, option: str) -> None:
+        """
+        Handle stack option change.
+
+        Shows/hides tile settings when Tile option is selected.
+
+        Args:
+            option: Selected stack option
+        """
+        # Show tile settings only when Tile option is selected
+        self._tile_widget.setVisible(option == "Tile")
+        self._on_settings_changed()
 
     def _on_settings_changed(self) -> None:
         """Handle any settings change."""
@@ -165,11 +230,14 @@ class ZStackPanel(QWidget):
         Returns:
             StackSettings object with current values
         """
+        # For backward compatibility, set bidirectional based on stack option
+        bidirectional = self._stack_option.currentText() == "Bidirectional"
+
         return StackSettings(
             num_planes=self._num_planes.value(),
             z_step_um=self._z_step.value(),
             z_velocity_mm_s=self._z_velocity.value(),
-            bidirectional=self._bidirectional.isChecked(),
+            bidirectional=bidirectional,
             return_to_start=self._return_to_start.isChecked(),
         )
 
@@ -185,11 +253,21 @@ class ZStackPanel(QWidget):
         z_step_mm = z_step_um / 1000.0
         z_range_mm = (num_planes - 1) * z_step_mm
 
+        # Get stack option value
+        stack_option = self._stack_option.currentText()
+
+        # Get tile settings (or 0 if not tiling)
+        tiles_x = self._tiles_x.value() if stack_option == "Tile" else 0
+        tiles_y = self._tiles_y.value() if stack_option == "Tile" else 0
+
         return {
             'Number of planes': num_planes,
             'Change in Z axis (mm)': z_range_mm,  # Total range, not step!
             'Z stage velocity (mm/s)': self._z_velocity.value(),
-            'Stack option': 'None' if not self._bidirectional.isChecked() else 'Bidirectional',
+            'Rotational stage velocity (°/s)': self._rotational_velocity.value(),
+            'Stack option': stack_option,
+            'Stack option settings 1': tiles_x,
+            'Stack option settings 2': tiles_y,
             'Auto update stack calculations': 'true',
             'Camera 1 capture percentage': 100,
             'Camera 1 capture mode': 0,
@@ -205,7 +283,11 @@ class ZStackPanel(QWidget):
         self._num_planes.setValue(settings.num_planes)
         self._z_step.setValue(settings.z_step_um)
         self._z_velocity.setValue(settings.z_velocity_mm_s)
-        self._bidirectional.setChecked(settings.bidirectional)
+
+        # Set stack option based on bidirectional flag (for backward compatibility)
+        if settings.bidirectional:
+            self._stack_option.setCurrentText("Bidirectional")
+
         self._return_to_start.setChecked(settings.return_to_start)
 
     def get_z_range_um(self) -> float:
