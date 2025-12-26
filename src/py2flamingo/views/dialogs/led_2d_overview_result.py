@@ -496,22 +496,26 @@ class ImagePanel(QWidget):
 
         # Draw coordinate labels if available
         if self._tile_coords:
-            # Calculate font size as 40% of tile height in pixels
-            # This needs to be large because the entire image gets scaled down for display
-            # e.g., 5000px image displayed at 400px = 0.08x scale, so 40% becomes ~3% on screen
-            # Minimum of 50px to ensure readability even with small tiles
-            font_pixel_size = max(50, int(tile_h * 0.40))
+            # Calculate font size as percentage of tile height
+            # Use 25% so two lines of text fit comfortably in tile
+            # The image will be scaled down for display, so text needs to be large in original
+            font_pixel_size = max(50, int(tile_h * 0.25))
             font = QFont("Courier")
             font.setPixelSize(font_pixel_size)
             font.setBold(True)
             painter.setFont(font)
 
-            logger.debug(f"Drawing labels: tile_h={tile_h:.0f}px, font_size={font_pixel_size}px, tiles={self._tiles_x}x{self._tiles_y}")
+            logger.info(f"LED 2D Overview labels: pixmap={w}x{h}, tiles={self._tiles_x}x{self._tiles_y}, "
+                       f"tile_size={tile_w:.0f}x{tile_h:.0f}px, font={font_pixel_size}px")
 
             # Get font metrics for centering
             from PyQt5.QtGui import QFontMetrics
             fm = QFontMetrics(font)
             line_height = fm.height()
+
+            # Total height needed for two lines with small gap
+            line_spacing = int(line_height * 0.2)  # 20% gap between lines
+            total_text_height = 2 * line_height + line_spacing
 
             for coord in self._tile_coords:
                 # Support both formats: (x, y, tile_x_idx, tile_y_idx) or legacy (x, y, z)
@@ -540,11 +544,12 @@ class ImagePanel(QWidget):
                 text1_width = fm.horizontalAdvance(text1)
                 text2_width = fm.horizontalAdvance(text2)
 
-                # Position text centered in tile (two lines stacked)
+                # Position text centered in tile (two lines stacked vertically)
+                # First line baseline above center, second line baseline below center
                 text1_x = int(tile_center_x - text1_width / 2)
                 text2_x = int(tile_center_x - text2_width / 2)
-                text1_y = int(tile_center_y - line_height / 2)
-                text2_y = int(tile_center_y + line_height / 2 + fm.descent())
+                text1_y = int(tile_center_y - line_spacing / 2)
+                text2_y = int(tile_center_y + line_height + line_spacing / 2)
 
                 # White text
                 painter.setPen(QColor(255, 255, 255))
