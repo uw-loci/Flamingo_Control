@@ -496,15 +496,17 @@ class ImagePanel(QWidget):
 
         # Draw coordinate labels if available
         if self._tile_coords:
-            # Calculate font size as 15% of tile height in pixels
-            # Using setPixelSize to avoid DPI scaling issues
-            font_pixel_size = max(12, int(tile_h * 0.15))
+            # Calculate font size as 40% of tile height in pixels
+            # This needs to be large because the entire image gets scaled down for display
+            # e.g., 5000px image displayed at 400px = 0.08x scale, so 40% becomes ~3% on screen
+            # Minimum of 50px to ensure readability even with small tiles
+            font_pixel_size = max(50, int(tile_h * 0.40))
             font = QFont("Courier")
             font.setPixelSize(font_pixel_size)
             font.setBold(True)
             painter.setFont(font)
 
-            logger.debug(f"Drawing labels: tile_h={tile_h:.0f}px, font_size={font_pixel_size}px")
+            logger.debug(f"Drawing labels: tile_h={tile_h:.0f}px, font_size={font_pixel_size}px, tiles={self._tiles_x}x{self._tiles_y}")
 
             # Get font metrics for centering
             from PyQt5.QtGui import QFontMetrics
