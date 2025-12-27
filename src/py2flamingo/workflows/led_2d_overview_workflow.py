@@ -602,10 +602,10 @@ class LED2DOverviewWorkflow(QObject):
             self._running = False
 
     def _scan_tiles_continuous(self):
-        """Scan all tiles using continuous motion - much faster than tile-by-tile.
+        """Scan all tiles using continuous Z sweeps - much faster than step-by-step.
 
-        Uses fixed Z (center of bounding box) and grabs frames from live view
-        while moving continuously. Serpentine pattern for efficient motion.
+        At each XY position, sweeps Z continuously while grabbing frames,
+        then computes projections. Serpentine XY pattern for efficient motion.
         """
         if not self._running:
             return
@@ -615,6 +615,7 @@ class LED2DOverviewWorkflow(QObject):
             return
 
         from py2flamingo.services.stage_service import StageService, AxisCode
+        from py2flamingo.utils.focus_detection import variance_of_laplacian
 
         _, camera_controller, _ = self._get_controllers()
         stage_service = StageService(self._app.connection_service)
@@ -622,12 +623,9 @@ class LED2DOverviewWorkflow(QObject):
         # Get effective bounding box and tile info
         eff_bbox = self._current_effective_bbox
         fov = self._actual_fov_mm
-        z_center = (eff_bbox.z_min + eff_bbox.z_max) / 2
-
-        # Move to fixed Z position
-        logger.info(f"Fast mode: Moving to fixed Z={z_center:.3f}mm")
-        stage_service.move_to_position(AxisCode.Z_AXIS, z_center)
-        time.sleep(0.1)
+        z_min = eff_bbox.z_min
+        z_max = eff_bbox.z_max
+        z_center = (z_min + z_max) / 2
 
         # Generate X positions
         x_positions = []
@@ -647,9 +645,10 @@ class LED2DOverviewWorkflow(QObject):
         tiles_y = len(y_positions)
         total_tiles = tiles_x * tiles_y
 
-        logger.info(f"Fast mode: Scanning {tiles_x}x{tiles_y}={total_tiles} tiles continuously")
+        logger.info(f"Fast mode: Scanning {tiles_x}x{tiles_y}={total_tiles} tiles with continuous Z sweeps")
+        logger.info(f"Fast mode: Z range {z_min:.3f} to {z_max:.3f}mm")
 
-        # Scan in serpentine pattern - continuous Y motion with X steps
+        # Scan in serpentine pattern
         tile_idx = 0
         rotation_result = self._results[self._current_rotation_idx]
 
@@ -660,7 +659,7 @@ class LED2DOverviewWorkflow(QObject):
 
             # Move to X position
             stage_service.move_to_position(AxisCode.X_AXIS, x_pos)
-            time.sleep(0.05)
+            time.sleep(0.03)
 
             # Determine Y scan direction (serpentine)
             if x_idx % 2 == 0:
@@ -668,40 +667,53 @@ class LED2DOverviewWorkflow(QObject):
             else:
                 y_range = list(reversed(list(enumerate(y_positions))))
 
-            # Move to start of Y row
-            first_y = y_range[0][1]
-            stage_service.move_to_position(AxisCode.Y_AXIS, first_y)
-            time.sleep(0.05)
-
-            # Scan along Y, grabbing frames at each tile position
             for y_idx, y_pos in y_range:
                 if self._cancelled:
                     self._finish_cancelled()
                     return
 
-                # Move to Y position
+                # Move to XY position
                 stage_service.move_to_position(AxisCode.Y_AXIS, y_pos)
-                time.sleep(0.02)  # Minimal delay - grab frame quickly
+                time.sleep(0.02)
 
-                # Grab frame from live view
-                frame_data = camera_controller.get_latest_frame()
-                if frame_data is not None:
-                    image = frame_data[0].copy()
+                # Continuous Z sweep: move to start, then sweep while grabbing frames
+                stage_service.move_to_position(AxisCode.Z_AXIS, z_min)
+                time.sleep(0.02)
 
-                    # Create tile result with single image (no Z-stack projections)
+                # Grab frames during Z sweep
+                frames = []  # List of (z_approx, image, focus_score)
+                z_step = self._config.z_step_size
+                z_pos = z_min
+
+                while z_pos <= z_max:
+                    # Move Z (non-blocking conceptually - we grab frame immediately)
+                    stage_service.move_to_position(AxisCode.Z_AXIS, z_pos)
+                    time.sleep(0.015)  # Minimal delay
+
+                    # Grab frame
+                    frame_data = camera_controller.get_latest_frame()
+                    if frame_data is not None:
+                        image = frame_data[0]
+                        focus_score = variance_of_laplacian(image)
+                        frames.append((z_pos, image.copy(), focus_score))
+
+                    z_pos += z_step
+
+                # Compute projections from captured frames
+                if frames:
+                    images = self._calculate_projections(frames)
+
+                    # Best focus from highest variance of laplacian
+                    best_z, best_frame, _ = max(frames, key=lambda f: f[2])
+                    images["best_focus"] = best_frame
+
                     tile_result = TileResult(
                         x=x_pos,
                         y=y_pos,
-                        z=z_center,
+                        z=best_z,
                         tile_x_idx=x_idx,
                         tile_y_idx=y_idx,
-                        images={
-                            "best_focus": image,
-                            "min_intensity": image,
-                            "max_intensity": image,
-                            "mean_intensity": image,
-                            "focus_stack": image,
-                        }
+                        images=images
                     )
                     rotation_result.tiles.append(tile_result)
 
@@ -714,7 +726,6 @@ class LED2DOverviewWorkflow(QObject):
                         f"Fast scan: {tile_idx}/{total_tiles} tiles",
                         percent
                     )
-                    # Process events to keep UI responsive
                     QApplication.processEvents()
 
         logger.info(f"Fast mode: Captured {len(rotation_result.tiles)} tiles")
