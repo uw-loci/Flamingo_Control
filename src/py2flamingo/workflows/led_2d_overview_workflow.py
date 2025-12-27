@@ -590,12 +590,137 @@ class LED2DOverviewWorkflow(QObject):
             movement_controller.move_absolute('r', rotation)
 
             # Wait for rotation to complete, then start tiles
-            QTimer.singleShot(3000, self._scan_next_tile)
+            # Use fast continuous mode if enabled, otherwise use slow tile-by-tile mode
+            if self._config.fast_mode:
+                QTimer.singleShot(3000, self._scan_tiles_continuous)
+            else:
+                QTimer.singleShot(3000, self._scan_next_tile)
 
         except Exception as e:
             logger.error(f"Error moving to rotation: {e}")
             self.scan_error.emit(str(e))
             self._running = False
+
+    def _scan_tiles_continuous(self):
+        """Scan all tiles using continuous motion - much faster than tile-by-tile.
+
+        Uses fixed Z (center of bounding box) and grabs frames from live view
+        while moving continuously. Serpentine pattern for efficient motion.
+        """
+        if not self._running:
+            return
+
+        if self._cancelled:
+            self._finish_cancelled()
+            return
+
+        from py2flamingo.services.stage_service import StageService, AxisCode
+
+        _, camera_controller, _ = self._get_controllers()
+        stage_service = StageService(self._app.connection_service)
+
+        # Get effective bounding box and tile info
+        eff_bbox = self._current_effective_bbox
+        fov = self._actual_fov_mm
+        z_center = (eff_bbox.z_min + eff_bbox.z_max) / 2
+
+        # Move to fixed Z position
+        logger.info(f"Fast mode: Moving to fixed Z={z_center:.3f}mm")
+        stage_service.move_to_position(AxisCode.Z_AXIS, z_center)
+        time.sleep(0.1)
+
+        # Generate X positions
+        x_positions = []
+        x = eff_bbox.tile_x_min
+        while x <= eff_bbox.tile_x_max + fov / 2:
+            x_positions.append(x)
+            x += fov
+
+        # Generate Y positions
+        y_positions = []
+        y = eff_bbox.tile_y_min
+        while y <= eff_bbox.tile_y_max + fov / 2:
+            y_positions.append(y)
+            y += fov
+
+        tiles_x = len(x_positions)
+        tiles_y = len(y_positions)
+        total_tiles = tiles_x * tiles_y
+
+        logger.info(f"Fast mode: Scanning {tiles_x}x{tiles_y}={total_tiles} tiles continuously")
+
+        # Scan in serpentine pattern - continuous Y motion with X steps
+        tile_idx = 0
+        rotation_result = self._results[self._current_rotation_idx]
+
+        for x_idx, x_pos in enumerate(x_positions):
+            if self._cancelled:
+                self._finish_cancelled()
+                return
+
+            # Move to X position
+            stage_service.move_to_position(AxisCode.X_AXIS, x_pos)
+            time.sleep(0.05)
+
+            # Determine Y scan direction (serpentine)
+            if x_idx % 2 == 0:
+                y_range = list(enumerate(y_positions))
+            else:
+                y_range = list(reversed(list(enumerate(y_positions))))
+
+            # Move to start of Y row
+            first_y = y_range[0][1]
+            stage_service.move_to_position(AxisCode.Y_AXIS, first_y)
+            time.sleep(0.05)
+
+            # Scan along Y, grabbing frames at each tile position
+            for y_idx, y_pos in y_range:
+                if self._cancelled:
+                    self._finish_cancelled()
+                    return
+
+                # Move to Y position
+                stage_service.move_to_position(AxisCode.Y_AXIS, y_pos)
+                time.sleep(0.02)  # Minimal delay - grab frame quickly
+
+                # Grab frame from live view
+                frame_data = camera_controller.get_latest_frame()
+                if frame_data is not None:
+                    image = frame_data[0].copy()
+
+                    # Create tile result with single image (no Z-stack projections)
+                    tile_result = TileResult(
+                        x=x_pos,
+                        y=y_pos,
+                        z=z_center,
+                        tile_x_idx=x_idx,
+                        tile_y_idx=y_idx,
+                        images={
+                            "best_focus": image,
+                            "min_intensity": image,
+                            "max_intensity": image,
+                            "mean_intensity": image,
+                            "focus_stack": image,
+                        }
+                    )
+                    rotation_result.tiles.append(tile_result)
+
+                tile_idx += 1
+
+                # Update progress periodically
+                if tile_idx % 5 == 0 or tile_idx == total_tiles:
+                    percent = (tile_idx / total_tiles) * 100
+                    self.scan_progress.emit(
+                        f"Fast scan: {tile_idx}/{total_tiles} tiles",
+                        percent
+                    )
+                    # Process events to keep UI responsive
+                    QApplication.processEvents()
+
+        logger.info(f"Fast mode: Captured {len(rotation_result.tiles)} tiles")
+
+        # Finish this rotation
+        self._finish_rotation()
 
     def _scan_next_tile(self):
         """Scan the next tile position."""

@@ -49,6 +49,7 @@ class ScanConfiguration:
     led_intensity: float
     z_step_size: float = 0.050  # mm (50 um default)
     use_focus_stacking: bool = False  # If True, use full focus stacking (TODO)
+    fast_mode: bool = True  # If True, use continuous scanning (no Z-stacks, much faster)
 
 
 class LED2DOverviewDialog(QDialog):
