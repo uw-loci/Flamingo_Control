@@ -496,45 +496,46 @@ class ImagePanel(QWidget):
 
         # Draw coordinate labels if available
         if self._tile_coords:
-            # Calculate font size as percentage of tile height
-            # Use 25% so two lines of text fit comfortably in tile
-            # The image will be scaled down for display, so text needs to be large in original
-            font_pixel_size = max(50, int(tile_h * 0.25))
-            font = QFont("Courier")
+            # Calculate font size: 35% of tile height
+            # Two lines at 35% each = 70% of tile, leaving 30% margin
+            font_pixel_size = int(tile_h * 0.35)
+            # Ensure minimum reasonable size
+            font_pixel_size = max(font_pixel_size, 20)
+
+            font = QFont("Arial")  # Arial renders more predictably than Courier
             font.setPixelSize(font_pixel_size)
             font.setBold(True)
             painter.setFont(font)
 
             logger.info(f"LED 2D Overview labels: pixmap={w}x{h}, tiles={self._tiles_x}x{self._tiles_y}, "
-                       f"tile_size={tile_w:.0f}x{tile_h:.0f}px, font={font_pixel_size}px")
+                       f"tile_size={tile_w:.0f}x{tile_h:.0f}px, font={font_pixel_size}px (35% of tile_h)")
 
-            # Get font metrics for centering
+            # Get font metrics
             from PyQt5.QtGui import QFontMetrics
             fm = QFontMetrics(font)
+            ascent = fm.ascent()
             line_height = fm.height()
 
-            # Total height needed for two lines with small gap
-            line_spacing = int(line_height * 0.2)  # 20% gap between lines
-            total_text_height = 2 * line_height + line_spacing
+            logger.info(f"Font metrics: ascent={ascent}, height={line_height}, requested_size={font_pixel_size}")
 
             for coord in self._tile_coords:
                 # Support both formats: (x, y, tile_x_idx, tile_y_idx) or legacy (x, y, z)
                 if len(coord) >= 4:
                     x, y, tile_x_idx, tile_y_idx = coord[:4]
                 else:
-                    # Legacy format - shouldn't happen with fixed code
                     continue
 
                 # Calculate display X index (invert if needed to match tile placement)
                 if self._invert_x:
-                    # Invert: tile_x_idx=0 goes on right, tile_x_idx=max goes on left
                     display_x_idx = (self._tiles_x - 1) - tile_x_idx
                 else:
                     display_x_idx = tile_x_idx
 
-                # Calculate tile center using display position
-                tile_center_x = display_x_idx * tile_w + tile_w / 2
-                tile_center_y = tile_y_idx * tile_h + tile_h / 2
+                # Calculate tile boundaries
+                tile_left = int(display_x_idx * tile_w)
+                tile_top = int(tile_y_idx * tile_h)
+                tile_center_x = tile_left + tile_w / 2
+                tile_center_y = tile_top + tile_h / 2
 
                 # Draw X,Y coordinates (two lines, centered in tile)
                 text1 = f"X:{x:.2f}"
@@ -544,12 +545,14 @@ class ImagePanel(QWidget):
                 text1_width = fm.horizontalAdvance(text1)
                 text2_width = fm.horizontalAdvance(text2)
 
-                # Position text centered in tile (two lines stacked vertically)
-                # First line baseline above center, second line baseline below center
+                # Position: center both lines vertically in tile
+                # Total height = 2 * line_height, centered around tile_center_y
+                # Line 1 baseline: center - line_height/2
+                # Line 2 baseline: center + line_height/2
                 text1_x = int(tile_center_x - text1_width / 2)
                 text2_x = int(tile_center_x - text2_width / 2)
-                text1_y = int(tile_center_y - line_spacing / 2)
-                text2_y = int(tile_center_y + line_height + line_spacing / 2)
+                text1_y = int(tile_center_y - line_height * 0.1)  # Slightly above center
+                text2_y = int(tile_center_y + line_height * 0.9)  # Below center
 
                 # White text
                 painter.setPen(QColor(255, 255, 255))
