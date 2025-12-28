@@ -496,11 +496,11 @@ class ImagePanel(QWidget):
 
         # Draw coordinate labels if available
         if self._tile_coords:
-            # Calculate font size: 35% of tile height
-            # Two lines at 35% each = 70% of tile, leaving 30% margin
-            font_pixel_size = int(tile_h * 0.35)
+            # Calculate font size: 17% of tile height
+            # Two lines at 17% each = 34% of tile, leaving room for margin
+            font_pixel_size = int(tile_h * 0.17)
             # Ensure minimum reasonable size
-            font_pixel_size = max(font_pixel_size, 20)
+            font_pixel_size = max(font_pixel_size, 12)
 
             font = QFont("Arial")  # Arial renders more predictably than Courier
             font.setPixelSize(font_pixel_size)
@@ -508,7 +508,7 @@ class ImagePanel(QWidget):
             painter.setFont(font)
 
             logger.info(f"LED 2D Overview labels: pixmap={w}x{h}, tiles={self._tiles_x}x{self._tiles_y}, "
-                       f"tile_size={tile_w:.0f}x{tile_h:.0f}px, font={font_pixel_size}px (35% of tile_h)")
+                       f"tile_size={tile_w:.0f}x{tile_h:.0f}px, font={font_pixel_size}px (17% of tile_h)")
 
             # Get font metrics
             from PyQt5.QtGui import QFontMetrics
