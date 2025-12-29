@@ -496,11 +496,10 @@ class ImagePanel(QWidget):
 
         # Draw coordinate labels if available
         if self._tile_coords:
-            # Calculate font size: 17% of tile height
-            # Two lines at 17% each = 34% of tile, leaving room for margin
-            font_pixel_size = int(tile_h * 0.17)
+            # Calculate font size: 8.5% of tile height (half of previous 17%)
+            font_pixel_size = int(tile_h * 0.085)
             # Ensure minimum reasonable size
-            font_pixel_size = max(font_pixel_size, 12)
+            font_pixel_size = max(font_pixel_size, 10)
 
             font = QFont("Arial")  # Arial renders more predictably than Courier
             font.setPixelSize(font_pixel_size)
@@ -508,7 +507,7 @@ class ImagePanel(QWidget):
             painter.setFont(font)
 
             logger.info(f"LED 2D Overview labels: pixmap={w}x{h}, tiles={self._tiles_x}x{self._tiles_y}, "
-                       f"tile_size={tile_w:.0f}x{tile_h:.0f}px, font={font_pixel_size}px (17% of tile_h)")
+                       f"tile_size={tile_w:.0f}x{tile_h:.0f}px, font={font_pixel_size}px (8.5% of tile_h)")
 
             # Get font metrics
             from PyQt5.QtGui import QFontMetrics
@@ -835,8 +834,8 @@ class LED2DOverviewResultWindow(QWidget):
         for viz_type, display_name in VISUALIZATION_TYPES:
             self.viz_combo.addItem(display_name, viz_type)
 
-        # Default to "Best Focus"
-        self.viz_combo.setCurrentIndex(0)
+        # Default to "Minimum Intensity" (index 2)
+        self.viz_combo.setCurrentIndex(2)
 
     def _on_visualization_changed(self, display_name: str):
         """Handle visualization type change."""
