@@ -1189,6 +1189,7 @@ class LED2DOverviewWorkflow(QObject):
             self._result_window = LED2DOverviewResultWindow(
                 results=self._results,
                 config=self._config,
+                app=self._app,
                 parent=None  # Make it independent window
             )
             logger.info(f"Result window created: {self._result_window}")

@@ -572,13 +572,14 @@ class LED2DOverviewResultWindow(QWidget):
     with grid overlays and coordinate information.
     """
 
-    def __init__(self, results=None, config=None, preview_mode: bool = False, parent=None):
+    def __init__(self, results=None, config=None, preview_mode: bool = False, app=None, parent=None):
         """Initialize the result window.
 
         Args:
             results: List of RotationResult from workflow (None for preview)
             config: ScanConfiguration used for the scan
             preview_mode: If True, show empty grid preview
+            app: FlamingoApplication instance for accessing services
             parent: Parent widget
         """
         super().__init__(parent)
@@ -586,6 +587,7 @@ class LED2DOverviewResultWindow(QWidget):
         self._results = results or []
         self._config = config
         self._preview_mode = preview_mode
+        self._app = app
 
         self.setWindowTitle("LED 2D Overview - Results" if not preview_mode else "LED 2D Overview - Preview")
         self.setMinimumSize(800, 500)
@@ -915,6 +917,7 @@ class LED2DOverviewResultWindow(QWidget):
             left_rotation=left_rotation,
             right_rotation=right_rotation,
             config=self._config,
+            app=self._app,
             parent=self
         )
         dialog.exec_()
@@ -951,28 +954,44 @@ class LED2DOverviewResultWindow(QWidget):
 
         try:
             import cv2
+
+            # Downsample by 4x for smaller file size
+            downsample_factor = 4
+            original_h, original_w = image.shape[:2]
+            new_w = original_w // downsample_factor
+            new_h = original_h // downsample_factor
+
+            # Use INTER_AREA for best quality when downsampling
+            downsampled = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            logger.info(f"Downsampled image from {original_w}x{original_h} to {new_w}x{new_h} (4x)")
+
             # Ensure image is in the right format for saving
-            if len(image.shape) == 3 and image.shape[2] == 3:
+            if len(downsampled.shape) == 3 and downsampled.shape[2] == 3:
                 # RGB to BGR for OpenCV
-                save_img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                save_img = cv2.cvtColor(downsampled, cv2.COLOR_RGB2BGR)
             else:
-                save_img = image
+                save_img = downsampled
 
             cv2.imwrite(path, save_img)
             logger.info(f"Saved image to {path}")
-            QMessageBox.information(self, "Saved", f"Image saved to:\n{path}")
+            QMessageBox.information(self, "Saved", f"Image saved to:\n{path}\n\nDownsampled 4x: {new_w}x{new_h} pixels")
 
         except ImportError:
-            # Fallback without OpenCV
+            # Fallback without OpenCV - use PIL
             try:
-                from PIL import Image
-                if len(image.shape) == 2:
-                    pil_img = Image.fromarray(image)
-                else:
-                    pil_img = Image.fromarray(image)
+                from PIL import Image as PILImage
+
+                # Downsample by 4x
+                downsample_factor = 4
+                original_h, original_w = image.shape[:2]
+                new_w = original_w // downsample_factor
+                new_h = original_h // downsample_factor
+
+                pil_img = PILImage.fromarray(image)
+                pil_img = pil_img.resize((new_w, new_h), PILImage.Resampling.LANCZOS)
                 pil_img.save(path)
-                logger.info(f"Saved image to {path}")
-                QMessageBox.information(self, "Saved", f"Image saved to:\n{path}")
+                logger.info(f"Saved image to {path} (downsampled 4x to {new_w}x{new_h})")
+                QMessageBox.information(self, "Saved", f"Image saved to:\n{path}\n\nDownsampled 4x: {new_w}x{new_h} pixels")
             except ImportError:
                 QMessageBox.critical(
                     self, "Error",

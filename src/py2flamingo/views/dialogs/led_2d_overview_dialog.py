@@ -838,6 +838,7 @@ class LED2DOverviewDialog(QDialog):
             self._preview_window = LED2DOverviewResultWindow(
                 config=config,
                 preview_mode=True,
+                app=self._app,
                 parent=None  # Independent window
             )
             self._preview_window.show()

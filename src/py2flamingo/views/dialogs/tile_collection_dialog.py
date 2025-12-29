@@ -34,7 +34,7 @@ class TileCollectionDialog(QDialog):
 
     def __init__(self, left_tiles: List, right_tiles: List,
                  left_rotation: float, right_rotation: float,
-                 config=None, parent=None):
+                 config=None, app=None, parent=None):
         """Initialize the dialog.
 
         Args:
@@ -43,6 +43,7 @@ class TileCollectionDialog(QDialog):
             left_rotation: Rotation angle for left panel tiles
             right_rotation: Rotation angle for right panel tiles
             config: ScanConfiguration with bounding box info
+            app: FlamingoApplication instance for accessing services
             parent: Parent widget
         """
         super().__init__(parent)
@@ -52,6 +53,7 @@ class TileCollectionDialog(QDialog):
         self._left_rotation = left_rotation
         self._right_rotation = right_rotation
         self._config = config
+        self._app = app
         self._workflow_type = WorkflowType.SNAPSHOT
 
         self.setWindowTitle("Collect Tiles - Workflow Configuration")
@@ -84,8 +86,8 @@ class TileCollectionDialog(QDialog):
         type_group = self._create_type_section()
         container_layout.addWidget(type_group)
 
-        # Illumination panel
-        self._illumination_panel = IlluminationPanel()
+        # Illumination panel - pass app for instrument laser configuration
+        self._illumination_panel = IlluminationPanel(app=self._app)
         container_layout.addWidget(self._illumination_panel)
 
         # Z-Stack panel (shown only for Z-Stack type)

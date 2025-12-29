@@ -5,7 +5,7 @@ Provides UI for selecting multiple laser light sources and LED simultaneously.
 """
 
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -17,15 +17,12 @@ from PyQt5.QtCore import pyqtSignal, Qt
 from py2flamingo.models.data.workflow import IlluminationSettings
 
 
-# Available laser channels (matching WORKFLOW_REFERENCE.md format)
+# Default laser channels - used when no instrument configuration is provided
 # Format: (Display Name, Workflow Key, Default Power)
-LASER_CHANNELS = [
+DEFAULT_LASER_CHANNELS = [
     ("Laser 1: 405 nm", "Laser 1 405 nm", 5.0),
-    ("Laser 2: 445 nm", "Laser 2 445 nm", 5.0),
-    ("Laser 3: 488 nm", "Laser 3 488 nm", 5.0),
-    ("Laser 3: 515 nm MLE", "Laser 3 3: 515 nm MLE", 5.0),
-    ("Laser 3: 561 nm MLE", "Laser 3 3: 561 nm MLE", 5.0),
-    ("Laser 3: 638 nm MLE", "Laser 3 3: 638 nm MLE", 5.0),
+    ("Laser 2: 488 nm", "Laser 2 488 nm", 5.0),
+    ("Laser 3: 561 nm", "Laser 3 561 nm", 5.0),
     ("Laser 4: 640 nm", "Laser 4 640 nm", 5.0),
 ]
 
@@ -48,21 +45,66 @@ class IlluminationPanel(QWidget):
 
     settings_changed = pyqtSignal(object)  # Emits dict of settings
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[QWidget] = None,
+                 laser_channels: Optional[List[Tuple[str, str, float]]] = None,
+                 app=None):
         """
         Initialize illumination panel.
 
         Args:
             parent: Parent widget
+            laser_channels: Optional list of (display_name, workflow_key, default_power) tuples.
+                           If not provided, will try to get from app or use defaults.
+            app: Optional FlamingoApplication instance for getting laser info from instrument
         """
         super().__init__(parent)
         self._logger = logging.getLogger(__name__)
+        self._app = app
+
+        # Determine laser channels to use
+        self._laser_channels = self._resolve_laser_channels(laser_channels, app)
 
         # Storage for laser checkboxes and power spinboxes
         self._laser_checkboxes: List[QCheckBox] = []
         self._laser_power_spinboxes: List[QDoubleSpinBox] = []
 
         self._setup_ui()
+
+    def _resolve_laser_channels(self, laser_channels: Optional[List], app) -> List[Tuple[str, str, float]]:
+        """Resolve laser channels from provided list, app, or defaults.
+
+        Args:
+            laser_channels: Explicitly provided laser channels
+            app: FlamingoApplication instance
+
+        Returns:
+            List of (display_name, workflow_key, default_power) tuples
+        """
+        # Use explicitly provided channels if given
+        if laser_channels is not None:
+            self._logger.info(f"Using provided laser channels: {len(laser_channels)} lasers")
+            return laser_channels
+
+        # Try to get from app's laser_led_service
+        if app is not None:
+            try:
+                laser_led_service = getattr(app, 'laser_led_service', None)
+                if laser_led_service is not None:
+                    lasers = laser_led_service.get_available_lasers()
+                    if lasers:
+                        channels = []
+                        for laser in lasers:
+                            display_name = f"Laser {laser.index}: {laser.wavelength} nm"
+                            workflow_key = f"Laser {laser.index} {laser.wavelength} nm"
+                            channels.append((display_name, workflow_key, 5.0))
+                        self._logger.info(f"Loaded {len(channels)} lasers from instrument")
+                        return channels
+            except Exception as e:
+                self._logger.warning(f"Could not get lasers from app: {e}")
+
+        # Fall back to defaults
+        self._logger.info("Using default laser channels")
+        return DEFAULT_LASER_CHANNELS
 
     def _setup_ui(self) -> None:
         """Create and layout UI components."""
@@ -80,7 +122,7 @@ class IlluminationPanel(QWidget):
 
         # Create laser table
         self._laser_table = QTableWidget()
-        self._laser_table.setRowCount(len(LASER_CHANNELS))
+        self._laser_table.setRowCount(len(self._laser_channels))
         self._laser_table.setColumnCount(3)
         self._laser_table.setHorizontalHeaderLabels(["Enable", "Laser", "Power (%)"])
 
@@ -92,7 +134,7 @@ class IlluminationPanel(QWidget):
         self._laser_table.setMaximumHeight(250)
 
         # Populate laser table
-        for row, (display_name, workflow_key, default_power) in enumerate(LASER_CHANNELS):
+        for row, (display_name, workflow_key, default_power) in enumerate(self._laser_channels):
             # Enable checkbox
             checkbox = QCheckBox()
             checkbox.setChecked(False)
@@ -227,7 +269,7 @@ class IlluminationPanel(QWidget):
         settings_list = []
 
         # Add enabled lasers
-        for i, (display_name, workflow_key, _) in enumerate(LASER_CHANNELS):
+        for i, (display_name, workflow_key, _) in enumerate(self._laser_channels):
             if self._laser_checkboxes[i].isChecked():
                 power = self._laser_power_spinboxes[i].value()
                 settings_list.append(IlluminationSettings(
@@ -262,7 +304,7 @@ class IlluminationPanel(QWidget):
         settings = {}
 
         # Add all lasers (enabled ones with power, disabled ones as 0.00 0)
-        for i, (display_name, workflow_key, _) in enumerate(LASER_CHANNELS):
+        for i, (display_name, workflow_key, _) in enumerate(self._laser_channels):
             if self._laser_checkboxes[i].isChecked():
                 power = self._laser_power_spinboxes[i].value()
                 settings[workflow_key] = f"{power:.2f} 1"
@@ -317,7 +359,7 @@ class IlluminationPanel(QWidget):
         for setting in settings:
             if setting.laser_enabled and setting.laser_channel:
                 # Find matching laser channel
-                for i, (_, workflow_key, _) in enumerate(LASER_CHANNELS):
+                for i, (_, workflow_key, _) in enumerate(self._laser_channels):
                     if workflow_key == setting.laser_channel:
                         self._laser_checkboxes[i].setChecked(True)
                         self._laser_power_spinboxes[i].setValue(setting.laser_power_mw)
@@ -342,7 +384,7 @@ class IlluminationPanel(QWidget):
         self._led_enable.setChecked(False)
 
         # Parse laser settings
-        for i, (_, workflow_key, default_power) in enumerate(LASER_CHANNELS):
+        for i, (_, workflow_key, default_power) in enumerate(self._laser_channels):
             if workflow_key in illumination_dict:
                 value_str = illumination_dict[workflow_key]
                 parts = value_str.split()
