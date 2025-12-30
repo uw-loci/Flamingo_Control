@@ -358,7 +358,10 @@ class LED2DOverviewDialog(QDialog):
 
         # Refresh button
         refresh_btn = QPushButton("Refresh from Sample View")
-        refresh_btn.setToolTip("Update LED settings from Sample View")
+        refresh_btn.setToolTip(
+            "Update LED settings from Sample View.\n"
+            "Start Live View with an LED enabled first, then click to detect settings."
+        )
         refresh_btn.clicked.connect(self._load_current_settings)
         refresh_btn.setMaximumWidth(200)
         layout.addWidget(refresh_btn)
