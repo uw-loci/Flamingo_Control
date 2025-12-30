@@ -39,16 +39,46 @@ class SavePanel(QWidget):
 
     settings_changed = pyqtSignal(dict)
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[QWidget] = None, app=None):
         """
         Initialize save panel.
 
         Args:
             parent: Parent widget
+            app: FlamingoApplication instance for getting system settings
         """
         super().__init__(parent)
         self._logger = logging.getLogger(__name__)
+        self._app = app
+
+        # Get default storage location from system
+        self._default_save_drive = self._get_default_save_drive()
+
         self._setup_ui()
+
+    def _get_default_save_drive(self) -> str:
+        """Get default save drive from system configuration.
+
+        Returns:
+            Default data storage location path
+        """
+        default = "/media/deploy/ctlsm1"
+
+        if self._app is None:
+            return default
+
+        try:
+            # Try to get from config_service
+            config_service = getattr(self._app, 'config_service', None)
+            if config_service is not None:
+                location = config_service.get_data_storage_location()
+                if location:
+                    self._logger.info(f"Using data storage location from system: {location}")
+                    return location
+        except Exception as e:
+            self._logger.warning(f"Could not get data storage location from system: {e}")
+
+        return default
 
     def _setup_ui(self) -> None:
         """Create and layout UI components."""
@@ -71,11 +101,11 @@ class SavePanel(QWidget):
         options_layout.setContentsMargins(0, 5, 0, 0)
         options_layout.setSpacing(6)
 
-        # Save drive (network share base)
+        # Save drive (network share base) - uses system default if available
         options_layout.addWidget(QLabel("Save Drive:"), 0, 0)
         self._save_drive = QLineEdit()
-        self._save_drive.setPlaceholderText("/media/deploy/ctlsm1")
-        self._save_drive.setText("/media/deploy/ctlsm1")
+        self._save_drive.setPlaceholderText(self._default_save_drive)
+        self._save_drive.setText(self._default_save_drive)
         self._save_drive.textChanged.connect(self._on_settings_changed)
         options_layout.addWidget(self._save_drive, 0, 1)
 

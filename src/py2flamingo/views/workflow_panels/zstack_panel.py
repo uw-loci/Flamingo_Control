@@ -49,16 +49,49 @@ class ZStackPanel(QWidget):
 
     settings_changed = pyqtSignal(object)  # Emits StackSettings
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[QWidget] = None, app=None):
         """
         Initialize Z-stack panel.
 
         Args:
             parent: Parent widget
+            app: FlamingoApplication instance for getting system settings
         """
         super().__init__(parent)
         self._logger = logging.getLogger(__name__)
+        self._app = app
+
+        # Get system defaults
+        self._default_z_velocity = self._get_default_z_velocity()
+
         self._setup_ui()
+
+    def _get_default_z_velocity(self) -> float:
+        """Get default Z velocity from system configuration.
+
+        Returns:
+            Default Z stage velocity in mm/s
+        """
+        default = 0.4  # mm/s
+
+        if self._app is None:
+            return default
+
+        try:
+            # Try to get from config_service -> scope settings
+            config_service = getattr(self._app, 'config_service', None)
+            if config_service is not None:
+                scope_settings = config_service.config.get('scope_settings', {})
+                stage_limits = scope_settings.get('Stage limits', {})
+                z_velocity = stage_limits.get('Default velocity z-axis', None)
+                if z_velocity is not None:
+                    velocity = float(z_velocity)
+                    self._logger.info(f"Using Z velocity from system: {velocity} mm/s")
+                    return velocity
+        except Exception as e:
+            self._logger.warning(f"Could not get Z velocity from system: {e}")
+
+        return default
 
     def _setup_ui(self) -> None:
         """Create and layout UI components."""
@@ -95,11 +128,11 @@ class ZStackPanel(QWidget):
         self._z_range_label.setStyleSheet("font-weight: bold;")
         grid.addWidget(self._z_range_label, 2, 1)
 
-        # Z velocity
+        # Z velocity - uses system default if available
         grid.addWidget(QLabel("Z Velocity:"), 3, 0)
         self._z_velocity = QDoubleSpinBox()
         self._z_velocity.setRange(0.01, 2.0)
-        self._z_velocity.setValue(0.4)  # Default 0.4 mm/s
+        self._z_velocity.setValue(self._default_z_velocity)
         self._z_velocity.setDecimals(2)
         self._z_velocity.setSingleStep(0.05)
         self._z_velocity.setSuffix(" mm/s")

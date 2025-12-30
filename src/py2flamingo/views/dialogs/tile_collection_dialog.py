@@ -90,13 +90,13 @@ class TileCollectionDialog(QDialog):
         self._illumination_panel = IlluminationPanel(app=self._app)
         container_layout.addWidget(self._illumination_panel)
 
-        # Z-Stack panel (shown only for Z-Stack type)
-        self._zstack_panel = ZStackPanel()
+        # Z-Stack panel (shown only for Z-Stack type) - pass app for system defaults
+        self._zstack_panel = ZStackPanel(app=self._app)
         self._zstack_panel.setVisible(False)
         container_layout.addWidget(self._zstack_panel)
 
-        # Save panel
-        self._save_panel = SavePanel()
+        # Save panel - pass app for system storage location
+        self._save_panel = SavePanel(app=self._app)
         container_layout.addWidget(self._save_panel)
 
         container_layout.addStretch()
