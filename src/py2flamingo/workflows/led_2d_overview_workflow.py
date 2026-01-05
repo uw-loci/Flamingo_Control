@@ -409,14 +409,15 @@ class LED2DOverviewWorkflow(QObject):
         z_center = (effective_bbox.z_min + effective_bbox.z_max) / 2
 
         # Generate serpentine path with tile indices
+        # X is outer loop (slowest axis) to minimize wobble on long thin samples
         positions = []
-        for y_idx, y_pos in enumerate(y_positions):
-            if y_idx % 2 == 0:
-                x_range = list(enumerate(x_positions))
+        for x_idx, x_pos in enumerate(x_positions):
+            if x_idx % 2 == 0:
+                y_range = list(enumerate(y_positions))
             else:
-                x_range = list(reversed(list(enumerate(x_positions))))
+                y_range = list(reversed(list(enumerate(y_positions))))
 
-            for x_idx, x_pos in x_range:
+            for y_idx, y_pos in y_range:
                 positions.append((x_pos, y_pos, z_center, x_idx, y_idx))
 
         logger.info(f"Generated {len(positions)} tile positions "

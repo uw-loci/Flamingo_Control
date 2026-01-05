@@ -374,6 +374,18 @@ class LED2DOverviewDialog(QDialog):
         group = QGroupBox("Scan Info")
         layout = QVBoxLayout()
 
+        # Warning about Live View requirement
+        self.live_view_warning = QLabel(
+            "Note: Start Live View with LED enabled, then click\n"
+            "'Refresh from Sample View' to detect LED settings."
+        )
+        self.live_view_warning.setStyleSheet(
+            "color: #856404; background-color: #fff3cd; "
+            "border: 1px solid #ffc107; border-radius: 4px; "
+            "padding: 6px; margin-bottom: 8px;"
+        )
+        layout.addWidget(self.live_view_warning)
+
         self.tiles_label = QLabel("Tiles: calculating...")
         self.total_tiles_label = QLabel("Total tiles: calculating...")
         self.z_planes_label = QLabel("Z planes: calculating...")
