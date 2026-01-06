@@ -231,19 +231,22 @@ class WorkflowService:
     
     def run_workflow(self, workflow_dict: dict, connection_manager):
         """
-        Run workflow through connection manager.
-        
+        DEPRECATED: Use WorkflowTransmissionService.execute_workflow_from_dict() instead.
+
+        This method has been deprecated and will raise an error.
+        Migrate to WorkflowTransmissionService for workflow execution.
+
         Args:
             workflow_dict: Workflow to run
-            connection_manager: Connection manager instance
+            connection_manager: Connection manager instance (no longer supported)
+
+        Raises:
+            DeprecationWarning: Always raises - this method is deprecated
         """
-        # Validate first
-        self.validate_workflow(workflow_dict)
-        
-        # Send to microscope
-        connection_manager.send_workflow(workflow_dict)
-        
-        self.logger.info(f"Started workflow: {workflow_dict['Work Flow Type']}")
+        raise DeprecationWarning(
+            "WorkflowService.run_workflow is deprecated. "
+            "Use WorkflowTransmissionService.execute_workflow_from_dict() instead."
+        )
     
     def save_workflow_template(self, name: str, workflow_dict: dict):
         """

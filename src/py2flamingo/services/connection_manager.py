@@ -250,13 +250,8 @@ class ConnectionManager:
         command = f"MOVE:X={position.x},Y={position.y},Z={position.z},R={position.r}\n"
         self.send_command(command)
     
-    def send_workflow(self, workflow_dict: dict):
-        """Send workflow to microscope."""
-        # Convert workflow dict to command format
-        # This is simplified - actual implementation would follow protocol
-        command = f"WORKFLOW:{workflow_dict}\n"
-        self.send_command(command)
-    
+    # NOTE: send_workflow method removed - use WorkflowOrchestrator instead
+
     def send_emergency_stop(self):
         """Send emergency stop command."""
         self.send_command("EMERGENCY_STOP\n")

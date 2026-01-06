@@ -7,5 +7,15 @@ the application.
 from py2flamingo.views.dialogs.led_2d_overview_dialog import LED2DOverviewDialog
 from py2flamingo.views.dialogs.led_2d_overview_result import LED2DOverviewResultWindow
 from py2flamingo.views.dialogs.tile_collection_dialog import TileCollectionDialog
+from py2flamingo.views.dialogs.advanced_illumination_dialog import AdvancedIlluminationDialog
+from py2flamingo.views.dialogs.advanced_camera_dialog import AdvancedCameraDialog
+from py2flamingo.views.dialogs.advanced_save_dialog import AdvancedSaveDialog
 
-__all__ = ['LED2DOverviewDialog', 'LED2DOverviewResultWindow', 'TileCollectionDialog']
+__all__ = [
+    'LED2DOverviewDialog',
+    'LED2DOverviewResultWindow',
+    'TileCollectionDialog',
+    'AdvancedIlluminationDialog',
+    'AdvancedCameraDialog',
+    'AdvancedSaveDialog',
+]

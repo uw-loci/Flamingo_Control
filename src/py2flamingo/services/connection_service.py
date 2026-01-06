@@ -288,28 +288,8 @@ class ConnectionService:
                 self.queue_manager.put_nowait('command_data', data)
             self.event_manager.set_event('send')
     
-    def send_workflow(self, workflow_dict: dict) -> None:
-        """
-        Send a workflow to the microscope.
-        
-        Args:
-            workflow_dict: Workflow configuration dictionary
-        """
-        if not self._connected:
-            raise RuntimeError("Not connected to microscope")
-        
-        # Save workflow to file (required by current implementation)
-        from py2flamingo.utils.file_handlers import dict_to_workflow
-        import os
-        
-        workflow_path = os.path.join('workflows', 'workflow.txt')
-        fh.dict_to_workflow(workflow_path, workflow_dict)
-        self.send_command(12292) 
-        
-        # Send workflow start command
-       # COMMAND_CODES_CAMERA_WORK_FLOW_START = 12292
-        #self.send_command(COMMAND_CODES_CAMERA_WORK_FLOW_START)
-    
+    # NOTE: send_workflow method removed - use WorkflowOrchestrator instead
+
     def get_microscope_settings(self) -> Tuple[float, Dict[str, Any]]:
         """
         Retrieve microscope settings and image pixel size.

@@ -1,7 +1,7 @@
 # Claude Report: LED 2D Overview Feature
 
-**Date:** 2025-12-16 to 2025-12-18
-**Commits:** 640d84a, 0c80f00, 1177270 (and others)
+**Date:** 2025-12-16 to 2026-01-06
+**Commits:** 640d84a, 0c80f00, 1177270, e8c2137, 68d4781 (and others)
 
 ---
 
@@ -409,10 +409,97 @@ class ScanConfiguration:
 
 ---
 
+## Recent Updates (2026-01-05 to 2026-01-06)
+
+### 1. Tile Scan Order Optimization (e8c2137)
+
+Changed tile scanning to use X as the outer (slowest) loop instead of Y.
+
+**Rationale:** Long thin specimens oriented along Y axis experience less wobble when the stage moves continuously in Y (fast axis) and steps in X (slow axis). This reduces motion artifacts during acquisition.
+
+**Before:** Y outer loop (scan columns)
+**After:** X outer loop (scan rows)
+
+### 2. Live View Warning in Dialog (e8c2137)
+
+Added a visible warning label in the Scan Info section:
+
+```
+⚠ Note: Live View must be active with LED enabled to detect FOV.
+   Click Refresh after enabling.
+```
+
+This helps users understand why FOV detection fails when Live View is not running.
+
+### 3. Tile Click Performance Optimization (68d4781)
+
+**Problem:** Clicking tiles to select them for workflow collection was extremely slow (multi-second delays). Each click regenerated the entire pixmap from the numpy array, redrew all grid lines, and re-rendered all coordinate text.
+
+**Solution:** Implemented a cached base pixmap strategy:
+- Base pixmap (image + grid + coordinates) is cached after initial render
+- Tile selection clicks only copy the cached base and draw selection rectangles
+- Base is invalidated only when image/grid/coords actually change
+
+**Result:** Tile selection is now nearly instantaneous.
+
+**Key code pattern:**
+```python
+def _get_base_pixmap(self) -> QPixmap:
+    """Get or create the cached base pixmap (image + grid + coords)."""
+    if self._cached_base_pixmap is None:
+        # Create base pixmap with image, grid overlay, and coordinates
+        self._cached_base_pixmap = self._create_base_pixmap()
+    return self._cached_base_pixmap
+
+def _invalidate_base_cache(self):
+    """Invalidate cached base pixmap when image/grid/coords change."""
+    self._cached_base_pixmap = None
+
+def _update_display_with_selections(self):
+    """Update display by drawing selections on cached base."""
+    base = self._get_base_pixmap().copy()  # Copy, don't modify cache
+    # Draw only selection rectangles on the copy
+    self._draw_selection_overlay(base)
+    self.setPixmap(base)
+```
+
+### 4. Start Scan Button Feedback (2026-01-06)
+
+**Problem:** After clicking "Start Scan", there was no visual feedback that the scan was running. Users had no indication that things were working until results appeared.
+
+**Solution:** Button now changes state during scan execution:
+
+| State | Button Text | Color | Enabled |
+|-------|-------------|-------|---------|
+| Ready | "Start Scan" | Green (#4CAF50) | Yes |
+| Running | "In Progress..." | Amber (#f1c21b) | No |
+| Complete | "Start Scan" | Green (#4CAF50) | Re-validated |
+
+**Implementation:**
+```python
+def _set_scan_in_progress(self, in_progress: bool) -> None:
+    """Update button appearance to reflect scan state."""
+    if in_progress:
+        self.start_btn.setText("In Progress...")
+        self.start_btn.setEnabled(False)
+        self.start_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {WARNING_COLOR}; color: black; "
+            "font-weight: bold; padding: 8px 16px; }}"
+        )
+    else:
+        self.start_btn.setText("Start Scan")
+        # Restore green styling and re-validate
+        self._update_start_button_state()
+```
+
+Pattern mirrors the Sample View's "Start Live" / "Stop Live" toggle button.
+
+---
+
 ## Future Enhancements
 
 1. **Tile overlap with blending** - For smoother stitched images
 2. **Save/load scan configurations** - Remember frequently used regions
 3. **Export results** - Save assembled overview image
-4. **Progress bar** - Visual feedback during scan
+4. ~~**Progress bar** - Visual feedback during scan~~ (Partially addressed with button state)
 5. **Custom rotation angles** - Not just R and R+90

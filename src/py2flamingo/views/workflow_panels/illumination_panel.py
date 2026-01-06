@@ -2,6 +2,7 @@
 Illumination panel for workflow configuration.
 
 Provides UI for selecting multiple laser light sources and LED simultaneously.
+Compact layout with Advanced settings dialog for rarely-used options.
 """
 
 import logging
@@ -9,8 +10,8 @@ from typing import Optional, Dict, Any, List, Tuple
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QDoubleSpinBox, QSpinBox, QComboBox, QCheckBox, QGroupBox, QGridLayout,
-    QTableWidget, QTableWidgetItem, QHeaderView
+    QDoubleSpinBox, QSpinBox, QCheckBox, QGroupBox, QGridLayout,
+    QPushButton, QSlider
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 
@@ -20,13 +21,91 @@ from py2flamingo.models.data.workflow import IlluminationSettings
 # Default laser channels - used when no instrument configuration is provided
 # Format: (Display Name, Workflow Key, Default Power)
 DEFAULT_LASER_CHANNELS = [
-    ("Laser 1: 405 nm", "Laser 1 405 nm", 5.0),
-    ("Laser 2: 488 nm", "Laser 2 488 nm", 5.0),
-    ("Laser 3: 561 nm", "Laser 3 561 nm", 5.0),
-    ("Laser 4: 640 nm", "Laser 4 640 nm", 5.0),
+    ("405 nm", "Laser 1 405 nm", 5.0),
+    ("488 nm", "Laser 2 488 nm", 5.0),
+    ("561 nm", "Laser 3 561 nm", 5.0),
+    ("640 nm", "Laser 4 640 nm", 5.0),
 ]
 
 LED_COLORS = ["Red", "Green", "Blue", "White"]
+
+
+class LaserRow(QWidget):
+    """Compact horizontal row for a single laser channel."""
+
+    value_changed = pyqtSignal()
+
+    def __init__(self, display_name: str, default_power: float = 5.0, parent=None):
+        super().__init__(parent)
+        self._display_name = display_name
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setSpacing(8)
+
+        # Enable checkbox with laser name
+        self._checkbox = QCheckBox(display_name)
+        self._checkbox.setMinimumWidth(70)
+        self._checkbox.stateChanged.connect(self._on_state_changed)
+        layout.addWidget(self._checkbox)
+
+        # Power slider
+        self._slider = QSlider(Qt.Horizontal)
+        self._slider.setRange(0, 100)
+        self._slider.setValue(int(default_power))
+        self._slider.setEnabled(False)
+        self._slider.valueChanged.connect(self._on_slider_changed)
+        layout.addWidget(self._slider, 1)
+
+        # Power spinbox (synchronized with slider)
+        self._spinbox = QDoubleSpinBox()
+        self._spinbox.setRange(0.0, 100.0)
+        self._spinbox.setValue(default_power)
+        self._spinbox.setDecimals(1)
+        self._spinbox.setSingleStep(0.5)
+        self._spinbox.setSuffix(" %")
+        self._spinbox.setFixedWidth(75)
+        self._spinbox.setEnabled(False)
+        self._spinbox.valueChanged.connect(self._on_spinbox_changed)
+        layout.addWidget(self._spinbox)
+
+    def _on_state_changed(self) -> None:
+        """Handle checkbox state change."""
+        enabled = self._checkbox.isChecked()
+        self._slider.setEnabled(enabled)
+        self._spinbox.setEnabled(enabled)
+        self.value_changed.emit()
+
+    def _on_slider_changed(self, value: int) -> None:
+        """Handle slider value change."""
+        self._spinbox.blockSignals(True)
+        self._spinbox.setValue(float(value))
+        self._spinbox.blockSignals(False)
+        self.value_changed.emit()
+
+    def _on_spinbox_changed(self, value: float) -> None:
+        """Handle spinbox value change."""
+        self._slider.blockSignals(True)
+        self._slider.setValue(int(value))
+        self._slider.blockSignals(False)
+        self.value_changed.emit()
+
+    def is_enabled(self) -> bool:
+        """Check if this laser is enabled."""
+        return self._checkbox.isChecked()
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Set whether this laser is enabled."""
+        self._checkbox.setChecked(enabled)
+
+    def get_power(self) -> float:
+        """Get current power value."""
+        return self._spinbox.value()
+
+    def set_power(self, power: float) -> None:
+        """Set power value."""
+        self._spinbox.setValue(power)
+        self._slider.setValue(int(power))
 
 
 class IlluminationPanel(QWidget):
@@ -34,10 +113,9 @@ class IlluminationPanel(QWidget):
     Panel for configuring workflow illumination settings.
 
     Provides:
-    - Multiple laser source selection with individual power control
-    - LED source with color and intensity control
-    - Left/Right path selection
-    - Multi-laser mode option
+    - Compact laser rows with checkbox, slider, and power value
+    - Simple LED enable with intensity
+    - Advanced button for path selection, multi-laser mode, LED DAC
 
     Signals:
         settings_changed: Emitted when illumination settings change
@@ -64,28 +142,24 @@ class IlluminationPanel(QWidget):
         # Determine laser channels to use
         self._laser_channels = self._resolve_laser_channels(laser_channels, app)
 
-        # Storage for laser checkboxes and power spinboxes
-        self._laser_checkboxes: List[QCheckBox] = []
-        self._laser_power_spinboxes: List[QDoubleSpinBox] = []
+        # Storage for laser rows
+        self._laser_rows: List[LaserRow] = []
+
+        # Advanced settings (stored here, edited via dialog)
+        self._left_path = True
+        self._right_path = False
+        self._multi_laser_mode = False
+        self._led_color_index = 3  # White
+        self._led_dac = 32768
 
         self._setup_ui()
 
     def _resolve_laser_channels(self, laser_channels: Optional[List], app) -> List[Tuple[str, str, float]]:
-        """Resolve laser channels from provided list, app, or defaults.
-
-        Args:
-            laser_channels: Explicitly provided laser channels
-            app: FlamingoApplication instance
-
-        Returns:
-            List of (display_name, workflow_key, default_power) tuples
-        """
-        # Use explicitly provided channels if given
+        """Resolve laser channels from provided list, app, or defaults."""
         if laser_channels is not None:
             self._logger.info(f"Using provided laser channels: {len(laser_channels)} lasers")
             return laser_channels
 
-        # Try to get from app's laser_led_service
         if app is not None:
             try:
                 laser_led_service = getattr(app, 'laser_led_service', None)
@@ -94,7 +168,7 @@ class IlluminationPanel(QWidget):
                     if lasers:
                         channels = []
                         for laser in lasers:
-                            display_name = f"Laser {laser.index}: {laser.wavelength} nm"
+                            display_name = f"{laser.wavelength} nm"
                             workflow_key = f"Laser {laser.index} {laser.wavelength} nm"
                             channels.append((display_name, workflow_key, 5.0))
                         self._logger.info(f"Loaded {len(channels)} lasers from instrument")
@@ -102,7 +176,6 @@ class IlluminationPanel(QWidget):
             except Exception as e:
                 self._logger.warning(f"Could not get lasers from app: {e}")
 
-        # Fall back to defaults
         self._logger.info("Using default laser channels")
         return DEFAULT_LASER_CHANNELS
 
@@ -110,138 +183,61 @@ class IlluminationPanel(QWidget):
         """Create and layout UI components."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
 
         # Illumination group
         group = QGroupBox("Illumination")
         group_layout = QVBoxLayout()
+        group_layout.setSpacing(4)
 
-        # === LASER TABLE ===
-        laser_label = QLabel("Lasers:")
+        # Header with Advanced button
+        header_layout = QHBoxLayout()
+        laser_label = QLabel("Lasers")
         laser_label.setStyleSheet("font-weight: bold;")
-        group_layout.addWidget(laser_label)
+        header_layout.addWidget(laser_label)
+        header_layout.addStretch()
 
-        # Create laser table
-        self._laser_table = QTableWidget()
-        self._laser_table.setRowCount(len(self._laser_channels))
-        self._laser_table.setColumnCount(3)
-        self._laser_table.setHorizontalHeaderLabels(["Enable", "Laser", "Power (%)"])
+        self._advanced_btn = QPushButton("Advanced...")
+        self._advanced_btn.setFixedWidth(90)
+        self._advanced_btn.clicked.connect(self._on_advanced_clicked)
+        header_layout.addWidget(self._advanced_btn)
+        group_layout.addLayout(header_layout)
 
-        # Configure table appearance
-        self._laser_table.verticalHeader().setVisible(False)
-        self._laser_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self._laser_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self._laser_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self._laser_table.setMaximumHeight(250)
+        # Create compact laser rows
+        for display_name, workflow_key, default_power in self._laser_channels:
+            row = LaserRow(display_name, default_power)
+            row.value_changed.connect(self._on_settings_changed)
+            self._laser_rows.append(row)
+            group_layout.addWidget(row)
 
-        # Populate laser table
-        for row, (display_name, workflow_key, default_power) in enumerate(self._laser_channels):
-            # Enable checkbox
-            checkbox = QCheckBox()
-            checkbox.setChecked(False)
-            checkbox.stateChanged.connect(self._on_settings_changed)
-            self._laser_checkboxes.append(checkbox)
+        # LED section - compact single row
+        led_layout = QHBoxLayout()
+        led_layout.setSpacing(8)
 
-            # Center the checkbox in the cell
-            checkbox_widget = QWidget()
-            checkbox_layout = QHBoxLayout(checkbox_widget)
-            checkbox_layout.addWidget(checkbox)
-            checkbox_layout.setAlignment(Qt.AlignCenter)
-            checkbox_layout.setContentsMargins(0, 0, 0, 0)
-            self._laser_table.setCellWidget(row, 0, checkbox_widget)
-
-            # Laser name label
-            name_item = QTableWidgetItem(display_name)
-            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
-            self._laser_table.setItem(row, 1, name_item)
-
-            # Power spinbox
-            power_spinbox = QDoubleSpinBox()
-            power_spinbox.setRange(0.0, 100.0)
-            power_spinbox.setValue(default_power)
-            power_spinbox.setDecimals(2)
-            power_spinbox.setSingleStep(0.5)
-            power_spinbox.valueChanged.connect(self._on_settings_changed)
-            self._laser_power_spinboxes.append(power_spinbox)
-            self._laser_table.setCellWidget(row, 2, power_spinbox)
-
-        group_layout.addWidget(self._laser_table)
-
-        # === LED SECTION ===
-        led_label = QLabel("LED:")
-        led_label.setStyleSheet("font-weight: bold;")
-        group_layout.addWidget(led_label)
-
-        led_widget = QWidget()
-        led_layout = QGridLayout(led_widget)
-        led_layout.setContentsMargins(0, 5, 0, 5)
-
-        # LED enable checkbox
-        led_layout.addWidget(QLabel("Enable:"), 0, 0)
-        self._led_enable = QCheckBox()
-        self._led_enable.setChecked(False)
+        self._led_enable = QCheckBox("LED")
+        self._led_enable.setMinimumWidth(70)
         self._led_enable.stateChanged.connect(self._on_led_enable_changed)
-        led_layout.addWidget(self._led_enable, 0, 1)
+        led_layout.addWidget(self._led_enable)
 
-        # LED color dropdown
-        led_layout.addWidget(QLabel("Color:"), 1, 0)
-        self._led_color = QComboBox()
-        self._led_color.addItems(LED_COLORS)
-        self._led_color.setEnabled(False)
-        self._led_color.currentIndexChanged.connect(self._on_settings_changed)
-        led_layout.addWidget(self._led_color, 1, 1)
+        self._led_slider = QSlider(Qt.Horizontal)
+        self._led_slider.setRange(0, 100)
+        self._led_slider.setValue(50)
+        self._led_slider.setEnabled(False)
+        self._led_slider.valueChanged.connect(self._on_led_slider_changed)
+        led_layout.addWidget(self._led_slider, 1)
 
-        # LED intensity spinbox
-        led_layout.addWidget(QLabel("Intensity (%):"), 2, 0)
         self._led_intensity = QDoubleSpinBox()
         self._led_intensity.setRange(0.0, 100.0)
         self._led_intensity.setValue(50.0)
         self._led_intensity.setDecimals(1)
         self._led_intensity.setSingleStep(5.0)
+        self._led_intensity.setSuffix(" %")
+        self._led_intensity.setFixedWidth(75)
         self._led_intensity.setEnabled(False)
-        self._led_intensity.valueChanged.connect(self._on_settings_changed)
-        led_layout.addWidget(self._led_intensity, 2, 1)
+        self._led_intensity.valueChanged.connect(self._on_led_spinbox_changed)
+        led_layout.addWidget(self._led_intensity)
 
-        # LED DAC spinbox (advanced)
-        led_layout.addWidget(QLabel("LED DAC:"), 3, 0)
-        self._led_dac = QSpinBox()
-        self._led_dac.setRange(0, 65535)
-        self._led_dac.setValue(32768)
-        self._led_dac.setEnabled(False)
-        self._led_dac.valueChanged.connect(self._on_settings_changed)
-        led_layout.addWidget(self._led_dac, 3, 1)
-
-        group_layout.addWidget(led_widget)
-
-        # === GLOBAL OPTIONS ===
-        options_label = QLabel("Options:")
-        options_label.setStyleSheet("font-weight: bold;")
-        group_layout.addWidget(options_label)
-
-        # Light path selection
-        path_layout = QHBoxLayout()
-        path_layout.addWidget(QLabel("Light Path:"))
-
-        self._left_path = QCheckBox("Left")
-        self._left_path.setChecked(True)
-        self._left_path.stateChanged.connect(self._on_settings_changed)
-        path_layout.addWidget(self._left_path)
-
-        self._right_path = QCheckBox("Right")
-        self._right_path.setChecked(False)
-        self._right_path.stateChanged.connect(self._on_settings_changed)
-        path_layout.addWidget(self._right_path)
-
-        path_layout.addStretch()
-        group_layout.addLayout(path_layout)
-
-        # Multi-laser mode checkbox
-        multi_laser_layout = QHBoxLayout()
-        self._multi_laser_mode = QCheckBox("Run stack with multiple lasers on")
-        self._multi_laser_mode.setChecked(False)
-        self._multi_laser_mode.stateChanged.connect(self._on_settings_changed)
-        multi_laser_layout.addWidget(self._multi_laser_mode)
-        multi_laser_layout.addStretch()
-        group_layout.addLayout(multi_laser_layout)
+        group_layout.addLayout(led_layout)
 
         group.setLayout(group_layout)
         layout.addWidget(group)
@@ -249,10 +245,45 @@ class IlluminationPanel(QWidget):
     def _on_led_enable_changed(self) -> None:
         """Handle LED enable checkbox state change."""
         enabled = self._led_enable.isChecked()
-        self._led_color.setEnabled(enabled)
+        self._led_slider.setEnabled(enabled)
         self._led_intensity.setEnabled(enabled)
-        self._led_dac.setEnabled(enabled)
         self._on_settings_changed()
+
+    def _on_led_slider_changed(self, value: int) -> None:
+        """Handle LED slider change."""
+        self._led_intensity.blockSignals(True)
+        self._led_intensity.setValue(float(value))
+        self._led_intensity.blockSignals(False)
+        self._on_settings_changed()
+
+    def _on_led_spinbox_changed(self, value: float) -> None:
+        """Handle LED spinbox change."""
+        self._led_slider.blockSignals(True)
+        self._led_slider.setValue(int(value))
+        self._led_slider.blockSignals(False)
+        self._on_settings_changed()
+
+    def _on_advanced_clicked(self) -> None:
+        """Open advanced illumination settings dialog."""
+        from py2flamingo.views.dialogs import AdvancedIlluminationDialog
+
+        dialog = AdvancedIlluminationDialog(self)
+        dialog.set_settings({
+            'left_path': self._left_path,
+            'right_path': self._right_path,
+            'multi_laser_mode': self._multi_laser_mode,
+            'led_color_index': self._led_color_index,
+            'led_dac': self._led_dac,
+        })
+
+        if dialog.exec_() == dialog.Accepted:
+            settings = dialog.get_settings()
+            self._left_path = settings['left_path']
+            self._right_path = settings['right_path']
+            self._multi_laser_mode = settings['multi_laser_mode']
+            self._led_color_index = settings['led_color_index']
+            self._led_dac = settings['led_dac']
+            self._on_settings_changed()
 
     def _on_settings_changed(self) -> None:
         """Handle any settings change."""
@@ -270,8 +301,8 @@ class IlluminationPanel(QWidget):
 
         # Add enabled lasers
         for i, (display_name, workflow_key, _) in enumerate(self._laser_channels):
-            if self._laser_checkboxes[i].isChecked():
-                power = self._laser_power_spinboxes[i].value()
+            if self._laser_rows[i].is_enabled():
+                power = self._laser_rows[i].get_power()
                 settings_list.append(IlluminationSettings(
                     laser_channel=workflow_key,
                     laser_power_mw=power,
@@ -305,30 +336,26 @@ class IlluminationPanel(QWidget):
 
         # Add all lasers (enabled ones with power, disabled ones as 0.00 0)
         for i, (display_name, workflow_key, _) in enumerate(self._laser_channels):
-            if self._laser_checkboxes[i].isChecked():
-                power = self._laser_power_spinboxes[i].value()
+            if self._laser_rows[i].is_enabled():
+                power = self._laser_rows[i].get_power()
                 settings[workflow_key] = f"{power:.2f} 1"
             else:
-                # Include disabled lasers as 0.00 0 for completeness
                 settings[workflow_key] = "0.00 0"
 
         # LED settings
         if self._led_enable.isChecked():
             intensity = self._led_intensity.value()
-            led_color_idx = self._led_color.currentIndex()
-            dac_value = self._led_dac.value()
-
             settings["LED_RGB_Board"] = f"{intensity:.1f} 1"
-            settings["LED selection"] = f"{led_color_idx} 1"
-            settings["LED DAC"] = f"{dac_value} 1"
+            settings["LED selection"] = f"{self._led_color_index} 1"
+            settings["LED DAC"] = f"{self._led_dac} 1"
         else:
             settings["LED_RGB_Board"] = "0.0 0"
             settings["LED selection"] = "0 0"
             settings["LED DAC"] = "0 0"
 
-        # Light paths
-        settings["Left path"] = "ON 1" if self._left_path.isChecked() else "OFF 0"
-        settings["Right path"] = "ON 1" if self._right_path.isChecked() else "OFF 0"
+        # Light paths (from advanced settings)
+        settings["Left path"] = "ON 1" if self._left_path else "OFF 0"
+        settings["Right path"] = "ON 1" if self._right_path else "OFF 0"
 
         return settings
 
@@ -340,7 +367,7 @@ class IlluminationPanel(QWidget):
             Dictionary for Illumination Options section
         """
         return {
-            "Run stack with multiple lasers on": "true" if self._multi_laser_mode.isChecked() else "false"
+            "Run stack with multiple lasers on": "true" if self._multi_laser_mode else "false"
         }
 
     def set_settings(self, settings: List[IlluminationSettings]) -> None:
@@ -350,19 +377,18 @@ class IlluminationPanel(QWidget):
         Args:
             settings: List of IlluminationSettings to apply
         """
-        # Reset all checkboxes first
-        for checkbox in self._laser_checkboxes:
-            checkbox.setChecked(False)
+        # Reset all
+        for row in self._laser_rows:
+            row.set_enabled(False)
         self._led_enable.setChecked(False)
 
         # Apply each setting
         for setting in settings:
             if setting.laser_enabled and setting.laser_channel:
-                # Find matching laser channel
                 for i, (_, workflow_key, _) in enumerate(self._laser_channels):
                     if workflow_key == setting.laser_channel:
-                        self._laser_checkboxes[i].setChecked(True)
-                        self._laser_power_spinboxes[i].setValue(setting.laser_power_mw)
+                        self._laser_rows[i].set_enabled(True)
+                        self._laser_rows[i].set_power(setting.laser_power_mw)
                         break
 
             elif setting.led_enabled and setting.led_channel:
@@ -379,8 +405,8 @@ class IlluminationPanel(QWidget):
             options_dict: Optional dictionary from Illumination Options section
         """
         # Reset all
-        for checkbox in self._laser_checkboxes:
-            checkbox.setChecked(False)
+        for row in self._laser_rows:
+            row.set_enabled(False)
         self._led_enable.setChecked(False)
 
         # Parse laser settings
@@ -392,8 +418,8 @@ class IlluminationPanel(QWidget):
                     power = float(parts[0])
                     enabled = int(parts[1]) == 1
                     if enabled:
-                        self._laser_checkboxes[i].setChecked(True)
-                        self._laser_power_spinboxes[i].setValue(power)
+                        self._laser_rows[i].set_enabled(True)
+                        self._laser_rows[i].set_power(power)
 
         # Parse LED settings
         if "LED_RGB_Board" in illumination_dict:
@@ -411,47 +437,57 @@ class IlluminationPanel(QWidget):
             value_str = illumination_dict["LED selection"]
             parts = value_str.split()
             if len(parts) >= 1:
-                color_idx = int(parts[0])
-                if 0 <= color_idx < len(LED_COLORS):
-                    self._led_color.setCurrentIndex(color_idx)
+                self._led_color_index = int(parts[0])
 
         # Parse LED DAC
         if "LED DAC" in illumination_dict:
             value_str = illumination_dict["LED DAC"]
             parts = value_str.split()
             if len(parts) >= 1:
-                dac_value = int(parts[0])
-                self._led_dac.setValue(dac_value)
+                self._led_dac = int(parts[0])
 
         # Parse light paths
         if "Left path" in illumination_dict:
-            self._left_path.setChecked(illumination_dict["Left path"].startswith("ON"))
+            self._left_path = illumination_dict["Left path"].startswith("ON")
 
         if "Right path" in illumination_dict:
-            self._right_path.setChecked(illumination_dict["Right path"].startswith("ON"))
+            self._right_path = illumination_dict["Right path"].startswith("ON")
 
         # Parse illumination options
         if options_dict and "Run stack with multiple lasers on" in options_dict:
-            multi_laser_enabled = options_dict["Run stack with multiple lasers on"].lower() == "true"
-            self._multi_laser_mode.setChecked(multi_laser_enabled)
+            self._multi_laser_mode = options_dict["Run stack with multiple lasers on"].lower() == "true"
 
     def get_enabled_laser_count(self) -> int:
-        """
-        Get the number of enabled lasers.
-
-        Returns:
-            Count of enabled laser channels
-        """
-        return sum(1 for checkbox in self._laser_checkboxes if checkbox.isChecked())
+        """Get the number of enabled lasers."""
+        return sum(1 for row in self._laser_rows if row.is_enabled())
 
     def get_enabled_source_count(self) -> int:
-        """
-        Get the total number of enabled illumination sources (lasers + LED).
-
-        Returns:
-            Count of all enabled sources
-        """
+        """Get the total number of enabled illumination sources."""
         count = self.get_enabled_laser_count()
         if self._led_enable.isChecked():
             count += 1
         return count
+
+    # Advanced settings accessors
+    def get_advanced_settings(self) -> Dict[str, Any]:
+        """Get advanced illumination settings."""
+        return {
+            'left_path': self._left_path,
+            'right_path': self._right_path,
+            'multi_laser_mode': self._multi_laser_mode,
+            'led_color_index': self._led_color_index,
+            'led_dac': self._led_dac,
+        }
+
+    def set_advanced_settings(self, settings: Dict[str, Any]) -> None:
+        """Set advanced illumination settings."""
+        if 'left_path' in settings:
+            self._left_path = settings['left_path']
+        if 'right_path' in settings:
+            self._right_path = settings['right_path']
+        if 'multi_laser_mode' in settings:
+            self._multi_laser_mode = settings['multi_laser_mode']
+        if 'led_color_index' in settings:
+            self._led_color_index = settings['led_color_index']
+        if 'led_dac' in settings:
+            self._led_dac = settings['led_dac']

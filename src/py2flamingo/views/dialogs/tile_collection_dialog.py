@@ -7,7 +7,7 @@ from the LED 2D Overview result window.
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple, Dict
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -23,6 +23,50 @@ from py2flamingo.models.data.workflow import WorkflowType, Workflow, StackSettin
 from py2flamingo.models.microscope import Position
 
 logger = logging.getLogger(__name__)
+
+
+def calculate_tile_z_ranges(
+    primary_tiles: List,
+    secondary_tiles: List,
+    fallback_z_min: float,
+    fallback_z_max: float
+) -> Dict[Tuple[int, int], Tuple[float, float]]:
+    """Calculate Z range for each primary tile based on secondary tile overlap.
+
+    When tiles are selected from two orthogonal views (e.g., 0° and 90°),
+    this function determines the Z range for each primary tile by finding
+    the min/max Z values from the secondary view.
+
+    For simplicity, this implementation uses the global Z range from all
+    secondary tiles for all primary tiles (no per-tile spatial overlap
+    calculation). This assumes no gaps in the sample.
+
+    Args:
+        primary_tiles: Tiles from the primary view (where Z-stacks will be taken)
+        secondary_tiles: Tiles from the secondary view (defines Z limits)
+        fallback_z_min: Fallback minimum Z if no secondary tiles
+        fallback_z_max: Fallback maximum Z if no secondary tiles
+
+    Returns:
+        Dictionary mapping (tile_x_idx, tile_y_idx) to (z_min, z_max)
+    """
+    # If no secondary tiles, use fallback range for all primary tiles
+    if not secondary_tiles:
+        return {
+            (tile.tile_x_idx, tile.tile_y_idx): (fallback_z_min, fallback_z_max)
+            for tile in primary_tiles
+        }
+
+    # Get global Z range from secondary tiles
+    secondary_z_values = [tile.z for tile in secondary_tiles]
+    z_min = min(secondary_z_values)
+    z_max = max(secondary_z_values)
+
+    # Apply same Z range to all primary tiles
+    return {
+        (tile.tile_x_idx, tile.tile_y_idx): (z_min, z_max)
+        for tile in primary_tiles
+    }
 
 
 class TileCollectionDialog(QDialog):
@@ -56,11 +100,60 @@ class TileCollectionDialog(QDialog):
         self._app = app
         self._workflow_type = WorkflowType.SNAPSHOT
 
+        # Determine if 90-degree overlap mode is available
+        self._has_dual_view = bool(left_tiles) and bool(right_tiles)
+        self._primary_is_left = True  # Default: left panel is primary
+
+        # Calculate Z ranges for tiles
+        self._tile_z_ranges: Dict[Tuple[int, int], Tuple[float, float]] = {}
+        self._update_z_ranges()
+
         self.setWindowTitle("Collect Tiles - Workflow Configuration")
         self.setMinimumWidth(500)
         self.setMinimumHeight(600)
 
         self._setup_ui()
+
+    def _update_z_ranges(self) -> None:
+        """Update Z ranges for tiles based on primary direction and overlap."""
+        # Get fallback Z range from bounding box
+        if self._config:
+            fallback_z_min = self._config.bounding_box.z_min
+            fallback_z_max = self._config.bounding_box.z_max
+        else:
+            fallback_z_min = 0.0
+            fallback_z_max = 10.0
+
+        # Determine primary and secondary tiles
+        if self._primary_is_left:
+            primary_tiles = self._left_tiles
+            secondary_tiles = self._right_tiles
+        else:
+            primary_tiles = self._right_tiles
+            secondary_tiles = self._left_tiles
+
+        # Calculate Z ranges
+        self._tile_z_ranges = calculate_tile_z_ranges(
+            primary_tiles, secondary_tiles, fallback_z_min, fallback_z_max
+        )
+
+    def _get_z_range_for_tile(self, tile) -> Tuple[float, float]:
+        """Get Z range for a specific tile.
+
+        Args:
+            tile: TileResult object
+
+        Returns:
+            Tuple of (z_min, z_max) in mm
+        """
+        key = (tile.tile_x_idx, tile.tile_y_idx)
+        if key in self._tile_z_ranges:
+            return self._tile_z_ranges[key]
+
+        # Fallback to bounding box
+        if self._config:
+            return (self._config.bounding_box.z_min, self._config.bounding_box.z_max)
+        return (0.0, 10.0)
 
     def _setup_ui(self):
         """Create the dialog UI."""
@@ -77,6 +170,11 @@ class TileCollectionDialog(QDialog):
         # Summary section
         summary_group = self._create_summary_section()
         container_layout.addWidget(summary_group)
+
+        # Primary direction section (only shown when both views have tiles)
+        if self._has_dual_view:
+            direction_group = self._create_direction_section()
+            container_layout.addWidget(direction_group)
 
         # Workflow name section
         name_group = self._create_name_section()
@@ -157,12 +255,124 @@ class TileCollectionDialog(QDialog):
             bbox = self._config.bounding_box
             summary_text += f"\nBounding box Z range: {bbox.z_min:.2f} to {bbox.z_max:.2f} mm"
 
-        summary_label = QLabel(summary_text)
-        summary_label.setStyleSheet("color: #666;")
-        layout.addWidget(summary_label)
+        # Show overlap Z range info if both views have tiles
+        if self._has_dual_view:
+            # Calculate Z range from current settings
+            if self._tile_z_ranges:
+                z_values = [(z_min, z_max) for z_min, z_max in self._tile_z_ranges.values()]
+                if z_values:
+                    global_z_min = min(z[0] for z in z_values)
+                    global_z_max = max(z[1] for z in z_values)
+                    summary_text += f"\n\n90° overlap Z range: {global_z_min:.2f} to {global_z_max:.2f} mm"
+
+        self._summary_label = QLabel(summary_text)
+        self._summary_label.setStyleSheet("color: #666;")
+        layout.addWidget(self._summary_label)
 
         group.setLayout(layout)
         return group
+
+    def _create_direction_section(self) -> QGroupBox:
+        """Create the primary direction selection section.
+
+        This section allows the user to choose which view (0° or 90°)
+        should be the primary direction for Z-stack workflows.
+        """
+        group = QGroupBox("Primary Direction (90° Overlap Mode)")
+        layout = QVBoxLayout()
+
+        # Description
+        desc = QLabel(
+            "Select the primary view direction. Z-stacks will be taken at "
+            "tile positions from the primary view. The Z range for each stack "
+            "is determined by the overlap with the secondary view."
+        )
+        desc.setWordWrap(True)
+        desc.setStyleSheet("color: #666; font-size: 11px; margin-bottom: 8px;")
+        layout.addWidget(desc)
+
+        # Radio-like combo for direction selection
+        dir_layout = QHBoxLayout()
+        dir_layout.addWidget(QLabel("Primary view:"))
+
+        self._direction_combo = QComboBox()
+        self._direction_combo.addItem(f"Left panel (R={self._left_rotation}°)", "left")
+        self._direction_combo.addItem(f"Right panel (R={self._right_rotation}°)", "right")
+        self._direction_combo.currentIndexChanged.connect(self._on_direction_changed)
+        dir_layout.addWidget(self._direction_combo)
+        dir_layout.addStretch()
+
+        layout.addLayout(dir_layout)
+
+        # Z range info label
+        self._z_range_info = QLabel()
+        self._z_range_info.setStyleSheet("color: #27ae60; font-weight: bold;")
+        self._update_z_range_info()
+        layout.addWidget(self._z_range_info)
+
+        group.setLayout(layout)
+        return group
+
+    def _on_direction_changed(self, index: int) -> None:
+        """Handle primary direction change."""
+        self._primary_is_left = (self._direction_combo.currentData() == "left")
+        self._update_z_ranges()
+        self._update_z_range_info()
+        self._update_summary_label()
+
+    def _update_z_range_info(self) -> None:
+        """Update the Z range info label."""
+        if not hasattr(self, '_z_range_info'):
+            return
+
+        if self._primary_is_left:
+            primary_count = len(self._left_tiles)
+            primary_angle = self._left_rotation
+            secondary_count = len(self._right_tiles)
+            secondary_angle = self._right_rotation
+        else:
+            primary_count = len(self._right_tiles)
+            primary_angle = self._right_rotation
+            secondary_count = len(self._left_tiles)
+            secondary_angle = self._left_rotation
+
+        if self._tile_z_ranges:
+            z_values = list(self._tile_z_ranges.values())
+            if z_values:
+                z_min = z_values[0][0]
+                z_max = z_values[0][1]
+                z_range = z_max - z_min
+                self._z_range_info.setText(
+                    f"{primary_count} Z-stacks at R={primary_angle}°, "
+                    f"Z range from {secondary_count} tiles at R={secondary_angle}°: "
+                    f"{z_min:.2f} to {z_max:.2f} mm ({z_range:.2f} mm)"
+                )
+
+    def _update_summary_label(self) -> None:
+        """Update the summary label with current Z range info."""
+        if not hasattr(self, '_summary_label'):
+            return
+
+        total = len(self._left_tiles) + len(self._right_tiles)
+
+        summary_text = f"Total tiles selected: {total}\n"
+        if self._left_tiles:
+            summary_text += f"  - Left panel (R={self._left_rotation}°): {len(self._left_tiles)} tiles\n"
+        if self._right_tiles:
+            summary_text += f"  - Right panel (R={self._right_rotation}°): {len(self._right_tiles)} tiles\n"
+
+        if self._config:
+            bbox = self._config.bounding_box
+            summary_text += f"\nBounding box Z range: {bbox.z_min:.2f} to {bbox.z_max:.2f} mm"
+
+        if self._has_dual_view and self._tile_z_ranges:
+            z_values = [(z_min, z_max) for z_min, z_max in self._tile_z_ranges.values()]
+            if z_values:
+                global_z_min = min(z[0] for z in z_values)
+                global_z_max = max(z[1] for z in z_values)
+                summary_text += f"\n\n90° overlap Z range: {global_z_min:.2f} to {global_z_max:.2f} mm"
+
+        self._summary_label.setText(summary_text)
 
     def _create_name_section(self) -> QGroupBox:
         """Create the workflow name section."""
@@ -204,7 +414,10 @@ class TileCollectionDialog(QDialog):
             self._zstack_panel.setVisible(False)
         else:
             self._workflow_type = WorkflowType.ZSTACK
-            self._type_description.setText("Z-stack using full bounding box Z range")
+            if self._has_dual_view:
+                self._type_description.setText("Z-stack using 90° overlap Z range")
+            else:
+                self._type_description.setText("Z-stack using bounding box Z range")
             self._zstack_panel.setVisible(True)
 
     def _on_camera_settings_changed(self, settings: dict):
@@ -239,14 +452,36 @@ class TileCollectionDialog(QDialog):
             QMessageBox.critical(self, "Error", f"Failed to create workflow folder:\n{e}")
             return
 
-        # Collect all tiles with their rotation angles
-        all_tiles = []
-        for tile in self._left_tiles:
-            all_tiles.append((tile, self._left_rotation))
-        for tile in self._right_tiles:
-            all_tiles.append((tile, self._right_rotation))
+        # Collect tiles based on mode:
+        # - If dual view (90° overlap): use only primary tiles with calculated Z ranges
+        # - If single view: use all tiles from that view with bounding box Z range
+        tiles_to_process = []
 
-        total = len(all_tiles)
+        if self._has_dual_view:
+            # 90-degree overlap mode: use only primary view tiles
+            if self._primary_is_left:
+                primary_tiles = self._left_tiles
+                primary_rotation = self._left_rotation
+            else:
+                primary_tiles = self._right_tiles
+                primary_rotation = self._right_rotation
+
+            for tile in primary_tiles:
+                z_min, z_max = self._get_z_range_for_tile(tile)
+                tiles_to_process.append((tile, primary_rotation, z_min, z_max))
+
+            logger.info(f"90° overlap mode: {len(primary_tiles)} primary tiles at R={primary_rotation}°")
+        else:
+            # Single view mode: use all tiles with bounding box Z range
+            bbox_z_min = self._config.bounding_box.z_min if self._config else 0.0
+            bbox_z_max = self._config.bounding_box.z_max if self._config else 10.0
+
+            for tile in self._left_tiles:
+                tiles_to_process.append((tile, self._left_rotation, bbox_z_min, bbox_z_max))
+            for tile in self._right_tiles:
+                tiles_to_process.append((tile, self._right_rotation, bbox_z_min, bbox_z_max))
+
+        total = len(tiles_to_process)
         if total == 0:
             QMessageBox.warning(self, "No Tiles", "No tiles selected.")
             return
@@ -256,13 +491,9 @@ class TileCollectionDialog(QDialog):
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)
 
-        # Get Z range from config for Z-stacks
-        z_min = self._config.bounding_box.z_min if self._config else 0.0
-        z_max = self._config.bounding_box.z_max if self._config else 10.0
-
         # Create workflows
         created_files = []
-        for i, (tile, rotation) in enumerate(all_tiles):
+        for i, (tile, rotation, z_min, z_max) in enumerate(tiles_to_process):
             if progress.wasCanceled():
                 break
 
@@ -275,7 +506,7 @@ class TileCollectionDialog(QDialog):
             # Create position
             position = Position(x=tile.x, y=tile.y, z=tile.z, r=rotation)
 
-            # Build workflow text
+            # Build workflow text with per-tile Z range
             workflow_text = self._build_workflow_text(
                 workflow_name, position, illumination, save_settings, z_min, z_max
             )

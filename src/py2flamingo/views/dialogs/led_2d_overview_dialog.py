@@ -16,6 +16,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QShowEvent, QCloseEvent, QHideEvent
 
+from py2flamingo.views.colors import WARNING_COLOR
+
 
 @dataclass
 class BoundingBox:
@@ -811,6 +813,31 @@ class LED2DOverviewDialog(QDialog):
         else:
             self.start_btn.setToolTip("Start the LED 2D Overview scan")
 
+    def _set_scan_in_progress(self, in_progress: bool) -> None:
+        """Update button appearance to reflect scan state.
+
+        Args:
+            in_progress: True if scan is running, False when complete
+        """
+        if in_progress:
+            self.start_btn.setText("In Progress...")
+            self.start_btn.setEnabled(False)
+            self.start_btn.setStyleSheet(
+                f"QPushButton {{ background-color: {WARNING_COLOR}; color: black; "
+                "font-weight: bold; padding: 8px 16px; }}"
+                "QPushButton:disabled { background-color: #ccc; }"
+            )
+            self.start_btn.setToolTip("Scan is in progress...")
+        else:
+            self.start_btn.setText("Start Scan")
+            self.start_btn.setStyleSheet(
+                "QPushButton { background-color: #4CAF50; color: white; font-weight: bold; "
+                "padding: 8px 16px; }"
+                "QPushButton:disabled { background-color: #ccc; }"
+            )
+            # Re-validate to set proper enabled state and tooltip
+            self._update_start_button_state()
+
     def _get_configuration(self) -> Optional[ScanConfiguration]:
         """Get the current scan configuration.
 
@@ -937,6 +964,9 @@ class LED2DOverviewDialog(QDialog):
             # Don't close dialog - user might want to run again
             self._workflow.start()
 
+            # Update button to show scan is in progress
+            self._set_scan_in_progress(True)
+
         except ImportError as e:
             self._logger.error(f"Could not import workflow: {e}")
             QMessageBox.information(
@@ -951,11 +981,13 @@ class LED2DOverviewDialog(QDialog):
     def _on_workflow_completed(self, *args) -> None:
         """Handle workflow completion (success or cancel) - stop live view."""
         self._logger.info("Workflow completed - stopping live view in SampleView")
+        self._set_scan_in_progress(False)
         self._stop_sample_view_live()
 
     def _on_workflow_error(self, error_msg: str) -> None:
         """Handle workflow error - stop live view."""
         self._logger.error(f"Workflow error: {error_msg} - stopping live view")
+        self._set_scan_in_progress(False)
         self._stop_sample_view_live()
 
     def _stop_sample_view_live(self) -> None:

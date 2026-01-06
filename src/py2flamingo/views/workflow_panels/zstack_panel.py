@@ -183,13 +183,18 @@ class ZStackPanel(QWidget):
         self._z_velocity.setStyleSheet("QDoubleSpinBox { background-color: #f0f0f0; }")
         self._update_auto_velocity()
 
-        # Stack option dropdown
-        grid.addWidget(QLabel("Stack Option:"), 6, 0)
+        # Stack option dropdown (hidden by default - auto-managed by workflow type)
+        self._stack_option_label = QLabel("Stack Option:")
+        grid.addWidget(self._stack_option_label, 6, 0)
         self._stack_option = QComboBox()
         self._stack_option.addItems(STACK_OPTIONS)
         self._stack_option.setCurrentText("None")
         self._stack_option.currentTextChanged.connect(self._on_stack_option_changed)
         grid.addWidget(self._stack_option, 6, 1)
+
+        # Hide stack option by default (auto-managed by WorkflowView)
+        self._stack_option_label.setVisible(False)
+        self._stack_option.setVisible(False)
 
         # Tile settings (only visible when Tile option selected)
         self._tile_widget = QWidget()
@@ -213,8 +218,9 @@ class ZStackPanel(QWidget):
         self._tile_widget.setVisible(False)
         grid.addWidget(self._tile_widget, 7, 0, 1, 2)
 
-        # Rotational stage velocity
-        grid.addWidget(QLabel("Rotational Velocity:"), 8, 0)
+        # Rotational stage velocity (only for OPT modes)
+        self._rotational_label = QLabel("Rotational Velocity:")
+        grid.addWidget(self._rotational_label, 8, 0)
         self._rotational_velocity = QDoubleSpinBox()
         self._rotational_velocity.setRange(0.0, 10.0)
         self._rotational_velocity.setValue(0.0)
@@ -223,6 +229,10 @@ class ZStackPanel(QWidget):
         self._rotational_velocity.setSuffix(" °/s")
         self._rotational_velocity.valueChanged.connect(self._on_settings_changed)
         grid.addWidget(self._rotational_velocity, 8, 1)
+
+        # Hide rotational velocity by default (shown for Multi-Angle mode)
+        self._rotational_label.setVisible(False)
+        self._rotational_velocity.setVisible(False)
 
         # Estimated acquisition time
         grid.addWidget(QLabel("Est. Time:"), 9, 0)
@@ -458,3 +468,58 @@ class ZStackPanel(QWidget):
     def get_z_range_mm(self) -> float:
         """Get total Z range in millimeters."""
         return self.get_z_range_um() / 1000.0
+
+    # Visibility control methods for workflow type integration
+
+    def set_stack_option(self, option: str) -> None:
+        """Set the stack option programmatically.
+
+        Args:
+            option: One of STACK_OPTIONS values
+        """
+        if option in STACK_OPTIONS:
+            self._stack_option.setCurrentText(option)
+
+    def get_stack_option(self) -> str:
+        """Get current stack option."""
+        return self._stack_option.currentText()
+
+    def set_stack_option_enabled(self, enabled: bool) -> None:
+        """Enable/disable the stack option dropdown.
+
+        When managed by workflow type, this should be disabled.
+
+        Args:
+            enabled: Whether the dropdown should be user-editable
+        """
+        self._stack_option.setEnabled(enabled)
+
+    def set_rotational_velocity_visible(self, visible: bool) -> None:
+        """Show/hide the rotational velocity setting.
+
+        Only needed for Multi-Angle/OPT modes.
+
+        Args:
+            visible: Whether to show rotational velocity
+        """
+        self._rotational_label.setVisible(visible)
+        self._rotational_velocity.setVisible(visible)
+
+    def set_tile_settings_visible(self, visible: bool) -> None:
+        """Show/hide the tile settings.
+
+        Args:
+            visible: Whether to show tile X/Y settings
+        """
+        self._tile_widget.setVisible(visible)
+
+    def set_stack_option_visible(self, visible: bool) -> None:
+        """Show/hide the stack option dropdown.
+
+        Usually hidden since it's auto-managed by workflow type.
+
+        Args:
+            visible: Whether to show stack option dropdown
+        """
+        self._stack_option_label.setVisible(visible)
+        self._stack_option.setVisible(visible)

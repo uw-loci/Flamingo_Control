@@ -13,7 +13,7 @@ from ..models.microscope import Position
 from ..models.collection import MultiAngleCollection, CollectionParameters
 from ..controllers.microscope_controller import MicroscopeController
 from ..services.workflow_service import WorkflowService
-from ..services.communication.connection_manager import ConnectionManager
+from ..services.workflow_transmission_service import WorkflowTransmissionService
 import py2flamingo.utils.calculations as calc
 import py2flamingo.functions.text_file_parsing as txt
 
@@ -21,25 +21,28 @@ import py2flamingo.functions.text_file_parsing as txt
 class MultiAngleController:
     """
     Controller for multi-angle collection workflows.
-    
+
     Handles automated collection at multiple rotation angles.
     """
-    
+
     def __init__(self,
                  microscope_controller: MicroscopeController,
                  workflow_service: WorkflowService,
-                 connection_manager: ConnectionManager):
+                 transmission_service: WorkflowTransmissionService,
+                 connection_service=None):
         """
         Initialize multi-angle controller.
-        
+
         Args:
             microscope_controller: Main microscope controller
-            workflow_service: Workflow service
-            connection_manager: Connection manager
+            workflow_service: Workflow service (for validation)
+            transmission_service: WorkflowTransmissionService for sending workflows
+            connection_service: Optional connection service for microscope queries
         """
         self.microscope = microscope_controller
         self.workflow_service = workflow_service
-        self.connection = connection_manager
+        self.transmission_service = transmission_service
+        self.connection_service = connection_service
         self.logger = logging.getLogger(__name__)
         
         # Current collection
@@ -189,7 +192,11 @@ class MultiAngleController:
         
         # Calculate tile region
         # Get image size from microscope
-        image_info = self.connection.get_camera_info()
+        # Get image info - use defaults if connection_service not available
+        if self.connection_service and hasattr(self.connection_service, 'get_camera_info'):
+            image_info = self.connection_service.get_camera_info()
+        else:
+            image_info = {}
         pixel_size_mm = image_info.get('pixel_size_mm', 0.00325)
         frame_size = image_info.get('frame_size', 2048)
         
@@ -222,25 +229,38 @@ class MultiAngleController:
             f"{sample_name}_angle_{int(angle):03d}"
         )
         
-        # Run workflow
-        self.workflow_service.run_workflow(angle_workflow, self.connection)
+        # Run workflow via transmission service
+        success, msg = self.transmission_service.execute_workflow_from_dict(angle_workflow)
+        if not success:
+            raise RuntimeError(f"Failed to start workflow: {msg}")
         
         # Wait for completion
         self._wait_for_workflow_completion()
     
     def _wait_for_workflow_completion(self):
-        """Wait for current workflow to complete."""
+        """Wait for current workflow to complete.
+
+        Note: This is a simplified implementation. In a real system,
+        you would want to query the microscope status service for
+        workflow completion events.
+        """
         import time
-        
-        while True:
-            status = self.connection.get_workflow_status()
-            
-            if status.get('state') == 'complete':
-                break
-            elif status.get('state') == 'error':
-                raise RuntimeError("Workflow failed")
-            
-            time.sleep(1.0)
+
+        # Simple polling loop with timeout
+        timeout_seconds = 600  # 10 minute timeout
+        poll_interval = 1.0
+        elapsed = 0
+
+        while elapsed < timeout_seconds:
+            # Check if transmission service indicates workflow is still executing
+            if not self.transmission_service.is_executing:
+                self.logger.info("Workflow completed")
+                return
+
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+
+        raise TimeoutError("Workflow timed out waiting for completion")
     
     def get_collection_status(self) -> dict:
         """
@@ -268,8 +288,8 @@ class MultiAngleController:
         if self.current_collection:
             self.logger.info("Cancelling multi-angle collection")
             
-            # Stop current workflow
-            self.connection.stop_workflow()
+            # Stop current workflow via transmission service
+            self.transmission_service.stop_workflow()
             
             # Mark collection as cancelled
             self.current_collection = None

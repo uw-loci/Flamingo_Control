@@ -36,14 +36,22 @@ Usage Example:
     ```
 
 Migration from Legacy Code:
-    # Old way (multiple entry points):
-    tcp_client.send_workflow(workflow_dict)  # Option 1
-    connection_service.send_workflow(data)    # Option 2
-    workflow_service.execute_workflow(wf)     # Option 3
+    # Old way (multiple entry points - DEPRECATED):
+    tcp_client.send_workflow(workflow_dict)  # Still available for MinimalGUI
+    connection_service.send_workflow(data)    # REMOVED
+    connection_manager.send_workflow(data)    # REMOVED
+    workflow_service.run_workflow(wf, conn)   # DEPRECATED - raises error
 
-    # New way (single entry point):
-    facade = WorkflowFacade()
-    facade.start_workflow(workflow)
+    # New way - use WorkflowTransmissionService (single funnel point):
+    from py2flamingo.services import WorkflowTransmissionService
+
+    transmission_service = WorkflowTransmissionService(connection_service)
+    success, msg = transmission_service.execute_workflow_from_dict(workflow_dict)
+    success, msg = transmission_service.execute_workflow_from_file(file_path)
+    success, msg = transmission_service.execute_workflow_from_text(workflow_text)
+
+    # Or through the WorkflowController (recommended for UI):
+    workflow_controller.start_workflow_from_ui(workflow, workflow_dict)
 
 This consolidation addresses the original issues of:
 - 4 different workflow entry points

@@ -205,6 +205,9 @@ class WorkflowView(QWidget):
         camera_settings = self._camera_panel.get_settings()
         self._zstack_panel.set_frame_rate(camera_settings['frame_rate'])
 
+        # Apply initial visibility matrix (Snapshot mode by default)
+        self._apply_visibility_matrix(WorkflowType.SNAPSHOT)
+
         return widget
 
     def _create_action_section(self) -> QFrame:
@@ -289,8 +292,44 @@ class WorkflowView(QWidget):
         # Switch to appropriate settings panel
         self._type_settings_stack.setCurrentIndex(index)
 
+        # Apply visibility matrix based on workflow type
+        self._apply_visibility_matrix(workflow_type)
+
         self.workflow_type_changed.emit(workflow_type.value)
         self._logger.info(f"Workflow type changed to: {name}")
+
+    def _apply_visibility_matrix(self, workflow_type: WorkflowType) -> None:
+        """Apply parameter visibility based on workflow type.
+
+        This sets:
+        - Stack option (auto-managed based on type)
+        - Rotational velocity visibility (only for Multi-Angle)
+        - Other type-specific UI adjustments
+
+        Args:
+            workflow_type: The selected workflow type
+        """
+        # Stack option mapping
+        stack_option_map = {
+            WorkflowType.SNAPSHOT: "None",
+            WorkflowType.ZSTACK: "ZStack",
+            WorkflowType.TIME_LAPSE: "None",
+            WorkflowType.TILE: "Tile",
+            WorkflowType.MULTI_ANGLE: "OPT",
+        }
+
+        # Set stack option and disable manual selection (auto-managed)
+        stack_option = stack_option_map.get(workflow_type, "None")
+        self._zstack_panel.set_stack_option(stack_option)
+        self._zstack_panel.set_stack_option_enabled(False)  # Auto-managed
+
+        # Rotational velocity: only for Multi-Angle mode
+        show_rotational = workflow_type == WorkflowType.MULTI_ANGLE
+        self._zstack_panel.set_rotational_velocity_visible(show_rotational)
+
+        # Tile settings: only when Tile type selected
+        show_tiles = workflow_type == WorkflowType.TILE
+        self._zstack_panel.set_tile_settings_visible(show_tiles)
 
     def _on_camera_settings_changed(self, settings: dict) -> None:
         """Handle camera settings change - update Z velocity calculation."""
