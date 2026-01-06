@@ -208,6 +208,7 @@ class ImagePanel(QWidget):
         self._title = title
         self._image: Optional[np.ndarray] = None
         self._pixmap: Optional[QPixmap] = None
+        self._base_pixmap: Optional[QPixmap] = None  # Cached base (image + grid + coords, no selections)
         self._show_grid = True
         self._tiles_x = 0
         self._tiles_y = 0
@@ -303,6 +304,9 @@ class ImagePanel(QWidget):
         self._tiles_x = tiles_x
         self._tiles_y = tiles_y
 
+        # Invalidate cached base pixmap since image/grid changed
+        self._invalidate_base_pixmap()
+
         # Update image label's tile grid for click detection
         self.image_label.set_tile_grid(tiles_x, tiles_y, self._invert_x)
 
@@ -311,13 +315,12 @@ class ImagePanel(QWidget):
             self.image_label.clear()
             return
 
-        # Convert numpy array to QPixmap
-        self._pixmap = self._array_to_pixmap(image)
+        # Build base pixmap with grid overlay
+        self._rebuild_base_pixmap()
 
-        # Draw grid overlay if enabled
-        if self._show_grid and tiles_x > 0 and tiles_y > 0:
-            self._draw_grid_overlay()
-
+        # Draw selections on top
+        self._pixmap = self._base_pixmap.copy()
+        self._draw_selection_overlay()
         self.image_label.setPixmap(self._pixmap)
 
         # Auto-fit to view after a short delay (allows layout to settle)
@@ -337,12 +340,18 @@ class ImagePanel(QWidget):
         """
         self._tile_coords = coords
         self._invert_x = invert_x
+
+        # Invalidate cached base pixmap since coordinates changed
+        self._invalidate_base_pixmap()
+
         # Update image label's tile grid for click detection
         self.image_label.set_tile_grid(self._tiles_x, self._tiles_y, invert_x)
+
         if self._image is not None and self._show_grid:
-            # Regenerate pixmap from original image to avoid double-drawing
-            self._pixmap = self._array_to_pixmap(self._image)
-            self._draw_grid_overlay()
+            # Rebuild base pixmap and redraw
+            self._rebuild_base_pixmap()
+            self._pixmap = self._base_pixmap.copy()
+            self._draw_selection_overlay()
             self.image_label.setPixmap(self._pixmap)
 
     def set_tile_results(self, tile_results: List):
@@ -364,13 +373,31 @@ class ImagePanel(QWidget):
         self.selection_changed.emit()
 
     def _redraw_overlay(self):
-        """Redraw the grid and selection overlay."""
+        """Redraw the selection overlay using cached base pixmap (fast path)."""
         if self._image is None:
             return
-        self._pixmap = self._array_to_pixmap(self._image)
-        if self._show_grid and self._tiles_x > 0 and self._tiles_y > 0:
-            self._draw_grid_overlay()
+
+        # Use cached base pixmap if available, otherwise rebuild it
+        if self._base_pixmap is None:
+            self._rebuild_base_pixmap()
+
+        # Copy base pixmap and draw selections on top (fast)
+        self._pixmap = self._base_pixmap.copy()
+        self._draw_selection_overlay()
         self.image_label.setPixmap(self._pixmap)
+
+    def _rebuild_base_pixmap(self):
+        """Rebuild the cached base pixmap (image + grid + coordinates, no selections)."""
+        if self._image is None:
+            return
+        self._base_pixmap = self._array_to_pixmap(self._image)
+        if self._show_grid and self._tiles_x > 0 and self._tiles_y > 0:
+            self._draw_base_overlay()
+        logger.debug(f"Rebuilt base pixmap: {self._base_pixmap.width()}x{self._base_pixmap.height()}")
+
+    def _invalidate_base_pixmap(self):
+        """Invalidate the cached base pixmap (call when image/grid/coords change)."""
+        self._base_pixmap = None
 
     def select_all_tiles(self):
         """Select all tiles."""
@@ -402,12 +429,15 @@ class ImagePanel(QWidget):
     def set_show_grid(self, show: bool):
         """Enable or disable grid overlay."""
         self._show_grid = show
+
+        # Invalidate base pixmap since grid visibility changed
+        self._invalidate_base_pixmap()
+
         if self._image is not None:
-            # Regenerate pixmap from original image
-            self._pixmap = self._array_to_pixmap(self._image)
-            # Draw grid with coordinates if enabled
-            if self._show_grid and self._tiles_x > 0 and self._tiles_y > 0:
-                self._draw_grid_overlay()
+            # Rebuild base pixmap and redraw
+            self._rebuild_base_pixmap()
+            self._pixmap = self._base_pixmap.copy()
+            self._draw_selection_overlay()
             self.image_label.setPixmap(self._pixmap)
 
     def _array_to_pixmap(self, image: np.ndarray) -> QPixmap:
@@ -439,13 +469,13 @@ class ImagePanel(QWidget):
 
         return QPixmap.fromImage(qimg.copy())  # Copy to ensure data persists
 
-    def _draw_grid_overlay(self):
-        """Draw grid lines on the pixmap."""
-        if self._pixmap is None or self._tiles_x <= 0 or self._tiles_y <= 0:
+    def _draw_base_overlay(self):
+        """Draw grid lines and coordinates on the base pixmap (cached, expensive)."""
+        if self._base_pixmap is None or self._tiles_x <= 0 or self._tiles_y <= 0:
             return
 
-        # Create painter
-        painter = QPainter(self._pixmap)
+        # Create painter on base pixmap
+        painter = QPainter(self._base_pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
 
         # Grid line pen
@@ -453,8 +483,8 @@ class ImagePanel(QWidget):
         pen.setWidth(1)
         painter.setPen(pen)
 
-        w = self._pixmap.width()
-        h = self._pixmap.height()
+        w = self._base_pixmap.width()
+        h = self._base_pixmap.height()
         tile_w = w / self._tiles_x
         tile_h = h / self._tiles_y
 
@@ -468,32 +498,6 @@ class ImagePanel(QWidget):
             y = int(i * tile_h)
             painter.drawLine(0, y, w, y)
 
-        # Draw selection highlights
-        if self._selected_tiles:
-            from PyQt5.QtGui import QBrush
-            # Semi-transparent cyan overlay for selected tiles
-            painter.setBrush(QBrush(QColor(0, 255, 255, 80)))
-            # Thick cyan border
-            selection_pen = QPen(QColor(0, 255, 255, 255))
-            selection_pen.setWidth(4)
-            painter.setPen(selection_pen)
-
-            for tile_x_idx, tile_y_idx in self._selected_tiles:
-                # Calculate display position
-                if self._invert_x:
-                    display_x_idx = (self._tiles_x - 1) - tile_x_idx
-                else:
-                    display_x_idx = tile_x_idx
-
-                x_pos = int(display_x_idx * tile_w)
-                y_pos = int(tile_y_idx * tile_h)
-                painter.drawRect(x_pos, y_pos, int(tile_w), int(tile_h))
-
-            # Reset pen for grid lines
-            pen = QPen(QColor(255, 255, 0, 180))
-            pen.setWidth(1)
-            painter.setPen(pen)
-
         # Draw coordinate labels if available
         if self._tile_coords:
             # Calculate font size: 8.5% of tile height (half of previous 17%)
@@ -506,16 +510,10 @@ class ImagePanel(QWidget):
             font.setBold(True)
             painter.setFont(font)
 
-            logger.info(f"LED 2D Overview labels: pixmap={w}x{h}, tiles={self._tiles_x}x{self._tiles_y}, "
-                       f"tile_size={tile_w:.0f}x{tile_h:.0f}px, font={font_pixel_size}px (8.5% of tile_h)")
-
             # Get font metrics
             from PyQt5.QtGui import QFontMetrics
             fm = QFontMetrics(font)
-            ascent = fm.ascent()
             line_height = fm.height()
-
-            logger.info(f"Font metrics: ascent={ascent}, height={line_height}, requested_size={font_pixel_size}")
 
             for coord in self._tile_coords:
                 # Support both formats: (x, y, tile_x_idx, tile_y_idx) or legacy (x, y, z)
@@ -545,9 +543,6 @@ class ImagePanel(QWidget):
                 text2_width = fm.horizontalAdvance(text2)
 
                 # Position: center both lines vertically in tile
-                # Total height = 2 * line_height, centered around tile_center_y
-                # Line 1 baseline: center - line_height/2
-                # Line 2 baseline: center + line_height/2
                 text1_x = int(tile_center_x - text1_width / 2)
                 text2_x = int(tile_center_x - text2_width / 2)
                 text1_y = int(tile_center_y - line_height * 0.1)  # Slightly above center
@@ -557,6 +552,42 @@ class ImagePanel(QWidget):
                 painter.setPen(QColor(255, 255, 255))
                 painter.drawText(text1_x, text1_y, text1)
                 painter.drawText(text2_x, text2_y, text2)
+
+        painter.end()
+
+    def _draw_selection_overlay(self):
+        """Draw selection highlights on the current pixmap (fast, called on every click)."""
+        if self._pixmap is None or self._tiles_x <= 0 or self._tiles_y <= 0:
+            return
+        if not self._selected_tiles:
+            return  # Nothing to draw
+
+        painter = QPainter(self._pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        w = self._pixmap.width()
+        h = self._pixmap.height()
+        tile_w = w / self._tiles_x
+        tile_h = h / self._tiles_y
+
+        from PyQt5.QtGui import QBrush
+        # Semi-transparent cyan overlay for selected tiles
+        painter.setBrush(QBrush(QColor(0, 255, 255, 80)))
+        # Thick cyan border
+        selection_pen = QPen(QColor(0, 255, 255, 255))
+        selection_pen.setWidth(4)
+        painter.setPen(selection_pen)
+
+        for tile_x_idx, tile_y_idx in self._selected_tiles:
+            # Calculate display position
+            if self._invert_x:
+                display_x_idx = (self._tiles_x - 1) - tile_x_idx
+            else:
+                display_x_idx = tile_x_idx
+
+            x_pos = int(display_x_idx * tile_w)
+            y_pos = int(tile_y_idx * tile_h)
+            painter.drawRect(x_pos, y_pos, int(tile_w), int(tile_h))
 
         painter.end()
 
