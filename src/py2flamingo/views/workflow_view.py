@@ -163,6 +163,7 @@ class WorkflowView(QWidget):
 
         # Camera settings (always shown)
         self._camera_panel = CameraPanel()
+        self._camera_panel.settings_changed.connect(self._on_camera_settings_changed)
         container_layout.addWidget(self._camera_panel)
 
         # Type-specific settings (stacked widget)
@@ -199,6 +200,10 @@ class WorkflowView(QWidget):
 
         scroll.setWidget(container)
         layout.addWidget(scroll)
+
+        # Initialize ZStackPanel with current camera frame rate
+        camera_settings = self._camera_panel.get_settings()
+        self._zstack_panel.set_frame_rate(camera_settings['frame_rate'])
 
         return widget
 
@@ -286,6 +291,11 @@ class WorkflowView(QWidget):
 
         self.workflow_type_changed.emit(workflow_type.value)
         self._logger.info(f"Workflow type changed to: {name}")
+
+    def _on_camera_settings_changed(self, settings: dict) -> None:
+        """Handle camera settings change - update Z velocity calculation."""
+        frame_rate = settings.get('frame_rate', 100.0)
+        self._zstack_panel.set_frame_rate(frame_rate)
 
     def _on_start_clicked(self) -> None:
         """Handle start button click."""

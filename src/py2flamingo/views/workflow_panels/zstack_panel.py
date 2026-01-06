@@ -16,6 +16,10 @@ from PyQt5.QtCore import pyqtSignal
 from py2flamingo.models.data.workflow import StackSettings
 
 
+# System limits for Z velocity (from C++ SystemLimits.h)
+Z_VELOCITY_MIN_MM_S = 0.001
+Z_VELOCITY_MAX_MM_S = 1.0
+
 # Stack option values
 STACK_OPTIONS = [
     "None",
@@ -63,6 +67,12 @@ class ZStackPanel(QWidget):
 
         # Get system defaults
         self._default_z_velocity = self._get_default_z_velocity()
+
+        # Frame rate for Z velocity calculation (default 100 fps)
+        self._frame_rate = 100.0
+
+        # Flag to prevent recursive updates
+        self._updating = False
 
         self._setup_ui()
 
@@ -128,24 +138,58 @@ class ZStackPanel(QWidget):
         self._z_range_label.setStyleSheet("font-weight: bold;")
         grid.addWidget(self._z_range_label, 2, 1)
 
-        # Z velocity - uses system default if available
-        grid.addWidget(QLabel("Z Velocity:"), 3, 0)
+        # Frame rate display (read-only, set by CameraPanel)
+        grid.addWidget(QLabel("Frame Rate:"), 3, 0)
+        self._frame_rate_label = QLabel("100.0 fps")
+        self._frame_rate_label.setStyleSheet("color: #666;")
+        self._frame_rate_label.setToolTip("Frame rate from Camera settings")
+        grid.addWidget(self._frame_rate_label, 3, 1)
+
+        # Z velocity row with auto-calculate checkbox
+        z_vel_layout = QHBoxLayout()
+        z_vel_layout.setContentsMargins(0, 0, 0, 0)
+        z_vel_layout.setSpacing(8)
+
         self._z_velocity = QDoubleSpinBox()
-        self._z_velocity.setRange(0.01, 2.0)
+        self._z_velocity.setRange(0.001, 2.0)
         self._z_velocity.setValue(self._default_z_velocity)
-        self._z_velocity.setDecimals(2)
-        self._z_velocity.setSingleStep(0.05)
+        self._z_velocity.setDecimals(4)
+        self._z_velocity.setSingleStep(0.01)
         self._z_velocity.setSuffix(" mm/s")
-        self._z_velocity.valueChanged.connect(self._on_settings_changed)
-        grid.addWidget(self._z_velocity, 3, 1)
+        self._z_velocity.valueChanged.connect(self._on_velocity_changed)
+        z_vel_layout.addWidget(self._z_velocity)
+
+        self._auto_velocity = QCheckBox("Auto")
+        self._auto_velocity.setChecked(True)
+        self._auto_velocity.setToolTip(
+            "Auto-calculate Z velocity from plane spacing and frame rate.\n"
+            "Formula: Z_velocity = (Z_step / 1000) × Frame_rate"
+        )
+        self._auto_velocity.stateChanged.connect(self._on_auto_velocity_changed)
+        z_vel_layout.addWidget(self._auto_velocity)
+
+        grid.addWidget(QLabel("Z Velocity:"), 4, 0)
+        grid.addLayout(z_vel_layout, 4, 1)
+
+        # Velocity warning label (hidden by default)
+        self._velocity_warning = QLabel("")
+        self._velocity_warning.setStyleSheet("color: #856404; font-size: 11px;")
+        self._velocity_warning.setWordWrap(True)
+        self._velocity_warning.setVisible(False)
+        grid.addWidget(self._velocity_warning, 5, 0, 1, 2)
+
+        # Apply initial auto-calculation state
+        self._z_velocity.setReadOnly(True)
+        self._z_velocity.setStyleSheet("QDoubleSpinBox { background-color: #f0f0f0; }")
+        self._update_auto_velocity()
 
         # Stack option dropdown
-        grid.addWidget(QLabel("Stack Option:"), 4, 0)
+        grid.addWidget(QLabel("Stack Option:"), 6, 0)
         self._stack_option = QComboBox()
         self._stack_option.addItems(STACK_OPTIONS)
         self._stack_option.setCurrentText("None")
         self._stack_option.currentTextChanged.connect(self._on_stack_option_changed)
-        grid.addWidget(self._stack_option, 4, 1)
+        grid.addWidget(self._stack_option, 6, 1)
 
         # Tile settings (only visible when Tile option selected)
         self._tile_widget = QWidget()
@@ -167,10 +211,10 @@ class ZStackPanel(QWidget):
         tile_layout.addWidget(self._tiles_y, 1, 1)
 
         self._tile_widget.setVisible(False)
-        grid.addWidget(self._tile_widget, 5, 0, 1, 2)
+        grid.addWidget(self._tile_widget, 7, 0, 1, 2)
 
         # Rotational stage velocity
-        grid.addWidget(QLabel("Rotational Velocity:"), 6, 0)
+        grid.addWidget(QLabel("Rotational Velocity:"), 8, 0)
         self._rotational_velocity = QDoubleSpinBox()
         self._rotational_velocity.setRange(0.0, 10.0)
         self._rotational_velocity.setValue(0.0)
@@ -178,13 +222,13 @@ class ZStackPanel(QWidget):
         self._rotational_velocity.setSingleStep(0.1)
         self._rotational_velocity.setSuffix(" °/s")
         self._rotational_velocity.valueChanged.connect(self._on_settings_changed)
-        grid.addWidget(self._rotational_velocity, 6, 1)
+        grid.addWidget(self._rotational_velocity, 8, 1)
 
         # Estimated acquisition time
-        grid.addWidget(QLabel("Est. Time:"), 7, 0)
+        grid.addWidget(QLabel("Est. Time:"), 9, 0)
         self._time_label = QLabel("~5.0 s")
         self._time_label.setStyleSheet("color: #666;")
-        grid.addWidget(self._time_label, 7, 1)
+        grid.addWidget(self._time_label, 9, 1)
 
         # Options row
         opts_layout = QHBoxLayout()
@@ -196,7 +240,7 @@ class ZStackPanel(QWidget):
         opts_layout.addWidget(self._return_to_start)
 
         opts_layout.addStretch()
-        grid.addLayout(opts_layout, 8, 0, 1, 2)
+        grid.addLayout(opts_layout, 10, 0, 1, 2)
 
         group.setLayout(grid)
         layout.addWidget(group)
@@ -219,9 +263,93 @@ class ZStackPanel(QWidget):
 
     def _on_settings_changed(self) -> None:
         """Handle any settings change."""
+        # Update auto-velocity if enabled
+        if self._auto_velocity.isChecked():
+            self._update_auto_velocity()
         self._update_calculations()
         settings = self.get_settings()
         self.settings_changed.emit(settings)
+
+    def _on_velocity_changed(self) -> None:
+        """Handle manual velocity change."""
+        if self._updating:
+            return
+        self._update_calculations()
+        settings = self.get_settings()
+        self.settings_changed.emit(settings)
+
+    def _on_auto_velocity_changed(self, state: int) -> None:
+        """Handle auto-velocity checkbox change."""
+        is_auto = state != 0
+
+        # Update UI state
+        self._z_velocity.setReadOnly(is_auto)
+        if is_auto:
+            self._z_velocity.setStyleSheet("QDoubleSpinBox { background-color: #f0f0f0; }")
+            self._update_auto_velocity()
+        else:
+            self._z_velocity.setStyleSheet("")
+
+        self._on_settings_changed()
+
+    def _update_auto_velocity(self) -> None:
+        """Calculate and set Z velocity from plane spacing and frame rate.
+
+        Formula: Z_velocity (mm/s) = (Z_step_um / 1000) × Frame_rate (fps)
+        """
+        if not self._auto_velocity.isChecked():
+            return
+
+        # Calculate Z velocity
+        z_step_mm = self._z_step.value() / 1000.0  # µm to mm
+        z_velocity = z_step_mm * self._frame_rate
+
+        # Check against limits and show warning if clamped
+        warning_msg = ""
+        original_velocity = z_velocity
+
+        if z_velocity < Z_VELOCITY_MIN_MM_S:
+            z_velocity = Z_VELOCITY_MIN_MM_S
+            warning_msg = f"Calculated velocity ({original_velocity:.4f} mm/s) below minimum. Using {Z_VELOCITY_MIN_MM_S} mm/s."
+        elif z_velocity > Z_VELOCITY_MAX_MM_S:
+            z_velocity = Z_VELOCITY_MAX_MM_S
+            warning_msg = f"Calculated velocity ({original_velocity:.4f} mm/s) above maximum. Using {Z_VELOCITY_MAX_MM_S} mm/s."
+
+        # Update warning display
+        if warning_msg:
+            self._velocity_warning.setText(warning_msg)
+            self._velocity_warning.setVisible(True)
+        else:
+            self._velocity_warning.setVisible(False)
+
+        # Update velocity spinbox without triggering recursive updates
+        self._updating = True
+        self._z_velocity.setValue(z_velocity)
+        self._updating = False
+
+    def set_frame_rate(self, frame_rate: float) -> None:
+        """Set frame rate for Z velocity calculation.
+
+        This should be called when CameraPanel exposure time changes.
+
+        Args:
+            frame_rate: Frame rate in fps (calculated from exposure time)
+        """
+        self._frame_rate = frame_rate
+        self._frame_rate_label.setText(f"{frame_rate:.1f} fps")
+
+        # Recalculate velocity if in auto mode
+        if self._auto_velocity.isChecked():
+            self._update_auto_velocity()
+            self._update_calculations()
+
+    def get_frame_rate(self) -> float:
+        """Get current frame rate.
+
+        Returns:
+            Frame rate in fps
+        """
+        return self._frame_rate
 
     def _update_calculations(self) -> None:
         """Update calculated values (Z range, time estimate)."""

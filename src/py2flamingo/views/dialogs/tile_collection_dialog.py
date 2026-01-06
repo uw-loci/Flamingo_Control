@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 
 from py2flamingo.views.workflow_panels import (
-    IlluminationPanel, ZStackPanel, SavePanel
+    IlluminationPanel, ZStackPanel, SavePanel, CameraPanel
 )
 from py2flamingo.models.data.workflow import WorkflowType, Workflow, StackSettings
 from py2flamingo.models.microscope import Position
@@ -90,10 +90,19 @@ class TileCollectionDialog(QDialog):
         self._illumination_panel = IlluminationPanel(app=self._app)
         container_layout.addWidget(self._illumination_panel)
 
+        # Camera panel for exposure/frame rate settings
+        self._camera_panel = CameraPanel()
+        self._camera_panel.settings_changed.connect(self._on_camera_settings_changed)
+        container_layout.addWidget(self._camera_panel)
+
         # Z-Stack panel (shown only for Z-Stack type) - pass app for system defaults
         self._zstack_panel = ZStackPanel(app=self._app)
         self._zstack_panel.setVisible(False)
         container_layout.addWidget(self._zstack_panel)
+
+        # Initialize Z velocity with current frame rate
+        camera_settings = self._camera_panel.get_settings()
+        self._zstack_panel.set_frame_rate(camera_settings['frame_rate'])
 
         # Save panel - pass app for system storage location
         self._save_panel = SavePanel(app=self._app)
@@ -197,6 +206,11 @@ class TileCollectionDialog(QDialog):
             self._workflow_type = WorkflowType.ZSTACK
             self._type_description.setText("Z-stack using full bounding box Z range")
             self._zstack_panel.setVisible(True)
+
+    def _on_camera_settings_changed(self, settings: dict):
+        """Handle camera settings change - update Z velocity calculation."""
+        frame_rate = settings.get('frame_rate', 100.0)
+        self._zstack_panel.set_frame_rate(frame_rate)
 
     def _on_create_workflows(self):
         """Create and execute workflows for selected tiles."""
@@ -311,6 +325,11 @@ class TileCollectionDialog(QDialog):
         """
         lines = ["<Workflow Settings>"]
 
+        # Get camera settings
+        camera_settings = self._camera_panel.get_settings()
+        exposure_us = camera_settings['exposure_us']
+        frame_rate = camera_settings['frame_rate']
+
         # Experiment Settings
         lines.append("    <Experiment Settings>")
 
@@ -318,8 +337,8 @@ class TileCollectionDialog(QDialog):
         plane_spacing = stack.z_step_um if stack else 1.0
 
         lines.append(f"    Plane spacing (um) = {plane_spacing}")
-        lines.append("    Frame rate (f/s) = 100.0")
-        lines.append("    Exposure time (us) = 10000")
+        lines.append(f"    Frame rate (f/s) = {frame_rate:.4f}")
+        lines.append(f"    Exposure time (us) = {exposure_us}")
         lines.append("    Duration (dd:hh:mm:ss) = 00:00:00:01")
         lines.append("    Interval (dd:hh:mm:ss) = 00:00:00:01")
         lines.append(f"    Sample = {name}")
@@ -339,10 +358,10 @@ class TileCollectionDialog(QDialog):
         # Camera Settings
         lines.append("")
         lines.append("    <Camera Settings>")
-        lines.append("    Exposure time (us) = 10000")
-        lines.append("    Frame rate (f/s) = 100.0")
-        lines.append("    AOI width = 2048")
-        lines.append("    AOI height = 2048")
+        lines.append(f"    Exposure time (us) = {exposure_us}")
+        lines.append(f"    Frame rate (f/s) = {frame_rate:.4f}")
+        lines.append(f"    AOI width = {camera_settings['aoi_width']}")
+        lines.append(f"    AOI height = {camera_settings['aoi_height']}")
         lines.append("    </Camera Settings>")
 
         # Stack Settings
