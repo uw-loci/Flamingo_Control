@@ -42,13 +42,14 @@ Migration from Legacy Code:
     connection_manager.send_workflow(data)    # REMOVED
     workflow_service.run_workflow(wf, conn)   # DEPRECATED - raises error
 
-    # New way - use WorkflowTransmissionService (single funnel point):
-    from py2flamingo.services import WorkflowTransmissionService
+    # New way - use MVCWorkflowService with WorkflowTextFormatter:
+    from py2flamingo.services import MVCWorkflowService
+    from py2flamingo.utils.workflow_parser import WorkflowTextFormatter
 
-    transmission_service = WorkflowTransmissionService(connection_service)
-    success, msg = transmission_service.execute_workflow_from_dict(workflow_dict)
-    success, msg = transmission_service.execute_workflow_from_file(file_path)
-    success, msg = transmission_service.execute_workflow_from_text(workflow_text)
+    # Convert dict to text and send
+    formatter = WorkflowTextFormatter()
+    workflow_bytes = formatter.format_to_bytes(workflow_dict)
+    workflow_service.start_workflow(workflow_bytes)
 
     # Or through the WorkflowController (recommended for UI):
     workflow_controller.start_workflow_from_ui(workflow, workflow_dict)

@@ -59,32 +59,35 @@ Multiple code paths existed for sending workflows to the microscope:
 This made maintenance difficult and risked inconsistent behavior.
 
 ### Solution
-Created `WorkflowTransmissionService` as the **single funnel point** for all workflow transmission.
+Simplified architecture using existing `MVCWorkflowService` for sending workflows,
+with a new `WorkflowTextFormatter` utility for dict-to-text conversion.
 
 ### New Architecture
 
 ```
-All Callers → WorkflowTransmissionService → WorkflowCommand → connection.send_command()
+All Callers → WorkflowTextFormatter → MVCWorkflowService.start_workflow() → WorkflowCommand → connection.send_command()
 ```
 
-#### WorkflowTransmissionService API
-- `execute_workflow_from_dict(workflow_dict)` - Execute from UI dictionary
-- `execute_workflow_from_file(file_path)` - Execute from file path
-- `execute_workflow_from_text(workflow_text)` - Execute from text content
-- `execute_workflow(workflow)` - Execute from Workflow model
+#### MVCWorkflowService API
+- `start_workflow(workflow_bytes)` - Send workflow bytes to microscope
 - `stop_workflow()` - Stop running workflow
-- `is_executing` - Property to check execution status
+- `get_workflow_status()` - Query workflow status
+
+#### WorkflowTextFormatter API
+- `format(workflow_dict)` - Convert dict to workflow text
+- `format_to_bytes(workflow_dict)` - Convert dict to UTF-8 bytes
 
 ### Files Changed (Consolidation)
-- `services/workflow_transmission_service.py` - NEW single funnel service
-- `services/__init__.py` - Added export
-- `controllers/workflow_controller.py` - Updated to use transmission service
-- `application.py` - Creates and injects transmission service
+- `utils/workflow_parser.py` - Added WorkflowTextFormatter class and dict_to_workflow_text function
+- `utils/__init__.py` - Added exports for new formatter
+- `controllers/workflow_controller.py` - Updated to use MVCWorkflowService + WorkflowTextFormatter
+- `application.py` - Simplified to pass MVCWorkflowService directly to WorkflowController
 - `services/connection_service.py` - Removed legacy `send_workflow` method
 - `services/connection_manager.py` - Removed legacy `send_workflow` method
 - `services/workflow_service.py` - `run_workflow` now raises DeprecationWarning
-- `controllers/multi_angle_collection.py` - Updated to use transmission service
+- `controllers/multi_angle_collection.py` - Updated to use MVCWorkflowService + WorkflowTextFormatter
 - `workflows/__init__.py` - Updated migration documentation
+- `services/workflow_transmission_service.py` - REMOVED (functionality moved to formatter + MVCWorkflowService)
 
 ### Migration Guide
 
@@ -97,29 +100,33 @@ workflow_service.run_workflow(wf, conn)   # DEPRECATED - raises error
 
 **After:**
 ```python
-from py2flamingo.services import WorkflowTransmissionService
+from py2flamingo.services import MVCWorkflowService
+from py2flamingo.utils.workflow_parser import WorkflowTextFormatter
 
-transmission_service = WorkflowTransmissionService(connection_service)
-success, msg = transmission_service.execute_workflow_from_dict(workflow_dict)
+formatter = WorkflowTextFormatter()
+workflow_bytes = formatter.format_to_bytes(workflow_dict)
+workflow_service.start_workflow(workflow_bytes)
 ```
 
 ### Notes
 - `TCPClient.send_workflow()` retained for standalone MinimalGUI tool
-- TileCollectionDialog execution path now goes through WorkflowController which uses transmission service
+- TileCollectionDialog execution path now goes through WorkflowController which uses MVCWorkflowService
 
 ## Testing
 
 Verified core imports work correctly:
 ```
-WorkflowTransmissionService imported successfully
-WorkflowController imported successfully
+✓ WorkflowTextFormatter imports successfully
+✓ MVCWorkflowService imports successfully
+✓ WorkflowController imports successfully
+✓ WorkflowTextFormatter.format() works - generated 1757 chars
+
 All core imports successful!
 ```
 
 ## Files Summary
 
-### New Files (4)
-- `services/workflow_transmission_service.py`
+### New Files (3)
 - `views/dialogs/advanced_camera_dialog.py`
 - `views/dialogs/advanced_illumination_dialog.py`
 - `views/dialogs/advanced_save_dialog.py`
@@ -132,6 +139,8 @@ All core imports successful!
 - `services/connection_manager.py`
 - `services/connection_service.py`
 - `services/workflow_service.py`
+- `utils/workflow_parser.py` - Added WorkflowTextFormatter
+- `utils/__init__.py` - Added exports
 - `views/dialogs/__init__.py`
 - `views/dialogs/tile_collection_dialog.py`
 - `views/workflow_panels/camera_panel.py`
@@ -140,3 +149,6 @@ All core imports successful!
 - `views/workflow_panels/zstack_panel.py`
 - `views/workflow_view.py`
 - `workflows/__init__.py`
+
+### Removed Files (1)
+- `services/workflow_transmission_service.py` - Simplified to use MVCWorkflowService + WorkflowTextFormatter

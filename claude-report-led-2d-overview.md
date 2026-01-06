@@ -463,36 +463,56 @@ def _update_display_with_selections(self):
     self.setPixmap(base)
 ```
 
-### 4. Start Scan Button Feedback (2026-01-06)
+### 4. Start Scan Button with Progress Percentage (2026-01-06)
 
 **Problem:** After clicking "Start Scan", there was no visual feedback that the scan was running. Users had no indication that things were working until results appeared.
 
-**Solution:** Button now changes state during scan execution:
+**Solution:** Button now shows real-time progress percentage during scan:
 
 | State | Button Text | Color | Enabled |
 |-------|-------------|-------|---------|
 | Ready | "Start Scan" | Green (#4CAF50) | Yes |
-| Running | "In Progress..." | Amber (#f1c21b) | No |
+| Running | "In Progress... 0%" → "In Progress... 100%" | Amber (#f1c21b) | No |
 | Complete | "Start Scan" | Green (#4CAF50) | Re-validated |
 
 **Implementation:**
+
+The dialog connects to the workflow's `tile_completed` signal which provides progress info:
+
 ```python
-def _set_scan_in_progress(self, in_progress: bool) -> None:
+# Connect to workflow progress signal
+self._workflow.tile_completed.connect(self._on_tile_completed)
+
+def _on_tile_completed(self, rotation_idx: int, tile_idx: int, total_tiles: int) -> None:
+    """Handle tile completion - update progress display."""
+    # Get actual number of rotations (1 if tip not calibrated, 2 otherwise)
+    num_rotations = 2
+    if self._workflow and hasattr(self._workflow, '_rotation_angles'):
+        num_rotations = len(self._workflow._rotation_angles)
+
+    # Calculate overall progress
+    tiles_done = rotation_idx * total_tiles + tile_idx + 1
+    total_all_rotations = total_tiles * num_rotations
+    percent = int((tiles_done / total_all_rotations) * 100)
+    self._set_scan_in_progress(True, percent)
+
+def _set_scan_in_progress(self, in_progress: bool, percent: int = 0) -> None:
     """Update button appearance to reflect scan state."""
     if in_progress:
-        self.start_btn.setText("In Progress...")
-        self.start_btn.setEnabled(False)
+        self.start_btn.setText(f"In Progress... {percent}%")
         self.start_btn.setStyleSheet(
-            f"QPushButton {{ background-color: {WARNING_COLOR}; color: black; "
-            "font-weight: bold; padding: 8px 16px; }}"
+            f"QPushButton {{ background-color: {WARNING_COLOR}; ... }}"
         )
     else:
         self.start_btn.setText("Start Scan")
-        # Restore green styling and re-validate
         self._update_start_button_state()
 ```
 
-Pattern mirrors the Sample View's "Start Live" / "Stop Live" toggle button.
+**Key details:**
+- Uses existing `tile_completed` signal from workflow (no workflow changes needed)
+- Correctly handles 1 or 2 rotations based on tip calibration status
+- Percentage updates after each tile completes
+- Pattern mirrors Sample View's "Start Live" / "Stop Live" toggle button
 
 ---
 

@@ -6,53 +6,60 @@ Workflow Controller for Flamingo MVC Architecture.
 Orchestrates workflow operations between UI and service layer.
 Handles user actions related to workflow execution.
 
-All workflow execution goes through WorkflowOrchestrator - the single funnel
-point for workflow operations.
+Uses MVCWorkflowService for sending workflows to the microscope.
 """
 
 import logging
 from typing import Tuple, Dict, Any, List, Optional, TYPE_CHECKING
 from pathlib import Path
+from datetime import datetime
 
 from ..models import ConnectionModel, ConnectionState, WorkflowModel
+from ..utils.workflow_parser import WorkflowTextFormatter
 
 if TYPE_CHECKING:
-    from ..services import WorkflowTransmissionService
+    from ..services import MVCWorkflowService
 
 
 class WorkflowController:
     """
     Controller for workflow operations.
 
-    Orchestrates workflow UI interactions with the WorkflowTransmissionService.
+    Orchestrates workflow UI interactions with MVCWorkflowService.
     Validates workflow files before sending and provides user-friendly feedback.
 
-    All workflow execution is delegated to WorkflowTransmissionService to ensure
-    a single code path for workflow operations.
+    Uses MVCWorkflowService for the actual workflow transmission to the microscope.
 
     Attributes:
-        _transmission_service: WorkflowTransmissionService for workflow operations
+        _workflow_service: MVCWorkflowService for sending workflows
         _connection_model: Connection model to check connection status
+        _workflow_model: Optional workflow model for state tracking
+        _text_formatter: WorkflowTextFormatter for dict-to-text conversion
         _logger: Logger instance
         _current_workflow_path: Path to currently loaded workflow
     """
 
-    def __init__(self, transmission_service: 'WorkflowTransmissionService', connection_model: ConnectionModel,
-                 workflow_model: Optional[WorkflowModel] = None):
+    def __init__(self, workflow_service: 'MVCWorkflowService', connection_model: ConnectionModel,
+                 workflow_model: Optional[WorkflowModel] = None,
+                 workflows_dir: Optional[Path] = None):
         """
         Initialize controller with dependencies.
 
         Args:
-            transmission_service: WorkflowTransmissionService for workflow operations
+            workflow_service: MVCWorkflowService for sending workflows
             connection_model: Connection model to check connection status
             workflow_model: Optional workflow model for state tracking
+            workflows_dir: Directory for saving workflow files (default: "workflows")
         """
-        self._transmission_service = transmission_service
+        self._workflow_service = workflow_service
         self._connection_model = connection_model
         self._workflow_model = workflow_model
+        self._workflows_dir = workflows_dir or Path("workflows")
+        self._text_formatter = WorkflowTextFormatter()
         self._logger = logging.getLogger(__name__)
         self._current_workflow_path: Optional[Path] = None
         self._current_workflow_data: Optional[bytes] = None  # Cache workflow data
+        self._is_executing = False
 
     def load_workflow(self, file_path: str) -> Tuple[bool, str]:
         """
@@ -129,12 +136,12 @@ class WorkflowController:
         if not self._current_workflow_path or not self._current_workflow_data:
             return (False, "No workflow loaded. Load a workflow file first.")
 
-        # Attempt to start workflow via orchestrator
+        # Attempt to start workflow via workflow service
         try:
-            workflow_text = self._current_workflow_data.decode('utf-8')
-            success, message = self._transmission_service.execute_workflow_from_text(workflow_text)
+            success = self._workflow_service.start_workflow(self._current_workflow_data)
 
             if success:
+                self._is_executing = True
                 # Mark workflow as started in model
                 if self._workflow_model:
                     self._workflow_model.mark_started()
@@ -142,10 +149,10 @@ class WorkflowController:
                 self._logger.info(f"Started workflow: {self._current_workflow_path.name}")
                 return (True, f"Workflow started: {self._current_workflow_path.name}")
             else:
-                return (False, message)
+                return (False, "Failed to start workflow")
 
-        except ConnectionError:
-            self._logger.error("Not connected when starting workflow")
+        except RuntimeError as e:
+            self._logger.error(f"Not connected when starting workflow: {e}")
             return (False, "Connection lost. Reconnect before starting workflow.")
 
         except ValueError as e:
@@ -170,11 +177,12 @@ class WorkflowController:
         if not self._is_connected():
             return (False, "Not connected to server")
 
-        # Attempt to stop workflow via orchestrator
+        # Attempt to stop workflow via workflow service
         try:
-            success, message = self._transmission_service.stop_workflow()
+            success = self._workflow_service.stop_workflow()
 
             if success:
+                self._is_executing = False
                 # Mark workflow as completed in model
                 if self._workflow_model:
                     self._workflow_model.mark_completed()
@@ -182,10 +190,10 @@ class WorkflowController:
                 self._logger.info("Stopped workflow")
                 return (True, "Workflow stopped successfully")
             else:
-                return (False, message)
+                return (False, "Failed to stop workflow")
 
-        except ConnectionError:
-            self._logger.error("Not connected when stopping workflow")
+        except RuntimeError as e:
+            self._logger.error(f"Not connected when stopping workflow: {e}")
             return (False, "Connection lost. Cannot stop workflow.")
 
         except Exception as e:
@@ -283,15 +291,17 @@ class WorkflowController:
         else:
             return (True, [])
 
-    def start_workflow_from_ui(self, workflow, workflow_dict: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
+    def start_workflow_from_ui(self, workflow, workflow_dict: Optional[Dict[str, Any]] = None,
+                               save_to_disk: bool = True) -> Tuple[bool, str]:
         """
         Start workflow from UI-built Workflow object.
 
-        Uses WorkflowOrchestrator as the single funnel point for workflow execution.
+        Uses MVCWorkflowService for sending workflows to the microscope.
 
         Args:
             workflow: Workflow object from UI (or None if using workflow_dict)
             workflow_dict: Optional complete workflow dictionary from view
+            save_to_disk: Whether to save workflow file to disk before sending
 
         Returns:
             Tuple of (success, message)
@@ -301,19 +311,31 @@ class WorkflowController:
             return (False, "Must connect to server before starting workflow")
 
         try:
-            # Use orchestrator to execute workflow
+            # Convert workflow dict to bytes
             if workflow_dict is not None:
-                # Execute from dict (most complete data from UI)
-                success, message = self._transmission_service.execute_workflow_from_dict(
-                    workflow_dict, save_to_disk=True
-                )
+                # Use the text formatter to convert dict to text
+                workflow_bytes = self._text_formatter.format_to_bytes(workflow_dict)
+            elif hasattr(workflow, 'to_dict'):
+                # Convert Workflow model to dict first
+                workflow_dict = workflow.to_dict()
+                workflow_bytes = self._text_formatter.format_to_bytes(workflow_dict)
             else:
-                # Execute from Workflow model
-                success, message = self._transmission_service.execute_workflow(
-                    workflow, save_to_disk=True
-                )
+                return (False, "Invalid workflow: no dict or to_dict method")
+
+            # Optionally save to disk
+            if save_to_disk:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"workflow_{timestamp}.txt"
+                file_path = self._workflows_dir / filename
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_bytes(workflow_bytes)
+                self._logger.info(f"Saved workflow to: {file_path}")
+
+            # Send workflow to microscope
+            success = self._workflow_service.start_workflow(workflow_bytes)
 
             if success:
+                self._is_executing = True
                 # Mark workflow as started in model
                 if self._workflow_model:
                     self._workflow_model.mark_started()
@@ -322,10 +344,10 @@ class WorkflowController:
                 self._logger.info(f"Started workflow from UI: {workflow_name}")
                 return (True, f"Workflow started: {workflow_name}")
             else:
-                return (False, message)
+                return (False, "Failed to start workflow")
 
-        except ConnectionError:
-            self._logger.error("Not connected when starting workflow")
+        except RuntimeError as e:
+            self._logger.error(f"Not connected when starting workflow: {e}")
             return (False, "Connection lost. Reconnect before starting workflow.")
 
         except Exception as e:
@@ -341,3 +363,8 @@ class WorkflowController:
         """
         status = self._connection_model.status
         return status.state == ConnectionState.CONNECTED
+
+    @property
+    def is_executing(self) -> bool:
+        """Check if a workflow is currently executing."""
+        return self._is_executing

@@ -152,6 +152,8 @@ class LED2DOverviewDialog(QDialog):
             "padding: 8px 16px; }"
             "QPushButton:disabled { background-color: #ccc; }"
         )
+        # Set minimum width to fit "In Progress... 100%" without layout shifts
+        self.start_btn.setMinimumWidth(160)
         self.start_btn.clicked.connect(self._on_start_clicked)
         button_layout.addWidget(self.start_btn)
 
@@ -813,21 +815,21 @@ class LED2DOverviewDialog(QDialog):
         else:
             self.start_btn.setToolTip("Start the LED 2D Overview scan")
 
-    def _set_scan_in_progress(self, in_progress: bool) -> None:
+    def _set_scan_in_progress(self, in_progress: bool, percent: int = 0) -> None:
         """Update button appearance to reflect scan state.
 
         Args:
             in_progress: True if scan is running, False when complete
+            percent: Progress percentage (0-100) to display when in_progress=True
         """
         if in_progress:
-            self.start_btn.setText("In Progress...")
+            self.start_btn.setText(f"In Progress... {percent}%")
             self.start_btn.setEnabled(False)
             self.start_btn.setStyleSheet(
                 f"QPushButton {{ background-color: {WARNING_COLOR}; color: black; "
                 "font-weight: bold; padding: 8px 16px; }}"
-                "QPushButton:disabled { background-color: #ccc; }"
             )
-            self.start_btn.setToolTip("Scan is in progress...")
+            self.start_btn.setToolTip(f"Scan is in progress... {percent}% complete")
         else:
             self.start_btn.setText("Start Scan")
             self.start_btn.setStyleSheet(
@@ -837,6 +839,26 @@ class LED2DOverviewDialog(QDialog):
             )
             # Re-validate to set proper enabled state and tooltip
             self._update_start_button_state()
+
+    def _on_tile_completed(self, rotation_idx: int, tile_idx: int, total_tiles: int) -> None:
+        """Handle tile completion - update progress display.
+
+        Args:
+            rotation_idx: Current rotation index (0 or 1)
+            tile_idx: Current tile index within rotation
+            total_tiles: Total tiles per rotation
+        """
+        # Get actual number of rotations from workflow (1 if tip not calibrated, 2 otherwise)
+        num_rotations = 2  # Default assumption
+        if self._workflow and hasattr(self._workflow, '_rotation_angles'):
+            num_rotations = len(self._workflow._rotation_angles)
+
+        # Calculate overall progress across all rotations
+        # rotation_idx is 0-based, tile_idx is 0-based within rotation
+        tiles_done = rotation_idx * total_tiles + tile_idx + 1
+        total_all_rotations = total_tiles * num_rotations
+        percent = int((tiles_done / total_all_rotations) * 100)
+        self._set_scan_in_progress(True, percent)
 
     def _get_configuration(self) -> Optional[ScanConfiguration]:
         """Get the current scan configuration.
@@ -960,6 +982,7 @@ class LED2DOverviewDialog(QDialog):
             self._workflow.scan_completed.connect(self._on_workflow_completed)
             self._workflow.scan_cancelled.connect(self._on_workflow_completed)
             self._workflow.scan_error.connect(self._on_workflow_error)
+            self._workflow.tile_completed.connect(self._on_tile_completed)
 
             # Don't close dialog - user might want to run again
             self._workflow.start()

@@ -12,8 +12,8 @@ import numpy as np
 from ..models.microscope import Position
 from ..models.collection import MultiAngleCollection, CollectionParameters
 from ..controllers.microscope_controller import MicroscopeController
-from ..services.workflow_service import WorkflowService
-from ..services.workflow_transmission_service import WorkflowTransmissionService
+from ..services.workflow_service import WorkflowService, MVCWorkflowService
+from ..utils.workflow_parser import WorkflowTextFormatter
 import py2flamingo.utils.calculations as calc
 import py2flamingo.functions.text_file_parsing as txt
 
@@ -28,7 +28,7 @@ class MultiAngleController:
     def __init__(self,
                  microscope_controller: MicroscopeController,
                  workflow_service: WorkflowService,
-                 transmission_service: WorkflowTransmissionService,
+                 mvc_workflow_service: MVCWorkflowService,
                  connection_service=None):
         """
         Initialize multi-angle controller.
@@ -36,14 +36,16 @@ class MultiAngleController:
         Args:
             microscope_controller: Main microscope controller
             workflow_service: Workflow service (for validation)
-            transmission_service: WorkflowTransmissionService for sending workflows
+            mvc_workflow_service: MVCWorkflowService for sending workflows
             connection_service: Optional connection service for microscope queries
         """
         self.microscope = microscope_controller
         self.workflow_service = workflow_service
-        self.transmission_service = transmission_service
+        self._mvc_workflow_service = mvc_workflow_service
+        self._text_formatter = WorkflowTextFormatter()
         self.connection_service = connection_service
         self.logger = logging.getLogger(__name__)
+        self._is_executing = False
         
         # Current collection
         self.current_collection: Optional[MultiAngleCollection] = None
@@ -229,10 +231,12 @@ class MultiAngleController:
             f"{sample_name}_angle_{int(angle):03d}"
         )
         
-        # Run workflow via transmission service
-        success, msg = self.transmission_service.execute_workflow_from_dict(angle_workflow)
+        # Convert dict to bytes and send workflow via MVC workflow service
+        workflow_bytes = self._text_formatter.format_to_bytes(angle_workflow)
+        success = self._mvc_workflow_service.start_workflow(workflow_bytes)
         if not success:
-            raise RuntimeError(f"Failed to start workflow: {msg}")
+            raise RuntimeError("Failed to start workflow")
+        self._is_executing = True
         
         # Wait for completion
         self._wait_for_workflow_completion()
@@ -252,14 +256,22 @@ class MultiAngleController:
         elapsed = 0
 
         while elapsed < timeout_seconds:
-            # Check if transmission service indicates workflow is still executing
-            if not self.transmission_service.is_executing:
-                self.logger.info("Workflow completed")
-                return
+            # Check workflow status from microscope
+            try:
+                status = self._mvc_workflow_service.get_workflow_status()
+                # If status indicates completion, exit
+                if 'idle' in status.lower() or 'complete' in status.lower():
+                    self._is_executing = False
+                    self.logger.info("Workflow completed")
+                    return
+            except Exception as e:
+                self.logger.debug(f"Error checking workflow status: {e}")
+                # Continue polling
 
             time.sleep(poll_interval)
             elapsed += poll_interval
 
+        self._is_executing = False
         raise TimeoutError("Workflow timed out waiting for completion")
     
     def get_collection_status(self) -> dict:
@@ -287,9 +299,10 @@ class MultiAngleController:
         """Cancel current collection."""
         if self.current_collection:
             self.logger.info("Cancelling multi-angle collection")
-            
-            # Stop current workflow via transmission service
-            self.transmission_service.stop_workflow()
-            
+
+            # Stop current workflow via MVC workflow service
+            self._mvc_workflow_service.stop_workflow()
+            self._is_executing = False
+
             # Mark collection as cancelled
             self.current_collection = None

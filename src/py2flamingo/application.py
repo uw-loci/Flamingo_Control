@@ -169,13 +169,6 @@ class FlamingoApplication(QObject):
             self.connection_service
         )
 
-        # Create WorkflowTransmissionService - the single funnel point for all workflow operations
-        from py2flamingo.services import WorkflowTransmissionService
-        self.workflow_transmission_service = WorkflowTransmissionService(
-            self.connection_service,
-            workflows_dir=Path("workflows")
-        )
-
         self.status_service = StatusService(
             self.connection_service
         )
@@ -201,7 +194,7 @@ class FlamingoApplication(QObject):
         )
 
         self.workflow_controller = WorkflowController(
-            self.workflow_transmission_service,
+            self.workflow_service,
             self.connection_model,
             self.workflow_model
         )
