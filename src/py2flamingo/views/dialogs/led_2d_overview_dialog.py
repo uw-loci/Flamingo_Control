@@ -121,16 +121,16 @@ class LED2DOverviewDialog(QDialog):
         layout.setSpacing(12)
 
         # Bounding Points group
-        points_group = self._create_points_group()
-        layout.addWidget(points_group)
+        self.points_group = self._create_points_group()
+        layout.addWidget(self.points_group)
 
         # Scan Settings group
         settings_group = self._create_settings_group()
         layout.addWidget(settings_group)
 
         # Imaging (LED) display group
-        imaging_group = self._create_imaging_group()
-        layout.addWidget(imaging_group)
+        self.imaging_group = self._create_imaging_group()
+        layout.addWidget(self.imaging_group)
 
         # Scan Info display
         info_group = self._create_info_group()
@@ -824,6 +824,50 @@ class LED2DOverviewDialog(QDialog):
             self.start_btn.setToolTip(error)
         else:
             self.start_btn.setToolTip("Start the LED 2D Overview scan")
+
+        # Update visual highlighting on incomplete sections
+        self._update_section_highlighting()
+
+    def _update_section_highlighting(self):
+        """Update visual highlighting on sections that need attention.
+
+        Uses subtle border to indicate incomplete sections without being overwhelming.
+        """
+        from py2flamingo.views.colors import WARNING_COLOR
+
+        # Check bounding points
+        bbox = self._get_bounding_box()
+        points_incomplete = bbox is None or (bbox.width < 0.001 and bbox.height < 0.001)
+
+        if points_incomplete:
+            self.points_group.setStyleSheet(
+                f"QGroupBox {{ border: 2px solid {WARNING_COLOR}; border-radius: 4px; "
+                "padding-top: 10px; margin-top: 6px; }}"
+                f"QGroupBox::title {{ color: {WARNING_COLOR}; }}"
+            )
+        else:
+            self.points_group.setStyleSheet("")
+
+        # Check imaging (LED + Live View)
+        led_text = self.led_info_label.text().replace("LED: ", "").lower()
+        led_not_selected = led_text in ('none', '--', 'sample view not open', 'panel not available')
+
+        live_view_inactive = False
+        if self._app and self._app.sample_view:
+            sample_view = self._app.sample_view
+            if sample_view.camera_controller:
+                live_view_inactive = not sample_view.camera_controller.is_live_view_active()
+
+        imaging_incomplete = led_not_selected or live_view_inactive
+
+        if imaging_incomplete:
+            self.imaging_group.setStyleSheet(
+                f"QGroupBox {{ border: 2px solid {WARNING_COLOR}; border-radius: 4px; "
+                "padding-top: 10px; margin-top: 6px; }}"
+                f"QGroupBox::title {{ color: {WARNING_COLOR}; }}"
+            )
+        else:
+            self.imaging_group.setStyleSheet("")
 
     def _set_scan_in_progress(self, in_progress: bool, percent: int = 0) -> None:
         """Update button appearance to reflect scan state.

@@ -775,8 +775,8 @@ class LED2DOverviewWorkflow(QObject):
             if tile_result:
                 self._results[self._current_rotation_idx].tiles.append(tile_result)
 
-            logger.debug(f"Emitting tile_completed signal: rotation={self._current_rotation_idx}, "
-                        f"tile={self._current_tile_idx}, total={total_tiles}")
+            logger.info(f"Emitting tile_completed signal: rotation={self._current_rotation_idx}, "
+                       f"tile={self._current_tile_idx}, total={total_tiles}")
             self.tile_completed.emit(
                 self._current_rotation_idx,
                 self._current_tile_idx,

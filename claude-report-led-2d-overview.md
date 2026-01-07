@@ -560,6 +560,57 @@ def _on_cancel_clicked(self) -> None:
 - Dialog cleans up via `_on_workflow_completed()` handler
 - Button state returns to idle
 
+### 6. Visual Highlighting for Incomplete Sections (2026-01-07)
+
+**Problem:** Users couldn't easily see which sections were preventing the "Start Scan" button from being enabled. They had to hover over the disabled button to read the tooltip explaining what was missing.
+
+**Solution:** Added subtle visual highlighting to sections that need attention:
+
+**Validation Requirements:**
+1. **Bounding Points** - At least 2 points (A and B) with non-degenerate bounding box
+2. **Imaging** - LED selected in Sample View AND Live View active
+
+**Visual Feedback:**
+- Incomplete sections get a thin amber border (2px, `WARNING_COLOR`)
+- Section title changes to amber color
+- Border disappears when requirements are met
+- Non-intrusive: no backgrounds, icons, or flashing
+
+**Implementation:**
+```python
+def _update_section_highlighting(self):
+    """Update visual highlighting on sections that need attention."""
+    # Check bounding points
+    bbox = self._get_bounding_box()
+    points_incomplete = bbox is None or (bbox.width < 0.001 and bbox.height < 0.001)
+
+    if points_incomplete:
+        self.points_group.setStyleSheet(
+            f"QGroupBox {{ border: 2px solid {WARNING_COLOR}; "
+            "border-radius: 4px; padding-top: 10px; margin-top: 6px; }}"
+            f"QGroupBox::title {{ color: {WARNING_COLOR}; }}"
+        )
+    else:
+        self.points_group.setStyleSheet("")
+
+    # Check imaging (LED + Live View)
+    imaging_incomplete = led_not_selected or live_view_inactive
+    # Apply same highlighting pattern to imaging_group
+```
+
+**Called automatically when:**
+- Dialog opens (via `_update_start_button_state()`)
+- User enters/changes bounding points
+- User clicks "Refresh from Sample View"
+- Any validation state changes
+
+**User Experience:**
+1. Open dialog → See amber border on both "Bounding Points" and "Imaging" sections
+2. Enter Point A and B → "Bounding Points" border disappears
+3. Start Live View in Sample View → "Imaging" border remains (no LED yet)
+4. Enable LED and click Refresh → "Imaging" border disappears
+5. "Start Scan" button becomes enabled
+
 ---
 
 ## Future Enhancements
