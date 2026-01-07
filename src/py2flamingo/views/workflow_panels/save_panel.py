@@ -41,17 +41,19 @@ class SavePanel(QWidget):
 
     settings_changed = pyqtSignal(dict)
 
-    def __init__(self, parent: Optional[QWidget] = None, app=None):
+    def __init__(self, parent: Optional[QWidget] = None, app=None, connection_service=None):
         """
         Initialize save panel.
 
         Args:
             parent: Parent widget
             app: FlamingoApplication instance for getting system settings
+            connection_service: MVCConnectionService for querying available drives
         """
         super().__init__(parent)
         self._logger = logging.getLogger(__name__)
         self._app = app
+        self._connection_service = connection_service
 
         # Get default storage location from system
         self._default_save_drive = self._get_default_save_drive()
@@ -182,7 +184,11 @@ class SavePanel(QWidget):
         """Open advanced save settings dialog."""
         from py2flamingo.views.dialogs import AdvancedSaveDialog
 
-        dialog = AdvancedSaveDialog(self, default_drive=self._default_save_drive)
+        dialog = AdvancedSaveDialog(
+            parent=self,
+            default_drive=self._default_save_drive,
+            connection_service=self._connection_service
+        )
         dialog.set_settings({
             'save_drive': self._save_drive,
             'region': self._region,

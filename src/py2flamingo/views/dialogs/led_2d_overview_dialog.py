@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QShowEvent, QCloseEvent, QHideEvent
 
-from py2flamingo.views.colors import WARNING_COLOR
+from py2flamingo.views.colors import WARNING_COLOR, ERROR_COLOR
 
 
 @dataclass
@@ -156,6 +156,16 @@ class LED2DOverviewDialog(QDialog):
         self.start_btn.setMinimumWidth(160)
         self.start_btn.clicked.connect(self._on_start_clicked)
         button_layout.addWidget(self.start_btn)
+
+        self.cancel_btn = QPushButton("Cancel Scan")
+        self.cancel_btn.setToolTip("Cancel the current scan")
+        self.cancel_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; font-weight: bold; "
+            "padding: 8px 16px; }"
+        )
+        self.cancel_btn.clicked.connect(self._on_cancel_clicked)
+        self.cancel_btn.setVisible(False)  # Hidden until scan starts
+        button_layout.addWidget(self.cancel_btn)
 
         self.close_btn = QPushButton("Close")
         self.close_btn.clicked.connect(self.close)
@@ -830,6 +840,8 @@ class LED2DOverviewDialog(QDialog):
                 "font-weight: bold; padding: 8px 16px; }}"
             )
             self.start_btn.setToolTip(f"Scan is in progress... {percent}% complete")
+            self.cancel_btn.setVisible(True)
+            self.close_btn.setEnabled(False)
         else:
             self.start_btn.setText("Start Scan")
             self.start_btn.setStyleSheet(
@@ -839,6 +851,8 @@ class LED2DOverviewDialog(QDialog):
             )
             # Re-validate to set proper enabled state and tooltip
             self._update_start_button_state()
+            self.cancel_btn.setVisible(False)
+            self.close_btn.setEnabled(True)
 
     def _on_tile_completed(self, rotation_idx: int, tile_idx: int, total_tiles: int) -> None:
         """Handle tile completion - update progress display.
@@ -858,6 +872,10 @@ class LED2DOverviewDialog(QDialog):
         tiles_done = rotation_idx * total_tiles + tile_idx + 1
         total_all_rotations = total_tiles * num_rotations
         percent = int((tiles_done / total_all_rotations) * 100)
+
+        self._logger.info(f"Tile completed: rotation {rotation_idx}, tile {tile_idx}/{total_tiles}, "
+                         f"progress: {tiles_done}/{total_all_rotations} = {percent}%")
+
         self._set_scan_in_progress(True, percent)
 
     def _get_configuration(self) -> Optional[ScanConfiguration]:
@@ -983,6 +1001,7 @@ class LED2DOverviewDialog(QDialog):
             self._workflow.scan_cancelled.connect(self._on_workflow_completed)
             self._workflow.scan_error.connect(self._on_workflow_error)
             self._workflow.tile_completed.connect(self._on_tile_completed)
+            self._logger.info("Connected to workflow signals (scan_completed, scan_cancelled, scan_error, tile_completed)")
 
             # Don't close dialog - user might want to run again
             self._workflow.start()
@@ -1012,6 +1031,13 @@ class LED2DOverviewDialog(QDialog):
         self._logger.error(f"Workflow error: {error_msg} - stopping live view")
         self._set_scan_in_progress(False)
         self._stop_sample_view_live()
+
+    def _on_cancel_clicked(self) -> None:
+        """Handle Cancel Scan button click."""
+        if self._workflow:
+            self._logger.info("User requested scan cancellation")
+            self._workflow.cancel()
+            # _on_workflow_completed will be called via scan_cancelled signal
 
     def _stop_sample_view_live(self) -> None:
         """Stop the live view in SampleView and update button state."""

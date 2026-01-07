@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QSpinBox, QComboBox, QCheckBox, QGroupBox, QGridLayout,
+    QDoubleSpinBox, QComboBox, QCheckBox, QGroupBox,
     QPushButton, QDialogButtonBox
 )
 from PyQt5.QtCore import Qt
@@ -22,10 +22,11 @@ class AdvancedIlluminationDialog(QDialog):
     """Dialog for advanced illumination settings.
 
     Settings included:
-    - Light path selection (Left/Right)
     - Multi-laser mode (run stack with multiple lasers on)
     - LED color selection
-    - LED DAC value
+    - LED brightness (percentage)
+
+    Note: Light path selection (Left/Right) is now on the main panel.
     """
 
     def __init__(self, parent: Optional[QDialog] = None):
@@ -48,24 +49,6 @@ class AdvancedIlluminationDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        # Light Path Section
-        path_group = QGroupBox("Light Path")
-        path_layout = QHBoxLayout()
-
-        path_layout.addWidget(QLabel("Illumination Path:"))
-
-        self._left_path = QCheckBox("Left")
-        self._left_path.setChecked(True)
-        path_layout.addWidget(self._left_path)
-
-        self._right_path = QCheckBox("Right")
-        self._right_path.setChecked(False)
-        path_layout.addWidget(self._right_path)
-
-        path_layout.addStretch()
-        path_group.setLayout(path_layout)
-        layout.addWidget(path_group)
-
         # Multi-Laser Mode Section
         laser_group = QGroupBox("Multi-Laser Options")
         laser_layout = QVBoxLayout()
@@ -82,34 +65,48 @@ class AdvancedIlluminationDialog(QDialog):
 
         # LED Advanced Section
         led_group = QGroupBox("LED Advanced Settings")
-        led_grid = QGridLayout()
-        led_grid.setSpacing(8)
+        led_layout = QVBoxLayout()
+        led_layout.setSpacing(8)
 
         # LED Color
-        led_grid.addWidget(QLabel("LED Color:"), 0, 0)
+        color_layout = QHBoxLayout()
+        color_layout.addWidget(QLabel("LED Color:"))
         self._led_color = QComboBox()
         self._led_color.addItems(LED_COLORS)
         self._led_color.setToolTip("Select the LED color channel")
-        led_grid.addWidget(self._led_color, 0, 1)
+        color_layout.addWidget(self._led_color)
+        color_layout.addStretch()
+        led_layout.addLayout(color_layout)
 
-        # LED DAC Value
-        led_grid.addWidget(QLabel("LED DAC Value:"), 1, 0)
-        self._led_dac = QSpinBox()
-        self._led_dac.setRange(0, 65535)
-        self._led_dac.setValue(32768)
-        self._led_dac.setToolTip(
-            "Direct DAC value for LED brightness control.\n"
-            "Default: 32768 (calibrated value)\n"
-            "Range: 0-65535"
+        # LED Brightness (percentage)
+        brightness_layout = QHBoxLayout()
+        brightness_layout.addWidget(QLabel("LED Brightness:"))
+        self._led_brightness = QDoubleSpinBox()
+        self._led_brightness.setRange(0.0, 100.0)
+        self._led_brightness.setValue(50.0)
+        self._led_brightness.setDecimals(1)
+        self._led_brightness.setSingleStep(5.0)
+        self._led_brightness.setSuffix(" %")
+        self._led_brightness.setToolTip("LED brightness percentage (default: 50%)")
+        brightness_layout.addWidget(self._led_brightness)
+        brightness_layout.addStretch()
+        led_layout.addLayout(brightness_layout)
+
+        # Description label explaining LED brightness
+        desc_label = QLabel(
+            "Controls the LED brightness via internal DAC conversion.\n"
+            "50% = calibrated default (DAC 32768). Adjust if LED appears too bright or dim."
         )
-        led_grid.addWidget(self._led_dac, 1, 1)
+        desc_label.setStyleSheet("color: gray; font-style: italic; padding: 5px;")
+        desc_label.setWordWrap(True)
+        led_layout.addWidget(desc_label)
 
         # Reset to default button
         reset_led_btn = QPushButton("Reset to Default")
         reset_led_btn.clicked.connect(self._reset_led_defaults)
-        led_grid.addWidget(reset_led_btn, 2, 1)
+        led_layout.addWidget(reset_led_btn)
 
-        led_group.setLayout(led_grid)
+        led_group.setLayout(led_layout)
         layout.addWidget(led_group)
 
         # Add stretch to push buttons to bottom
@@ -126,7 +123,7 @@ class AdvancedIlluminationDialog(QDialog):
     def _reset_led_defaults(self) -> None:
         """Reset LED settings to defaults."""
         self._led_color.setCurrentIndex(3)  # White
-        self._led_dac.setValue(32768)
+        self._led_brightness.setValue(50.0)  # 50%
 
     def get_settings(self) -> Dict[str, Any]:
         """Get current advanced illumination settings.
@@ -135,12 +132,10 @@ class AdvancedIlluminationDialog(QDialog):
             Dictionary with settings
         """
         return {
-            'left_path': self._left_path.isChecked(),
-            'right_path': self._right_path.isChecked(),
             'multi_laser_mode': self._multi_laser_mode.isChecked(),
             'led_color_index': self._led_color.currentIndex(),
             'led_color': self._led_color.currentText(),
-            'led_dac': self._led_dac.value(),
+            'led_dac_percent': self._led_brightness.value(),
         }
 
     def set_settings(self, settings: Dict[str, Any]) -> None:
@@ -149,38 +144,14 @@ class AdvancedIlluminationDialog(QDialog):
         Args:
             settings: Dictionary with settings to apply
         """
-        if 'left_path' in settings:
-            self._left_path.setChecked(settings['left_path'])
-        if 'right_path' in settings:
-            self._right_path.setChecked(settings['right_path'])
         if 'multi_laser_mode' in settings:
             self._multi_laser_mode.setChecked(settings['multi_laser_mode'])
         if 'led_color_index' in settings:
             self._led_color.setCurrentIndex(settings['led_color_index'])
-        if 'led_dac' in settings:
-            self._led_dac.setValue(settings['led_dac'])
+        if 'led_dac_percent' in settings:
+            self._led_brightness.setValue(settings['led_dac_percent'])
 
     # Individual property accessors
-    @property
-    def left_path(self) -> bool:
-        """Get left path enabled state."""
-        return self._left_path.isChecked()
-
-    @left_path.setter
-    def left_path(self, enabled: bool) -> None:
-        """Set left path enabled state."""
-        self._left_path.setChecked(enabled)
-
-    @property
-    def right_path(self) -> bool:
-        """Get right path enabled state."""
-        return self._right_path.isChecked()
-
-    @right_path.setter
-    def right_path(self, enabled: bool) -> None:
-        """Set right path enabled state."""
-        self._right_path.setChecked(enabled)
-
     @property
     def multi_laser_mode(self) -> bool:
         """Get multi-laser mode state."""
@@ -202,11 +173,11 @@ class AdvancedIlluminationDialog(QDialog):
         self._led_color.setCurrentIndex(index)
 
     @property
-    def led_dac(self) -> int:
-        """Get LED DAC value."""
-        return self._led_dac.value()
+    def led_brightness(self) -> float:
+        """Get LED brightness percentage."""
+        return self._led_brightness.value()
 
-    @led_dac.setter
-    def led_dac(self, value: int) -> None:
-        """Set LED DAC value."""
-        self._led_dac.setValue(value)
+    @led_brightness.setter
+    def led_brightness(self, value: float) -> None:
+        """Set LED brightness percentage."""
+        self._led_brightness.setValue(value)

@@ -32,6 +32,8 @@ from .window_geometry_manager import WindowGeometryManager, GeometryPersistenceM
 from .workflow_execution_service import WorkflowExecutionService
 from .initialization_service import MicroscopeInitializationService, InitializationData
 from .image_acquisition_service import ImageAcquisitionService
+from .workflow_template_service import WorkflowTemplateService
+from .acquisition_timing_service import AcquisitionTimingService
 
 # Legacy services (require numpy/scipy) - import with try/except
 try:
@@ -64,6 +66,8 @@ __all__ = [
     'MicroscopeInitializationService',
     'InitializationData',
     'ImageAcquisitionService',
+    'WorkflowTemplateService',
+    'AcquisitionTimingService',
     # Legacy services (may be None if numpy/scipy not installed)
     'WorkflowService',
     'SampleSearchService',

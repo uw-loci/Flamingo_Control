@@ -10,7 +10,8 @@ from typing import Optional, Dict, Any
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QCheckBox, QGroupBox, QGridLayout,
-    QPushButton, QDialogButtonBox, QPlainTextEdit, QFileDialog
+    QPushButton, QDialogButtonBox, QPlainTextEdit, QFileDialog,
+    QComboBox
 )
 from PyQt5.QtCore import Qt
 
@@ -26,16 +27,20 @@ class AdvancedSaveDialog(QDialog):
     - Extended comments field
     """
 
-    def __init__(self, parent: Optional[QDialog] = None, default_drive: str = "/media/deploy/ctlsm1"):
+    def __init__(self, parent: Optional[QDialog] = None,
+                 default_drive: str = "/media/deploy/ctlsm1",
+                 connection_service = None):
         """Initialize the dialog.
 
         Args:
             parent: Parent widget
             default_drive: Default save drive path
+            connection_service: MVCConnectionService for querying available drives
         """
         super().__init__(parent)
         self._logger = logging.getLogger(__name__)
         self._default_drive = default_drive
+        self._connection_service = connection_service
 
         self.setWindowTitle("Advanced Save Settings")
         self.setMinimumWidth(500)
@@ -54,20 +59,31 @@ class AdvancedSaveDialog(QDialog):
         storage_layout = QGridLayout()
         storage_layout.setSpacing(8)
 
-        # Save drive
+        # Save drive (dropdown with refresh button)
         storage_layout.addWidget(QLabel("Save Drive:"), 0, 0)
 
         drive_layout = QHBoxLayout()
-        self._save_drive = QLineEdit()
-        self._save_drive.setText(self._default_drive)
-        self._save_drive.setPlaceholderText("/media/deploy/ctlsm1")
+        self._save_drive = QComboBox()
+        self._save_drive.setEditable(True)
+        self._save_drive.setMinimumWidth(300)
+        self._save_drive.addItem(self._default_drive)
+        self._save_drive.setCurrentText(self._default_drive)
         self._save_drive.setToolTip(
             "Base path for data storage.\n"
-            "This is typically a network share or local disk."
+            "This is typically a network share or local disk.\n\n"
+            "Click 'Refresh' to query available drives from microscope."
         )
-        drive_layout.addWidget(self._save_drive)
+        drive_layout.addWidget(self._save_drive, 1)
+
+        self._refresh_btn = QPushButton("Refresh")
+        self._refresh_btn.setToolTip("Query available storage drives from microscope")
+        self._refresh_btn.clicked.connect(self._refresh_drives)
+        # Disable refresh button if no connection service
+        self._refresh_btn.setEnabled(self._connection_service is not None)
+        drive_layout.addWidget(self._refresh_btn)
 
         browse_btn = QPushButton("Browse...")
+        browse_btn.setToolTip("Browse for local directory")
         browse_btn.clicked.connect(self._browse_drive)
         drive_layout.addWidget(browse_btn)
 
@@ -149,9 +165,54 @@ class AdvancedSaveDialog(QDialog):
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
 
+    def _refresh_drives(self) -> None:
+        """Query available drives from microscope server."""
+        if not self._connection_service:
+            self._logger.warning("No connection service available")
+            return
+
+        try:
+            # Disable button during query
+            self._refresh_btn.setEnabled(False)
+            self._refresh_btn.setText("Querying...")
+
+            # Query available drives
+            drives = self._connection_service.query_available_drives(timeout=3.0)
+
+            if drives:
+                # Remember current selection
+                current = self._save_drive.currentText()
+
+                # Update dropdown
+                self._save_drive.clear()
+                for drive in drives:
+                    self._save_drive.addItem(drive)
+
+                # Try to restore previous selection
+                index = self._save_drive.findText(current)
+                if index >= 0:
+                    self._save_drive.setCurrentIndex(index)
+                elif drives:
+                    self._save_drive.setCurrentIndex(0)
+
+                self._logger.info(f"Refreshed {len(drives)} available drives")
+            else:
+                # No drives returned, keep default
+                self._logger.warning("No drives returned from server, using default")
+                if self._save_drive.count() == 0:
+                    self._save_drive.addItem(self._default_drive)
+
+        except Exception as e:
+            self._logger.error(f"Failed to refresh drives: {e}")
+
+        finally:
+            # Re-enable button
+            self._refresh_btn.setEnabled(True)
+            self._refresh_btn.setText("Refresh")
+
     def _browse_drive(self) -> None:
         """Open file dialog to browse for save drive."""
-        current = self._save_drive.text() or self._default_drive
+        current = self._save_drive.currentText() or self._default_drive
         directory = QFileDialog.getExistingDirectory(
             self,
             "Select Save Drive",
@@ -159,11 +220,11 @@ class AdvancedSaveDialog(QDialog):
             QFileDialog.ShowDirsOnly
         )
         if directory:
-            self._save_drive.setText(directory)
+            self._save_drive.setCurrentText(directory)
 
     def _reset_defaults(self) -> None:
         """Reset all settings to defaults."""
-        self._save_drive.setText(self._default_drive)
+        self._save_drive.setCurrentText(self._default_drive)
         self._region.clear()
         self._save_subfolders.setChecked(False)
         self._live_view.setChecked(True)
@@ -176,7 +237,7 @@ class AdvancedSaveDialog(QDialog):
             Dictionary with settings
         """
         return {
-            'save_drive': self._save_drive.text(),
+            'save_drive': self._save_drive.currentText(),
             'region': self._region.text(),
             'save_subfolders': self._save_subfolders.isChecked(),
             'live_view': self._live_view.isChecked(),
@@ -190,7 +251,7 @@ class AdvancedSaveDialog(QDialog):
             settings: Dictionary with settings to apply
         """
         if 'save_drive' in settings:
-            self._save_drive.setText(settings['save_drive'])
+            self._save_drive.setCurrentText(settings['save_drive'])
         if 'region' in settings:
             self._region.setText(settings['region'])
         if 'save_subfolders' in settings:
@@ -204,12 +265,12 @@ class AdvancedSaveDialog(QDialog):
     @property
     def save_drive(self) -> str:
         """Get save drive path."""
-        return self._save_drive.text()
+        return self._save_drive.currentText()
 
     @save_drive.setter
     def save_drive(self, value: str) -> None:
         """Set save drive path."""
-        self._save_drive.setText(value)
+        self._save_drive.setCurrentText(value)
 
     @property
     def region(self) -> str:

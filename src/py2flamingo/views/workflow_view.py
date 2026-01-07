@@ -14,7 +14,8 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QComboBox, QGroupBox, QScrollArea,
     QFrame, QMessageBox, QProgressBar, QStackedWidget,
-    QTabWidget, QSplitter
+    QTabWidget, QSplitter, QInputDialog, QDialog,
+    QDialogButtonBox, QTextEdit, QFormLayout
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 
@@ -61,6 +62,10 @@ class WorkflowView(QWidget):
     workflow_stopped = pyqtSignal()
     start_requested = pyqtSignal()
     stop_requested = pyqtSignal()
+    template_save_requested = pyqtSignal(str, str)  # name, description
+    template_load_requested = pyqtSignal(str)  # name
+    template_delete_requested = pyqtSignal(str)  # name
+    check_workflow_requested = pyqtSignal()
 
     def __init__(self, controller):
         """
@@ -112,8 +117,9 @@ class WorkflowView(QWidget):
         acquisition_widget = self._create_acquisition_tab()
         self._settings_tabs.addTab(acquisition_widget, "Acquisition")
 
-        # Tab 3: Save/Output
-        self._save_panel = SavePanel()
+        # Tab 3: Save/Output (pass connection service for drive querying)
+        connection_service = getattr(self._controller, '_connection_service', None)
+        self._save_panel = SavePanel(connection_service=connection_service)
         save_scroll = QScrollArea()
         save_scroll.setWidgetResizable(True)
         save_scroll.setFrameShape(QFrame.NoFrame)
@@ -217,8 +223,49 @@ class WorkflowView(QWidget):
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        # Buttons row
+        # Template controls row
+        template_layout = QHBoxLayout()
+        template_layout.addWidget(QLabel("Template:"))
+
+        self._template_combo = QComboBox()
+        self._template_combo.setMinimumWidth(150)
+        self._template_combo.addItem("(None)")
+        self._template_combo.currentIndexChanged.connect(self._on_template_selected)
+        template_layout.addWidget(self._template_combo, 1)
+
+        self._save_template_btn = QPushButton("Save As...")
+        self._save_template_btn.clicked.connect(self._on_save_template_clicked)
+        template_layout.addWidget(self._save_template_btn)
+
+        self._delete_template_btn = QPushButton("Delete")
+        self._delete_template_btn.setEnabled(False)
+        self._delete_template_btn.clicked.connect(self._on_delete_template_clicked)
+        template_layout.addWidget(self._delete_template_btn)
+
+        layout.addLayout(template_layout)
+
+        # Check and Start/Stop buttons row
         btn_layout = QHBoxLayout()
+
+        self._check_btn = QPushButton("Check Stack")
+        self._check_btn.setMinimumHeight(40)
+        self._check_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 8px 16px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+            QPushButton:disabled {
+                background-color: #95a5a6;
+            }
+        """)
+        self._check_btn.clicked.connect(self._on_check_clicked)
+        btn_layout.addWidget(self._check_btn)
 
         self._start_btn = QPushButton("Start Workflow")
         self._start_btn.setMinimumHeight(40)
@@ -522,6 +569,47 @@ class WorkflowView(QWidget):
         else:
             self._message_label.setStyleSheet(f"color: {SUCCESS_COLOR};")
 
+    # Template handlers
+
+    def _on_template_selected(self, index: int) -> None:
+        """Handle template selection from dropdown."""
+        # Enable delete button only if a template is selected (not "(None)")
+        self._delete_template_btn.setEnabled(index > 0)
+
+        if index > 0:
+            template_name = self._template_combo.currentText()
+            self.template_load_requested.emit(template_name)
+            self._logger.info(f"Template selected: {template_name}")
+
+    def _on_save_template_clicked(self) -> None:
+        """Handle save template button click."""
+        dialog = SaveTemplateDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            name, description = dialog.get_values()
+            if name:
+                self.template_save_requested.emit(name, description)
+                self._logger.info(f"Save template requested: {name}")
+
+    def _on_delete_template_clicked(self) -> None:
+        """Handle delete template button click."""
+        template_name = self._template_combo.currentText()
+        if template_name and template_name != "(None)":
+            reply = QMessageBox.question(
+                self,
+                "Delete Template",
+                f"Are you sure you want to delete template '{template_name}'?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                self.template_delete_requested.emit(template_name)
+                self._logger.info(f"Delete template requested: {template_name}")
+
+    def _on_check_clicked(self) -> None:
+        """Handle check stack button click."""
+        self.check_workflow_requested.emit()
+        self._logger.info("Check workflow requested")
+
     # Public API for controller integration
 
     def set_position_callback(self, callback) -> None:
@@ -669,3 +757,266 @@ class WorkflowView(QWidget):
     def multiangle_panel(self) -> MultiAnglePanel:
         """Get multi-angle panel."""
         return self._multiangle_panel
+
+    # Template management public API
+
+    def update_template_list(self, template_names: List[str]) -> None:
+        """
+        Update the template dropdown with available templates.
+
+        Args:
+            template_names: List of template names to display
+        """
+        # Block signals while updating
+        self._template_combo.blockSignals(True)
+        current = self._template_combo.currentText()
+
+        self._template_combo.clear()
+        self._template_combo.addItem("(None)")
+        for name in template_names:
+            self._template_combo.addItem(name)
+
+        # Try to restore previous selection
+        index = self._template_combo.findText(current)
+        if index >= 0:
+            self._template_combo.setCurrentIndex(index)
+        else:
+            self._template_combo.setCurrentIndex(0)
+
+        self._template_combo.blockSignals(False)
+        self._delete_template_btn.setEnabled(self._template_combo.currentIndex() > 0)
+
+    def set_workflow_dict(self, workflow_dict: Dict[str, Any], workflow_type: str) -> None:
+        """
+        Apply a workflow dictionary to all panels (for loading templates).
+
+        Args:
+            workflow_dict: Complete workflow settings dictionary
+            workflow_type: Workflow type string (SNAPSHOT, ZSTACK, etc.)
+        """
+        try:
+            # Set workflow type
+            type_index = -1
+            for i, (name, wtype, _) in enumerate(WORKFLOW_TYPES):
+                if wtype.value == workflow_type:
+                    type_index = i
+                    break
+            if type_index >= 0:
+                self._type_combo.setCurrentIndex(type_index)
+
+            # Apply settings to each panel
+            if 'Start Position' in workflow_dict:
+                pos = workflow_dict['Start Position']
+                self._position_panel.set_position(Position(
+                    x=float(pos.get('X (mm)', 0)),
+                    y=float(pos.get('Y (mm)', 0)),
+                    z=float(pos.get('Z (mm)', 0)),
+                    r=float(pos.get('Angle (degrees)', 0))
+                ))
+
+            if 'Camera Settings' in workflow_dict:
+                cam = workflow_dict['Camera Settings']
+                self._camera_panel.set_settings(cam)
+
+            if 'Stack Settings' in workflow_dict:
+                stack = workflow_dict['Stack Settings']
+                self._zstack_panel.set_settings(stack)
+
+            if 'Illumination Source' in workflow_dict:
+                illum = workflow_dict['Illumination Source']
+                self._illumination_panel.set_settings(illum)
+
+            if 'Experiment Settings' in workflow_dict:
+                exp = workflow_dict['Experiment Settings']
+                self._save_panel.set_settings(exp)
+
+                # Time-lapse settings
+                if 'Duration (dd:hh:mm:ss)' in exp:
+                    self._timelapse_panel.set_settings(exp)
+
+                # Multi-angle settings
+                if 'Number of angles' in exp:
+                    self._multiangle_panel.set_settings(exp)
+
+            self._logger.info(f"Applied workflow template settings (type: {workflow_type})")
+
+        except Exception as e:
+            self._logger.error(f"Error applying workflow dict: {e}", exc_info=True)
+            self._show_message(f"Error loading template: {str(e)}", is_error=True)
+
+    def get_current_workflow_type(self) -> str:
+        """Get current workflow type as string."""
+        return self._current_type.value
+
+    def show_validation_result(self, result: Dict[str, Any]) -> None:
+        """
+        Display validation result in a dialog.
+
+        Args:
+            result: Dictionary with validation results containing:
+                - valid: bool
+                - errors: List[str]
+                - warnings: List[str]
+                - estimates: Dict with time, data_size, images, z_range
+        """
+        dialog = ValidationResultDialog(result, self)
+        dialog.exec_()
+
+
+class SaveTemplateDialog(QDialog):
+    """Dialog for saving a workflow template with name and description."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Save Workflow Template")
+        self.setMinimumWidth(400)
+
+        layout = QVBoxLayout(self)
+
+        # Form
+        form_layout = QFormLayout()
+
+        self._name_edit = QComboBox()
+        self._name_edit.setEditable(True)
+        self._name_edit.setMinimumWidth(250)
+        form_layout.addRow("Template Name:", self._name_edit)
+
+        self._description_edit = QTextEdit()
+        self._description_edit.setMaximumHeight(80)
+        self._description_edit.setPlaceholderText("Optional description...")
+        form_layout.addRow("Description:", self._description_edit)
+
+        layout.addLayout(form_layout)
+
+        # Buttons
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def get_values(self) -> tuple:
+        """Get the entered name and description."""
+        return (
+            self._name_edit.currentText().strip(),
+            self._description_edit.toPlainText().strip()
+        )
+
+    def set_existing_templates(self, names: List[str]) -> None:
+        """Set existing template names for overwrite selection."""
+        self._name_edit.clear()
+        self._name_edit.addItems(names)
+        self._name_edit.setCurrentText("")
+
+
+class ValidationResultDialog(QDialog):
+    """Dialog for displaying workflow validation results."""
+
+    def __init__(self, result: Dict[str, Any], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Workflow Validation")
+        self.setMinimumWidth(450)
+        self.setMinimumHeight(300)
+
+        layout = QVBoxLayout(self)
+
+        # Status header
+        is_valid = result.get('valid', False)
+        errors = result.get('errors', [])
+        warnings = result.get('warnings', [])
+
+        status_text = "Valid" if is_valid else "Invalid"
+        if warnings:
+            status_text += f" ({len(warnings)} warning{'s' if len(warnings) > 1 else ''})"
+
+        status_label = QLabel(f"Status: {'✓' if is_valid else '✗'} {status_text}")
+        status_label.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; color: {'#27ae60' if is_valid else '#e74c3c'}; padding: 10px;"
+        )
+        layout.addWidget(status_label)
+
+        # Estimates section
+        estimates = result.get('estimates', {})
+        if estimates:
+            est_group = QGroupBox("Estimates")
+            est_layout = QVBoxLayout(est_group)
+
+            est_text = []
+            if 'acquisition_time' in estimates:
+                time_str = self._format_duration(estimates['acquisition_time'])
+                sample_count = estimates.get('sample_count', 0)
+                if sample_count > 0:
+                    est_text.append(f"• Acquisition Time: ~{time_str} (based on {sample_count} similar acquisitions)")
+                else:
+                    est_text.append(f"• Acquisition Time: ~{time_str} (theoretical)")
+
+            if 'data_size_gb' in estimates:
+                est_text.append(f"• Data Size: ~{estimates['data_size_gb']:.1f} GB")
+
+            if 'total_images' in estimates:
+                est_text.append(f"• Total Images: {estimates['total_images']}")
+
+            if 'z_range_um' in estimates:
+                z_um = estimates['z_range_um']
+                planes = estimates.get('num_planes', 0)
+                step = estimates.get('z_step_um', 0)
+                if planes and step:
+                    est_text.append(f"• Z Range: {z_um:.1f} µm ({planes} planes × {step:.1f} µm)")
+                else:
+                    est_text.append(f"• Z Range: {z_um:.1f} µm")
+
+            est_label = QLabel("\n".join(est_text))
+            est_label.setStyleSheet("padding: 5px;")
+            est_layout.addWidget(est_label)
+            layout.addWidget(est_group)
+
+        # Errors section
+        if errors:
+            err_group = QGroupBox("Errors")
+            err_layout = QVBoxLayout(err_group)
+            err_label = QLabel("\n".join(f"✗ {e}" for e in errors))
+            err_label.setStyleSheet("color: #e74c3c; padding: 5px;")
+            err_label.setWordWrap(True)
+            err_layout.addWidget(err_label)
+            layout.addWidget(err_group)
+
+        # Warnings section
+        if warnings:
+            warn_group = QGroupBox("Warnings")
+            warn_layout = QVBoxLayout(warn_group)
+            warn_label = QLabel("\n".join(f"⚠ {w}" for w in warnings))
+            warn_label.setStyleSheet("color: #f39c12; padding: 5px;")
+            warn_label.setWordWrap(True)
+            warn_layout.addWidget(warn_label)
+            layout.addWidget(warn_group)
+
+        # Hardware validation
+        hw_result = result.get('hardware_validation')
+        if hw_result:
+            hw_group = QGroupBox("Hardware Validation")
+            hw_layout = QVBoxLayout(hw_group)
+            hw_valid = hw_result.get('valid', True)
+            hw_message = hw_result.get('message', 'No response')
+            hw_label = QLabel(f"{'✓' if hw_valid else '✗'} {hw_message}")
+            hw_label.setStyleSheet(f"color: {'#27ae60' if hw_valid else '#e74c3c'}; padding: 5px;")
+            hw_layout.addWidget(hw_label)
+            layout.addWidget(hw_group)
+
+        layout.addStretch()
+
+        # OK button
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok)
+        buttons.accepted.connect(self.accept)
+        layout.addWidget(buttons)
+
+    def _format_duration(self, seconds: float) -> str:
+        """Format duration in seconds to human readable string."""
+        if seconds < 60:
+            return f"{seconds:.0f} sec"
+        elif seconds < 3600:
+            mins = int(seconds // 60)
+            secs = int(seconds % 60)
+            return f"{mins} min {secs} sec"
+        else:
+            hours = int(seconds // 3600)
+            mins = int((seconds % 3600) // 60)
+            return f"{hours} hr {mins} min"

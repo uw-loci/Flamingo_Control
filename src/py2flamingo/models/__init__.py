@@ -69,6 +69,16 @@ from .image_display import (
     ImageDisplayModel
 )
 
+from .workflow_template import (
+    WorkflowTemplate
+)
+
+from .acquisition_timing import (
+    AcquisitionTimingRecord,
+    LearnedOverheadComponents,
+    TimingHistory
+)
+
 __all__ = [
     # Microscope
     'MicroscopeState',
@@ -123,4 +133,12 @@ __all__ = [
 
     # Image Display
     'ImageDisplayModel',
+
+    # Workflow Templates
+    'WorkflowTemplate',
+
+    # Acquisition Timing
+    'AcquisitionTimingRecord',
+    'LearnedOverheadComponents',
+    'TimingHistory',
 ]

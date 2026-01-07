@@ -513,6 +513,52 @@ def _set_scan_in_progress(self, in_progress: bool, percent: int = 0) -> None:
 - Correctly handles 1 or 2 rotations based on tip calibration status
 - Percentage updates after each tile completes
 - Pattern mirrors Sample View's "Start Live" / "Stop Live" toggle button
+- **Debugging:** Added extensive logging to track signal emission and reception
+
+### 5. Cancel Scan Button (2026-01-07)
+
+**Problem:** Once a scan starts, there's no way to stop it. The Close button is ignored during scanning, forcing users to wait for completion even if they realize they made a configuration error.
+
+**Solution:** Added a "Cancel Scan" button that appears during scanning:
+
+| Scan State | Start Button | Cancel Button | Close Button |
+|------------|--------------|---------------|--------------|
+| Idle | Visible, enabled | Hidden | Enabled |
+| Running | "In Progress... X%", disabled | Visible, enabled (red) | Disabled |
+| Complete | Visible, enabled | Hidden | Enabled |
+
+**Implementation:**
+```python
+# In UI setup:
+self.cancel_btn = QPushButton("Cancel Scan")
+self.cancel_btn.setStyleSheet(
+    f"QPushButton {{ background-color: {ERROR_COLOR}; ... }}"  # Red
+)
+self.cancel_btn.clicked.connect(self._on_cancel_clicked)
+self.cancel_btn.setVisible(False)  # Hidden until scan starts
+
+# In _set_scan_in_progress():
+if in_progress:
+    self.cancel_btn.setVisible(True)
+    self.close_btn.setEnabled(False)
+else:
+    self.cancel_btn.setVisible(False)
+    self.close_btn.setEnabled(True)
+
+# Handler:
+def _on_cancel_clicked(self) -> None:
+    """Handle Cancel Scan button click."""
+    if self._workflow:
+        self._workflow.cancel()
+        # scan_cancelled signal triggers cleanup
+```
+
+**Behavior:**
+- Cancel button appears when scan starts
+- Calls workflow's `cancel()` method
+- Workflow emits `scan_cancelled` signal
+- Dialog cleans up via `_on_workflow_completed()` handler
+- Button state returns to idle
 
 ---
 

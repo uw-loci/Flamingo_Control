@@ -566,6 +566,69 @@ class MVCConnectionService:
         from py2flamingo.models.connection import ConnectionState
         return self.model.status.state == ConnectionState.CONNECTED
 
+    def query_available_drives(self, timeout: float = 3.0) -> List[str]:
+        """
+        Query available storage drives/mount points from microscope server.
+
+        Sends STORAGE_PATH_GET command (0x1013) to the server, which returns
+        a newline-separated list of available mount points (e.g., /media/deploy/drive1).
+
+        Args:
+            timeout: Response timeout in seconds (default: 3.0)
+
+        Returns:
+            List of available mount point paths. Empty list if query fails.
+
+        Raises:
+            RuntimeError: If not connected to microscope
+        """
+        if not self.is_connected():
+            raise RuntimeError("Not connected to microscope")
+
+        try:
+            from py2flamingo.core.command_codes import SystemCommands, CommandDataBits
+            from py2flamingo.models.command import Command
+
+            # Create STORAGE_PATH_GET command with int32Data0=0 (query mode, not selection)
+            cmd = Command(
+                code=SystemCommands.STORAGE_PATH_GET,
+                params=[0, 0, 0, 0, 0, 0, CommandDataBits.TRIGGER_CALL_BACK]
+            )
+
+            # Send command and get response
+            response_bytes = self.send_command(cmd, timeout=timeout)
+
+            # Parse response - drive list is in the additionalData buffer as newline-separated text
+            if len(response_bytes) >= 128:
+                # Extract additionalData buffer (72 bytes starting at offset 48)
+                # Protocol format: [start][code][status][7*params][double][count][72-byte data][end]
+                # Offsets: 0-4=start, 4-8=code, 8-12=status, 12-40=params, 40-48=double+count, 48-120=data
+                import struct
+
+                # Get the count field to know how many bytes of data are valid
+                count = struct.unpack_from("I", response_bytes, 44)[0]
+
+                if count > 0 and count <= 72:
+                    # Extract the text data
+                    data_bytes = response_bytes[48:48+count]
+                    drives_str = data_bytes.decode('utf-8', errors='ignore').strip()
+
+                    # Split by newlines and filter empty strings
+                    drives = [d.strip() for d in drives_str.split('\n') if d.strip()]
+
+                    self.logger.info(f"Found {len(drives)} available storage drives: {drives}")
+                    return drives
+                else:
+                    self.logger.warning("No storage drives reported by server")
+                    return []
+            else:
+                self.logger.error(f"Invalid response size: {len(response_bytes)} bytes")
+                return []
+
+        except Exception as e:
+            self.logger.error(f"Failed to query available drives: {e}", exc_info=True)
+            return []
+
     @property
     def has_async_reader(self) -> bool:
         """Check if async socket reader is active (delegates to tcp_connection)."""

@@ -139,7 +139,8 @@ class CameraPanel(QWidget):
         exposure_us = self._exposure_spinbox.value()
         if exposure_us > 0:
             exposure_s = exposure_us / 1_000_000.0
-            framerate = 1.0 / exposure_s
+            # Cap frame rate at 40 fps (hardware limit)
+            framerate = min(1.0 / exposure_s, 40.0)
             self._framerate_label.setText(f"{framerate:.1f} fps")
         else:
             self._framerate_label.setText("N/A")
@@ -185,7 +186,8 @@ class CameraPanel(QWidget):
         """
         exposure_us = self._exposure_spinbox.value()
         exposure_s = exposure_us / 1_000_000.0
-        framerate = 1.0 / exposure_s if exposure_s > 0 else 0
+        # Cap frame rate at 40 fps (hardware limit)
+        framerate = min(1.0 / exposure_s, 40.0) if exposure_s > 0 else 0
 
         return {
             'exposure_us': exposure_us,
@@ -203,10 +205,11 @@ class CameraPanel(QWidget):
         return self._exposure_spinbox.value()
 
     def get_frame_rate(self) -> float:
-        """Get calculated frame rate."""
+        """Get calculated frame rate (capped at 40 fps)."""
         exposure_us = self._exposure_spinbox.value()
         if exposure_us > 0:
-            return 1_000_000.0 / exposure_us
+            # Cap frame rate at 40 fps (hardware limit)
+            return min(1_000_000.0 / exposure_us, 40.0)
         return 0.0
 
     def set_exposure(self, exposure_us: float) -> None:

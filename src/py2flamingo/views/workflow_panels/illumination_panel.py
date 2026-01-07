@@ -146,11 +146,9 @@ class IlluminationPanel(QWidget):
         self._laser_rows: List[LaserRow] = []
 
         # Advanced settings (stored here, edited via dialog)
-        self._left_path = True
-        self._right_path = False
         self._multi_laser_mode = False
         self._led_color_index = 3  # White
-        self._led_dac = 32768
+        self._led_dac_percent = 50.0  # Default 50% (was 32768 / 65535)
 
         self._setup_ui()
 
@@ -190,18 +188,33 @@ class IlluminationPanel(QWidget):
         group_layout = QVBoxLayout()
         group_layout.setSpacing(4)
 
-        # Header with Advanced button
-        header_layout = QHBoxLayout()
-        laser_label = QLabel("Lasers")
-        laser_label.setStyleSheet("font-weight: bold;")
-        header_layout.addWidget(laser_label)
-        header_layout.addStretch()
+        # Illumination Path (always visible - fundamental setting)
+        path_layout = QHBoxLayout()
+        path_layout.addWidget(QLabel("Path:"))
+
+        self._left_path = QCheckBox("Left")
+        self._left_path.setChecked(True)
+        self._left_path.stateChanged.connect(self._on_settings_changed)
+        path_layout.addWidget(self._left_path)
+
+        self._right_path = QCheckBox("Right")
+        self._right_path.setChecked(False)
+        self._right_path.stateChanged.connect(self._on_settings_changed)
+        path_layout.addWidget(self._right_path)
+
+        path_layout.addStretch()
 
         self._advanced_btn = QPushButton("Advanced...")
         self._advanced_btn.setFixedWidth(90)
         self._advanced_btn.clicked.connect(self._on_advanced_clicked)
-        header_layout.addWidget(self._advanced_btn)
-        group_layout.addLayout(header_layout)
+        path_layout.addWidget(self._advanced_btn)
+
+        group_layout.addLayout(path_layout)
+
+        # Laser header
+        laser_label = QLabel("Lasers")
+        laser_label.setStyleSheet("font-weight: bold;")
+        group_layout.addWidget(laser_label)
 
         # Create compact laser rows
         for display_name, workflow_key, default_power in self._laser_channels:
@@ -269,20 +282,16 @@ class IlluminationPanel(QWidget):
 
         dialog = AdvancedIlluminationDialog(self)
         dialog.set_settings({
-            'left_path': self._left_path,
-            'right_path': self._right_path,
             'multi_laser_mode': self._multi_laser_mode,
             'led_color_index': self._led_color_index,
-            'led_dac': self._led_dac,
+            'led_dac_percent': self._led_dac_percent,
         })
 
         if dialog.exec_() == dialog.Accepted:
             settings = dialog.get_settings()
-            self._left_path = settings['left_path']
-            self._right_path = settings['right_path']
             self._multi_laser_mode = settings['multi_laser_mode']
             self._led_color_index = settings['led_color_index']
-            self._led_dac = settings['led_dac']
+            self._led_dac_percent = settings['led_dac_percent']
             self._on_settings_changed()
 
     def _on_settings_changed(self) -> None:
@@ -345,17 +354,19 @@ class IlluminationPanel(QWidget):
         # LED settings
         if self._led_enable.isChecked():
             intensity = self._led_intensity.value()
+            # Convert LED DAC percentage to hardware value (0-65535)
+            led_dac_value = int(self._led_dac_percent * 655.35)
             settings["LED_RGB_Board"] = f"{intensity:.1f} 1"
             settings["LED selection"] = f"{self._led_color_index} 1"
-            settings["LED DAC"] = f"{self._led_dac} 1"
+            settings["LED DAC"] = f"{led_dac_value} 1"
         else:
             settings["LED_RGB_Board"] = "0.0 0"
             settings["LED selection"] = "0 0"
             settings["LED DAC"] = "0 0"
 
-        # Light paths (from advanced settings)
-        settings["Left path"] = "ON 1" if self._left_path else "OFF 0"
-        settings["Right path"] = "ON 1" if self._right_path else "OFF 0"
+        # Light paths (now on main panel)
+        settings["Left path"] = "ON 1" if self._left_path.isChecked() else "OFF 0"
+        settings["Right path"] = "ON 1" if self._right_path.isChecked() else "OFF 0"
 
         return settings
 
@@ -439,19 +450,21 @@ class IlluminationPanel(QWidget):
             if len(parts) >= 1:
                 self._led_color_index = int(parts[0])
 
-        # Parse LED DAC
+        # Parse LED DAC (convert from hardware value to percentage)
         if "LED DAC" in illumination_dict:
             value_str = illumination_dict["LED DAC"]
             parts = value_str.split()
             if len(parts) >= 1:
-                self._led_dac = int(parts[0])
+                led_dac_value = int(parts[0])
+                # Convert hardware DAC (0-65535) to percentage (0-100)
+                self._led_dac_percent = led_dac_value / 655.35
 
-        # Parse light paths
+        # Parse light paths (now on main panel)
         if "Left path" in illumination_dict:
-            self._left_path = illumination_dict["Left path"].startswith("ON")
+            self._left_path.setChecked(illumination_dict["Left path"].startswith("ON"))
 
         if "Right path" in illumination_dict:
-            self._right_path = illumination_dict["Right path"].startswith("ON")
+            self._right_path.setChecked(illumination_dict["Right path"].startswith("ON"))
 
         # Parse illumination options
         if options_dict and "Run stack with multiple lasers on" in options_dict:
@@ -472,22 +485,16 @@ class IlluminationPanel(QWidget):
     def get_advanced_settings(self) -> Dict[str, Any]:
         """Get advanced illumination settings."""
         return {
-            'left_path': self._left_path,
-            'right_path': self._right_path,
             'multi_laser_mode': self._multi_laser_mode,
             'led_color_index': self._led_color_index,
-            'led_dac': self._led_dac,
+            'led_dac_percent': self._led_dac_percent,
         }
 
     def set_advanced_settings(self, settings: Dict[str, Any]) -> None:
         """Set advanced illumination settings."""
-        if 'left_path' in settings:
-            self._left_path = settings['left_path']
-        if 'right_path' in settings:
-            self._right_path = settings['right_path']
         if 'multi_laser_mode' in settings:
             self._multi_laser_mode = settings['multi_laser_mode']
         if 'led_color_index' in settings:
             self._led_color_index = settings['led_color_index']
-        if 'led_dac' in settings:
-            self._led_dac = settings['led_dac']
+        if 'led_dac_percent' in settings:
+            self._led_dac_percent = settings['led_dac_percent']
