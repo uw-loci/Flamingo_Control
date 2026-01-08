@@ -243,9 +243,14 @@ class WorkflowExecutionService:
 
             self.logger.info("Waiting for workflow image data...")
 
-            # Wait for image data or terminate event
+            # Wait for image data or terminate/cancellation event
             start_time = time.time()
             while True:
+                # Check for cancellation
+                if self.event_manager.is_set('workflow_cancelled'):
+                    self.logger.warning("Workflow resolution cancelled by user")
+                    raise WorkflowCancelledException("Workflow cancelled by user")
+
                 # Check for terminate event
                 if self.event_manager.is_set('terminate'):
                     self.logger.warning("Workflow resolution terminated by user")
