@@ -611,6 +611,70 @@ def _update_section_highlighting(self):
 4. Enable LED and click Refresh → "Imaging" border disappears
 5. "Start Scan" button becomes enabled
 
+### 7. Coordinate Bounds Validation (2026-01-08)
+
+**Problem:** Users could fill in Point A with valid coordinates, leaving Point B at its default values (0.00, 0.00, 0.00). If these default values were outside the microscope's valid stage range, the validation would incorrectly allow the scan to proceed, or the highlighting would disappear prematurely, giving false feedback that the configuration was complete.
+
+**Solution:** Added explicit coordinate bounds validation to check that all Point A and Point B coordinates are within the microscope's valid X/Y/Z stage limits.
+
+**Validation Logic:**
+```python
+def _are_coordinates_valid(self) -> bool:
+    """Check if Point A and Point B coordinates are within valid stage bounds."""
+    x_limits = self._stage_limits['x']
+    y_limits = self._stage_limits['y']
+    z_limits = self._stage_limits['z']
+
+    # Check each coordinate against its respective limits
+    point_a_valid = (
+        x_limits['min'] <= self.point_a_x.value() <= x_limits['max'] and
+        y_limits['min'] <= self.point_a_y.value() <= y_limits['max'] and
+        z_limits['min'] <= self.point_a_z.value() <= z_limits['max']
+    )
+
+    point_b_valid = (
+        x_limits['min'] <= self.point_b_x.value() <= x_limits['max'] and
+        y_limits['min'] <= self.point_b_y.value() <= y_limits['max'] and
+        z_limits['min'] <= self.point_b_z.value() <= z_limits['max']
+    )
+
+    # Log warnings for debugging
+    if not point_a_valid or not point_b_valid:
+        self._logger.warning(f"Invalid coordinates detected with ranges: "
+                           f"X[{x_limits['min']}-{x_limits['max']}], ...")
+
+    return point_a_valid and point_b_valid
+```
+
+**Integration:**
+1. **Validation Check** - `_validate_configuration()` checks coordinate validity FIRST
+   - Returns clear error message showing valid ranges if coordinates are invalid
+   - Example: "One or more coordinates are outside valid stage bounds. Valid ranges: X[2.0-24.0], Y[3.5-22.5], Z[0.0-26.0]"
+
+2. **Visual Highlighting** - `_update_section_highlighting()` checks coordinate validity
+   - Amber border persists on "Bounding Points" section if any coordinate is out of bounds
+   - Works alongside existing checks for bounding box dimensions
+
+3. **Logging** - Invalid coordinates are logged with specific values and valid ranges
+   - Helps users identify typos or configuration errors
+   - Example: "Point B has invalid coordinates: X=0.000 (valid: 2.0-24.0), Y=0.000 (valid: 3.5-22.5), Z=0.000 (valid: 0.0-26.0)"
+
+**Behavior:**
+- If Point B is left at default (0.00, 0.00, 0.00) and these values are outside the microscope's actual stage bounds:
+  - "Bounding Points" section remains highlighted in amber
+  - "Start Scan" button stays disabled
+  - Hover tooltip shows helpful error message with valid ranges
+- User must explicitly set Point B to valid coordinates within the microscope's range
+- Catches typos like entering 25.5 when max is 24.0
+
+**Stage Limits Loading:**
+Stage limits are loaded from microscope settings in `_load_stage_limits()`:
+- Called before UI setup to ensure spinboxes use correct ranges
+- Falls back to default (0-26 mm) if microscope settings unavailable
+- Validation uses current `_stage_limits` values, catching discrepancies
+
+**Commit:** 55b0339
+
 ---
 
 ## Future Enhancements
