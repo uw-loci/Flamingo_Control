@@ -675,6 +675,103 @@ Stage limits are loaded from microscope settings in `_load_stage_limits()`:
 
 **Commit:** 55b0339
 
+### 8. LED Settings Memory and Automatic Activation (2026-01-08)
+
+**Problem:** Users had to manually set up Live View and LED every time they wanted to run a scan. The dialog didn't remember which LED and intensity were used for previous scans, and the LED settings were only shown generically (e.g., "LED: led_red" and "Intensity: (using current setting)") without displaying the actual values.
+
+**Solution:** Implemented LED settings persistence and automatic Live View/LED activation:
+
+**Features Added:**
+
+1. **LED Settings Memory**
+   - LED name and intensity are now stored in instance variables (`_current_led_name`, `_current_led_intensity`)
+   - Settings are automatically saved to `microscope_settings/led_2d_overview_settings.json` after successful scan completion
+   - Settings are automatically loaded on dialog initialization
+   - JSON format:
+     ```json
+     {
+       "led_name": "led_red",
+       "led_intensity": 45.0
+     }
+     ```
+
+2. **Improved Display**
+   - LED label now shows friendly color name: "LED: Red" (instead of "LED: led_red")
+   - Intensity label now shows actual percentage: "Intensity: 45.0%" (instead of "Intensity: (using current setting)")
+   - Users can see exactly what LED and intensity will be used for the scan
+
+3. **"Reload Last Used" Button**
+   - Added alongside "Refresh from Sample View" button
+   - Loads LED settings from last successful scan with one click
+   - Shows confirmation dialog with loaded settings
+   - Helpful error message if no saved settings exist
+
+4. **Automatic Live View & LED Activation**
+   - Created `_start_sample_view_live_with_led()` method
+   - When "Start Scan" is clicked:
+     1. Checks if Live View is already active
+     2. Starts Live View if needed
+     3. Sets LED intensity to stored value
+     4. Enables LED for preview
+   - Users no longer need to manually activate Live View before each scan
+
+5. **Updated Validation**
+   - Removed requirement for Live View to be pre-activated
+   - Validation now checks for valid LED settings (name and intensity)
+   - Clear error messages: "No LED settings loaded. Use 'Refresh from Sample View' or 'Reload Last Used' to load LED settings."
+   - Section highlighting updated to reflect new requirements
+
+**Implementation Details:**
+
+```python
+def _save_led_settings(self) -> None:
+    """Save current LED settings to JSON file for future use."""
+    settings = {
+        "led_name": self._current_led_name,
+        "led_intensity": self._current_led_intensity
+    }
+    with open(settings_file, 'w') as f:
+        json.dump(settings, f, indent=2)
+
+def _load_led_settings(self) -> bool:
+    """Load LED settings from JSON file."""
+    # Load from microscope_settings/led_2d_overview_settings.json
+    # Update display labels with friendly names
+    # Returns True if successful
+
+def _start_sample_view_live_with_led(self) -> bool:
+    """Start Live View and enable LED at specified intensity."""
+    # 1. Start Live View if not already active
+    # 2. Get LED color index from name (e.g., "led_red" -> 0)
+    # 3. Set LED intensity using laser_led_controller
+    # 4. Enable LED for preview
+```
+
+**User Workflow:**
+
+*First Time Setup:*
+1. Open LED 2D Overview dialog
+2. Click "Refresh from Sample View" to load current LED settings from Sample View
+3. (Optional) Adjust LED settings in Sample View if needed
+4. Configure bounding points and scan settings
+5. Click "Start Scan"
+6. Settings are automatically saved after successful scan
+
+*Subsequent Scans:*
+1. Open LED 2D Overview dialog
+2. Settings from last scan are automatically loaded
+3. (Optional) Click "Reload Last Used" to explicitly reload if settings were changed
+4. Configure bounding points and scan settings
+5. Click "Start Scan" - Live View and LED are activated automatically
+
+**Benefits:**
+- Faster workflow - no manual Live View/LED setup for each scan
+- Consistency - same LED settings used across multiple scans
+- Visibility - users know exactly what LED and intensity will be used
+- Convenience - one-click reload of previous settings
+
+**Commit:** 5b21368
+
 ---
 
 ## Future Enhancements
