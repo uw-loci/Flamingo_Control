@@ -203,7 +203,11 @@ class TileCollectionDialog(QDialog):
         self._zstack_panel.set_frame_rate(camera_settings['frame_rate'])
 
         # Save panel - pass app for system storage location and connection_service for drive refresh
+        # Only pass connection_service if it has query_available_drives method
         connection_service = getattr(self._app, 'connection_service', None) if self._app else None
+        if connection_service and not hasattr(connection_service, 'query_available_drives'):
+            logger.warning("Connection service lacks query_available_drives method - disabling drive refresh")
+            connection_service = None
         self._save_panel = SavePanel(app=self._app, connection_service=connection_service)
         container_layout.addWidget(self._save_panel)
 
