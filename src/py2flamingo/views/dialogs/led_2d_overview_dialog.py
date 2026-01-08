@@ -795,6 +795,16 @@ class LED2DOverviewDialog(QDialog):
         Returns:
             Error message string if invalid, None if valid
         """
+        # Check if coordinates are within valid stage bounds
+        if not self._are_coordinates_valid():
+            x_limits = self._stage_limits['x']
+            y_limits = self._stage_limits['y']
+            z_limits = self._stage_limits['z']
+            return (f"One or more coordinates are outside valid stage bounds. "
+                   f"Valid ranges: X[{x_limits['min']:.1f}-{x_limits['max']:.1f}], "
+                   f"Y[{y_limits['min']:.1f}-{y_limits['max']:.1f}], "
+                   f"Z[{z_limits['min']:.1f}-{z_limits['max']:.1f}]")
+
         # Check bounding box
         bbox = self._get_bounding_box()
         if bbox is None:
@@ -828,6 +838,45 @@ class LED2DOverviewDialog(QDialog):
         # Update visual highlighting on incomplete sections
         self._update_section_highlighting()
 
+    def _are_coordinates_valid(self) -> bool:
+        """Check if Point A and Point B coordinates are within valid stage bounds.
+
+        Returns:
+            False if any coordinate in Point A or Point B is outside the valid range
+        """
+        # Check Point A
+        x_limits = self._stage_limits['x']
+        y_limits = self._stage_limits['y']
+        z_limits = self._stage_limits['z']
+
+        point_a_x_valid = x_limits['min'] <= self.point_a_x.value() <= x_limits['max']
+        point_a_y_valid = y_limits['min'] <= self.point_a_y.value() <= y_limits['max']
+        point_a_z_valid = z_limits['min'] <= self.point_a_z.value() <= z_limits['max']
+        point_a_valid = point_a_x_valid and point_a_y_valid and point_a_z_valid
+
+        point_b_x_valid = x_limits['min'] <= self.point_b_x.value() <= x_limits['max']
+        point_b_y_valid = y_limits['min'] <= self.point_b_y.value() <= y_limits['max']
+        point_b_z_valid = z_limits['min'] <= self.point_b_z.value() <= z_limits['max']
+        point_b_valid = point_b_x_valid and point_b_y_valid and point_b_z_valid
+
+        # Log invalid coordinates for debugging
+        if not point_a_valid:
+            self._logger.warning(
+                f"Point A has invalid coordinates: "
+                f"X={self.point_a_x.value():.3f} (valid: {x_limits['min']}-{x_limits['max']}), "
+                f"Y={self.point_a_y.value():.3f} (valid: {y_limits['min']}-{y_limits['max']}), "
+                f"Z={self.point_a_z.value():.3f} (valid: {z_limits['min']}-{z_limits['max']})"
+            )
+        if not point_b_valid:
+            self._logger.warning(
+                f"Point B has invalid coordinates: "
+                f"X={self.point_b_x.value():.3f} (valid: {x_limits['min']}-{x_limits['max']}), "
+                f"Y={self.point_b_y.value():.3f} (valid: {y_limits['min']}-{y_limits['max']}), "
+                f"Z={self.point_b_z.value():.3f} (valid: {z_limits['min']}-{z_limits['max']})"
+            )
+
+        return point_a_valid and point_b_valid
+
     def _update_section_highlighting(self):
         """Update visual highlighting on sections that need attention.
 
@@ -835,9 +884,14 @@ class LED2DOverviewDialog(QDialog):
         """
         from py2flamingo.views.colors import WARNING_COLOR
 
-        # Check bounding points
+        # Check bounding points - validate coordinates AND bounding box
         bbox = self._get_bounding_box()
-        points_incomplete = bbox is None or (bbox.width < 0.001 and bbox.height < 0.001)
+        coords_valid = self._are_coordinates_valid()
+        points_incomplete = (
+            not coords_valid or
+            bbox is None or
+            (bbox.width < 0.001 and bbox.height < 0.001)
+        )
 
         if points_incomplete:
             self.points_group.setStyleSheet(
