@@ -202,8 +202,9 @@ class TileCollectionDialog(QDialog):
         camera_settings = self._camera_panel.get_settings()
         self._zstack_panel.set_frame_rate(camera_settings['frame_rate'])
 
-        # Save panel - pass app for system storage location
-        self._save_panel = SavePanel(app=self._app)
+        # Save panel - pass app for system storage location and connection_service for drive refresh
+        connection_service = getattr(self._app, 'connection_service', None) if self._app else None
+        self._save_panel = SavePanel(app=self._app, connection_service=connection_service)
         container_layout.addWidget(self._save_panel)
 
         container_layout.addStretch()
