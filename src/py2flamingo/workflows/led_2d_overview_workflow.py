@@ -720,6 +720,15 @@ class LED2DOverviewWorkflow(QObject):
 
                 tile_idx += 1
 
+                # Emit tile_completed signal for progress tracking
+                logger.info(f"Emitting tile_completed signal (fast mode): rotation={self._current_rotation_idx}, "
+                           f"tile={tile_idx - 1}, total={total_tiles}")
+                self.tile_completed.emit(
+                    self._current_rotation_idx,
+                    tile_idx - 1,  # tile_idx was just incremented, so subtract 1
+                    total_tiles
+                )
+
                 # Update progress periodically
                 if tile_idx % 5 == 0 or tile_idx == total_tiles:
                     percent = (tile_idx / total_tiles) * 100
