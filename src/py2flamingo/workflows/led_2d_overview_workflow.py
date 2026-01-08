@@ -736,7 +736,9 @@ class LED2DOverviewWorkflow(QObject):
                         f"Fast scan: {tile_idx}/{total_tiles} tiles",
                         percent
                     )
-                    QApplication.processEvents()
+
+                # Process events after every tile to update UI
+                QApplication.processEvents()
 
         logger.info(f"Fast mode: Captured {len(rotation_result.tiles)} tiles")
 
