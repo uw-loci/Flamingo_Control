@@ -5,7 +5,9 @@ Configuration dialog for the LED 2D Overview extension that creates
 """
 
 import logging
-from typing import Optional, List, Tuple
+import json
+from pathlib import Path
+from typing import Optional, List, Tuple, Dict, Any
 from dataclasses import dataclass
 
 from PyQt5.QtWidgets import (
@@ -92,6 +94,10 @@ class LED2DOverviewDialog(QDialog):
             'r': {'min': -720.0, 'max': 720.0}
         }
 
+        # Current LED settings (loaded from Sample View or saved settings)
+        self._current_led_name = None  # e.g., "led_red"
+        self._current_led_intensity = 0.0  # percentage (0-100)
+
         self.setWindowTitle("LED 2D Overview")
         self.setMinimumWidth(520)
         # Non-modal so user can interact with Sample View and other dialogs
@@ -99,7 +105,11 @@ class LED2DOverviewDialog(QDialog):
 
         self._load_stage_limits()
         self._setup_ui()
-        self._load_current_settings()
+
+        # Try to load saved LED settings first, fall back to Sample View if none exist
+        if not self._load_led_settings():
+            self._load_current_settings()
+
         self._refresh_presets()
         self._update_scan_info()
 
@@ -370,7 +380,9 @@ class LED2DOverviewDialog(QDialog):
         self.intensity_info_label = QLabel("Intensity: --")
         layout.addWidget(self.intensity_info_label)
 
-        # Refresh button
+        # Buttons layout
+        buttons_layout = QHBoxLayout()
+
         refresh_btn = QPushButton("Refresh from Sample View")
         refresh_btn.setToolTip(
             "Update LED settings from Sample View.\n"
@@ -378,7 +390,19 @@ class LED2DOverviewDialog(QDialog):
         )
         refresh_btn.clicked.connect(self._load_current_settings)
         refresh_btn.setMaximumWidth(200)
-        layout.addWidget(refresh_btn)
+        buttons_layout.addWidget(refresh_btn)
+
+        reload_btn = QPushButton("Reload Last Used")
+        reload_btn.setToolTip(
+            "Load LED settings from the last successful scan.\n"
+            "Settings are saved automatically when a scan completes."
+        )
+        reload_btn.clicked.connect(self._reload_last_used_settings)
+        reload_btn.setMaximumWidth(150)
+        buttons_layout.addWidget(reload_btn)
+
+        buttons_layout.addStretch()
+        layout.addLayout(buttons_layout)
 
         group.setLayout(layout)
         return group
@@ -550,23 +574,123 @@ class LED2DOverviewDialog(QDialog):
         if not self._app or not self._app.sample_view:
             self.led_info_label.setText("LED: Sample View not open")
             self.intensity_info_label.setText("Intensity: --")
+            self._current_led_name = None
+            self._current_led_intensity = 0.0
             return
 
         try:
             panel = self._app.sample_view.laser_led_panel
             if panel:
+                # Get LED source name (e.g., "led_red")
                 source = panel.get_selected_source()
-                self.led_info_label.setText(f"LED: {source}")
-                self.intensity_info_label.setText("Intensity: (using current setting)")
+                self._current_led_name = source
+
+                # Get LED intensity if LED is selected
+                if source.startswith("led_"):
+                    # Get current LED color index from combobox
+                    led_combobox = panel._led_combobox
+                    led_slider = panel._led_slider
+                    if led_combobox and led_slider:
+                        self._current_led_intensity = float(led_slider.value())
+
+                        # Extract color name from source (e.g., "led_red" -> "Red")
+                        color_name = source.replace("led_", "").capitalize()
+
+                        self.led_info_label.setText(f"LED: {color_name}")
+                        self.intensity_info_label.setText(f"Intensity: {self._current_led_intensity:.1f}%")
+                    else:
+                        self.led_info_label.setText(f"LED: {source}")
+                        self.intensity_info_label.setText("Intensity: (unknown)")
+                else:
+                    self.led_info_label.setText(f"LED: {source}")
+                    self.intensity_info_label.setText("Intensity: --")
+                    self._current_led_intensity = 0.0
             else:
                 self.led_info_label.setText("LED: Panel not available")
                 self.intensity_info_label.setText("Intensity: --")
+                self._current_led_name = None
+                self._current_led_intensity = 0.0
         except Exception as e:
             self._logger.error(f"Error loading LED settings: {e}")
             self.led_info_label.setText(f"LED: Error - {e}")
+            self._current_led_name = None
+            self._current_led_intensity = 0.0
 
         # Update start button state after LED info changes
         self._update_start_button_state()
+
+    def _save_led_settings(self) -> None:
+        """Save current LED settings to JSON file for future use."""
+        try:
+            settings_dir = Path("microscope_settings")
+            settings_dir.mkdir(exist_ok=True)
+            settings_file = settings_dir / "led_2d_overview_settings.json"
+
+            settings = {
+                "led_name": self._current_led_name,
+                "led_intensity": self._current_led_intensity
+            }
+
+            with open(settings_file, 'w') as f:
+                json.dump(settings, f, indent=2)
+
+            self._logger.info(f"Saved LED settings: {self._current_led_name} at {self._current_led_intensity:.1f}%")
+
+        except Exception as e:
+            self._logger.error(f"Error saving LED settings: {e}", exc_info=True)
+
+    def _load_led_settings(self) -> bool:
+        """Load LED settings from JSON file.
+
+        Returns:
+            True if settings were loaded successfully, False otherwise
+        """
+        try:
+            settings_file = Path("microscope_settings") / "led_2d_overview_settings.json"
+
+            if not settings_file.exists():
+                self._logger.info("No saved LED settings found")
+                return False
+
+            with open(settings_file, 'r') as f:
+                settings = json.load(f)
+
+            self._current_led_name = settings.get("led_name")
+            self._current_led_intensity = settings.get("led_intensity", 0.0)
+
+            # Update display labels
+            if self._current_led_name and self._current_led_name.startswith("led_"):
+                color_name = self._current_led_name.replace("led_", "").capitalize()
+                self.led_info_label.setText(f"LED: {color_name}")
+                self.intensity_info_label.setText(f"Intensity: {self._current_led_intensity:.1f}%")
+            else:
+                self.led_info_label.setText(f"LED: {self._current_led_name}")
+                self.intensity_info_label.setText("Intensity: --")
+
+            self._logger.info(f"Loaded LED settings: {self._current_led_name} at {self._current_led_intensity:.1f}%")
+            return True
+
+        except Exception as e:
+            self._logger.error(f"Error loading LED settings: {e}", exc_info=True)
+            return False
+
+    def _reload_last_used_settings(self) -> None:
+        """Reload LED settings from last successful scan."""
+        if self._load_led_settings():
+            self._update_start_button_state()
+            QMessageBox.information(
+                self, "Settings Loaded",
+                f"Loaded LED settings from last scan:\n"
+                f"LED: {self._current_led_name}\n"
+                f"Intensity: {self._current_led_intensity:.1f}%"
+            )
+        else:
+            QMessageBox.warning(
+                self, "No Saved Settings",
+                "No saved LED settings found.\n\n"
+                "Complete a scan first to save settings, or use\n"
+                "'Refresh from Sample View' to load current settings."
+            )
 
     def _is_point_set(self, x_spinbox: QDoubleSpinBox, y_spinbox: QDoubleSpinBox, z_spinbox: QDoubleSpinBox) -> bool:
         """Check if a point has valid values (not the "not set" special value)."""
@@ -813,16 +937,14 @@ class LED2DOverviewDialog(QDialog):
         if bbox.width < 0.001 and bbox.height < 0.001:
             return "Bounding box is too small (points are nearly identical)"
 
-        # Check LED source
-        led_text = self.led_info_label.text().replace("LED: ", "").lower()
-        if led_text in ('none', '--', 'sample view not open', 'panel not available'):
-            return "No light source selected. Please select an LED in the Sample View."
+        # Check LED source - must have valid LED settings stored
+        if not self._current_led_name or self._current_led_name == "none":
+            return "No LED settings loaded. Use 'Refresh from Sample View' or 'Reload Last Used' to load LED settings."
 
-        # Check if live viewer is active
-        if self._app and self._app.sample_view:
-            camera_controller = self._app.sample_view.camera_controller
-            if camera_controller and not camera_controller.is_live_view_active():
-                return "Live viewer is not active. Please start the live viewer in Sample View."
+        if not self._current_led_name.startswith("led_"):
+            return f"Invalid light source: {self._current_led_name}. Must be an LED (red, green, blue, or white)."
+
+        # Note: We no longer require Live View to be active - the scan will start it automatically
 
         return None
 
@@ -902,17 +1024,9 @@ class LED2DOverviewDialog(QDialog):
         else:
             self.points_group.setStyleSheet("")
 
-        # Check imaging (LED + Live View)
-        led_text = self.led_info_label.text().replace("LED: ", "").lower()
-        led_not_selected = led_text in ('none', '--', 'sample view not open', 'panel not available')
-
-        live_view_inactive = False
-        if self._app and self._app.sample_view:
-            sample_view = self._app.sample_view
-            if sample_view.camera_controller:
-                live_view_inactive = not sample_view.camera_controller.is_live_view_active()
-
-        imaging_incomplete = led_not_selected or live_view_inactive
+        # Check imaging (LED settings loaded)
+        # We no longer require Live View to be active - scan will start it automatically
+        imaging_incomplete = not self._current_led_name or self._current_led_name == "none"
 
         if imaging_incomplete:
             self.imaging_group.setStyleSheet(
@@ -993,8 +1107,8 @@ class LED2DOverviewDialog(QDialog):
         return ScanConfiguration(
             bounding_box=bbox,
             starting_r=self.starting_r.value(),
-            led_name=self.led_info_label.text().replace("LED: ", ""),
-            led_intensity=0.0,  # Using current setting
+            led_name=self._current_led_name if self._current_led_name else "none",
+            led_intensity=self._current_led_intensity,
             z_step_size=self.z_step_size.value(),
             use_focus_stacking=self.focus_stacking_checkbox.isChecked()
         )
@@ -1081,6 +1195,16 @@ class LED2DOverviewDialog(QDialog):
 
         self._logger.info(f"Starting LED 2D Overview scan with config: {config}")
 
+        # Start Live View and enable LED at specified intensity
+        if not self._start_sample_view_live_with_led():
+            QMessageBox.critical(
+                self,
+                "Cannot Start Scan",
+                "Failed to start Live View or enable LED.\n\n"
+                "Please ensure Sample View is open and the camera is connected."
+            )
+            return
+
         # Emit signal
         self.scan_requested.emit(config)
 
@@ -1124,6 +1248,10 @@ class LED2DOverviewDialog(QDialog):
         self._set_scan_in_progress(False)
         self._stop_sample_view_live()
 
+        # Save LED settings for future use if they're valid
+        if self._current_led_name and self._current_led_name != "none":
+            self._save_led_settings()
+
     def _on_workflow_error(self, error_msg: str) -> None:
         """Handle workflow error - stop live view."""
         self._logger.error(f"Workflow error: {error_msg} - stopping live view")
@@ -1136,6 +1264,70 @@ class LED2DOverviewDialog(QDialog):
             self._logger.info("User requested scan cancellation")
             self._workflow.cancel()
             # _on_workflow_completed will be called via scan_cancelled signal
+
+    def _start_sample_view_live_with_led(self) -> bool:
+        """Start Live View in SampleView and enable LED at specified intensity.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self._app or not self._app.sample_view:
+            self._logger.error("Cannot start live view - SampleView not available")
+            return False
+
+        sample_view = self._app.sample_view
+
+        # Check if Live View is already active
+        camera_controller = sample_view.camera_controller
+        if not camera_controller:
+            self._logger.error("Cannot start live view - camera controller not available")
+            return False
+
+        # Start Live View if not already active
+        if not camera_controller.is_live_view_active():
+            try:
+                camera_controller.start_live_view()
+                self._logger.info("Started camera live view for LED 2D Overview scan")
+            except Exception as e:
+                self._logger.error(f"Error starting camera live view: {e}")
+                return False
+
+        # Set up LED at specified intensity
+        laser_led_panel = sample_view.laser_led_panel
+        if not laser_led_panel:
+            self._logger.error("Cannot enable LED - laser/LED panel not available")
+            return False
+
+        try:
+            # Get LED color index from name (e.g., "led_red" -> 0)
+            led_map = {
+                'led_red': 0,
+                'led_green': 1,
+                'led_blue': 2,
+                'led_white': 3
+            }
+            led_color = led_map.get(self._current_led_name.lower())
+            if led_color is None:
+                self._logger.error(f"Invalid LED name: {self._current_led_name}")
+                return False
+
+            # Get the laser/LED controller
+            laser_led_controller = laser_led_panel.laser_led_controller
+
+            # Set LED intensity
+            laser_led_controller.set_led_intensity(led_color, self._current_led_intensity)
+            self._logger.info(f"Set LED intensity to {self._current_led_intensity:.1f}%")
+
+            # Enable LED for preview
+            laser_led_controller.enable_led_for_preview(led_color)
+            color_names = ["Red", "Green", "Blue", "White"]
+            self._logger.info(f"Enabled {color_names[led_color]} LED for LED 2D Overview scan")
+
+            return True
+
+        except Exception as e:
+            self._logger.error(f"Error enabling LED: {e}", exc_info=True)
+            return False
 
     def _stop_sample_view_live(self) -> None:
         """Stop the live view in SampleView and update button state."""
