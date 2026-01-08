@@ -687,6 +687,11 @@ class LED2DOverviewWorkflow(QObject):
                 z_pos = z_min
 
                 while z_pos <= z_max:
+                    # Check for cancellation during Z sweep
+                    if self._cancelled:
+                        self._finish_cancelled()
+                        return
+
                     # Move Z (non-blocking conceptually - we grab frame immediately)
                     stage_service.move_to_position(AxisCode.Z_AXIS, z_pos)
                     time.sleep(0.015)  # Minimal delay
@@ -739,6 +744,11 @@ class LED2DOverviewWorkflow(QObject):
 
                 # Process events after every tile to update UI
                 QApplication.processEvents()
+
+                # Check for cancellation after processing events
+                if self._cancelled:
+                    self._finish_cancelled()
+                    return
 
         logger.info(f"Fast mode: Captured {len(rotation_result.tiles)} tiles")
 
