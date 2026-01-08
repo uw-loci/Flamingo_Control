@@ -295,17 +295,20 @@ class MVCWorkflowService:
 
     Attributes:
         connection_service: MVCConnectionService for sending commands
+        event_manager: EventManager for synchronization events
         logger: Logger instance
     """
 
-    def __init__(self, connection_service: 'MVCConnectionService'):
+    def __init__(self, connection_service: 'MVCConnectionService', event_manager: 'EventManager'):
         """
         Initialize MVC workflow service with dependency injection.
 
         Args:
             connection_service: MVCConnectionService instance
+            event_manager: EventManager instance for workflow cancellation
         """
         self.connection_service = connection_service
+        self.event_manager = event_manager
         self.logger = logging.getLogger(__name__)
 
     def load_workflow(self, path: Path) -> bytes:
@@ -399,6 +402,10 @@ class MVCWorkflowService:
             raise RuntimeError("Not connected to microscope")
 
         try:
+            # Clear any previous workflow cancellation event
+            self.event_manager.clear_event('workflow_cancelled')
+            self.logger.debug("Cleared workflow_cancelled event for new workflow")
+
             # TODO: Parse workflow_data to determine type and set appropriate flags
             # For now, using basic flag (EXPERIMENT_TIME_REMAINING like old code)
             # params[6] = CommandDataBits.EXPERIMENT_TIME_REMAINING
@@ -421,7 +428,7 @@ class MVCWorkflowService:
 
     def stop_workflow(self) -> bool:
         """
-        Send CMD_WORKFLOW_STOP to microscope.
+        Send CMD_WORKFLOW_STOP to microscope and signal cancellation.
 
         Returns:
             True if workflow stopped successfully
@@ -437,13 +444,17 @@ class MVCWorkflowService:
             raise RuntimeError("Not connected to microscope")
 
         try:
+            # Signal workflow cancellation to break any wait loops
+            self.event_manager.set_event('workflow_cancelled')
+            self.logger.info("Workflow cancellation event set")
+
             # Create stop command
             cmd = Command(code=CommandCode.CMD_WORKFLOW_STOP)
 
             # Send command
             response = self.connection_service.send_command(cmd)
 
-            self.logger.info("Workflow stopped")
+            self.logger.info("Workflow stop command sent to microscope")
             return True
 
         except Exception as e:

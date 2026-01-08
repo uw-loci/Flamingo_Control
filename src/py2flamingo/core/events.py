@@ -32,6 +32,7 @@ class EventManager:
             'send': Event(),           # Send command to microscope
             'terminate': Event(),      # Terminate threads
             'visualize': Event(),      # Visualize image data
+            'workflow_cancelled': Event(),  # Workflow cancellation requested
         }
         
         # Set initial states

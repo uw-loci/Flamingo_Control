@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QObject, pyqtSignal
 
 from py2flamingo.core import ProtocolEncoder, TCPConnection, QueueManager
+from py2flamingo.core.events import EventManager
 from py2flamingo.models import (
     ConnectionModel, WorkflowModel, WorkflowType, Position, ImageDisplayModel
 )
@@ -144,6 +145,7 @@ class FlamingoApplication(QObject):
         self.tcp_connection = TCPConnection()
         self.protocol_encoder = ProtocolEncoder()
         self.queue_manager = QueueManager()
+        self.event_manager = EventManager()
 
         # Models layer - data models
         self.logger.debug("Creating models layer components...")
@@ -166,7 +168,8 @@ class FlamingoApplication(QObject):
         )
 
         self.workflow_service = MVCWorkflowService(
-            self.connection_service
+            self.connection_service,
+            self.event_manager
         )
 
         self.status_service = StatusService(

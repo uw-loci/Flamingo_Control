@@ -16,6 +16,11 @@ from py2flamingo.core.events import EventManager
 from py2flamingo.core.queue_manager import QueueManager
 
 
+class WorkflowCancelledException(Exception):
+    """Exception raised when workflow is cancelled by user."""
+    pass
+
+
 class WorkflowExecutionService:
     """
     Service for executing microscope workflows.
@@ -157,6 +162,9 @@ class WorkflowExecutionService:
 
             self.logger.info("Workflow execution completed")
 
+        except WorkflowCancelledException as e:
+            self.logger.info(f"Workflow cancelled: {e}")
+            raise  # Re-raise so caller knows it was cancelled
         except Exception as e:
             self.logger.error(f"Failed to send workflow: {e}")
             raise
@@ -175,6 +183,7 @@ class WorkflowExecutionService:
 
         Raises:
             TimeoutError: If system doesn't become idle within timeout
+            WorkflowCancelledException: If workflow cancelled by user
         """
         self.logger.info("Waiting for system to become idle...")
 
@@ -183,6 +192,12 @@ class WorkflowExecutionService:
         query_interval = 5.0  # Query system state every 5 seconds
 
         while not self.event_manager.is_set('system_idle'):
+            # Check for cancellation
+            if self.event_manager.is_set('workflow_cancelled'):
+                elapsed = time.time() - start_time
+                self.logger.info(f"Workflow wait cancelled by user after {elapsed:.1f}s")
+                raise WorkflowCancelledException("Workflow cancelled by user")
+
             # Check for timeout
             elapsed = time.time() - start_time
             if elapsed > timeout:
