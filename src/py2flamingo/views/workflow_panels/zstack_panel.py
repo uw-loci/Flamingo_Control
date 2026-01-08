@@ -5,6 +5,7 @@ Provides UI for Z-stack acquisition parameters.
 """
 
 import logging
+import math
 from typing import Optional, Dict, Any
 
 from PyQt5.QtWidgets import (
@@ -74,6 +75,10 @@ class ZStackPanel(QWidget):
         # Flag to prevent recursive updates
         self._updating = False
 
+        # Z range can be set externally (for tile collection)
+        self._z_range_mm = None  # None means calculate from num_planes * z_step
+        self._auto_num_planes = False  # Auto-calculate num_planes from z_range and z_step
+
         self._setup_ui()
 
     def _get_default_z_velocity(self) -> float:
@@ -113,16 +118,54 @@ class ZStackPanel(QWidget):
         grid = QGridLayout()
         grid.setSpacing(8)
 
-        # Number of planes
-        grid.addWidget(QLabel("Number of Planes:"), 0, 0)
+        # Z range (can be set externally for tile collection, or calculated from num_planes)
+        grid.addWidget(QLabel("Z Range:"), 0, 0)
+        z_range_layout = QHBoxLayout()
+        z_range_layout.setContentsMargins(0, 0, 0, 0)
+        z_range_layout.setSpacing(8)
+
+        self._z_range_spinbox = QDoubleSpinBox()
+        self._z_range_spinbox.setRange(0.001, 100.0)  # 1 um to 100 mm
+        self._z_range_spinbox.setValue(0.250)  # Default 250 um = 0.25 mm
+        self._z_range_spinbox.setDecimals(4)
+        self._z_range_spinbox.setSingleStep(0.001)
+        self._z_range_spinbox.setSuffix(" mm")
+        self._z_range_spinbox.valueChanged.connect(self._on_z_range_changed)
+        self._z_range_spinbox.setVisible(False)  # Hidden by default, shown only in tile mode
+        z_range_layout.addWidget(self._z_range_spinbox)
+
+        self._z_range_label = QLabel("250.0 um")
+        self._z_range_label.setStyleSheet("font-weight: bold;")
+        z_range_layout.addWidget(self._z_range_label)
+
+        grid.addLayout(z_range_layout, 0, 1)
+
+        # Number of planes row with auto-calculate checkbox
+        num_planes_layout = QHBoxLayout()
+        num_planes_layout.setContentsMargins(0, 0, 0, 0)
+        num_planes_layout.setSpacing(8)
+
         self._num_planes = QSpinBox()
-        self._num_planes.setRange(1, 10000)
+        self._num_planes.setRange(1, 50000)  # Support large Z ranges (100mm / 0.002mm = 50000)
         self._num_planes.setValue(100)
-        self._num_planes.valueChanged.connect(self._on_settings_changed)
-        grid.addWidget(self._num_planes, 0, 1)
+        self._num_planes.valueChanged.connect(self._on_num_planes_changed)
+        num_planes_layout.addWidget(self._num_planes)
+
+        self._auto_num_planes_checkbox = QCheckBox("Auto")
+        self._auto_num_planes_checkbox.setChecked(False)
+        self._auto_num_planes_checkbox.setToolTip(
+            "Auto-calculate number of planes from Z range and Z step.\n"
+            "Formula: Num_planes = ceiling(Z_range / Z_step) + 1"
+        )
+        self._auto_num_planes_checkbox.stateChanged.connect(self._on_auto_num_planes_changed)
+        self._auto_num_planes_checkbox.setVisible(False)  # Hidden by default, shown only in tile mode
+        num_planes_layout.addWidget(self._auto_num_planes_checkbox)
+
+        grid.addWidget(QLabel("Number of Planes:"), 1, 0)
+        grid.addLayout(num_planes_layout, 1, 1)
 
         # Z step size (in micrometers, stored as mm in workflow)
-        grid.addWidget(QLabel("Z Step:"), 1, 0)
+        grid.addWidget(QLabel("Z Step:"), 2, 0)
         self._z_step = QDoubleSpinBox()
         self._z_step.setRange(0.1, 100.0)
         self._z_step.setValue(2.5)  # Default 2.5 um
@@ -130,13 +173,7 @@ class ZStackPanel(QWidget):
         self._z_step.setSingleStep(0.1)
         self._z_step.setSuffix(" um")
         self._z_step.valueChanged.connect(self._on_settings_changed)
-        grid.addWidget(self._z_step, 1, 1)
-
-        # Z range (calculated, read-only display)
-        grid.addWidget(QLabel("Z Range:"), 2, 0)
-        self._z_range_label = QLabel("250.0 um")
-        self._z_range_label.setStyleSheet("font-weight: bold;")
-        grid.addWidget(self._z_range_label, 2, 1)
+        grid.addWidget(self._z_step, 2, 1)
 
         # Frame rate display (read-only, set by CameraPanel)
         grid.addWidget(QLabel("Frame Rate:"), 3, 0)
@@ -178,6 +215,13 @@ class ZStackPanel(QWidget):
         self._velocity_warning.setVisible(False)
         grid.addWidget(self._velocity_warning, 5, 0, 1, 2)
 
+        # Z range validation warning (hidden by default)
+        self._z_range_warning = QLabel("")
+        self._z_range_warning.setStyleSheet("color: #d9534f; font-size: 11px; font-weight: bold;")
+        self._z_range_warning.setWordWrap(True)
+        self._z_range_warning.setVisible(False)
+        grid.addWidget(self._z_range_warning, 6, 0, 1, 2)
+
         # Apply initial auto-calculation state
         self._z_velocity.setReadOnly(True)
         self._z_velocity.setStyleSheet("QDoubleSpinBox { background-color: #f0f0f0; }")
@@ -185,12 +229,12 @@ class ZStackPanel(QWidget):
 
         # Stack option dropdown (hidden by default - auto-managed by workflow type)
         self._stack_option_label = QLabel("Stack Option:")
-        grid.addWidget(self._stack_option_label, 6, 0)
+        grid.addWidget(self._stack_option_label, 7, 0)
         self._stack_option = QComboBox()
         self._stack_option.addItems(STACK_OPTIONS)
         self._stack_option.setCurrentText("None")
         self._stack_option.currentTextChanged.connect(self._on_stack_option_changed)
-        grid.addWidget(self._stack_option, 6, 1)
+        grid.addWidget(self._stack_option, 7, 1)
 
         # Hide stack option by default (auto-managed by WorkflowView)
         self._stack_option_label.setVisible(False)
@@ -216,11 +260,11 @@ class ZStackPanel(QWidget):
         tile_layout.addWidget(self._tiles_y, 1, 1)
 
         self._tile_widget.setVisible(False)
-        grid.addWidget(self._tile_widget, 7, 0, 1, 2)
+        grid.addWidget(self._tile_widget, 8, 0, 1, 2)
 
         # Rotational stage velocity (only for OPT modes)
         self._rotational_label = QLabel("Rotational Velocity:")
-        grid.addWidget(self._rotational_label, 8, 0)
+        grid.addWidget(self._rotational_label, 9, 0)
         self._rotational_velocity = QDoubleSpinBox()
         self._rotational_velocity.setRange(0.0, 10.0)
         self._rotational_velocity.setValue(0.0)
@@ -228,17 +272,17 @@ class ZStackPanel(QWidget):
         self._rotational_velocity.setSingleStep(0.1)
         self._rotational_velocity.setSuffix(" °/s")
         self._rotational_velocity.valueChanged.connect(self._on_settings_changed)
-        grid.addWidget(self._rotational_velocity, 8, 1)
+        grid.addWidget(self._rotational_velocity, 9, 1)
 
         # Hide rotational velocity by default (shown for Multi-Angle mode)
         self._rotational_label.setVisible(False)
         self._rotational_velocity.setVisible(False)
 
         # Estimated acquisition time
-        grid.addWidget(QLabel("Est. Time:"), 9, 0)
+        grid.addWidget(QLabel("Est. Time:"), 10, 0)
         self._time_label = QLabel("~5.0 s")
         self._time_label.setStyleSheet("color: #666;")
-        grid.addWidget(self._time_label, 9, 1)
+        grid.addWidget(self._time_label, 10, 1)
 
         # Options row
         opts_layout = QHBoxLayout()
@@ -250,7 +294,7 @@ class ZStackPanel(QWidget):
         opts_layout.addWidget(self._return_to_start)
 
         opts_layout.addStretch()
-        grid.addLayout(opts_layout, 10, 0, 1, 2)
+        grid.addLayout(opts_layout, 11, 0, 1, 2)
 
         group.setLayout(grid)
         layout.addWidget(group)
@@ -273,6 +317,16 @@ class ZStackPanel(QWidget):
 
     def _on_settings_changed(self) -> None:
         """Handle any settings change."""
+        # If in tile mode with auto num_planes, recalculate when Z step changes
+        if self._auto_num_planes and self._z_range_mm is not None:
+            z_step_mm = self._z_step.value() / 1000.0
+            if z_step_mm > 0:
+                num_planes = math.ceil(self._z_range_mm / z_step_mm) + 1
+
+                self._updating = True
+                self._num_planes.setValue(num_planes)
+                self._updating = False
+
         # Update auto-velocity if enabled
         if self._auto_velocity.isChecked():
             self._update_auto_velocity()
@@ -299,6 +353,61 @@ class ZStackPanel(QWidget):
             self._update_auto_velocity()
         else:
             self._z_velocity.setStyleSheet("")
+
+        self._on_settings_changed()
+
+    def _on_z_range_changed(self) -> None:
+        """Handle Z range spinbox change."""
+        if self._updating:
+            return
+
+        # Update stored Z range
+        self._z_range_mm = self._z_range_spinbox.value()
+
+        # If auto num planes is enabled, recalculate num_planes
+        if self._auto_num_planes:
+            z_step_mm = self._z_step.value() / 1000.0
+            if z_step_mm > 0:
+                # Formula: Num_planes = ceiling(Z_range / Z_step) + 1
+                num_planes = math.ceil(self._z_range_mm / z_step_mm) + 1
+
+                # Update num_planes without triggering recursive updates
+                self._updating = True
+                self._num_planes.setValue(num_planes)
+                self._updating = False
+
+        self._on_settings_changed()
+
+    def _on_num_planes_changed(self) -> None:
+        """Handle number of planes change."""
+        if self._updating:
+            return
+
+        # If in tile mode with auto num_planes disabled, user can manually override
+        # In this case, we don't update Z range - they're independently set
+        self._on_settings_changed()
+
+    def _on_auto_num_planes_changed(self, state: int) -> None:
+        """Handle auto-calculate num planes checkbox change."""
+        is_auto = state != 0
+        self._auto_num_planes = is_auto
+
+        # Update UI state
+        self._num_planes.setReadOnly(is_auto)
+        if is_auto:
+            self._num_planes.setStyleSheet("QSpinBox { background-color: #f0f0f0; }")
+
+            # Recalculate num_planes from Z range and Z step
+            if self._z_range_mm is not None:
+                z_step_mm = self._z_step.value() / 1000.0
+                if z_step_mm > 0:
+                    num_planes = math.ceil(self._z_range_mm / z_step_mm) + 1
+
+                    self._updating = True
+                    self._num_planes.setValue(num_planes)
+                    self._updating = False
+        else:
+            self._num_planes.setStyleSheet("")
 
         self._on_settings_changed()
 
@@ -367,16 +476,38 @@ class ZStackPanel(QWidget):
         z_step_um = self._z_step.value()
         z_velocity = self._z_velocity.value()
 
-        # Calculate Z range
-        z_range_um = (num_planes - 1) * z_step_um
+        # Calculate or display Z range
+        if self._z_range_mm is not None:
+            # In tile mode - Z range is set externally
+            z_range_mm = self._z_range_mm
+            z_range_um = z_range_mm * 1000.0
+        else:
+            # Normal mode - calculate Z range from num_planes and z_step
+            z_range_um = (num_planes - 1) * z_step_um
+            z_range_mm = z_range_um / 1000.0
+
+        # Validate Z step vs Z range (only in tile mode where range is fixed)
+        if self._z_range_mm is not None:
+            z_step_mm = z_step_um / 1000.0
+            if z_step_mm > z_range_mm:
+                warning = (f"Warning: Z step ({z_step_um:.1f} µm) is larger than Z range "
+                          f"({z_range_um:.1f} µm). Only {num_planes} plane(s) will be acquired, "
+                          f"covering {(num_planes - 1) * z_step_um:.1f} µm.")
+                self._z_range_warning.setText(warning)
+                self._z_range_warning.setVisible(True)
+            else:
+                self._z_range_warning.setVisible(False)
+        else:
+            self._z_range_warning.setVisible(False)
+
+        # Update Z range label
         if z_range_um < 1000:
             self._z_range_label.setText(f"{z_range_um:.1f} um")
         else:
-            self._z_range_label.setText(f"{z_range_um / 1000:.2f} mm")
+            self._z_range_label.setText(f"{z_range_mm:.2f} mm")
 
         # Estimate acquisition time
         # Time = distance / velocity + overhead per plane
-        z_range_mm = z_range_um / 1000.0
         z_travel_time = z_range_mm / z_velocity if z_velocity > 0 else 0
         overhead_per_plane = 0.01  # ~10ms overhead per plane
         total_overhead = num_planes * overhead_per_plane
@@ -468,6 +599,57 @@ class ZStackPanel(QWidget):
     def get_z_range_mm(self) -> float:
         """Get total Z range in millimeters."""
         return self.get_z_range_um() / 1000.0
+
+    def set_z_range(self, z_min_mm: float, z_max_mm: float) -> None:
+        """Set Z range externally for tile collection mode.
+
+        Args:
+            z_min_mm: Minimum Z position in mm
+            z_max_mm: Maximum Z position in mm
+        """
+        z_range_mm = abs(z_max_mm - z_min_mm)
+        self._z_range_mm = z_range_mm
+
+        # Update spinbox
+        self._updating = True
+        self._z_range_spinbox.setValue(z_range_mm)
+        self._updating = False
+
+        # If auto num_planes is enabled, recalculate
+        if self._auto_num_planes:
+            z_step_mm = self._z_step.value() / 1000.0
+            if z_step_mm > 0:
+                num_planes = math.ceil(z_range_mm / z_step_mm) + 1
+
+                self._updating = True
+                self._num_planes.setValue(num_planes)
+                self._updating = False
+
+        self._update_calculations()
+
+    def enable_tile_mode(self, enable: bool = True) -> None:
+        """Enable tile collection mode with Z range input and auto num_planes.
+
+        Args:
+            enable: True to enable tile mode, False to disable
+        """
+        self._z_range_spinbox.setVisible(enable)
+        self._auto_num_planes_checkbox.setVisible(enable)
+
+        if enable:
+            # Default to auto mode when enabling tile mode
+            self._auto_num_planes_checkbox.setChecked(True)
+            self._z_range_label.setVisible(False)  # Hide calculated label when showing spinbox
+        else:
+            # Reset to normal mode
+            self._z_range_mm = None
+            self._auto_num_planes = False
+            self._auto_num_planes_checkbox.setChecked(False)
+            self._z_range_label.setVisible(True)  # Show calculated label
+            self._num_planes.setReadOnly(False)
+            self._num_planes.setStyleSheet("")
+
+        self._update_calculations()
 
     # Visibility control methods for workflow type integration
 

@@ -39,6 +39,10 @@ class TileResult:
 
     Stores multiple visualization types for the same tile position.
     The 'images' dict maps visualization type to the corresponding image.
+
+    For spatial overlap calculation in tile collection:
+    - rotation_angle: The rotation angle at which this tile was captured
+    - z_stack_min/max: The Z-stack bounds used for this tile (in workflow coordinates)
     """
     x: float
     y: float
@@ -46,6 +50,9 @@ class TileResult:
     tile_x_idx: int
     tile_y_idx: int
     images: dict = field(default_factory=dict)  # visualization_type -> np.ndarray
+    rotation_angle: float = 0.0  # Rotation angle in degrees
+    z_stack_min: float = 0.0  # Minimum Z position of Z-stack (mm)
+    z_stack_max: float = 0.0  # Maximum Z position of Z-stack (mm)
 
     @property
     def image(self) -> np.ndarray:
@@ -719,7 +726,10 @@ class LED2DOverviewWorkflow(QObject):
                         z=best_z,
                         tile_x_idx=x_idx,
                         tile_y_idx=y_idx,
-                        images=images
+                        images=images,
+                        rotation_angle=self._rotation_angles[self._current_rotation_idx],
+                        z_stack_min=z_min,
+                        z_stack_max=z_max
                     )
                     rotation_result.tiles.append(tile_result)
 
@@ -894,7 +904,10 @@ class LED2DOverviewWorkflow(QObject):
             return TileResult(
                 x=x, y=y, z=z_center,
                 tile_x_idx=tile_x_idx, tile_y_idx=tile_y_idx,
-                images={vtype: placeholder.copy() for vtype, _ in VISUALIZATION_TYPES}
+                images={vtype: placeholder.copy() for vtype, _ in VISUALIZATION_TYPES},
+                rotation_angle=self._rotation_angles[self._current_rotation_idx],
+                z_stack_min=eff_bbox.z_min,
+                z_stack_max=eff_bbox.z_max
             )
 
         # Calculate all visualization types from the captured frames
@@ -918,7 +931,10 @@ class LED2DOverviewWorkflow(QObject):
             z=best_z,
             tile_x_idx=tile_x_idx,
             tile_y_idx=tile_y_idx,
-            images=images
+            images=images,
+            rotation_angle=self._rotation_angles[self._current_rotation_idx],
+            z_stack_min=eff_bbox.z_min,
+            z_stack_max=eff_bbox.z_max
         )
 
     def _focus_stack_frames(self, frames: list) -> np.ndarray:
