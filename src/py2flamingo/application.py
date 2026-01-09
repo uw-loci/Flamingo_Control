@@ -199,7 +199,8 @@ class FlamingoApplication(QObject):
         self.workflow_controller = WorkflowController(
             self.workflow_service,
             self.connection_model,
-            self.workflow_model
+            self.workflow_model,
+            connection_service=self.connection_service
         )
 
         self.position_controller = PositionController(
