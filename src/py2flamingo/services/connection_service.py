@@ -604,45 +604,43 @@ class MVCConnectionService:
 
             self.logger.debug(f"Received {len(response_bytes)} bytes response for STORAGE_PATH_GET")
 
-            # Parse response - drive list is in the buffer field as newline-separated text
+            # Parse response - drive list is in ADDITIONAL DATA that follows the 128-byte message
+            # Protocol: SCommand (128 bytes) + additionalData (variable length string)
+            # The additionalDataBytes field (offset 48) tells us how many bytes follow
             if len(response_bytes) >= 128:
-                # Extract buffer field (72 bytes starting at offset 52)
-                # Protocol format (128 bytes total):
-                #   0-3:    startMarker (uint32)
-                #   4-7:    cmd (uint32)
-                #   8-11:   status (uint32)
-                #   12-39:  7 x int32Data params (28 bytes)
-                #   40-47:  doubleData (double, 8 bytes)
-                #   48-51:  addDataBytes (uint32) - count of valid bytes in buffer
-                #   52-123: buffer (72 bytes) - string data
-                #   124-127: endMarker (uint32)
                 import struct
 
-                # Get the count field to know how many bytes of data are valid
-                count = struct.unpack_from("I", response_bytes, 48)[0]
+                # Get the additionalDataBytes field to know how many extra bytes follow
+                additional_data_size = struct.unpack_from("I", response_bytes, 48)[0]
 
-                if count > 0 and count <= 72:
-                    # Extract the text data from buffer (starts at offset 52)
-                    data_bytes = response_bytes[52:52+count]
-                    drives_str = data_bytes.decode('utf-8', errors='ignore').strip()
+                self.logger.debug(f"STORAGE_PATH_GET: additionalDataBytes={additional_data_size}, "
+                                 f"total response={len(response_bytes)} bytes")
 
-                    # Split by newlines and filter empty strings
-                    drives = [d.strip() for d in drives_str.split('\n') if d.strip()]
+                if additional_data_size > 0 and len(response_bytes) > 128:
+                    # Additional data follows the 128-byte message
+                    additional_data = response_bytes[128:128+additional_data_size]
+                    drives_str = additional_data.decode('utf-8', errors='ignore').strip('\x00').strip()
 
-                    self.logger.info(f"Found {len(drives)} available storage drives: {drives}")
-                    return drives
+                    if drives_str:
+                        # Split by newlines and filter empty strings
+                        drives = [d.strip() for d in drives_str.split('\n') if d.strip()]
+                        self.logger.info(f"Found {len(drives)} available storage drives: {drives}")
+                        return drives
+                    else:
+                        self.logger.warning("Additional data was empty")
+                        return []
                 else:
-                    # Count is 0 or invalid - try reading the whole buffer anyway
-                    # Some servers may not set addDataBytes correctly
+                    # No additional data - check the 72-byte buffer field as fallback
                     data_bytes = response_bytes[52:124]
                     drives_str = data_bytes.decode('utf-8', errors='ignore').strip('\x00').strip()
 
                     if drives_str:
                         drives = [d.strip() for d in drives_str.split('\n') if d.strip()]
-                        self.logger.info(f"Found {len(drives)} available storage drives (from raw buffer): {drives}")
+                        self.logger.info(f"Found {len(drives)} available storage drives (from buffer field): {drives}")
                         return drives
                     else:
-                        self.logger.warning("No storage drives reported by server")
+                        self.logger.warning(f"No storage drives reported by server "
+                                          f"(additionalDataBytes={additional_data_size})")
                         return []
             else:
                 self.logger.error(f"Invalid response size: {len(response_bytes)} bytes")

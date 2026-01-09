@@ -430,13 +430,18 @@ class MicroscopeCommandService:
             # Convert ParsedMessage to legacy dict format
             parsed = self._convert_parsed_message(response)
 
-            # Note: Additional data handling would need separate mechanism
-            # for async mode if needed (currently not implemented)
+            # Include additional data if present (follows 128-byte message for some commands)
+            # Concatenate it to raw_response so callers get the full response
+            raw_response = response.raw_data
+            if response.additional_data:
+                raw_response = raw_response + response.additional_data
+                self.logger.debug(f"{command_name} has {len(response.additional_data)} bytes additional data")
 
             return {
                 'success': True,
                 'parsed': parsed,
-                'raw_response': response.raw_data
+                'raw_response': raw_response,
+                'additional_data': response.additional_data
             }
 
         except Exception as e:
