@@ -224,11 +224,12 @@ class ConfigurationService:
     def get_data_storage_location(self) -> str:
         """
         Get default data storage location.
-        
+
         Returns:
-            str: Data storage path
+            str: Data storage path, or empty string if not configured.
+                 User must select via Refresh button in Advanced Save Settings.
         """
-        return self.config.get('data_storage_location', '/media/deploy/MSN_LS')
+        return self.config.get('data_storage_location', '')
     
     def get_microscope_name(self) -> str:
         """

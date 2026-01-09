@@ -553,13 +553,51 @@ class TileCollectionDialog(QDialog):
             self._workflow_type = WorkflowType.SNAPSHOT
             self._type_description.setText("Single image at each tile position")
             self._zstack_panel.setVisible(False)
+            self._zstack_panel.enable_tile_mode(False)
         else:
             self._workflow_type = WorkflowType.ZSTACK
+
+            # Enable tile mode and set Z range from tiles
+            self._zstack_panel.enable_tile_mode(True)
+            z_min, z_max = self._get_representative_z_range()
+            self._zstack_panel.set_z_range(z_min, z_max)
+
+            # Update description with Z range info
+            z_range_mm = z_max - z_min
             if self._has_dual_view:
-                self._type_description.setText("Z-stack using 90° overlap Z range")
+                desc = f"Z-stack using 90° overlap Z range ({z_range_mm*1000:.0f} µm)"
             else:
-                self._type_description.setText("Z-stack using bounding box Z range")
+                desc = f"Z-stack using bounding box Z range ({z_range_mm*1000:.0f} µm)"
+            self._type_description.setText(desc)
             self._zstack_panel.setVisible(True)
+
+    def _get_representative_z_range(self) -> Tuple[float, float]:
+        """Get representative Z range from all tiles.
+
+        Uses the maximum Z range across all tiles since that determines
+        the maximum number of planes needed for complete coverage.
+
+        Returns:
+            Tuple of (z_min, z_max) in mm
+        """
+        if not self._tile_z_ranges:
+            # Fallback to bounding box
+            if self._config:
+                return (self._config.bounding_box.z_min, self._config.bounding_box.z_max)
+            return (0.0, 10.0)
+
+        # Find the largest Z range (for UI display)
+        # Each tile workflow will use its specific Z range
+        max_range = 0.0
+        best_z_min, best_z_max = 0.0, 0.0
+
+        for (z_min, z_max) in self._tile_z_ranges.values():
+            z_range = z_max - z_min
+            if z_range > max_range:
+                max_range = z_range
+                best_z_min, best_z_max = z_min, z_max
+
+        return (best_z_min, best_z_max)
 
     def _on_camera_settings_changed(self, settings: dict):
         """Handle camera settings change - update Z velocity calculation."""

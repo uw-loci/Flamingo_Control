@@ -247,7 +247,7 @@ def trace_ellipse(
     laser_channel="Laser 3 488 nm",
     laser_setting="5.00 1",
     z_search_depth_mm=2.0,
-    data_storage_location=os.path.join("/media", "deploy", "MSN_LS"),
+    data_storage_location="",  # Must be provided by caller or queried from server
 ):
     """
     Trace an ellipse based on a single bounding box, generally acquired from the Locate Sample button. However, this could also be created manually and placed at sample_txt/{samplename}/bounds_{samplename}.txt

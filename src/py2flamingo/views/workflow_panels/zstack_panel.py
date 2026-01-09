@@ -628,26 +628,44 @@ class ZStackPanel(QWidget):
         self._update_calculations()
 
     def enable_tile_mode(self, enable: bool = True) -> None:
-        """Enable tile collection mode with Z range input and auto num_planes.
+        """Enable tile collection mode with Z range from LED 2D Overview.
+
+        In tile mode:
+        - Z range is set from tile data (read-only, from LED 2D Overview)
+        - Number of planes is auto-calculated from Z range and Z step
+        - User can adjust Z step to control resolution
 
         Args:
             enable: True to enable tile mode, False to disable
         """
-        self._z_range_spinbox.setVisible(enable)
         self._auto_num_planes_checkbox.setVisible(enable)
 
         if enable:
-            # Default to auto mode when enabling tile mode
+            # Show Z range as read-only label (comes from LED 2D Overview)
+            self._z_range_spinbox.setVisible(False)
+            self._z_range_label.setVisible(True)
+            self._z_range_label.setToolTip(
+                "Z range is determined by LED 2D Overview scan.\n"
+                "Each tile uses its specific Z range from the overlap calculation."
+            )
+
+            # Enable auto num_planes mode
             self._auto_num_planes_checkbox.setChecked(True)
-            self._z_range_label.setVisible(False)  # Hide calculated label when showing spinbox
+            self._auto_num_planes = True
+            self._num_planes.setReadOnly(True)
+            self._num_planes.setStyleSheet("QSpinBox { background-color: #f0f0f0; }")
+            self._num_planes.setToolTip("Auto-calculated from Z range and Z step")
         else:
             # Reset to normal mode
+            self._z_range_spinbox.setVisible(False)
+            self._z_range_label.setVisible(True)
+            self._z_range_label.setToolTip("")
             self._z_range_mm = None
             self._auto_num_planes = False
             self._auto_num_planes_checkbox.setChecked(False)
-            self._z_range_label.setVisible(True)  # Show calculated label
             self._num_planes.setReadOnly(False)
             self._num_planes.setStyleSheet("")
+            self._num_planes.setToolTip("")
 
         self._update_calculations()
 
