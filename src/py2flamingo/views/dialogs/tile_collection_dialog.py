@@ -611,9 +611,9 @@ class TileCollectionDialog(QDialog):
             QMessageBox.warning(self, "Missing Name", "Please enter a workflow name prefix.")
             return
 
-        # Validate illumination
-        illumination = self._illumination_panel.get_settings()
-        if not illumination.laser_enabled and not illumination.led_enabled:
+        # Validate illumination - get_settings() returns a list of IlluminationSettings
+        illumination_list = self._illumination_panel.get_settings()
+        if not illumination_list:
             QMessageBox.warning(self, "No Illumination", "Please enable at least one light source.")
             return
 
@@ -687,7 +687,7 @@ class TileCollectionDialog(QDialog):
 
             # Build workflow text with per-tile Z range
             workflow_text = self._build_workflow_text(
-                workflow_name, position, illumination, save_settings, z_min, z_max
+                workflow_name, position, illumination_list, save_settings, z_min, z_max
             )
 
             # Save to file
@@ -718,14 +718,14 @@ class TileCollectionDialog(QDialog):
         self.accept()
 
     def _build_workflow_text(self, name: str, position: Position,
-                             illumination, save_settings: dict,
+                             illumination_list: List, save_settings: dict,
                              z_min: float, z_max: float) -> str:
         """Build workflow file text content.
 
         Args:
             name: Workflow name
             position: Start position
-            illumination: IlluminationSettings
+            illumination_list: List of IlluminationSettings for enabled sources
             save_settings: Save settings dict
             z_min: Minimum Z for Z-stack
             z_max: Maximum Z for Z-stack
@@ -824,10 +824,14 @@ class TileCollectionDialog(QDialog):
         # Illumination Source
         lines.append("")
         lines.append("    <Illumination Source>")
-        if illumination.laser_enabled and illumination.laser_channel:
-            lines.append(f"    {illumination.laser_channel} = {illumination.laser_power_mw:.2f} 1")
-        if illumination.led_enabled and illumination.led_channel:
-            lines.append(f"    {illumination.led_channel} = {illumination.led_intensity_percent:.1f} 1")
+        has_led = False
+        for illum in illumination_list:
+            if illum.laser_enabled and illum.laser_channel:
+                lines.append(f"    {illum.laser_channel} = {illum.laser_power_mw:.2f} 1")
+            if illum.led_enabled and illum.led_channel:
+                lines.append(f"    {illum.led_channel} = {illum.led_intensity_percent:.1f} 1")
+                has_led = True
+        if has_led:
             lines.append("    LED selection = 0 0")
         lines.append("    LED DAC = 42000 0")
         lines.append("    </Illumination Source>")
@@ -840,9 +844,12 @@ class TileCollectionDialog(QDialog):
         lines.append("    </Illumination Path>")
 
         # Illumination Options
+        # Check if multiple lasers are enabled
+        laser_count = sum(1 for illum in illumination_list if illum.laser_enabled)
+        multi_laser = laser_count > 1
         lines.append("")
         lines.append("    <Illumination Options>")
-        lines.append("    Run stack with multiple lasers on = false")
+        lines.append(f"    Run stack with multiple lasers on = {'true' if multi_laser else 'false'}")
         lines.append("    </Illumination Options>")
 
         lines.append("</Workflow Settings>")
