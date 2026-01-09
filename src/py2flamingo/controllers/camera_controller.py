@@ -44,6 +44,7 @@ class CameraController(QObject):
     state_changed = pyqtSignal(object)  # CameraState
     error_occurred = pyqtSignal(str)  # error message
     frame_rate_updated = pyqtSignal(float)  # FPS
+    tile_zstack_frame = pyqtSignal(np.ndarray, dict, int, int)  # (image, position, z_index, frame_num)
 
     def __init__(self, camera_service: CameraService, laser_led_controller=None):
         """
@@ -90,6 +91,11 @@ class CameraController(QObject):
         # Local frame counter for duplicate detection
         # Hardware frame_number may not increment, so we use our own counter
         self._local_frame_counter = 0
+
+        # Tile workflow mode for Sample View integration
+        self._workflow_tile_mode = False
+        self._current_tile_position = None
+        self._z_plane_counter = 0
 
         # Timer-based frame pulling (ensures display always updates)
         # This timer pulls latest frame from buffer and discards accumulated frames
@@ -225,6 +231,42 @@ class CameraController(QObject):
         """
         return self._exposure_us
 
+    def set_active_tile_position(self, position: dict):
+        """Activate tile workflow mode for Sample View integration.
+
+        Args:
+            position: Dict with 'x', 'y', 'z_min', 'z_max', 'filename'
+        """
+        self._workflow_tile_mode = True
+        self._current_tile_position = position
+        self._z_plane_counter = 0
+        self.logger.info(f"CameraController: Activated tile mode for {position.get('filename', 'unknown')}")
+
+    def clear_tile_mode(self):
+        """Deactivate tile workflow mode."""
+        if self._workflow_tile_mode:
+            self.logger.info(f"CameraController: Cleared tile mode after {self._z_plane_counter} frames")
+        self._workflow_tile_mode = False
+        self._current_tile_position = None
+        self._z_plane_counter = 0
+
+    def _route_frame_to_sample_view(self, image, header):
+        """Route workflow Z-stack frame to Sample View integration.
+
+        Args:
+            image: numpy array of captured frame
+            header: ImageHeader with metadata
+        """
+        # Emit signal for Sample View to catch
+        # (Sample View will connect to this signal)
+        self.tile_zstack_frame.emit(
+            image,                          # Frame data
+            self._current_tile_position,    # Tile position metadata
+            self._z_plane_counter,          # Z-plane index
+            header.frame_number             # Global frame number
+        )
+        self.logger.debug(f"Routed Z-plane {self._z_plane_counter} to Sample View")
+
     def set_display_range(self, min_val: int, max_val: int) -> None:
         """
         Set display intensity range for scaling.
@@ -357,6 +399,11 @@ class CameraController(QObject):
                 return
 
             image, header = frame
+
+            # NEW: If in tile workflow mode, route to Sample View
+            if self._workflow_tile_mode and self._current_tile_position:
+                self._route_frame_to_sample_view(image, header)
+                self._z_plane_counter += 1
 
             # Apply display scaling if auto-scale enabled
             if self._auto_scale and header.image_scale_min != header.image_scale_max:

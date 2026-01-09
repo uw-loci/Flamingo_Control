@@ -592,25 +592,32 @@ class MVCConnectionService:
             # Create STORAGE_PATH_GET command with int32Data0=0 (query mode, not selection)
             cmd = Command(
                 code=SystemCommands.STORAGE_PATH_GET,
-                params=[0, 0, 0, 0, 0, 0, CommandDataBits.TRIGGER_CALL_BACK]
+                parameters={'params': [0, 0, 0, 0, 0, 0, CommandDataBits.TRIGGER_CALL_BACK]}
             )
 
             # Send command and get response
             response_bytes = self.send_command(cmd, timeout=timeout)
 
-            # Parse response - drive list is in the additionalData buffer as newline-separated text
+            # Parse response - drive list is in the buffer field as newline-separated text
             if len(response_bytes) >= 128:
-                # Extract additionalData buffer (72 bytes starting at offset 48)
-                # Protocol format: [start][code][status][7*params][double][count][72-byte data][end]
-                # Offsets: 0-4=start, 4-8=code, 8-12=status, 12-40=params, 40-48=double+count, 48-120=data
+                # Extract buffer field (72 bytes starting at offset 52)
+                # Protocol format (128 bytes total):
+                #   0-3:    startMarker (uint32)
+                #   4-7:    cmd (uint32)
+                #   8-11:   status (uint32)
+                #   12-39:  7 x int32Data params (28 bytes)
+                #   40-47:  doubleData (double, 8 bytes)
+                #   48-51:  addDataBytes (uint32) - count of valid bytes in buffer
+                #   52-123: buffer (72 bytes) - string data
+                #   124-127: endMarker (uint32)
                 import struct
 
                 # Get the count field to know how many bytes of data are valid
-                count = struct.unpack_from("I", response_bytes, 44)[0]
+                count = struct.unpack_from("I", response_bytes, 48)[0]
 
                 if count > 0 and count <= 72:
-                    # Extract the text data
-                    data_bytes = response_bytes[48:48+count]
+                    # Extract the text data from buffer (starts at offset 52)
+                    data_bytes = response_bytes[52:52+count]
                     drives_str = data_bytes.decode('utf-8', errors='ignore').strip()
 
                     # Split by newlines and filter empty strings
@@ -619,8 +626,18 @@ class MVCConnectionService:
                     self.logger.info(f"Found {len(drives)} available storage drives: {drives}")
                     return drives
                 else:
-                    self.logger.warning("No storage drives reported by server")
-                    return []
+                    # Count is 0 or invalid - try reading the whole buffer anyway
+                    # Some servers may not set addDataBytes correctly
+                    data_bytes = response_bytes[52:124]
+                    drives_str = data_bytes.decode('utf-8', errors='ignore').strip('\x00').strip()
+
+                    if drives_str:
+                        drives = [d.strip() for d in drives_str.split('\n') if d.strip()]
+                        self.logger.info(f"Found {len(drives)} available storage drives (from raw buffer): {drives}")
+                        return drives
+                    else:
+                        self.logger.warning("No storage drives reported by server")
+                        return []
             else:
                 self.logger.error(f"Invalid response size: {len(response_bytes)} bytes")
                 return []

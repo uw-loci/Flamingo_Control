@@ -643,6 +643,25 @@ class FlamingoApplication(QObject):
         self.logger.info("Application shutdown complete")
 
     # -------------------------------------------------------------------------
+    # Configuration Properties
+    # -------------------------------------------------------------------------
+
+    @property
+    def microscope_settings(self):
+        """Get microscope settings service for stage limits and other per-microscope config.
+
+        This property provides access to the MicroscopeSettingsService which contains
+        stage movement limits, position history settings, and other microscope-specific
+        configuration loaded from {microscope_name}_settings.json.
+
+        Returns:
+            MicroscopeSettingsService instance, or None if config_service not available
+        """
+        if hasattr(self, 'config_service') and self.config_service:
+            return self.config_service.microscope_settings
+        return None
+
+    # -------------------------------------------------------------------------
     # Acquisition State Management
     # -------------------------------------------------------------------------
 

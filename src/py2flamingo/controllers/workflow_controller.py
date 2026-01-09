@@ -77,6 +77,46 @@ class WorkflowController:
         self._current_workflow_start_time: Optional[float] = None
         self._current_workflow_params: Optional[Dict[str, Any]] = None
 
+        # Tile workflow position tracking for Sample View integration
+        self._active_tile_position: Optional[Dict] = None
+        self._camera_controller = None  # Will be set via setter
+
+    def set_camera_controller(self, camera_controller):
+        """Set camera controller reference for tile workflow integration.
+
+        Args:
+            camera_controller: CameraController instance
+        """
+        self._camera_controller = camera_controller
+
+    def set_active_tile_position(self, position: dict):
+        """Set position metadata for active tile workflow.
+
+        This enables Sample View integration by passing position data to the
+        CameraController, which will intercept and route frames.
+
+        Args:
+            position: Dict with x, y, z_min, z_max, filename
+        """
+        self._active_tile_position = position
+
+        # Pass to CameraController for frame interception
+        if self._camera_controller and hasattr(self._camera_controller, 'set_active_tile_position'):
+            self._camera_controller.set_active_tile_position(position)
+            self._logger.info(f"Set tile position for Sample View integration: {position.get('filename', 'unknown')}")
+        else:
+            self._logger.warning("Camera controller not available for tile position tracking")
+
+    def _clear_tile_position(self):
+        """Clear tile position metadata after workflow completes."""
+        if self._active_tile_position:
+            self._logger.info(f"Clearing tile position: {self._active_tile_position.get('filename', 'unknown')}")
+            self._active_tile_position = None
+
+            # Clear camera controller tile mode
+            if self._camera_controller and hasattr(self._camera_controller, 'clear_tile_mode'):
+                self._camera_controller.clear_tile_mode()
+
     def load_workflow(self, file_path: str) -> Tuple[bool, str]:
         """
         Load workflow file for validation and preview.
@@ -202,6 +242,9 @@ class WorkflowController:
                 # Mark workflow as completed in model
                 if self._workflow_model:
                     self._workflow_model.mark_completed()
+
+                # Clear tile position for Sample View integration
+                self._clear_tile_position()
 
                 self._logger.info("Stopped workflow")
                 return (True, "Workflow stopped successfully")
@@ -782,6 +825,9 @@ class WorkflowController:
         if self._workflow_model:
             self._workflow_model.mark_completed()
 
+        # Clear tile position for Sample View integration
+        self._clear_tile_position()
+
     def on_workflow_cancelled(self) -> None:
         """
         Handle workflow cancellation.
@@ -794,3 +840,6 @@ class WorkflowController:
 
         if self._workflow_model:
             self._workflow_model.mark_completed()
+
+        # Clear tile position for Sample View integration
+        self._clear_tile_position()

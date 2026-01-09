@@ -28,13 +28,13 @@ class AdvancedSaveDialog(QDialog):
     """
 
     def __init__(self, parent: Optional[QDialog] = None,
-                 default_drive: str = "/media/deploy/ctlsm1",
+                 default_drive: str = "",
                  connection_service = None):
         """Initialize the dialog.
 
         Args:
             parent: Parent widget
-            default_drive: Default save drive path
+            default_drive: Default save drive path (empty if not configured)
             connection_service: MVCConnectionService for querying available drives
         """
         super().__init__(parent)
@@ -66,8 +66,13 @@ class AdvancedSaveDialog(QDialog):
         self._save_drive = QComboBox()
         self._save_drive.setEditable(True)
         self._save_drive.setMinimumWidth(300)
-        self._save_drive.addItem(self._default_drive)
-        self._save_drive.setCurrentText(self._default_drive)
+        # Only add default if it's a valid path
+        if self._default_drive:
+            self._save_drive.addItem(self._default_drive)
+            self._save_drive.setCurrentText(self._default_drive)
+        else:
+            # No default - show placeholder
+            self._save_drive.setPlaceholderText("Click Refresh to query available drives...")
         self._save_drive.setToolTip(
             "Base path for data storage.\n"
             "This is typically a network share or local disk.\n\n"
@@ -197,9 +202,9 @@ class AdvancedSaveDialog(QDialog):
 
                 self._logger.info(f"Refreshed {len(drives)} available drives")
             else:
-                # No drives returned, keep default
+                # No drives returned - warn user
                 self._logger.warning("No drives returned from server, using default")
-                if self._save_drive.count() == 0:
+                if self._save_drive.count() == 0 and self._default_drive:
                     self._save_drive.addItem(self._default_drive)
 
         except Exception as e:
@@ -212,7 +217,7 @@ class AdvancedSaveDialog(QDialog):
 
     def _browse_drive(self) -> None:
         """Open file dialog to browse for save drive."""
-        current = self._save_drive.currentText() or self._default_drive
+        current = self._save_drive.currentText() or self._default_drive or ""
         directory = QFileDialog.getExistingDirectory(
             self,
             "Select Save Drive",
@@ -224,7 +229,10 @@ class AdvancedSaveDialog(QDialog):
 
     def _reset_defaults(self) -> None:
         """Reset all settings to defaults."""
-        self._save_drive.setCurrentText(self._default_drive)
+        if self._default_drive:
+            self._save_drive.setCurrentText(self._default_drive)
+        else:
+            self._save_drive.setCurrentText("")
         self._region.clear()
         self._save_subfolders.setChecked(False)
         self._live_view.setChecked(True)

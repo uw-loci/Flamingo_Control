@@ -68,11 +68,13 @@ class SavePanel(QWidget):
         self._setup_ui()
 
     def _get_default_save_drive(self) -> str:
-        """Get default save drive from system configuration."""
-        default = "/media/deploy/ctlsm1"
+        """Get default save drive from system configuration.
 
+        Returns empty string if no valid drive is configured, requiring
+        user to select one via Advanced settings.
+        """
         if self._app is None:
-            return default
+            return ""  # No app, no default - user must configure
 
         try:
             config_service = getattr(self._app, 'config_service', None)
@@ -84,7 +86,10 @@ class SavePanel(QWidget):
         except Exception as e:
             self._logger.warning(f"Could not get data storage location from system: {e}")
 
-        return default
+        # No valid drive found - return empty string
+        # User must configure via Advanced settings
+        self._logger.warning("No default save drive configured - user must select via Advanced settings")
+        return ""
 
     def _setup_ui(self) -> None:
         """Create and layout UI components."""
@@ -161,14 +166,23 @@ class SavePanel(QWidget):
         settings_layout.addLayout(format_row, 2, 0, 1, 2)
 
         # Drive info (compact display)
-        self._drive_info = QLabel(f"Drive: {self._save_drive}")
-        self._drive_info.setStyleSheet("color: gray; font-size: 9pt;")
+        self._drive_info = QLabel()
+        self._update_drive_info_display()
         settings_layout.addWidget(self._drive_info, 3, 0, 1, 2)
 
         group_layout.addWidget(self._settings_widget)
 
         group.setLayout(group_layout)
         layout.addWidget(group)
+
+    def _update_drive_info_display(self) -> None:
+        """Update the drive info label based on current save drive."""
+        if self._save_drive:
+            self._drive_info.setText(f"Drive: {self._save_drive}")
+            self._drive_info.setStyleSheet("color: gray; font-size: 9pt;")
+        else:
+            self._drive_info.setText("⚠ No save drive configured - click Advanced to select")
+            self._drive_info.setStyleSheet("color: #e74c3c; font-size: 9pt; font-weight: bold;")
 
     def _on_save_enabled_changed(self, state: int) -> None:
         """Handle save enabled checkbox change."""
@@ -206,7 +220,7 @@ class SavePanel(QWidget):
             self._comments = settings['comments']
 
             # Update drive info display
-            self._drive_info.setText(f"Drive: {self._save_drive}")
+            self._update_drive_info_display()
             self._on_settings_changed()
 
     def get_settings(self) -> Dict[str, Any]:

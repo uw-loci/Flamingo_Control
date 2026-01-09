@@ -736,6 +736,12 @@ class SampleView(QWidget):
         # Live view state
         self._live_view_active = False
 
+        # Tile workflow integration state
+        self._tile_workflow_active = False
+        self._expected_tiles = []  # List of tile positions
+        self._accumulated_zstacks = {}  # (x,y) -> list of (z, image)
+        self._current_channel = 0  # Default to channel 0 (405nm)
+
         # Setup window - sized for 3-column layout
         self.setWindowTitle("Sample View")
         self.setMinimumSize(1000, 800)
@@ -1521,6 +1527,11 @@ class SampleView(QWidget):
         if self.camera_controller:
             self.camera_controller.new_image.connect(self._on_frame_received)
             self.camera_controller.state_changed.connect(self._on_camera_state_changed)
+
+            # Connect tile Z-stack frame signal for Sample View integration
+            if hasattr(self.camera_controller, 'tile_zstack_frame'):
+                self.camera_controller.tile_zstack_frame.connect(self._on_tile_zstack_frame)
+                self.logger.info("Connected tile Z-stack frame signal for Sample View integration")
 
         # Movement signals
         if self.movement_controller:
@@ -2503,3 +2514,148 @@ class SampleView(QWidget):
         # (acquisition controls the LED, user shouldn't change it)
         if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
             self.laser_led_panel.setEnabled(enabled)
+
+    # ========== Tile Workflow Integration ==========
+
+    def prepare_for_tile_workflows(self, tile_info: list):
+        """Prepare Sample View to receive tile workflow Z-stacks.
+
+        Args:
+            tile_info: List of dicts with tile positions and Z-ranges
+                      Each dict has keys: x, y, z_min, z_max, filename
+        """
+        self._tile_workflow_active = True
+        self._expected_tiles = tile_info
+        self._accumulated_zstacks = {}
+
+        self.logger.info(f"Sample View: Prepared to receive {len(tile_info)} tile workflows")
+
+        # Show progress indicator if available
+        # TODO: Add progress bar if needed
+
+    def _on_tile_zstack_frame(self, image: np.ndarray, position: dict,
+                              z_index: int, frame_num: int):
+        """Handle incoming Z-stack frame from tile workflow.
+
+        Args:
+            image: Frame data (H, W) uint16 array
+            position: Tile position dict with x, y, z_min, z_max, filename
+            z_index: Z-plane index (0-based)
+            frame_num: Global frame number
+        """
+        if not self._tile_workflow_active:
+            return
+
+        # Calculate actual Z position from index
+        # Assume linear spacing from z_min to z_max
+        z_min = position['z_min']
+        z_max = position['z_max']
+        z_range = z_max - z_min
+
+        # Estimate total number of planes from Z range and typical step (2.5 um)
+        estimated_planes = max(1, int(z_range / 0.0025) + 1)
+        z_position = z_min + (z_index / max(1, estimated_planes - 1)) * z_range
+
+        # Accumulate frame
+        tile_key = (position['x'], position['y'])
+        if tile_key not in self._accumulated_zstacks:
+            self._accumulated_zstacks[tile_key] = []
+
+        self._accumulated_zstacks[tile_key].append({
+            'z': z_position,
+            'image': image.copy(),
+            'z_index': z_index,
+            'timestamp': time.time()
+        })
+
+        # Process frame into 3D volume
+        self._add_frame_to_3d_volume(image, position, z_position)
+
+        # Update progress (if we have a progress bar)
+        total_frames = sum(len(frames) for frames in self._accumulated_zstacks.values())
+
+        self.logger.debug(f"Sample View: Accumulated Z-plane {z_index} for tile "
+                         f"({position['x']:.2f}, {position['y']:.2f})")
+
+    def _add_frame_to_3d_volume(self, image: np.ndarray, position: dict, z_mm: float):
+        """Add tile frame to 3D volume visualization.
+
+        Args:
+            image: Frame data (H, W) uint16
+            position: Tile center position (x, y in mm)
+            z_mm: Z position of this frame (mm)
+        """
+        # Get 3D visualization window
+        if not self.sample_3d_window:
+            self.logger.warning("3D visualization not available")
+            return
+
+        viz = self.sample_3d_window
+
+        # Get voxel storage
+        if not self.voxel_storage:
+            self.logger.warning("Voxel storage not available")
+            return
+
+        # Get camera pixel size from camera controller
+        if not self.camera_controller or not self.camera_controller.camera_service:
+            self.logger.warning("Camera service not available")
+            return
+
+        # Get pixel field of view (in mm)
+        pixel_size_mm = self.camera_controller.camera_service.get_pixel_field_of_view()
+        pixel_size_um = pixel_size_mm * 1000  # mm to µm
+
+        # Convert tile position to world coordinates
+        tile_x_um = position['x'] * 1000  # mm to µm
+        tile_y_um = position['y'] * 1000
+        tile_z_um = z_mm * 1000
+
+        # Create pixel coordinate grid
+        h, w = image.shape[:2]
+        y_pixels, x_pixels = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
+
+        # Center coordinates (image center = tile center)
+        x_pixels_centered = (x_pixels - w/2) * pixel_size_um
+        y_pixels_centered = (y_pixels - h/2) * pixel_size_um
+
+        # Build 3D world coordinates (Z, Y, X order for napari)
+        x_world = tile_x_um + x_pixels_centered
+        y_world = tile_y_um + y_pixels_centered
+        z_world = np.full_like(x_world, tile_z_um)
+
+        world_coords = np.column_stack([
+            z_world.ravel(),
+            y_world.ravel(),
+            x_world.ravel()
+        ])
+
+        # Get pixel values
+        pixel_values = image.ravel().astype(np.uint16)
+
+        # Filter low-intensity background for efficiency
+        threshold = 100  # Adjust as needed
+        mask = pixel_values > threshold
+        world_coords = world_coords[mask]
+        pixel_values = pixel_values[mask]
+
+        # Update voxel storage
+        timestamp = time.time()
+        try:
+            self.voxel_storage.update_storage(
+                channel_id=self._current_channel,
+                world_coords=world_coords,
+                pixel_values=pixel_values,
+                timestamp=timestamp,
+                update_mode='maximum'  # Maximum intensity projection
+            )
+
+            # Mark display as dirty to trigger visualization update
+            if hasattr(viz, '_update_visualization_if_needed'):
+                viz._update_visualization_if_needed()
+
+            self.logger.debug(f"Added {len(pixel_values)} voxels to 3D volume at "
+                             f"tile ({position['x']:.2f}, {position['y']:.2f}), Z={z_mm:.3f}mm")
+
+        except Exception as e:
+            self.logger.error(f"Failed to update voxel storage: {e}")

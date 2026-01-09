@@ -13,7 +13,7 @@ from typing import List, Optional, Tuple, Dict
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QGroupBox, QComboBox, QScrollArea, QWidget,
-    QMessageBox, QProgressDialog, QFrame
+    QMessageBox, QProgressDialog, QFrame, QCheckBox
 )
 from PyQt5.QtCore import Qt
 
@@ -336,6 +336,16 @@ class TileCollectionDialog(QDialog):
             connection_service = None
         self._save_panel = SavePanel(app=self._app, connection_service=connection_service)
         container_layout.addWidget(self._save_panel)
+
+        # Sample View Integration checkbox
+        self._add_to_sample_view_checkbox = QCheckBox("Add Z-stacks to Sample View (live)")
+        self._add_to_sample_view_checkbox.setToolTip(
+            "If checked, Z-stack frames will be added to Sample View 3D\n"
+            "visualization in real-time as each tile workflow executes.\n"
+            "Requires Sample View window to be open."
+        )
+        self._add_to_sample_view_checkbox.setChecked(True)  # Default enabled
+        container_layout.addWidget(self._add_to_sample_view_checkbox)
 
         container_layout.addStretch()
         scroll.setWidget(container)
@@ -801,12 +811,114 @@ class TileCollectionDialog(QDialog):
 
         return "\n".join(lines)
 
+    def _get_sample_view_instance(self):
+        """Get Sample View instance from application.
+
+        Returns:
+            Sample View instance if available, None otherwise
+        """
+        if self._app and hasattr(self._app, 'sample_view'):
+            return self._app.sample_view
+        return None
+
+    def _parse_workflow_position(self, workflow_file: Path) -> Optional[Dict]:
+        """Extract X, Y position from workflow filename.
+
+        Filename format: tile_collection_R0_X10.50_Y20.75.txt
+
+        Args:
+            workflow_file: Path to workflow file
+
+        Returns:
+            Dictionary with 'x', 'y', 'filename' or None if parse fails
+        """
+        import re
+        match = re.search(r'X([-\d.]+)_Y([-\d.]+)', workflow_file.stem)
+        if match:
+            return {
+                'x': float(match.group(1)),
+                'y': float(match.group(2)),
+                'filename': workflow_file.name
+            }
+        logger.warning(f"Could not parse position from filename: {workflow_file.name}")
+        return None
+
+    def _read_z_range_from_workflow(self, workflow_file: Path) -> Tuple[float, float]:
+        """Read Z-stack range from workflow file.
+
+        Args:
+            workflow_file: Path to workflow file
+
+        Returns:
+            Tuple of (z_min, z_max) in mm
+        """
+        try:
+            with open(workflow_file, 'r') as f:
+                content = f.read()
+
+            # Parse Start Position Z
+            z_min = 0.0
+            z_max = 0.0
+
+            import re
+            start_match = re.search(r'<Start Position>.*?Z \(mm\) = ([-\d.]+)', content, re.DOTALL)
+            if start_match:
+                z_min = float(start_match.group(1))
+
+            end_match = re.search(r'<End Position>.*?Z \(mm\) = ([-\d.]+)', content, re.DOTALL)
+            if end_match:
+                z_max = float(end_match.group(1))
+
+            return (z_min, z_max)
+
+        except Exception as e:
+            logger.error(f"Failed to read Z range from {workflow_file.name}: {e}")
+            return (0.0, 10.0)
+
+    def _setup_sample_view_integration(self, workflow_files: List[Path], sample_view):
+        """Setup Sample View to receive workflow Z-stack frames.
+
+        Args:
+            workflow_files: List of workflow file paths
+            sample_view: Sample View instance
+        """
+        # Calculate expected Z-stack parameters from workflows
+        z_stack_info = []
+        for wf_file in workflow_files:
+            position = self._parse_workflow_position(wf_file)
+            if position:
+                # Read Z-range from workflow file
+                z_min, z_max = self._read_z_range_from_workflow(wf_file)
+                position['z_min'] = z_min
+                position['z_max'] = z_max
+                z_stack_info.append(position)
+
+        # Pass to Sample View for initialization
+        if hasattr(sample_view, 'prepare_for_tile_workflows'):
+            sample_view.prepare_for_tile_workflows(z_stack_info)
+            logger.info(f"Sample View prepared to receive {len(z_stack_info)} tile workflows")
+        else:
+            logger.warning("Sample View does not have prepare_for_tile_workflows method")
+
     def _execute_workflows(self, workflow_files: List[Path]):
         """Execute the created workflow files.
 
         Args:
             workflow_files: List of workflow file paths to execute
         """
+        # Check if Sample View integration is enabled
+        add_to_sample_view = self._add_to_sample_view_checkbox.isChecked()
+
+        if add_to_sample_view:
+            # Get Sample View reference
+            sample_view = self._get_sample_view_instance()
+            if sample_view:
+                # Register workflow metadata for frame interception
+                self._setup_sample_view_integration(workflow_files, sample_view)
+            else:
+                logger.warning("Sample View not available - 3D integration disabled")
+                add_to_sample_view = False
+
         # Try to get the application and workflow controller
         try:
             from PyQt5.QtWidgets import QApplication
@@ -842,12 +954,27 @@ class TileCollectionDialog(QDialog):
                 progress.setValue(i)
                 progress.setLabelText(f"Executing {workflow_file.name}...")
 
+                # Parse workflow position for Sample View integration
+                tile_position = None
+                if add_to_sample_view:
+                    tile_position = self._parse_workflow_position(workflow_file)
+                    if tile_position:
+                        # Add Z range from workflow file
+                        z_min, z_max = self._read_z_range_from_workflow(workflow_file)
+                        tile_position['z_min'] = z_min
+                        tile_position['z_max'] = z_max
+
                 try:
                     # Load and execute workflow
                     if hasattr(flamingo_app, 'workflow_controller'):
                         controller = flamingo_app.workflow_controller
                         success, msg = controller.load_workflow(str(workflow_file))
                         if success:
+                            # Tag workflow with position metadata for Sample View integration
+                            if add_to_sample_view and tile_position and hasattr(controller, 'set_active_tile_position'):
+                                controller.set_active_tile_position(tile_position)
+                                logger.debug(f"Set tile position for Sample View: {tile_position}")
+
                             success, msg = controller.start_workflow()
                             if success:
                                 logger.info(f"Started workflow: {workflow_file.name}")
