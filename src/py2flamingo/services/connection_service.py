@@ -590,13 +590,19 @@ class MVCConnectionService:
             from py2flamingo.models.command import Command
 
             # Create STORAGE_PATH_GET command with int32Data0=0 (query mode, not selection)
+            # Note: Command code 0x1013 is named "SET" on server but handles queries when int32Data0=0
             cmd = Command(
                 code=SystemCommands.STORAGE_PATH_GET,
                 parameters={'params': [0, 0, 0, 0, 0, 0, CommandDataBits.TRIGGER_CALL_BACK]}
             )
 
+            self.logger.info(f"Querying storage drives: cmd=0x{SystemCommands.STORAGE_PATH_GET:04X}, "
+                           f"callback_flag=0x{CommandDataBits.TRIGGER_CALL_BACK:08X}")
+
             # Send command and get response
             response_bytes = self.send_command(cmd, timeout=timeout)
+
+            self.logger.debug(f"Received {len(response_bytes)} bytes response for STORAGE_PATH_GET")
 
             # Parse response - drive list is in the buffer field as newline-separated text
             if len(response_bytes) >= 128:

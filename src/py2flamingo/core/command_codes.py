@@ -49,7 +49,9 @@ class SystemCommands:
     SCOPE_SETTINGS_LOAD = 0x1009  # 4105 - Load microscope settings
 
     # Storage path commands
-    STORAGE_PATH_GET = 0xFBB8  # 64440 - Query available storage drives/mount points
+    # Note: Despite the name "SET", 0x1013 is used to QUERY available storage paths
+    # when int32Data0=0. The server's storagePathSet() function handles both query and set.
+    STORAGE_PATH_GET = 0x1013  # 4115 - Query available storage drives/mount points
     STORAGE_PATH_UNMOUNT = 0x1014  # 4116 - Unmount a storage drive
     STORAGE_PATH_TEST = 0x1015  # 4117 - Test storage drive performance
 
