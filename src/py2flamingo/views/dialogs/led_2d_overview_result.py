@@ -304,6 +304,10 @@ class ImagePanel(QWidget):
         self._tiles_x = tiles_x
         self._tiles_y = tiles_y
 
+        if image is not None:
+            logger.info(f"ImagePanel.set_image: image shape={image.shape}, tiles={tiles_x}x{tiles_y}, "
+                       f"existing coords={len(self._tile_coords)}, invert_x={self._invert_x}")
+
         # Invalidate cached base pixmap since image/grid changed
         self._invalidate_base_pixmap()
 
@@ -340,6 +344,16 @@ class ImagePanel(QWidget):
         """
         self._tile_coords = coords
         self._invert_x = invert_x
+
+        # Debug logging for tile coordinate issues
+        if coords:
+            x_indices = [c[2] for c in coords if len(c) >= 4]
+            y_indices = [c[3] for c in coords if len(c) >= 4]
+            max_x = max(x_indices) if x_indices else -1
+            max_y = max(y_indices) if y_indices else -1
+            logger.info(f"ImagePanel.set_tile_coordinates: {len(coords)} coords, "
+                       f"tile indices up to ({max_x}, {max_y}), invert_x={invert_x}, "
+                       f"expected grid={self._tiles_x}x{self._tiles_y}")
 
         # Invalidate cached base pixmap since coordinates changed
         self._invalidate_base_pixmap()
@@ -558,9 +572,16 @@ class ImagePanel(QWidget):
     def _draw_selection_overlay(self):
         """Draw selection highlights on the current pixmap (fast, called on every click)."""
         if self._pixmap is None or self._tiles_x <= 0 or self._tiles_y <= 0:
+            logger.debug(f"_draw_selection_overlay: skipping - pixmap={self._pixmap is not None}, "
+                        f"tiles={self._tiles_x}x{self._tiles_y}")
             return
         if not self._selected_tiles:
+            logger.debug("_draw_selection_overlay: no selected tiles")
             return  # Nothing to draw
+
+        logger.info(f"_draw_selection_overlay: drawing {len(self._selected_tiles)} selections, "
+                   f"tiles={self._tiles_x}x{self._tiles_y}, invert_x={self._invert_x}, "
+                   f"pixmap={self._pixmap.width()}x{self._pixmap.height()}")
 
         painter = QPainter(self._pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -758,8 +779,17 @@ class LED2DOverviewResultWindow(QWidget):
             result1 = self._results[0]
             self.left_panel.set_title(f"R = {result1.rotation_angle}°")
 
+            # Debug: log expected vs actual tile counts
+            expected_tiles = result1.tiles_x * result1.tiles_y
+            actual_tiles = len(result1.tiles)
+            logger.info(f"LEFT PANEL: R={result1.rotation_angle}°, expected grid={result1.tiles_x}x{result1.tiles_y}={expected_tiles}, "
+                       f"actual tiles={actual_tiles}, invert_x={result1.invert_x}")
+            if actual_tiles != expected_tiles:
+                logger.warning(f"MISMATCH: Expected {expected_tiles} tiles but got {actual_tiles}!")
+
             img1 = result1.stitched_images.get(viz_type)
             if img1 is not None:
+                logger.info(f"LEFT PANEL: image shape={img1.shape}, viz_type={viz_type}")
                 self.left_panel.set_image(img1, result1.tiles_x, result1.tiles_y)
                 # Set tile coordinates with grid indices for correct label positioning
                 coords = [(t.x, t.y, t.tile_x_idx, t.tile_y_idx) for t in result1.tiles]
