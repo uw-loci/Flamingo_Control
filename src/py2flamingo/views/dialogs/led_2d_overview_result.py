@@ -779,18 +779,27 @@ class LED2DOverviewResultWindow(QWidget):
             result1 = self._results[0]
             self.left_panel.set_title(f"R = {result1.rotation_angle}°")
 
+            # Calculate actual grid from tiles (may differ from expected if some tiles missing)
+            if result1.tiles:
+                actual_tiles_x = max(t.tile_x_idx for t in result1.tiles) + 1
+                actual_tiles_y = max(t.tile_y_idx for t in result1.tiles) + 1
+            else:
+                actual_tiles_x = result1.tiles_x
+                actual_tiles_y = result1.tiles_y
+
             # Debug: log expected vs actual tile counts
             expected_tiles = result1.tiles_x * result1.tiles_y
             actual_tiles = len(result1.tiles)
             logger.info(f"LEFT PANEL: R={result1.rotation_angle}°, expected grid={result1.tiles_x}x{result1.tiles_y}={expected_tiles}, "
-                       f"actual tiles={actual_tiles}, invert_x={result1.invert_x}")
+                       f"actual grid={actual_tiles_x}x{actual_tiles_y}, actual tiles={actual_tiles}, invert_x={result1.invert_x}")
             if actual_tiles != expected_tiles:
                 logger.warning(f"MISMATCH: Expected {expected_tiles} tiles but got {actual_tiles}!")
 
             img1 = result1.stitched_images.get(viz_type)
             if img1 is not None:
                 logger.info(f"LEFT PANEL: image shape={img1.shape}, viz_type={viz_type}")
-                self.left_panel.set_image(img1, result1.tiles_x, result1.tiles_y)
+                # Use actual grid dimensions to match stitched image
+                self.left_panel.set_image(img1, actual_tiles_x, actual_tiles_y)
                 # Set tile coordinates with grid indices for correct label positioning
                 coords = [(t.x, t.y, t.tile_x_idx, t.tile_y_idx) for t in result1.tiles]
                 self.left_panel.set_tile_coordinates(coords, invert_x=result1.invert_x)
@@ -802,9 +811,21 @@ class LED2DOverviewResultWindow(QWidget):
             result2 = self._results[1]
             self.right_panel.set_title(f"R = {result2.rotation_angle}°")
 
+            # Calculate actual grid from tiles (may differ from expected if some tiles missing)
+            if result2.tiles:
+                actual_tiles_x = max(t.tile_x_idx for t in result2.tiles) + 1
+                actual_tiles_y = max(t.tile_y_idx for t in result2.tiles) + 1
+            else:
+                actual_tiles_x = result2.tiles_x
+                actual_tiles_y = result2.tiles_y
+
+            logger.info(f"RIGHT PANEL: R={result2.rotation_angle}°, expected grid={result2.tiles_x}x{result2.tiles_y}, "
+                       f"actual grid={actual_tiles_x}x{actual_tiles_y}, actual tiles={len(result2.tiles)}, invert_x={result2.invert_x}")
+
             img2 = result2.stitched_images.get(viz_type)
             if img2 is not None:
-                self.right_panel.set_image(img2, result2.tiles_x, result2.tiles_y)
+                # Use actual grid dimensions to match stitched image
+                self.right_panel.set_image(img2, actual_tiles_x, actual_tiles_y)
                 # Set tile coordinates with grid indices for correct label positioning
                 coords = [(t.x, t.y, t.tile_x_idx, t.tile_y_idx) for t in result2.tiles]
                 self.right_panel.set_tile_coordinates(coords, invert_x=result2.invert_x)
@@ -921,14 +942,36 @@ class LED2DOverviewResultWindow(QWidget):
             result1 = self._results[0]
             img1 = result1.stitched_images.get(visualization_type)
             if img1 is not None:
-                self.left_panel.set_image(img1, result1.tiles_x, result1.tiles_y)
+                # Calculate actual grid from tiles (may differ from expected if some tiles missing)
+                if result1.tiles:
+                    actual_tiles_x = max(t.tile_x_idx for t in result1.tiles) + 1
+                    actual_tiles_y = max(t.tile_y_idx for t in result1.tiles) + 1
+                else:
+                    actual_tiles_x = result1.tiles_x
+                    actual_tiles_y = result1.tiles_y
+
+                self.left_panel.set_image(img1, actual_tiles_x, actual_tiles_y)
+                # Re-apply coordinates to ensure they're set after image change
+                coords = [(t.x, t.y, t.tile_x_idx, t.tile_y_idx) for t in result1.tiles]
+                self.left_panel.set_tile_coordinates(coords, invert_x=result1.invert_x)
 
         # Display second rotation
         if len(self._results) >= 2:
             result2 = self._results[1]
             img2 = result2.stitched_images.get(visualization_type)
             if img2 is not None:
-                self.right_panel.set_image(img2, result2.tiles_x, result2.tiles_y)
+                # Calculate actual grid from tiles (may differ from expected if some tiles missing)
+                if result2.tiles:
+                    actual_tiles_x = max(t.tile_x_idx for t in result2.tiles) + 1
+                    actual_tiles_y = max(t.tile_y_idx for t in result2.tiles) + 1
+                else:
+                    actual_tiles_x = result2.tiles_x
+                    actual_tiles_y = result2.tiles_y
+
+                self.right_panel.set_image(img2, actual_tiles_x, actual_tiles_y)
+                # Re-apply coordinates to ensure they're set after image change
+                coords = [(t.x, t.y, t.tile_x_idx, t.tile_y_idx) for t in result2.tiles]
+                self.right_panel.set_tile_coordinates(coords, invert_x=result2.invert_x)
 
     def _toggle_grid(self):
         """Toggle grid overlay."""
