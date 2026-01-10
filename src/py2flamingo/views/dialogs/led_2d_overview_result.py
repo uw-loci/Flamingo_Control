@@ -529,6 +529,8 @@ class ImagePanel(QWidget):
             fm = QFontMetrics(font)
             line_height = fm.height()
 
+            coords_drawn = 0
+            coords_skipped = 0
             for coord in self._tile_coords:
                 # Support both formats: (x, y, tile_x_idx, tile_y_idx) or legacy (x, y, z)
                 if len(coord) >= 4:
@@ -562,10 +564,25 @@ class ImagePanel(QWidget):
                 text1_y = int(tile_center_y - line_height * 0.1)  # Slightly above center
                 text2_y = int(tile_center_y + line_height * 0.9)  # Below center
 
+                # Check if coordinates are within pixmap bounds
+                if (text1_x < 0 or text1_x >= w or text1_y < 0 or text1_y >= h or
+                    text2_x < 0 or text2_x >= w or text2_y < 0 or text2_y >= h):
+                    coords_skipped += 1
+                    if coords_skipped <= 5:  # Only log first few
+                        logger.warning(f"Coordinate label out of bounds: tile({tile_x_idx},{tile_y_idx}) "
+                                      f"text_pos=({text1_x},{text1_y})/({text2_x},{text2_y}), "
+                                      f"pixmap={w}x{h}")
+                    continue
+
                 # White text
                 painter.setPen(QColor(255, 255, 255))
                 painter.drawText(text1_x, text1_y, text1)
                 painter.drawText(text2_x, text2_y, text2)
+                coords_drawn += 1
+
+            # Log summary
+            logger.info(f"_draw_base_overlay: drew {coords_drawn} coordinate labels, "
+                       f"skipped {coords_skipped} (out of bounds), total coords={len(self._tile_coords)}")
 
         painter.end()
 
@@ -599,6 +616,8 @@ class ImagePanel(QWidget):
         selection_pen.setWidth(4)
         painter.setPen(selection_pen)
 
+        selections_drawn = 0
+        selections_skipped = 0
         for tile_x_idx, tile_y_idx in self._selected_tiles:
             # Calculate display position
             if self._invert_x:
@@ -608,8 +627,19 @@ class ImagePanel(QWidget):
 
             x_pos = int(display_x_idx * tile_w)
             y_pos = int(tile_y_idx * tile_h)
-            painter.drawRect(x_pos, y_pos, int(tile_w), int(tile_h))
 
+            # Check if selection rectangle is within bounds
+            if x_pos < 0 or x_pos >= w or y_pos < 0 or y_pos >= h:
+                selections_skipped += 1
+                logger.warning(f"Selection out of bounds: tile({tile_x_idx},{tile_y_idx}) -> "
+                              f"display({display_x_idx},{tile_y_idx}) -> pos({x_pos},{y_pos}), "
+                              f"pixmap={w}x{h}")
+                continue
+
+            painter.drawRect(x_pos, y_pos, int(tile_w), int(tile_h))
+            selections_drawn += 1
+
+        logger.info(f"_draw_selection_overlay: drew {selections_drawn}, skipped {selections_skipped}")
         painter.end()
 
     def get_image(self) -> Optional[np.ndarray]:
