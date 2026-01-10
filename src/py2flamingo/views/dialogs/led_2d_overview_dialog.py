@@ -230,33 +230,51 @@ class LED2DOverviewDialog(QDialog):
         grid.addWidget(QLabel("Z (mm)"), 0, 3)
         grid.addWidget(QLabel(""), 0, 4)
 
-        # Point A
+        # Point A (required - but defaults to "not set" to remind user)
         self.point_a_label = QLabel("Point A:")
-        self.point_a_x = self._create_coord_spinbox('x')
-        self.point_a_y = self._create_coord_spinbox('y')
-        self.point_a_z = self._create_coord_spinbox('z')
+        self.point_a_x = self._create_coord_spinbox('x', optional=True)
+        self.point_a_y = self._create_coord_spinbox('y', optional=True)
+        self.point_a_z = self._create_coord_spinbox('z', optional=True)
         self.point_a_btn = QPushButton("Get Pos")
         self.point_a_btn.setToolTip("Get current stage position")
+        self.point_a_clear = QPushButton("Clear")
+        self.point_a_clear.setToolTip("Clear Point A")
         self.point_a_btn.clicked.connect(lambda: self._get_current_position('A'))
+        self.point_a_clear.clicked.connect(self._clear_point_a)
+
+        a_btn_layout = QHBoxLayout()
+        a_btn_layout.setSpacing(4)
+        a_btn_layout.addWidget(self.point_a_btn)
+        a_btn_layout.addWidget(self.point_a_clear)
+
         grid.addWidget(self.point_a_label, 1, 0)
         grid.addWidget(self.point_a_x, 1, 1)
         grid.addWidget(self.point_a_y, 1, 2)
         grid.addWidget(self.point_a_z, 1, 3)
-        grid.addWidget(self.point_a_btn, 1, 4)
+        grid.addLayout(a_btn_layout, 1, 4)
 
-        # Point B
+        # Point B (required - but defaults to "not set" to remind user)
         self.point_b_label = QLabel("Point B:")
-        self.point_b_x = self._create_coord_spinbox('x')
-        self.point_b_y = self._create_coord_spinbox('y')
-        self.point_b_z = self._create_coord_spinbox('z')
+        self.point_b_x = self._create_coord_spinbox('x', optional=True)
+        self.point_b_y = self._create_coord_spinbox('y', optional=True)
+        self.point_b_z = self._create_coord_spinbox('z', optional=True)
         self.point_b_btn = QPushButton("Get Pos")
         self.point_b_btn.setToolTip("Get current stage position")
+        self.point_b_clear = QPushButton("Clear")
+        self.point_b_clear.setToolTip("Clear Point B")
         self.point_b_btn.clicked.connect(lambda: self._get_current_position('B'))
+        self.point_b_clear.clicked.connect(self._clear_point_b)
+
+        b_btn_layout = QHBoxLayout()
+        b_btn_layout.setSpacing(4)
+        b_btn_layout.addWidget(self.point_b_btn)
+        b_btn_layout.addWidget(self.point_b_clear)
+
         grid.addWidget(self.point_b_label, 2, 0)
         grid.addWidget(self.point_b_x, 2, 1)
         grid.addWidget(self.point_b_y, 2, 2)
         grid.addWidget(self.point_b_z, 2, 3)
-        grid.addWidget(self.point_b_btn, 2, 4)
+        grid.addLayout(b_btn_layout, 2, 4)
 
         # Point C (optional)
         self.point_c_label = QLabel("Point C:")
@@ -557,6 +575,28 @@ class LED2DOverviewDialog(QDialog):
         except Exception as e:
             self._logger.error(f"Error getting rotation: {e}")
             QMessageBox.warning(self, "Error", f"Failed to get rotation: {e}")
+
+    def _clear_point_a(self):
+        """Clear Point A values."""
+        # Set to special "not set" value (min - 1)
+        x_min = self._stage_limits['x']['min']
+        y_min = self._stage_limits['y']['min']
+        z_min = self._stage_limits['z']['min']
+        self.point_a_x.setValue(x_min - 1)
+        self.point_a_y.setValue(y_min - 1)
+        self.point_a_z.setValue(z_min - 1)
+        self._update_scan_info()
+
+    def _clear_point_b(self):
+        """Clear Point B values."""
+        # Set to special "not set" value (min - 1)
+        x_min = self._stage_limits['x']['min']
+        y_min = self._stage_limits['y']['min']
+        z_min = self._stage_limits['z']['min']
+        self.point_b_x.setValue(x_min - 1)
+        self.point_b_y.setValue(y_min - 1)
+        self.point_b_z.setValue(z_min - 1)
+        self._update_scan_info()
 
     def _clear_point_c(self):
         """Clear Point C values."""
@@ -919,6 +959,16 @@ class LED2DOverviewDialog(QDialog):
         Returns:
             Error message string if invalid, None if valid
         """
+        # Check if Point A is set (within valid stage bounds)
+        point_a_set = self._is_point_set(self.point_a_x, self.point_a_y, self.point_a_z)
+        if not point_a_set:
+            return "Point A has not been set. Use 'Get Pos' to capture stage position."
+
+        # Check if Point B is set (within valid stage bounds)
+        point_b_set = self._is_point_set(self.point_b_x, self.point_b_y, self.point_b_z)
+        if not point_b_set:
+            return "Point B has not been set. Use 'Get Pos' to capture stage position."
+
         # Check if coordinates are within valid stage bounds
         if not self._are_coordinates_valid():
             x_limits = self._stage_limits['x']
@@ -981,21 +1031,27 @@ class LED2DOverviewDialog(QDialog):
         point_b_z_valid = z_limits['min'] <= self.point_b_z.value() <= z_limits['max']
         point_b_valid = point_b_x_valid and point_b_y_valid and point_b_z_valid
 
-        # Log invalid coordinates for debugging
+        # Log invalid coordinates for debugging (only when actually out of range, not just "not set")
         if not point_a_valid:
-            self._logger.warning(
-                f"Point A has invalid coordinates: "
-                f"X={self.point_a_x.value():.3f} (valid: {x_limits['min']}-{x_limits['max']}), "
-                f"Y={self.point_a_y.value():.3f} (valid: {y_limits['min']}-{y_limits['max']}), "
-                f"Z={self.point_a_z.value():.3f} (valid: {z_limits['min']}-{z_limits['max']})"
-            )
+            if not self._is_point_set(self.point_a_x, self.point_a_y, self.point_a_z):
+                self._logger.debug("Point A not set")
+            else:
+                self._logger.warning(
+                    f"Point A has invalid coordinates: "
+                    f"X={self.point_a_x.value():.3f} (valid: {x_limits['min']}-{x_limits['max']}), "
+                    f"Y={self.point_a_y.value():.3f} (valid: {y_limits['min']}-{y_limits['max']}), "
+                    f"Z={self.point_a_z.value():.3f} (valid: {z_limits['min']}-{z_limits['max']})"
+                )
         if not point_b_valid:
-            self._logger.warning(
-                f"Point B has invalid coordinates: "
-                f"X={self.point_b_x.value():.3f} (valid: {x_limits['min']}-{x_limits['max']}), "
-                f"Y={self.point_b_y.value():.3f} (valid: {y_limits['min']}-{y_limits['max']}), "
-                f"Z={self.point_b_z.value():.3f} (valid: {z_limits['min']}-{z_limits['max']})"
-            )
+            if not self._is_point_set(self.point_b_x, self.point_b_y, self.point_b_z):
+                self._logger.debug("Point B not set")
+            else:
+                self._logger.warning(
+                    f"Point B has invalid coordinates: "
+                    f"X={self.point_b_x.value():.3f} (valid: {x_limits['min']}-{x_limits['max']}), "
+                    f"Y={self.point_b_y.value():.3f} (valid: {y_limits['min']}-{y_limits['max']}), "
+                    f"Z={self.point_b_z.value():.3f} (valid: {z_limits['min']}-{z_limits['max']})"
+                )
 
         return point_a_valid and point_b_valid
 
