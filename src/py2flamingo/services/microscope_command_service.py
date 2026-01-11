@@ -273,6 +273,84 @@ class MicroscopeCommandService:
                 'error': str(e)
             }
 
+    def _send_workflow_command(self, cmd: 'Command', timeout: float = 5.0) -> bytes:
+        """
+        Send a workflow command with workflow data.
+
+        Workflow commands require special handling:
+        1. Send 128-byte header with file size in data field
+        2. Send workflow data bytes
+        3. Wait for 128-byte response
+
+        Args:
+            cmd: WorkflowCommand object with workflow_data attribute
+            timeout: Response timeout in seconds
+
+        Returns:
+            128-byte response from microscope
+
+        Raises:
+            RuntimeError: If not connected
+            TimeoutError: If response timeout
+        """
+        import struct
+
+        if not self.connection.is_connected():
+            raise RuntimeError("Not connected to microscope")
+
+        workflow_data = cmd.workflow_data
+        file_size = len(workflow_data)
+        command_code = cmd.code
+        cmd_name = get_command_name(command_code)
+
+        self.logger.info(f"Sending workflow: {file_size} bytes")
+
+        try:
+            # Get command socket
+            command_socket = self.connection._command_socket
+            if command_socket is None:
+                raise RuntimeError("Command socket not available")
+
+            # Pack file size into the data field (first 4 bytes of 72-byte buffer)
+            # The server reads the file size from here to know how many bytes to expect
+            data_with_size = struct.pack("I", file_size).ljust(72, b'\x00')
+
+            # Encode command header with file size in data field
+            cmd_bytes = self.connection.encoder.encode_command(
+                code=command_code,
+                status=0,
+                params=[0] * 7,
+                value=0.0,
+                data=data_with_size
+            )
+
+            # Send header
+            command_socket.sendall(cmd_bytes)
+            self.logger.debug(f"Sent workflow header for {cmd_name}")
+
+            # Send workflow data
+            command_socket.sendall(workflow_data)
+            self.logger.debug(f"Sent {file_size} bytes of workflow data")
+
+            # Wait for response (workflow start can take a moment)
+            response = self._receive_full_bytes(command_socket, 128, timeout=timeout)
+
+            # Parse response to check for errors
+            parsed = self._parse_response(response)
+            status = parsed.get('status_code', 0)
+            if status != 1:
+                self.logger.warning(f"Workflow start response status: {status}")
+
+            self.logger.info(f"Workflow started successfully")
+            return response
+
+        except socket.timeout as e:
+            self.logger.error(f"Timeout waiting for workflow start response")
+            raise TimeoutError(f"Timeout waiting for {cmd_name} response") from e
+        except Exception as e:
+            self.logger.error(f"Error sending workflow: {e}", exc_info=True)
+            raise
+
     def _receive_full_bytes(self, sock: socket.socket, num_bytes: int, timeout: float = 3.0) -> bytes:
         """
         Receive exact number of bytes from socket.
@@ -626,6 +704,11 @@ class MicroscopeCommandService:
         """
         # Handle Command object
         if hasattr(cmd, 'code'):
+            # Check if this is a WorkflowCommand
+            if hasattr(cmd, 'workflow_data') and cmd.workflow_data is not None:
+                # Special handling for WorkflowCommand
+                return self._send_workflow_command(cmd, timeout)
+
             # Extract from Command object
             command_code = cmd.code
             params = cmd.parameters.get('params', [])
