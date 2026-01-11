@@ -175,18 +175,20 @@ class WorkflowController:
         """
         Start currently loaded workflow.
 
-        Requires connection to be established before starting.
+        Will attempt to reconnect if connection was lost.
 
         Returns:
             Tuple of (success, message):
                 - (True, "Workflow started successfully") on success
-                - (False, "Not connected to server") if not connected
+                - (False, "Not connected to server") if not connected and reconnect fails
                 - (False, "No workflow loaded") if no workflow loaded
                 - (False, error message) on other errors
         """
-        # Check connection
+        # Check connection, attempt reconnect if needed
         if not self._is_connected():
-            return (False, "Must connect to server before starting workflow")
+            reconnect_success, reconnect_msg = self._ensure_connected()
+            if not reconnect_success:
+                return (False, reconnect_msg)
 
         # Check if workflow loaded
         if not self._current_workflow_path or not self._current_workflow_data:
@@ -356,6 +358,7 @@ class WorkflowController:
         Start workflow from UI-built Workflow object.
 
         Uses MVCWorkflowService for sending workflows to the microscope.
+        Will attempt to reconnect if connection was lost.
 
         Args:
             workflow: Workflow object from UI (or None if using workflow_dict)
@@ -365,9 +368,11 @@ class WorkflowController:
         Returns:
             Tuple of (success, message)
         """
-        # Check connection
+        # Check connection, attempt reconnect if needed
         if not self._is_connected():
-            return (False, "Must connect to server before starting workflow")
+            reconnect_success, reconnect_msg = self._ensure_connected()
+            if not reconnect_success:
+                return (False, reconnect_msg)
 
         try:
             # Convert workflow dict to bytes
@@ -426,6 +431,61 @@ class WorkflowController:
         """
         status = self._connection_model.status
         return status.state == ConnectionState.CONNECTED
+
+    def _ensure_connected(self) -> Tuple[bool, str]:
+        """
+        Ensure connection to microscope, attempting reconnect if needed.
+
+        Uses the last known IP/port from the connection model to attempt
+        automatic reconnection if the connection was lost.
+
+        Returns:
+            Tuple of (success, message):
+                - (True, "Connected") if already connected
+                - (True, "Reconnected successfully") if reconnection succeeded
+                - (False, error_message) if reconnection failed
+        """
+        # Already connected
+        if self._is_connected():
+            return (True, "Connected")
+
+        # Check if we have connection service and last known config
+        if not self._connection_service:
+            return (False, "Must connect to server before starting workflow (no connection service)")
+
+        status = self._connection_model.status
+        if not status.ip or not status.port:
+            return (False, "Must connect to server before starting workflow (no previous connection)")
+
+        # Attempt to reconnect using last known IP/port
+        self._logger.info(f"Connection lost, attempting reconnect to {status.ip}:{status.port}")
+        try:
+            from py2flamingo.models.connection import ConnectionConfig
+
+            config = ConnectionConfig(
+                ip_address=status.ip,
+                port=status.port,
+                live_port=status.port + 1,  # Standard live port offset
+                timeout=5.0
+            )
+
+            self._connection_service.reconnect(config)
+
+            if self._is_connected():
+                self._logger.info("Reconnected successfully")
+                return (True, "Reconnected successfully")
+            else:
+                return (False, "Reconnection failed - please reconnect manually")
+
+        except TimeoutError:
+            self._logger.warning("Reconnect timed out")
+            return (False, "Reconnection timed out - microscope may be unresponsive")
+        except ConnectionError as e:
+            self._logger.warning(f"Reconnect failed: {e}")
+            return (False, f"Reconnection failed: {e}")
+        except Exception as e:
+            self._logger.exception("Unexpected error during reconnect")
+            return (False, f"Reconnection error: {e}")
 
     @property
     def is_executing(self) -> bool:
