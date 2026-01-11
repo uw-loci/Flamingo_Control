@@ -387,7 +387,8 @@ class MVCConnectionService:
     def __init__(self,
                  tcp_connection: 'TCPConnection',
                  encoder: 'ProtocolEncoder',
-                 queue_manager: Optional[QueueManager] = None):
+                 queue_manager: Optional[QueueManager] = None,
+                 connection_model: Optional['ConnectionModel'] = None):
         """
         Initialize MVC connection service with dependency injection.
 
@@ -395,6 +396,8 @@ class MVCConnectionService:
             tcp_connection: TCPConnection instance from core layer
             encoder: ProtocolEncoder instance from core layer
             queue_manager: Optional queue manager for data flow
+            connection_model: Optional connection model for state tracking.
+                              If not provided, a new one is created.
         """
         from py2flamingo.models.connection import ConnectionModel
         from py2flamingo.services.microscope_command_service import MicroscopeCommandService
@@ -402,7 +405,7 @@ class MVCConnectionService:
         self.tcp_connection = tcp_connection
         self.encoder = encoder
         self.queue_manager = queue_manager or QueueManager()
-        self.model = ConnectionModel()
+        self.model = connection_model or ConnectionModel()
         self.logger = logging.getLogger(__name__)
 
         self._command_socket: Optional[socket.socket] = None

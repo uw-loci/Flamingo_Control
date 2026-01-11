@@ -164,7 +164,8 @@ class FlamingoApplication(QObject):
         self.connection_service = MVCConnectionService(
             self.tcp_connection,
             self.protocol_encoder,
-            self.queue_manager
+            self.queue_manager,
+            connection_model=self.connection_model
         )
 
         self.workflow_service = MVCWorkflowService(
