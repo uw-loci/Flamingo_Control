@@ -738,6 +738,17 @@ class WorkflowView(QWidget):
         """Get save panel."""
         return self._save_panel
 
+    def set_app(self, app) -> None:
+        """Set application reference for configuration access.
+
+        Enables last-used drive persistence in SavePanel.
+
+        Args:
+            app: FlamingoApplication instance
+        """
+        if hasattr(self._save_panel, 'set_app'):
+            self._save_panel.set_app(app)
+
     @property
     def zstack_panel(self) -> ZStackPanel:
         """Get Z-stack panel."""

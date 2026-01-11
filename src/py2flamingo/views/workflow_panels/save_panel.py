@@ -2,11 +2,12 @@
 Save location panel for workflow configuration.
 
 Provides UI for configuring essential data save settings.
-Advanced settings (drive, region, subfolders) available via dialog.
+Save drive selection is prominently displayed since it's required.
+Advanced settings (region, subfolders, comments) available via dialog.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -23,6 +24,9 @@ SAVE_FORMATS = [
     ("Not Saved", "NotSaved"),
 ]
 
+# Key for storing last used drive in configuration
+LAST_USED_DRIVE_KEY = 'last_used_save_drive'
+
 
 class SavePanel(QWidget):
     """
@@ -30,10 +34,11 @@ class SavePanel(QWidget):
 
     Provides:
     - Save enable checkbox
+    - Save drive selection with refresh (REQUIRED - prominently displayed)
     - Directory and sample name inputs
     - Save format selection
     - MIP options
-    - Advanced button for drive, region, subfolders, comments
+    - Advanced button for region, subfolders, comments
 
     Signals:
         settings_changed: Emitted when save settings change
@@ -54,12 +59,17 @@ class SavePanel(QWidget):
         self._logger = logging.getLogger(__name__)
         self._app = app
         self._connection_service = connection_service
+        self._available_drives: List[str] = []
 
-        # Get default storage location from system
+        # Get last used drive from configuration (preferred over system default)
+        self._last_used_drive = self._get_last_used_drive()
         self._default_save_drive = self._get_default_save_drive()
 
+        # Use last used drive if available, otherwise fall back to system default
+        initial_drive = self._last_used_drive or self._default_save_drive
+
         # Advanced settings (stored here, edited via dialog)
-        self._save_drive = self._default_save_drive
+        self._save_drive = initial_drive
         self._region = ""
         self._save_subfolders = False
         self._live_view = True
@@ -67,14 +77,55 @@ class SavePanel(QWidget):
 
         self._setup_ui()
 
+        # Try to auto-refresh drives on creation if connected
+        self._try_auto_refresh_drives()
+
+    def _get_last_used_drive(self) -> str:
+        """Get last used save drive from configuration.
+
+        Returns:
+            Last used drive path, or empty string if not set.
+        """
+        if self._app is None:
+            return ""
+
+        try:
+            config_service = getattr(self._app, 'config_service', None)
+            if config_service is not None:
+                # Check if config has the last used drive stored
+                last_used = config_service.config.get(LAST_USED_DRIVE_KEY, '')
+                if last_used:
+                    self._logger.info(f"Loaded last used save drive: {last_used}")
+                    return last_used
+        except Exception as e:
+            self._logger.debug(f"Could not get last used save drive: {e}")
+
+        return ""
+
+    def _save_last_used_drive(self, drive: str) -> None:
+        """Save the last used drive to configuration.
+
+        Args:
+            drive: Drive path to save
+        """
+        if self._app is None or not drive:
+            return
+
+        try:
+            config_service = getattr(self._app, 'config_service', None)
+            if config_service is not None:
+                config_service.config[LAST_USED_DRIVE_KEY] = drive
+                self._logger.info(f"Saved last used save drive: {drive}")
+        except Exception as e:
+            self._logger.warning(f"Could not save last used drive: {e}")
+
     def _get_default_save_drive(self) -> str:
         """Get default save drive from system configuration.
 
-        Returns empty string if no valid drive is configured, requiring
-        user to select one via Advanced settings.
+        Returns empty string if no valid drive is configured.
         """
         if self._app is None:
-            return ""  # No app, no default - user must configure
+            return ""
 
         try:
             config_service = getattr(self._app, 'config_service', None)
@@ -86,9 +137,6 @@ class SavePanel(QWidget):
         except Exception as e:
             self._logger.warning(f"Could not get data storage location from system: {e}")
 
-        # No valid drive found - return empty string
-        # User must configure via Advanced settings
-        self._logger.warning("No default save drive configured - user must select via Advanced settings")
         return ""
 
     def _setup_ui(self) -> None:
@@ -113,6 +161,7 @@ class SavePanel(QWidget):
 
         self._advanced_btn = QPushButton("Advanced...")
         self._advanced_btn.setFixedWidth(90)
+        self._advanced_btn.setToolTip("Configure region, subfolders, and comments")
         self._advanced_btn.clicked.connect(self._on_advanced_clicked)
         header_layout.addWidget(self._advanced_btn)
         group_layout.addLayout(header_layout)
@@ -123,19 +172,55 @@ class SavePanel(QWidget):
         settings_layout.setContentsMargins(0, 4, 0, 0)
         settings_layout.setSpacing(6)
 
+        # Save Drive (REQUIRED - prominently displayed at top)
+        drive_label = QLabel("Save Drive:")
+        drive_label.setStyleSheet("font-weight: bold;")
+        settings_layout.addWidget(drive_label, 0, 0)
+
+        drive_layout = QHBoxLayout()
+        self._save_drive_combo = QComboBox()
+        self._save_drive_combo.setEditable(True)
+        self._save_drive_combo.setMinimumWidth(200)
+        self._save_drive_combo.setToolTip(
+            "Storage location for image data (REQUIRED).\n"
+            "Click 'Refresh' to query available drives from microscope."
+        )
+        # Initialize with current drive if set
+        if self._save_drive:
+            self._save_drive_combo.addItem(self._save_drive)
+            self._save_drive_combo.setCurrentText(self._save_drive)
+        else:
+            self._save_drive_combo.setPlaceholderText("Click Refresh to load drives...")
+        self._save_drive_combo.currentTextChanged.connect(self._on_drive_changed)
+        drive_layout.addWidget(self._save_drive_combo, 1)
+
+        self._refresh_btn = QPushButton("Refresh")
+        self._refresh_btn.setToolTip("Query available storage drives from microscope")
+        self._refresh_btn.clicked.connect(self._refresh_drives)
+        # Disable refresh button if no connection service
+        self._refresh_btn.setEnabled(self._connection_service is not None)
+        drive_layout.addWidget(self._refresh_btn)
+
+        settings_layout.addLayout(drive_layout, 0, 1)
+
+        # Warning label for no drive
+        self._drive_warning = QLabel()
+        self._update_drive_warning()
+        settings_layout.addWidget(self._drive_warning, 1, 0, 1, 2)
+
         # Directory (subdirectory within save drive)
-        settings_layout.addWidget(QLabel("Directory:"), 0, 0)
+        settings_layout.addWidget(QLabel("Directory:"), 2, 0)
         self._save_directory = QLineEdit()
         self._save_directory.setPlaceholderText("experiment_01")
         self._save_directory.textChanged.connect(self._on_settings_changed)
-        settings_layout.addWidget(self._save_directory, 0, 1)
+        settings_layout.addWidget(self._save_directory, 2, 1)
 
         # Sample name
-        settings_layout.addWidget(QLabel("Sample:"), 1, 0)
+        settings_layout.addWidget(QLabel("Sample:"), 3, 0)
         self._sample_name = QLineEdit()
         self._sample_name.setPlaceholderText("Sample_001")
         self._sample_name.textChanged.connect(self._on_settings_changed)
-        settings_layout.addWidget(self._sample_name, 1, 1)
+        settings_layout.addWidget(self._sample_name, 3, 1)
 
         # Format and MIP options row
         format_row = QHBoxLayout()
@@ -163,26 +248,92 @@ class SavePanel(QWidget):
         format_row.addWidget(self._display_mip)
 
         format_row.addStretch()
-        settings_layout.addLayout(format_row, 2, 0, 1, 2)
-
-        # Drive info (compact display)
-        self._drive_info = QLabel()
-        self._update_drive_info_display()
-        settings_layout.addWidget(self._drive_info, 3, 0, 1, 2)
+        settings_layout.addLayout(format_row, 4, 0, 1, 2)
 
         group_layout.addWidget(self._settings_widget)
 
         group.setLayout(group_layout)
         layout.addWidget(group)
 
-    def _update_drive_info_display(self) -> None:
-        """Update the drive info label based on current save drive."""
+    def _update_drive_warning(self) -> None:
+        """Update the drive warning label based on current save drive."""
         if self._save_drive:
-            self._drive_info.setText(f"Drive: {self._save_drive}")
-            self._drive_info.setStyleSheet("color: gray; font-size: 9pt;")
+            self._drive_warning.hide()
         else:
-            self._drive_info.setText("⚠ No save drive configured - click Advanced to select")
-            self._drive_info.setStyleSheet("color: #e74c3c; font-size: 9pt; font-weight: bold;")
+            self._drive_warning.setText("⚠ No save drive selected - workflow cannot save data")
+            self._drive_warning.setStyleSheet("color: #e74c3c; font-size: 9pt; font-weight: bold;")
+            self._drive_warning.show()
+
+    def _on_drive_changed(self, drive: str) -> None:
+        """Handle save drive selection change."""
+        self._save_drive = drive
+        self._update_drive_warning()
+        # Save as last used drive
+        self._save_last_used_drive(drive)
+        self._on_settings_changed()
+
+    def _refresh_drives(self) -> None:
+        """Query available drives from microscope server."""
+        if not self._connection_service:
+            self._logger.warning("No connection service available for drive refresh")
+            return
+
+        try:
+            # Disable button during query
+            self._refresh_btn.setEnabled(False)
+            self._refresh_btn.setText("...")
+
+            # Query available drives
+            drives = self._connection_service.query_available_drives(timeout=3.0)
+
+            if drives:
+                self._available_drives = drives
+                # Remember current selection
+                current = self._save_drive_combo.currentText()
+
+                # Update dropdown
+                self._save_drive_combo.clear()
+                for drive in drives:
+                    self._save_drive_combo.addItem(drive)
+
+                # Try to restore previous selection or last used drive
+                preferred = current or self._last_used_drive
+                if preferred:
+                    index = self._save_drive_combo.findText(preferred)
+                    if index >= 0:
+                        self._save_drive_combo.setCurrentIndex(index)
+                        self._logger.info(f"Restored save drive selection: {preferred}")
+                    elif drives:
+                        # Preferred not available, use first drive
+                        self._save_drive_combo.setCurrentIndex(0)
+                        self._logger.info(f"Last used drive not available, using: {drives[0]}")
+                elif drives:
+                    self._save_drive_combo.setCurrentIndex(0)
+
+                self._logger.info(f"Refreshed {len(drives)} available drives")
+            else:
+                self._logger.warning("No drives returned from server")
+
+        except Exception as e:
+            self._logger.error(f"Failed to refresh drives: {e}")
+
+        finally:
+            # Re-enable button
+            self._refresh_btn.setEnabled(True)
+            self._refresh_btn.setText("Refresh")
+
+    def _try_auto_refresh_drives(self) -> None:
+        """Try to auto-refresh drives on panel creation if connected."""
+        if not self._connection_service:
+            return
+
+        # Check if we're connected
+        try:
+            if hasattr(self._connection_service, 'is_connected') and self._connection_service.is_connected():
+                self._logger.info("Auto-refreshing drives on panel creation")
+                self._refresh_drives()
+        except Exception as e:
+            self._logger.debug(f"Auto-refresh not performed: {e}")
 
     def _on_save_enabled_changed(self, state: int) -> None:
         """Handle save enabled checkbox change."""
@@ -195,16 +346,21 @@ class SavePanel(QWidget):
         self.settings_changed.emit(settings)
 
     def _on_advanced_clicked(self) -> None:
-        """Open advanced save settings dialog."""
+        """Open advanced save settings dialog.
+
+        Note: Save drive is now in the main UI, not in Advanced dialog.
+        Advanced dialog handles: region, subfolders, live view, comments.
+        """
         from py2flamingo.views.dialogs import AdvancedSaveDialog
 
         dialog = AdvancedSaveDialog(
             parent=self,
             default_drive=self._default_save_drive,
-            connection_service=self._connection_service
+            connection_service=self._connection_service,
+            hide_drive_selection=True  # Drive is now in main UI
         )
         dialog.set_settings({
-            'save_drive': self._save_drive,
+            'save_drive': self._save_drive,  # Pass for reference but hidden
             'region': self._region,
             'save_subfolders': self._save_subfolders,
             'live_view': self._live_view,
@@ -213,14 +369,11 @@ class SavePanel(QWidget):
 
         if dialog.exec_() == dialog.Accepted:
             settings = dialog.get_settings()
-            self._save_drive = settings['save_drive']
+            # Drive is set in main UI, not here
             self._region = settings['region']
             self._save_subfolders = settings['save_subfolders']
             self._live_view = settings['live_view']
             self._comments = settings['comments']
-
-            # Update drive info display
-            self._update_drive_info_display()
             self._on_settings_changed()
 
     def get_settings(self) -> Dict[str, Any]:
@@ -273,7 +426,8 @@ class SavePanel(QWidget):
     def set_save_drive(self, drive: str) -> None:
         """Set save drive path."""
         self._save_drive = drive
-        self._drive_info.setText(f"Drive: {drive}")
+        self._save_drive_combo.setCurrentText(drive)
+        self._update_drive_warning()
 
     def set_save_directory(self, directory: str) -> None:
         """Set save directory."""
@@ -328,8 +482,7 @@ class SavePanel(QWidget):
     def set_advanced_settings(self, settings: Dict[str, Any]) -> None:
         """Set advanced save settings."""
         if 'save_drive' in settings:
-            self._save_drive = settings['save_drive']
-            self._drive_info.setText(f"Drive: {self._save_drive}")
+            self.set_save_drive(settings['save_drive'])
         if 'region' in settings:
             self._region = settings['region']
         if 'save_subfolders' in settings:
@@ -338,3 +491,21 @@ class SavePanel(QWidget):
             self._live_view = settings['live_view']
         if 'comments' in settings:
             self._comments = settings['comments']
+
+    def set_app(self, app) -> None:
+        """Set application reference for configuration access.
+
+        This can be called after construction if app wasn't available at init time.
+        Enables last-used drive persistence and auto-refresh features.
+
+        Args:
+            app: FlamingoApplication instance
+        """
+        self._app = app
+        # Now that we have app, try to load last used drive
+        self._last_used_drive = self._get_last_used_drive()
+        if self._last_used_drive and not self._save_drive:
+            self.set_save_drive(self._last_used_drive)
+            self._logger.info(f"Set last used drive from app: {self._last_used_drive}")
+        # Try auto-refresh if connected
+        self._try_auto_refresh_drives()

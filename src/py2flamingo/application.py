@@ -244,6 +244,8 @@ class FlamingoApplication(QObject):
             position_controller=self.position_controller  # For debug features
         )
         self.workflow_view = WorkflowView(self.workflow_controller)
+        # Set app reference for save drive persistence
+        self.workflow_view.set_app(self)
 
         # Create sample info view
         self.logger.debug("Creating sample info view...")

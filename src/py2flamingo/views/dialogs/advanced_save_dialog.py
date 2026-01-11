@@ -20,7 +20,7 @@ class AdvancedSaveDialog(QDialog):
     """Dialog for advanced save settings.
 
     Settings included:
-    - Save drive (storage location)
+    - Save drive (storage location) - optional, can be hidden if in main UI
     - Region identifier
     - Save to subfolders option
     - Enable live view option
@@ -29,22 +29,25 @@ class AdvancedSaveDialog(QDialog):
 
     def __init__(self, parent: Optional[QDialog] = None,
                  default_drive: str = "",
-                 connection_service = None):
+                 connection_service = None,
+                 hide_drive_selection: bool = False):
         """Initialize the dialog.
 
         Args:
             parent: Parent widget
             default_drive: Default save drive path (empty if not configured)
             connection_service: MVCConnectionService for querying available drives
+            hide_drive_selection: If True, hide drive selection (it's in main UI)
         """
         super().__init__(parent)
         self._logger = logging.getLogger(__name__)
         self._default_drive = default_drive
         self._connection_service = connection_service
+        self._hide_drive_selection = hide_drive_selection
 
         self.setWindowTitle("Advanced Save Settings")
         self.setMinimumWidth(500)
-        self.setMinimumHeight(400)
+        self.setMinimumHeight(350 if hide_drive_selection else 400)
         self.setModal(True)
 
         self._setup_ui()
@@ -54,58 +57,80 @@ class AdvancedSaveDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        # Storage Location Section
-        storage_group = QGroupBox("Storage Location")
-        storage_layout = QGridLayout()
-        storage_layout.setSpacing(8)
+        # Storage Location Section - only show if drive selection not hidden
+        if not self._hide_drive_selection:
+            storage_group = QGroupBox("Storage Location")
+            storage_layout = QGridLayout()
+            storage_layout.setSpacing(8)
 
-        # Save drive (dropdown with refresh button)
-        storage_layout.addWidget(QLabel("Save Drive:"), 0, 0)
+            # Save drive (dropdown with refresh button)
+            storage_layout.addWidget(QLabel("Save Drive:"), 0, 0)
 
-        drive_layout = QHBoxLayout()
-        self._save_drive = QComboBox()
-        self._save_drive.setEditable(True)
-        self._save_drive.setMinimumWidth(300)
-        # Only add default if it's a valid path
-        if self._default_drive:
-            self._save_drive.addItem(self._default_drive)
-            self._save_drive.setCurrentText(self._default_drive)
+            drive_layout = QHBoxLayout()
+            self._save_drive = QComboBox()
+            self._save_drive.setEditable(True)
+            self._save_drive.setMinimumWidth(300)
+            # Only add default if it's a valid path
+            if self._default_drive:
+                self._save_drive.addItem(self._default_drive)
+                self._save_drive.setCurrentText(self._default_drive)
+            else:
+                # No default - show placeholder
+                self._save_drive.setPlaceholderText("Click Refresh to query available drives...")
+            self._save_drive.setToolTip(
+                "Base path for data storage.\n"
+                "This is typically a network share or local disk.\n\n"
+                "Click 'Refresh' to query available drives from microscope."
+            )
+            drive_layout.addWidget(self._save_drive, 1)
+
+            self._refresh_btn = QPushButton("Refresh")
+            self._refresh_btn.setToolTip("Query available storage drives from microscope")
+            self._refresh_btn.clicked.connect(self._refresh_drives)
+            # Disable refresh button if no connection service
+            self._refresh_btn.setEnabled(self._connection_service is not None)
+            drive_layout.addWidget(self._refresh_btn)
+
+            browse_btn = QPushButton("Browse...")
+            browse_btn.setToolTip("Browse for local directory")
+            browse_btn.clicked.connect(self._browse_drive)
+            drive_layout.addWidget(browse_btn)
+
+            storage_layout.addLayout(drive_layout, 0, 1)
+
+            # Region identifier
+            storage_layout.addWidget(QLabel("Region:"), 1, 0)
+            self._region = QLineEdit()
+            self._region.setPlaceholderText("Optional region identifier (e.g., ROI_1)")
+            self._region.setToolTip(
+                "Optional identifier for the region being imaged.\n"
+                "Used for organizing data from multiple regions."
+            )
+            storage_layout.addWidget(self._region, 1, 1)
+
+            storage_group.setLayout(storage_layout)
+            layout.addWidget(storage_group)
         else:
-            # No default - show placeholder
-            self._save_drive.setPlaceholderText("Click Refresh to query available drives...")
-        self._save_drive.setToolTip(
-            "Base path for data storage.\n"
-            "This is typically a network share or local disk.\n\n"
-            "Click 'Refresh' to query available drives from microscope."
-        )
-        drive_layout.addWidget(self._save_drive, 1)
+            # Drive selection is in main UI, just create hidden storage for it
+            self._save_drive = None  # No widget, will use _hidden_save_drive
+            self._hidden_save_drive = ""
 
-        self._refresh_btn = QPushButton("Refresh")
-        self._refresh_btn.setToolTip("Query available storage drives from microscope")
-        self._refresh_btn.clicked.connect(self._refresh_drives)
-        # Disable refresh button if no connection service
-        self._refresh_btn.setEnabled(self._connection_service is not None)
-        drive_layout.addWidget(self._refresh_btn)
+            # Region-only section
+            region_group = QGroupBox("Region Settings")
+            region_layout = QGridLayout()
+            region_layout.setSpacing(8)
 
-        browse_btn = QPushButton("Browse...")
-        browse_btn.setToolTip("Browse for local directory")
-        browse_btn.clicked.connect(self._browse_drive)
-        drive_layout.addWidget(browse_btn)
+            region_layout.addWidget(QLabel("Region:"), 0, 0)
+            self._region = QLineEdit()
+            self._region.setPlaceholderText("Optional region identifier (e.g., ROI_1)")
+            self._region.setToolTip(
+                "Optional identifier for the region being imaged.\n"
+                "Used for organizing data from multiple regions."
+            )
+            region_layout.addWidget(self._region, 0, 1)
 
-        storage_layout.addLayout(drive_layout, 0, 1)
-
-        # Region identifier
-        storage_layout.addWidget(QLabel("Region:"), 1, 0)
-        self._region = QLineEdit()
-        self._region.setPlaceholderText("Optional region identifier (e.g., ROI_1)")
-        self._region.setToolTip(
-            "Optional identifier for the region being imaged.\n"
-            "Used for organizing data from multiple regions."
-        )
-        storage_layout.addWidget(self._region, 1, 1)
-
-        storage_group.setLayout(storage_layout)
-        layout.addWidget(storage_group)
+            region_group.setLayout(region_layout)
+            layout.addWidget(region_group)
 
         # Save Options Section
         options_group = QGroupBox("Save Options")
@@ -172,8 +197,8 @@ class AdvancedSaveDialog(QDialog):
 
     def _refresh_drives(self) -> None:
         """Query available drives from microscope server."""
-        if not self._connection_service:
-            self._logger.warning("No connection service available")
+        if not self._connection_service or self._save_drive is None:
+            self._logger.warning("No connection service available or drive selection hidden")
             return
 
         try:
@@ -217,6 +242,9 @@ class AdvancedSaveDialog(QDialog):
 
     def _browse_drive(self) -> None:
         """Open file dialog to browse for save drive."""
+        if self._save_drive is None:
+            return
+
         current = self._save_drive.currentText() or self._default_drive or ""
         directory = QFileDialog.getExistingDirectory(
             self,
@@ -229,10 +257,11 @@ class AdvancedSaveDialog(QDialog):
 
     def _reset_defaults(self) -> None:
         """Reset all settings to defaults."""
-        if self._default_drive:
-            self._save_drive.setCurrentText(self._default_drive)
-        else:
-            self._save_drive.setCurrentText("")
+        if self._save_drive is not None:
+            if self._default_drive:
+                self._save_drive.setCurrentText(self._default_drive)
+            else:
+                self._save_drive.setCurrentText("")
         self._region.clear()
         self._save_subfolders.setChecked(False)
         self._live_view.setChecked(True)
@@ -244,8 +273,14 @@ class AdvancedSaveDialog(QDialog):
         Returns:
             Dictionary with settings
         """
+        # Handle hidden drive selection
+        if self._save_drive is not None:
+            save_drive = self._save_drive.currentText()
+        else:
+            save_drive = self._hidden_save_drive
+
         return {
-            'save_drive': self._save_drive.currentText(),
+            'save_drive': save_drive,
             'region': self._region.text(),
             'save_subfolders': self._save_subfolders.isChecked(),
             'live_view': self._live_view.isChecked(),
@@ -259,7 +294,10 @@ class AdvancedSaveDialog(QDialog):
             settings: Dictionary with settings to apply
         """
         if 'save_drive' in settings:
-            self._save_drive.setCurrentText(settings['save_drive'])
+            if self._save_drive is not None:
+                self._save_drive.setCurrentText(settings['save_drive'])
+            else:
+                self._hidden_save_drive = settings['save_drive']
         if 'region' in settings:
             self._region.setText(settings['region'])
         if 'save_subfolders' in settings:
@@ -273,12 +311,17 @@ class AdvancedSaveDialog(QDialog):
     @property
     def save_drive(self) -> str:
         """Get save drive path."""
-        return self._save_drive.currentText()
+        if self._save_drive is not None:
+            return self._save_drive.currentText()
+        return self._hidden_save_drive
 
     @save_drive.setter
     def save_drive(self, value: str) -> None:
         """Set save drive path."""
-        self._save_drive.setCurrentText(value)
+        if self._save_drive is not None:
+            self._save_drive.setCurrentText(value)
+        else:
+            self._hidden_save_drive = value
 
     @property
     def region(self) -> str:
