@@ -278,9 +278,10 @@ class MicroscopeCommandService:
         Send a workflow command with workflow data.
 
         Workflow commands require special handling:
-        1. Send 128-byte header with file size in data field
-        2. Send workflow data bytes
-        3. Wait for 128-byte response
+        1. Parse workflow to determine type and set appropriate flags
+        2. Send 128-byte header with file size in data field
+        3. Send workflow data bytes
+        4. Wait for 128-byte response and handle any additional data
 
         Args:
             cmd: WorkflowCommand object with workflow_data attribute
@@ -290,10 +291,11 @@ class MicroscopeCommandService:
             128-byte response from microscope
 
         Raises:
-            RuntimeError: If not connected
+            RuntimeError: If not connected or workflow start fails
             TimeoutError: If response timeout
         """
         import struct
+        import re
 
         if not self.connection.is_connected():
             raise RuntimeError("Not connected to microscope")
@@ -303,13 +305,20 @@ class MicroscopeCommandService:
         command_code = cmd.code
         cmd_name = get_command_name(command_code)
 
-        self.logger.info(f"Sending workflow: {file_size} bytes")
+        # Parse workflow to determine type and flags
+        workflow_flags = self._parse_workflow_flags(workflow_data)
+        self.logger.info(f"Sending workflow: {file_size} bytes, flags=0x{workflow_flags:08X}")
 
         try:
             # Get command socket
             command_socket = self.connection._command_socket
             if command_socket is None:
                 raise RuntimeError("Command socket not available")
+
+            # Build params with workflow-specific flags in params[6]
+            # Note: Do NOT use TRIGGER_CALL_BACK for workflow commands
+            params = [0] * 7
+            params[6] = workflow_flags
 
             # Pack file size into the data field (first 4 bytes of 72-byte buffer)
             # The server reads the file size from here to know how many bytes to expect
@@ -319,9 +328,10 @@ class MicroscopeCommandService:
             cmd_bytes = self.connection.encoder.encode_command(
                 code=command_code,
                 status=0,
-                params=[0] * 7,
+                params=params,
                 value=0.0,
-                data=data_with_size
+                data=data_with_size,
+                additional_data_size=file_size  # Tell firmware how many bytes follow
             )
 
             # Send header
@@ -338,10 +348,25 @@ class MicroscopeCommandService:
             # Parse response to check for errors
             parsed = self._parse_response(response)
             status = parsed.get('status_code', 0)
-            if status != 1:
-                self.logger.warning(f"Workflow start response status: {status}")
 
-            self.logger.info(f"Workflow started successfully")
+            # Handle any additional data in response (prevents socket buffer corruption)
+            add_data_bytes = parsed.get('reserved', 0)
+            if add_data_bytes > 0:
+                self.logger.debug(f"Reading {add_data_bytes} additional bytes from workflow response...")
+                additional_data = self._receive_full_bytes(command_socket, add_data_bytes, timeout=3.0)
+                parsed['additional_data'] = additional_data
+
+            # Check status - status=1 means success/acknowledged
+            if status == 1:
+                self.logger.info(f"Workflow started successfully")
+            elif status == 0:
+                # Status 0 might also be OK for some firmware versions
+                self.logger.info(f"Workflow start acknowledged (status=0)")
+            else:
+                # Non-zero, non-one status indicates an error
+                self.logger.error(f"Workflow start failed with status {status}")
+                raise RuntimeError(f"Workflow start failed with status code {status}")
+
             return response
 
         except socket.timeout as e:
@@ -349,6 +374,153 @@ class MicroscopeCommandService:
             raise TimeoutError(f"Timeout waiting for {cmd_name} response") from e
         except Exception as e:
             self.logger.error(f"Error sending workflow: {e}", exc_info=True)
+            raise
+
+    def _parse_workflow_flags(self, workflow_data: bytes) -> int:
+        """
+        Parse workflow data to determine appropriate command flags.
+
+        Examines the workflow file content to detect:
+        - Stack option (ZStack, Tile, ZSweep, etc.)
+        - Save settings (save to disk, MIP, etc.)
+
+        Args:
+            workflow_data: Workflow file content as bytes
+
+        Returns:
+            Integer flags for params[6] (cmdDataBits0)
+        """
+        import re
+
+        flags = 0
+
+        try:
+            # Decode workflow text
+            workflow_text = workflow_data.decode('utf-8', errors='replace')
+
+            # Detect Stack option
+            stack_match = re.search(r'Stack option\s*=\s*(\w+)', workflow_text)
+            stack_option = stack_match.group(1).lower() if stack_match else 'none'
+
+            # Detect save settings
+            save_data_match = re.search(r'Save image data\s*=\s*(\w+)', workflow_text)
+            save_data = save_data_match.group(1).lower() if save_data_match else 'notsaved'
+            saving_to_disk = save_data not in ('notsaved', 'none', '')
+
+            save_mip_match = re.search(r'Save max projection\s*=\s*(\w+)', workflow_text)
+            save_mip = save_mip_match.group(1).lower() if save_mip_match else 'false'
+            saving_mip = save_mip == 'true'
+
+            # Set flags based on workflow type
+            # Reference: CommandDataBits in tcp_protocol.py
+            if stack_option in ('zstack', 'zstack movie', 'zsweep'):
+                # Z-stack workflows: enable Z-sweep mode
+                flags |= CommandDataBits.STAGE_ZSWEEP  # 0x00000020
+                if saving_mip:
+                    flags |= CommandDataBits.MAX_PROJECTION  # 0x00000004
+
+            elif stack_option == 'tile':
+                # Tile/mosaic workflows: positions buffered
+                flags |= CommandDataBits.STAGE_POSITIONS_IN_BUFFER  # 0x00000002
+                # Don't update client during rapid tile movements
+                flags |= CommandDataBits.STAGE_NOT_UPDATE_CLIENT  # 0x00000010
+
+            elif stack_option in ('opt', 'opt zstacks'):
+                # OPT (Optical Projection Tomography) workflows
+                flags |= CommandDataBits.STAGE_ZSWEEP  # 0x00000020
+                if saving_mip:
+                    flags |= CommandDataBits.MAX_PROJECTION  # 0x00000004
+
+            elif stack_option == 'bidirectional':
+                # Bidirectional scanning
+                flags |= CommandDataBits.STAGE_ZSWEEP  # 0x00000020
+
+            # Add save to disk flag if saving images
+            if saving_to_disk:
+                flags |= CommandDataBits.SAVE_TO_DISK  # 0x00000008
+
+            # Always include experiment time remaining for progress tracking
+            flags |= CommandDataBits.EXPERIMENT_TIME_REMAINING  # 0x00000001
+
+            self.logger.debug(f"Workflow type: {stack_option}, saving: {saving_to_disk}, "
+                            f"MIP: {saving_mip}, flags: 0x{flags:08X}")
+
+        except Exception as e:
+            self.logger.warning(f"Failed to parse workflow flags, using defaults: {e}")
+            # Default: just experiment time remaining
+            flags = CommandDataBits.EXPERIMENT_TIME_REMAINING
+
+        return flags
+
+    def _send_workflow_stop_command(self, cmd: 'Command', timeout: float = 3.0) -> bytes:
+        """
+        Send a workflow stop command.
+
+        WORKFLOW_STOP requires special handling:
+        - Does NOT use TRIGGER_CALL_BACK flag (unlike query commands)
+        - Uses params[6] = 0 (no special flags needed)
+        - Still expects a response
+
+        Args:
+            cmd: Command object with code=CMD_WORKFLOW_STOP
+            timeout: Response timeout in seconds
+
+        Returns:
+            128-byte response from microscope
+
+        Raises:
+            RuntimeError: If not connected
+            TimeoutError: If response timeout
+        """
+        if not self.connection.is_connected():
+            raise RuntimeError("Not connected to microscope")
+
+        command_code = cmd.code
+        cmd_name = get_command_name(command_code)
+
+        self.logger.info(f"Sending workflow stop command")
+
+        try:
+            # Get command socket
+            command_socket = self.connection._command_socket
+            if command_socket is None:
+                raise RuntimeError("Command socket not available")
+
+            # Encode command with params[6] = 0 (NOT TRIGGER_CALL_BACK)
+            cmd_bytes = self.connection.encoder.encode_command(
+                code=command_code,
+                status=0,
+                params=[0] * 7,  # No special flags for stop
+                value=0.0,
+                data=b''
+            )
+
+            # Send command
+            command_socket.sendall(cmd_bytes)
+            self.logger.debug(f"Sent {cmd_name}")
+
+            # Wait for response
+            response = self._receive_full_bytes(command_socket, 128, timeout=timeout)
+
+            # Parse response
+            parsed = self._parse_response(response)
+            status = parsed.get('status_code', 0)
+
+            # Handle any additional data
+            add_data_bytes = parsed.get('reserved', 0)
+            if add_data_bytes > 0:
+                self.logger.debug(f"Reading {add_data_bytes} additional bytes from stop response...")
+                additional_data = self._receive_full_bytes(command_socket, add_data_bytes, timeout=3.0)
+                parsed['additional_data'] = additional_data
+
+            self.logger.info(f"Workflow stop acknowledged (status={status})")
+            return response
+
+        except socket.timeout as e:
+            self.logger.error(f"Timeout waiting for workflow stop response")
+            raise TimeoutError(f"Timeout waiting for {cmd_name} response") from e
+        except Exception as e:
+            self.logger.error(f"Error sending workflow stop: {e}", exc_info=True)
             raise
 
     def _receive_full_bytes(self, sock: socket.socket, num_bytes: int, timeout: float = 3.0) -> bytes:
@@ -704,10 +876,16 @@ class MicroscopeCommandService:
         """
         # Handle Command object
         if hasattr(cmd, 'code'):
-            # Check if this is a WorkflowCommand
+            # Check if this is a WorkflowCommand (with workflow data)
             if hasattr(cmd, 'workflow_data') and cmd.workflow_data is not None:
                 # Special handling for WorkflowCommand
                 return self._send_workflow_command(cmd, timeout)
+
+            # Check if this is a workflow stop command
+            # WORKFLOW_STOP should NOT use TRIGGER_CALL_BACK flag
+            from py2flamingo.core.tcp_protocol import CommandCode
+            if cmd.code == CommandCode.CMD_WORKFLOW_STOP:
+                return self._send_workflow_stop_command(cmd, timeout)
 
             # Extract from Command object
             command_code = cmd.code
