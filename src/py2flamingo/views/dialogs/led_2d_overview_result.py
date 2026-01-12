@@ -773,7 +773,16 @@ class LED2DOverviewResultWindow(QWidget):
         self.grid_btn.clicked.connect(self._toggle_grid)
         button_layout.addWidget(self.grid_btn)
 
-        # Save buttons
+        # Save Session button - saves everything for later loading
+        self.save_session_btn = QPushButton("Save Session...")
+        self.save_session_btn.setToolTip(
+            "Save all images and metadata to a folder.\n"
+            "Can be loaded later without re-running the scan."
+        )
+        self.save_session_btn.clicked.connect(self._save_session)
+        button_layout.addWidget(self.save_session_btn)
+
+        # Save buttons for individual images
         self.save_left_btn = QPushButton("Save Left")
         self.save_left_btn.clicked.connect(lambda: self._save_image('left'))
         button_layout.addWidget(self.save_left_btn)
@@ -1150,3 +1159,168 @@ class LED2DOverviewResultWindow(QWidget):
         # For now, just redraw the full image
         # A more efficient implementation would update just the tile
         pass
+
+    def _save_session(self):
+        """Save all scan results to a folder for later loading."""
+        from pathlib import Path
+        from datetime import datetime
+        import json
+
+        if not self._results:
+            QMessageBox.warning(self, "No Results", "No scan results to save")
+            return
+
+        # Get save location
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Folder to Save Session",
+            "",
+            QFileDialog.ShowDirsOnly
+        )
+        if not folder:
+            return
+
+        try:
+            import tifffile
+
+            save_path = Path(folder)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            result_folder = save_path / f"led_2d_overview_{timestamp}"
+            result_folder.mkdir(parents=True, exist_ok=True)
+
+            # Build metadata
+            metadata = {
+                'version': '1.0',
+                'saved_at': datetime.now().isoformat(),
+                'config': {},
+                'rotations': []
+            }
+
+            # Save config if available
+            if self._config:
+                metadata['config'] = {
+                    'bounding_box': {
+                        'x_min': self._config.bounding_box.x_min,
+                        'x_max': self._config.bounding_box.x_max,
+                        'y_min': self._config.bounding_box.y_min,
+                        'y_max': self._config.bounding_box.y_max,
+                        'z_min': self._config.bounding_box.z_min,
+                        'z_max': self._config.bounding_box.z_max,
+                    },
+                    'starting_r': self._config.starting_r,
+                    'led_name': self._config.led_name,
+                    'led_intensity': self._config.led_intensity,
+                    'z_step_size': getattr(self._config, 'z_step_size', 0.250),
+                }
+
+            # Save each rotation
+            for i, rotation in enumerate(self._results):
+                rot_folder = result_folder / f"rotation_{i}"
+                rot_folder.mkdir()
+
+                rot_data = rotation.to_dict()
+
+                # Save stitched images
+                for vis_type, image in rotation.stitched_images.items():
+                    if image is not None:
+                        img_path = rot_folder / f"stitched_{vis_type}.tif"
+                        tifffile.imwrite(str(img_path), image)
+
+                metadata['rotations'].append(rot_data)
+
+            # Save metadata JSON
+            with open(result_folder / 'metadata.json', 'w') as f:
+                json.dump(metadata, f, indent=2)
+
+            logger.info(f"Saved LED 2D Overview session to {result_folder}")
+            QMessageBox.information(
+                self, "Session Saved",
+                f"Session saved to:\n{result_folder}\n\n"
+                f"Contains {len(self._results)} rotation(s) with all visualization types."
+            )
+
+        except ImportError:
+            QMessageBox.critical(
+                self, "Missing Dependency",
+                "tifffile library required for saving sessions.\n"
+                "Install with: pip install tifffile"
+            )
+        except Exception as e:
+            logger.error(f"Error saving session: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to save session:\n{e}")
+
+    @classmethod
+    def load_from_folder(cls, folder_path, app=None) -> 'LED2DOverviewResultWindow':
+        """Load saved results from folder and create result window.
+
+        Args:
+            folder_path: Path to saved session folder (containing metadata.json)
+            app: Optional FlamingoApplication reference
+
+        Returns:
+            LED2DOverviewResultWindow instance with loaded data
+        """
+        from pathlib import Path
+        import json
+
+        folder_path = Path(folder_path)
+        metadata_path = folder_path / 'metadata.json'
+        if not metadata_path.exists():
+            raise FileNotFoundError(f"No metadata.json found in {folder_path}")
+
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+
+        # Reconstruct config
+        config = None
+        if metadata.get('config'):
+            from .led_2d_overview_dialog import BoundingBox, ScanConfiguration
+
+            bbox_data = metadata['config'].get('bounding_box', {})
+            bounding_box = BoundingBox(
+                x_min=bbox_data.get('x_min', 0),
+                x_max=bbox_data.get('x_max', 0),
+                y_min=bbox_data.get('y_min', 0),
+                y_max=bbox_data.get('y_max', 0),
+                z_min=bbox_data.get('z_min', 0),
+                z_max=bbox_data.get('z_max', 0)
+            )
+
+            config = ScanConfiguration(
+                bounding_box=bounding_box,
+                starting_r=metadata['config'].get('starting_r', 0),
+                led_name=metadata['config'].get('led_name', 'led_red'),
+                led_intensity=metadata['config'].get('led_intensity', 50),
+                z_step_size=metadata['config'].get('z_step_size', 0.250)
+            )
+
+        # Load rotations
+        from py2flamingo.workflows.led_2d_overview_workflow import TileResult, RotationResult
+        import tifffile
+
+        results = []
+        for i, rot_data in enumerate(metadata.get('rotations', [])):
+            rot_folder = folder_path / f"rotation_{i}"
+
+            # Load stitched images
+            stitched_images = {}
+            for vis_type in rot_data.get('stitched_image_types', ['best_focus']):
+                img_path = rot_folder / f"stitched_{vis_type}.tif"
+                if img_path.exists():
+                    stitched_images[vis_type] = tifffile.imread(str(img_path))
+
+            # Reconstruct tiles (for coordinate display)
+            tiles = []
+            for tile_data in rot_data.get('tiles', []):
+                tile = TileResult.from_dict(tile_data)
+                tiles.append(tile)
+
+            rotation = RotationResult.from_dict(
+                rot_data,
+                stitched_images=stitched_images,
+                tiles=tiles
+            )
+            results.append(rotation)
+
+        # Create and return window
+        window = cls(results=results, config=config, app=app)
+        return window

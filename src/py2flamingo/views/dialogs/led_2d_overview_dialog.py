@@ -150,6 +150,14 @@ class LED2DOverviewDialog(QDialog):
         button_layout = QHBoxLayout()
         button_layout.addStretch()
 
+        self.load_previous_btn = QPushButton("Load Previous Scan...")
+        self.load_previous_btn.setToolTip(
+            "Load a previously saved LED 2D Overview scan.\n"
+            "Opens the result dialog without re-running the scan."
+        )
+        self.load_previous_btn.clicked.connect(self._load_previous_scan)
+        button_layout.addWidget(self.load_previous_btn)
+
         self.preview_btn = QPushButton("Preview Grid")
         self.preview_btn.setToolTip("Show empty tile grid layout before scanning")
         self.preview_btn.clicked.connect(self._on_preview_clicked)
@@ -1168,6 +1176,45 @@ class LED2DOverviewDialog(QDialog):
             z_step_size=self.z_step_size.value(),
             use_focus_stacking=self.focus_stacking_checkbox.isChecked()
         )
+
+    def _load_previous_scan(self):
+        """Load and display a previously saved scan."""
+        from pathlib import Path
+
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Saved Scan Folder",
+            "",
+            QFileDialog.ShowDirsOnly
+        )
+        if not folder:
+            return
+
+        try:
+            from .led_2d_overview_result import LED2DOverviewResultWindow
+
+            window = LED2DOverviewResultWindow.load_from_folder(
+                Path(folder),
+                app=self._app
+            )
+            window.show()
+            window.raise_()
+            window.activateWindow()
+
+            # Store reference to prevent garbage collection
+            self._loaded_result_window = window
+
+            logger.info(f"Loaded previous scan from {folder}")
+
+        except FileNotFoundError as e:
+            logger.warning(f"Failed to load scan: {e}")
+            QMessageBox.warning(
+                self, "Invalid Folder",
+                f"No valid scan data found in:\n{folder}\n\n"
+                "Please select a folder containing metadata.json"
+            )
+        except Exception as e:
+            logger.error(f"Failed to load scan: {e}", exc_info=True)
+            QMessageBox.critical(self, "Load Error", f"Failed to load scan:\n{e}")
 
     def _on_preview_clicked(self):
         """Handle Preview Grid button click."""
