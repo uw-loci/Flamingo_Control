@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
     QLabel, QPushButton, QDoubleSpinBox, QComboBox, QCheckBox,
-    QMessageBox, QSizePolicy
+    QMessageBox, QSizePolicy, QFileDialog
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QShowEvent, QCloseEvent, QHideEvent
