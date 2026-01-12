@@ -99,7 +99,7 @@ class LED2DOverviewDialog(QDialog):
         self._current_led_intensity = 0.0  # percentage (0-100)
 
         self.setWindowTitle("LED 2D Overview")
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(580)
         # Non-modal so user can interact with Sample View and other dialogs
         self.setModal(False)
 
@@ -150,7 +150,7 @@ class LED2DOverviewDialog(QDialog):
         button_layout = QHBoxLayout()
         button_layout.addStretch()
 
-        self.load_previous_btn = QPushButton("Load Previous Scan...")
+        self.load_previous_btn = QPushButton("Load Scan...")
         self.load_previous_btn.setToolTip(
             "Load a previously saved LED 2D Overview scan.\n"
             "Opens the result dialog without re-running the scan."
