@@ -803,13 +803,22 @@ class TileCollectionDialog(QDialog):
             lines.append("    Number of planes = 1")
             lines.append("    Z stage velocity (mm/s) = 0.4")
 
+        lines.append("    Number of planes saved = ")
         lines.append("    Rotational stage velocity (°/s) = 0")
         lines.append("    Auto update stack calculations = true")
-        lines.append("    Camera 1 capture percentage = 100")
-        lines.append("    Camera 1 capture mode = 0")
-        lines.append("    Stack option = None")
-        lines.append("    Stack option settings 1 = 0")
-        lines.append("    Stack option settings 2 = 0")
+        lines.append("    Date time stamp = ")
+        lines.append("    Stack file name = ")
+        lines.append(f"    Camera 1 capture percentage = {camera_settings['cam1_capture_percentage']}")
+        lines.append(f"    Camera 1 capture mode (0 full, 1 from front, 2 from back, 3 none) = {camera_settings['cam1_capture_mode']}")
+        lines.append("    Camera 1 capture range = ")
+        lines.append(f"    Camera 2 capture percentage = {camera_settings['cam2_capture_percentage']}")
+        lines.append(f"    Camera 2 capture mode (0 full, 1 from front, 2 from back, 3 none) = {camera_settings['cam2_capture_mode']}")
+        lines.append("    Camera 2 capture range = ")
+        # Stack option determines workflow type - ZStack for z-stack, Tile for tiling
+        stack_option = "ZStack" if self._workflow_type == WorkflowType.ZSTACK else "Snapshot"
+        lines.append(f"    Stack option = {stack_option}")
+        lines.append("    Stack option settings 1 = ")
+        lines.append("    Stack option settings 2 = ")
         lines.append("    </Stack Settings>")
 
         # Start Position
@@ -847,11 +856,15 @@ class TileCollectionDialog(QDialog):
         lines.append("    LED DAC = 42000 0")
         lines.append("    </Illumination Source>")
 
-        # Illumination Path
+        # Illumination Path - format is "path = ON/OFF value" where value is 1 for ON, 0 for OFF
         lines.append("")
         lines.append("    <Illumination Path>")
-        lines.append("    Left path = ON")
-        lines.append("    Right path = OFF")
+        # Get illumination path settings from panel
+        illum_settings = self._illumination_panel.get_settings()
+        left_on = illum_settings.get('left_path', True)
+        right_on = illum_settings.get('right_path', False)
+        lines.append(f"    Left path = {'ON' if left_on else 'OFF'} {1 if left_on else 0}")
+        lines.append(f"    Right path = {'ON' if right_on else 'OFF'} {1 if right_on else 0}")
         lines.append("    </Illumination Path>")
 
         # Illumination Options
