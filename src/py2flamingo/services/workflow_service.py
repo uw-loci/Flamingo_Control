@@ -406,9 +406,8 @@ class MVCWorkflowService:
             self.event_manager.clear_event('workflow_cancelled')
             self.logger.debug("Cleared workflow_cancelled event for new workflow")
 
-            # TODO: Parse workflow_data to determine type and set appropriate flags
-            # For now, using basic flag (EXPERIMENT_TIME_REMAINING like old code)
-            # params[6] = CommandDataBits.EXPERIMENT_TIME_REMAINING
+            # Workflow flags are now parsed and set in MicroscopeCommandService._send_workflow_command()
+            # based on the actual workflow content (ZStack, Tile, save settings, etc.)
 
             # Create workflow command
             cmd = WorkflowCommand(

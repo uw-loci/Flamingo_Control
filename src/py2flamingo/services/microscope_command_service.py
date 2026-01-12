@@ -281,21 +281,23 @@ class MicroscopeCommandService:
         1. Parse workflow to determine type and set appropriate flags
         2. Send 128-byte header with file size in data field
         3. Send workflow data bytes
-        4. Wait for 128-byte response and handle any additional data
+
+        NOTE: Workflow commands are "fire and forget" - the server does not
+        send a synchronous response. Status updates come asynchronously via
+        system state events and frame callbacks. This matches the legacy
+        behavior in tcp_client.py::send_workflow().
 
         Args:
             cmd: WorkflowCommand object with workflow_data attribute
-            timeout: Response timeout in seconds
+            timeout: Not used (kept for API compatibility)
 
         Returns:
-            128-byte response from microscope
+            Empty bytes (no response expected)
 
         Raises:
-            RuntimeError: If not connected or workflow start fails
-            TimeoutError: If response timeout
+            RuntimeError: If not connected or send fails
         """
         import struct
-        import re
 
         if not self.connection.is_connected():
             raise RuntimeError("Not connected to microscope")
@@ -340,38 +342,12 @@ class MicroscopeCommandService:
 
             # Send workflow data
             command_socket.sendall(workflow_data)
-            self.logger.debug(f"Sent {file_size} bytes of workflow data")
+            self.logger.info(f"Workflow sent: {file_size} bytes to {cmd_name}")
 
-            # Wait for response (workflow start can take a moment)
-            response = self._receive_full_bytes(command_socket, 128, timeout=timeout)
+            # No response expected - workflow commands are fire-and-forget
+            # Status updates come asynchronously via system state events
+            return b''
 
-            # Parse response to check for errors
-            parsed = self._parse_response(response)
-            status = parsed.get('status_code', 0)
-
-            # Handle any additional data in response (prevents socket buffer corruption)
-            add_data_bytes = parsed.get('reserved', 0)
-            if add_data_bytes > 0:
-                self.logger.debug(f"Reading {add_data_bytes} additional bytes from workflow response...")
-                additional_data = self._receive_full_bytes(command_socket, add_data_bytes, timeout=3.0)
-                parsed['additional_data'] = additional_data
-
-            # Check status - status=1 means success/acknowledged
-            if status == 1:
-                self.logger.info(f"Workflow started successfully")
-            elif status == 0:
-                # Status 0 might also be OK for some firmware versions
-                self.logger.info(f"Workflow start acknowledged (status=0)")
-            else:
-                # Non-zero, non-one status indicates an error
-                self.logger.error(f"Workflow start failed with status {status}")
-                raise RuntimeError(f"Workflow start failed with status code {status}")
-
-            return response
-
-        except socket.timeout as e:
-            self.logger.error(f"Timeout waiting for workflow start response")
-            raise TimeoutError(f"Timeout waiting for {cmd_name} response") from e
         except Exception as e:
             self.logger.error(f"Error sending workflow: {e}", exc_info=True)
             raise
