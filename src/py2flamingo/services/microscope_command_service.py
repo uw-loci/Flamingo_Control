@@ -307,9 +307,11 @@ class MicroscopeCommandService:
         command_code = cmd.code
         cmd_name = get_command_name(command_code)
 
-        # Parse workflow to determine type and flags
+        # Note: Legacy tcp_client.py uses params[6] = 0 for all workflows.
+        # The firmware may not support the flags we were trying to set.
+        # Keeping flag parsing for debugging but using 0 to match legacy behavior.
         workflow_flags = self._parse_workflow_flags(workflow_data)
-        self.logger.info(f"Sending workflow: {file_size} bytes, flags=0x{workflow_flags:08X}")
+        self.logger.info(f"Sending workflow: {file_size} bytes, detected_flags=0x{workflow_flags:08X} (using 0 like legacy)")
 
         try:
             # Get command socket
@@ -317,10 +319,11 @@ class MicroscopeCommandService:
             if command_socket is None:
                 raise RuntimeError("Command socket not available")
 
-            # Build params with workflow-specific flags in params[6]
+            # Build params - use all zeros like legacy tcp_client.py
             # Note: Do NOT use TRIGGER_CALL_BACK for workflow commands
+            # The firmware may ignore or reject workflows with non-zero params[6]
             params = [0] * 7
-            params[6] = workflow_flags
+            # params[6] = workflow_flags  # Disabled: legacy uses 0
 
             # Pack file size into the data field (first 4 bytes of 72-byte buffer)
             # The server reads the file size from here to know how many bytes to expect
