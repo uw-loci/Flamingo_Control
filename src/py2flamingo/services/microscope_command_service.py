@@ -327,16 +327,18 @@ class MicroscopeCommandService:
 
             # Pack file size into the data field (first 4 bytes of 72-byte buffer)
             # The server reads the file size from here to know how many bytes to expect
+            # NOTE: The additional_data_size field must be 0 - legacy code hardcodes it to 0
             data_with_size = struct.pack("I", file_size).ljust(72, b'\x00')
 
-            # Encode command header with file size in data field
+            # Encode command header with file size in data field only
+            # (additional_data_size=0 to match legacy tcp_client.py behavior)
             cmd_bytes = self.connection.encoder.encode_command(
                 code=command_code,
                 status=0,
                 params=params,
                 value=0.0,
                 data=data_with_size,
-                additional_data_size=file_size  # Tell firmware how many bytes follow
+                additional_data_size=0  # Must be 0 - legacy hardcodes this
             )
 
             # Send header
