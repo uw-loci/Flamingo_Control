@@ -20,6 +20,8 @@ from PyQt5.QtGui import QShowEvent, QCloseEvent, QHideEvent
 
 from py2flamingo.views.colors import WARNING_COLOR, ERROR_COLOR
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class BoundingBox:
