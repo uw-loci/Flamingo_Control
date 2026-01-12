@@ -399,6 +399,61 @@ class SavePanel(QWidget):
             'comments': self._comments,
         }
 
+    def set_settings(self, settings: Dict[str, Any]) -> None:
+        """
+        Set save settings from dictionary.
+
+        Used for restoring settings from persistence.
+
+        Args:
+            settings: Dictionary with save settings
+        """
+        if not settings:
+            return
+
+        if 'save_enabled' in settings:
+            self._save_enabled.setChecked(settings['save_enabled'])
+
+        if 'save_drive' in settings:
+            self._save_drive = settings['save_drive']
+            # Try to set combo box if the drive is in the list
+            idx = self._save_drive_combo.findText(settings['save_drive'])
+            if idx >= 0:
+                self._save_drive_combo.setCurrentIndex(idx)
+            else:
+                self._save_drive_combo.setCurrentText(settings['save_drive'])
+
+        if 'save_directory' in settings:
+            self._save_directory.setText(settings['save_directory'])
+
+        if 'sample_name' in settings:
+            self._sample_name.setText(settings['sample_name'])
+
+        if 'region' in settings:
+            self._region = settings['region']
+
+        if 'save_format' in settings:
+            # Find format index by value
+            for i, (_, format_value) in enumerate(SAVE_FORMATS):
+                if format_value == settings['save_format']:
+                    self._format_combo.setCurrentIndex(i)
+                    break
+
+        if 'save_mip' in settings:
+            self._save_mip.setChecked(settings['save_mip'])
+
+        if 'display_mip' in settings:
+            self._display_mip.setChecked(settings['display_mip'])
+
+        if 'save_subfolders' in settings:
+            self._save_subfolders = settings['save_subfolders']
+
+        if 'live_view' in settings:
+            self._live_view = settings['live_view']
+
+        if 'comments' in settings:
+            self._comments = settings['comments']
+
     def get_workflow_save_dict(self) -> Dict[str, str]:
         """
         Get save settings as workflow dictionary format.

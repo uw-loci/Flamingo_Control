@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QSpinBox, QComboBox, QGroupBox, QGridLayout,
+    QSpinBox, QDoubleSpinBox, QComboBox, QGroupBox, QGridLayout,
     QPushButton, QDialogButtonBox
 )
 from PyQt5.QtCore import Qt
@@ -62,6 +62,39 @@ class AdvancedCameraDialog(QDialog):
         """Create and layout UI components."""
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
+
+        # Exposure Section
+        exposure_group = QGroupBox("Exposure (Manual Override)")
+        exposure_grid = QGridLayout()
+        exposure_grid.setSpacing(8)
+
+        exposure_grid.addWidget(QLabel("Exposure:"), 0, 0)
+        exp_layout = QHBoxLayout()
+        self._exposure_spinbox = QDoubleSpinBox()
+        self._exposure_spinbox.setRange(0.1, 100000.0)  # 0.1us to 100ms
+        self._exposure_spinbox.setValue(10000.0)  # Default 10ms
+        self._exposure_spinbox.setDecimals(1)
+        self._exposure_spinbox.setSingleStep(100.0)
+        self._exposure_spinbox.setSuffix(" us")
+        self._exposure_spinbox.valueChanged.connect(self._on_exposure_changed)
+        exp_layout.addWidget(self._exposure_spinbox)
+
+        # Frame rate display (calculated)
+        self._fps_label = QLabel("= 40.0 fps")
+        self._fps_label.setStyleSheet("color: #27ae60; font-weight: bold;")
+        exp_layout.addWidget(self._fps_label)
+        exposure_grid.addLayout(exp_layout, 0, 1)
+
+        exposure_info = QLabel(
+            "Override auto-detected exposure. Frame rate is calculated from exposure "
+            "(capped at 40 fps)."
+        )
+        exposure_info.setStyleSheet("color: gray; font-size: 9pt;")
+        exposure_info.setWordWrap(True)
+        exposure_grid.addWidget(exposure_info, 1, 0, 1, 2)
+
+        exposure_group.setLayout(exposure_grid)
+        layout.addWidget(exposure_group)
 
         # AOI Section
         aoi_group = QGroupBox("Area of Interest (AOI)")
@@ -174,6 +207,17 @@ class AdvancedCameraDialog(QDialog):
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
 
+    def _on_exposure_changed(self) -> None:
+        """Handle exposure time change - update frame rate display."""
+        exposure_us = self._exposure_spinbox.value()
+        if exposure_us > 0:
+            exposure_s = exposure_us / 1_000_000.0
+            # Cap frame rate at 40 fps (hardware limit)
+            framerate = min(1.0 / exposure_s, 40.0)
+            self._fps_label.setText(f"= {framerate:.1f} fps")
+        else:
+            self._fps_label.setText("= N/A")
+
     def _on_preset_changed(self, index: int) -> None:
         """Handle AOI preset selection change."""
         if self._updating_preset:
@@ -210,6 +254,7 @@ class AdvancedCameraDialog(QDialog):
 
     def _reset_defaults(self) -> None:
         """Reset all settings to defaults."""
+        self._exposure_spinbox.setValue(10000.0)  # 10ms default
         self._aoi_preset.setCurrentIndex(0)  # Full Frame
         self._aoi_width.setValue(2048)
         self._aoi_height.setValue(2048)
@@ -228,6 +273,7 @@ class AdvancedCameraDialog(QDialog):
         _, cam2_mode_value = CAPTURE_MODES[self._cam2_mode.currentIndex()]
 
         return {
+            'exposure_us': self._exposure_spinbox.value(),
             'aoi_width': self._aoi_width.value(),
             'aoi_height': self._aoi_height.value(),
             'cam1_capture_percentage': self._cam1_percentage.value(),
@@ -242,6 +288,8 @@ class AdvancedCameraDialog(QDialog):
         Args:
             settings: Dictionary with settings to apply
         """
+        if 'exposure_us' in settings:
+            self._exposure_spinbox.setValue(settings['exposure_us'])
         if 'aoi_width' in settings:
             self._aoi_width.setValue(settings['aoi_width'])
         if 'aoi_height' in settings:

@@ -498,3 +498,73 @@ class IlluminationPanel(QWidget):
             self._led_color_index = settings['led_color_index']
         if 'led_dac_percent' in settings:
             self._led_dac_percent = settings['led_dac_percent']
+
+    def get_ui_state(self) -> Dict[str, Any]:
+        """
+        Get UI state for persistence.
+
+        Returns a dictionary with all UI settings that can be saved and restored.
+
+        Returns:
+            Dictionary with UI state
+        """
+        # Collect laser states
+        lasers = []
+        for i, (display_name, workflow_key, _) in enumerate(self._laser_channels):
+            lasers.append({
+                'workflow_key': workflow_key,
+                'enabled': self._laser_rows[i].is_enabled(),
+                'power': self._laser_rows[i].get_power(),
+            })
+
+        return {
+            'lasers': lasers,
+            'led_enabled': self._led_enable.isChecked(),
+            'led_intensity': self._led_intensity.value(),
+            'left_path': self._left_path.isChecked(),
+            'right_path': self._right_path.isChecked(),
+            'multi_laser_mode': self._multi_laser_mode,
+            'led_color_index': self._led_color_index,
+            'led_dac_percent': self._led_dac_percent,
+        }
+
+    def set_ui_state(self, state: Dict[str, Any]) -> None:
+        """
+        Restore UI state from persistence.
+
+        Args:
+            state: Dictionary with UI state from get_ui_state()
+        """
+        if not state:
+            return
+
+        # Restore laser states
+        if 'lasers' in state:
+            for laser_state in state['lasers']:
+                workflow_key = laser_state.get('workflow_key', '')
+                for i, (_, key, _) in enumerate(self._laser_channels):
+                    if key == workflow_key:
+                        self._laser_rows[i].set_enabled(laser_state.get('enabled', False))
+                        self._laser_rows[i].set_power(laser_state.get('power', 5.0))
+                        break
+
+        if 'led_enabled' in state:
+            self._led_enable.setChecked(state['led_enabled'])
+
+        if 'led_intensity' in state:
+            self._led_intensity.setValue(state['led_intensity'])
+
+        if 'left_path' in state:
+            self._left_path.setChecked(state['left_path'])
+
+        if 'right_path' in state:
+            self._right_path.setChecked(state['right_path'])
+
+        if 'multi_laser_mode' in state:
+            self._multi_laser_mode = state['multi_laser_mode']
+
+        if 'led_color_index' in state:
+            self._led_color_index = state['led_color_index']
+
+        if 'led_dac_percent' in state:
+            self._led_dac_percent = state['led_dac_percent']

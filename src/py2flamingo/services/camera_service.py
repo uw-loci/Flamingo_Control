@@ -74,6 +74,7 @@ class CameraCommandCode:
     # Query commands
     IMAGE_SIZE_GET = 12327  # 0x3027
     PIXEL_FIELD_OF_VIEW_GET = 12343  # 0x3037
+    EXPOSURE_GET = 12290  # 0x3002 - get exposure time
 
     # Action commands
     SNAPSHOT = 12294  # 0x3006 - take single image
@@ -215,6 +216,39 @@ class CameraService(MicroscopeCommandService):
 
         self.logger.info(f"Pixel field of view: {pixel_fov} mm/pixel ({pixel_fov * 1000:.3f} µm/pixel)")
         return pixel_fov
+
+    def get_exposure(self) -> float:
+        """
+        Get current camera exposure time in microseconds.
+
+        Queries the camera via CAMERA_EXPOSURE_GET (0x3002) command.
+
+        Returns:
+            Exposure time in microseconds
+
+        Raises:
+            RuntimeError: If command fails or microscope not connected
+
+        Example:
+            >>> exposure_us = camera_service.get_exposure()
+            >>> print(f"Exposure: {exposure_us} us ({exposure_us/1000:.2f} ms)")
+            Exposure: 25000.0 us (25.00 ms)
+        """
+        self.logger.info("Getting camera exposure time...")
+
+        result = self._query_command(
+            CameraCommandCode.EXPOSURE_GET,
+            "CAMERA_EXPOSURE_GET"
+        )
+
+        if not result['success']:
+            raise RuntimeError(f"Failed to get exposure: {result.get('error', 'Unknown error')}")
+
+        # Exposure returned in Value field (double) in microseconds
+        exposure_us = result['parsed']['value']
+
+        self.logger.info(f"Camera exposure: {exposure_us} us ({exposure_us/1000:.2f} ms)")
+        return exposure_us
 
     def take_snapshot(self) -> None:
         """

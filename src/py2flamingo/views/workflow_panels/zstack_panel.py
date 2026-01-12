@@ -723,3 +723,66 @@ class ZStackPanel(QWidget):
         """
         self._stack_option_label.setVisible(visible)
         self._stack_option.setVisible(visible)
+
+    def get_ui_state(self) -> Dict[str, Any]:
+        """
+        Get UI state for persistence.
+
+        Returns additional UI state not included in StackSettings object.
+        Use this along with get_settings() to fully persist the panel state.
+
+        Returns:
+            Dictionary with UI-specific state
+        """
+        return {
+            'z_step_um': self._z_step.value(),
+            'num_planes': self._num_planes.value(),
+            'z_velocity_mm_s': self._z_velocity.value(),
+            'auto_velocity': self._auto_velocity.isChecked(),
+            'return_to_start': self._return_to_start.isChecked(),
+            'stack_option': self._stack_option.currentText(),
+        }
+
+    def set_ui_state(self, state: Dict[str, Any]) -> None:
+        """
+        Restore UI state from persistence.
+
+        Restores additional UI state not included in StackSettings object.
+        Use this after restoring the panel with set_settings().
+
+        Args:
+            state: Dictionary with UI-specific state from get_ui_state()
+        """
+        if not state:
+            return
+
+        self._updating = True
+
+        if 'z_step_um' in state:
+            self._z_step.setValue(state['z_step_um'])
+
+        if 'num_planes' in state:
+            self._num_planes.setValue(state['num_planes'])
+
+        if 'z_velocity_mm_s' in state:
+            self._z_velocity.setValue(state['z_velocity_mm_s'])
+
+        if 'auto_velocity' in state:
+            is_auto = state['auto_velocity']
+            self._auto_velocity.setChecked(is_auto)
+            self._z_velocity.setReadOnly(is_auto)
+            if is_auto:
+                self._z_velocity.setStyleSheet("QDoubleSpinBox { background-color: #f0f0f0; }")
+            else:
+                self._z_velocity.setStyleSheet("")
+
+        if 'return_to_start' in state:
+            self._return_to_start.setChecked(state['return_to_start'])
+
+        if 'stack_option' in state and state['stack_option'] in STACK_OPTIONS:
+            self._stack_option.setCurrentText(state['stack_option'])
+
+        self._updating = False
+
+        # Update calculations with restored values
+        self._update_calculations()

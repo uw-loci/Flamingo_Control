@@ -224,7 +224,7 @@ class TileCollectionDialog(QDialog):
         self._right_rotation = right_rotation
         self._config = config
         self._app = app
-        self._workflow_type = WorkflowType.SNAPSHOT
+        self._workflow_type = WorkflowType.ZSTACK  # Default to Z-Stack (user preference)
 
         # Determine if 90-degree overlap mode is available
         self._has_dual_view = bool(left_tiles) and bool(right_tiles)
@@ -239,6 +239,9 @@ class TileCollectionDialog(QDialog):
         self.setMinimumHeight(600)
 
         self._setup_ui()
+
+        # Restore persisted settings (after UI setup)
+        self._restore_dialog_state()
 
     def _update_z_ranges(self) -> None:
         """Update Z ranges for tiles based on primary direction and overlap."""
@@ -314,15 +317,21 @@ class TileCollectionDialog(QDialog):
         self._illumination_panel = IlluminationPanel(app=self._app)
         container_layout.addWidget(self._illumination_panel)
 
-        # Camera panel for exposure/frame rate settings
-        self._camera_panel = CameraPanel()
+        # Camera panel for exposure/frame rate settings - pass app for auto-detection
+        self._camera_panel = CameraPanel(app=self._app)
         self._camera_panel.settings_changed.connect(self._on_camera_settings_changed)
         container_layout.addWidget(self._camera_panel)
 
-        # Z-Stack panel (shown only for Z-Stack type) - pass app for system defaults
+        # Z-Stack panel - pass app for system defaults
+        # Default to visible since we default to Z-Stack mode
         self._zstack_panel = ZStackPanel(app=self._app)
-        self._zstack_panel.setVisible(False)
+        self._zstack_panel.setVisible(True)  # Default visible for Z-Stack
+        self._zstack_panel.enable_tile_mode(True)  # Enable tile mode
         container_layout.addWidget(self._zstack_panel)
+
+        # Initialize Z range for Z-Stack mode
+        z_min, z_max = self._get_representative_z_range()
+        self._zstack_panel.set_z_range(z_min, z_max)
 
         # Initialize Z velocity with current frame rate
         camera_settings = self._camera_panel.get_settings()
@@ -536,10 +545,12 @@ class TileCollectionDialog(QDialog):
 
         self._type_combo = QComboBox()
         self._type_combo.addItems(["Snapshot", "Z-Stack"])
+        self._type_combo.setCurrentIndex(1)  # Default to Z-Stack
         self._type_combo.currentIndexChanged.connect(self._on_type_changed)
         layout.addWidget(self._type_combo)
 
-        self._type_description = QLabel("Single image at each tile position")
+        # Description will be updated by _on_type_changed
+        self._type_description = QLabel("Z-stack at each tile position")
         self._type_description.setStyleSheet("color: gray; font-style: italic;")
         layout.addWidget(self._type_description)
 
@@ -1045,3 +1056,121 @@ class TileCollectionDialog(QDialog):
                 self, "Execution Error",
                 f"Error executing workflows: {e}\n\nWorkflow files have been saved."
             )
+
+    def _get_geometry_manager(self):
+        """Get WindowGeometryManager from application."""
+        if self._app and hasattr(self._app, 'geometry_manager'):
+            return self._app.geometry_manager
+        return None
+
+    def _save_dialog_state(self) -> None:
+        """Save all dialog settings for persistence."""
+        gm = self._get_geometry_manager()
+        if not gm:
+            return
+
+        state = {
+            # Dialog-level settings
+            'workflow_type': self._type_combo.currentIndex(),
+            'name_prefix': self._name_prefix.text(),
+            'add_to_sample_view': self._add_to_sample_view_checkbox.isChecked(),
+
+            # Panel settings (using ui_state methods for raw dict persistence)
+            'illumination': self._illumination_panel.get_ui_state(),
+            'camera': self._camera_panel.get_settings(),
+            'zstack': self._zstack_panel.get_ui_state(),
+            'save': self._save_panel.get_settings(),
+        }
+
+        # Primary direction (only if dual view mode available)
+        if self._has_dual_view:
+            state['primary_is_left'] = self._primary_is_left
+
+        try:
+            gm.save_dialog_state("TileCollectionDialog", state)
+            gm.save_all()
+            logger.debug("Saved TileCollectionDialog state")
+        except Exception as e:
+            logger.warning(f"Failed to save dialog state: {e}")
+
+    def _restore_dialog_state(self) -> None:
+        """Restore dialog settings from persistence."""
+        gm = self._get_geometry_manager()
+        if not gm:
+            return
+
+        try:
+            state = gm.restore_dialog_state("TileCollectionDialog")
+        except Exception as e:
+            logger.warning(f"Failed to restore dialog state: {e}")
+            state = None
+
+        if not state:
+            # Apply defaults (Z-Stack mode already set)
+            return
+
+        logger.debug("Restoring TileCollectionDialog state")
+
+        # Restore workflow type
+        if 'workflow_type' in state:
+            idx = state['workflow_type']
+            self._type_combo.setCurrentIndex(idx)
+            self._on_type_changed(idx)
+
+        # Restore name prefix
+        if 'name_prefix' in state:
+            self._name_prefix.setText(state['name_prefix'])
+
+        # Restore add to sample view checkbox
+        if 'add_to_sample_view' in state:
+            self._add_to_sample_view_checkbox.setChecked(state['add_to_sample_view'])
+
+        # Restore panel settings
+        if 'illumination' in state:
+            try:
+                self._illumination_panel.set_ui_state(state['illumination'])
+            except Exception as e:
+                logger.warning(f"Failed to restore illumination settings: {e}")
+
+        if 'camera' in state:
+            try:
+                self._camera_panel.set_settings(state['camera'])
+            except Exception as e:
+                logger.warning(f"Failed to restore camera settings: {e}")
+
+        if 'zstack' in state:
+            try:
+                self._zstack_panel.set_ui_state(state['zstack'])
+            except Exception as e:
+                logger.warning(f"Failed to restore zstack settings: {e}")
+
+        if 'save' in state:
+            try:
+                self._save_panel.set_settings(state['save'])
+            except Exception as e:
+                logger.warning(f"Failed to restore save settings: {e}")
+
+        # Restore primary direction
+        if 'primary_is_left' in state and self._has_dual_view:
+            self._primary_is_left = state['primary_is_left']
+            # Update combo box
+            if hasattr(self, '_direction_combo'):
+                self._direction_combo.setCurrentIndex(0 if self._primary_is_left else 1)
+
+    def accept(self):
+        """Save state before accepting."""
+        self._save_dialog_state()
+        super().accept()
+
+    def reject(self):
+        """Save state before rejecting."""
+        self._save_dialog_state()
+        super().reject()
+
+    def showEvent(self, event):
+        """Handle show event - trigger camera auto-detection."""
+        super().showEvent(event)
+
+        # Auto-detect camera settings on first show
+        if not self._camera_panel._auto_detected:
+            self._camera_panel.detect_camera_settings()
