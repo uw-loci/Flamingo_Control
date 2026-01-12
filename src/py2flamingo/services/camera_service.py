@@ -74,7 +74,7 @@ class CameraCommandCode:
     # Query commands
     IMAGE_SIZE_GET = 12327  # 0x3027
     PIXEL_FIELD_OF_VIEW_GET = 12343  # 0x3037
-    EXPOSURE_GET = 12290  # 0x3002 - get exposure time
+    EXPOSURE_GET = 12298  # 0x300A - get exposure time (returns int32Data0 in microseconds)
 
     # Action commands
     SNAPSHOT = 12294  # 0x3006 - take single image
@@ -221,7 +221,7 @@ class CameraService(MicroscopeCommandService):
         """
         Get current camera exposure time in microseconds.
 
-        Queries the camera via CAMERA_EXPOSURE_GET (0x3002) command.
+        Queries the camera via CAMERA_EXPOSURE_GET (0x300A) command.
 
         Returns:
             Exposure time in microseconds
@@ -244,8 +244,12 @@ class CameraService(MicroscopeCommandService):
         if not result['success']:
             raise RuntimeError(f"Failed to get exposure: {result.get('error', 'Unknown error')}")
 
-        # Exposure returned in Value field (double) in microseconds
-        exposure_us = result['parsed']['value']
+        parsed = result['parsed']
+
+        # Exposure is returned in int32Data0 (params[3]) in microseconds
+        # Reference: PCOBase.cpp getExposureTime() sets pscmd->int32Data0 = exposure
+        params = parsed['params']
+        exposure_us = float(params[3]) if len(params) > 3 else 0.0
 
         self.logger.info(f"Camera exposure: {exposure_us} us ({exposure_us/1000:.2f} ms)")
         return exposure_us

@@ -146,7 +146,7 @@ class CameraCommands:
 
     # Camera parameter commands
     EXPOSURE_SET = 0x3001  # 12289 - Set exposure time
-    EXPOSURE_GET = 0x3002  # 12290 - Get exposure time
+    EXPOSURE_GET = 0x300A  # 12298 - Get exposure time (returns int32Data0 in us)
     IMAGE_SIZE_GET = 0x3027  # 12327 - Get image dimensions
     PIXEL_SIZE_GET = 0x3042  # 12354 - Get pixel size in micrometers
     FIELD_OF_VIEW_GET = 0x3043  # 12355 - Get field of view

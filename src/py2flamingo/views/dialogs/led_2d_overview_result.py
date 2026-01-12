@@ -12,7 +12,7 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QSplitter, QGroupBox, QFileDialog, QMessageBox,
-    QSizePolicy, QFrame, QComboBox
+    QSizePolicy, QFrame, QComboBox, QMenu, QAction
 )
 from PyQt5.QtCore import Qt, QSize, QPoint, QPointF, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QWheelEvent, QMouseEvent
@@ -773,27 +773,38 @@ class LED2DOverviewResultWindow(QWidget):
         self.grid_btn.clicked.connect(self._toggle_grid)
         button_layout.addWidget(self.grid_btn)
 
-        # Save Session button - saves everything for later loading
-        self.save_session_btn = QPushButton("Save Session...")
-        self.save_session_btn.setToolTip(
-            "Save all images and metadata to a folder.\n"
-            "Can be loaded later without re-running the scan."
+        # Save button with dropdown menu
+        self.save_btn = QPushButton("Save ▼")
+        self.save_btn.setToolTip(
+            "Save scan results.\n"
+            "Click for options: Whole Session, Initial image, or Rotated image."
         )
-        self.save_session_btn.clicked.connect(self._save_session)
-        button_layout.addWidget(self.save_session_btn)
 
-        # Save buttons for individual images
-        self.save_left_btn = QPushButton("Save Left")
-        self.save_left_btn.clicked.connect(lambda: self._save_image('left'))
-        button_layout.addWidget(self.save_left_btn)
+        # Create dropdown menu for save options
+        save_menu = QMenu(self)
 
-        self.save_right_btn = QPushButton("Save Right")
-        self.save_right_btn.clicked.connect(lambda: self._save_image('right'))
-        button_layout.addWidget(self.save_right_btn)
+        # Whole Session - default option (saves everything for later loading)
+        self.save_session_action = QAction("Whole Session", self)
+        self.save_session_action.setToolTip("Save all images and metadata to a folder (can be loaded later)")
+        self.save_session_action.triggered.connect(self._save_session)
+        save_menu.addAction(self.save_session_action)
 
-        self.save_both_btn = QPushButton("Save Both")
-        self.save_both_btn.clicked.connect(lambda: self._save_image('both'))
-        button_layout.addWidget(self.save_both_btn)
+        save_menu.addSeparator()
+
+        # Initial image (rotation 0 / left panel)
+        self.save_initial_action = QAction("Initial image", self)
+        self.save_initial_action.setToolTip("Save the initial rotation image (left panel)")
+        self.save_initial_action.triggered.connect(lambda: self._save_single_rotation(0))
+        save_menu.addAction(self.save_initial_action)
+
+        # Rotated image (rotation 1 / right panel)
+        self.save_rotated_action = QAction("Rotated image", self)
+        self.save_rotated_action.setToolTip("Save the rotated image (right panel)")
+        self.save_rotated_action.triggered.connect(lambda: self._save_single_rotation(1))
+        save_menu.addAction(self.save_rotated_action)
+
+        self.save_btn.setMenu(save_menu)
+        button_layout.addWidget(self.save_btn)
 
         # Close button
         close_btn = QPushButton("Close")
@@ -1142,6 +1153,109 @@ class LED2DOverviewResultWindow(QWidget):
                 )
         except Exception as e:
             logger.error(f"Error saving image: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to save image:\n{e}")
+
+    def _save_single_rotation(self, rotation_idx: int):
+        """Save a single rotation's stitched image.
+
+        Args:
+            rotation_idx: 0 for initial image, 1 for rotated image
+        """
+        if not self._results or len(self._results) <= rotation_idx:
+            name = "Initial" if rotation_idx == 0 else "Rotated"
+            QMessageBox.warning(self, "No Image", f"No {name.lower()} image available")
+            return
+
+        rotation = self._results[rotation_idx]
+
+        # Get currently selected visualization type
+        viz_type = self.viz_combo.currentData() or "best_focus"
+
+        # Get the stitched image for this rotation and viz type
+        image = rotation.stitched_images.get(viz_type)
+        if image is None:
+            # Try fallback to any available image
+            for vt, img in rotation.stitched_images.items():
+                if img is not None:
+                    image = img
+                    viz_type = vt
+                    break
+
+        if image is None:
+            QMessageBox.warning(self, "No Image", f"No stitched image available for rotation {rotation_idx}")
+            return
+
+        # Build default filename
+        rotation_name = "initial" if rotation_idx == 0 else "rotated"
+        angle = rotation.rotation_angle
+        default_name = f"led_2d_overview_{rotation_name}_R{angle}_{viz_type}.tiff"
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Save {'Initial' if rotation_idx == 0 else 'Rotated'} Image",
+            default_name,
+            "TIFF Images (*.tiff *.tif);;PNG Images (*.png);;All Files (*)"
+        )
+
+        if not path:
+            return
+
+        try:
+            import tifffile
+
+            # Save as 16-bit TIFF if it's grayscale, otherwise downsample and save
+            if len(image.shape) == 2 and image.dtype == np.uint16:
+                # Save full resolution 16-bit TIFF
+                tifffile.imwrite(path, image)
+                logger.info(f"Saved 16-bit TIFF to {path}")
+                QMessageBox.information(
+                    self, "Saved",
+                    f"Image saved to:\n{path}\n\n"
+                    f"Full resolution: {image.shape[1]}x{image.shape[0]} pixels\n"
+                    f"16-bit grayscale"
+                )
+            else:
+                # Downsample for RGB or 8-bit images
+                downsample_factor = 4
+                original_h, original_w = image.shape[:2]
+                new_w = original_w // downsample_factor
+                new_h = original_h // downsample_factor
+
+                import cv2
+                downsampled = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                tifffile.imwrite(path, downsampled)
+                logger.info(f"Saved downsampled image to {path}")
+                QMessageBox.information(
+                    self, "Saved",
+                    f"Image saved to:\n{path}\n\n"
+                    f"Downsampled 4x: {new_w}x{new_h} pixels"
+                )
+
+        except ImportError as e:
+            # Fallback without tifffile
+            logger.warning(f"tifffile not available: {e}")
+            try:
+                import cv2
+
+                # Downsample
+                downsample_factor = 4
+                original_h, original_w = image.shape[:2]
+                new_w = original_w // downsample_factor
+                new_h = original_h // downsample_factor
+                downsampled = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+                if len(downsampled.shape) == 3 and downsampled.shape[2] == 3:
+                    save_img = cv2.cvtColor(downsampled, cv2.COLOR_RGB2BGR)
+                else:
+                    save_img = downsampled
+
+                cv2.imwrite(path, save_img)
+                logger.info(f"Saved image to {path}")
+                QMessageBox.information(self, "Saved", f"Image saved to:\n{path}\n\nDownsampled 4x: {new_w}x{new_h} pixels")
+            except ImportError:
+                QMessageBox.critical(self, "Error", "Required libraries (tifffile or cv2) not available")
+        except Exception as e:
+            logger.error(f"Error saving rotation image: {e}")
             QMessageBox.critical(self, "Error", f"Failed to save image:\n{e}")
 
     def update_tile(self, rotation_idx: int, tile_idx: int, image: np.ndarray):
