@@ -863,10 +863,10 @@ class TileCollectionDialog(QDialog):
         # Illumination Path - format is "path = ON/OFF value" where value is 1 for ON, 0 for OFF
         lines.append("")
         lines.append("    <Illumination Path>")
-        # Get illumination path settings from panel
-        illum_settings = self._illumination_panel.get_settings()
-        left_on = illum_settings.get('left_path', True)
-        right_on = illum_settings.get('right_path', False)
+        # Get illumination path settings from panel's UI state (not get_settings which returns a list)
+        illum_ui_state = self._illumination_panel.get_ui_state()
+        left_on = illum_ui_state.get('left_path', True)
+        right_on = illum_ui_state.get('right_path', False)
         lines.append(f"    Left path = {'ON' if left_on else 'OFF'} {1 if left_on else 0}")
         lines.append(f"    Right path = {'ON' if right_on else 'OFF'} {1 if right_on else 0}")
         lines.append("    </Illumination Path>")
