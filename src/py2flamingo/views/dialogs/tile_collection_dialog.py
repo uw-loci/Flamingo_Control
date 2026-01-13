@@ -631,13 +631,17 @@ class TileCollectionDialog(QDialog):
         # Get save settings
         save_settings = self._save_panel.get_settings()
 
-        # Create output folder for workflow files
+        # Create output folder for workflow files LOCALLY (not on server's save_drive)
+        # The save_drive in workflow content tells the SERVER where to save images
+        # But the workflow files themselves must be local so Python can read and send them
+        import tempfile
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        workflow_folder = Path(save_settings['save_drive']) / save_settings['save_directory'] / f"workflows_{timestamp}"
+        local_workflow_dir = Path(tempfile.gettempdir()) / "flamingo_workflows"
+        workflow_folder = local_workflow_dir / f"{save_settings['save_directory']}_{timestamp}"
 
         try:
             workflow_folder.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Created workflow folder: {workflow_folder}")
+            logger.info(f"Created local workflow folder: {workflow_folder}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to create workflow folder:\n{e}")
             return
