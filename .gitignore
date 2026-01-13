@@ -167,3 +167,4 @@ sample_txt/
 claude-reports/
 claude-report/
 logs/
+*:Zone.Identifier
