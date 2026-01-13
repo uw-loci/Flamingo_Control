@@ -755,43 +755,39 @@ class TileCollectionDialog(QDialog):
         exposure_us = camera_settings['exposure_us']
         frame_rate = camera_settings['frame_rate']
 
-        # Experiment Settings
-        lines.append("    <Experiment Settings>")
+        # Experiment Settings - 2 spaces for section tags, 4 spaces for fields
+        lines.append("  <Experiment Settings>")
 
         stack = self._zstack_panel.get_settings() if self._workflow_type == WorkflowType.ZSTACK else None
         plane_spacing = stack.z_step_um if stack else 1.0
 
         lines.append(f"    Plane spacing (um) = {plane_spacing}")
-        lines.append(f"    Frame rate (f/s) = {frame_rate:.4f}")
-        lines.append(f"    Exposure time (us) = {exposure_us}")
-        lines.append("    Duration (dd:hh:mm:ss) = 00:00:00:01")
-        lines.append("    Interval (dd:hh:mm:ss) = 00:00:00:01")
+        lines.append(f"    Frame rate (f/s) = {frame_rate:.6f}")
+        lines.append(f"    Exposure time (us) = {int(exposure_us)}")
+        lines.append("    Duration (dd:hh:mm:ss) = 00:00:00:00")
+        lines.append("    Interval (dd:hh:mm:ss) = 00:00:00:00")
         lines.append(f"    Sample = {name}")
-        lines.append("    Number of angles = 1")
-        lines.append("    Angle step size = 0")
+        lines.append("    Number of angles = ")
+        lines.append("    Angle step size = ")
         lines.append("    Region = ")
         lines.append(f"    Save image drive = {save_settings['save_drive']}")
         lines.append(f"    Save image directory = {save_settings['save_directory']}")
-        lines.append(f"    Comments = Tile collection workflow")
+        lines.append("    Comments = Tile collection workflow")
         lines.append(f"    Save max projection = {'true' if save_settings['save_mip'] else 'false'}")
-        lines.append(f"    Display max projection = {'true' if save_settings['display_mip'] else 'true'}")
+        lines.append(f"    Display max projection = {'true' if save_settings['display_mip'] else 'false'}")
         lines.append(f"    Save image data = {save_settings['save_format'] if save_settings['save_enabled'] else 'NotSaved'}")
         lines.append("    Save to subfolders = false")
-        lines.append(f"    Work flow live view enabled = {'true' if save_settings['live_view'] else 'true'}")
-        lines.append("    </Experiment Settings>")
-
+        lines.append(f"    Work flow live view enabled = {'true' if save_settings['live_view'] else 'false'}")
+        lines.append("  </Experiment Settings>")
         # Camera Settings
-        lines.append("")
-        lines.append("    <Camera Settings>")
-        lines.append(f"    Exposure time (us) = {exposure_us}")
-        lines.append(f"    Frame rate (f/s) = {frame_rate:.4f}")
+        lines.append("  <Camera Settings>")
+        lines.append("    Exposure time (us) = ")
+        lines.append("    Frame rate (f/s) = ")
         lines.append(f"    AOI width = {camera_settings['aoi_width']}")
         lines.append(f"    AOI height = {camera_settings['aoi_height']}")
-        lines.append("    </Camera Settings>")
-
+        lines.append("  </Camera Settings>")
         # Stack Settings
-        lines.append("")
-        lines.append("    <Stack Settings>")
+        lines.append("  <Stack Settings>")
         lines.append("    Stack index = ")
 
         if self._workflow_type == WorkflowType.ZSTACK and stack:
@@ -799,15 +795,17 @@ class TileCollectionDialog(QDialog):
             z_range_mm = z_max - z_min
             # Formula: Num_planes = ceiling(Z_range / Z_step) + 1 to ensure full coverage
             num_planes = max(1, math.ceil(z_range_mm / (stack.z_step_um / 1000.0)) + 1)
-            lines.append(f"    Change in Z axis (mm) = {z_range_mm:.6f}")
+            lines.append(f"    Change in Z axis (mm) = {z_range_mm:.3f}")
             lines.append(f"    Number of planes = {num_planes}")
-            lines.append(f"    Z stage velocity (mm/s) = {stack.z_velocity_mm_s}")
         else:
-            lines.append("    Change in Z axis (mm) = 0.001")
+            lines.append("    Change in Z axis (mm) = 0.01")
             lines.append("    Number of planes = 1")
-            lines.append("    Z stage velocity (mm/s) = 0.4")
 
         lines.append("    Number of planes saved = ")
+        if self._workflow_type == WorkflowType.ZSTACK and stack:
+            lines.append(f"    Z stage velocity (mm/s) = {stack.z_velocity_mm_s:.6f}")
+        else:
+            lines.append("    Z stage velocity (mm/s) = 0.4")
         lines.append("    Rotational stage velocity (°/s) = 0")
         lines.append("    Auto update stack calculations = true")
         lines.append("    Date time stamp = ")
@@ -823,66 +821,91 @@ class TileCollectionDialog(QDialog):
         lines.append(f"    Stack option = {stack_option}")
         lines.append("    Stack option settings 1 = ")
         lines.append("    Stack option settings 2 = ")
-        lines.append("    </Stack Settings>")
-
+        lines.append("  </Stack Settings>")
         # Start Position
-        lines.append("")
-        lines.append("    <Start Position>")
+        lines.append("  <Start Position>")
         start_z = z_min if self._workflow_type == WorkflowType.ZSTACK else position.z
-        lines.append(f"    X (mm) = {position.x:.6f}")
-        lines.append(f"    Y (mm) = {position.y:.6f}")
-        lines.append(f"    Z (mm) = {start_z:.6f}")
-        lines.append(f"    Angle (degrees) = {position.r:.2f}")
-        lines.append("    </Start Position>")
-
+        lines.append(f"    X (mm) = {position.x:.3f}")
+        lines.append(f"    Y (mm) = {position.y:.3f}")
+        lines.append(f"    Z (mm) = {start_z:.3f}")
+        lines.append(f"    Angle (degrees) = {position.r:.3f}")
+        lines.append("  </Start Position>")
         # End Position
-        lines.append("")
-        lines.append("    <End Position>")
+        lines.append("  <End Position>")
         end_z = z_max if self._workflow_type == WorkflowType.ZSTACK else position.z
-        lines.append(f"    X (mm) = {position.x:.6f}")
-        lines.append(f"    Y (mm) = {position.y:.6f}")
-        lines.append(f"    Z (mm) = {end_z:.6f}")
-        lines.append(f"    Angle (degrees) = {position.r:.2f}")
-        lines.append("    </End Position>")
+        lines.append(f"    X (mm) = {position.x:.3f}")
+        lines.append(f"    Y (mm) = {position.y:.3f}")
+        lines.append(f"    Z (mm) = {end_z:.3f}")
+        lines.append(f"    Angle (degrees) = {position.r:.3f}")
+        lines.append("  </End Position>")
+        # Illumination Source - list ALL lasers in exact format server expects
+        # Format: "Laser N N: XXX nm MLE = power enabled"
+        lines.append("  <Illumination Source>")
 
-        # Illumination Source
-        lines.append("")
-        lines.append("    <Illumination Source>")
-        has_led = False
+        # Build dict of enabled lasers from illumination_list
+        enabled_lasers = {}
+        led_settings = None
         for illum in illumination_list:
             if illum.laser_enabled and illum.laser_channel:
-                lines.append(f"    {illum.laser_channel} = {illum.laser_power_mw:.2f} 1")
-            if illum.led_enabled and illum.led_channel:
-                lines.append(f"    {illum.led_channel} = {illum.led_intensity_percent:.1f} 1")
-                has_led = True
-        if has_led:
-            lines.append("    LED selection = 0 0")
-        lines.append("    LED DAC = 42000 0")
-        lines.append("    </Illumination Source>")
+                # Extract laser number from channel name like "Laser 4 640 nm"
+                enabled_lasers[illum.laser_channel] = illum.laser_power_mw
+            if illum.led_enabled:
+                led_settings = illum
 
+        # List all 7 laser slots in exact format (even disabled ones)
+        laser_configs = [
+            (1, "405 nm"),
+            (2, "488 nm"),
+            (3, "561 nm"),
+            (4, "640 nm"),
+            (5, None),  # Empty slot
+            (6, None),  # Empty slot
+            (7, None),  # Empty slot
+        ]
+
+        for laser_num, wavelength in laser_configs:
+            if wavelength:
+                # Check if this laser is enabled
+                channel_key = f"Laser {laser_num} {wavelength}"
+                if channel_key in enabled_lasers:
+                    power = enabled_lasers[channel_key]
+                    enabled = 1
+                else:
+                    power = 0.0
+                    enabled = 0
+                lines.append(f"    Laser {laser_num} {laser_num}: {wavelength} MLE = {power:.2f} {enabled}")
+            else:
+                # Empty laser slot
+                lines.append(f"    Laser {laser_num} = 0.00 0")
+
+        # LED settings
+        if led_settings:
+            lines.append(f"    LED_RGB_Board = {led_settings.led_intensity_percent:.2f} 1")
+            lines.append("    LED selection = 0 0")
+            lines.append("    LED DAC = 42000 0")
+        else:
+            lines.append("    LED_RGB_Board = 0.00 0")
+            lines.append("    LED selection = 0 0")
+            lines.append("    LED DAC = 42000 0")
+        lines.append("  </Illumination Source>")
         # Illumination Path - format is "path = ON/OFF value" where value is 1 for ON, 0 for OFF
-        lines.append("")
-        lines.append("    <Illumination Path>")
+        lines.append("  <Illumination Path>")
         # Get illumination path settings from panel's UI state (not get_settings which returns a list)
         illum_ui_state = self._illumination_panel.get_ui_state()
         left_on = illum_ui_state.get('left_path', True)
         right_on = illum_ui_state.get('right_path', False)
         lines.append(f"    Left path = {'ON' if left_on else 'OFF'} {1 if left_on else 0}")
         lines.append(f"    Right path = {'ON' if right_on else 'OFF'} {1 if right_on else 0}")
-        lines.append("    </Illumination Path>")
-
+        lines.append("  </Illumination Path>")
         # Illumination Options
-        # Check if multiple lasers are enabled
-        laser_count = sum(1 for illum in illumination_list if illum.laser_enabled)
-        multi_laser = laser_count > 1
-        lines.append("")
-        lines.append("    <Illumination Options>")
+        lines.append("  <Illumination Options>")
+        multi_laser = len(enabled_lasers) > 1
         lines.append(f"    Run stack with multiple lasers on = {'true' if multi_laser else 'false'}")
-        lines.append("    </Illumination Options>")
-
+        lines.append("  </Illumination Options>")
         lines.append("</Workflow Settings>")
 
-        return "\n".join(lines)
+        # Join with CRLF line endings (required by server)
+        return "\r\n".join(lines)
 
     def _get_sample_view_instance(self):
         """Get Sample View instance from application.
