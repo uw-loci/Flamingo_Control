@@ -631,13 +631,13 @@ class TileCollectionDialog(QDialog):
         # Get save settings
         save_settings = self._save_panel.get_settings()
 
-        # Create output folder for workflow files LOCALLY (not on server's save_drive)
+        # Save workflow files to the project's "workflows" directory
         # The save_drive in workflow content tells the SERVER where to save images
         # But the workflow files themselves must be local so Python can read and send them
-        import tempfile
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        local_workflow_dir = Path(tempfile.gettempdir()) / "flamingo_workflows"
-        workflow_folder = local_workflow_dir / f"{save_settings['save_directory']}_{timestamp}"
+        # Find project root (where the workflows directory should be)
+        project_root = Path(__file__).parent.parent.parent.parent.parent  # Up from views/dialogs to project root
+        workflow_folder = project_root / "workflows" / f"{save_settings['save_directory']}_{timestamp}"
 
         try:
             workflow_folder.mkdir(parents=True, exist_ok=True)
