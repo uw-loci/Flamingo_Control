@@ -763,7 +763,8 @@ class TileCollectionDialog(QDialog):
 
         lines.append(f"    Plane spacing (um) = {plane_spacing}")
         lines.append(f"    Frame rate (f/s) = {frame_rate:.6f}")
-        lines.append(f"    Exposure time (us) = {int(exposure_us)}")
+        # Exposure with comma formatting like "9,002"
+        lines.append(f"    Exposure time (us) = {int(exposure_us):,}")
         lines.append("    Duration (dd:hh:mm:ss) = 00:00:00:00")
         lines.append("    Interval (dd:hh:mm:ss) = 00:00:00:00")
         lines.append(f"    Sample = {name}")
@@ -793,20 +794,17 @@ class TileCollectionDialog(QDialog):
         if self._workflow_type == WorkflowType.ZSTACK and stack:
             # Use full Z range from bounding box
             z_range_mm = z_max - z_min
-            # Formula: Num_planes = ceiling(Z_range / Z_step) + 1 to ensure full coverage
-            num_planes = max(1, math.ceil(z_range_mm / (stack.z_step_um / 1000.0)) + 1)
             lines.append(f"    Change in Z axis (mm) = {z_range_mm:.3f}")
-            lines.append(f"    Number of planes = {num_planes}")
+            # Server calculates these automatically when set to "auto"
+            lines.append("    Number of planes = auto")
         else:
             lines.append("    Change in Z axis (mm) = 0.01")
             lines.append("    Number of planes = 1")
 
         lines.append("    Number of planes saved = ")
-        if self._workflow_type == WorkflowType.ZSTACK and stack:
-            lines.append(f"    Z stage velocity (mm/s) = {stack.z_velocity_mm_s:.6f}")
-        else:
-            lines.append("    Z stage velocity (mm/s) = 0.4")
-        lines.append("    Rotational stage velocity (°/s) = 0")
+        # Server calculates velocity automatically
+        lines.append("    Z stage velocity (mm/s) = auto")
+        lines.append("    Rotational stage velocity (°/s) = auto")
         lines.append("    Auto update stack calculations = true")
         lines.append("    Date time stamp = ")
         lines.append("    Stack file name = ")
@@ -904,8 +902,8 @@ class TileCollectionDialog(QDialog):
         lines.append("  </Illumination Options>")
         lines.append("</Workflow Settings>")
 
-        # Join with CRLF line endings (required by server)
-        return "\r\n".join(lines)
+        # Join with LF line endings (server uses Unix line endings)
+        return "\n".join(lines)
 
     def _get_sample_view_instance(self):
         """Get Sample View instance from application.
