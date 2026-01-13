@@ -199,6 +199,27 @@ class ConnectionView(QWidget):
         cmd_layout.addWidget(self.save_settings_btn)
         debug_main_layout.addLayout(cmd_layout)
 
+        # Workflow test buttons row
+        workflow_test_layout = QHBoxLayout()
+
+        self.test_workflow_file_btn = QPushButton("Test Workflow File")
+        self.test_workflow_file_btn.setToolTip(
+            "Run WorkflowZstack.txt directly to test workflow transmission"
+        )
+        self.test_workflow_file_btn.clicked.connect(self._on_test_workflow_file_clicked)
+        self.test_workflow_file_btn.setEnabled(False)
+        workflow_test_layout.addWidget(self.test_workflow_file_btn)
+
+        self.test_workflow_gen_btn = QPushButton("Test Workflow Gen")
+        self.test_workflow_gen_btn.setToolTip(
+            "Generate a workflow using our functions and run it"
+        )
+        self.test_workflow_gen_btn.clicked.connect(self._on_test_workflow_gen_clicked)
+        self.test_workflow_gen_btn.setEnabled(False)
+        workflow_test_layout.addWidget(self.test_workflow_gen_btn)
+
+        debug_main_layout.addLayout(workflow_test_layout)
+
         debug_group.setLayout(debug_main_layout)
         layout.addWidget(debug_group)
 
@@ -303,6 +324,8 @@ class ConnectionView(QWidget):
             self.debug_query_btn.setEnabled(True)
             self.save_settings_btn.setEnabled(True)
             self.sample_view_btn.setEnabled(True)
+            self.test_workflow_file_btn.setEnabled(True)
+            self.test_workflow_gen_btn.setEnabled(True)
         else:
             # Disconnected state
             self.status_label.setText("Status: Not connected")
@@ -315,6 +338,8 @@ class ConnectionView(QWidget):
             self.debug_query_btn.setEnabled(False)
             self.save_settings_btn.setEnabled(False)
             self.sample_view_btn.setEnabled(False)
+            self.test_workflow_file_btn.setEnabled(False)
+            self.test_workflow_gen_btn.setEnabled(False)
 
     def _on_sample_view_clicked(self) -> None:
         """Handle Sample View button click - emit signal to open Sample View."""
@@ -724,6 +749,207 @@ class ConnectionView(QWidget):
         except Exception as e:
             self._logger.error(f"Error saving settings: {e}", exc_info=True)
             self._show_message(f"Save failed: {e}", is_error=True)
+
+    def _on_test_workflow_file_clicked(self) -> None:
+        """Test workflow transmission by sending WorkflowZstack.txt directly.
+
+        This tests if the workflow transmission mechanism works by sending
+        a known-working workflow file from the C++ GUI.
+        """
+        from PyQt5.QtWidgets import QMessageBox
+        from pathlib import Path
+
+        self._logger.info("Test Workflow File button clicked")
+
+        # Find the workflow file
+        workflow_path = Path(__file__).parent.parent.parent.parent / "workflows" / "WorkflowZstack.txt"
+
+        if not workflow_path.exists():
+            self._show_message(f"WorkflowZstack.txt not found at {workflow_path}", is_error=True)
+            return
+
+        # Read the workflow file
+        try:
+            workflow_data = workflow_path.read_bytes()
+            self._logger.info(f"Read {len(workflow_data)} bytes from {workflow_path}")
+        except Exception as e:
+            self._show_message(f"Failed to read workflow: {e}", is_error=True)
+            return
+
+        # Get workflow service from app
+        if not self._app or not hasattr(self._app, 'workflow_service'):
+            self._show_message("Workflow service not available", is_error=True)
+            return
+
+        # Confirm with user
+        confirm = QMessageBox.question(
+            self,
+            "Test Workflow Transmission",
+            f"This will send WorkflowZstack.txt ({len(workflow_data)} bytes) to the server.\n\n"
+            "This tests if workflow transmission works with a known-working file.\n\n"
+            "The workflow will START EXECUTION on the microscope!\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if confirm != QMessageBox.Yes:
+            return
+
+        # Send the workflow
+        try:
+            workflow_service = self._app.workflow_service
+            success = workflow_service.start_workflow(workflow_data)
+
+            if success:
+                self._show_message(f"Workflow sent successfully ({len(workflow_data)} bytes)", is_error=False)
+                self._logger.info("Test workflow sent successfully")
+            else:
+                self._show_message("Workflow transmission failed", is_error=True)
+                self._logger.error("Test workflow failed")
+
+        except Exception as e:
+            self._logger.error(f"Error sending workflow: {e}", exc_info=True)
+            self._show_message(f"Workflow send failed: {e}", is_error=True)
+
+    def _on_test_workflow_gen_clicked(self) -> None:
+        """Test workflow generation by creating and sending a workflow.
+
+        This tests our workflow generation code by creating a simple
+        workflow using our functions and sending it to the server.
+        """
+        from PyQt5.QtWidgets import QMessageBox
+        from pathlib import Path
+
+        self._logger.info("Test Workflow Gen button clicked")
+
+        # Generate a simple test workflow using our format
+        lines = []
+        lines.append("<Workflow Settings>")
+        lines.append("  <Experiment Settings>")
+        lines.append("    Plane spacing (um) = 2.5")
+        lines.append("    Frame rate (f/s) = 40.213000")
+        lines.append("    Exposure time (us) = 9,002")
+        lines.append("    Duration (dd:hh:mm:ss) = 00:00:00:00")
+        lines.append("    Interval (dd:hh:mm:ss) = 00:00:00:00")
+        lines.append("    Sample = TestFromPython")
+        lines.append("    Number of angles = ")
+        lines.append("    Angle step size = ")
+        lines.append("    Region = ")
+        lines.append("    Save image drive = /media/deploy/ctlsm1")
+        lines.append("    Save image directory = PythonTest")
+        lines.append("    Comments = Generated by Python test")
+        lines.append("    Save max projection = true")
+        lines.append("    Display max projection = false")
+        lines.append("    Save image data = Tiff")
+        lines.append("    Save to subfolders = false")
+        lines.append("    Work flow live view enabled = false")
+        lines.append("  </Experiment Settings>")
+        lines.append("  <Camera Settings>")
+        lines.append("    Exposure time (us) = ")
+        lines.append("    Frame rate (f/s) = ")
+        lines.append("    AOI width = ")
+        lines.append("    AOI height = ")
+        lines.append("  </Camera Settings>")
+        lines.append("  <Stack Settings>")
+        lines.append("    Stack index = ")
+        lines.append("    Change in Z axis (mm) = 0.5")
+        lines.append("    Number of planes = 200")
+        lines.append("    Number of planes saved = ")
+        lines.append("    Z stage velocity (mm/s) = 0.100533")
+        lines.append("    Rotational stage velocity (°/s) = 0")
+        lines.append("    Auto update stack calculations = true")
+        lines.append("    Date time stamp = ")
+        lines.append("    Stack file name = ")
+        lines.append("    Camera 1 capture percentage = 100")
+        lines.append("    Camera 1 capture mode (0 full, 1 from front, 2 from back, 3 none) = 0")
+        lines.append("    Camera 1 capture range = ")
+        lines.append("    Camera 2 capture percentage = 100")
+        lines.append("    Camera 2 capture mode (0 full, 1 from front, 2 from back, 3 none) = 0")
+        lines.append("    Camera 2 capture range = ")
+        lines.append("    Stack option = ZStack")
+        lines.append("    Stack option settings 1 = ")
+        lines.append("    Stack option settings 2 = ")
+        lines.append("  </Stack Settings>")
+        lines.append("  <Start Position>")
+        lines.append("    X (mm) = 9.995")
+        lines.append("    Y (mm) = 13.054")
+        lines.append("    Z (mm) = 19.634")
+        lines.append("    Angle (degrees) = 0.000")
+        lines.append("  </Start Position>")
+        lines.append("  <End Position>")
+        lines.append("    X (mm) = 9.995")
+        lines.append("    Y (mm) = 13.054")
+        lines.append("    Z (mm) = 20.134")
+        lines.append("    Angle (degrees) = 0.000")
+        lines.append("  </End Position>")
+        lines.append("  <Illumination Source>")
+        lines.append("    Laser 1 1: 405 nm MLE = 0.00 0")
+        lines.append("    Laser 2 2: 488 nm MLE = 0.00 0")
+        lines.append("    Laser 3 3: 561 nm MLE = 0.00 0")
+        lines.append("    Laser 4 4: 640 nm MLE = 5.00 1")
+        lines.append("    Laser 5 = 0.00 0")
+        lines.append("    Laser 6 = 0.00 0")
+        lines.append("    Laser 7 = 0.00 0")
+        lines.append("    LED_RGB_Board = 0.00 0")
+        lines.append("    LED selection = 0 0")
+        lines.append("    LED DAC = 42000 0")
+        lines.append("  </Illumination Source>")
+        lines.append("  <Illumination Path>")
+        lines.append("    Left path = ON 1")
+        lines.append("    Right path = OFF 0")
+        lines.append("  </Illumination Path>")
+        lines.append("  <Illumination Options>")
+        lines.append("    Run stack with multiple lasers on = false")
+        lines.append("  </Illumination Options>")
+        lines.append("</Workflow Settings>")
+
+        workflow_text = "\n".join(lines)
+        workflow_data = workflow_text.encode('utf-8')
+
+        # Save to file for inspection
+        test_path = Path(__file__).parent.parent.parent.parent / "workflows" / "TestGenerated.txt"
+        try:
+            test_path.write_text(workflow_text)
+            self._logger.info(f"Saved test workflow to {test_path}")
+        except Exception as e:
+            self._logger.warning(f"Could not save test workflow: {e}")
+
+        # Get workflow service
+        if not self._app or not hasattr(self._app, 'workflow_service'):
+            self._show_message("Workflow service not available", is_error=True)
+            return
+
+        # Confirm with user
+        confirm = QMessageBox.question(
+            self,
+            "Test Generated Workflow",
+            f"This will send a Python-generated workflow ({len(workflow_data)} bytes) to the server.\n\n"
+            f"Saved to: {test_path}\n\n"
+            "The workflow will START EXECUTION on the microscope!\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if confirm != QMessageBox.Yes:
+            return
+
+        # Send the workflow
+        try:
+            workflow_service = self._app.workflow_service
+            success = workflow_service.start_workflow(workflow_data)
+
+            if success:
+                self._show_message(f"Generated workflow sent ({len(workflow_data)} bytes)", is_error=False)
+                self._logger.info("Generated test workflow sent successfully")
+            else:
+                self._show_message("Generated workflow transmission failed", is_error=True)
+                self._logger.error("Generated test workflow failed")
+
+        except Exception as e:
+            self._logger.error(f"Error sending generated workflow: {e}", exc_info=True)
+            self._show_message(f"Workflow send failed: {e}", is_error=True)
 
     def _on_config_selected(self, config_name: str) -> None:
         """Handle configuration selection from dropdown.

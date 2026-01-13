@@ -794,17 +794,20 @@ class TileCollectionDialog(QDialog):
         if self._workflow_type == WorkflowType.ZSTACK and stack:
             # Use full Z range from bounding box
             z_range_mm = z_max - z_min
+            # Calculate number of planes from Z range and step size
+            num_planes = max(1, int(z_range_mm / (stack.z_step_um / 1000.0)) + 1)
             lines.append(f"    Change in Z axis (mm) = {z_range_mm:.3f}")
-            # Server calculates these automatically when set to "auto"
-            lines.append("    Number of planes = auto")
+            lines.append(f"    Number of planes = {num_planes}")
         else:
             lines.append("    Change in Z axis (mm) = 0.01")
             lines.append("    Number of planes = 1")
 
         lines.append("    Number of planes saved = ")
-        # Server calculates velocity automatically
-        lines.append("    Z stage velocity (mm/s) = auto")
-        lines.append("    Rotational stage velocity (°/s) = auto")
+        if self._workflow_type == WorkflowType.ZSTACK and stack:
+            lines.append(f"    Z stage velocity (mm/s) = {stack.z_velocity_mm_s:.6f}")
+        else:
+            lines.append("    Z stage velocity (mm/s) = 0.1")
+        lines.append("    Rotational stage velocity (°/s) = 0")
         lines.append("    Auto update stack calculations = true")
         lines.append("    Date time stamp = ")
         lines.append("    Stack file name = ")
