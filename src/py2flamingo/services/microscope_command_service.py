@@ -319,10 +319,11 @@ class MicroscopeCommandService:
             if command_socket is None:
                 raise RuntimeError("Command socket not available")
 
-            # Build params to match old working tcpip_nuc.py:
+            # Build params to match C++ GUI (from server log):
             # - params[0-5] = 0 (hardwareID, subsystemID, clientID, int32Data0-2)
-            # - params[6] = 1 (cmdDataBits0 - OLD CODE USES 1, NOT 0!)
-            params = [0, 0, 0, 0, 0, 0, 1]  # cmdDataBits0 = 1
+            # - params[6] = 0x80000000 (cmdDataBits0 = TRIGGER_CALL_BACK flag!)
+            # Server log shows C++ GUI uses cmdDataBits0 = 0x80000000, NOT 1!
+            params = [0, 0, 0, 0, 0, 0, 0x80000000]  # TRIGGER_CALL_BACK
 
             # OLD CODE (tcpip_nuc.py lines 59-63):
             # - addDataBytes = fileBytes (file size goes HERE, not in buffer)
