@@ -771,12 +771,11 @@ class ConnectionView(QWidget):
             self._show_message(f"WorkflowZstack.txt not found at {workflow_path}", is_error=True)
             return
 
-        # Read the workflow file - must read as text then encode to UTF-8
-        # This matches legacy tcp_client behavior which normalizes CRLF to LF
+        # Read the workflow file as BINARY - old tcpip_nuc.py line 92:
+        # workflow_file = open(wf_file, "rb").read()
+        # This preserves CRLF line endings exactly as in the file
         try:
-            with open(workflow_path, 'r', encoding='utf-8') as f:
-                workflow_content = f.read()  # Normalizes CRLF to LF
-            workflow_data = workflow_content.encode('utf-8')  # Encode as UTF-8 with LF
+            workflow_data = workflow_path.read_bytes()
             self._logger.info(f"Read {len(workflow_data)} bytes from {workflow_path}")
         except Exception as e:
             self._show_message(f"Failed to read workflow: {e}", is_error=True)

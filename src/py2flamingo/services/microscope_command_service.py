@@ -319,26 +319,24 @@ class MicroscopeCommandService:
             if command_socket is None:
                 raise RuntimeError("Command socket not available")
 
-            # Build params - use all zeros like legacy tcp_client.py
-            # Note: Do NOT use TRIGGER_CALL_BACK for workflow commands
-            # The firmware may ignore or reject workflows with non-zero params[6]
-            params = [0] * 7
-            # params[6] = workflow_flags  # Disabled: legacy uses 0
+            # Build params to match old working tcpip_nuc.py:
+            # - params[0-5] = 0 (hardwareID, subsystemID, clientID, int32Data0-2)
+            # - params[6] = 1 (cmdDataBits0 - OLD CODE USES 1, NOT 0!)
+            params = [0, 0, 0, 0, 0, 0, 1]  # cmdDataBits0 = 1
 
-            # Pack file size into the data field (first 4 bytes of 72-byte buffer)
-            # The server reads the file size from here to know how many bytes to expect
-            # NOTE: The additional_data_size field must be 0 - legacy code hardcodes it to 0
-            data_with_size = struct.pack("I", file_size).ljust(72, b'\x00')
+            # OLD CODE (tcpip_nuc.py lines 59-63):
+            # - addDataBytes = fileBytes (file size goes HERE, not in buffer)
+            # - buffer_72 = b"\0" * 72 (empty buffer!)
+            empty_buffer = b'\x00' * 72
 
-            # Encode command header with file size in data field only
-            # (additional_data_size=0 to match legacy tcp_client.py behavior)
+            # Encode command header with file size in addDataBytes field
             cmd_bytes = self.connection.encoder.encode_command(
                 code=command_code,
                 status=0,
                 params=params,
                 value=0.0,
-                data=data_with_size,
-                additional_data_size=0  # Must be 0 - legacy hardcodes this
+                data=empty_buffer,  # Empty buffer, NOT file size!
+                additional_data_size=file_size  # File size goes HERE!
             )
 
             # Send header
