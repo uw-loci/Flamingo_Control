@@ -63,6 +63,7 @@ class ProtocolCommands(IntEnum):
 
     # Laser commands
     LASER_LEVEL_SET = 0x2001  # 8193
+    LASER_LEVEL_GET = 0x2002  # 8194 - Also sent as unsolicited status during workflow
     LASER_PREVIEW_ENABLE = 0x2004  # 8196
     LASER_PREVIEW_DISABLE = 0x2005  # 8197
     LASER_ALL_DISABLE = 0x2007  # 8199
@@ -267,10 +268,12 @@ class MessageDispatcher:
                 self._stats['messages_dropped'] += 1
                 logger.warning(f"Unsolicited queue full, dropping 0x{command_code:04X}")
         else:
-            # This could be a response that arrived after timeout
-            # Log at INFO for laser commands to help diagnose timing issues
+            # This could be:
+            # 1. Unsolicited status update during workflow execution (LED_DISABLE, LASER_LEVEL_GET)
+            # 2. A response that arrived after timeout
+            # Log at DEBUG - these are normal during workflow
             if command_code in LASER_LED_COMMANDS:
-                logger.warning(f"[RX] Unhandled laser/LED message 0x{command_code:04X} - possible late response or no pending request")
+                logger.debug(f"[RX] Unsolicited laser/LED status: 0x{command_code:04X} ({message.command_name})")
             else:
                 logger.debug(f"Unhandled message 0x{command_code:04X} (late response?)")
 

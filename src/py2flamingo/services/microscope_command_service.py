@@ -277,15 +277,27 @@ class MicroscopeCommandService:
         """
         Send a workflow command with workflow data.
 
-        Workflow commands require special handling:
-        1. Parse workflow to determine type and set appropriate flags
-        2. Send 128-byte header with file size in data field
-        3. Send workflow data bytes
+        CRITICAL WORKFLOW COMMAND STRUCTURE (discovered 2026-01-14):
+        ============================================================
+        The server expects a SPECIFIC command structure for workflows.
+        This was determined by comparing server logs between Python (failed)
+        and C++ GUI (succeeded). Reference: oldcodereference/tcpip_nuc.py
+
+        Required header fields:
+        - params[6] (cmdDataBits0) = 0x80000000 (TRIGGER_CALL_BACK flag)
+        - additional_data_size = file_size (workflow file length in bytes)
+        - data buffer = empty 72 bytes (NOT the file size!)
+
+        The workflow file itself is sent as binary data AFTER the header.
+        The file should be read as binary (preserve CRLF) and sent as-is.
+
+        Server log comparison (ServerWorkflowResponse.txt):
+        - FAILED: cmdDataBits0=0x00000000, additionalDataBytes=0 → "Work flow empty"
+        - SUCCESS: cmdDataBits0=0x80000000, additionalDataBytes=2204 → workflow executes
 
         NOTE: Workflow commands are "fire and forget" - the server does not
         send a synchronous response. Status updates come asynchronously via
-        system state events and frame callbacks. This matches the legacy
-        behavior in tcp_client.py::send_workflow().
+        LED_DISABLE (0x4003) and LASER_LEVEL_GET (0x2002) messages.
 
         Args:
             cmd: WorkflowCommand object with workflow_data attribute
@@ -307,11 +319,9 @@ class MicroscopeCommandService:
         command_code = cmd.code
         cmd_name = get_command_name(command_code)
 
-        # Note: Legacy tcp_client.py uses params[6] = 0 for all workflows.
-        # The firmware may not support the flags we were trying to set.
-        # Keeping flag parsing for debugging but using 0 to match legacy behavior.
+        # Parse workflow for debugging info (not used in actual command)
         workflow_flags = self._parse_workflow_flags(workflow_data)
-        self.logger.info(f"Sending workflow: {file_size} bytes, detected_flags=0x{workflow_flags:08X} (using 0 like legacy)")
+        self.logger.info(f"Sending workflow: {file_size} bytes (detected_flags=0x{workflow_flags:08X})")
 
         try:
             # Get command socket
