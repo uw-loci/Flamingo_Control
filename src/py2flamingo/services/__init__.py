@@ -34,6 +34,7 @@ from .initialization_service import MicroscopeInitializationService, Initializat
 from .image_acquisition_service import ImageAcquisitionService
 from .workflow_template_service import WorkflowTemplateService
 from .acquisition_timing_service import AcquisitionTimingService
+from .workflow_queue_service import WorkflowQueueService
 
 # Legacy services (require numpy/scipy) - import with try/except
 try:
@@ -68,6 +69,7 @@ __all__ = [
     'ImageAcquisitionService',
     'WorkflowTemplateService',
     'AcquisitionTimingService',
+    'WorkflowQueueService',
     # Legacy services (may be None if numpy/scipy not installed)
     'WorkflowService',
     'SampleSearchService',

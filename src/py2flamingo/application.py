@@ -27,6 +27,7 @@ from py2flamingo.services import (
     MVCConnectionService, MVCWorkflowService, StatusService, ConfigurationManager,
     StatusIndicatorService, WindowGeometryManager
 )
+from py2flamingo.services.workflow_queue_service import WorkflowQueueService
 from py2flamingo.controllers import ConnectionController, WorkflowController, PositionController
 from py2flamingo.controllers.movement_controller import MovementController
 from py2flamingo.controllers.camera_controller import CameraController
@@ -100,6 +101,7 @@ class FlamingoApplication(QObject):
         # Services layer components
         self.connection_service: Optional[MVCConnectionService] = None
         self.workflow_service: Optional[MVCWorkflowService] = None
+        self.workflow_queue_service: Optional[WorkflowQueueService] = None
         self.status_service: Optional[StatusService] = None
         self.status_indicator_service: Optional[StatusIndicatorService] = None
         self.config_manager: Optional[ConfigurationManager] = None
@@ -203,6 +205,16 @@ class FlamingoApplication(QObject):
             self.workflow_model,
             connection_service=self.connection_service
         )
+
+        # Create workflow queue service for sequential multi-tile execution
+        # This service manages a queue of workflows and executes them one at a time,
+        # waiting for each to complete before starting the next
+        self.workflow_queue_service = WorkflowQueueService(
+            workflow_controller=self.workflow_controller,
+            connection_service=self.connection_service,
+            status_indicator_service=self.status_indicator_service
+        )
+        self.logger.info("WorkflowQueueService created for sequential multi-tile execution")
 
         self.position_controller = PositionController(
             self.connection_service

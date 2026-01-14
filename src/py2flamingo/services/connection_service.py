@@ -653,6 +653,68 @@ class MVCConnectionService:
             self.logger.error(f"Failed to query available drives: {e}", exc_info=True)
             return []
 
+    def query_system_state(self, timeout: float = 3.0) -> Optional[Dict[str, Any]]:
+        """
+        Query current system state from microscope.
+
+        Sends SYSTEM_STATE_GET command (0xa007) to determine if the microscope
+        is idle, busy, or in error state. This is used by WorkflowQueueService
+        to detect workflow completion.
+
+        Args:
+            timeout: Response timeout in seconds (default: 3.0)
+
+        Returns:
+            Dictionary with system state info:
+                - 'state': int - 0=IDLE, 1=BUSY, 2=ERROR
+                - 'is_idle': bool - True if state is IDLE
+            Returns None if query fails.
+
+        Raises:
+            RuntimeError: If not connected to microscope
+        """
+        if not self.is_connected():
+            raise RuntimeError("Not connected to microscope")
+
+        try:
+            from py2flamingo.core.command_codes import SystemCommands, CommandDataBits
+            from py2flamingo.models.command import Command
+
+            # Create SYSTEM_STATE_GET command with callback flag
+            cmd = Command(
+                code=SystemCommands.STATE_GET,
+                parameters={'params': [0, 0, 0, 0, 0, 0, CommandDataBits.TRIGGER_CALL_BACK]}
+            )
+
+            self.logger.debug(f"Querying system state: cmd=0x{SystemCommands.STATE_GET:04X}")
+
+            # Send command and get response
+            response_bytes = self.send_command(cmd, timeout=timeout)
+
+            if len(response_bytes) >= 128:
+                import struct
+
+                # Parse response - state is in int32Data0 field (offset 12, 4 bytes)
+                # Protocol: start(4) + code(4) + status(4) + hardwareID(4) + subsystemID(4)
+                #           + clientID(4) + int32Data0(4) ...
+                # Offset 24 = int32Data0
+                state_value = struct.unpack_from("i", response_bytes, 24)[0]
+
+                result = {
+                    'state': state_value,
+                    'is_idle': state_value == 0  # STATE_VALUE_IDLE = 0
+                }
+
+                self.logger.debug(f"System state: {state_value} (idle={result['is_idle']})")
+                return result
+            else:
+                self.logger.error(f"Invalid response size: {len(response_bytes)} bytes")
+                return None
+
+        except Exception as e:
+            self.logger.error(f"Failed to query system state: {e}", exc_info=True)
+            return None
+
     @property
     def has_async_reader(self) -> bool:
         """Check if async socket reader is active (delegates to tcp_connection)."""

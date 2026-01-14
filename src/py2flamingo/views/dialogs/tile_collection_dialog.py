@@ -998,7 +998,10 @@ class TileCollectionDialog(QDialog):
             logger.warning("Sample View does not have prepare_for_tile_workflows method")
 
     def _execute_workflows(self, workflow_files: List[Path]):
-        """Execute the created workflow files.
+        """Execute the created workflow files using the workflow queue.
+
+        Uses WorkflowQueueService to execute workflows sequentially,
+        waiting for each to complete before starting the next.
 
         Args:
             workflow_files: List of workflow file paths to execute
@@ -1016,80 +1019,43 @@ class TileCollectionDialog(QDialog):
                 logger.warning("Sample View not available - 3D integration disabled")
                 add_to_sample_view = False
 
-        # Try to get the application and workflow controller
+        # Try to get the application and workflow queue service
         try:
-            from PyQt5.QtWidgets import QApplication
-            app = QApplication.instance()
+            if not self._app:
+                from PyQt5.QtWidgets import QApplication
+                app = QApplication.instance()
 
-            # Find the main application
-            if hasattr(app, 'flamingo_app'):
-                flamingo_app = app.flamingo_app
-            else:
-                # Try to find through parent widgets
-                parent = self.parent()
-                while parent:
-                    if hasattr(parent, '_app'):
-                        flamingo_app = parent._app
-                        break
-                    parent = parent.parent()
+                # Find the main application
+                if hasattr(app, 'flamingo_app'):
+                    self._app = app.flamingo_app
                 else:
-                    logger.warning("Could not find FlamingoApplication - workflows saved but not executed")
-                    QMessageBox.information(
-                        self, "Workflows Saved",
-                        f"Workflow files saved. Execute them manually from the Workflow tab."
-                    )
-                    return
+                    parent = self.parent()
+                    while parent:
+                        if hasattr(parent, '_app'):
+                            self._app = parent._app
+                            break
+                        parent = parent.parent()
 
-            # Execute each workflow
-            progress = QProgressDialog("Executing workflows...", "Cancel", 0, len(workflow_files), self)
-            progress.setWindowModality(Qt.WindowModal)
+            if not self._app:
+                logger.warning("Could not find FlamingoApplication - workflows saved but not executed")
+                QMessageBox.information(
+                    self, "Workflows Saved",
+                    "Workflow files saved. Execute them manually from the Workflow tab."
+                )
+                return
 
-            for i, workflow_file in enumerate(workflow_files):
-                if progress.wasCanceled():
-                    break
+            # Check for workflow queue service
+            has_queue = hasattr(self._app, 'workflow_queue_service')
+            queue_service = getattr(self._app, 'workflow_queue_service', None) if has_queue else None
+            logger.info(f"Workflow execution: has_queue_attr={has_queue}, queue_service_exists={queue_service is not None}")
 
-                progress.setValue(i)
-                progress.setLabelText(f"Executing {workflow_file.name}...")
-
-                # Parse workflow position for Sample View integration
-                tile_position = None
-                if add_to_sample_view:
-                    tile_position = self._parse_workflow_position(workflow_file)
-                    if tile_position:
-                        # Add Z range from workflow file
-                        z_min, z_max = self._read_z_range_from_workflow(workflow_file)
-                        tile_position['z_min'] = z_min
-                        tile_position['z_max'] = z_max
-
-                try:
-                    # Load and execute workflow
-                    if hasattr(flamingo_app, 'workflow_controller'):
-                        controller = flamingo_app.workflow_controller
-                        success, msg = controller.load_workflow(str(workflow_file))
-                        if success:
-                            # Tag workflow with position metadata for Sample View integration
-                            if add_to_sample_view and tile_position and hasattr(controller, 'set_active_tile_position'):
-                                controller.set_active_tile_position(tile_position)
-                                logger.debug(f"Set tile position for Sample View: {tile_position}")
-
-                            success, msg = controller.start_workflow()
-                            if success:
-                                logger.info(f"Started workflow: {workflow_file.name}")
-                                # Wait for workflow to complete (simplified - real impl would monitor)
-                                import time
-                                time.sleep(0.5)  # Brief pause between workflows
-                            else:
-                                logger.error(f"Failed to start {workflow_file.name}: {msg}")
-                        else:
-                            logger.error(f"Failed to load {workflow_file.name}: {msg}")
-                except Exception as e:
-                    logger.error(f"Error executing {workflow_file.name}: {e}")
-
-            progress.setValue(len(workflow_files))
-            QMessageBox.information(
-                self, "Execution Complete",
-                f"Executed {len(workflow_files)} workflows."
-            )
+            if queue_service is not None:
+                logger.info("Using WorkflowQueueService for sequential execution")
+                self._execute_with_queue_service(workflow_files, add_to_sample_view)
+            else:
+                # Fallback to workflow controller (sequential, but no completion detection)
+                logger.warning("WorkflowQueueService not available - using fallback execution")
+                self._execute_workflows_fallback(workflow_files, add_to_sample_view)
 
         except Exception as e:
             logger.error(f"Error during workflow execution: {e}")
@@ -1097,6 +1063,182 @@ class TileCollectionDialog(QDialog):
                 self, "Execution Error",
                 f"Error executing workflows: {e}\n\nWorkflow files have been saved."
             )
+
+    def _execute_with_queue_service(self, workflow_files: List[Path], add_to_sample_view: bool):
+        """Execute workflows using WorkflowQueueService.
+
+        Args:
+            workflow_files: List of workflow file paths
+            add_to_sample_view: Whether to integrate with Sample View
+        """
+        from py2flamingo.services.workflow_queue_service import WorkflowQueueService
+
+        queue_service = self._app.workflow_queue_service
+
+        # Build metadata list for Sample View integration
+        metadata_list = []
+        for wf_file in workflow_files:
+            metadata = {}
+            if add_to_sample_view:
+                tile_position = self._parse_workflow_position(wf_file)
+                if tile_position:
+                    z_min, z_max = self._read_z_range_from_workflow(wf_file)
+                    tile_position['z_min'] = z_min
+                    tile_position['z_max'] = z_max
+                    metadata = tile_position
+            metadata_list.append(metadata)
+
+        # Set up workflow start callback for Sample View integration
+        if add_to_sample_view and hasattr(self._app, 'workflow_controller'):
+            def on_workflow_start(file_path: Path, metadata: Dict):
+                """Set tile position when workflow starts."""
+                controller = self._app.workflow_controller
+                if metadata and hasattr(controller, 'set_active_tile_position'):
+                    controller.set_active_tile_position(metadata)
+                    logger.debug(f"Set tile position for Sample View: {metadata}")
+
+            queue_service.set_workflow_start_callback(on_workflow_start)
+
+        # Create progress dialog
+        progress = QProgressDialog(
+            "Executing workflows...", "Cancel", 0, len(workflow_files), self
+        )
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+
+        # Track completion
+        self._queue_completed = False
+        self._queue_error = None
+
+        # Connect signals for progress updates
+        def on_progress(current, total, message):
+            progress.setValue(current - 1)  # -1 because queue uses 1-indexed
+            progress.setLabelText(message)
+
+        def on_workflow_completed(index, total, path):
+            progress.setValue(index + 1)
+            logger.info(f"Workflow {index + 1}/{total} completed: {Path(path).name}")
+
+        def on_queue_completed():
+            self._queue_completed = True
+            progress.setValue(len(workflow_files))
+            QMessageBox.information(
+                self, "Execution Complete",
+                f"Successfully executed {len(workflow_files)} workflows."
+            )
+
+        def on_queue_cancelled():
+            self._queue_completed = True
+            QMessageBox.warning(
+                self, "Execution Cancelled",
+                "Workflow queue was cancelled."
+            )
+
+        def on_error(message):
+            self._queue_error = message
+            logger.error(f"Workflow queue error: {message}")
+
+        # Connect signals
+        queue_service.progress_updated.connect(on_progress)
+        queue_service.workflow_completed.connect(on_workflow_completed)
+        queue_service.queue_completed.connect(on_queue_completed)
+        queue_service.queue_cancelled.connect(on_queue_cancelled)
+        queue_service.error_occurred.connect(on_error)
+
+        # Connect cancel button
+        progress.canceled.connect(queue_service.cancel)
+
+        try:
+            # Enqueue and start workflows
+            logger.info(f"Enqueueing {len(workflow_files)} workflows to queue service")
+            queue_service.enqueue(workflow_files, metadata_list)
+            logger.info("Starting workflow queue execution")
+            started = queue_service.start()
+            logger.info(f"Queue service started: {started}")
+
+            if not started:
+                QMessageBox.warning(
+                    self, "Queue Error",
+                    "Failed to start workflow queue. Check logs for details."
+                )
+                return
+
+            # Show progress dialog (blocks until closed or queue completes)
+            # Note: The progress dialog will close when setValue reaches max
+            progress.exec_()
+
+        finally:
+            # Disconnect signals to avoid issues with stale connections
+            try:
+                queue_service.progress_updated.disconnect(on_progress)
+                queue_service.workflow_completed.disconnect(on_workflow_completed)
+                queue_service.queue_completed.disconnect(on_queue_completed)
+                queue_service.queue_cancelled.disconnect(on_queue_cancelled)
+                queue_service.error_occurred.disconnect(on_error)
+            except Exception:
+                pass  # Signals may already be disconnected
+
+    def _execute_workflows_fallback(self, workflow_files: List[Path], add_to_sample_view: bool):
+        """Fallback workflow execution without queue service.
+
+        Uses simple sequential execution with estimated timing.
+        Not ideal but maintains backward compatibility.
+
+        Args:
+            workflow_files: List of workflow file paths
+            add_to_sample_view: Whether to integrate with Sample View
+        """
+        progress = QProgressDialog("Executing workflows...", "Cancel", 0, len(workflow_files), self)
+        progress.setWindowModality(Qt.WindowModal)
+
+        for i, workflow_file in enumerate(workflow_files):
+            if progress.wasCanceled():
+                break
+
+            progress.setValue(i)
+            progress.setLabelText(f"Executing {workflow_file.name}...")
+
+            # Parse workflow position for Sample View integration
+            tile_position = None
+            if add_to_sample_view:
+                tile_position = self._parse_workflow_position(workflow_file)
+                if tile_position:
+                    z_min, z_max = self._read_z_range_from_workflow(workflow_file)
+                    tile_position['z_min'] = z_min
+                    tile_position['z_max'] = z_max
+
+            try:
+                if hasattr(self._app, 'workflow_controller'):
+                    controller = self._app.workflow_controller
+                    success, msg = controller.load_workflow(str(workflow_file))
+                    if success:
+                        if add_to_sample_view and tile_position and hasattr(controller, 'set_active_tile_position'):
+                            controller.set_active_tile_position(tile_position)
+
+                        success, msg = controller.start_workflow()
+                        if success:
+                            logger.info(f"Started workflow: {workflow_file.name}")
+                            # Estimate workflow time based on Z range
+                            # This is a rough estimate - actual time depends on many factors
+                            z_range = (tile_position['z_max'] - tile_position['z_min']) if tile_position else 1.0
+                            estimated_time = max(5.0, z_range * 10.0)  # ~10s per mm of Z
+                            logger.info(f"Waiting {estimated_time:.1f}s for workflow completion...")
+                            import time
+                            time.sleep(estimated_time)
+                        else:
+                            logger.error(f"Failed to start {workflow_file.name}: {msg}")
+                    else:
+                        logger.error(f"Failed to load {workflow_file.name}: {msg}")
+            except Exception as e:
+                logger.error(f"Error executing {workflow_file.name}: {e}")
+
+        progress.setValue(len(workflow_files))
+        QMessageBox.information(
+            self, "Execution Complete",
+            f"Executed {len(workflow_files)} workflows.\n\n"
+            "Note: Used fallback timing. For better reliability, "
+            "ensure WorkflowQueueService is configured."
+        )
 
     def _get_geometry_manager(self):
         """Get WindowGeometryManager from application."""
