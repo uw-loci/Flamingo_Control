@@ -237,6 +237,10 @@ class FlamingoApplication(QObject):
         from py2flamingo.controllers.position_controller_adapter import wire_motion_tracking
         wire_motion_tracking(self.movement_controller, self.status_indicator_service)
 
+        # Set movement controller for workflow position polling
+        # This allows the status indicator to start/stop position polling during workflows
+        self.status_indicator_service.set_movement_controller(self.movement_controller)
+
         # Views layer - UI components
         self.logger.debug("Creating views layer components...")
         self.connection_view = ConnectionView(

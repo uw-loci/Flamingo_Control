@@ -82,6 +82,11 @@ class MovementController(QObject):
         self._monitoring_interval = 0.5  # seconds (500ms)
         self._last_position: Optional[Position] = None
 
+        # Workflow position polling (queries hardware directly during workflow execution)
+        self._workflow_polling_enabled = False
+        self._workflow_polling_thread: Optional[threading.Thread] = None
+        self._workflow_polling_interval = 2.0  # seconds - slower to avoid overwhelming server
+
         # Motion tracking
         self._current_motion_axis: Optional[str] = None
 
@@ -434,6 +439,103 @@ class MovementController(QObject):
                 self.logger.error(f"Error in position monitor: {e}")
 
             time.sleep(self._monitoring_interval)
+
+    # ============================================================================
+    # Workflow Position Polling (Hardware Queries During Workflow)
+    # ============================================================================
+
+    def start_workflow_polling(self, interval: float = 2.0) -> None:
+        """
+        Start polling hardware position during workflow execution.
+
+        During server-controlled workflows, the stage moves but our cached position
+        doesn't update. This polls the actual hardware position and emits position_changed
+        signals so the Sample View can track the stage during acquisition.
+
+        This polling is SLOWER than normal position monitoring (2s default) to avoid
+        overwhelming the server with position queries during acquisition.
+
+        Args:
+            interval: Polling interval in seconds (default 2.0)
+        """
+        if self._workflow_polling_enabled:
+            self.logger.debug("Workflow polling already enabled")
+            return
+
+        self._workflow_polling_interval = interval
+        self._workflow_polling_enabled = True
+
+        self._workflow_polling_thread = threading.Thread(
+            target=self._workflow_poll_loop,
+            name="WorkflowPositionPoll",
+            daemon=True
+        )
+        self._workflow_polling_thread.start()
+
+        self.logger.info(f"Workflow position polling started (interval={interval}s)")
+
+    def stop_workflow_polling(self) -> None:
+        """Stop polling hardware position during workflow."""
+        if not self._workflow_polling_enabled:
+            return
+
+        self._workflow_polling_enabled = False
+
+        if self._workflow_polling_thread:
+            self._workflow_polling_thread.join(timeout=3.0)
+            self._workflow_polling_thread = None
+
+        self.logger.info("Workflow position polling stopped")
+
+    def _workflow_poll_loop(self) -> None:
+        """
+        Background thread for workflow position polling.
+
+        Queries ACTUAL hardware position (not cached) and updates position tracking.
+        This runs at a slower rate to avoid interfering with workflow execution.
+        """
+        self.logger.info("Workflow poll loop started")
+
+        while self._workflow_polling_enabled:
+            try:
+                # Query actual position from hardware (slower but accurate)
+                hardware_pos = self.stage_service.get_position()
+
+                if hardware_pos:
+                    # Check if position changed significantly
+                    if self._last_position is None or not self._positions_equal(
+                        hardware_pos, self._last_position
+                    ):
+                        # Update cached position in position_controller
+                        self.position_controller._current_position = hardware_pos
+                        self._last_position = hardware_pos
+
+                        # Emit signal for UI updates
+                        self.position_changed.emit(
+                            hardware_pos.x, hardware_pos.y,
+                            hardware_pos.z, hardware_pos.r
+                        )
+                        self.logger.debug(
+                            f"Workflow position update: X={hardware_pos.x:.3f}, "
+                            f"Y={hardware_pos.y:.3f}, Z={hardware_pos.z:.3f}, "
+                            f"R={hardware_pos.r:.2f}"
+                        )
+
+            except Exception as e:
+                self.logger.error(f"Error in workflow position poll: {e}")
+
+            time.sleep(self._workflow_polling_interval)
+
+        self.logger.info("Workflow poll loop ended")
+
+    def _positions_equal(self, pos1: Position, pos2: Position, tolerance: float = 0.001) -> bool:
+        """Check if two positions are equal within tolerance."""
+        return (
+            abs(pos1.x - pos2.x) < tolerance and
+            abs(pos1.y - pos2.y) < tolerance and
+            abs(pos1.z - pos2.z) < tolerance and
+            abs(pos1.r - pos2.r) < 0.01  # 0.01 degree tolerance for rotation
+        )
 
     # ============================================================================
     # Motion Callbacks

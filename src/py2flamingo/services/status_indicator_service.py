@@ -62,6 +62,9 @@ class StatusIndicatorService(QObject):
         self.logger = logging.getLogger(__name__)
         self.connection_service = connection_service
 
+        # Movement controller for workflow position polling
+        self._movement_controller = None
+
         # Current state tracking
         self._current_status = GlobalStatus.DISCONNECTED
         self._is_connected = False
@@ -73,6 +76,20 @@ class StatusIndicatorService(QObject):
             self._setup_connection_monitoring()
 
         self.logger.info("StatusIndicatorService initialized")
+
+    def set_movement_controller(self, movement_controller) -> None:
+        """
+        Set the movement controller for workflow position polling.
+
+        When a workflow starts, the status indicator service will tell
+        the movement controller to start polling hardware position so
+        the Sample View can track stage position during acquisition.
+
+        Args:
+            movement_controller: MovementController instance
+        """
+        self._movement_controller = movement_controller
+        self.logger.info("Movement controller set for workflow position polling")
 
     def _setup_connection_monitoring(self):
         """Set up monitoring of connection service."""
@@ -140,20 +157,32 @@ class StatusIndicatorService(QObject):
         Handle workflow started event.
 
         Should be called when an acquisition workflow begins.
+        Also starts position polling to track stage during workflow.
         """
         self.logger.info("Workflow started")
         self._is_workflow_running = True
         self._update_status()
+
+        # Start position polling so Sample View updates during workflow
+        if self._movement_controller and hasattr(self._movement_controller, 'start_workflow_polling'):
+            self._movement_controller.start_workflow_polling(interval=2.0)
+            self.logger.info("Started workflow position polling")
 
     def on_workflow_stopped(self):
         """
         Handle workflow stopped event.
 
         Should be called when an acquisition workflow completes or is stopped.
+        Also stops position polling.
         """
         self.logger.info("Workflow stopped")
         self._is_workflow_running = False
         self._update_status()
+
+        # Stop position polling
+        if self._movement_controller and hasattr(self._movement_controller, 'stop_workflow_polling'):
+            self._movement_controller.stop_workflow_polling()
+            self.logger.info("Stopped workflow position polling")
 
     def _update_status(self):
         """
