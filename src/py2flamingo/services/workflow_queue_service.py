@@ -212,13 +212,11 @@ class WorkflowQueueService(QObject):
 
             # Notify status indicator that workflow(s) are starting
             if self._status_indicator_service:
-                # Use invokeMethod for thread safety (status service is QObject)
-                from PyQt5.QtCore import QMetaObject, Qt
-                QMetaObject.invokeMethod(
-                    self._status_indicator_service,
-                    "on_workflow_started",
-                    Qt.QueuedConnection
-                )
+                # Call directly - the status indicator service handles this gracefully
+                try:
+                    self._status_indicator_service.on_workflow_started()
+                except Exception as e:
+                    logger.warning(f"Could not notify status indicator of workflow start: {e}")
 
             total = len(self._queue)
 
@@ -275,12 +273,10 @@ class WorkflowQueueService(QObject):
 
             # Notify status indicator that workflow(s) are done
             if self._status_indicator_service:
-                from PyQt5.QtCore import QMetaObject, Qt
-                QMetaObject.invokeMethod(
-                    self._status_indicator_service,
-                    "on_workflow_stopped",
-                    Qt.QueuedConnection
-                )
+                try:
+                    self._status_indicator_service.on_workflow_stopped()
+                except Exception as e:
+                    logger.warning(f"Could not notify status indicator of workflow stop: {e}")
 
     def _execute_single_workflow(self, item: WorkflowQueueItem) -> tuple:
         """
