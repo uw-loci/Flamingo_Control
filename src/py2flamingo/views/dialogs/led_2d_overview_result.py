@@ -24,8 +24,11 @@ logger = logging.getLogger(__name__)
 class ZoomableImageLabel(QLabel):
     """Image label with zoom and pan support."""
 
-    # Signal emitted when user clicks on a tile (tile_x_idx, tile_y_idx)
+    # Signal emitted when user left-clicks on a tile (tile_x_idx, tile_y_idx)
     tile_clicked = pyqtSignal(int, int)
+
+    # Signal emitted when user right-clicks on a tile (tile_x_idx, tile_y_idx)
+    tile_right_clicked = pyqtSignal(int, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -120,6 +123,12 @@ class ZoomableImageLabel(QLabel):
 
             event.accept()
 
+        elif event.button() == Qt.RightButton:
+            # Right-click - move to tile center Z
+            if self._tiles_x > 0 and self._tiles_y > 0:
+                self._handle_tile_right_click(event.pos())
+            event.accept()
+
     def _handle_tile_click(self, pos: QPoint):
         """Calculate which tile was clicked and emit signal."""
         if self._original_pixmap is None:
@@ -151,6 +160,38 @@ class ZoomableImageLabel(QLabel):
 
         logger.debug(f"Tile clicked: ({tile_x_idx}, {tile_y_idx})")
         self.tile_clicked.emit(tile_x_idx, tile_y_idx)
+
+    def _handle_tile_right_click(self, pos: QPoint):
+        """Calculate which tile was right-clicked and emit signal for move to center Z."""
+        if self._original_pixmap is None:
+            return
+
+        # Convert click position to original image coordinates
+        img_x = pos.x() / self._zoom
+        img_y = pos.y() / self._zoom
+
+        # Calculate tile size in original image
+        img_w = self._original_pixmap.width()
+        img_h = self._original_pixmap.height()
+        tile_w = img_w / self._tiles_x
+        tile_h = img_h / self._tiles_y
+
+        # Calculate display tile index
+        display_x_idx = int(img_x / tile_w)
+        tile_y_idx = int(img_y / tile_h)
+
+        # Clamp to valid range
+        display_x_idx = max(0, min(display_x_idx, self._tiles_x - 1))
+        tile_y_idx = max(0, min(tile_y_idx, self._tiles_y - 1))
+
+        # Convert display index back to tile index if inverted
+        if self._invert_x:
+            tile_x_idx = (self._tiles_x - 1) - display_x_idx
+        else:
+            tile_x_idx = display_x_idx
+
+        logger.debug(f"Tile right-clicked: ({tile_x_idx}, {tile_y_idx})")
+        self.tile_right_clicked.emit(tile_x_idx, tile_y_idx)
 
     def mouseMoveEvent(self, event: QMouseEvent):
         """Pan while dragging."""
@@ -202,6 +243,9 @@ class ImagePanel(QWidget):
     # Signal emitted when tile selection changes
     selection_changed = pyqtSignal()
 
+    # Signal emitted when a tile is right-clicked (tile_x_idx, tile_y_idx)
+    tile_right_clicked = pyqtSignal(int, int)
+
     def __init__(self, title: str = "", parent=None):
         super().__init__(parent)
 
@@ -230,6 +274,12 @@ class ImagePanel(QWidget):
         self.title_label.setStyleSheet("font-weight: bold; font-size: 11pt;")
         layout.addWidget(self.title_label)
 
+        # Hint label for user interaction
+        self.hint_label = QLabel("Right-click tile to move to center Z")
+        self.hint_label.setAlignment(Qt.AlignCenter)
+        self.hint_label.setStyleSheet("color: #888; font-size: 9pt; font-style: italic;")
+        layout.addWidget(self.hint_label)
+
         # Scroll area with zoomable image
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(False)  # Don't auto-resize for zoom
@@ -240,6 +290,7 @@ class ImagePanel(QWidget):
         self.image_label = ZoomableImageLabel()
         self.image_label.set_scroll_area(self.scroll_area)  # Connect for panning
         self.image_label.tile_clicked.connect(self._on_tile_clicked)
+        self.image_label.tile_right_clicked.connect(self._on_tile_right_clicked)
 
         self.scroll_area.setWidget(self.image_label)
         layout.addWidget(self.scroll_area, stretch=1)
@@ -385,6 +436,11 @@ class ImagePanel(QWidget):
         # Redraw to show selection
         self._redraw_overlay()
         self.selection_changed.emit()
+
+    def _on_tile_right_clicked(self, tile_x_idx: int, tile_y_idx: int):
+        """Handle tile right-click - propagate signal upward for move to center Z."""
+        logger.debug(f"Tile right-clicked in panel: ({tile_x_idx}, {tile_y_idx})")
+        self.tile_right_clicked.emit(tile_x_idx, tile_y_idx)
 
     def _redraw_overlay(self):
         """Redraw the selection overlay using cached base pixmap (fast path)."""
@@ -691,11 +747,17 @@ class LED2DOverviewResultWindow(QWidget):
         # Left panel (first rotation)
         self.left_panel = ImagePanel("Rotation 1")
         self.left_panel.selection_changed.connect(self._on_selection_changed)
+        self.left_panel.tile_right_clicked.connect(
+            lambda x, y: self._on_tile_right_clicked(x, y, panel='left')
+        )
         splitter.addWidget(self.left_panel)
 
         # Right panel (second rotation)
         self.right_panel = ImagePanel("Rotation 2")
         self.right_panel.selection_changed.connect(self._on_selection_changed)
+        self.right_panel.tile_right_clicked.connect(
+            lambda x, y: self._on_tile_right_clicked(x, y, panel='right')
+        )
         splitter.addWidget(self.right_panel)
 
         # Set equal split
@@ -1047,6 +1109,68 @@ class LED2DOverviewResultWindow(QWidget):
 
         self.selection_label.setText(f"{total} tiles selected")
         self.collect_btn.setEnabled(total > 0)
+
+    def _on_tile_right_clicked(self, tile_x_idx: int, tile_y_idx: int, panel: str):
+        """Handle tile right-click - move stage to center Z of tile.
+
+        Args:
+            tile_x_idx: Tile X index
+            tile_y_idx: Tile Y index
+            panel: 'left' or 'right' indicating which panel was clicked
+        """
+        logger.info(f"Right-click on tile ({tile_x_idx}, {tile_y_idx}) in {panel} panel")
+
+        # Get the panel and its tile results
+        if panel == 'left':
+            image_panel = self.left_panel
+        else:
+            image_panel = self.right_panel
+
+        # Find the TileResult for this tile
+        tile_results = image_panel._tile_results
+        target_tile = None
+
+        for tile in tile_results:
+            if hasattr(tile, 'tile_x') and hasattr(tile, 'tile_y'):
+                if tile.tile_x == tile_x_idx and tile.tile_y == tile_y_idx:
+                    target_tile = tile
+                    break
+
+        if target_tile is None:
+            logger.warning(f"Could not find tile ({tile_x_idx}, {tile_y_idx}) in results")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Tile Not Found",
+                              f"Could not find Z data for tile ({tile_x_idx}, {tile_y_idx}).")
+            return
+
+        # Calculate center Z from bounding box
+        if hasattr(target_tile, 'effective_bounding_box') and target_tile.effective_bounding_box:
+            bbox = target_tile.effective_bounding_box
+            z_center = (bbox.z_min + bbox.z_max) / 2
+        else:
+            logger.warning(f"Tile ({tile_x_idx}, {tile_y_idx}) has no bounding box")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "No Z Data",
+                              f"Tile ({tile_x_idx}, {tile_y_idx}) has no Z range data.")
+            return
+
+        logger.info(f"Moving to center Z: {z_center:.3f} mm (range: {bbox.z_min:.3f} - {bbox.z_max:.3f})")
+
+        # Move stage to center Z
+        if self._app and hasattr(self._app, 'movement_controller') and self._app.movement_controller:
+            try:
+                self._app.movement_controller.position_controller.move_z(z_center)
+                self.info_text.setText(f"Moving to Z={z_center:.3f} mm (tile {tile_x_idx},{tile_y_idx})")
+            except Exception as e:
+                logger.error(f"Failed to move to Z={z_center}: {e}")
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Move Failed",
+                                  f"Failed to move stage: {e}")
+        else:
+            logger.warning("Movement controller not available")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Not Connected",
+                              "Cannot move stage - not connected to microscope.")
 
     def _on_collect_tiles(self):
         """Open dialog to configure and collect workflows for selected tiles."""
