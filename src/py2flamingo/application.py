@@ -242,7 +242,8 @@ class FlamingoApplication(QObject):
         self.connection_view = ConnectionView(
             self.connection_controller,
             config_manager=self.config_manager,
-            position_controller=self.position_controller  # For debug features
+            position_controller=self.position_controller,  # For debug features
+            workflow_service=self.workflow_service  # For workflow test buttons
         )
         self.workflow_view = WorkflowView(self.workflow_controller)
         # Set app reference for save drive persistence

@@ -33,18 +33,21 @@ class ConnectionView(QWidget):
     connection_established = pyqtSignal()  # Emitted when connection succeeds
     sample_view_requested = pyqtSignal()  # Emitted when user clicks "Open Sample View"
 
-    def __init__(self, controller, config_manager=None, position_controller=None):
+    def __init__(self, controller, config_manager=None, position_controller=None,
+                 workflow_service=None):
         """Initialize connection view with controller.
 
         Args:
             controller: ConnectionController for handling business logic
             config_manager: Optional ConfigurationManager for loading configs
             position_controller: Optional PositionController for debug features
+            workflow_service: Optional MVCWorkflowService for workflow testing
         """
         super().__init__()
         self._controller = controller
         self._config_manager = config_manager
         self._position_controller = position_controller
+        self._workflow_service = workflow_service
         self._configurations = {}  # Map of name -> MicroscopeConfiguration
         self._logger = logging.getLogger(__name__)
         self.setup_ui()
@@ -776,8 +779,8 @@ class ConnectionView(QWidget):
             self._show_message(f"Failed to read workflow: {e}", is_error=True)
             return
 
-        # Get workflow service from app
-        if not self._app or not hasattr(self._app, 'workflow_service'):
+        # Get workflow service
+        if not self._workflow_service:
             self._show_message("Workflow service not available", is_error=True)
             return
 
@@ -798,7 +801,7 @@ class ConnectionView(QWidget):
 
         # Send the workflow
         try:
-            workflow_service = self._app.workflow_service
+            workflow_service = self._workflow_service
             success = workflow_service.start_workflow(workflow_data)
 
             if success:
@@ -937,7 +940,7 @@ class ConnectionView(QWidget):
 
         # Send the workflow
         try:
-            workflow_service = self._app.workflow_service
+            workflow_service = self._workflow_service
             success = workflow_service.start_workflow(workflow_data)
 
             if success:
