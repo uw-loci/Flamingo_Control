@@ -73,7 +73,8 @@ class WorkflowQueueService(QObject):
     error_occurred = pyqtSignal(str)
 
     # Poll interval for checking system state (seconds)
-    STATE_POLL_INTERVAL = 2.0
+    # INCREASED from 2.0 to 10.0 for debugging - reduce server load
+    STATE_POLL_INTERVAL = 10.0
 
     # Maximum time to wait for a workflow (seconds) - 30 minutes default
     MAX_WORKFLOW_TIMEOUT = 1800
@@ -210,13 +211,14 @@ class WorkflowQueueService(QObject):
             # Emit queue started on main thread
             self.queue_started.emit()
 
-            # Notify status indicator that workflow(s) are starting
-            if self._status_indicator_service:
-                # Call directly - the status indicator service handles this gracefully
-                try:
-                    self._status_indicator_service.on_workflow_started()
-                except Exception as e:
-                    logger.warning(f"Could not notify status indicator of workflow start: {e}")
+            # TEMPORARILY DISABLED: Status indicator starts position polling
+            # which combined with our state polling may overwhelm server
+            # if self._status_indicator_service:
+            #     try:
+            #         self._status_indicator_service.on_workflow_started()
+            #     except Exception as e:
+            #         logger.warning(f"Could not notify status indicator of workflow start: {e}")
+            logger.info("Status indicator notification disabled for debugging")
 
             total = len(self._queue)
 
@@ -271,12 +273,13 @@ class WorkflowQueueService(QObject):
         finally:
             self._is_running = False
 
-            # Notify status indicator that workflow(s) are done
-            if self._status_indicator_service:
-                try:
-                    self._status_indicator_service.on_workflow_stopped()
-                except Exception as e:
-                    logger.warning(f"Could not notify status indicator of workflow stop: {e}")
+            # TEMPORARILY DISABLED: Status indicator notification
+            # if self._status_indicator_service:
+            #     try:
+            #         self._status_indicator_service.on_workflow_stopped()
+            #     except Exception as e:
+            #         logger.warning(f"Could not notify status indicator of workflow stop: {e}")
+            logger.info("Status indicator stop notification disabled for debugging")
 
     def _execute_single_workflow(self, item: WorkflowQueueItem) -> tuple:
         """
