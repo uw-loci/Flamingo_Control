@@ -677,13 +677,13 @@ class MVCConnectionService:
             raise RuntimeError("Not connected to microscope")
 
         try:
-            from py2flamingo.core.command_codes import SystemCommands, CommandDataBits
+            from py2flamingo.core.command_codes import SystemCommands
             from py2flamingo.models.command import Command
 
-            # Create SYSTEM_STATE_GET command with callback flag
+            # Create SYSTEM_STATE_GET command (no callback flag - matches connection validation)
             cmd = Command(
                 code=SystemCommands.STATE_GET,
-                parameters={'params': [0, 0, 0, 0, 0, 0, CommandDataBits.TRIGGER_CALL_BACK]}
+                parameters={'params': [0, 0, 0, 0, 0, 0, 0]}
             )
 
             self.logger.debug(f"Querying system state: cmd=0x{SystemCommands.STATE_GET:04X}")
