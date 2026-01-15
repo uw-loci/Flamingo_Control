@@ -449,42 +449,42 @@ class WorkflowView(QWidget):
                 led_enabled=False,
             )
 
-        # Create base workflow
-        workflow = Workflow(
-            workflow_type=self._current_type,
-            name=f"{self._current_type.value.capitalize()} Workflow",
-            start_position=position,
-            illumination=illumination,
-        )
+        # Gather type-specific settings BEFORE creating workflow (validation happens in __post_init__)
+        stack_settings = None
+        tile_settings = None
+        time_lapse_settings = None
+        end_position = position  # Default: same as start
 
-        # Add type-specific settings
         if self._current_type == WorkflowType.ZSTACK:
-            workflow.stack_settings = self._zstack_panel.get_settings()
+            stack_settings = self._zstack_panel.get_settings()
             z_range_mm = self._zstack_panel.get_z_range_mm()
-            workflow.end_position = Position(
+            end_position = Position(
                 x=position.x, y=position.y,
                 z=position.z + z_range_mm, r=position.r
             )
 
         elif self._current_type == WorkflowType.TIME_LAPSE:
-            workflow.timelapse_settings = self._timelapse_panel.get_settings()
-            workflow.end_position = position
+            time_lapse_settings = self._timelapse_panel.get_settings()
 
         elif self._current_type == WorkflowType.TILE:
-            workflow.tile_settings = self._tiling_panel.get_settings()
+            tile_settings = self._tiling_panel.get_settings()
             scan_x_mm, scan_y_mm = self._tiling_panel.get_scan_area_mm()
-            workflow.end_position = Position(
+            end_position = Position(
                 x=position.x + scan_x_mm, y=position.y + scan_y_mm,
                 z=position.z, r=position.r
             )
 
-        elif self._current_type == WorkflowType.MULTI_ANGLE:
-            # Store multi-angle settings in workflow
-            workflow.end_position = position
-
-        else:
-            # Snapshot - end position same as start
-            workflow.end_position = position
+        # Create workflow with all required settings at once (validation in __post_init__)
+        workflow = Workflow(
+            workflow_type=self._current_type,
+            name=f"{self._current_type.value.capitalize()} Workflow",
+            start_position=position,
+            end_position=end_position,
+            illumination=illumination,
+            stack_settings=stack_settings,
+            tile_settings=tile_settings,
+            time_lapse_settings=time_lapse_settings,
+        )
 
         return workflow
 
