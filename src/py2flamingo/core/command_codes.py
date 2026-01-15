@@ -155,6 +155,14 @@ class CameraCommands:
     WORKFLOW_START = 0x3004  # 12292 - Start image acquisition workflow
     WORKFLOW_STOP = 0x3005  # 12293 - Stop image acquisition workflow
 
+    # Stack/acquisition completion callbacks (sent by server)
+    STACK_COMPLETE = 0x3011  # 12305 - Stack acquisition complete callback
+    # Response contains:
+    #   int32Data0 = images acquired
+    #   int32Data1 = images expected
+    #   int32Data2 = error count
+    #   doubleData = acquisition time (microseconds)
+
     # Note: Camera dimensions returned in int32Data0/1/2
     # Pixel size and FOV returned in doubleData field
 
@@ -184,6 +192,24 @@ class FilterCommands:
     # Filter wheel control
     POSITION_SET = 0x5001  # 20481 - Set filter wheel position
     POSITION_GET = 0x5002  # 20482 - Get current filter wheel position
+
+
+class UICommands:
+    """
+    UI-related command codes for progress tracking.
+
+    These are callback messages sent by the server to update the GUI
+    during workflow execution.
+    """
+
+    # Progress bar commands (callbacks from server)
+    SET_GAUGE_SIZE = 0x9003  # 36867 - Set progress bar maximum value
+    SET_GAUGE_VALUE = 0x9004  # 36868 - Update progress bar current value
+    IMAGES_SAVED_TO_STORAGE = 0x9008  # 36872 - Images written notification
+
+    # Response contains:
+    #   int32Data0 = current count
+    #   int32Data1 = total count
 
 
 class CommandDataBits:

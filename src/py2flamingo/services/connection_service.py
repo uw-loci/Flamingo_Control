@@ -738,6 +738,32 @@ class MVCConnectionService:
             return self.tcp_connection.resume_async_reader()
         return False
 
+    def register_callback(self, command_code: int, handler) -> None:
+        """
+        Register a callback handler for unsolicited messages.
+
+        Args:
+            command_code: Command code to handle (e.g., 0x3011 for STACK_COMPLETE)
+            handler: Callable that receives ParsedMessage
+        """
+        if self.tcp_connection and hasattr(self.tcp_connection, 'register_callback'):
+            self.tcp_connection.register_callback(command_code, handler)
+            self.logger.info(f"Registered callback for 0x{command_code:04X}")
+        else:
+            self.logger.warning(f"Cannot register callback - no tcp_connection")
+
+    def unregister_callback(self, command_code: int, handler) -> None:
+        """
+        Unregister a callback handler.
+
+        Args:
+            command_code: Command code to unregister
+            handler: Handler to remove
+        """
+        if self.tcp_connection and hasattr(self.tcp_connection, 'unregister_callback'):
+            self.tcp_connection.unregister_callback(command_code, handler)
+            self.logger.info(f"Unregistered callback for 0x{command_code:04X}")
+
     def send_command_async(self, command_bytes: bytes, expected_response_code: int,
                           timeout: float = 3.0):
         """Send command via async reader (delegates to tcp_connection)."""
