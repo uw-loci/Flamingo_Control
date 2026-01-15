@@ -700,12 +700,16 @@ class MVCConnectionService:
                 # Offset 24 = int32Data0
                 state_value = struct.unpack_from("i", response_bytes, 24)[0]
 
+                # Also log raw bytes for diagnostics
+                raw_bytes_24_28 = response_bytes[24:28].hex()
+                status_field = struct.unpack_from("i", response_bytes, 8)[0]
+
                 result = {
                     'state': state_value,
                     'is_idle': state_value == 0  # STATE_VALUE_IDLE = 0
                 }
 
-                self.logger.debug(f"System state: {state_value} (idle={result['is_idle']})")
+                self.logger.info(f"System state query: state={state_value} (bytes[24:28]={raw_bytes_24_28}, status_field={status_field}, idle={result['is_idle']})")
                 return result
             else:
                 self.logger.error(f"Invalid response size: {len(response_bytes)} bytes")

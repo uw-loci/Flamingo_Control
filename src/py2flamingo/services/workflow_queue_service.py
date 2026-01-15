@@ -366,7 +366,7 @@ class WorkflowQueueService(QObject):
         if not self._connection_service:
             # Fall back to workflow controller's executing flag
             is_idle = not self._workflow_controller.is_executing
-            logger.debug(f"System idle check (fallback): is_executing={self._workflow_controller.is_executing}, is_idle={is_idle}")
+            logger.info(f"System idle check (fallback): is_executing={self._workflow_controller.is_executing}, is_idle={is_idle}")
             return is_idle
 
         try:
@@ -382,12 +382,12 @@ class WorkflowQueueService(QObject):
             # Check if state is IDLE (0)
             state = response.get('state', -1)
             is_idle = state == 0  # SystemCommands.STATE_VALUE_IDLE
-            logger.debug(f"System idle check: state={state}, is_idle={is_idle}")
+            logger.info(f"System idle check: state={state}, is_idle={is_idle}")
             return is_idle
 
         except Exception as e:
             logger.warning(f"Error checking system state: {e}")
             # Fall back to workflow controller
             is_idle = not self._workflow_controller.is_executing
-            logger.debug(f"System idle check (exception fallback): is_idle={is_idle}")
+            logger.info(f"System idle check (exception fallback): is_idle={is_idle}")
             return is_idle
