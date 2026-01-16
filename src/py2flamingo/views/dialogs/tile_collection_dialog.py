@@ -760,13 +760,9 @@ class TileCollectionDialog(QDialog):
                     )
 
                 if warning_result != QMessageBox.Yes:
-                    logger.info("User cancelled workflow execution due to TIFF size warning")
-                    QMessageBox.information(
-                        self, "Workflows Saved",
-                        f"Workflow files saved to:\n{workflow_folder}\n\n"
-                        "Adjust the Z range or step size, then try again."
-                    )
-                    self.accept()
+                    logger.info("User cancelled workflow execution due to TIFF size warning - returning to dialog")
+                    # Don't close the dialog - let user adjust settings and try again
+                    # The workflow files were created but we return to let user modify parameters
                     return
 
             msg = f"Created {len(created_files)} workflow files in:\n{workflow_folder}\n\n"
@@ -788,6 +784,9 @@ class TileCollectionDialog(QDialog):
         Checks if the workflow parameters would produce TIFF files
         that exceed the 4GB standard TIFF limit.
 
+        Only applies to standard TIFF format. BigTIFF and Raw formats
+        don't have this limitation.
+
         Args:
             workflow_files: List of workflow file paths to validate
 
@@ -795,6 +794,14 @@ class TileCollectionDialog(QDialog):
             Warning message if size exceeds limit, None if OK
         """
         if not workflow_files:
+            return None
+
+        # Check save format - only standard TIFF has 4GB limit
+        save_settings = self._save_panel.get_settings()
+        save_format = save_settings.get('save_format', 'Tiff')
+        if save_format != 'Tiff':
+            # BigTiff, Raw, and NotSaved don't have the 4GB limit
+            logger.debug(f"Skipping TIFF size validation - format is {save_format}")
             return None
 
         # Parse the first workflow file to get parameters
@@ -1214,23 +1221,58 @@ class TileCollectionDialog(QDialog):
             queue_service.set_workflow_start_callback(on_workflow_start)
 
         # Create progress dialog
+        # Use 0-100 range for percentage-based progress
         progress = QProgressDialog(
-            "Executing workflows...", "Cancel", 0, len(workflow_files), self
+            "Executing workflows...", "Cancel", 0, 100, self
         )
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)
 
-        # Track completion
+        # Track completion and current state
         self._queue_completed = False
         self._queue_error = None
+        total_workflows = len(workflow_files)
+        current_workflow_images = [0, 0]  # [acquired, expected]
+
+        def calculate_overall_progress(workflow_idx: int, img_acquired: int, img_expected: int) -> int:
+            """Calculate overall progress 0-100 based on workflow and image progress."""
+            if total_workflows == 0:
+                return 0
+            # Base progress from completed workflows
+            base_progress = (workflow_idx / total_workflows) * 100
+            # Progress within current workflow
+            if img_expected > 0:
+                workflow_progress = (img_acquired / img_expected) * (100 / total_workflows)
+            else:
+                workflow_progress = 0
+            return min(99, int(base_progress + workflow_progress))  # Cap at 99 until complete
 
         # Connect signals for progress updates
         def on_progress(current, total, message):
-            progress.setValue(current - 1)  # -1 because queue uses 1-indexed
+            # current is 1-indexed workflow number
+            workflow_idx = current - 1
+            pct = calculate_overall_progress(
+                workflow_idx, current_workflow_images[0], current_workflow_images[1]
+            )
+            progress.setValue(pct)
             progress.setLabelText(message)
 
+        def on_image_progress(acquired, expected):
+            """Handle image-level progress updates."""
+            current_workflow_images[0] = acquired
+            current_workflow_images[1] = expected
+            # Calculate overall progress
+            workflow_idx = queue_service.current_index
+            pct = calculate_overall_progress(workflow_idx, acquired, expected)
+            progress.setValue(pct)
+            progress.setLabelText(f"Workflow {workflow_idx + 1}/{total_workflows}: {acquired}/{expected} images")
+
         def on_workflow_completed(index, total, path):
-            progress.setValue(index + 1)
+            # Reset image progress for next workflow
+            current_workflow_images[0] = 0
+            current_workflow_images[1] = 0
+            pct = calculate_overall_progress(index + 1, 0, 0)
+            progress.setValue(pct)
             logger.info(f"Workflow {index + 1}/{total} completed: {Path(path).name}")
 
         def on_queue_completed():
@@ -1254,6 +1296,7 @@ class TileCollectionDialog(QDialog):
 
         # Connect signals
         queue_service.progress_updated.connect(on_progress)
+        queue_service.workflow_progress.connect(on_image_progress)  # Image-level progress
         queue_service.workflow_completed.connect(on_workflow_completed)
         queue_service.queue_completed.connect(on_queue_completed)
         queue_service.queue_cancelled.connect(on_queue_cancelled)
@@ -1285,6 +1328,7 @@ class TileCollectionDialog(QDialog):
             # Disconnect signals to avoid issues with stale connections
             try:
                 queue_service.progress_updated.disconnect(on_progress)
+                queue_service.workflow_progress.disconnect(on_image_progress)
                 queue_service.workflow_completed.disconnect(on_workflow_completed)
                 queue_service.queue_completed.disconnect(on_queue_completed)
                 queue_service.queue_cancelled.disconnect(on_queue_cancelled)

@@ -87,6 +87,7 @@ class ProtocolCommands(IntEnum):
 # Set of command codes that are unsolicited (sent by microscope without request)
 UNSOLICITED_COMMANDS: Set[int] = {
     ProtocolCommands.STAGE_MOTION_STOPPED,
+    ProtocolCommands.SYSTEM_STATE_IDLE,  # 0xa002 - System became idle (workflow complete)
     0x3011,  # CAMERA_STACK_COMPLETE - Workflow/stack acquisition complete
     0x9003,  # UI_SET_GAUGE_SIZE - Progress bar maximum
     0x9004,  # UI_SET_GAUGE_VALUE - Progress bar update

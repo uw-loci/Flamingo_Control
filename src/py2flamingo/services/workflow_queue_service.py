@@ -47,7 +47,8 @@ logger = logging.getLogger(__name__)
 
 
 # Command codes for workflow progress (from command_codes.py)
-CAMERA_STACK_COMPLETE = 0x3011  # 12305 - Stack acquisition complete
+SYSTEM_STATE_IDLE = 0xa002     # 40962 - System became idle (PRIMARY completion signal)
+CAMERA_STACK_COMPLETE = 0x3011  # 12305 - Stack acquisition complete (backup)
 UI_SET_GAUGE_VALUE = 0x9004    # 36868 - Progress bar update
 UI_IMAGES_SAVED = 0x9008       # 36872 - Images written to storage
 
@@ -234,20 +235,38 @@ class WorkflowQueueService(QObject):
     # Callback Handlers
     # =========================================================================
 
+    def _on_system_idle(self, message) -> None:
+        """
+        Handle SYSTEM_STATE_IDLE callback from server.
+
+        This is the PRIMARY signal that a workflow has completed.
+        The server sends this when it transitions back to idle state.
+
+        Args:
+            message: ParsedMessage (may not contain useful data)
+        """
+        logger.info(f"[QUEUE] Received SYSTEM_STATE_IDLE callback - workflow complete!")
+
+        # Signal completion - this is the definitive completion signal
+        self._completion_event.set()
+
     def _on_stack_complete(self, message) -> None:
         """
         Handle CAMERA_STACK_COMPLETE callback from server.
 
+        This contains acquisition statistics but is NOT the primary completion signal.
+        We store the data for reporting but wait for SYSTEM_STATE_IDLE for completion.
+
         Args:
             message: ParsedMessage containing completion data
         """
-        logger.info(f"Received STACK_COMPLETE callback: "
+        logger.info(f"[QUEUE] Received STACK_COMPLETE callback: "
                    f"acquired={message.int32_data0}, "
                    f"expected={message.int32_data1}, "
                    f"errors={message.int32_data2}, "
                    f"time={message.double_data:.1f}us")
 
-        # Store completion data
+        # Store completion data for reporting (but don't signal completion yet)
         self._completion_data = {
             'images_acquired': message.int32_data0,
             'images_expected': message.int32_data1,
@@ -255,8 +274,7 @@ class WorkflowQueueService(QObject):
             'acquisition_time_us': message.double_data
         }
 
-        # Signal completion
-        self._completion_event.set()
+        # Note: Do NOT set _completion_event here - wait for SYSTEM_STATE_IDLE
 
     def _on_progress_update(self, message) -> None:
         """
@@ -296,13 +314,19 @@ class WorkflowQueueService(QObject):
             return
 
         try:
+            # Primary completion signal - system returning to idle
+            self._connection_service.register_callback(
+                SYSTEM_STATE_IDLE, self._on_system_idle
+            )
+            # Acquisition stats (not completion trigger)
             self._connection_service.register_callback(
                 CAMERA_STACK_COMPLETE, self._on_stack_complete
             )
+            # Progress tracking
             self._connection_service.register_callback(
                 UI_SET_GAUGE_VALUE, self._on_progress_update
             )
-            logger.info("Registered callbacks for STACK_COMPLETE and progress updates")
+            logger.info("Registered callbacks for SYSTEM_STATE_IDLE, STACK_COMPLETE, and progress updates")
         except Exception as e:
             logger.warning(f"Failed to register callbacks: {e}")
 
@@ -312,6 +336,9 @@ class WorkflowQueueService(QObject):
             return
 
         try:
+            self._connection_service.unregister_callback(
+                SYSTEM_STATE_IDLE, self._on_system_idle
+            )
             self._connection_service.unregister_callback(
                 CAMERA_STACK_COMPLETE, self._on_stack_complete
             )
@@ -331,15 +358,19 @@ class WorkflowQueueService(QObject):
         try:
             # Emit queue started on main thread
             self.queue_started.emit()
+            logger.info("=== Queue execution started ===")
 
             # Register callbacks for completion detection
             self._register_callbacks()
 
             total = len(self._queue)
+            logger.info(f"Queue contains {total} workflows to execute")
 
             for i, item in enumerate(self._queue):
+                logger.info(f"--- Starting workflow {i + 1}/{total}: {item.file_path.name} ---")
+
                 if self._cancel_requested:
-                    logger.info("Queue execution cancelled")
+                    logger.info("Queue execution cancelled by user")
                     self.queue_cancelled.emit()
                     break
 
@@ -360,23 +391,29 @@ class WorkflowQueueService(QObject):
                         logger.warning(f"Workflow start callback error: {e}")
 
                 # Execute the workflow
+                logger.info(f"Executing workflow {i + 1}/{total}...")
                 success, error = self._execute_single_workflow(item)
+                logger.info(f"Workflow {i + 1}/{total} execution returned: success={success}, error={error}")
 
                 if not success:
                     item.error = error
-                    logger.error(f"Workflow {i + 1}/{total} failed: {error}")
+                    logger.error(f"Workflow {i + 1}/{total} FAILED: {error}")
                     self.error_occurred.emit(f"Workflow {item.file_path.name}: {error}")
                     # Continue with next workflow instead of aborting entire queue
+                    logger.info(f"Continuing to next workflow after failure...")
                     continue
 
                 item.completed = True
+                logger.info(f"Workflow {i + 1}/{total} completed successfully, emitting signal")
                 self.workflow_completed.emit(i, total, str(item.file_path))
 
                 # Brief delay between workflows
                 if i < total - 1 and not self._cancel_requested:
+                    logger.info(f"Waiting {self.MIN_INTER_WORKFLOW_DELAY}s before next workflow...")
                     time.sleep(self.MIN_INTER_WORKFLOW_DELAY)
 
             # Queue finished
+            logger.info(f"=== Queue loop finished, cancel_requested={self._cancel_requested} ===")
             if not self._cancel_requested:
                 self.queue_completed.emit()
                 logger.info(f"Queue execution completed: {total} workflows")
@@ -400,36 +437,50 @@ class WorkflowQueueService(QObject):
             Tuple of (success: bool, error_message: Optional[str])
         """
         file_path = item.file_path
+        logger.info(f"[QUEUE] Loading workflow: {file_path.name}")
 
         # Load the workflow
         success, msg = self._workflow_controller.load_workflow(str(file_path))
         if not success:
+            logger.error(f"[QUEUE] Load failed: {msg}")
             return (False, f"Load failed: {msg}")
+        logger.info(f"[QUEUE] Workflow loaded successfully")
 
-        # Clear completion state
+        # Clear completion state BEFORE starting
+        logger.info(f"[QUEUE] Clearing completion state...")
         self._completion_event.clear()
         self._completion_data = None
 
         # Start the workflow
+        logger.info(f"[QUEUE] Starting workflow execution...")
         success, msg = self._workflow_controller.start_workflow()
         if not success:
+            logger.error(f"[QUEUE] Start failed: {msg}")
             return (False, f"Start failed: {msg}")
 
-        logger.info(f"Started workflow: {file_path.name}")
+        logger.info(f"[QUEUE] Started workflow: {file_path.name}, waiting for completion...")
 
         # Wait for workflow completion
         success, error = self._wait_for_completion(item)
+        logger.info(f"[QUEUE] Wait completed: success={success}, error={error}")
 
         if success:
             # Notify workflow controller that workflow completed
             # This records timing data and clears tile position
+            logger.info(f"[QUEUE] Notifying controller of completion...")
             self._workflow_controller.on_workflow_completed()
 
         return (success, error)
 
     def _wait_for_completion(self, item: WorkflowQueueItem) -> tuple:
         """
-        Wait for workflow to complete via callback or fallback polling.
+        Wait for workflow to complete via SYSTEM_STATE_IDLE callback.
+
+        The primary completion signal is receiving SYSTEM_STATE_IDLE (0xa002)
+        on the same message stream as progress updates. This indicates the
+        server has finished all acquisition and processing.
+
+        Falls back to polling if callback not received within timeout.
 
         Args:
             item: Current workflow queue item
@@ -438,7 +489,7 @@ class WorkflowQueueService(QObject):
             Tuple of (success: bool, error_message: Optional[str])
         """
         start_time = time.time()
-        logger.info(f"Waiting for workflow completion: {item.file_path.name}")
+        logger.info(f"[QUEUE] Waiting for SYSTEM_STATE_IDLE callback: {item.file_path.name}")
 
         # Wait for completion callback with timeout
         while True:
@@ -449,39 +500,39 @@ class WorkflowQueueService(QObject):
             # Check timeout
             elapsed = time.time() - start_time
             if elapsed > self.MAX_WORKFLOW_TIMEOUT:
-                logger.error(f"Workflow timeout after {elapsed:.1f}s")
+                logger.error(f"[QUEUE] Workflow timeout after {elapsed:.1f}s")
                 return (False, f"Timeout after {elapsed:.1f}s")
 
-            # Wait for completion event (callback-based)
+            # Wait for SYSTEM_STATE_IDLE callback (primary completion signal)
             if self._completion_event.wait(timeout=self.STATE_POLL_INTERVAL):
-                # Callback received
+                # SYSTEM_STATE_IDLE callback received
                 if self._cancel_requested:
                     return (False, "Cancelled")
 
+                # Log completion stats if we received STACK_COMPLETE data
                 if self._completion_data:
                     acquired = self._completion_data.get('images_acquired', 0)
                     expected = self._completion_data.get('images_expected', 0)
                     errors = self._completion_data.get('error_count', 0)
                     acq_time = self._completion_data.get('acquisition_time_us', 0)
 
-                    logger.info(f"Workflow completed via callback: "
+                    logger.info(f"[QUEUE] Workflow completed via SYSTEM_STATE_IDLE: "
                                f"{acquired}/{expected} images, "
                                f"{errors} errors, {acq_time/1e6:.1f}s")
 
                     if errors > 0:
-                        logger.warning(f"Workflow had {errors} acquisition errors")
-
-                    return (True, None)
+                        logger.warning(f"[QUEUE] Workflow had {errors} acquisition errors")
                 else:
-                    logger.info(f"Workflow completed after {elapsed:.1f}s")
-                    return (True, None)
+                    logger.info(f"[QUEUE] Workflow completed via SYSTEM_STATE_IDLE after {elapsed:.1f}s")
+
+                return (True, None)
 
             # Fallback: Poll system state if no callback received
-            logger.debug(f"No callback received after {self.STATE_POLL_INTERVAL}s, "
-                        f"checking system state...")
+            logger.debug(f"[QUEUE] No SYSTEM_STATE_IDLE callback after {self.STATE_POLL_INTERVAL}s, "
+                        f"polling system state...")
 
             if self._is_system_idle():
-                logger.info(f"Workflow completed (via polling) after {elapsed:.1f}s")
+                logger.info(f"[QUEUE] Workflow completed (via polling fallback) after {elapsed:.1f}s")
                 return (True, None)
 
             # Update progress

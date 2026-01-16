@@ -646,6 +646,9 @@ class WorkflowView(QWidget):
         """
         Check if workflow would exceed TIFF 4GB file size limit.
 
+        Only applies to standard TIFF format. BigTIFF and Raw formats
+        don't have this limitation.
+
         Args:
             workflow: Workflow to check
 
@@ -656,6 +659,13 @@ class WorkflowView(QWidget):
             return None
 
         if workflow.stack_settings is None:
+            return None
+
+        # Check save format - only standard TIFF has 4GB limit
+        save_settings = self._save_panel.get_settings()
+        save_format = save_settings.get('save_format', 'Tiff')
+        if save_format != 'Tiff':
+            # BigTiff, Raw, and NotSaved don't have the 4GB limit
             return None
 
         # Get camera settings for image dimensions

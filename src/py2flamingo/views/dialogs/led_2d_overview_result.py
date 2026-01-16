@@ -664,12 +664,12 @@ class ImagePanel(QWidget):
         tile_w = w / self._tiles_x
         tile_h = h / self._tiles_y
 
-        from PyQt5.QtGui import QBrush
-        # Semi-transparent cyan overlay for selected tiles
-        painter.setBrush(QBrush(QColor(0, 255, 255, 80)))
+        from PyQt5.QtCore import Qt
+        # Outline only - no fill for selected tiles
+        painter.setBrush(Qt.NoBrush)
         # Thick cyan border
         selection_pen = QPen(QColor(0, 255, 255, 255))
-        selection_pen.setWidth(4)
+        selection_pen.setWidth(3)
         painter.setPen(selection_pen)
 
         selections_drawn = 0
@@ -799,6 +799,12 @@ class LED2DOverviewResultWindow(QWidget):
         self.clear_selection_btn.setToolTip("Deselect all tiles")
         self.clear_selection_btn.clicked.connect(self._on_clear_selection)
         button_layout.addWidget(self.clear_selection_btn)
+
+        # Auto-select button (thresholder)
+        self.auto_select_btn = QPushButton("Auto-Select...")
+        self.auto_select_btn.setToolTip("Automatically select tiles containing sample (not background)")
+        self.auto_select_btn.clicked.connect(self._on_auto_select)
+        button_layout.addWidget(self.auto_select_btn)
 
         # Collect tiles button
         self.collect_btn = QPushButton("Collect tiles")
@@ -1100,6 +1106,61 @@ class LED2DOverviewResultWindow(QWidget):
         """Clear selection in both panels."""
         self.left_panel.clear_selection()
         self.right_panel.clear_selection()
+
+    def _on_auto_select(self):
+        """Open thresholder dialog for automatic tile selection."""
+        # Get the current image from left panel (first rotation)
+        image = self.left_panel.get_image()
+        if image is None:
+            QMessageBox.warning(
+                self, "No Image",
+                "No image loaded. Please wait for scan to complete."
+            )
+            return
+
+        tiles_x = self.left_panel._tiles_x
+        tiles_y = self.left_panel._tiles_y
+
+        if tiles_x <= 0 or tiles_y <= 0:
+            QMessageBox.warning(
+                self, "No Tiles",
+                "Tile grid not configured. Please ensure scan completed correctly."
+            )
+            return
+
+        # Import here to avoid circular imports
+        from .overview_thresholder_dialog import OverviewThresholderDialog
+
+        dialog = OverviewThresholderDialog(
+            image=image,
+            tiles_x=tiles_x,
+            tiles_y=tiles_y,
+            parent=self
+        )
+
+        # Connect selection signal
+        def apply_selection(selected_tiles):
+            """Apply selection from thresholder to both panels."""
+            # Clear existing selection
+            self.left_panel.clear_selection()
+            self.right_panel.clear_selection()
+
+            # Apply new selection to both panels
+            for tx, ty in selected_tiles:
+                self.left_panel._selected_tiles.add((tx, ty))
+                self.right_panel._selected_tiles.add((tx, ty))
+
+            # Redraw overlays
+            self.left_panel._redraw_overlay()
+            self.right_panel._redraw_overlay()
+
+            # Update selection UI
+            self._on_selection_changed()
+
+            logger.info(f"Auto-select applied {len(selected_tiles)} tiles to both panels")
+
+        dialog.selection_ready.connect(apply_selection)
+        dialog.exec_()
 
     def _on_selection_changed(self):
         """Handle tile selection change - update UI state."""
