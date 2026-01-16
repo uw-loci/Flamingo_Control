@@ -22,6 +22,10 @@ from py2flamingo.views.workflow_panels import (
 )
 from py2flamingo.models.data.workflow import WorkflowType, Workflow, StackSettings
 from py2flamingo.models.microscope import Position
+from py2flamingo.services.tiff_size_validator import (
+    validate_workflow_params, parse_workflow_file, get_recommended_planes,
+    TiffSizeEstimate, TIFF_4GB_LIMIT
+)
 
 logger = logging.getLogger(__name__)
 
@@ -719,6 +723,52 @@ class TileCollectionDialog(QDialog):
 
         # Report results
         if created_files:
+            # Validate TIFF size before execution
+            tiff_warning = self._validate_tiff_size(created_files)
+
+            if tiff_warning:
+                # Show warning with detailed information
+                warning_result = QMessageBox.warning(
+                    self, "TIFF File Size Warning",
+                    tiff_warning + "\n\nDo you want to proceed anyway?",
+                    QMessageBox.Yes | QMessageBox.No | QMessageBox.Help,
+                    QMessageBox.No
+                )
+
+                if warning_result == QMessageBox.Help:
+                    # Show detailed help
+                    QMessageBox.information(
+                        self, "TIFF 4GB Limit Explained",
+                        "Standard TIFF format uses 32-bit file offsets, which limits "
+                        "files to 4GB (4,294,967,296 bytes).\n\n"
+                        "When acquiring large Z-stacks, the server writes images to a "
+                        "single TIFF file. If this file exceeds 4GB, the write operation "
+                        "fails and the acquisition is aborted.\n\n"
+                        "Solutions:\n"
+                        "1. Reduce the Z range to keep each file under 4GB\n"
+                        "2. Increase the Z step size (fewer planes)\n"
+                        "3. Use camera binning to reduce image size\n\n"
+                        "For 2048x2048 16-bit images, the maximum safe number of planes "
+                        "is approximately 500 per acquisition."
+                    )
+                    # Ask again after showing help
+                    warning_result = QMessageBox.warning(
+                        self, "TIFF File Size Warning",
+                        tiff_warning + "\n\nDo you want to proceed anyway?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
+
+                if warning_result != QMessageBox.Yes:
+                    logger.info("User cancelled workflow execution due to TIFF size warning")
+                    QMessageBox.information(
+                        self, "Workflows Saved",
+                        f"Workflow files saved to:\n{workflow_folder}\n\n"
+                        "Adjust the Z range or step size, then try again."
+                    )
+                    self.accept()
+                    return
+
             msg = f"Created {len(created_files)} workflow files in:\n{workflow_folder}\n\n"
             msg += "Would you like to execute them now?"
 
@@ -731,6 +781,70 @@ class TileCollectionDialog(QDialog):
                 self._execute_workflows(created_files)
 
         self.accept()
+
+    def _validate_tiff_size(self, workflow_files: List[Path]) -> Optional[str]:
+        """Validate TIFF file size for workflow files.
+
+        Checks if the workflow parameters would produce TIFF files
+        that exceed the 4GB standard TIFF limit.
+
+        Args:
+            workflow_files: List of workflow file paths to validate
+
+        Returns:
+            Warning message if size exceeds limit, None if OK
+        """
+        if not workflow_files:
+            return None
+
+        # Parse the first workflow file to get parameters
+        estimate = parse_workflow_file(workflow_files[0])
+        if estimate is None:
+            # Couldn't parse - fall back to current panel settings
+            camera_settings = self._camera_panel.get_settings()
+            stack_settings = self._zstack_panel.get_settings()
+
+            # Get Z range from panel
+            z_range_mm = stack_settings.get('z_range_mm', 4.0)
+            z_step_um = stack_settings.get('z_step_um', 2.5)
+
+            estimate = validate_workflow_params(
+                z_range_mm=z_range_mm,
+                z_step_um=z_step_um,
+                image_width=camera_settings.get('aoi_width', 2048),
+                image_height=camera_settings.get('aoi_height', 2048),
+                bytes_per_pixel=2
+            )
+
+        if estimate.exceeds_limit:
+            logger.warning(
+                f"TIFF size warning: {estimate.num_planes} planes = "
+                f"{estimate.estimated_gb:.2f} GB (exceeds 4GB limit)"
+            )
+
+            # Get recommended settings
+            camera_settings = self._camera_panel.get_settings()
+            max_planes, min_step_um = get_recommended_planes(
+                z_range_mm=abs(estimate.num_planes * 0.0025),  # Estimate from num_planes
+                image_width=camera_settings.get('aoi_width', 2048),
+                image_height=camera_settings.get('aoi_height', 2048)
+            )
+
+            warning_msg = (
+                f"TIFF FILE SIZE LIMIT WARNING\n\n"
+                f"Your workflow will create TIFF files of approximately "
+                f"{estimate.estimated_gb:.2f} GB, which exceeds the 4GB limit.\n\n"
+                f"Current settings:\n"
+                f"  - Number of planes: {estimate.num_planes:,}\n"
+                f"  - Image size: {estimate.image_width}x{estimate.image_height}\n"
+                f"  - Estimated size: {estimate.estimated_gb:.2f} GB\n\n"
+                f"The acquisition will FAIL after approximately {estimate.max_safe_planes:,} planes.\n\n"
+                f"Recommendation: Reduce to ≤{estimate.max_safe_planes:,} planes or split into "
+                f"multiple smaller acquisitions."
+            )
+            return warning_msg
+
+        return None
 
     def _build_workflow_text(self, name: str, position: Position,
                              illumination_list: List, save_settings: dict,

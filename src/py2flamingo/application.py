@@ -390,6 +390,13 @@ class FlamingoApplication(QObject):
             )
             self.logger.debug("Connected workflow view to position controller")
 
+        # Connect workflow view to preset service for "Load Saved Position" dropdowns
+        if hasattr(self.workflow_view, 'set_preset_service') and self.position_controller:
+            self.workflow_view.set_preset_service(
+                self.position_controller.preset_service
+            )
+            self.logger.debug("Connected workflow view to position preset service")
+
         # Connect workflow view to connection state for enable/disable
         if hasattr(self.connection_view, 'connection_established') and hasattr(self.workflow_view, 'update_for_connection_state'):
             self.connection_view.connection_established.connect(

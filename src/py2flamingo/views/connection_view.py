@@ -921,7 +921,7 @@ class ConnectionView(QWidget):
             self._logger.warning(f"Could not save test workflow: {e}")
 
         # Get workflow service
-        if not self._app or not hasattr(self._app, 'workflow_service'):
+        if not self._workflow_service:
             self._show_message("Workflow service not available", is_error=True)
             return
 

@@ -243,3 +243,82 @@ class TilingPanel(QWidget):
         scan_y_um = self._tile_size_um + (tiles_y - 1) * effective_tile_y
 
         return (scan_x_um / 1000.0, scan_y_um / 1000.0)
+
+    # =========================================================================
+    # Two-Point Mode (for DualPositionPanel integration)
+    # =========================================================================
+
+    def set_two_point_mode(self, enabled: bool) -> None:
+        """
+        Enable two-point mode where tile count comes from DualPositionPanel.
+
+        In two-point mode:
+        - Tiles X/Y are auto-calculated from position range and overlap
+        - User sets corner positions in DualPositionPanel
+        - Panel shows calculated tile counts (read-only)
+
+        Args:
+            enabled: True to enable two-point mode
+        """
+        if enabled:
+            # Make tiles X/Y read-only
+            self._tiles_x.setReadOnly(True)
+            self._tiles_y.setReadOnly(True)
+            self._tiles_x.setStyleSheet("QSpinBox { background-color: #f0f0f0; }")
+            self._tiles_y.setStyleSheet("QSpinBox { background-color: #f0f0f0; }")
+            self._tiles_x.setToolTip("Auto-calculated from Position A/B corners")
+            self._tiles_y.setToolTip("Auto-calculated from Position A/B corners")
+        else:
+            # Return to manual mode
+            self._tiles_x.setReadOnly(False)
+            self._tiles_y.setReadOnly(False)
+            self._tiles_x.setStyleSheet("")
+            self._tiles_y.setStyleSheet("")
+            self._tiles_x.setToolTip("")
+            self._tiles_y.setToolTip("")
+
+    def set_from_positions(self, x_min: float, x_max: float,
+                           y_min: float, y_max: float) -> None:
+        """
+        Calculate tile grid from DualPositionPanel positions.
+
+        Called when Position A or B XY values change in two-point mode.
+        Calculates number of tiles needed to cover the area with current overlap.
+
+        Args:
+            x_min: Minimum X position in mm
+            x_max: Maximum X position in mm
+            y_min: Minimum Y position in mm
+            y_max: Maximum Y position in mm
+        """
+        x_range_mm = abs(x_max - x_min)
+        y_range_mm = abs(y_max - y_min)
+
+        # FOV is tile size (from camera)
+        fov_mm = self._tile_size_um / 1000.0
+        overlap_factor = 1.0 - self._overlap.value() / 100.0
+        effective_step = fov_mm * overlap_factor
+
+        # Calculate tiles needed to cover range
+        # Formula: tiles = ceil(range / effective_step) + 1
+        # But at minimum we need 1 tile
+        if effective_step > 0:
+            tiles_x = max(1, int(x_range_mm / effective_step) + 1)
+            tiles_y = max(1, int(y_range_mm / effective_step) + 1)
+        else:
+            tiles_x = 1
+            tiles_y = 1
+
+        # Update spinboxes
+        self._tiles_x.blockSignals(True)
+        self._tiles_y.blockSignals(True)
+        self._tiles_x.setValue(tiles_x)
+        self._tiles_y.setValue(tiles_y)
+        self._tiles_x.blockSignals(False)
+        self._tiles_y.blockSignals(False)
+
+        self._update_calculations()
+
+        self._logger.debug(f"Tiles from positions: X range={x_range_mm:.2f}mm -> {tiles_x} tiles, "
+                          f"Y range={y_range_mm:.2f}mm -> {tiles_y} tiles "
+                          f"(FOV={fov_mm:.2f}mm, overlap={self._overlap.value():.1f}%)")

@@ -21,13 +21,17 @@ from PyQt5.QtCore import Qt, pyqtSignal
 
 from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR, SUCCESS_BG, WARNING_BG
 from py2flamingo.views.workflow_panels import (
-    PositionPanel, IlluminationPanel, CameraPanel, SavePanel, ZStackPanel,
+    IlluminationPanel, CameraPanel, SavePanel, ZStackPanel,
     TimeLapsePanel, TilingPanel, MultiAnglePanel
 )
+from py2flamingo.views.workflow_panels.dual_position_panel import DualPositionPanel
 from py2flamingo.models.data.workflow import (
     WorkflowType, Workflow, IlluminationSettings, StackSettings
 )
 from py2flamingo.models.microscope import Position
+from py2flamingo.services.tiff_size_validator import (
+    validate_workflow_params, calculate_tiff_size, TiffSizeEstimate
+)
 
 
 # Workflow type definitions with descriptions
@@ -97,8 +101,10 @@ class WorkflowView(QWidget):
         type_group = self._create_type_selection()
         main_layout.addWidget(type_group)
 
-        # 2. Position Panel (always visible)
-        self._position_panel = PositionPanel()
+        # 2. Dual Position Panel (Position A and B with mode switching)
+        self._position_panel = DualPositionPanel()
+        self._position_panel.position_a_changed.connect(self._on_position_changed)
+        self._position_panel.position_b_changed.connect(self._on_position_changed)
         main_layout.addWidget(self._position_panel)
 
         # 3. Settings Sub-Tabs
@@ -342,6 +348,9 @@ class WorkflowView(QWidget):
         # Apply visibility matrix based on workflow type
         self._apply_visibility_matrix(workflow_type)
 
+        # Configure DualPositionPanel mode and two-point calculations
+        self._configure_two_point_mode(workflow_type)
+
         self.workflow_type_changed.emit(workflow_type.value)
         self._logger.info(f"Workflow type changed to: {name}")
 
@@ -377,6 +386,80 @@ class WorkflowView(QWidget):
         # Tile settings: only when Tile type selected
         show_tiles = workflow_type == WorkflowType.TILE
         self._zstack_panel.set_tile_settings_visible(show_tiles)
+
+    def _configure_two_point_mode(self, workflow_type: WorkflowType) -> None:
+        """
+        Configure DualPositionPanel mode and two-point calculations.
+
+        Sets the position panel mode and enables/disables two-point mode
+        on ZStackPanel and TilingPanel based on workflow type.
+
+        Args:
+            workflow_type: The selected workflow type
+        """
+        if workflow_type == WorkflowType.SNAPSHOT:
+            # Snapshot: Position B hidden, no two-point mode
+            self._position_panel.set_mode("snapshot")
+            self._zstack_panel.set_two_point_mode(False)
+            self._tiling_panel.set_two_point_mode(False)
+
+        elif workflow_type == WorkflowType.ZSTACK:
+            # Z-Stack: Position B shows only Z, two-point mode for Z-stack
+            self._position_panel.set_mode("zstack")
+            self._zstack_panel.set_two_point_mode(True)
+            self._tiling_panel.set_two_point_mode(False)
+            # Update Z-stack panel with current positions
+            self._update_zstack_from_positions()
+
+        elif workflow_type == WorkflowType.TILE:
+            # Tiling: Position B shows X, Y, Z, two-point mode for both
+            self._position_panel.set_mode("tiling")
+            self._zstack_panel.set_two_point_mode(True)
+            self._tiling_panel.set_two_point_mode(True)
+            # Update both panels with current positions
+            self._update_tiling_from_positions()
+
+        elif workflow_type == WorkflowType.TIME_LAPSE:
+            # Time-Lapse: Same as snapshot (single position)
+            self._position_panel.set_mode("snapshot")
+            self._zstack_panel.set_two_point_mode(False)
+            self._tiling_panel.set_two_point_mode(False)
+
+        elif workflow_type == WorkflowType.MULTI_ANGLE:
+            # Multi-Angle: Same as Z-stack (uses Z range)
+            self._position_panel.set_mode("zstack")
+            self._zstack_panel.set_two_point_mode(True)
+            self._tiling_panel.set_two_point_mode(False)
+            self._update_zstack_from_positions()
+
+    def _on_position_changed(self, position) -> None:
+        """
+        Handle position A or B change from DualPositionPanel.
+
+        Updates ZStackPanel and TilingPanel based on current mode.
+
+        Args:
+            position: The changed Position object
+        """
+        if self._current_type == WorkflowType.ZSTACK:
+            self._update_zstack_from_positions()
+        elif self._current_type == WorkflowType.TILE:
+            self._update_tiling_from_positions()
+        elif self._current_type == WorkflowType.MULTI_ANGLE:
+            self._update_zstack_from_positions()
+
+    def _update_zstack_from_positions(self) -> None:
+        """Update Z-stack panel from dual position Z values."""
+        z_min, z_max = self._position_panel.get_z_range()
+        self._zstack_panel.set_z_range_from_positions(z_min, z_max)
+
+    def _update_tiling_from_positions(self) -> None:
+        """Update tiling and z-stack panels from dual position values."""
+        x_min, x_max, y_min, y_max = self._position_panel.get_xy_range()
+        z_min, z_max = self._position_panel.get_z_range()
+
+        self._tiling_panel.set_from_positions(x_min, x_max, y_min, y_max)
+        self._zstack_panel.set_z_range_from_positions(z_min, z_max)
 
     def _on_camera_settings_changed(self, settings: dict) -> None:
         """Handle camera settings change - update Z velocity calculation."""
@@ -427,11 +510,14 @@ class WorkflowView(QWidget):
         """
         Build Workflow object from current UI state.
 
+        Uses DualPositionPanel for start and end positions based on workflow type.
+
         Returns:
             Configured Workflow object
         """
-        # Get settings from panels
-        position = self._position_panel.get_position()
+        # Get positions from DualPositionPanel
+        position_a = self._position_panel.get_position_a()  # Start position
+        position_b = self._position_panel.get_position_b()  # End position
         illumination_settings = self._illumination_panel.get_settings()
         camera_settings = self._camera_panel.get_settings()
         save_settings = self._save_panel.get_settings()
@@ -453,14 +539,15 @@ class WorkflowView(QWidget):
         stack_settings = None
         tile_settings = None
         time_lapse_settings = None
-        end_position = position  # Default: same as start
+        start_position = position_a
+        end_position = position_a  # Default: same as start
 
         if self._current_type == WorkflowType.ZSTACK:
             stack_settings = self._zstack_panel.get_settings()
-            z_range_mm = self._zstack_panel.get_z_range_mm()
+            # End position uses Z from Position B, but X/Y/R from Position A
             end_position = Position(
-                x=position.x, y=position.y,
-                z=position.z + z_range_mm, r=position.r
+                x=position_a.x, y=position_a.y,
+                z=position_b.z, r=position_a.r
             )
 
         elif self._current_type == WorkflowType.TIME_LAPSE:
@@ -468,17 +555,26 @@ class WorkflowView(QWidget):
 
         elif self._current_type == WorkflowType.TILE:
             tile_settings = self._tiling_panel.get_settings()
-            scan_x_mm, scan_y_mm = self._tiling_panel.get_scan_area_mm()
+            stack_settings = self._zstack_panel.get_settings()  # Z-stack at each tile
+            # End position uses X/Y/Z from Position B
             end_position = Position(
-                x=position.x + scan_x_mm, y=position.y + scan_y_mm,
-                z=position.z, r=position.r
+                x=position_b.x, y=position_b.y,
+                z=position_b.z, r=position_a.r
+            )
+
+        elif self._current_type == WorkflowType.MULTI_ANGLE:
+            stack_settings = self._zstack_panel.get_settings()
+            # End position uses Z from Position B (for Z range in multi-angle)
+            end_position = Position(
+                x=position_a.x, y=position_a.y,
+                z=position_b.z, r=position_a.r
             )
 
         # Create workflow with all required settings at once (validation in __post_init__)
         workflow = Workflow(
             workflow_type=self._current_type,
             name=f"{self._current_type.value.capitalize()} Workflow",
-            start_position=position,
+            start_position=start_position,
             end_position=end_position,
             illumination=illumination,
             stack_settings=stack_settings,
@@ -513,6 +609,11 @@ class WorkflowView(QWidget):
                 errors.append("Number of planes must be at least 1")
             elif workflow.stack_settings.z_step_um <= 0:
                 errors.append("Z step must be positive")
+            else:
+                # Validate TIFF size for Z-stack workflows
+                tiff_warning = self._check_tiff_size_limit(workflow)
+                if tiff_warning:
+                    errors.append(tiff_warning)
 
         elif workflow.workflow_type == WorkflowType.TIME_LAPSE:
             settings = self._timelapse_panel.get_settings()
@@ -540,6 +641,48 @@ class WorkflowView(QWidget):
                 errors.append("Save directory not specified")
 
         return errors
+
+    def _check_tiff_size_limit(self, workflow: Workflow) -> Optional[str]:
+        """
+        Check if workflow would exceed TIFF 4GB file size limit.
+
+        Args:
+            workflow: Workflow to check
+
+        Returns:
+            Warning message if size exceeds limit, None if OK
+        """
+        if workflow.workflow_type != WorkflowType.ZSTACK:
+            return None
+
+        if workflow.stack_settings is None:
+            return None
+
+        # Get camera settings for image dimensions
+        camera_settings = self._camera_panel.get_settings()
+        image_width = camera_settings.get('aoi_width', 2048)
+        image_height = camera_settings.get('aoi_height', 2048)
+
+        # Calculate expected TIFF size
+        estimate = calculate_tiff_size(
+            num_planes=workflow.stack_settings.num_planes,
+            image_width=image_width,
+            image_height=image_height,
+            bytes_per_pixel=2  # 16-bit images
+        )
+
+        if estimate.exceeds_limit:
+            self._logger.warning(
+                f"TIFF size limit exceeded: {estimate.num_planes} planes = "
+                f"{estimate.estimated_gb:.2f} GB"
+            )
+            return (
+                f"TIFF FILE SIZE LIMIT: {estimate.num_planes:,} planes at "
+                f"{image_width}x{image_height} = {estimate.estimated_gb:.2f} GB "
+                f"(exceeds 4GB limit). Maximum safe: {estimate.max_safe_planes:,} planes."
+            )
+
+        return None
 
     def _set_running_state(self, running: bool) -> None:
         """Update UI for running/stopped state."""
@@ -616,6 +759,19 @@ class WorkflowView(QWidget):
         """Set callback for getting current position."""
         self._position_panel.set_position_callback(callback)
 
+    def set_preset_service(self, preset_service) -> None:
+        """
+        Set the preset service for loading saved positions.
+
+        Args:
+            preset_service: PositionPresetService instance
+        """
+        self._position_panel.set_preset_service(preset_service)
+
+    def refresh_position_presets(self) -> None:
+        """Refresh the saved position preset lists."""
+        self._position_panel.refresh_preset_lists()
+
     def update_for_connection_state(self, connected: bool) -> None:
         """Update view based on connection state."""
         self._start_btn.setEnabled(connected)
@@ -634,10 +790,13 @@ class WorkflowView(QWidget):
         """
         Get complete workflow configuration as dictionary.
 
+        Uses DualPositionPanel positions for start and end positions.
+
         Returns:
             Dictionary suitable for workflow file generation
         """
-        position = self._position_panel.get_position()
+        position_a = self._position_panel.get_position_a()  # Start position
+        position_b = self._position_panel.get_position_b()  # End position
         illumination = self._illumination_panel.get_workflow_illumination_dict()
         illumination_options = self._illumination_panel.get_workflow_illumination_options_dict()
         camera = self._camera_panel.get_settings()
@@ -646,7 +805,7 @@ class WorkflowView(QWidget):
         # Build experiment settings
         experiment_settings = {
             **save,
-            'Plane spacing (um)': self._zstack_panel._z_step.value() if self._current_type == WorkflowType.ZSTACK else 1.0,
+            'Plane spacing (um)': self._zstack_panel._z_step.value() if self._current_type in (WorkflowType.ZSTACK, WorkflowType.TILE, WorkflowType.MULTI_ANGLE) else 1.0,
             'Frame rate (f/s)': camera['frame_rate'],
             'Exposure time (us)': camera['exposure_us'],
         }
@@ -670,10 +829,10 @@ class WorkflowView(QWidget):
                 'AOI height': camera['aoi_height'],
             },
             'Start Position': {
-                'X (mm)': position.x,
-                'Y (mm)': position.y,
-                'Z (mm)': position.z,
-                'Angle (degrees)': position.r,
+                'X (mm)': position_a.x,
+                'Y (mm)': position_a.y,
+                'Z (mm)': position_a.z,
+                'Angle (degrees)': position_a.r,
             },
             'Illumination Source': illumination,
             'Illumination Options': illumination_options,
@@ -695,24 +854,33 @@ class WorkflowView(QWidget):
 
         workflow_dict['Stack Settings'] = stack_dict
 
-        # Calculate end position
+        # Calculate end position based on workflow type using DualPositionPanel values
         if self._current_type == WorkflowType.ZSTACK:
-            z_range_mm = self._zstack_panel.get_z_range_mm()
+            # Z-Stack: X/Y/R from A, Z from B
             workflow_dict['End Position'] = {
-                'X (mm)': position.x,
-                'Y (mm)': position.y,
-                'Z (mm)': position.z + z_range_mm,
-                'Angle (degrees)': position.r,
+                'X (mm)': position_a.x,
+                'Y (mm)': position_a.y,
+                'Z (mm)': position_b.z,
+                'Angle (degrees)': position_a.r,
             }
         elif self._current_type == WorkflowType.TILE:
-            scan_x_mm, scan_y_mm = self._tiling_panel.get_scan_area_mm()
+            # Tiling: X/Y/Z from B, R from A
             workflow_dict['End Position'] = {
-                'X (mm)': position.x + scan_x_mm,
-                'Y (mm)': position.y + scan_y_mm,
-                'Z (mm)': position.z,
-                'Angle (degrees)': position.r,
+                'X (mm)': position_b.x,
+                'Y (mm)': position_b.y,
+                'Z (mm)': position_b.z,
+                'Angle (degrees)': position_a.r,
+            }
+        elif self._current_type == WorkflowType.MULTI_ANGLE:
+            # Multi-Angle: X/Y/R from A, Z from B
+            workflow_dict['End Position'] = {
+                'X (mm)': position_a.x,
+                'Y (mm)': position_a.y,
+                'Z (mm)': position_b.z,
+                'Angle (degrees)': position_a.r,
             }
         else:
+            # Snapshot, Time-Lapse: same as start
             workflow_dict['End Position'] = workflow_dict['Start Position'].copy()
 
         return workflow_dict
@@ -818,7 +986,16 @@ class WorkflowView(QWidget):
             # Apply settings to each panel
             if 'Start Position' in workflow_dict:
                 pos = workflow_dict['Start Position']
-                self._position_panel.set_position(Position(
+                self._position_panel.set_position_a(Position(
+                    x=float(pos.get('X (mm)', 0)),
+                    y=float(pos.get('Y (mm)', 0)),
+                    z=float(pos.get('Z (mm)', 0)),
+                    r=float(pos.get('Angle (degrees)', 0))
+                ))
+
+            if 'End Position' in workflow_dict:
+                pos = workflow_dict['End Position']
+                self._position_panel.set_position_b(Position(
                     x=float(pos.get('X (mm)', 0)),
                     y=float(pos.get('Y (mm)', 0)),
                     z=float(pos.get('Z (mm)', 0)),

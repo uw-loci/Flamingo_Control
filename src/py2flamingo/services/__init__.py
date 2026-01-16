@@ -35,6 +35,10 @@ from .image_acquisition_service import ImageAcquisitionService
 from .workflow_template_service import WorkflowTemplateService
 from .acquisition_timing_service import AcquisitionTimingService
 from .workflow_queue_service import WorkflowQueueService
+from .tiff_size_validator import (
+    calculate_tiff_size, validate_workflow_params, parse_workflow_file,
+    get_recommended_planes, TiffSizeEstimate, TIFF_4GB_LIMIT
+)
 
 # Legacy services (require numpy/scipy) - import with try/except
 try:
@@ -70,6 +74,13 @@ __all__ = [
     'WorkflowTemplateService',
     'AcquisitionTimingService',
     'WorkflowQueueService',
+    # TIFF size validation
+    'calculate_tiff_size',
+    'validate_workflow_params',
+    'parse_workflow_file',
+    'get_recommended_planes',
+    'TiffSizeEstimate',
+    'TIFF_4GB_LIMIT',
     # Legacy services (may be None if numpy/scipy not installed)
     'WorkflowService',
     'SampleSearchService',

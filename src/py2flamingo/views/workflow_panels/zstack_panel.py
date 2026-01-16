@@ -786,3 +786,68 @@ class ZStackPanel(QWidget):
 
         # Update calculations with restored values
         self._update_calculations()
+
+    # =========================================================================
+    # Two-Point Mode (for DualPositionPanel integration)
+    # =========================================================================
+
+    def set_two_point_mode(self, enabled: bool) -> None:
+        """
+        Enable two-point mode where Z range comes from DualPositionPanel.
+
+        In two-point mode:
+        - Number of planes is auto-calculated from Z range and Z step
+        - User sets Z positions in DualPositionPanel
+        - Panel shows calculated num_planes (read-only)
+
+        Args:
+            enabled: True to enable two-point mode
+        """
+        self._auto_num_planes = enabled
+
+        if enabled:
+            # Show auto checkbox and enable auto mode
+            self._auto_num_planes_checkbox.setVisible(True)
+            self._auto_num_planes_checkbox.setChecked(True)
+            self._num_planes.setReadOnly(True)
+            self._num_planes.setStyleSheet("QSpinBox { background-color: #f0f0f0; }")
+            self._num_planes.setToolTip("Auto-calculated from Position A/B Z values and Z step")
+        else:
+            # Return to manual mode
+            self._auto_num_planes_checkbox.setVisible(False)
+            self._auto_num_planes_checkbox.setChecked(False)
+            self._num_planes.setReadOnly(False)
+            self._num_planes.setStyleSheet("")
+            self._num_planes.setToolTip("")
+            self._z_range_mm = None
+
+        self._update_calculations()
+
+    def set_z_range_from_positions(self, z_min_mm: float, z_max_mm: float) -> None:
+        """
+        Set Z range from DualPositionPanel positions.
+
+        Called when Position A or B Z values change in two-point mode.
+        Calculates number of planes from the Z range and current Z step.
+
+        Args:
+            z_min_mm: Minimum Z position in mm
+            z_max_mm: Maximum Z position in mm
+        """
+        z_range_mm = abs(z_max_mm - z_min_mm)
+        self._z_range_mm = z_range_mm
+
+        # Calculate number of planes
+        z_step_mm = self._z_step.value() / 1000.0  # um to mm
+        if z_step_mm > 0:
+            num_planes = max(1, math.ceil(z_range_mm / z_step_mm) + 1)
+
+            self._updating = True
+            self._num_planes.setValue(num_planes)
+            self._updating = False
+
+        # Update Z range display
+        self._update_calculations()
+
+        self._logger.debug(f"Z range from positions: {z_range_mm:.3f} mm, "
+                          f"{self._num_planes.value()} planes at {self._z_step.value():.1f} um step")

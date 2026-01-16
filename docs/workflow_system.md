@@ -3,7 +3,7 @@
 Comprehensive documentation of the Flamingo microscope workflow system, including file formats,
 parameter calculations, UI inputs, and execution flow.
 
-**Last Updated:** 2026-01-05
+**Last Updated:** 2026-01-15
 
 ---
 
@@ -18,6 +18,9 @@ parameter calculations, UI inputs, and execution flow.
 7. [Stage-Camera Synchronization](#stage-camera-synchronization)
 8. [Z-Stack Acquisition Modes](#z-stack-acquisition-modes)
 9. [System Limits and Constraints](#system-limits-and-constraints)
+   - [TIFF File Size Limit (4GB)](#tiff-file-size-limit-critical)
+10. [Workflow Completion Detection](#workflow-completion-detection)
+11. [Two-Point Position UI](#two-point-position-ui)
 
 ---
 
@@ -288,14 +291,23 @@ The "Check Stack" button triggers validation and calculation:
 | Camera 1 Percentage | SpinBox | 0-100% | No |
 | Camera 1 Mode | ComboBox | Full/Front/Back/None | No |
 
-### Position Panel (`position_panel.py`)
+### Dual Position Panel (`dual_position_panel.py`)
 
-| Field | Type | Range |
-|-------|------|-------|
-| X Position | SpinBox | -50.0 to 50.0 mm |
-| Y Position | SpinBox | -50.0 to 50.0 mm |
-| Z Position | SpinBox | 0.0 to 30.0 mm |
-| R Position | SpinBox | 0.0 to 360.0° |
+Provides two-point position input with mode-dependent field visibility.
+
+| Field | Position A | Position B |
+|-------|------------|------------|
+| X Position | SpinBox -50.0 to 50.0 mm | Mode-dependent |
+| Y Position | SpinBox -50.0 to 50.0 mm | Mode-dependent |
+| Z Position | SpinBox 0.0 to 30.0 mm | Always editable |
+| R Position | SpinBox 0.0 to 360.0° | Always greyed |
+| Use Current | Button | Button |
+| Load Saved | ComboBox (presets) | ComboBox (presets) |
+
+**Modes:**
+- **snapshot**: Position B hidden
+- **zstack**: Position B shows Z only
+- **tiling**: Position B shows X, Y, Z
 
 ### Illumination Panel (`illumination_panel.py`)
 
@@ -504,6 +516,155 @@ Z velocity is auto-calculated when:
 
 The `checkZVelocity()` function clamps velocity to system limits and logs warnings if adjustments are needed.
 
+### TIFF File Size Limit (CRITICAL)
+
+**Standard TIFF files are limited to 4GB (4,294,967,296 bytes)** due to 32-bit file offsets.
+Workflows that exceed this limit will FAIL during acquisition.
+
+| Image Size | Bytes/Image | Max Safe Planes | Max Z-Range @ 2.5µm |
+|------------|-------------|-----------------|---------------------|
+| 2048×2048 | 8 MB | ~480 | 1.2 mm |
+| 1024×1024 | 2 MB | ~1,920 | 4.8 mm |
+| 4096×4096 | 32 MB | ~120 | 0.3 mm |
+
+**Calculation:**
+```python
+image_bytes = width × height × 2  # 16-bit = 2 bytes/pixel
+max_planes = 4,294,967,296 ÷ image_bytes × 0.95  # 5% safety margin
+```
+
+**Symptoms of exceeding limit:**
+- Server log: `Bytes written not equal to buffer size (-1, 8388608)`
+- Server log: `system fault detected, disk full, stopping experiment`
+- Acquisition stops after ~500 planes for 2048×2048 images
+- "Disk full" error despite terabytes of free space
+
+**Pre-flight Validation:**
+Python validates TIFF size before workflow execution:
+```python
+from py2flamingo.services.tiff_size_validator import validate_workflow_params
+
+estimate = validate_workflow_params(
+    z_range_mm=4.0,
+    z_step_um=2.5,
+    image_width=2048,
+    image_height=2048
+)
+
+if estimate.exceeds_limit:
+    print(f"WARNING: {estimate.num_planes} planes = {estimate.estimated_gb:.1f} GB")
+    print(f"Max safe planes: {estimate.max_safe_planes}")
+```
+
+**Solutions:**
+1. Reduce Z-range to stay under ~1.2mm for 2048×2048
+2. Increase Z step size (fewer planes)
+3. Use camera binning/smaller AOI
+4. Split acquisition into multiple smaller Z-stacks
+
+---
+
+## Workflow Completion Detection
+
+### Callback-Based Detection (Recommended)
+
+The C++ GUI uses callback-based completion detection. When a workflow finishes, the server
+sends a `CAMERA_STACK_COMPLETE` (0x3011) callback containing completion data.
+
+**Callback Message Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `int32Data0` | int | Images acquired |
+| `int32Data1` | int | Images expected |
+| `int32Data2` | int | Error count |
+| `doubleData` | double | Acquisition time (microseconds) |
+
+**Progress Callbacks:**
+| Code | Name | Description |
+|------|------|-------------|
+| `0x3011` | CAMERA_STACK_COMPLETE | Workflow finished |
+| `0x9004` | UI_SET_GAUGE_VALUE | Progress bar update (images acquired/expected) |
+| `0x9008` | UI_IMAGES_SAVED_TO_STORAGE | Images written to disk notification |
+
+**Implementation:**
+```python
+# Register for completion callback
+connection_service.register_callback(0x3011, on_stack_complete)
+
+def on_stack_complete(message):
+    acquired = message.int32_data0
+    expected = message.int32_data1
+    errors = message.int32_data2
+    time_us = message.double_data
+    # Workflow completed!
+```
+
+### Polling-Based Detection (Fallback)
+
+If callbacks are not available, poll `SYSTEM_STATE_GET` (0xa007):
+- Returns state 0 = IDLE (workflow complete)
+- Returns state 1 = BUSY (workflow running)
+- Poll interval: 10 seconds recommended
+
+**Note:** Excessive polling can cause server issues. Prefer callback-based detection.
+
+---
+
+## Two-Point Position UI
+
+### Overview
+
+The DualPositionPanel provides an intuitive "pick two points" interface for defining workflow
+regions. Instead of entering abstract parameters (number of planes, step size), users define
+**Point A** (start) and **Point B** (end) - the system calculates everything else.
+
+### DualPositionPanel (`dual_position_panel.py`)
+
+| Field | Position A | Position B (varies by mode) |
+|-------|------------|----------------------------|
+| X (mm) | Always editable | Editable (Tiling), Greyed (Z-Stack) |
+| Y (mm) | Always editable | Editable (Tiling), Greyed (Z-Stack) |
+| Z (mm) | Always editable | Always editable |
+| R (deg) | Always editable | Greyed (all modes) |
+
+**Modes:**
+- **Snapshot**: Position B hidden
+- **Z-Stack**: Position B shows Z only (X, Y, R greyed out)
+- **Tiling**: Position B shows X, Y, Z (R greyed out)
+
+### Position Sources
+
+Each position can be set via:
+1. **Manual entry** - Type values directly
+2. **Use Current** button - Capture current hardware position
+3. **Load Saved** dropdown - Load from saved position presets
+
+### Auto-Calculation
+
+When positions change, panels auto-calculate:
+
+| Panel | Calculated From | Formula |
+|-------|-----------------|---------|
+| ZStackPanel | Z range (Z_A to Z_B) | `num_planes = ceil(z_range / z_step) + 1` |
+| TilingPanel | XY range (A to B corners) | `tiles = ceil(range / (fov * (1 - overlap)))` |
+
+### Integration
+
+```python
+# In WorkflowView
+self._position_panel = DualPositionPanel()
+self._position_panel.position_a_changed.connect(self._on_position_changed)
+self._position_panel.position_b_changed.connect(self._on_position_changed)
+
+def _on_position_changed(self, position):
+    if self._current_type == WorkflowType.ZSTACK:
+        z_min, z_max = self._position_panel.get_z_range()
+        self._zstack_panel.set_z_range_from_positions(z_min, z_max)
+    elif self._current_type == WorkflowType.TILE:
+        x_min, x_max, y_min, y_max = self._position_panel.get_xy_range()
+        self._tiling_panel.set_from_positions(x_min, x_max, y_min, y_max)
+```
+
 ---
 
 ## Key Source Files
@@ -526,10 +687,17 @@ The `checkZVelocity()` function clamps velocity to system limits and logs warnin
 
 | File | Purpose |
 |------|---------|
+| `views/workflow_panels/dual_position_panel.py` | Two-point position UI with mode switching |
 | `views/workflow_panels/zstack_panel.py` | Z-Stack UI configuration |
+| `views/workflow_panels/tiling_panel.py` | Tiling/mosaic UI configuration |
 | `views/workflow_panels/camera_panel.py` | Camera settings UI |
 | `views/workflow_panels/illumination_panel.py` | Laser/LED UI |
 | `views/workflow_panels/save_panel.py` | Save settings UI |
+| `views/workflow_view.py` | Main workflow builder UI |
+| `services/workflow_queue_service.py` | Sequential workflow execution with callbacks |
+| `services/connection_service.py` | TCP connection and callback registration |
+| `services/position_preset_service.py` | Saved position presets |
+| `core/command_codes.py` | Command codes including STACK_COMPLETE |
 | `utils/workflow_parser.py` | Parse workflow files |
 | `utils/file_handlers.py` | Read/write workflow files |
 | `workflows/workflow_repository.py` | Load/save all formats |
