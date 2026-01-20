@@ -101,6 +101,11 @@ class WorkflowQueueService(QObject):
     # Minimum wait between workflows (seconds) - ensures system settles
     MIN_INTER_WORKFLOW_DELAY = 1.0
 
+    # Minimum time before accepting completion signal (seconds)
+    # This prevents race condition where SYSTEM_STATE_IDLE arrives before
+    # the workflow actually starts executing on the server
+    MIN_WORKFLOW_EXECUTION_TIME = 2.0
+
     def __init__(self,
                  workflow_controller: 'WorkflowController',
                  connection_service: Optional['MVCConnectionService'] = None,
@@ -128,6 +133,7 @@ class WorkflowQueueService(QObject):
         # Completion detection
         self._completion_event = threading.Event()
         self._completion_data: Optional[Dict] = None
+        self._workflow_start_time: float = 0.0  # Time when workflow was started
 
         # Execution thread
         self._execution_thread: Optional[threading.Thread] = None
@@ -242,9 +248,20 @@ class WorkflowQueueService(QObject):
         This is the PRIMARY signal that a workflow has completed.
         The server sends this when it transitions back to idle state.
 
+        We only accept this signal if enough time has passed since the workflow
+        started, to avoid catching stale idle states from before execution began.
+
         Args:
             message: ParsedMessage (may not contain useful data)
         """
+        elapsed = time.time() - self._workflow_start_time
+
+        # Ignore early idle signals - these are likely from before the workflow started
+        if elapsed < self.MIN_WORKFLOW_EXECUTION_TIME:
+            logger.warning(f"[QUEUE] Ignoring early SYSTEM_STATE_IDLE callback "
+                          f"(only {elapsed:.1f}s since start, need {self.MIN_WORKFLOW_EXECUTION_TIME}s)")
+            return
+
         logger.info(f"[QUEUE] Received SYSTEM_STATE_IDLE callback - workflow complete!")
 
         # Signal completion - this is the definitive completion signal
@@ -453,6 +470,7 @@ class WorkflowQueueService(QObject):
 
         # Start the workflow
         logger.info(f"[QUEUE] Starting workflow execution...")
+        self._workflow_start_time = time.time()  # Record start time for early-idle filtering
         success, msg = self._workflow_controller.start_workflow()
         if not success:
             logger.error(f"[QUEUE] Start failed: {msg}")
