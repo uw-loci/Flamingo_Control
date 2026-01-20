@@ -689,7 +689,11 @@ class TileCollectionDialog(QDialog):
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)
 
-        # Create workflows
+        # Create workflows with per-tile save directories
+        # Directory structure: base_directory/date/X{x}_Y{y}/
+        base_save_directory = save_settings['save_directory']
+        date_folder = datetime.now().strftime("%Y-%m-%d")
+
         created_files = []
         for i, (tile, rotation, z_min, z_max) in enumerate(tiles_to_process):
             if progress.wasCanceled():
@@ -701,12 +705,20 @@ class TileCollectionDialog(QDialog):
             # Create workflow name
             workflow_name = f"{name_prefix}_R{rotation:.0f}_X{tile.x:.2f}_Y{tile.y:.2f}"
 
+            # Create per-tile save directory: base/date/X{x}_Y{y}/
+            tile_folder = f"X{tile.x:.2f}_Y{tile.y:.2f}"
+            tile_save_directory = f"{base_save_directory}/{date_folder}/{tile_folder}"
+
+            # Create a copy of save_settings with the tile-specific directory
+            tile_save_settings = save_settings.copy()
+            tile_save_settings['save_directory'] = tile_save_directory
+
             # Create position
             position = Position(x=tile.x, y=tile.y, z=tile.z, r=rotation)
 
-            # Build workflow text with per-tile Z range
+            # Build workflow text with per-tile Z range and per-tile save directory
             workflow_text = self._build_workflow_text(
-                workflow_name, position, illumination_list, save_settings, z_min, z_max
+                workflow_name, position, illumination_list, tile_save_settings, z_min, z_max
             )
 
             # Save to file
@@ -766,6 +778,7 @@ class TileCollectionDialog(QDialog):
                     return
 
             msg = f"Created {len(created_files)} workflow files in:\n{workflow_folder}\n\n"
+            msg += f"Images will be saved to:\n{save_settings['save_drive']}/{base_save_directory}/{date_folder}/X_Y/\n\n"
             msg += "Would you like to execute them now?"
 
             result = QMessageBox.question(
@@ -1277,7 +1290,7 @@ class TileCollectionDialog(QDialog):
 
         def on_queue_completed():
             self._queue_completed = True
-            progress.setValue(len(workflow_files))
+            progress.setValue(100)  # 100% complete
             QMessageBox.information(
                 self, "Execution Complete",
                 f"Successfully executed {len(workflow_files)} workflows."

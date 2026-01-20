@@ -10,6 +10,7 @@ from py2flamingo.views.dialogs.tile_collection_dialog import TileCollectionDialo
 from py2flamingo.views.dialogs.advanced_illumination_dialog import AdvancedIlluminationDialog
 from py2flamingo.views.dialogs.advanced_camera_dialog import AdvancedCameraDialog
 from py2flamingo.views.dialogs.advanced_save_dialog import AdvancedSaveDialog
+from py2flamingo.views.dialogs.mip_overview_dialog import MIPOverviewDialog
 
 __all__ = [
     'LED2DOverviewDialog',
@@ -18,4 +19,5 @@ __all__ = [
     'AdvancedIlluminationDialog',
     'AdvancedCameraDialog',
     'AdvancedSaveDialog',
+    'MIPOverviewDialog',
 ]

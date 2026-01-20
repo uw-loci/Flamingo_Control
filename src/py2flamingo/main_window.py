@@ -270,6 +270,18 @@ class MainWindow(QMainWindow):
         self.led_2d_overview_action.setEnabled(False)
         extensions_menu.addAction(self.led_2d_overview_action)
 
+        self.load_2d_overview_action = QAction("&Load 2D Overview Session...", self)
+        self.load_2d_overview_action.setStatusTip("Load a saved 2D Overview session for tile selection and analysis")
+        self.load_2d_overview_action.triggered.connect(self._on_load_2d_overview)
+        extensions_menu.addAction(self.load_2d_overview_action)
+
+        extensions_menu.addSeparator()
+
+        self.mip_overview_action = QAction("&MIP Overview...", self)
+        self.mip_overview_action.setStatusTip("Load MIP files from tile acquisitions to view and select tiles for re-acquisition")
+        self.mip_overview_action.triggered.connect(self._on_mip_overview)
+        extensions_menu.addAction(self.mip_overview_action)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -515,6 +527,77 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error opening LED 2D Overview: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to open dialog: {e}")
+
+    def _on_load_2d_overview(self):
+        """Handle Load 2D Overview Session menu action."""
+        import logging
+        from PyQt5.QtWidgets import QFileDialog
+        logger = logging.getLogger(__name__)
+        logger.info("Load 2D Overview Session menu action triggered")
+
+        # Ask user to select a saved session folder
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select 2D Overview Session Folder",
+            "",
+            QFileDialog.ShowDirsOnly
+        )
+
+        if not folder:
+            return  # User cancelled
+
+        try:
+            from py2flamingo.views.dialogs.led_2d_overview_result import LED2DOverviewResultWindow
+            from pathlib import Path
+
+            folder_path = Path(folder)
+
+            # Try to load from saved folder
+            window = LED2DOverviewResultWindow.from_saved_folder(
+                folder_path,
+                app=self.app
+            )
+
+            if window:
+                # Keep reference to prevent garbage collection
+                if not hasattr(self, '_loaded_overview_windows'):
+                    self._loaded_overview_windows = []
+                self._loaded_overview_windows.append(window)
+                window.show()
+                logger.info(f"Loaded 2D Overview session from: {folder}")
+            else:
+                QMessageBox.warning(
+                    self, "Load Failed",
+                    f"Could not load 2D Overview session from:\n{folder}\n\n"
+                    "Make sure this is a valid session folder with metadata.json"
+                )
+
+        except Exception as e:
+            logger.error(f"Error loading 2D Overview session: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to load session:\n{e}")
+
+    def _on_mip_overview(self):
+        """Handle MIP Overview menu action."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("MIP Overview menu action triggered")
+
+        try:
+            from py2flamingo.views.dialogs.mip_overview_dialog import MIPOverviewDialog
+
+            dialog = MIPOverviewDialog(app=self.app, parent=self)
+            dialog.show()
+
+            # Keep reference to prevent garbage collection
+            if not hasattr(self, '_mip_overview_dialogs'):
+                self._mip_overview_dialogs = []
+            self._mip_overview_dialogs.append(dialog)
+
+            logger.info("MIP Overview dialog opened")
+
+        except Exception as e:
+            logger.error(f"Error opening MIP Overview: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to open MIP Overview:\n{e}")
 
     def _on_tab_changed(self, index: int) -> None:
         """Handle tab change event - log which tab user switched to.

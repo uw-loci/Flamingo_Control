@@ -212,23 +212,36 @@ class ZoomableImageLabel(QLabel):
         self._update_display()
 
     def fit_to_view(self, view_size: QSize):
-        """Fit image to view size, scaling up if needed."""
+        """Fit image to view size, scaling down to fit entirely in viewport."""
         if self._original_pixmap is None:
+            logger.debug("fit_to_view: no pixmap")
             return
 
         img_w = self._original_pixmap.width()
         img_h = self._original_pixmap.height()
 
         if img_w <= 0 or img_h <= 0:
+            logger.debug(f"fit_to_view: invalid image size {img_w}x{img_h}")
             return
 
-        # Calculate zoom to fit, allowing scale up for small images
-        scale_x = (view_size.width() - 20) / img_w  # Leave margin
-        scale_y = (view_size.height() - 20) / img_h
+        view_w = view_size.width()
+        view_h = view_size.height()
+
+        if view_w <= 0 or view_h <= 0:
+            logger.debug(f"fit_to_view: invalid view size {view_w}x{view_h}")
+            return
+
+        # Calculate zoom to fit entire image in view with small margin
+        margin = 10
+        scale_x = (view_w - margin) / img_w
+        scale_y = (view_h - margin) / img_h
         self._zoom = min(scale_x, scale_y)
 
-        # Ensure minimum reasonable zoom
-        self._zoom = max(0.1, self._zoom)
+        # Clamp to reasonable range
+        self._zoom = max(self._min_zoom, min(self._max_zoom, self._zoom))
+
+        logger.debug(f"fit_to_view: image={img_w}x{img_h}, view={view_w}x{view_h}, "
+                    f"scale_x={scale_x:.4f}, scale_y={scale_y:.4f}, zoom={self._zoom:.4f}")
 
         self._update_display()
 
@@ -378,9 +391,8 @@ class ImagePanel(QWidget):
         self._draw_selection_overlay()
         self.image_label.setPixmap(self._pixmap)
 
-        # Auto-fit to view after a short delay (allows layout to settle)
-        from PyQt5.QtCore import QTimer
-        QTimer.singleShot(100, self._fit_to_view)
+        # Note: Auto-fit is now handled by LED2DOverviewResultWindow.showEvent()
+        # which triggers after the window is fully visible
 
         self._update_zoom_label()
 
@@ -667,9 +679,14 @@ class ImagePanel(QWidget):
         from PyQt5.QtCore import Qt
         # Outline only - no fill for selected tiles
         painter.setBrush(Qt.NoBrush)
-        # Thick cyan border
-        selection_pen = QPen(QColor(0, 255, 255, 255))
-        selection_pen.setWidth(3)
+
+        # Calculate line width based on tile size (thicker for larger tiles)
+        # Minimum 16px, scales with tile size for maximum visibility
+        line_width = max(16, int(min(tile_w, tile_h) / 8))
+
+        # Bright cyan border - fully opaque for maximum visibility
+        selection_pen = QPen(QColor(0, 255, 255))
+        selection_pen.setWidth(line_width)
         painter.setPen(selection_pen)
 
         selections_drawn = 0
@@ -730,12 +747,31 @@ class LED2DOverviewResultWindow(QWidget):
         self.setWindowTitle("LED 2D Overview - Results" if not preview_mode else "LED 2D Overview - Preview")
         self.setMinimumSize(800, 500)
 
+        # Track first show for auto-fit
+        self._first_show = True
+
         self._setup_ui()
 
         if results:
             self._display_results()
         elif preview_mode:
             self._display_preview()
+
+    def showEvent(self, event):
+        """Handle window show - fit images on first display."""
+        super().showEvent(event)
+
+        if self._first_show:
+            self._first_show = False
+            # Fit both panels after window is visible and laid out
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(50, self._fit_all_panels)
+
+    def _fit_all_panels(self):
+        """Fit images in all panels to their viewports."""
+        self.left_panel._fit_to_view()
+        self.right_panel._fit_to_view()
+        logger.debug("Auto-fit applied to all panels on first show")
 
     def _setup_ui(self):
         """Create the window UI."""
