@@ -1203,5 +1203,54 @@ During acquisition, these should **stay enabled** so users can monitor progress:
 
 ---
 
-**Last Updated:** 2025-12-25
+## Code Quality Guidelines
+
+### Avoid Hardcoded Values
+
+**IMPORTANT:** Hardcoded values should be avoided at all costs. They create brittle code that breaks when conditions change.
+
+**Bad Pattern - Hardcoded Delays:**
+```python
+# BAD: Magic number that may not work in all conditions
+MIN_WORKFLOW_EXECUTION_TIME = 2.0  # What if workflow takes longer to start?
+
+if elapsed < MIN_WORKFLOW_EXECUTION_TIME:
+    return  # Ignore early signals
+```
+
+**Good Pattern - State Transitions:**
+```python
+# GOOD: Track actual state changes
+self._workflow_running = False
+
+def _on_workflow_started(self, message):
+    self._workflow_running = True
+
+def _on_system_idle(self, message):
+    if not self._workflow_running:
+        return  # Ignore - workflow hasn't started yet
+    self._workflow_running = False
+    self._completion_event.set()
+```
+
+**Principles:**
+1. **Use state machines** instead of timing assumptions
+2. **Track transitions** (not-running → running → completed)
+3. **Query actual state** rather than assuming based on time
+4. **Make constants configurable** if they must exist (user settings, not magic numbers)
+
+**Common Violations:**
+- Hardcoded delays (`time.sleep(2.0)`)
+- Magic timeout values that assume certain performance
+- Assumptions about how long operations take
+- Fixed retry counts without considering actual conditions
+
+**Exception:** Some hardware protocols have documented timing requirements. These should be:
+1. Documented with references to hardware specs
+2. Named clearly (`HARDWARE_SETTLE_TIME_MS = 50  # Per datasheet section 4.2`)
+3. Placed in a configuration or constants module
+
+---
+
+**Last Updated:** 2026-01-20
 **Maintained By:** Claude Code assistant

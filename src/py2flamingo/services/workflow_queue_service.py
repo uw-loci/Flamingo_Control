@@ -101,11 +101,6 @@ class WorkflowQueueService(QObject):
     # Minimum wait between workflows (seconds) - ensures system settles
     MIN_INTER_WORKFLOW_DELAY = 1.0
 
-    # Minimum time before accepting completion signal (seconds)
-    # This prevents race condition where SYSTEM_STATE_IDLE arrives before
-    # the workflow actually starts executing on the server
-    MIN_WORKFLOW_EXECUTION_TIME = 2.0
-
     def __init__(self,
                  workflow_controller: 'WorkflowController',
                  connection_service: Optional['MVCConnectionService'] = None,
@@ -130,10 +125,10 @@ class WorkflowQueueService(QObject):
         self._is_running = False
         self._cancel_requested = False
 
-        # Completion detection
+        # Completion detection - state-based (not time-based)
         self._completion_event = threading.Event()
         self._completion_data: Optional[Dict] = None
-        self._workflow_start_time: float = 0.0  # Time when workflow was started
+        self._workflow_running = False  # Set True when we confirm workflow is executing
 
         # Execution thread
         self._execution_thread: Optional[threading.Thread] = None
@@ -248,18 +243,17 @@ class WorkflowQueueService(QObject):
         This is the PRIMARY signal that a workflow has completed.
         The server sends this when it transitions back to idle state.
 
-        We only accept this signal if enough time has passed since the workflow
-        started, to avoid catching stale idle states from before execution began.
+        We only accept this signal if _workflow_running is True, meaning we've
+        confirmed the workflow actually started (via progress updates or stack
+        complete). This prevents catching stale idle states from before execution.
 
         Args:
             message: ParsedMessage (may not contain useful data)
         """
-        elapsed = time.time() - self._workflow_start_time
-
-        # Ignore early idle signals - these are likely from before the workflow started
-        if elapsed < self.MIN_WORKFLOW_EXECUTION_TIME:
-            logger.warning(f"[QUEUE] Ignoring early SYSTEM_STATE_IDLE callback "
-                          f"(only {elapsed:.1f}s since start, need {self.MIN_WORKFLOW_EXECUTION_TIME}s)")
+        # Ignore idle signals if workflow hasn't started running yet
+        if not self._workflow_running:
+            logger.warning(f"[QUEUE] Ignoring SYSTEM_STATE_IDLE callback - "
+                          f"workflow not confirmed as running yet")
             return
 
         logger.info(f"[QUEUE] Received SYSTEM_STATE_IDLE callback - workflow complete!")
@@ -274,6 +268,9 @@ class WorkflowQueueService(QObject):
         This contains acquisition statistics but is NOT the primary completion signal.
         We store the data for reporting but wait for SYSTEM_STATE_IDLE for completion.
 
+        Receiving STACK_COMPLETE also confirms the workflow ran, so we set
+        _workflow_running = True.
+
         Args:
             message: ParsedMessage containing completion data
         """
@@ -282,6 +279,11 @@ class WorkflowQueueService(QObject):
                    f"expected={message.int32_data1}, "
                    f"errors={message.int32_data2}, "
                    f"time={message.double_data:.1f}us")
+
+        # Stack complete confirms workflow ran
+        if not self._workflow_running:
+            logger.info(f"[QUEUE] Stack complete received - workflow confirmed running")
+            self._workflow_running = True
 
         # Store completion data for reporting (but don't signal completion yet)
         self._completion_data = {
@@ -297,6 +299,10 @@ class WorkflowQueueService(QObject):
         """
         Handle UI_SET_GAUGE_VALUE callback for progress tracking.
 
+        Receiving a progress update confirms the workflow is actually running,
+        so we set _workflow_running = True to allow SYSTEM_STATE_IDLE to trigger
+        completion.
+
         Args:
             message: ParsedMessage containing progress data
 
@@ -305,6 +311,11 @@ class WorkflowQueueService(QObject):
         """
         acquired = message.int32_data0
         expected = message.int32_data1
+
+        # Progress update confirms workflow is actually running
+        if not self._workflow_running:
+            logger.info(f"[QUEUE] Progress update received - workflow confirmed running")
+            self._workflow_running = True
 
         logger.debug(f"Progress update: {acquired}/{expected} images")
 
@@ -467,16 +478,24 @@ class WorkflowQueueService(QObject):
         logger.info(f"[QUEUE] Clearing completion state...")
         self._completion_event.clear()
         self._completion_data = None
+        self._workflow_running = False  # Will be set True when we see progress/stack_complete
 
         # Start the workflow
         logger.info(f"[QUEUE] Starting workflow execution...")
-        self._workflow_start_time = time.time()  # Record start time for early-idle filtering
         success, msg = self._workflow_controller.start_workflow()
         if not success:
             logger.error(f"[QUEUE] Start failed: {msg}")
             return (False, f"Start failed: {msg}")
 
-        logger.info(f"[QUEUE] Started workflow: {file_path.name}, waiting for completion...")
+        logger.info(f"[QUEUE] Started workflow: {file_path.name}")
+
+        # Wait for system to become NOT idle (confirms workflow actually started)
+        logger.info(f"[QUEUE] Waiting for system to become busy (workflow to start)...")
+        if not self._wait_for_workflow_start():
+            logger.error(f"[QUEUE] Workflow failed to start - system remained idle")
+            return (False, "Workflow failed to start - system remained idle")
+
+        logger.info(f"[QUEUE] Workflow confirmed running, waiting for completion...")
 
         # Wait for workflow completion
         success, error = self._wait_for_completion(item)
@@ -547,11 +566,18 @@ class WorkflowQueueService(QObject):
 
             # Fallback: Poll system state if no callback received
             logger.debug(f"[QUEUE] No SYSTEM_STATE_IDLE callback after {self.STATE_POLL_INTERVAL}s, "
-                        f"polling system state...")
+                        f"polling system state (workflow_running={self._workflow_running})...")
 
             if self._is_system_idle():
-                logger.info(f"[QUEUE] Workflow completed (via polling fallback) after {elapsed:.1f}s")
-                return (True, None)
+                if self._workflow_running:
+                    # Workflow ran and is now complete
+                    logger.info(f"[QUEUE] Workflow completed (via polling fallback) after {elapsed:.1f}s")
+                    return (True, None)
+                else:
+                    # System is idle but we haven't confirmed workflow started yet
+                    # Log warning but keep waiting - progress updates may come
+                    logger.warning(f"[QUEUE] System idle but no progress updates yet "
+                                  f"(elapsed={elapsed:.1f}s) - waiting for workflow to start...")
 
             # Update progress
             self.progress_updated.emit(
@@ -559,6 +585,73 @@ class WorkflowQueueService(QObject):
                 len(self._queue),
                 f"Workflow running... ({elapsed:.0f}s)"
             )
+
+    # Maximum time to wait for workflow to start before giving up (seconds)
+    # This is the escape mechanism if the system never leaves idle state
+    MAX_WORKFLOW_START_TIMEOUT = 30.0
+
+    # Interval for polling system state while waiting for workflow start
+    WORKFLOW_START_POLL_INTERVAL = 0.5
+
+    def _wait_for_workflow_start(self) -> bool:
+        """
+        Wait for the system to become NOT idle after starting a workflow.
+
+        This confirms the workflow actually started executing before we begin
+        listening for the idle state that signals completion. This prevents
+        catching stale idle states from before the workflow started.
+
+        The method polls the system state waiting for it to become busy.
+        Once the system is busy (not idle), we know the workflow is running
+        and can safely wait for the SYSTEM_STATE_IDLE callback to signal
+        completion.
+
+        Returns:
+            True if workflow confirmed started (system became busy)
+            False if cancelled, timeout, or system remained idle
+
+        Escape mechanisms:
+            - Cancellation: User can cancel via self._cancel_requested
+            - Timeout: MAX_WORKFLOW_START_TIMEOUT seconds (default 30s)
+            - Progress callback: If _workflow_running set True by callback, return success
+        """
+        start_time = time.time()
+        logger.info(f"[QUEUE] Waiting for system to become busy (max {self.MAX_WORKFLOW_START_TIMEOUT}s)...")
+
+        while True:
+            # Check for cancellation (escape mechanism #1)
+            if self._cancel_requested:
+                logger.info("[QUEUE] Workflow start wait cancelled by user")
+                return False
+
+            # Check if progress/stack callbacks already confirmed workflow running
+            # (escape mechanism via callback confirmation)
+            if self._workflow_running:
+                logger.info("[QUEUE] Workflow confirmed running via callback")
+                return True
+
+            # Check timeout (escape mechanism #2)
+            elapsed = time.time() - start_time
+            if elapsed > self.MAX_WORKFLOW_START_TIMEOUT:
+                logger.warning(f"[QUEUE] Timeout waiting for workflow to start "
+                             f"after {elapsed:.1f}s - system never became busy")
+                return False
+
+            # Poll system state
+            if not self._is_system_idle():
+                # System is busy - workflow has started!
+                logger.info(f"[QUEUE] System became busy after {elapsed:.1f}s - "
+                           f"workflow confirmed started")
+                self._workflow_running = True
+                return True
+
+            # Brief sleep before next poll
+            time.sleep(self.WORKFLOW_START_POLL_INTERVAL)
+
+            # Log progress periodically (every 5 seconds)
+            if int(elapsed) % 5 == 0 and elapsed > 0:
+                logger.debug(f"[QUEUE] Still waiting for workflow to start... "
+                            f"({elapsed:.1f}s elapsed)")
 
     def _is_system_idle(self) -> bool:
         """
