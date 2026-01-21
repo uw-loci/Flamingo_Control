@@ -684,8 +684,8 @@ class ImagePanel(QWidget):
         # Minimum 16px, scales with tile size for maximum visibility
         line_width = max(16, int(min(tile_w, tile_h) / 8))
 
-        # Bright cyan border - fully opaque for maximum visibility
-        selection_pen = QPen(QColor(0, 255, 255))
+        # Bright cyan border - 30% opacity (70% transparent)
+        selection_pen = QPen(QColor(0, 255, 255, 76))
         selection_pen.setWidth(line_width)
         painter.setPen(selection_pen)
 
