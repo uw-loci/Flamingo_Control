@@ -704,9 +704,14 @@ class MVCConnectionService:
                 raw_bytes_24_28 = response_bytes[24:28].hex()
                 status_field = struct.unpack_from("i", response_bytes, 8)[0]
 
+                # Server returns SYSTEM_STATE_IDLE (0xa002 = 40962) when idle
+                # Also accept 0 for backwards compatibility
+                SYSTEM_STATE_IDLE_CODE = 0xa002  # 40962
+                is_idle = state_value == 0 or state_value == SYSTEM_STATE_IDLE_CODE
+
                 result = {
                     'state': state_value,
-                    'is_idle': state_value == 0  # STATE_VALUE_IDLE = 0
+                    'is_idle': is_idle
                 }
 
                 self.logger.info(f"System state query: state={state_value} (bytes[24:28]={raw_bytes_24_28}, status_field={status_field}, idle={result['is_idle']})")

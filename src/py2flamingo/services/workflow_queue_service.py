@@ -674,11 +674,17 @@ class WorkflowQueueService(QObject):
                 logger.warning("System state query returned None - assuming busy")
                 return False
 
-            # Check if state is IDLE (0)
+            # Use the is_idle field from connection service (handles 0 and 0xa002)
             state = response.get('state', -1)
-            is_idle = state == 0
-            logger.debug(f"System idle check: state={state}, is_idle={is_idle}")
+            is_idle = response.get('is_idle', False)
+            logger.debug(f"System idle check: state={state} (0x{state:04x}), is_idle={is_idle}")
             return is_idle
+
+        except TimeoutError:
+            # Timeout likely means system is busy processing workflow
+            # Don't treat this as an error - assume busy
+            logger.debug(f"System state query timed out - assuming system is busy")
+            return False
 
         except Exception as e:
             logger.warning(f"Error checking system state: {e}")
