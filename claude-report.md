@@ -104,11 +104,26 @@ After these changes, when settings retrieval fails:
 3. Settings text area shows error message in red
 4. User has clear visual feedback that something is wrong
 
-## Commit
+## Commits
 
 ```
 6c16a29 Add ERROR status to show communication failures after connection
+8e6da02 Update button states on communication error
 ```
+
+### Follow-up Fix (8e6da02)
+
+The initial fix showed the error in the status indicator but didn't update button states. Added `_update_status_error()` method to properly handle the error state:
+
+- **Connect button**: Re-enabled (allows user to retry)
+- **Disconnect button**: Stays enabled (TCP connection exists)
+- **Sample View button**: Disabled (microscope not usable)
+- **Debug/workflow buttons**: Disabled
+
+This ensures users can:
+1. See the error clearly (red status indicator + error message)
+2. Retry by clicking Connect again
+3. Cannot accidentally try to use features that require working communication
 
 Pushed to: https://github.com/uw-loci/Flamingo_Control.git (main branch)
 

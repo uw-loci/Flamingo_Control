@@ -30,7 +30,8 @@ class ConnectionView(QWidget):
     """
 
     # Signals
-    connection_established = pyqtSignal()  # Emitted when connection succeeds
+    connection_established = pyqtSignal()  # Emitted when TCP connection succeeds
+    settings_loaded = pyqtSignal()         # Emitted after settings retrieval completes (position queries should wait for this)
     connection_error = pyqtSignal(str)     # Emitted when communication error occurs (e.g., settings retrieval failed)
     sample_view_requested = pyqtSignal()  # Emitted when user clicks "Open Sample View"
 
@@ -1180,6 +1181,9 @@ class ConnectionView(QWidget):
                     "font-size: 10pt; background-color: #f0f0f0; }"
                 )
                 self._logger.info("ConnectionView: Settings display updated successfully")
+                # Emit settings_loaded signal - position queries should wait for this
+                self.settings_loaded.emit()
+                self._logger.debug("ConnectionView: Emitted settings_loaded signal")
                 return True
             else:
                 self._logger.warning("ConnectionView: No settings returned from controller")

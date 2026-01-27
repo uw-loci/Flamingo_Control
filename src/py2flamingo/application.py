@@ -378,6 +378,14 @@ class FlamingoApplication(QObject):
             )
             self.logger.debug("Connected connection_error to status indicator service")
 
+        # Connect settings_loaded to trigger position queries
+        # This happens AFTER settings retrieval to avoid race condition with SocketReader pause
+        if hasattr(self.connection_view, 'settings_loaded'):
+            self.connection_view.settings_loaded.connect(
+                lambda: self._on_settings_loaded()
+            )
+            self.logger.debug("Connected settings_loaded to position query handler")
+
         # Connect workflow events to status indicator service
         if hasattr(self.workflow_view, 'workflow_started'):
             self.workflow_view.workflow_started.connect(
@@ -448,8 +456,9 @@ class FlamingoApplication(QObject):
     def _on_stage_connection_established(self):
         """Handle connection established event for enhanced stage control view.
 
-        Enables controls and queries initial position from hardware.
-        Queries position using blocking I/O in background thread to avoid freezing the GUI.
+        Enables controls immediately when TCP connection succeeds.
+        Note: Position queries are deferred to _on_settings_loaded() to avoid
+        race condition with settings retrieval that pauses the SocketReader.
         """
         self.logger.info("Connection established - enabling stage controls")
 
@@ -464,6 +473,15 @@ class FlamingoApplication(QObject):
         # Enable controls immediately (connection is established)
         if self.stage_control_view:
             self.stage_control_view._set_controls_enabled(True)
+
+    def _on_settings_loaded(self):
+        """Handle settings loaded event - query initial position from hardware.
+
+        This is triggered AFTER settings retrieval completes, avoiding the race
+        condition where position queries would collide with the synchronous
+        settings retrieval that pauses the SocketReader.
+        """
+        self.logger.info("Settings loaded - querying initial position from hardware")
 
         # Query position in background thread to avoid blocking GUI
         # StageService.get_position() uses blocking socket I/O
