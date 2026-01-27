@@ -32,7 +32,8 @@ class StatusIndicatorWidget(QWidget):
         GlobalStatus.DISCONNECTED: QColor(NEUTRAL_COLOR),      # Grey
         GlobalStatus.IDLE: QColor(SUCCESS_COLOR),              # Blue
         GlobalStatus.MOVING: QColor(WARNING_COLOR),            # Amber/Gold
-        GlobalStatus.WORKFLOW_RUNNING: QColor("#a56eff")       # Purple
+        GlobalStatus.WORKFLOW_RUNNING: QColor("#a56eff"),      # Purple
+        GlobalStatus.ERROR: QColor(ERROR_COLOR)                # Red-Orange (communication error)
     }
 
     def __init__(self, parent=None):

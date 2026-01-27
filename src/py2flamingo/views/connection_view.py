@@ -31,6 +31,7 @@ class ConnectionView(QWidget):
 
     # Signals
     connection_established = pyqtSignal()  # Emitted when connection succeeds
+    connection_error = pyqtSignal(str)     # Emitted when communication error occurs (e.g., settings retrieval failed)
     sample_view_requested = pyqtSignal()  # Emitted when user clicks "Open Sample View"
 
     def __init__(self, controller, config_manager=None, position_controller=None,
@@ -289,12 +290,16 @@ class ConnectionView(QWidget):
         self._show_message(message, is_error=not success)
         if success:
             self._update_status(connected=True)
-            # Pull and display microscope settings
-            self._logger.info("ConnectionView: Calling _load_and_display_settings()")
-            self._load_and_display_settings()
-            # Emit connection established signal
+            # Emit connection established signal FIRST
+            # (so status indicator knows we're connected before checking for errors)
             self.connection_established.emit()
             self._logger.debug("ConnectionView: Emitted connection_established signal")
+            # Pull and display microscope settings
+            # (this will emit connection_error if retrieval fails)
+            self._logger.info("ConnectionView: Calling _load_and_display_settings()")
+            settings_ok = self._load_and_display_settings()
+            if not settings_ok:
+                self._logger.warning("ConnectionView: Settings retrieval failed - error state active")
 
     def _on_disconnect_clicked(self) -> None:
         """Handle disconnect button click.
@@ -1118,8 +1123,12 @@ class ConnectionView(QWidget):
                 self.config_name_input.setEnabled(False)
                 self.save_config_btn.setEnabled(False)
 
-    def _load_and_display_settings(self) -> None:
-        """Load microscope settings and display them in the text area."""
+    def _load_and_display_settings(self) -> bool:
+        """Load microscope settings and display them in the text area.
+
+        Returns:
+            True if settings were loaded successfully, False otherwise.
+        """
         self._logger.info("ConnectionView: _load_and_display_settings() called")
 
         try:
@@ -1140,9 +1149,18 @@ class ConnectionView(QWidget):
                     "font-size: 10pt; background-color: #f0f0f0; }"
                 )
                 self._logger.info("ConnectionView: Settings display updated successfully")
+                return True
             else:
                 self._logger.warning("ConnectionView: No settings returned from controller")
-                self.settings_display.setPlainText("No settings available.")
+                error_msg = "Failed to retrieve microscope settings (timeout or no response)"
+                self.settings_display.setPlainText(error_msg)
+                self.settings_display.setStyleSheet(
+                    f"QTextEdit {{ font-family: 'Courier New', monospace; "
+                    f"font-size: 10pt; color: {ERROR_COLOR}; }}"
+                )
+                # Emit error signal to update status indicator
+                self.connection_error.emit("Settings retrieval failed")
+                return False
 
         except Exception as e:
             error_msg = f"Error loading settings: {str(e)}"
@@ -1152,6 +1170,9 @@ class ConnectionView(QWidget):
                 f"QTextEdit {{ font-family: 'Courier New', monospace; "
                 f"font-size: 10pt; color: {ERROR_COLOR}; }}"
             )
+            # Emit error signal to update status indicator
+            self.connection_error.emit("Communication error")
+            return False
 
     def _format_settings(self, settings: Dict[str, Any]) -> str:
         """Format microscope settings dictionary into readable text.

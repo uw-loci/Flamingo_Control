@@ -371,6 +371,13 @@ class FlamingoApplication(QObject):
             )
             self.logger.debug("Connected connection_closed to status indicator service")
 
+        # Connect connection error to status indicator service
+        if hasattr(self.connection_view, 'connection_error'):
+            self.connection_view.connection_error.connect(
+                lambda msg: self.status_indicator_service.on_connection_error(msg)
+            )
+            self.logger.debug("Connected connection_error to status indicator service")
+
         # Connect workflow events to status indicator service
         if hasattr(self.workflow_view, 'workflow_started'):
             self.workflow_view.workflow_started.connect(

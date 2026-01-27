@@ -26,11 +26,13 @@ class GlobalStatus(Enum):
     - IDLE: Blue (ready/waiting)
     - MOVING: Red (stage motion in progress)
     - WORKFLOW_RUNNING: Magenta (acquisition workflow active)
+    - ERROR: Orange (connected but communication error)
     """
     DISCONNECTED = "disconnected"
     IDLE = "idle"
     MOVING = "moving"
     WORKFLOW_RUNNING = "workflow_running"
+    ERROR = "error"
 
 
 class StatusIndicatorService(QObject):
@@ -70,6 +72,8 @@ class StatusIndicatorService(QObject):
         self._is_connected = False
         self._is_moving = False
         self._is_workflow_running = False
+        self._has_error = False
+        self._error_message = ""
 
         # Connect to connection service if provided
         if self.connection_service:
@@ -118,7 +122,36 @@ class StatusIndicatorService(QObject):
         """
         self.logger.info("Connection established")
         self._is_connected = True
+        self._has_error = False
+        self._error_message = ""
         self._update_status()
+
+    def on_connection_error(self, message: str = "Communication error"):
+        """
+        Handle connection error event.
+
+        Should be called when communication with the microscope fails
+        (e.g., settings retrieval timeout) even though TCP connection succeeded.
+
+        Args:
+            message: Error message to display
+        """
+        self.logger.warning(f"Connection error: {message}")
+        self._has_error = True
+        self._error_message = message
+        self._update_status()
+
+    def clear_error(self):
+        """
+        Clear the error state.
+
+        Call this when the error condition has been resolved.
+        """
+        if self._has_error:
+            self.logger.info("Error state cleared")
+            self._has_error = False
+            self._error_message = ""
+            self._update_status()
 
     def on_connection_closed(self):
         """
@@ -130,6 +163,8 @@ class StatusIndicatorService(QObject):
         self._is_connected = False
         self._is_moving = False
         self._is_workflow_running = False
+        self._has_error = False
+        self._error_message = ""
         self._update_status()
 
     def on_motion_started(self):
@@ -219,6 +254,9 @@ class StatusIndicatorService(QObject):
         if not self._is_connected:
             return GlobalStatus.DISCONNECTED
 
+        if self._has_error:
+            return GlobalStatus.ERROR
+
         if self._is_workflow_running:
             return GlobalStatus.WORKFLOW_RUNNING
 
@@ -237,11 +275,15 @@ class StatusIndicatorService(QObject):
         Returns:
             Human-readable description
         """
+        if status == GlobalStatus.ERROR and self._error_message:
+            return self._error_message
+
         descriptions = {
             GlobalStatus.DISCONNECTED: "Disconnected",
             GlobalStatus.IDLE: "Ready",
             GlobalStatus.MOVING: "Moving",
-            GlobalStatus.WORKFLOW_RUNNING: "Workflow Running"
+            GlobalStatus.WORKFLOW_RUNNING: "Workflow Running",
+            GlobalStatus.ERROR: "Communication Error"
         }
         return descriptions.get(status, "Unknown")
 
