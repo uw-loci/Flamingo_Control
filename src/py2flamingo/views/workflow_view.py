@@ -639,6 +639,24 @@ class WorkflowView(QWidget):
                 errors.append("Save drive not specified")
             if not save_settings['save_directory']:
                 errors.append("Save directory not specified")
+            else:
+                # Check for path separators in save directory
+                # Server can only create single-level directories
+                save_dir = save_settings['save_directory']
+                if '/' in save_dir or '\\' in save_dir:
+                    # Sanitize by replacing path separators with underscores
+                    sanitized = save_dir.replace('/', '_').replace('\\', '_')
+                    self._logger.warning(
+                        f"Save directory contains path separators, sanitizing: "
+                        f"'{save_dir}' -> '{sanitized}'"
+                    )
+                    # Update the save panel with sanitized value
+                    self._save_panel.set_save_directory(sanitized)
+                    errors.append(
+                        f"Save directory '{save_dir}' contains path separators.\n"
+                        f"Changed to '{sanitized}' for server compatibility.\n"
+                        "Please review and try again."
+                    )
 
         return errors
 

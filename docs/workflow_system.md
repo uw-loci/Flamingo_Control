@@ -324,7 +324,8 @@ Provides two-point position input with mode-dependent field visibility.
 | Field | Type |
 |-------|------|
 | Save Images | CheckBox |
-| Save Drive | LineEdit |
+| Save Drive | ComboBox (editable, with Refresh button) |
+| Local Path... | Button (configure local mount for drive) |
 | Directory | LineEdit |
 | Sample Name | LineEdit |
 | Format | ComboBox (TIFF/BigTIFF/Raw/NotSaved) |
@@ -333,6 +334,20 @@ Provides two-point position input with mode-dependent field visibility.
 | Save Subfolders | CheckBox |
 | Live View | CheckBox |
 | Comments | TextEdit |
+
+**Local Path Mapping:**
+The "Local Path..." button configures a mapping between server storage paths
+(e.g., `/media/deploy/ctlsm1`) and local mount points (e.g., `G:\CTLSM1`).
+This enables post-collection folder reorganization from flattened structure
+(required by server) to nested structure (required by MIP Overview).
+
+Mappings are stored in configuration service under `drive_path_mappings` key.
+
+**Save Directory Sanitization:**
+The workflow view validates that save directories don't contain path separators
+(`/` or `\`). If found, they are replaced with underscores and the user is
+prompted to review. This prevents server directory creation failures since
+the server can only create single-level directories.
 
 ---
 

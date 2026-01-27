@@ -11,7 +11,8 @@ from typing import Optional, Dict, Any, List
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QComboBox, QCheckBox, QGroupBox, QGridLayout, QPushButton
+    QLineEdit, QComboBox, QCheckBox, QGroupBox, QGridLayout, QPushButton,
+    QFileDialog, QMessageBox
 )
 from PyQt5.QtCore import pyqtSignal
 
@@ -201,6 +202,15 @@ class SavePanel(QWidget):
         self._refresh_btn.setEnabled(self._connection_service is not None)
         drive_layout.addWidget(self._refresh_btn)
 
+        self._configure_local_btn = QPushButton("Local Path...")
+        self._configure_local_btn.setToolTip(
+            "Configure local path for this drive.\n"
+            "Required for post-collection folder reorganization\n"
+            "into nested structure for MIP Overview compatibility."
+        )
+        self._configure_local_btn.clicked.connect(self._configure_local_path)
+        drive_layout.addWidget(self._configure_local_btn)
+
         settings_layout.addLayout(drive_layout, 0, 1)
 
         # Warning label for no drive
@@ -334,6 +344,58 @@ class SavePanel(QWidget):
                 self._refresh_drives()
         except Exception as e:
             self._logger.debug(f"Auto-refresh not performed: {e}")
+
+    def _configure_local_path(self) -> None:
+        """Open dialog to configure local path for current drive.
+
+        This mapping allows post-collection folder reorganization from
+        flattened structure (required by server) to nested structure
+        (required by MIP Overview).
+        """
+        current_drive = self._save_drive_combo.currentText()
+        if not current_drive:
+            QMessageBox.warning(self, "No Drive", "Select a save drive first.")
+            return
+
+        # Get config service
+        config_service = self._get_config_service()
+        if not config_service:
+            QMessageBox.warning(
+                self, "Not Available",
+                "Configuration service not available.\n"
+                "Local path mapping requires the application to be fully initialized."
+            )
+            return
+
+        # Get current local path if set
+        current_local = config_service.get_local_path_for_drive(current_drive) or ""
+
+        # Open directory selection dialog
+        from pathlib import Path
+        local_path = QFileDialog.getExistingDirectory(
+            self,
+            f"Select Local Path for {current_drive}",
+            current_local or str(Path.home())
+        )
+
+        if local_path:
+            config_service.set_drive_mapping(current_drive, local_path)
+            QMessageBox.information(
+                self, "Local Path Configured",
+                f"Local path mapping saved:\n\n"
+                f"Server drive: {current_drive}\n"
+                f"Local path: {local_path}\n\n"
+                "After tile collection completes, folders will be\n"
+                "automatically reorganized into nested structure\n"
+                "for MIP Overview compatibility."
+            )
+            self._logger.info(f"Configured local path: {current_drive} -> {local_path}")
+
+    def _get_config_service(self):
+        """Get ConfigurationService from application."""
+        if self._app and hasattr(self._app, 'config_service'):
+            return self._app.config_service
+        return None
 
     def _on_save_enabled_changed(self, state: int) -> None:
         """Handle save enabled checkbox change."""

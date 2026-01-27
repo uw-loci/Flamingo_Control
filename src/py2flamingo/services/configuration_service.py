@@ -277,13 +277,13 @@ class ConfigurationService:
     def save_start_position(self, microscope_name: str, position: Dict[str, float]) -> None:
         """
         Save start position to file.
-        
+
         Args:
             microscope_name: Name of microscope
             position: Dictionary with x, y, z, r values
         """
         from py2flamingo.utils.file_handlers import dict_to_text
-        
+
         position_dict = {
             microscope_name: {
                 'x(mm)': position['x'],
@@ -292,7 +292,62 @@ class ConfigurationService:
                 'r(°)': position['r']
             }
         }
-        
+
         file_path = self.base_path / 'microscope_settings' / f'{microscope_name}_start_position.txt'
         dict_to_text(str(file_path), position_dict)
         self.logger.info(f"Saved start position to {file_path}")
+
+    # Drive path mapping methods for post-collection folder reorganization
+    DRIVE_MAPPINGS_KEY = 'drive_path_mappings'
+
+    def get_drive_mappings(self) -> Dict[str, str]:
+        """Get server-to-local drive mappings.
+
+        These mappings allow the application to find locally-mounted paths
+        for server storage drives, enabling post-collection file reorganization.
+
+        Returns:
+            Dictionary mapping server paths to local paths.
+            Example: {"/media/deploy/ctlsm1": "G:/CTLSM1"}
+        """
+        return self.config.get(self.DRIVE_MAPPINGS_KEY, {})
+
+    def set_drive_mapping(self, server_path: str, local_path: str) -> None:
+        """Set local path mapping for a server drive.
+
+        Args:
+            server_path: Server storage path (e.g., "/media/deploy/ctlsm1")
+            local_path: Local mount path (e.g., "G:/CTLSM1")
+        """
+        mappings = self.config.get(self.DRIVE_MAPPINGS_KEY, {})
+        mappings[server_path] = local_path
+        self.config[self.DRIVE_MAPPINGS_KEY] = mappings
+        self.logger.info(f"Set drive mapping: {server_path} -> {local_path}")
+
+    def get_local_path_for_drive(self, server_path: str) -> Optional[str]:
+        """Get local path for a server drive, or None if not mapped.
+
+        Args:
+            server_path: Server storage path to look up
+
+        Returns:
+            Local path if mapped, None otherwise
+        """
+        return self.get_drive_mappings().get(server_path)
+
+    def remove_drive_mapping(self, server_path: str) -> bool:
+        """Remove a drive mapping.
+
+        Args:
+            server_path: Server path to remove mapping for
+
+        Returns:
+            True if mapping was removed, False if it didn't exist
+        """
+        mappings = self.config.get(self.DRIVE_MAPPINGS_KEY, {})
+        if server_path in mappings:
+            del mappings[server_path]
+            self.config[self.DRIVE_MAPPINGS_KEY] = mappings
+            self.logger.info(f"Removed drive mapping for: {server_path}")
+            return True
+        return False

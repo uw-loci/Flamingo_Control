@@ -6,6 +6,7 @@ from the LED 2D Overview result window.
 
 import logging
 import math
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict
@@ -690,9 +691,17 @@ class TileCollectionDialog(QDialog):
         progress.setMinimumDuration(0)
 
         # Create workflows with per-tile save directories
-        # Directory structure: base_directory/date/X{x}_Y{y}/
+        # Use FLATTENED directory names for server compatibility (single directory level)
+        # Format: base_date_tile (e.g., Test_2026-01-27_X11.09_Y14.46)
+        # Post-collection reorganization will move to nested structure if local access available
         base_save_directory = save_settings['save_directory']
         date_folder = datetime.now().strftime("%Y-%m-%d")
+
+        # Track folders for post-collection reorganization
+        # Maps flattened_name -> (date_folder, tile_folder) for later reorganization
+        self._tile_folder_mapping: Dict[str, Tuple[str, str]] = {}
+        self._base_save_directory = base_save_directory
+        self._save_drive = save_settings['save_drive']
 
         created_files = []
         for i, (tile, rotation, z_min, z_max) in enumerate(tiles_to_process):
@@ -705,9 +714,14 @@ class TileCollectionDialog(QDialog):
             # Create workflow name
             workflow_name = f"{name_prefix}_R{rotation:.0f}_X{tile.x:.2f}_Y{tile.y:.2f}"
 
-            # Create per-tile save directory: base/date/X{x}_Y{y}/
+            # Create per-tile save directory using FLATTENED format for server compatibility
+            # Server can only create single-level directories, so use underscores instead of slashes
             tile_folder = f"X{tile.x:.2f}_Y{tile.y:.2f}"
-            tile_save_directory = f"{base_save_directory}/{date_folder}/{tile_folder}"
+            # Flattened format: base_date_tile (no slashes!)
+            tile_save_directory = f"{base_save_directory}_{date_folder}_{tile_folder}"
+
+            # Track for post-collection reorganization
+            self._tile_folder_mapping[tile_save_directory] = (date_folder, tile_folder)
 
             # Create a copy of save_settings with the tile-specific directory
             tile_save_settings = save_settings.copy()
@@ -778,7 +792,8 @@ class TileCollectionDialog(QDialog):
                     return
 
             msg = f"Created {len(created_files)} workflow files in:\n{workflow_folder}\n\n"
-            msg += f"Images will be saved to:\n{save_settings['save_drive']}/{base_save_directory}/{date_folder}/X_Y/\n\n"
+            msg += f"Images will be saved to:\n{save_settings['save_drive']}/{base_save_directory}_{date_folder}_X_Y/\n"
+            msg += "(Flattened structure for server compatibility)\n\n"
             msg += "Would you like to execute them now?"
 
             result = QMessageBox.question(
@@ -1291,10 +1306,23 @@ class TileCollectionDialog(QDialog):
         def on_queue_completed():
             self._queue_completed = True
             progress.setValue(100)  # 100% complete
-            QMessageBox.information(
-                self, "Execution Complete",
-                f"Successfully executed {len(workflow_files)} workflows."
-            )
+
+            # Reorganize folders AFTER all workflows confirmed complete
+            # This is safe because queue_completed only fires after all
+            # SYSTEM_STATE_IDLE callbacks have been received
+            reorganized = self._reorganize_tile_folders()
+
+            if reorganized:
+                QMessageBox.information(
+                    self, "Execution Complete",
+                    f"Successfully executed {len(workflow_files)} workflows.\n\n"
+                    f"Folders reorganized into nested structure for MIP Overview compatibility."
+                )
+            else:
+                QMessageBox.information(
+                    self, "Execution Complete",
+                    f"Successfully executed {len(workflow_files)} workflows."
+                )
 
         def on_queue_cancelled():
             self._queue_completed = True
@@ -1410,6 +1438,103 @@ class TileCollectionDialog(QDialog):
             "Note: Used fallback timing. For better reliability, "
             "ensure WorkflowQueueService is configured."
         )
+
+    def _get_config_service(self):
+        """Get ConfigurationService from application."""
+        if self._app and hasattr(self._app, 'config_service'):
+            return self._app.config_service
+        return None
+
+    def _reorganize_tile_folders(self) -> bool:
+        """Reorganize flattened folders into nested structure for MIP Overview compatibility.
+
+        Moves: base_date_tile/ -> base/date/tile/
+
+        Only runs if local drive mapping is configured and accessible.
+        This method is called AFTER queue_completed signal, which guarantees all
+        workflows have finished and all files are written.
+
+        Returns:
+            True if any folders were reorganized, False otherwise
+        """
+        # Check if we have folder mapping from collection
+        if not hasattr(self, '_tile_folder_mapping') or not self._tile_folder_mapping:
+            logger.debug("No tile folder mapping - skipping reorganization")
+            return False
+
+        config_service = self._get_config_service()
+        if not config_service:
+            logger.info("No config service - skipping folder reorganization")
+            return False
+
+        local_drive = config_service.get_local_path_for_drive(self._save_drive)
+        if not local_drive:
+            logger.info(f"No local drive mapping for {self._save_drive} - skipping folder reorganization")
+            return False
+
+        local_base = Path(local_drive)
+        if not local_base.exists():
+            logger.warning(f"Local drive path does not exist: {local_base} - skipping reorganization")
+            return False
+
+        logger.info(f"Starting folder reorganization: {local_base}")
+        reorganized_count = 0
+
+        # Find the timestamped folders created by server
+        # They'll be named like: 20260127_123617_Test_2026-01-27_X11.09_Y14.46
+        for flattened_name, (date_folder, tile_folder) in self._tile_folder_mapping.items():
+            # Search for matching folder (with any timestamp prefix)
+            # Pattern: *_{flattened_name} where flattened_name is like "Test_2026-01-27_X11.09_Y14.46"
+            pattern = f"*_{flattened_name}"
+            matching_folders = list(local_base.glob(pattern))
+
+            if not matching_folders:
+                logger.warning(f"Could not find folder matching pattern: {pattern}")
+                continue
+
+            for src_folder in matching_folders:
+                if not src_folder.is_dir():
+                    continue
+
+                # Target nested structure: base/date/tile/
+                dest_folder = local_base / self._base_save_directory / date_folder / tile_folder
+
+                try:
+                    dest_folder.mkdir(parents=True, exist_ok=True)
+
+                    # Move contents (not the folder itself)
+                    items_moved = 0
+                    for item in src_folder.iterdir():
+                        dest_path = dest_folder / item.name
+                        # Handle existing files by overwriting
+                        if dest_path.exists():
+                            if dest_path.is_dir():
+                                shutil.rmtree(str(dest_path))
+                            else:
+                                dest_path.unlink()
+                        shutil.move(str(item), str(dest_path))
+                        items_moved += 1
+                        logger.debug(f"Moved: {item.name} -> {dest_path}")
+
+                    # Remove now-empty source folder
+                    try:
+                        src_folder.rmdir()
+                    except OSError:
+                        # Folder not empty (might have hidden files)
+                        logger.warning(f"Could not remove source folder (not empty): {src_folder}")
+
+                    logger.info(f"Reorganized: {src_folder.name} -> {self._base_save_directory}/{date_folder}/{tile_folder}/ ({items_moved} items)")
+                    reorganized_count += 1
+
+                except Exception as e:
+                    logger.error(f"Failed to reorganize {src_folder}: {e}")
+
+        if reorganized_count > 0:
+            logger.info(f"Tile folder reorganization complete: {reorganized_count} folders moved")
+        else:
+            logger.info("No folders were reorganized")
+
+        return reorganized_count > 0
 
     def _get_geometry_manager(self):
         """Get WindowGeometryManager from application."""
