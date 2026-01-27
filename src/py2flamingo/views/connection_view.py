@@ -349,6 +349,37 @@ class ConnectionView(QWidget):
             self.test_workflow_file_btn.setEnabled(False)
             self.test_workflow_gen_btn.setEnabled(False)
 
+    def _update_status_error(self, error_message: str) -> None:
+        """Update UI state for communication error (TCP connected but microscope not responding).
+
+        This puts the UI in a partial state where:
+        - Connect button is re-enabled (to allow retry)
+        - Disconnect button stays enabled (TCP is connected)
+        - Sample View and other features are disabled (microscope not usable)
+
+        Args:
+            error_message: Error message to display
+        """
+        self._logger.info(f"ConnectionView: Updating UI for error state: {error_message}")
+        self.status_label.setText(f"Status: {error_message}")
+        self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-weight: bold;")
+
+        # Re-enable Connect to allow retry
+        self.connect_btn.setEnabled(True)
+        # Keep Disconnect enabled since TCP is connected
+        self.disconnect_btn.setEnabled(True)
+        # Keep IP/port disabled (still have TCP connection)
+        self.ip_input.setEnabled(False)
+        self.port_input.setEnabled(False)
+
+        # Disable features that require working microscope communication
+        self.sample_view_btn.setEnabled(False)
+        self.debug_command_combo.setEnabled(False)
+        self.debug_query_btn.setEnabled(False)
+        self.save_settings_btn.setEnabled(False)
+        self.test_workflow_file_btn.setEnabled(False)
+        self.test_workflow_gen_btn.setEnabled(False)
+
     def _on_sample_view_clicked(self) -> None:
         """Handle Sample View button click - emit signal to open Sample View."""
         self._logger.info("Sample View button clicked")
@@ -1158,6 +1189,8 @@ class ConnectionView(QWidget):
                     f"QTextEdit {{ font-family: 'Courier New', monospace; "
                     f"font-size: 10pt; color: {ERROR_COLOR}; }}"
                 )
+                # Update button states for error condition
+                self._update_status_error("Communication Error")
                 # Emit error signal to update status indicator
                 self.connection_error.emit("Settings retrieval failed")
                 return False
@@ -1170,6 +1203,8 @@ class ConnectionView(QWidget):
                 f"QTextEdit {{ font-family: 'Courier New', monospace; "
                 f"font-size: 10pt; color: {ERROR_COLOR}; }}"
             )
+            # Update button states for error condition
+            self._update_status_error("Communication Error")
             # Emit error signal to update status indicator
             self.connection_error.emit("Communication error")
             return False
