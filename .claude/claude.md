@@ -637,6 +637,44 @@ def test_invalid_position():
 4. **Professional Logs**: Structured logging with appropriate severity levels
 5. **Maintainable Code**: Clear patterns for error handling throughout codebase
 
+## Connection Initialization Flow
+
+### Signal Ordering for Connection
+
+When connecting to the microscope, signals must be emitted in a specific order to avoid race conditions:
+
+```
+User clicks Connect
+    ↓
+TCP connection established
+    ↓
+connection_established.emit()     ← Triggers: enable controls, status indicator
+    ↓
+Settings retrieval (PAUSES SocketReader for synchronous I/O)
+    ↓
+settings_loaded.emit()            ← Triggers: position queries
+    ↓
+Position queries complete
+```
+
+**Key Signals (ConnectionView):**
+- `connection_established` - TCP connection succeeded (immediate feedback)
+- `settings_loaded` - Settings retrieval completed (safe to use async socket operations)
+- `connection_error` - Communication error occurred (e.g., settings timeout)
+
+**Why This Order Matters:**
+
+The SocketReader is **paused** during settings retrieval to allow synchronous text reading. Any async operations (like position queries) that start before settings complete will have their responses lost because the reader isn't processing messages.
+
+**Implementation:**
+- `connection_established` → enables controls, sets status indicator
+- `settings_loaded` → starts position queries via `_on_settings_loaded()`
+- `connection_error` → sets ERROR status, re-enables Connect button
+
+See `src/py2flamingo/views/connection_view.py` and `src/py2flamingo/application.py`.
+
+---
+
 ## Async Socket Reader Architecture
 
 ### Overview

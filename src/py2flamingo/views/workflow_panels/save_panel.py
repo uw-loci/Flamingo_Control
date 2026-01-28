@@ -202,15 +202,6 @@ class SavePanel(QWidget):
         self._refresh_btn.setEnabled(self._connection_service is not None)
         drive_layout.addWidget(self._refresh_btn)
 
-        self._configure_local_btn = QPushButton("Local Path...")
-        self._configure_local_btn.setToolTip(
-            "Configure local path for this drive.\n"
-            "Required for post-collection folder reorganization\n"
-            "into nested structure for MIP Overview compatibility."
-        )
-        self._configure_local_btn.clicked.connect(self._configure_local_path)
-        drive_layout.addWidget(self._configure_local_btn)
-
         settings_layout.addLayout(drive_layout, 0, 1)
 
         # Warning label for no drive
@@ -218,19 +209,58 @@ class SavePanel(QWidget):
         self._update_drive_warning()
         settings_layout.addWidget(self._drive_warning, 1, 0, 1, 2)
 
+        # Local Path Configuration Section (for post-processing)
+        local_section_label = QLabel("Local Access:")
+        local_section_label.setStyleSheet("font-weight: bold; margin-top: 8px;")
+        local_section_label.setToolTip(
+            "Configure where the server drive is mounted on this computer.\n"
+            "Required for folder reorganization and MIP Overview processing."
+        )
+        settings_layout.addWidget(local_section_label, 2, 0)
+
+        # Local path row with checkbox, path display, and browse button
+        local_path_layout = QHBoxLayout()
+
+        self._enable_local_access = QCheckBox("Enable post-processing")
+        self._enable_local_access.setToolTip(
+            "Enable folder reorganization after tile collection.\n"
+            "Moves files from flat structure to nested folders\n"
+            "for MIP Overview compatibility."
+        )
+        self._enable_local_access.stateChanged.connect(self._on_local_access_changed)
+        local_path_layout.addWidget(self._enable_local_access)
+
+        self._local_path_display = QLineEdit()
+        self._local_path_display.setReadOnly(True)
+        self._local_path_display.setPlaceholderText("Not configured - click Browse...")
+        self._local_path_display.setMinimumWidth(150)
+        local_path_layout.addWidget(self._local_path_display, 1)
+
+        self._browse_local_btn = QPushButton("Browse...")
+        self._browse_local_btn.setToolTip("Select where the server drive is mounted locally")
+        self._browse_local_btn.clicked.connect(self._browse_local_path)
+        local_path_layout.addWidget(self._browse_local_btn)
+
+        settings_layout.addLayout(local_path_layout, 2, 1)
+
+        # Local path status/info label
+        self._local_path_status = QLabel()
+        self._update_local_path_status()
+        settings_layout.addWidget(self._local_path_status, 3, 0, 1, 2)
+
         # Directory (subdirectory within save drive)
-        settings_layout.addWidget(QLabel("Directory:"), 2, 0)
+        settings_layout.addWidget(QLabel("Directory:"), 4, 0)
         self._save_directory = QLineEdit()
         self._save_directory.setPlaceholderText("experiment_01")
         self._save_directory.textChanged.connect(self._on_settings_changed)
-        settings_layout.addWidget(self._save_directory, 2, 1)
+        settings_layout.addWidget(self._save_directory, 4, 1)
 
         # Sample name
-        settings_layout.addWidget(QLabel("Sample:"), 3, 0)
+        settings_layout.addWidget(QLabel("Sample:"), 5, 0)
         self._sample_name = QLineEdit()
         self._sample_name.setPlaceholderText("Sample_001")
         self._sample_name.textChanged.connect(self._on_settings_changed)
-        settings_layout.addWidget(self._sample_name, 3, 1)
+        settings_layout.addWidget(self._sample_name, 5, 1)
 
         # Format and MIP options row
         format_row = QHBoxLayout()
@@ -258,7 +288,7 @@ class SavePanel(QWidget):
         format_row.addWidget(self._display_mip)
 
         format_row.addStretch()
-        settings_layout.addLayout(format_row, 4, 0, 1, 2)
+        settings_layout.addLayout(format_row, 6, 0, 1, 2)
 
         group_layout.addWidget(self._settings_widget)
 
@@ -280,7 +310,24 @@ class SavePanel(QWidget):
         self._update_drive_warning()
         # Save as last used drive
         self._save_last_used_drive(drive)
+        # Update local path display for the new drive
+        self._update_local_path_display()
+        self._update_local_path_status()
         self._on_settings_changed()
+
+    def _update_local_path_display(self) -> None:
+        """Update the local path display when drive changes."""
+        config_service = self._get_config_service()
+        if config_service and self._save_drive:
+            local_path = config_service.get_local_path_for_drive(self._save_drive)
+            if local_path:
+                self._local_path_display.setText(local_path)
+                self._enable_local_access.setChecked(True)
+            else:
+                self._local_path_display.clear()
+                # Don't uncheck - let user decide
+        else:
+            self._local_path_display.clear()
 
     def _refresh_drives(self) -> None:
         """Query available drives from microscope server."""
@@ -345,8 +392,22 @@ class SavePanel(QWidget):
         except Exception as e:
             self._logger.debug(f"Auto-refresh not performed: {e}")
 
-    def _configure_local_path(self) -> None:
-        """Open dialog to configure local path for current drive.
+    def _on_local_access_changed(self, state: int) -> None:
+        """Handle local access checkbox change."""
+        enabled = state != 0
+        self._browse_local_btn.setEnabled(enabled)
+        if not enabled:
+            # Clear local path when disabled
+            self._local_path_display.clear()
+            # Remove mapping from config
+            config_service = self._get_config_service()
+            if config_service and self._save_drive:
+                config_service.remove_drive_mapping(self._save_drive)
+        self._update_local_path_status()
+        self._on_settings_changed()
+
+    def _browse_local_path(self) -> None:
+        """Open dialog to select local path for the current drive.
 
         This mapping allows post-collection folder reorganization from
         flattened structure (required by server) to nested structure
@@ -374,22 +435,62 @@ class SavePanel(QWidget):
         from pathlib import Path
         local_path = QFileDialog.getExistingDirectory(
             self,
-            f"Select Local Path for {current_drive}",
+            f"Select Local Folder for {current_drive}",
             current_local or str(Path.home())
         )
 
         if local_path:
             config_service.set_drive_mapping(current_drive, local_path)
-            QMessageBox.information(
-                self, "Local Path Configured",
-                f"Local path mapping saved:\n\n"
-                f"Server drive: {current_drive}\n"
-                f"Local path: {local_path}\n\n"
-                "After tile collection completes, folders will be\n"
-                "automatically reorganized into nested structure\n"
-                "for MIP Overview compatibility."
-            )
+            self._local_path_display.setText(local_path)
+            self._enable_local_access.setChecked(True)
+            self._update_local_path_status()
             self._logger.info(f"Configured local path: {current_drive} -> {local_path}")
+            self._on_settings_changed()
+
+    def _update_local_path_status(self) -> None:
+        """Update the local path status label based on current configuration."""
+        current_drive = self._save_drive_combo.currentText()
+        config_service = self._get_config_service()
+
+        if not current_drive:
+            self._local_path_status.setText("")
+            self._local_path_status.hide()
+            return
+
+        local_path = None
+        if config_service:
+            local_path = config_service.get_local_path_for_drive(current_drive)
+
+        if local_path:
+            # Check if path exists
+            from pathlib import Path
+            if Path(local_path).exists():
+                self._local_path_status.setText(
+                    "Configured - folders will be reorganized after tile collection"
+                )
+                self._local_path_status.setStyleSheet("color: #27ae60; font-size: 9pt;")
+                self._local_path_display.setText(local_path)
+                self._enable_local_access.setChecked(True)
+            else:
+                self._local_path_status.setText(
+                    f"Warning: Local path not accessible: {local_path}"
+                )
+                self._local_path_status.setStyleSheet("color: #e67e22; font-size: 9pt;")
+                self._local_path_display.setText(local_path)
+                self._enable_local_access.setChecked(True)
+            self._local_path_status.show()
+        elif self._enable_local_access.isChecked():
+            self._local_path_status.setText(
+                "Click 'Browse...' to select where the server drive is mounted locally"
+            )
+            self._local_path_status.setStyleSheet("color: #3498db; font-size: 9pt;")
+            self._local_path_status.show()
+        else:
+            self._local_path_status.setText(
+                "Optional: Enable for MIP Overview compatibility and folder organization"
+            )
+            self._local_path_status.setStyleSheet("color: #7f8c8d; font-size: 9pt;")
+            self._local_path_status.show()
 
     def _get_config_service(self):
         """Get ConfigurationService from application."""
@@ -447,6 +548,13 @@ class SavePanel(QWidget):
         """
         _, format_value = SAVE_FORMATS[self._format_combo.currentIndex()]
 
+        # Get local path from config if enabled
+        local_path = None
+        if self._enable_local_access.isChecked():
+            config_service = self._get_config_service()
+            if config_service and self._save_drive:
+                local_path = config_service.get_local_path_for_drive(self._save_drive)
+
         return {
             'save_enabled': self._save_enabled.isChecked(),
             'save_drive': self._save_drive,
@@ -459,6 +567,9 @@ class SavePanel(QWidget):
             'save_subfolders': self._save_subfolders,
             'live_view': self._live_view,
             'comments': self._comments,
+            # Local access settings for post-processing
+            'local_access_enabled': self._enable_local_access.isChecked(),
+            'local_path': local_path,
         }
 
     def set_settings(self, settings: Dict[str, Any]) -> None:
@@ -515,6 +626,13 @@ class SavePanel(QWidget):
 
         if 'comments' in settings:
             self._comments = settings['comments']
+
+        if 'local_access_enabled' in settings:
+            self._enable_local_access.setChecked(settings['local_access_enabled'])
+
+        # Update local path display after restoring settings
+        self._update_local_path_display()
+        self._update_local_path_status()
 
     def get_workflow_save_dict(self) -> Dict[str, str]:
         """

@@ -1,5 +1,7 @@
 # Claude Report: Connection Error Status Indicator
 
+**Status: RESOLVED** (2026-01-28)
+
 ## Issue Summary
 
 When clicking "Connect" in the Flamingo Control application, if the TCP connection succeeds but subsequent communication with the microscope fails (e.g., settings retrieval times out), the UI was misleadingly showing:

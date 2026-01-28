@@ -702,6 +702,9 @@ class TileCollectionDialog(QDialog):
         self._tile_folder_mapping: Dict[str, Tuple[str, str]] = {}
         self._base_save_directory = base_save_directory
         self._save_drive = save_settings['save_drive']
+        # Get local path directly from save settings (configured via Browse button)
+        self._local_path = save_settings.get('local_path')
+        self._local_access_enabled = save_settings.get('local_access_enabled', False)
 
         created_files = []
         for i, (tile, rotation, z_min, z_max) in enumerate(tiles_to_process):
@@ -1450,7 +1453,7 @@ class TileCollectionDialog(QDialog):
 
         Moves: base_date_tile/ -> base/date/tile/
 
-        Only runs if local drive mapping is configured and accessible.
+        Only runs if local path was configured in save settings and is accessible.
         This method is called AFTER queue_completed signal, which guarantees all
         workflows have finished and all files are written.
 
@@ -1462,17 +1465,17 @@ class TileCollectionDialog(QDialog):
             logger.debug("No tile folder mapping - skipping reorganization")
             return False
 
-        config_service = self._get_config_service()
-        if not config_service:
-            logger.info("No config service - skipping folder reorganization")
+        # Check if local access was enabled and path was configured
+        if not getattr(self, '_local_access_enabled', False):
+            logger.info("Local access not enabled - skipping folder reorganization")
             return False
 
-        local_drive = config_service.get_local_path_for_drive(self._save_drive)
-        if not local_drive:
-            logger.info(f"No local drive mapping for {self._save_drive} - skipping folder reorganization")
+        local_path = getattr(self, '_local_path', None)
+        if not local_path:
+            logger.info("No local path configured - skipping folder reorganization")
             return False
 
-        local_base = Path(local_drive)
+        local_base = Path(local_path)
         if not local_base.exists():
             logger.warning(f"Local drive path does not exist: {local_base} - skipping reorganization")
             return False
