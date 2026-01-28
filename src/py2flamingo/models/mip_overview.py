@@ -100,6 +100,7 @@ class MIPOverviewConfig:
         tile_size_pixels: Size of each tile in pixels (original, before downsampling)
         downsample_factor: How much images were downsampled for display
         rotation_angle: Rotation angle of the tiles (default 0.0)
+        invert_x: Whether X-axis is inverted for display (low X on right)
     """
     base_folder: Path
     date_folder: str
@@ -108,6 +109,7 @@ class MIPOverviewConfig:
     tile_size_pixels: int = 2048
     downsample_factor: int = 4
     rotation_angle: float = 0.0
+    invert_x: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize config to dictionary.
@@ -123,6 +125,7 @@ class MIPOverviewConfig:
             'tile_size_pixels': self.tile_size_pixels,
             'downsample_factor': self.downsample_factor,
             'rotation_angle': self.rotation_angle,
+            'invert_x': self.invert_x,
         }
 
     @classmethod
@@ -143,6 +146,7 @@ class MIPOverviewConfig:
             tile_size_pixels=data.get('tile_size_pixels', 2048),
             downsample_factor=data.get('downsample_factor', 4),
             rotation_angle=data.get('rotation_angle', 0.0),
+            invert_x=data.get('invert_x', False),
         )
 
 
@@ -236,3 +240,43 @@ def find_tile_folders(date_path: Path) -> List[Path]:
                 tile_folders.append(item)
 
     return tile_folders
+
+
+def load_invert_x_setting() -> bool:
+    """Load the X-axis inversion setting from visualization config.
+
+    The microscope stage X-axis may be inverted relative to image display.
+    When invert_x is True, low X stage values appear on the right side
+    of the image, and high X values on the left.
+
+    Returns:
+        True if X-axis should be inverted for display
+    """
+    try:
+        import yaml
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # Look for config in standard locations
+        config_paths = [
+            Path(__file__).parent.parent / "configs" / "visualization_3d_config.yaml",
+            Path.cwd() / "configs" / "visualization_3d_config.yaml",
+        ]
+
+        for config_path in config_paths:
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+
+                invert_x = config.get('stage_control', {}).get('invert_x_default', False)
+                logger.info(f"MIP Overview: loaded invert_x={invert_x} from {config_path.name}")
+                return invert_x
+
+        logger.warning("Visualization config not found, using invert_x=False")
+        return False
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to load invert_x setting: {e}, using False")
+        return False

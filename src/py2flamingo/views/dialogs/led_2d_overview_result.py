@@ -276,10 +276,10 @@ class ImagePanel(QWidget):
 
         # Contrast settings - slider values (0-1000 range for precision)
         self._contrast_min_slider = 0  # Maps to _image_min
-        self._contrast_max_slider = 1000  # Maps to _image_95pct
+        self._contrast_max_slider = 1000  # Maps to _image_max_pct
         # Actual image intensity range (set when image is loaded)
         self._image_min = 0.0
-        self._image_95pct = 255.0
+        self._image_max_pct = 255.0  # 99.5th percentile
 
         self._setup_ui()
 
@@ -447,13 +447,13 @@ class ImagePanel(QWidget):
                 flat = image[:, :, 0].ravel() if image.shape[2] >= 1 else image.ravel()
 
             self._image_min = float(np.min(flat))
-            self._image_95pct = float(np.percentile(flat, 95))
+            self._image_max_pct = float(np.percentile(flat, 99.5))
 
             # Ensure min < max
-            if self._image_95pct <= self._image_min:
-                self._image_95pct = self._image_min + 1
+            if self._image_max_pct <= self._image_min:
+                self._image_max_pct = self._image_min + 1
 
-            logger.debug(f"Contrast range: min={self._image_min:.1f}, 95%={self._image_95pct:.1f}")
+            logger.debug(f"Contrast range: min={self._image_min:.1f}, 99.5%={self._image_max_pct:.1f}")
 
             # Reset sliders to full range
             self._min_slider.blockSignals(True)
@@ -624,8 +624,8 @@ class ImagePanel(QWidget):
             bytes_per_line = w
 
             # Apply contrast adjustment using slider values
-            # Slider values (0-1000) map to the range [_image_min, _image_95pct]
-            intensity_range = self._image_95pct - self._image_min
+            # Slider values (0-1000) map to the range [_image_min, _image_max_pct]
+            intensity_range = self._image_max_pct - self._image_min
             display_min = self._image_min + (self._contrast_min_slider / 1000.0) * intensity_range
             display_max = self._image_min + (self._contrast_max_slider / 1000.0) * intensity_range
 

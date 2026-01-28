@@ -33,7 +33,7 @@ from PyQt5.QtGui import QIcon
 from py2flamingo.models.mip_overview import (
     MIPTileResult, MIPOverviewConfig,
     parse_coords_from_folder, calculate_grid_indices,
-    find_date_folders, find_tile_folders,
+    find_date_folders, find_tile_folders, load_invert_x_setting,
 )
 from py2flamingo.workflows.led_2d_overview_workflow import TileResult
 
@@ -337,7 +337,7 @@ class MIPOverviewDialog(QDialog):
         # Get tile size from first image
         tile_size = tiles[0].image.shape[0]  # Assume square tiles
 
-        # Create config
+        # Create config (load axis inversion setting from visualization config)
         self._config = MIPOverviewConfig(
             base_folder=base_path,
             date_folder=date_folder,
@@ -345,6 +345,7 @@ class MIPOverviewDialog(QDialog):
             tiles_y=tiles_y,
             tile_size_pixels=tile_size,
             downsample_factor=4,
+            invert_x=load_invert_x_setting(),
         )
 
         self._tiles = tiles
@@ -412,8 +413,13 @@ class MIPOverviewDialog(QDialog):
             else:
                 downsampled = tile.image
 
-            # Calculate position
-            x_pos = tile.tile_x_idx * tile_w
+            # Calculate position (invert X if needed to match stage orientation)
+            if self._config.invert_x:
+                # Invert: tile_x_idx=0 goes on right, tile_x_idx=max goes on left
+                inverted_x_idx = (tiles_x - 1) - tile.tile_x_idx
+                x_pos = inverted_x_idx * tile_w
+            else:
+                x_pos = tile.tile_x_idx * tile_w
             y_pos = tile.tile_y_idx * tile_h
 
             # Place in stitched image
@@ -428,9 +434,9 @@ class MIPOverviewDialog(QDialog):
         # Convert tiles to TileResult format for ImagePanel
         tile_results = self._mip_tiles_to_tile_results(self._tiles)
 
-        # Display in left panel
+        # Display in left panel (use invert_x from config for correct axis orientation)
         self._left_panel.set_image(stitched, tiles_x, tiles_y)
-        self._left_panel.set_tile_coordinates(coords, invert_x=False)
+        self._left_panel.set_tile_coordinates(coords, invert_x=self._config.invert_x)
         self._left_panel.set_tile_results(tile_results)
 
         logger.info(f"Stitched {len(self._tiles)} tiles into {stitched_w}x{stitched_h} overview")
@@ -724,9 +730,9 @@ class MIPOverviewDialog(QDialog):
             # Convert tiles to TileResult format
             tile_results = dialog._mip_tiles_to_tile_results(tiles)
 
-            # Display
+            # Display (use invert_x from loaded config for correct axis orientation)
             dialog._left_panel.set_image(stitched_image, config.tiles_x, config.tiles_y)
-            dialog._left_panel.set_tile_coordinates(coords, invert_x=False)
+            dialog._left_panel.set_tile_coordinates(coords, invert_x=config.invert_x)
             dialog._left_panel.set_tile_results(tile_results)
 
         dialog._folder_edit.setText(str(config.base_folder))
