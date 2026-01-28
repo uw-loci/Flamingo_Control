@@ -93,13 +93,19 @@ class WorkflowQueueService(QObject):
     error_occurred = pyqtSignal(str)
 
     # Fallback poll interval if callbacks not received (seconds)
-    STATE_POLL_INTERVAL = 10.0
+    # Increased to reduce server load during workflow execution
+    STATE_POLL_INTERVAL = 15.0
 
     # Maximum time to wait for a workflow (seconds) - 30 minutes default
     MAX_WORKFLOW_TIMEOUT = 1800
 
     # Minimum wait between workflows (seconds) - ensures system settles
-    MIN_INTER_WORKFLOW_DELAY = 1.0
+    # Increased from 1.0 to give server time to fully complete cleanup
+    MIN_INTER_WORKFLOW_DELAY = 3.0
+
+    # Delay after sending workflow before polling for start (seconds)
+    # Gives server time to receive and begin processing the workflow
+    POST_WORKFLOW_SEND_DELAY = 2.0
 
     def __init__(self,
                  workflow_controller: 'WorkflowController',
@@ -489,6 +495,11 @@ class WorkflowQueueService(QObject):
 
         logger.info(f"[QUEUE] Started workflow: {file_path.name}")
 
+        # Give server time to receive and begin processing the workflow
+        # before we start polling. This reduces server load.
+        logger.info(f"[QUEUE] Waiting {self.POST_WORKFLOW_SEND_DELAY}s for server to begin processing...")
+        time.sleep(self.POST_WORKFLOW_SEND_DELAY)
+
         # Wait for system to become NOT idle (confirms workflow actually started)
         logger.info(f"[QUEUE] Waiting for system to become busy (workflow to start)...")
         if not self._wait_for_workflow_start():
@@ -591,7 +602,8 @@ class WorkflowQueueService(QObject):
     MAX_WORKFLOW_START_TIMEOUT = 30.0
 
     # Interval for polling system state while waiting for workflow start
-    WORKFLOW_START_POLL_INTERVAL = 0.5
+    # Increased from 0.5 to reduce server load
+    WORKFLOW_START_POLL_INTERVAL = 2.0
 
     def _wait_for_workflow_start(self) -> bool:
         """

@@ -125,6 +125,24 @@ This ensures users can:
 2. Retry by clicking Connect again
 3. Cannot accidentally try to use features that require working communication
 
+### Position Query Race Condition Fix (57b6677)
+
+**Problem:** Stage position showed 0,0,0,0 because position queries were colliding with settings retrieval:
+1. `connection_established` signal triggered position queries immediately
+2. Settings retrieval pauses the SocketReader for synchronous operation
+3. Position responses arriving during the pause were lost (timeout)
+
+**Solution:**
+- Added `settings_loaded` signal emitted after settings retrieval completes
+- Split `_on_stage_connection_established()` into two handlers:
+  - `_on_stage_connection_established()`: enables controls (on TCP connection)
+  - `_on_settings_loaded()`: queries position (after settings complete)
+- Position queries now wait for settings retrieval to finish
+
+**Files Modified:**
+- `connection_view.py`: Added `settings_loaded` signal, emit after successful settings load
+- `application.py`: New `_on_settings_loaded()` handler, connect to signal
+
 Pushed to: https://github.com/uw-loci/Flamingo_Control.git (main branch)
 
 ---
