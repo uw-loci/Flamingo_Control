@@ -12,10 +12,10 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QSplitter, QGroupBox, QFileDialog, QMessageBox,
-    QSizePolicy, QFrame, QComboBox, QMenu, QAction
+    QSizePolicy, QFrame, QComboBox, QMenu, QAction, QSlider
 )
 from PyQt5.QtCore import Qt, QSize, QPoint, QPointF, pyqtSignal
-from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QWheelEvent, QMouseEvent
+from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QWheelEvent, QMouseEvent, QIcon
 
 
 logger = logging.getLogger(__name__)
@@ -274,6 +274,13 @@ class ImagePanel(QWidget):
         self._selected_tiles: set = set()  # Set of (tile_x_idx, tile_y_idx) tuples
         self._tile_results: List = []  # Store TileResult objects for retrieval
 
+        # Contrast settings - slider values (0-1000 range for precision)
+        self._contrast_min_slider = 0  # Maps to _image_min
+        self._contrast_max_slider = 1000  # Maps to _image_95pct
+        # Actual image intensity range (set when image is loaded)
+        self._image_min = 0.0
+        self._image_95pct = 255.0
+
         self._setup_ui()
 
     def _setup_ui(self):
@@ -318,6 +325,34 @@ class ImagePanel(QWidget):
 
         zoom_layout.addStretch()
 
+        # Contrast sliders
+        contrast_label = QLabel("Contrast:")
+        contrast_label.setStyleSheet("color: gray; font-size: 9pt;")
+        zoom_layout.addWidget(contrast_label)
+
+        self._min_slider = QSlider(Qt.Horizontal)
+        self._min_slider.setRange(0, 1000)
+        self._min_slider.setValue(0)
+        self._min_slider.setFixedWidth(80)
+        self._min_slider.setToolTip("Black point (minimum display value)")
+        self._min_slider.valueChanged.connect(self._on_contrast_changed)
+        zoom_layout.addWidget(self._min_slider)
+
+        self._contrast_label = QLabel("0-100%")
+        self._contrast_label.setStyleSheet("color: gray; font-size: 9pt;")
+        self._contrast_label.setFixedWidth(55)
+        zoom_layout.addWidget(self._contrast_label)
+
+        self._max_slider = QSlider(Qt.Horizontal)
+        self._max_slider.setRange(0, 1000)
+        self._max_slider.setValue(1000)
+        self._max_slider.setFixedWidth(80)
+        self._max_slider.setToolTip("White point (maximum display value)")
+        self._max_slider.valueChanged.connect(self._on_contrast_changed)
+        zoom_layout.addWidget(self._max_slider)
+
+        zoom_layout.addStretch()
+
         fit_btn = QPushButton("Fit")
         fit_btn.setFixedWidth(40)
         fit_btn.setToolTip("Fit image to view")
@@ -356,6 +391,37 @@ class ImagePanel(QWidget):
         zoom_pct = int(self.image_label.zoom_level * 100)
         self.zoom_label.setText(f"{zoom_pct}%")
 
+    def _on_contrast_changed(self):
+        """Handle contrast slider change - redraw image with new contrast."""
+        self._contrast_min_slider = self._min_slider.value()
+        self._contrast_max_slider = self._max_slider.value()
+
+        # Ensure min < max (swap if needed)
+        if self._contrast_min_slider >= self._contrast_max_slider:
+            if self.sender() == self._min_slider:
+                self._contrast_min_slider = self._contrast_max_slider - 1
+                self._min_slider.blockSignals(True)
+                self._min_slider.setValue(self._contrast_min_slider)
+                self._min_slider.blockSignals(False)
+            else:
+                self._contrast_max_slider = self._contrast_min_slider + 1
+                self._max_slider.blockSignals(True)
+                self._max_slider.setValue(self._contrast_max_slider)
+                self._max_slider.blockSignals(False)
+
+        self._update_contrast_label()
+
+        # Redraw image with new contrast settings
+        if self._image is not None:
+            self._invalidate_base_pixmap()
+            self._redraw_overlay()
+
+    def _update_contrast_label(self):
+        """Update the contrast percentage label."""
+        min_pct = int(self._contrast_min_slider / 10)
+        max_pct = int(self._contrast_max_slider / 10)
+        self._contrast_label.setText(f"{min_pct}-{max_pct}%")
+
     def set_image(self, image: Optional[np.ndarray], tiles_x: int = 0, tiles_y: int = 0):
         """Set the image to display.
 
@@ -371,6 +437,34 @@ class ImagePanel(QWidget):
         if image is not None:
             logger.info(f"ImagePanel.set_image: image shape={image.shape}, tiles={tiles_x}x{tiles_y}, "
                        f"existing coords={len(self._tile_coords)}, invert_x={self._invert_x}")
+
+            # Calculate image intensity range for contrast sliders
+            # Use min and 95th percentile as the slider range endpoints
+            if len(image.shape) == 2:
+                flat = image.ravel()
+            else:
+                # For RGB, use first channel or convert to grayscale
+                flat = image[:, :, 0].ravel() if image.shape[2] >= 1 else image.ravel()
+
+            self._image_min = float(np.min(flat))
+            self._image_95pct = float(np.percentile(flat, 95))
+
+            # Ensure min < max
+            if self._image_95pct <= self._image_min:
+                self._image_95pct = self._image_min + 1
+
+            logger.debug(f"Contrast range: min={self._image_min:.1f}, 95%={self._image_95pct:.1f}")
+
+            # Reset sliders to full range
+            self._min_slider.blockSignals(True)
+            self._max_slider.blockSignals(True)
+            self._min_slider.setValue(0)
+            self._max_slider.setValue(1000)
+            self._contrast_min_slider = 0
+            self._contrast_max_slider = 1000
+            self._min_slider.blockSignals(False)
+            self._max_slider.blockSignals(False)
+            self._update_contrast_label()
 
         # Invalidate cached base pixmap since image/grid changed
         self._invalidate_base_pixmap()
@@ -523,16 +617,29 @@ class ImagePanel(QWidget):
             self.image_label.setPixmap(self._pixmap)
 
     def _array_to_pixmap(self, image: np.ndarray) -> QPixmap:
-        """Convert numpy array to QPixmap."""
+        """Convert numpy array to QPixmap with contrast adjustment."""
         if len(image.shape) == 2:
             # Grayscale
             h, w = image.shape
             bytes_per_line = w
-            # Normalize to 8-bit if needed
-            if image.dtype != np.uint8:
-                img_8bit = ((image - image.min()) / (image.max() - image.min() + 1e-10) * 255).astype(np.uint8)
-            else:
-                img_8bit = image
+
+            # Apply contrast adjustment using slider values
+            # Slider values (0-1000) map to the range [_image_min, _image_95pct]
+            intensity_range = self._image_95pct - self._image_min
+            display_min = self._image_min + (self._contrast_min_slider / 1000.0) * intensity_range
+            display_max = self._image_min + (self._contrast_max_slider / 1000.0) * intensity_range
+
+            # Ensure valid range
+            if display_max <= display_min:
+                display_max = display_min + 1
+
+            # Clip and rescale to 8-bit
+            img_float = image.astype(np.float32)
+            img_clipped = np.clip(img_float, display_min, display_max)
+            img_8bit = ((img_clipped - display_min) / (display_max - display_min) * 255).astype(np.uint8)
+
+            # Ensure contiguous array for QImage
+            img_8bit = np.ascontiguousarray(img_8bit)
             qimg = QImage(img_8bit.data, w, h, bytes_per_line, QImage.Format_Grayscale8)
         elif len(image.shape) == 3:
             h, w, c = image.shape
@@ -745,6 +852,7 @@ class LED2DOverviewResultWindow(QWidget):
         self._app = app
 
         self.setWindowTitle("LED 2D Overview - Results" if not preview_mode else "LED 2D Overview - Preview")
+        self.setWindowIcon(QIcon())  # Clear inherited napari icon
         self.setMinimumSize(800, 500)
 
         # Track first show for auto-fit
@@ -1505,14 +1613,41 @@ class LED2DOverviewResultWindow(QWidget):
             QMessageBox.warning(self, "No Results", "No scan results to save")
             return
 
+        # Determine default save location
+        # Priority: 1) User's saved preference, 2) 2DOverviewSession in project folder
+        default_folder = None
+
+        # Check for user's saved preference via configuration service
+        if self._app and hasattr(self._app, 'configuration_service'):
+            saved_path = self._app.configuration_service.get_led_2d_session_path()
+            if saved_path and Path(saved_path).exists():
+                default_folder = saved_path
+
+        # Fall back to default 2DOverviewSession folder in project root
+        if not default_folder:
+            # Get project root (parent of src directory)
+            project_root = Path(__file__).parent.parent.parent.parent.parent
+            default_session_folder = project_root / "2DOverviewSession"
+            # Create it if it doesn't exist
+            try:
+                default_session_folder.mkdir(parents=True, exist_ok=True)
+                default_folder = str(default_session_folder)
+            except Exception as e:
+                logger.warning(f"Could not create default session folder: {e}")
+                default_folder = str(Path.home())
+
         # Get save location
         folder = QFileDialog.getExistingDirectory(
             self, "Select Folder to Save Session",
-            "",
+            default_folder,
             QFileDialog.ShowDirsOnly
         )
         if not folder:
             return
+
+        # Remember user's choice for future sessions
+        if self._app and hasattr(self._app, 'configuration_service'):
+            self._app.configuration_service.set_led_2d_session_path(folder)
 
         try:
             import tifffile

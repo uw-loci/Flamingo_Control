@@ -28,6 +28,7 @@ from PyQt5.QtWidgets import (
     QComboBox, QProgressDialog, QLineEdit, QFrame,
 )
 from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QIcon
 
 from py2flamingo.models.mip_overview import (
     MIPTileResult, MIPOverviewConfig,
@@ -74,6 +75,7 @@ class MIPOverviewDialog(QDialog):
         self._first_show = True
 
         self.setWindowTitle("MIP Overview")
+        self.setWindowIcon(QIcon())  # Clear inherited napari icon
         self.setMinimumSize(1200, 800)
         self._setup_ui()
 
@@ -591,16 +593,44 @@ class MIPOverviewDialog(QDialog):
             QMessageBox.warning(self, "Nothing to Save", "No tiles loaded to save.")
             return
 
+        # Determine default save location
+        # Priority: 1) User's saved preference, 2) MIPOverviewSession in project folder
+        default_folder = None
+
+        # Check for user's saved preference via configuration service
+        if self._app and hasattr(self._app, 'configuration_service'):
+            saved_path = self._app.configuration_service.get_mip_session_path()
+            if saved_path and Path(saved_path).exists():
+                default_folder = saved_path
+
+        # Fall back to default MIPOverviewSession folder in project root
+        if not default_folder:
+            # Get project root (parent of src directory)
+            project_root = Path(__file__).parent.parent.parent.parent.parent
+            default_session_folder = project_root / "MIPOverviewSession"
+            # Create it if it doesn't exist
+            try:
+                default_session_folder.mkdir(parents=True, exist_ok=True)
+                default_folder = str(default_session_folder)
+            except Exception as e:
+                logger.warning(f"Could not create default session folder: {e}")
+                default_folder = str(Path.home())
+
         # Ask for save location
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_name = f"mip_overview_{timestamp}"
 
         folder = QFileDialog.getExistingDirectory(
             self, "Select Folder to Save Session",
-            str(Path.home())
+            default_folder,
+            QFileDialog.ShowDirsOnly
         )
         if not folder:
             return
+
+        # Remember user's choice for future sessions
+        if self._app and hasattr(self._app, 'configuration_service'):
+            self._app.configuration_service.set_mip_session_path(folder)
 
         save_path = Path(folder) / default_name
         try:

@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QDialogButtonBox
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QIcon
 
 
 # AOI preset configurations
@@ -53,6 +54,7 @@ class AdvancedCameraDialog(QDialog):
         self._updating_preset = False
 
         self.setWindowTitle("Advanced Camera Settings")
+        self.setWindowIcon(QIcon())  # Clear inherited napari icon
         self.setMinimumWidth(400)
         self.setModal(True)
 

@@ -17,6 +17,7 @@ from PyQt5.QtWidgets import (
     QMessageBox, QProgressDialog, QFrame, QCheckBox
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QIcon
 
 from py2flamingo.views.workflow_panels import (
     IlluminationPanel, ZStackPanel, SavePanel, CameraPanel
@@ -240,8 +241,9 @@ class TileCollectionDialog(QDialog):
         self._update_z_ranges()
 
         self.setWindowTitle("Collect Tiles - Workflow Configuration")
-        self.setMinimumWidth(500)
-        self.setMinimumHeight(600)
+        self.setWindowIcon(QIcon())  # Clear inherited napari icon
+        self.setMinimumWidth(550)
+        self.setMinimumHeight(720)
 
         self._setup_ui()
 

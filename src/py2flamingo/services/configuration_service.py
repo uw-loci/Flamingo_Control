@@ -351,3 +351,41 @@ class ConfigurationService:
             self.logger.info(f"Removed drive mapping for: {server_path}")
             return True
         return False
+
+    # Session save path methods
+    LED_2D_SESSION_PATH_KEY = 'led_2d_overview_session_path'
+    MIP_SESSION_PATH_KEY = 'mip_overview_session_path'
+
+    def get_led_2d_session_path(self) -> Optional[str]:
+        """Get the last-used LED 2D Overview session save path.
+
+        Returns:
+            Path string if set, None otherwise
+        """
+        return self.config.get(self.LED_2D_SESSION_PATH_KEY)
+
+    def set_led_2d_session_path(self, path: str) -> None:
+        """Set the LED 2D Overview session save path.
+
+        Args:
+            path: Directory path to save sessions to
+        """
+        self.config[self.LED_2D_SESSION_PATH_KEY] = path
+        self.logger.info(f"Set LED 2D session path: {path}")
+
+    def get_mip_session_path(self) -> Optional[str]:
+        """Get the last-used MIP Overview session save path.
+
+        Returns:
+            Path string if set, None otherwise
+        """
+        return self.config.get(self.MIP_SESSION_PATH_KEY)
+
+    def set_mip_session_path(self, path: str) -> None:
+        """Set the MIP Overview session save path.
+
+        Args:
+            path: Directory path to save sessions to
+        """
+        self.config[self.MIP_SESSION_PATH_KEY] = path
+        self.logger.info(f"Set MIP session path: {path}")

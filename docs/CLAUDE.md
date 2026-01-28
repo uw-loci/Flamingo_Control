@@ -143,6 +143,31 @@ Display is decoupled via `views/viewer_interface.py`:
 
 To add a new viewer, implement `ViewerInterface` and update `__main__.py`.
 
+### LED 2D Overview Feature
+
+Extension for quick sample orientation scanning. Creates 2D overview maps at dual rotation angles (R and R+90).
+
+**Key Files:**
+- `views/dialogs/led_2d_overview_dialog.py` - Configuration dialog (60KB)
+- `workflows/led_2d_overview_workflow.py` - Scan execution engine (52KB)
+- `views/dialogs/led_2d_overview_result.py` - Results display window (68KB)
+- `views/dialogs/tile_collection_dialog.py` - Workflow generation from selected tiles (73KB)
+- `views/dialogs/overview_thresholder_dialog.py` - Auto-selection tool (20KB)
+
+**Architecture:** Clean extension with minimal integration:
+- Menu entry in `main_window.py` (lines 267-276)
+- Application state signals for acquisition locking
+- Service dependencies via injection (PositionPresetService, CameraService, StageService)
+- No direct database modifications, global state pollution, or monkey-patching
+- Could be extracted to separate package with ~90% import path changes only
+
+**Data Flow:**
+```
+LED2DOverviewDialog → LED2DOverviewWorkflow → LED2DOverviewResultWindow → TileCollectionDialog
+```
+
+See [LED 2D Overview Guide](led_2d_overview.md) for complete documentation.
+
 ## Important Configuration Files
 
 **Required for operation:**

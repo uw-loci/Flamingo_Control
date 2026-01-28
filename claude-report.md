@@ -301,3 +301,242 @@ MIP Overview can now load from: G:\CTLSM1\Test\
 
 - `docs/workflow_system.md` - Added save panel local path mapping docs
 - `claude-report/tile_collection_dialog_feature.md` - Added server directory fix section (in gitignored dir)
+
+---
+
+# Claude Report: LED 2D Overview Documentation
+
+**Date:** 2026-01-28
+
+## Summary
+
+Created comprehensive documentation for the LED 2D Overview feature and integrated it into the project's documentation structure.
+
+## Files Created
+
+| File | Size | Description |
+|------|------|-------------|
+| `docs/led_2d_overview.md` | 14KB | Complete user & developer guide |
+
+## Files Updated
+
+| File | Changes |
+|------|---------|
+| `README.md` | Added LED 2D Overview feature section; added link in Documentation section |
+| `docs/CLAUDE.md` | Added LED 2D Overview feature context for AI assistance |
+
+## Documentation Contents
+
+The new `docs/led_2d_overview.md` includes:
+
+1. **Overview** - Purpose and capabilities
+2. **Features** - Dual-rotation scanning, visualization types, tile selection, etc.
+3. **Quick Start** - 6-step getting started guide
+4. **User Workflow** - Detailed 4-stage workflow:
+   - Stage 1: Configuration (bounding points, LED settings, rotation)
+   - Stage 2: Scanning (progress tracking, cancellation)
+   - Stage 3: Results & Selection (visualization types, manual/auto selection)
+   - Stage 4: Tile Collection (workflow generation)
+5. **Configuration Parameters** - Tables of scan settings and calculated values
+6. **Architecture (Developer Reference)**:
+   - Component overview with file sizes
+   - Data flow diagram
+   - Key classes (BoundingBox, ScanConfiguration, TileResult, RotationResult)
+   - Signal flow diagram
+   - Integration points (menu entry, service dependencies)
+7. **Troubleshooting** - Common issues and solutions
+8. **Related Features** - Links to MIP Overview, Tile Collection, etc.
+
+## Architecture Assessment
+
+Verified the LED 2D Overview feature is well-separated (9/10 architecture quality):
+- 7 main files (~228KB total)
+- Minimal integration points (menu entry + signals)
+- No direct database modifications, global state pollution, or monkey-patching
+- Could be extracted to separate package with ~90% import path changes only
+
+---
+
+# Claude Report: Tile Collection Dialog Resize
+
+**Date:** 2026-01-28
+
+## Summary
+
+Increased the minimum size of the Tile Collection Dialog to accommodate recent UI additions.
+
+## Changes
+
+| Property | Before | After | Change |
+|----------|--------|-------|--------|
+| Minimum Width | 500px | 550px | +10% |
+| Minimum Height | 600px | 720px | +20% |
+
+## File Modified
+
+`src/py2flamingo/views/dialogs/tile_collection_dialog.py` (lines 243-244)
+
+```python
+# Before
+self.setMinimumWidth(500)
+self.setMinimumHeight(600)
+
+# After
+self.setMinimumWidth(550)
+self.setMinimumHeight(720)
+```
+
+---
+
+# Claude Report: Napari Icon Removal from Dialogs
+
+**Date:** 2026-01-28
+
+## Issue
+
+The napari logo appeared in the title bar of most dialog windows, confusing users who thought the application was a napari plugin. The icon was being inherited from napari when it was imported/initialized for the 3D visualization.
+
+## Solution
+
+Added `self.setWindowIcon(QIcon())` to dialog constructors to clear the inherited napari icon. The Sample View window (which actually uses napari) retains the napari icon since it's appropriate there.
+
+## Files Modified
+
+| File | Dialog Name |
+|------|-------------|
+| `views/dialogs/led_2d_overview_dialog.py` | LED 2D Overview |
+| `views/dialogs/led_2d_overview_result.py` | LED 2D Overview - Results |
+| `views/dialogs/tile_collection_dialog.py` | Collect Tiles - Workflow Configuration |
+| `views/dialogs/overview_thresholder_dialog.py` | 2D Overview Tile Thresholder |
+| `views/dialogs/mip_overview_dialog.py` | MIP Overview |
+| `views/dialogs/advanced_illumination_dialog.py` | Advanced Illumination Settings |
+| `views/dialogs/advanced_save_dialog.py` | Advanced Save Settings |
+| `views/dialogs/advanced_camera_dialog.py` | Advanced Camera Settings |
+
+## Implementation
+
+Each dialog received two changes:
+
+1. **Import addition:**
+   ```python
+   from PyQt5.QtGui import QIcon  # Added to existing QtGui import
+   ```
+
+2. **Icon clearing in constructor:**
+   ```python
+   self.setWindowTitle("Dialog Name")
+   self.setWindowIcon(QIcon())  # Clear inherited napari icon
+   ```
+
+## Result
+
+- Dialog windows now show the default system icon (or no icon) instead of the napari logo
+- Sample View retains the napari icon since it genuinely uses napari for 3D visualization
+- Users are no longer confused about whether the application is a napari plugin
+
+---
+
+# Claude Report: Contrast Slider for ImagePanel
+
+**Date:** 2026-01-28
+
+## Summary
+
+Added min/max contrast sliders to the ImagePanel component used by MIP Overview and LED 2D Overview dialogs.
+
+## Features
+
+- **Dual sliders**: Min (black point) and Max (white point) sliders
+- **Auto-range**: Slider endpoints are image minimum and 95th percentile values
+- **Real-time update**: Moving sliders instantly updates display
+- **Slider protection**: Min cannot exceed max (and vice versa)
+
+## Files Modified
+
+| File | Changes |
+|------|---------|
+| `views/dialogs/led_2d_overview_result.py` | Added contrast slider UI and logic to ImagePanel class |
+
+## Implementation Details
+
+### UI Layout
+
+Added between zoom label and Fit/1:1 buttons:
+```
+[100%] ... [Contrast:] [---min---] [0-100%] [---max---] ... [Fit] [1:1]
+```
+
+### Contrast Calculation
+
+```python
+# When image is loaded:
+self._image_min = float(np.min(flat))
+self._image_95pct = float(np.percentile(flat, 95))
+
+# When converting to display:
+display_min = self._image_min + (slider_min / 1000.0) * intensity_range
+display_max = self._image_min + (slider_max / 1000.0) * intensity_range
+img_clipped = np.clip(image, display_min, display_max)
+img_8bit = rescale_to_255(img_clipped)
+```
+
+### Instance Variables Added
+
+```python
+self._contrast_min_slider = 0      # 0-1000 range for precision
+self._contrast_max_slider = 1000
+self._image_min = 0.0              # Actual image intensity min
+self._image_95pct = 255.0          # Actual image 95th percentile
+```
+
+---
+
+# Claude Report: Session Save Path Defaults
+
+**Date:** 2026-01-28
+
+## Summary
+
+Added default save locations for MIP Overview and LED 2D Overview session saves, with persistence of user preferences.
+
+## Default Locations
+
+| Feature | Default Folder |
+|---------|----------------|
+| LED 2D Overview | `Flamingo_Control/2DOverviewSession/` |
+| MIP Overview | `Flamingo_Control/MIPOverviewSession/` |
+
+## Behavior
+
+1. **First use**: Defaults to session folder in project root
+2. **User selects different folder**: Choice is remembered via configuration service
+3. **Next session**: Opens to user's previously selected folder
+4. **Folder creation**: Default folders are auto-created if they don't exist
+
+## Files Modified
+
+| File | Changes |
+|------|---------|
+| `services/configuration_service.py` | Added `get_led_2d_session_path()`, `set_led_2d_session_path()`, `get_mip_session_path()`, `set_mip_session_path()` |
+| `views/dialogs/led_2d_overview_result.py` | Updated `_save_session()` with default path and persistence |
+| `views/dialogs/mip_overview_dialog.py` | Updated `_on_save_session()` with default path and persistence |
+| `.gitignore` | Added `2DOverviewSession/` and `MIPOverviewSession/` |
+
+## Configuration Service Methods
+
+```python
+# Session save path keys
+LED_2D_SESSION_PATH_KEY = 'led_2d_overview_session_path'
+MIP_SESSION_PATH_KEY = 'mip_overview_session_path'
+
+def get_led_2d_session_path(self) -> Optional[str]: ...
+def set_led_2d_session_path(self, path: str) -> None: ...
+def get_mip_session_path(self) -> Optional[str]: ...
+def set_mip_session_path(self, path: str) -> None: ...
+```
+
+## Path Priority
+
+1. User's previously saved preference (from configuration service)
+2. Default session folder in project root
+3. Falls back to home directory if folder creation fails

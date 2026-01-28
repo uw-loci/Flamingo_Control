@@ -168,3 +168,7 @@ claude-reports/
 claude-report/
 logs/
 *:Zone.Identifier
+
+# Overview session save folders (user data, not code)
+2DOverviewSession/
+MIPOverviewSession/

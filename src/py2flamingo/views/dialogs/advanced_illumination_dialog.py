@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QDialogButtonBox
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QIcon
 
 
 LED_COLORS = ["Red", "Green", "Blue", "White"]
@@ -39,6 +40,7 @@ class AdvancedIlluminationDialog(QDialog):
         self._logger = logging.getLogger(__name__)
 
         self.setWindowTitle("Advanced Illumination Settings")
+        self.setWindowIcon(QIcon())  # Clear inherited napari icon
         self.setMinimumWidth(400)
         self.setModal(True)
 

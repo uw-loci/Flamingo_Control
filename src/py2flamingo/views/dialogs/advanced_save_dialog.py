@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
     QComboBox
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QIcon
 
 
 class AdvancedSaveDialog(QDialog):
@@ -46,6 +47,7 @@ class AdvancedSaveDialog(QDialog):
         self._hide_drive_selection = hide_drive_selection
 
         self.setWindowTitle("Advanced Save Settings")
+        self.setWindowIcon(QIcon())  # Clear inherited napari icon
         self.setMinimumWidth(500)
         self.setMinimumHeight(350 if hide_drive_selection else 400)
         self.setModal(True)

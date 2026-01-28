@@ -72,6 +72,14 @@ The application will:
 - **Napari integration** - Dock widget with Napari canvas display
 - **Viewer abstraction** - Easy to add new viewers
 
+### LED 2D Overview (Sample Orientation)
+Quick scanning feature for sample orientation and tile selection:
+- **Dual-rotation overview maps** at R and R+90 degrees
+- **Multiple visualization types** - Best focus, EDF, min/max/mean projections
+- **Interactive tile selection** from overview images
+- **Direct workflow generation** for selected tiles
+- See [LED 2D Overview Guide](docs/led_2d_overview.md) for details
+
 ---
 
 ## Documentation
@@ -79,6 +87,7 @@ The application will:
 - **[INSTALLATION.md](INSTALLATION.md)** - Complete installation guide for all platforms
 - **[DEVELOPER.md](docs/DEVELOPER.md)** - Developer guide, architecture, testing
 - **[CLAUDE.md](docs/CLAUDE.md)** - AI assistant guidance for code work
+- **[LED 2D Overview Guide](docs/led_2d_overview.md)** - Sample orientation scanning
 
 ---
 
