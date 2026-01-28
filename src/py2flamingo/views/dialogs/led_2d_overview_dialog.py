@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
     QMessageBox, QSizePolicy, QFileDialog
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QShowEvent, QCloseEvent, QHideEvent
+from PyQt5.QtGui import QShowEvent, QCloseEvent, QHideEvent, QIcon
 
 from py2flamingo.views.colors import WARNING_COLOR, ERROR_COLOR
 
@@ -101,6 +101,7 @@ class LED2DOverviewDialog(QDialog):
         self._current_led_intensity = 0.0  # percentage (0-100)
 
         self.setWindowTitle("LED 2D Overview")
+        self.setWindowIcon(QIcon())  # Clear inherited napari icon
         self.setMinimumWidth(580)
         # Non-modal so user can interact with Sample View and other dialogs
         self.setModal(False)
@@ -1156,6 +1157,28 @@ class LED2DOverviewDialog(QDialog):
 
         self._set_scan_in_progress(True, percent)
 
+        # Update Sample View's workflow progress display
+        self._update_sample_view_progress(
+            f"LED 2D Overview: {tiles_done}/{total_all_rotations} tiles",
+            percent
+        )
+
+    def _update_sample_view_progress(self, status: str, percent: int, time_remaining: str = "--:--") -> None:
+        """Update Sample View's workflow progress display.
+
+        Args:
+            status: Status text to display
+            percent: Progress percentage (0-100)
+            time_remaining: Time remaining string (default "--:--")
+        """
+        if self._app and self._app.sample_view:
+            self._app.sample_view.update_workflow_progress(status, percent, time_remaining)
+
+    def _reset_sample_view_progress(self) -> None:
+        """Reset Sample View's workflow progress display to idle state."""
+        if self._app and self._app.sample_view:
+            self._app.sample_view.update_workflow_progress("Not Running", 0, "--:--")
+
     def _get_configuration(self) -> Optional[ScanConfiguration]:
         """Get the current scan configuration.
 
@@ -1352,6 +1375,7 @@ class LED2DOverviewDialog(QDialog):
         self._logger.info("Workflow completed - stopping live view in SampleView")
         self._set_scan_in_progress(False)
         self._stop_sample_view_live()
+        self._reset_sample_view_progress()
 
         # Save LED settings for future use if they're valid
         if self._current_led_name and self._current_led_name != "none":
@@ -1362,6 +1386,7 @@ class LED2DOverviewDialog(QDialog):
         self._logger.error(f"Workflow error: {error_msg} - stopping live view")
         self._set_scan_in_progress(False)
         self._stop_sample_view_live()
+        self._reset_sample_view_progress()
 
     def _on_cancel_clicked(self) -> None:
         """Handle Cancel Scan button click."""
