@@ -1316,7 +1316,7 @@ class LED2DOverviewResultWindow(QWidget):
         self.collect_btn.setEnabled(total > 0)
 
     def _on_tile_right_clicked(self, tile_x_idx: int, tile_y_idx: int, panel: str):
-        """Handle tile right-click - move stage to center Z of tile.
+        """Handle tile right-click - move stage to tile position (X, Y, center Z).
 
         Args:
             tile_x_idx: Tile X index
@@ -1336,44 +1336,41 @@ class LED2DOverviewResultWindow(QWidget):
         target_tile = None
 
         for tile in tile_results:
-            if hasattr(tile, 'tile_x') and hasattr(tile, 'tile_y'):
-                if tile.tile_x == tile_x_idx and tile.tile_y == tile_y_idx:
-                    target_tile = tile
-                    break
+            if tile.tile_x_idx == tile_x_idx and tile.tile_y_idx == tile_y_idx:
+                target_tile = tile
+                break
 
         if target_tile is None:
             logger.warning(f"Could not find tile ({tile_x_idx}, {tile_y_idx}) in results")
-            from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Tile Not Found",
-                              f"Could not find Z data for tile ({tile_x_idx}, {tile_y_idx}).")
+                              f"Could not find data for tile ({tile_x_idx}, {tile_y_idx}).")
             return
 
-        # Calculate center Z from bounding box
-        if hasattr(target_tile, 'effective_bounding_box') and target_tile.effective_bounding_box:
-            bbox = target_tile.effective_bounding_box
-            z_center = (bbox.z_min + bbox.z_max) / 2
-        else:
-            logger.warning(f"Tile ({tile_x_idx}, {tile_y_idx}) has no bounding box")
-            from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "No Z Data",
-                              f"Tile ({tile_x_idx}, {tile_y_idx}) has no Z range data.")
-            return
+        # Calculate center Z from z_stack range
+        z_center = (target_tile.z_stack_min + target_tile.z_stack_max) / 2
+        if target_tile.z_stack_min == 0.0 and target_tile.z_stack_max == 0.0:
+            # No Z range data, use tile's Z position
+            z_center = target_tile.z
 
-        logger.info(f"Moving to center Z: {z_center:.3f} mm (range: {bbox.z_min:.3f} - {bbox.z_max:.3f})")
+        logger.info(f"Moving to tile ({tile_x_idx}, {tile_y_idx}): "
+                    f"X={target_tile.x:.3f}, Y={target_tile.y:.3f}, Z={z_center:.3f} mm "
+                    f"(Z range: {target_tile.z_stack_min:.3f} - {target_tile.z_stack_max:.3f})")
 
-        # Move stage to center Z
+        # Move stage to tile position
         if self._app and hasattr(self._app, 'movement_controller') and self._app.movement_controller:
             try:
-                self._app.movement_controller.position_controller.move_z(z_center)
-                self.info_text.setText(f"Moving to Z={z_center:.3f} mm (tile {tile_x_idx},{tile_y_idx})")
+                self._app.movement_controller.move_absolute('x', target_tile.x)
+                self._app.movement_controller.move_absolute('y', target_tile.y)
+                self._app.movement_controller.move_absolute('z', z_center)
+                self.info_text.setText(
+                    f"Moving to X={target_tile.x:.3f}, Y={target_tile.y:.3f}, "
+                    f"Z={z_center:.3f} mm (tile {tile_x_idx},{tile_y_idx})")
             except Exception as e:
-                logger.error(f"Failed to move to Z={z_center}: {e}")
-                from PyQt5.QtWidgets import QMessageBox
+                logger.error(f"Failed to move to tile position: {e}")
                 QMessageBox.warning(self, "Move Failed",
                                   f"Failed to move stage: {e}")
         else:
             logger.warning("Movement controller not available")
-            from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Not Connected",
                               "Cannot move stage - not connected to microscope.")
 
