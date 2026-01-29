@@ -540,6 +540,21 @@ class CameraService(MicroscopeCommandService):
 
             return latest
 
+    def drain_all_frames(self) -> list:
+        """Get ALL buffered frames and clear buffer.
+
+        Unlike get_latest_frame() which keeps only the newest,
+        this returns every frame in the buffer. Used for tile
+        workflow mode where each frame is a unique Z-plane.
+
+        Returns:
+            List of (image, header) tuples, oldest first
+        """
+        with self._frame_buffer_lock:
+            frames = list(self._frame_buffer)
+            self._frame_buffer.clear()
+            return frames
+
     def get_buffer_size(self) -> int:
         """
         Get current number of frames in buffer.

@@ -1312,6 +1312,12 @@ class TileCollectionDialog(QDialog):
             self._queue_completed = True
             progress.setValue(100)  # 100% complete
 
+            # Clean up tile mode when all workflows are done
+            if add_to_sample_view and hasattr(self._app, 'workflow_controller'):
+                controller = self._app.workflow_controller
+                if hasattr(controller, '_camera_controller') and controller._camera_controller:
+                    controller._camera_controller.clear_tile_mode()
+
             # Reorganize folders AFTER all workflows confirmed complete
             # This is safe because queue_completed only fires after all
             # SYSTEM_STATE_IDLE callbacks have been received

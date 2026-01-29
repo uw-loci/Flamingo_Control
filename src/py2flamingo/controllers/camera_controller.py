@@ -96,6 +96,8 @@ class CameraController(QObject):
         self._workflow_tile_mode = False
         self._current_tile_position = None
         self._z_plane_counter = 0
+        self._workflow_started_timer = False
+        self._workflow_started_streaming = False
 
         # Timer-based frame pulling (ensures display always updates)
         # This timer pulls latest frame from buffer and discards accumulated frames
@@ -242,13 +244,46 @@ class CameraController(QObject):
         self._z_plane_counter = 0
         self.logger.info(f"CameraController: Activated tile mode for {position.get('filename', 'unknown')}")
 
+        # Ensure display timer runs so _pull_and_display_frame routes frames
+        if not self._display_timer.isActive():
+            self.logger.info("Starting display timer for tile workflow frame routing")
+            self._workflow_started_timer = True
+            self._display_timer.start(self._display_timer_interval_ms)
+        else:
+            self._workflow_started_timer = False
+
+        # Ensure data socket streaming is active
+        if not self.camera_service.is_streaming():
+            try:
+                self.logger.info("Starting live view streaming for tile workflow")
+                self._workflow_started_streaming = True
+                self.camera_service.start_live_view_streaming()
+            except Exception as e:
+                self.logger.warning(f"Could not start streaming for tile workflow: {e}")
+                self._workflow_started_streaming = False
+        else:
+            self._workflow_started_streaming = False
+
     def clear_tile_mode(self):
         """Deactivate tile workflow mode."""
         if self._workflow_tile_mode:
             self.logger.info(f"CameraController: Cleared tile mode after {self._z_plane_counter} frames")
+
+            if getattr(self, '_workflow_started_timer', False):
+                self._display_timer.stop()
+                self.logger.info("Stopped display timer (was started for tile workflow)")
+            if getattr(self, '_workflow_started_streaming', False):
+                try:
+                    self.camera_service.stop_live_view_streaming()
+                    self.logger.info("Stopped streaming (was started for tile workflow)")
+                except Exception as e:
+                    self.logger.warning(f"Error stopping streaming: {e}")
+
         self._workflow_tile_mode = False
         self._current_tile_position = None
         self._z_plane_counter = 0
+        self._workflow_started_timer = False
+        self._workflow_started_streaming = False
 
     def _route_frame_to_sample_view(self, image, header):
         """Route workflow Z-stack frame to Sample View integration.
@@ -391,7 +426,27 @@ class CameraController(QObject):
         - Processing time doesn't cause lag accumulation
         """
         try:
-            # Pull latest frame from service (automatically clears accumulated frames)
+            # In tile workflow mode: process ALL buffered frames (each is a unique Z-plane)
+            if self._workflow_tile_mode and self._current_tile_position:
+                all_frames = self.camera_service.drain_all_frames()
+                for image, header in all_frames:
+                    self._route_frame_to_sample_view(image, header)
+                    self._z_plane_counter += 1
+
+                # Also emit latest frame for live display (if any frames were available)
+                if all_frames:
+                    image, header = all_frames[-1]
+                    if self._auto_scale and header.image_scale_min != header.image_scale_max:
+                        self._display_min = header.image_scale_min
+                        self._display_max = header.image_scale_max
+                    self.new_image.emit(image, header)
+                    if header.frame_number % 10 == 0:
+                        fps = self.get_frame_rate()
+                        if fps > 0:
+                            self.frame_rate_updated.emit(fps)
+                return
+
+            # Normal path: pull latest frame, drop accumulated
             frame = self.camera_service.get_latest_frame(clear_buffer=True)
 
             if frame is None:
@@ -399,11 +454,6 @@ class CameraController(QObject):
                 return
 
             image, header = frame
-
-            # NEW: If in tile workflow mode, route to Sample View
-            if self._workflow_tile_mode and self._current_tile_position:
-                self._route_frame_to_sample_view(image, header)
-                self._z_plane_counter += 1
 
             # Apply display scaling if auto-scale enabled
             if self._auto_scale and header.image_scale_min != header.image_scale_max:

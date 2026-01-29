@@ -767,6 +767,12 @@ class SampleView(QWidget):
         self._info_timer.timeout.connect(self._update_info_displays)
         self._info_timer.start(500)  # Update every 500ms
 
+        # Debounced timer for channel availability checks
+        self._channel_availability_timer = QTimer(self)
+        self._channel_availability_timer.setSingleShot(True)
+        self._channel_availability_timer.setInterval(500)
+        self._channel_availability_timer.timeout.connect(self._update_channel_availability)
+
         self.logger.info("SampleView initialized")
 
     def _load_visualization_config(self) -> Dict[str, Any]:
@@ -1358,6 +1364,8 @@ class SampleView(QWidget):
         # Store widget references
         self.channel_checkboxes: Dict[int, QCheckBox] = {}
         self.channel_contrast_sliders: Dict[int, QRangeSlider] = {}
+        self.channel_min_labels: Dict[int, QLabel] = {}
+        self.channel_max_labels: Dict[int, QLabel] = {}
 
         for i in range(4):
             # Get channel config or use default
@@ -1421,7 +1429,34 @@ class SampleView(QWidget):
                 lambda val, ch=i: self._on_channel_contrast_changed(ch, val)
             )
             self.channel_contrast_sliders[i] = slider
+
+            # Min/max value labels flanking the slider
+            min_label = QLabel(str(min_val))
+            min_label.setFixedWidth(28)
+            min_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            min_label.setStyleSheet("color: #888; font-size: 9pt;")
+            self.channel_min_labels[i] = min_label
+
+            max_label = QLabel(str(max_val))
+            max_label.setFixedWidth(28)
+            max_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            max_label.setStyleSheet("color: #888; font-size: 9pt;")
+            self.channel_max_labels[i] = max_label
+
+            row_layout.addWidget(min_label)
             row_layout.addWidget(slider, stretch=1)
+            row_layout.addWidget(max_label)
+
+            # Start channels disabled until data arrives
+            checkbox.setEnabled(False)
+            checkbox.setChecked(False)
+            checkbox.setToolTip(
+                f"{name} channel — No data loaded.\n"
+                "This channel will activate automatically when 3D volume data is received."
+            )
+            slider.setEnabled(False)
+            min_label.setEnabled(False)
+            max_label.setEnabled(False)
 
             layout.addLayout(row_layout)
 
@@ -1929,6 +1964,12 @@ class SampleView(QWidget):
         self._channel_states[channel]['contrast_min'] = min_val
         self._channel_states[channel]['contrast_max'] = max_val
 
+        # Update min/max labels
+        if channel in self.channel_min_labels:
+            self.channel_min_labels[channel].setText(str(min_val))
+        if channel in self.channel_max_labels:
+            self.channel_max_labels[channel].setText(str(max_val))
+
         # Update napari layer contrast via the 3D window's viewer
         viewer = self._get_viewer()
         if viewer:
@@ -1937,6 +1978,35 @@ class SampleView(QWidget):
                 viewer.layers[layer_name].contrast_limits = [min_val, max_val]
 
         self.logger.debug(f"Channel {channel} contrast range: [{min_val}, {max_val}]")
+
+    def _update_channel_availability(self) -> None:
+        """Enable/disable channel controls based on whether data exists."""
+        if not self.voxel_storage:
+            return
+
+        channels_config = self._config.get('channels', [])
+
+        for ch_id in range(4):
+            has_data = self.voxel_storage.has_data(ch_id)
+            checkbox = self.channel_checkboxes.get(ch_id)
+            slider = self.channel_contrast_sliders.get(ch_id)
+            min_lbl = self.channel_min_labels.get(ch_id)
+            max_lbl = self.channel_max_labels.get(ch_id)
+
+            if checkbox and has_data and not checkbox.isEnabled():
+                # Auto-enable on first data arrival
+                checkbox.setEnabled(True)
+                checkbox.setChecked(True)
+                if slider:
+                    slider.setEnabled(True)
+                if min_lbl:
+                    min_lbl.setEnabled(True)
+                if max_lbl:
+                    max_lbl.setEnabled(True)
+
+                name = channels_config[ch_id].get('name', f'Ch {ch_id}') if ch_id < len(channels_config) else f'Ch {ch_id}'
+                checkbox.setToolTip(f"{name} — Data available. Click to toggle visibility.")
+                self.logger.info(f"Channel {ch_id} auto-enabled (data received)")
 
     def _get_viewer(self):
         """Get the napari viewer from the 3D window."""
@@ -2068,6 +2138,28 @@ class SampleView(QWidget):
                 if self.voxel_storage and hasattr(self.voxel_storage, 'clear'):
                     self.voxel_storage.clear()
                     self.logger.info("Cleared all visualization data")
+
+        # Reset channel controls to disabled
+        channels_config = self._config.get('channels', [])
+        for ch_id in range(4):
+            cb = self.channel_checkboxes.get(ch_id)
+            sl = self.channel_contrast_sliders.get(ch_id)
+            ml = self.channel_min_labels.get(ch_id)
+            xl = self.channel_max_labels.get(ch_id)
+            if cb:
+                cb.setEnabled(False)
+                cb.setChecked(False)
+                name = channels_config[ch_id].get('name', f'Ch {ch_id}') if ch_id < len(channels_config) else f'Ch {ch_id}'
+                cb.setToolTip(
+                    f"{name} channel — No data loaded.\n"
+                    "This channel will activate automatically when 3D volume data is received."
+                )
+            if sl:
+                sl.setEnabled(False)
+            if ml:
+                ml.setEnabled(False)
+            if xl:
+                xl.setEnabled(False)
 
     # ========== 3D Viewer Integration (reuses existing Sample3DVisualizationWindow) ==========
 
@@ -2656,6 +2748,10 @@ class SampleView(QWidget):
 
             self.logger.debug(f"Added {len(pixel_values)} voxels to 3D volume at "
                              f"tile ({position['x']:.2f}, {position['y']:.2f}), Z={z_mm:.3f}mm")
+
+            # Trigger channel availability update (debounced)
+            if not self._channel_availability_timer.isActive():
+                self._channel_availability_timer.start()
 
         except Exception as e:
             self.logger.error(f"Failed to update voxel storage: {e}")
