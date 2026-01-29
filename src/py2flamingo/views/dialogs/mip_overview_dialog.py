@@ -84,17 +84,18 @@ class MIPOverviewDialog(QDialog):
         layout = QVBoxLayout()
         layout.setSpacing(8)
 
-        # Folder browser section
-        folder_group = QGroupBox("Load MIP Files")
+        # Folder browser section - load from raw acquisition folders
+        folder_group = QGroupBox("Load from Acquisition Folders")
         folder_layout = QHBoxLayout()
 
         folder_layout.addWidget(QLabel("Folder:"))
         self._folder_edit = QLineEdit()
-        self._folder_edit.setPlaceholderText("Select folder containing tile acquisitions...")
+        self._folder_edit.setPlaceholderText("Select folder containing tile acquisitions (X*_Y*/*_MP.tif)...")
         self._folder_edit.setReadOnly(True)
         folder_layout.addWidget(self._folder_edit, stretch=1)
 
         self._browse_btn = QPushButton("Browse...")
+        self._browse_btn.setToolTip("Browse for a folder containing raw tile acquisition data (X*_Y* subfolders with *_MP.tif files)")
         self._browse_btn.clicked.connect(self._on_browse)
         folder_layout.addWidget(self._browse_btn)
 
@@ -106,6 +107,7 @@ class MIPOverviewDialog(QDialog):
 
         self._load_btn = QPushButton("Load")
         self._load_btn.setEnabled(False)
+        self._load_btn.setToolTip("Load MIP images from raw acquisition folders")
         self._load_btn.clicked.connect(self._on_load)
         folder_layout.addWidget(self._load_btn)
 
@@ -191,9 +193,15 @@ class MIPOverviewDialog(QDialog):
         button_layout.addStretch()
 
         self._save_btn = QPushButton("Save Session")
+        self._save_btn.setToolTip("Save current overview as a session (can be loaded later without original files)")
         self._save_btn.clicked.connect(self._on_save_session)
         self._save_btn.setEnabled(False)
         button_layout.addWidget(self._save_btn)
+
+        self._load_session_btn = QPushButton("Load Session")
+        self._load_session_btn.setToolTip("Load a previously saved session (metadata + stitched overview)")
+        self._load_session_btn.clicked.connect(self._on_load_session)
+        button_layout.addWidget(self._load_session_btn)
 
         self._close_btn = QPushButton("Close")
         self._close_btn.clicked.connect(self.close)
@@ -214,11 +222,21 @@ class MIPOverviewDialog(QDialog):
 
     def _on_browse(self):
         """Browse for folder containing tile acquisitions."""
+        # Remember last browse location
+        default_path = str(Path.home())
+        if self._app and hasattr(self._app, 'configuration_service'):
+            saved = self._app.configuration_service.get_mip_browse_path()
+            if saved and Path(saved).exists():
+                default_path = saved
+
         folder = QFileDialog.getExistingDirectory(
             self, "Select Folder with Tile Acquisitions",
-            str(Path.home())
+            default_path
         )
         if folder:
+            # Save browse location for next time
+            if self._app and hasattr(self._app, 'configuration_service'):
+                self._app.configuration_service.set_mip_browse_path(folder)
             self._folder_edit.setText(folder)
             self._update_date_combo(Path(folder))
 
@@ -715,6 +733,96 @@ class MIPOverviewDialog(QDialog):
             f"Session saved to:\n{save_path}"
         )
         logger.info(f"MIP overview session saved to {save_path}")
+
+    def _on_load_session(self):
+        """Load a previously saved MIP overview session."""
+        # Determine default browse location (same as save session path)
+        default_folder = str(Path.home())
+        if self._app and hasattr(self._app, 'configuration_service'):
+            saved_path = self._app.configuration_service.get_mip_session_path()
+            if saved_path and Path(saved_path).exists():
+                default_folder = saved_path
+            else:
+                # Fall back to default MIPOverviewSession folder
+                project_root = Path(__file__).parent.parent.parent.parent.parent
+                default_session_folder = project_root / "MIPOverviewSession"
+                if default_session_folder.exists():
+                    default_folder = str(default_session_folder)
+
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Saved Session Folder (containing metadata.json)",
+            default_folder,
+            QFileDialog.ShowDirsOnly
+        )
+        if not folder:
+            return
+
+        folder_path = Path(folder)
+        metadata_path = folder_path / "metadata.json"
+        if not metadata_path.exists():
+            QMessageBox.warning(
+                self, "Invalid Session Folder",
+                f"No metadata.json found in:\n{folder}\n\n"
+                "Please select a folder created by 'Save Session'."
+            )
+            return
+
+        try:
+            with open(metadata_path, 'r') as f:
+                metadata = json.load(f)
+        except Exception as e:
+            QMessageBox.critical(self, "Load Error", f"Failed to read metadata:\n{e}")
+            return
+
+        # Load config
+        config = MIPOverviewConfig.from_dict(metadata['config'])
+
+        # Load stitched image
+        overview_path = folder_path / "stitched_overview.tif"
+        stitched_image = None
+        if overview_path.exists():
+            try:
+                stitched_image = tifffile.imread(str(overview_path))
+            except Exception as e:
+                QMessageBox.critical(self, "Load Error", f"Failed to load overview image:\n{e}")
+                return
+        else:
+            QMessageBox.warning(
+                self, "Incomplete Session",
+                f"No stitched_overview.tif found in:\n{folder}\n\n"
+                "The session may be corrupted."
+            )
+            return
+
+        # Reconstruct tiles from metadata (without full images)
+        tiles = []
+        for tile_data in metadata.get('tiles', []):
+            tile = MIPTileResult.from_dict(tile_data)
+            tiles.append(tile)
+
+        # Apply to current dialog
+        self._config = config
+        self._tiles = tiles
+        self._stitched_image = stitched_image
+
+        if stitched_image is not None:
+            coords = [(t.x, t.y, t.tile_x_idx, t.tile_y_idx) for t in tiles]
+            tile_results = self._mip_tiles_to_tile_results(tiles)
+
+            self._left_panel.set_image(stitched_image, config.tiles_x, config.tiles_y)
+            self._left_panel.set_tile_coordinates(coords, invert_x=config.invert_x)
+            self._left_panel.set_tile_results(tile_results)
+
+        self._folder_edit.setText(f"[Session] {folder_path.name}")
+        self._update_status()
+        self._enable_controls(True)
+
+        logger.info(f"Loaded MIP overview session from {folder_path}")
+        QMessageBox.information(
+            self, "Session Loaded",
+            f"Loaded session with {len(tiles)} tiles "
+            f"({config.tiles_x}x{config.tiles_y} grid)."
+        )
 
     @classmethod
     def load_from_folder(cls, folder: Path, app=None, parent=None) -> Optional['MIPOverviewDialog']:

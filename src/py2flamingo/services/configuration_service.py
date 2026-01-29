@@ -389,3 +389,23 @@ class ConfigurationService:
         """
         self.config[self.MIP_SESSION_PATH_KEY] = path
         self.logger.info(f"Set MIP session path: {path}")
+
+    # MIP browse path (for Load MIP Files)
+    MIP_BROWSE_PATH_KEY = 'mip_overview_browse_path'
+
+    def get_mip_browse_path(self) -> Optional[str]:
+        """Get the last-used MIP Overview browse path for Load MIP Files.
+
+        Returns:
+            Path string if set, None otherwise
+        """
+        return self.config.get(self.MIP_BROWSE_PATH_KEY)
+
+    def set_mip_browse_path(self, path: str) -> None:
+        """Set the MIP Overview browse path for Load MIP Files.
+
+        Args:
+            path: Directory path last browsed to
+        """
+        self.config[self.MIP_BROWSE_PATH_KEY] = path
+        self.logger.info(f"Set MIP browse path: {path}")
