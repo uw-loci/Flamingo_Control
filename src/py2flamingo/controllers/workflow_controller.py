@@ -15,6 +15,8 @@ from typing import Tuple, Dict, Any, List, Optional, TYPE_CHECKING, Callable
 from pathlib import Path
 from datetime import datetime
 
+from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
+
 from ..models import ConnectionModel, ConnectionState, WorkflowModel
 from ..utils.workflow_parser import WorkflowTextFormatter
 
@@ -22,7 +24,7 @@ if TYPE_CHECKING:
     from ..services import MVCWorkflowService, WorkflowTemplateService, AcquisitionTimingService, MVCConnectionService
 
 
-class WorkflowController:
+class WorkflowController(QObject):
     """
     Controller for workflow operations.
 
@@ -43,6 +45,10 @@ class WorkflowController:
         _current_workflow_path: Path to currently loaded workflow
     """
 
+    # Signals for thread-safe tile position updates (callbacks run in worker threads)
+    _tile_position_requested = pyqtSignal(dict)
+    _tile_position_clear_requested = pyqtSignal()
+
     def __init__(self, workflow_service: 'MVCWorkflowService', connection_model: ConnectionModel,
                  workflow_model: Optional[WorkflowModel] = None,
                  workflows_dir: Optional[Path] = None,
@@ -61,6 +67,7 @@ class WorkflowController:
             template_service: Optional WorkflowTemplateService for template management
             timing_service: Optional AcquisitionTimingService for time estimation
         """
+        super().__init__()
         self._workflow_service = workflow_service
         self._connection_model = connection_model
         self._workflow_model = workflow_model
@@ -81,6 +88,10 @@ class WorkflowController:
         self._active_tile_position: Optional[Dict] = None
         self._camera_controller = None  # Will be set via setter
 
+        # Connect signals to slots for thread-safe tile position updates
+        self._tile_position_requested.connect(self._apply_tile_position)
+        self._tile_position_clear_requested.connect(self._apply_clear_tile_position)
+
     def set_camera_controller(self, camera_controller):
         """Set camera controller reference for tile workflow integration.
 
@@ -95,27 +106,41 @@ class WorkflowController:
         This enables Sample View integration by passing position data to the
         CameraController, which will intercept and route frames.
 
+        This method may be called from a worker thread (via workflow callbacks),
+        so it emits a signal to marshal the camera controller call onto the
+        main/GUI thread where QTimer operations are safe.
+
         Args:
             position: Dict with x, y, z_min, z_max, filename
         """
         self._active_tile_position = position
+        # Emit signal to marshal onto main thread (callback may run in worker thread)
+        self._tile_position_requested.emit(position)
 
-        # Pass to CameraController for frame interception
+    @pyqtSlot(dict)
+    def _apply_tile_position(self, position: dict):
+        """Apply tile position on the main thread (invoked via signal)."""
         if self._camera_controller and hasattr(self._camera_controller, 'set_active_tile_position'):
             self._camera_controller.set_active_tile_position(position)
-            self._logger.info(f"Set tile position for Sample View integration: {position.get('filename', 'unknown')}")
+            self._logger.info(f"Set tile position for Sample View: {position.get('filename', 'unknown')}")
         else:
             self._logger.warning("Camera controller not available for tile position tracking")
 
     def _clear_tile_position(self):
-        """Clear tile position metadata after workflow completes."""
+        """Clear tile position metadata after workflow completes.
+
+        Emits signal to marshal the camera controller call onto the main thread.
+        """
         if self._active_tile_position:
             self._logger.info(f"Clearing tile position: {self._active_tile_position.get('filename', 'unknown')}")
             self._active_tile_position = None
+            self._tile_position_clear_requested.emit()
 
-            # Clear camera controller tile mode
-            if self._camera_controller and hasattr(self._camera_controller, 'clear_tile_mode'):
-                self._camera_controller.clear_tile_mode()
+    @pyqtSlot()
+    def _apply_clear_tile_position(self):
+        """Clear tile position on the main thread (invoked via signal)."""
+        if self._camera_controller and hasattr(self._camera_controller, 'clear_tile_mode'):
+            self._camera_controller.clear_tile_mode()
 
     def load_workflow(self, file_path: str) -> Tuple[bool, str]:
         """

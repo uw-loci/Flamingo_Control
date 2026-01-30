@@ -253,6 +253,9 @@ class FlamingoApplication(QObject):
         # This allows the status indicator to start/stop position polling during workflows
         self.status_indicator_service.set_movement_controller(self.movement_controller)
 
+        # Wire camera controller to workflow controller for tile→Sample View data flow
+        self.workflow_controller.set_camera_controller(self.camera_controller)
+
         # Views layer - UI components
         self.logger.debug("Creating views layer components...")
         self.connection_view = ConnectionView(
