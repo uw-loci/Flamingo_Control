@@ -210,7 +210,8 @@ class TileCollectionDialog(QDialog):
 
     def __init__(self, left_tiles: List, right_tiles: List,
                  left_rotation: float, right_rotation: float,
-                 config=None, app=None, parent=None):
+                 config=None, app=None, parent=None,
+                 local_base_folder: str = None):
         """Initialize the dialog.
 
         Args:
@@ -221,6 +222,8 @@ class TileCollectionDialog(QDialog):
             config: ScanConfiguration with bounding box info
             app: FlamingoApplication instance for accessing services
             parent: Parent widget
+            local_base_folder: Local drive root path for auto-configuring
+                post-processing (e.g. from MIP Overview)
         """
         super().__init__(parent)
 
@@ -230,6 +233,7 @@ class TileCollectionDialog(QDialog):
         self._right_rotation = right_rotation
         self._config = config
         self._app = app
+        self._local_base_folder_hint = local_base_folder
         self._workflow_type = WorkflowType.ZSTACK  # Default to Z-Stack (user preference)
 
         # Determine if 90-degree overlap mode is available
@@ -249,6 +253,36 @@ class TileCollectionDialog(QDialog):
 
         # Restore persisted settings (after UI setup)
         self._restore_dialog_state()
+
+        # Auto-configure local access if hint provided (e.g. from MIP Overview)
+        if self._local_base_folder_hint:
+            self._auto_configure_local_access(self._local_base_folder_hint)
+
+    def _auto_configure_local_access(self, local_base_folder: str) -> None:
+        """Auto-configure local access for post-processing folder reorganization.
+
+        Args:
+            local_base_folder: Local drive root path (e.g. 'G:\\CTLSM1')
+        """
+        current_drive = self._save_panel._save_drive_combo.currentText()
+        if not current_drive:
+            logger.info("No save drive selected - skipping local access auto-config")
+            return
+
+        # Don't override if already configured
+        config_service = None
+        if self._app and hasattr(self._app, 'config_service'):
+            config_service = self._app.config_service
+
+        if config_service:
+            existing = config_service.get_local_path_for_drive(current_drive)
+            if existing:
+                logger.info(f"Local access already configured for {current_drive}: {existing}")
+                return
+
+        # Configure the mapping and enable local access in the UI
+        self._save_panel.enable_local_access(local_base_folder)
+        logger.info(f"Auto-configured local access for {current_drive} -> {local_base_folder}")
 
     def _update_z_ranges(self) -> None:
         """Update Z ranges for tiles based on primary direction and overlap."""

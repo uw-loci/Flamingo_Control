@@ -629,6 +629,7 @@ class MIPOverviewDialog(QDialog):
             config=None,  # No ScanConfiguration for MIP overview
             app=self._app,
             parent=self,
+            local_base_folder=str(self._config.base_folder.parent) if self._config else None,
         )
 
         # Connect to completion signal to reload results

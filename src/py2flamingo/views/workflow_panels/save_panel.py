@@ -245,7 +245,6 @@ class SavePanel(QWidget):
 
         # Local path status/info label
         self._local_path_status = QLabel()
-        self._update_local_path_status()
         settings_layout.addWidget(self._local_path_status, 3, 0, 1, 2)
 
         # Directory (subdirectory within save drive)
@@ -294,6 +293,10 @@ class SavePanel(QWidget):
 
         group.setLayout(group_layout)
         layout.addWidget(group)
+
+        # Update local path status AFTER all widgets are created to avoid
+        # signal-triggered access to not-yet-created widgets (e.g. _format_combo)
+        self._update_local_path_status()
 
     def _update_drive_warning(self) -> None:
         """Update the drive warning label based on current save drive."""
@@ -446,6 +449,32 @@ class SavePanel(QWidget):
             self._update_local_path_status()
             self._logger.info(f"Configured local path: {current_drive} -> {local_path}")
             self._on_settings_changed()
+
+    def enable_local_access(self, local_path: str) -> None:
+        """Programmatically enable local access with a given path.
+
+        Sets the local path display, checks the post-processing checkbox,
+        and saves the drive mapping in config_service.
+
+        Args:
+            local_path: Local drive root path (e.g. 'G:\\CTLSM1')
+        """
+        current_drive = self._save_drive_combo.currentText()
+        if not current_drive:
+            self._logger.warning("Cannot enable local access - no drive selected")
+            return
+
+        # Save drive mapping in config
+        config_service = self._get_config_service()
+        if config_service:
+            config_service.set_drive_mapping(current_drive, local_path)
+
+        # Update UI
+        self._local_path_display.setText(local_path)
+        self._enable_local_access.setChecked(True)
+        self._update_local_path_status()
+        self._on_settings_changed()
+        self._logger.info(f"Local access enabled: {current_drive} -> {local_path}")
 
     def _update_local_path_status(self) -> None:
         """Update the local path status label based on current configuration."""
