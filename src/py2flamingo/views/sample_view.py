@@ -739,7 +739,7 @@ class SampleView(QWidget):
         # Tile workflow integration state
         self._tile_workflow_active = False
         self._expected_tiles = []  # List of tile positions
-        self._accumulated_zstacks = {}  # (x,y) -> list of (z, image)
+        self._accumulated_zstacks = {}  # (x,y) -> frame count
         self._current_channel = 0  # Default to channel 0 (405nm)
 
         # Setup window - sized for 3-column layout
@@ -2620,10 +2620,19 @@ class SampleView(QWidget):
         self._expected_tiles = tile_info
         self._accumulated_zstacks = {}
 
-        self.logger.info(f"Sample View: Prepared to receive {len(tile_info)} tile workflows")
+        # Cache pixel FOV once (avoid synchronous TCP call per frame)
+        self._cached_pixel_size_mm = None
+        if self.camera_controller and self.camera_controller.camera_service:
+            try:
+                self._cached_pixel_size_mm = self.camera_controller.camera_service.get_pixel_field_of_view()
+                self.logger.info(f"Sample View: Cached pixel FOV: {self._cached_pixel_size_mm * 1000:.3f} µm/pixel")
+            except Exception as e:
+                self.logger.warning(f"Could not cache pixel FOV: {e}")
 
-        # Show progress indicator if available
-        # TODO: Add progress bar if needed
+        # Precomputed XY coordinate cache: (tile_x, tile_y) -> (x_world_flat, y_world_flat)
+        self._tile_xy_cache = {}
+
+        self.logger.info(f"Sample View: Prepared to receive {len(tile_info)} tile workflows")
 
     def _on_tile_zstack_frame(self, image: np.ndarray, position: dict,
                               z_index: int, frame_num: int):
@@ -2648,23 +2657,14 @@ class SampleView(QWidget):
         estimated_planes = max(1, int(z_range / 0.0025) + 1)
         z_position = z_min + (z_index / max(1, estimated_planes - 1)) * z_range
 
-        # Accumulate frame
+        # Count frames per tile (no image copy — avoids 8MB/frame leak)
         tile_key = (position['x'], position['y'])
         if tile_key not in self._accumulated_zstacks:
-            self._accumulated_zstacks[tile_key] = []
-
-        self._accumulated_zstacks[tile_key].append({
-            'z': z_position,
-            'image': image.copy(),
-            'z_index': z_index,
-            'timestamp': time.time()
-        })
+            self._accumulated_zstacks[tile_key] = 0
+        self._accumulated_zstacks[tile_key] += 1
 
         # Process frame into 3D volume
         self._add_frame_to_3d_volume(image, position, z_position)
-
-        # Update progress (if we have a progress bar)
-        total_frames = sum(len(frames) for frames in self._accumulated_zstacks.values())
 
         self.logger.debug(f"Sample View: Accumulated Z-plane {z_index} for tile "
                          f"({position['x']:.2f}, {position['y']:.2f})")
@@ -2677,79 +2677,65 @@ class SampleView(QWidget):
             position: Tile center position (x, y in mm)
             z_mm: Z position of this frame (mm)
         """
-        # Get 3D visualization window
-        if not self.sample_3d_window:
-            self.logger.warning("3D visualization not available")
+        if not self.sample_3d_window or not self.voxel_storage:
             return
 
         viz = self.sample_3d_window
 
-        # Get voxel storage
-        if not self.voxel_storage:
-            self.logger.warning("Voxel storage not available")
+        # Use cached pixel size (no synchronous TCP call)
+        pixel_size_mm = getattr(self, '_cached_pixel_size_mm', None)
+        if pixel_size_mm is None or pixel_size_mm <= 0:
             return
+        pixel_size_um = pixel_size_mm * 1000
 
-        # Get camera pixel size from camera controller
-        if not self.camera_controller or not self.camera_controller.camera_service:
-            self.logger.warning("Camera service not available")
-            return
-
-        # Get pixel field of view (in mm)
-        pixel_size_mm = self.camera_controller.camera_service.get_pixel_field_of_view()
-        pixel_size_um = pixel_size_mm * 1000  # mm to µm
-
-        # Convert tile position to world coordinates
-        tile_x_um = position['x'] * 1000  # mm to µm
+        tile_x_um = position['x'] * 1000
         tile_y_um = position['y'] * 1000
         tile_z_um = z_mm * 1000
 
-        # Create pixel coordinate grid
-        h, w = image.shape[:2]
-        y_pixels, x_pixels = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
+        # Get or create cached XY world coordinates for this tile
+        tile_key = (position['x'], position['y'])
+        tile_xy_cache = getattr(self, '_tile_xy_cache', {})
+        if tile_key not in tile_xy_cache:
+            h, w = image.shape[:2]
+            y_indices, x_indices = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
+            x_world_flat = (tile_x_um + (x_indices - w / 2) * pixel_size_um).ravel()
+            y_world_flat = (tile_y_um + (y_indices - h / 2) * pixel_size_um).ravel()
+            tile_xy_cache[tile_key] = (x_world_flat, y_world_flat)
+            self._tile_xy_cache = tile_xy_cache
+            self.logger.info(f"Cached XY coordinates for tile ({position['x']:.2f}, {position['y']:.2f})")
 
-        # Center coordinates (image center = tile center)
-        x_pixels_centered = (x_pixels - w/2) * pixel_size_um
-        y_pixels_centered = (y_pixels - h/2) * pixel_size_um
+        x_world_flat, y_world_flat = tile_xy_cache[tile_key]
 
-        # Build 3D world coordinates (Z, Y, X order for napari)
-        x_world = tile_x_um + x_pixels_centered
-        y_world = tile_y_um + y_pixels_centered
-        z_world = np.full_like(x_world, tile_z_um)
-
-        world_coords = np.column_stack([
-            z_world.ravel(),
-            y_world.ravel(),
-            x_world.ravel()
-        ])
-
-        # Get pixel values
+        # Threshold mask FIRST — only build coords for non-background pixels
         pixel_values = image.ravel().astype(np.uint16)
-
-        # Filter low-intensity background for efficiency
-        threshold = 100  # Adjust as needed
-        mask = pixel_values > threshold
-        world_coords = world_coords[mask]
+        mask = pixel_values > 100
         pixel_values = pixel_values[mask]
 
-        # Update voxel storage
-        timestamp = time.time()
+        if len(pixel_values) == 0:
+            return
+
+        # Build coordinate array only for masked pixels
+        world_coords = np.column_stack([
+            np.full(mask.sum(), tile_z_um),
+            y_world_flat[mask],
+            x_world_flat[mask]
+        ])
+
         try:
             self.voxel_storage.update_storage(
                 channel_id=self._current_channel,
                 world_coords=world_coords,
                 pixel_values=pixel_values,
-                timestamp=timestamp,
-                update_mode='maximum'  # Maximum intensity projection
+                timestamp=time.time(),
+                update_mode='maximum'
             )
 
-            # Mark display as dirty to trigger visualization update
             if hasattr(viz, '_update_visualization_if_needed'):
                 viz._update_visualization_if_needed()
 
-            self.logger.debug(f"Added {len(pixel_values)} voxels to 3D volume at "
-                             f"tile ({position['x']:.2f}, {position['y']:.2f}), Z={z_mm:.3f}mm")
+            self.logger.debug(f"Added {len(pixel_values)} voxels at tile "
+                             f"({position['x']:.2f}, {position['y']:.2f}), Z={z_mm:.3f}mm")
 
-            # Trigger channel availability update (debounced)
             if not self._channel_availability_timer.isActive():
                 self._channel_availability_timer.start()
 
