@@ -553,7 +553,7 @@ class MainWindow(QMainWindow):
             folder_path = Path(folder)
 
             # Try to load from saved folder
-            window = LED2DOverviewResultWindow.from_saved_folder(
+            window = LED2DOverviewResultWindow.load_from_folder(
                 folder_path,
                 app=self.app
             )

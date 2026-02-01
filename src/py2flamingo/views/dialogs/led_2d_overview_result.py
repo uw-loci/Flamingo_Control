@@ -1356,12 +1356,19 @@ class LED2DOverviewResultWindow(QWidget):
                     f"X={target_tile.x:.3f}, Y={target_tile.y:.3f}, Z={z_center:.3f} mm "
                     f"(Z range: {target_tile.z_stack_min:.3f} - {target_tile.z_stack_max:.3f})")
 
-        # Move stage to tile position
+        # Move stage to tile position using move_to_position for multi-axis move
         if self._app and hasattr(self._app, 'movement_controller') and self._app.movement_controller:
             try:
-                self._app.movement_controller.move_absolute('x', target_tile.x)
-                self._app.movement_controller.move_absolute('y', target_tile.y)
-                self._app.movement_controller.move_absolute('z', z_center)
+                from py2flamingo.models.microscope import Position
+                pos_ctrl = self._app.movement_controller.position_controller
+                current = pos_ctrl._current_position
+                target_position = Position(
+                    x=target_tile.x,
+                    y=target_tile.y,
+                    z=z_center,
+                    r=current.r if current else 0.0
+                )
+                pos_ctrl.move_to_position(target_position, validate=True)
                 self.info_text.setText(
                     f"Moving to X={target_tile.x:.3f}, Y={target_tile.y:.3f}, "
                     f"Z={z_center:.3f} mm (tile {tile_x_idx},{tile_y_idx})")
