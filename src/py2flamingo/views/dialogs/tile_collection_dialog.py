@@ -1315,6 +1315,11 @@ class TileCollectionDialog(QDialog):
             return min(99, int(base_progress + workflow_progress))  # Cap at 99 until complete
 
         # Connect signals for progress updates
+        def update_sample_view(status, pct):
+            """Update Sample View's workflow progress display."""
+            if self._app and hasattr(self._app, 'sample_view') and self._app.sample_view:
+                self._app.sample_view.update_workflow_progress(status, pct, "--:--")
+
         def on_progress(current, total, message):
             # current is 1-indexed workflow number
             workflow_idx = current - 1
@@ -1323,6 +1328,7 @@ class TileCollectionDialog(QDialog):
             )
             progress.setValue(pct)
             progress.setLabelText(message)
+            update_sample_view(f"Tile {current}/{total}", pct)
 
         def on_image_progress(acquired, expected):
             """Handle image-level progress updates."""
@@ -1332,7 +1338,9 @@ class TileCollectionDialog(QDialog):
             workflow_idx = queue_service.current_index
             pct = calculate_overall_progress(workflow_idx, acquired, expected)
             progress.setValue(pct)
-            progress.setLabelText(f"Workflow {workflow_idx + 1}/{total_workflows}: {acquired}/{expected} images")
+            status = f"Tile {workflow_idx + 1}/{total_workflows}: {acquired}/{expected} images"
+            progress.setLabelText(status)
+            update_sample_view(status, pct)
 
         def on_workflow_completed(index, total, path):
             # Reset image progress for next workflow
@@ -1345,6 +1353,7 @@ class TileCollectionDialog(QDialog):
         def on_queue_completed():
             self._queue_completed = True
             progress.setValue(100)  # 100% complete
+            update_sample_view("Not Running", 0)
 
             # Clean up tile mode when all workflows are done
             if add_to_sample_view and hasattr(self._app, 'workflow_controller'):
@@ -1371,6 +1380,7 @@ class TileCollectionDialog(QDialog):
 
         def on_queue_cancelled():
             self._queue_completed = True
+            update_sample_view("Not Running", 0)
             QMessageBox.warning(
                 self, "Execution Cancelled",
                 "Workflow queue was cancelled."
@@ -1392,6 +1402,9 @@ class TileCollectionDialog(QDialog):
         progress.canceled.connect(queue_service.cancel)
 
         try:
+            # Update Sample View status at start
+            update_sample_view(f"Tile Collection: 0/{total_workflows} tiles", 0)
+
             # Enqueue and start workflows
             logger.info(f"Enqueueing {len(workflow_files)} workflows to queue service")
             queue_service.enqueue(workflow_files, metadata_list)
@@ -1400,6 +1413,7 @@ class TileCollectionDialog(QDialog):
             logger.info(f"Queue service started: {started}")
 
             if not started:
+                update_sample_view("Not Running", 0)
                 QMessageBox.warning(
                     self, "Queue Error",
                     "Failed to start workflow queue. Check logs for details."
