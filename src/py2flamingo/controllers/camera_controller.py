@@ -252,17 +252,10 @@ class CameraController(QObject):
         else:
             self._workflow_started_timer = False
 
-        # Ensure data socket streaming is active
-        if not self.camera_service.is_streaming():
-            try:
-                self.logger.info("Starting live view streaming for tile workflow")
-                self._workflow_started_streaming = True
-                self.camera_service.start_live_view_streaming()
-            except Exception as e:
-                self.logger.warning(f"Could not start streaming for tile workflow: {e}")
-                self._workflow_started_streaming = False
-        else:
-            self._workflow_started_streaming = False
+        # Note: Do NOT start/stop live view streaming here.
+        # The workflow handles its own camera acquisition. Starting
+        # LIVE_VIEW between queued workflows crashes the server.
+        self._workflow_started_streaming = False
 
     def clear_tile_mode(self):
         """Deactivate tile workflow mode."""
