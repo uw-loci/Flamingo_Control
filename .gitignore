@@ -166,6 +166,7 @@ sample_txt/
 /Capture.PNG
 claude-reports/
 claude-report/
+claude-report.md
 logs/
 *:Zone.Identifier
 

@@ -58,6 +58,15 @@ pytest tests/ --cov=src/py2flamingo --cov-report=html
 
 Install test dependencies: `pip install -r requirements-dev.txt`
 
+## Claude Reports
+
+When asked to write a report (e.g., "update claude-report"), create an individual markdown file in the `claude-report/` directory (gitignored). **Do NOT create or append to a monolithic `claude-report.md` file in the repo root.**
+
+- Location: `claude-report/<descriptive_name>.md`
+- Naming: use lowercase with underscores (e.g., `main_thread_starvation_fix.md`)
+- One report per file, one topic per report
+- Existing reports in that directory serve as examples of the expected format
+
 ## Architecture
 
 ### Modular Design (Post-Refactor)
