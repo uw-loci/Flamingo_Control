@@ -252,10 +252,14 @@ class CameraController(QObject):
         else:
             self._workflow_started_timer = False
 
-        # Note: Do NOT start/stop live view streaming here.
-        # The workflow handles its own camera acquisition. Starting
-        # LIVE_VIEW between queued workflows crashes the server.
-        self._workflow_started_streaming = False
+        # Start the data receiver (listen-only, no LIVE_VIEW_START command)
+        # so frames from the workflow's own camera acquisition are captured.
+        try:
+            self.camera_service.ensure_data_receiver_running()
+            self._workflow_started_streaming = True
+        except Exception as e:
+            self.logger.warning(f"Could not start data receiver for tile workflow: {e}")
+            self._workflow_started_streaming = False
 
     def clear_tile_mode(self):
         """Deactivate tile workflow mode."""
@@ -267,10 +271,10 @@ class CameraController(QObject):
                 self.logger.info("Stopped display timer (was started for tile workflow)")
             if getattr(self, '_workflow_started_streaming', False):
                 try:
-                    self.camera_service.stop_live_view_streaming()
-                    self.logger.info("Stopped streaming (was started for tile workflow)")
+                    self.camera_service.stop_data_receiver()
+                    self.logger.info("Stopped data receiver (was started for tile workflow)")
                 except Exception as e:
-                    self.logger.warning(f"Error stopping streaming: {e}")
+                    self.logger.warning(f"Error stopping data receiver: {e}")
 
         self._workflow_tile_mode = False
         self._current_tile_position = None
@@ -422,6 +426,8 @@ class CameraController(QObject):
             # In tile workflow mode: process ALL buffered frames (each is a unique Z-plane)
             if self._workflow_tile_mode and self._current_tile_position:
                 all_frames = self.camera_service.drain_all_frames()
+                if all_frames:
+                    self.logger.debug(f"Tile mode: drained {len(all_frames)} frames, routing to Sample View")
                 for image, header in all_frames:
                     self._route_frame_to_sample_view(image, header)
                     self._z_plane_counter += 1

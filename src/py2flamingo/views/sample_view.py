@@ -1473,6 +1473,7 @@ class SampleView(QWidget):
         # Status label
         self.workflow_status_label = QLabel("Workflow: Not Running")
         self.workflow_status_label.setStyleSheet("font-weight: bold;")
+        self.workflow_status_label.setMinimumWidth(350)
         layout.addWidget(self.workflow_status_label)
 
         # Progress bar

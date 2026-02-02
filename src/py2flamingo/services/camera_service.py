@@ -463,6 +463,83 @@ class CameraService(MicroscopeCommandService):
 
         self.logger.info("Live view streaming stopped")
 
+    def ensure_data_receiver_running(self) -> None:
+        """
+        Start the data receiver thread without sending LIVE_VIEW_START.
+
+        This is a "listen-only" mode for use during tile workflows where
+        the workflow handles its own camera acquisition. Sending LIVE_VIEW_START
+        between queued workflows crashes the server, so this method only sets up
+        the socket reader thread to capture frames already being sent.
+
+        No-op if already streaming.
+        """
+        with self._streaming_lock:
+            if self._streaming:
+                self.logger.debug("Data receiver already running, skipping")
+                return
+
+            # Use the EXISTING live socket (already connected during initial connection)
+            try:
+                if hasattr(self.connection, 'tcp_connection') and hasattr(self.connection.tcp_connection, '_live_socket'):
+                    self._data_socket = self.connection.tcp_connection._live_socket
+                    ip = self.connection.tcp_connection._ip
+                    port = 53718
+                elif hasattr(self.connection, 'live_client'):
+                    self._data_socket = self.connection.live_client
+                    ip = self.connection.ip
+                    port = 53718
+                else:
+                    raise RuntimeError("Cannot access live socket from connection service")
+
+                if self._data_socket is None:
+                    raise RuntimeError("Live socket is not connected")
+
+                self._data_socket.settimeout(5.0)
+                self.logger.info(f"Data receiver using existing live socket ({ip}:{port})")
+
+            except Exception as e:
+                self.logger.error(f"Failed to access live socket for data receiver: {e}")
+                self._data_socket = None
+                raise RuntimeError(f"Failed to access live socket: {e}")
+
+            # Start streaming thread
+            self._streaming = True
+            self._data_thread = threading.Thread(
+                target=self._data_receiver_loop,
+                daemon=True,
+                name="CameraDataReceiver"
+            )
+            self._data_thread.start()
+
+            self.logger.info("Data receiver started (no LIVE_VIEW_START sent)")
+
+    def stop_data_receiver(self) -> None:
+        """
+        Stop the data receiver thread without sending LIVE_VIEW_STOP.
+
+        Counterpart to ensure_data_receiver_running(). Tears down the
+        receiver thread but does not send any commands to the server.
+        """
+        with self._streaming_lock:
+            if not self._streaming:
+                self.logger.warning("Data receiver not active")
+                return
+
+            # Signal thread to stop
+            self._streaming = False
+
+        # Wait for thread to finish
+        if self._data_thread and self._data_thread.is_alive():
+            self._data_thread.join(timeout=2.0)
+            if self._data_thread.is_alive():
+                self.logger.warning("Data receiver thread did not stop within 2s timeout")
+
+        # Clear socket reference (but don't close it - tcp_connection owns it)
+        self._data_socket = None
+
+        self.logger.info("Stopped data receiver (no LIVE_VIEW_STOP sent)")
+
     def is_streaming(self) -> bool:
         """
         Check if live view streaming is active.

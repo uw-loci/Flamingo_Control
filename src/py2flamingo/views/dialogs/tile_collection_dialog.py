@@ -1328,7 +1328,6 @@ class TileCollectionDialog(QDialog):
             )
             progress.setValue(pct)
             progress.setLabelText(message)
-            update_sample_view(f"Tile {current}/{total}", pct)
 
         def on_image_progress(acquired, expected):
             """Handle image-level progress updates."""
