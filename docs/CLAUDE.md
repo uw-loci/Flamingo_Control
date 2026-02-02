@@ -191,6 +191,25 @@ See [LED 2D Overview Guide](led_2d_overview.md) for complete documentation.
 
 ## Common Development Patterns
 
+### Creating a New Dialog
+
+**All dialogs must remember their window position between sessions.** Use `PersistentDialog` (not `QDialog`) or `PersistentWidget` (not `QWidget`) from `py2flamingo.services.window_geometry_manager`:
+
+```python
+from py2flamingo.services.window_geometry_manager import PersistentDialog
+
+class MyNewDialog(PersistentDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # ... build UI — geometry persistence is automatic
+```
+
+- `PersistentDialog` replaces `QDialog`; `PersistentWidget` replaces `QWidget` for top-level windows
+- Position/size is saved on hide/close and restored on first show — no manual code needed
+- The default geometry manager is set once at startup (`application.py`), so no constructor changes are required
+- The window ID defaults to the class name; override with `window_id="CustomName"` if needed
+- If a subclass overrides `showEvent`/`hideEvent`/`closeEvent`, it **must** call `super()` to preserve persistence
+
 ### Adding a New Controller Action
 
 ```python
