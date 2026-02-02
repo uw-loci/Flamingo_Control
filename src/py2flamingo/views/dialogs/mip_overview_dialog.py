@@ -23,10 +23,11 @@ import numpy as np
 import tifffile
 
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QSplitter, QGroupBox, QFileDialog, QMessageBox,
     QComboBox, QProgressDialog, QLineEdit, QFrame,
 )
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon
 
@@ -44,7 +45,7 @@ from .led_2d_overview_result import ImagePanel
 logger = logging.getLogger(__name__)
 
 
-class MIPOverviewDialog(QDialog):
+class MIPOverviewDialog(PersistentDialog):
     """Dialog for loading and viewing MIP tile overviews.
 
     Allows users to:

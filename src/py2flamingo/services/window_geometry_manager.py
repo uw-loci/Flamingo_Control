@@ -16,11 +16,34 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
-from PyQt5.QtWidgets import QWidget, QMainWindow, QSplitter
+from PyQt5.QtWidgets import QWidget, QMainWindow, QDialog, QSplitter
 from PyQt5.QtCore import QByteArray
 
 
 logger = logging.getLogger(__name__)
+
+
+# Module-level default geometry manager.
+# Set once at application startup via set_default_geometry_manager().
+# PersistentDialog/PersistentWidget use this automatically when no
+# explicit geometry_manager is passed, so callers don't need to thread
+# the manager through every constructor chain.
+_default_geometry_manager: Optional['WindowGeometryManager'] = None
+
+
+def set_default_geometry_manager(manager: 'WindowGeometryManager') -> None:
+    """Set the application-wide default geometry manager.
+
+    Call once during application startup. All PersistentDialog and
+    PersistentWidget instances will use this manager automatically
+    unless an explicit geometry_manager is passed to their constructor.
+
+    Args:
+        manager: The WindowGeometryManager instance to use as default
+    """
+    global _default_geometry_manager
+    _default_geometry_manager = manager
+    logger.info("Default geometry manager set for PersistentDialog/PersistentWidget")
 
 
 class WindowGeometryManager:
@@ -382,3 +405,91 @@ class GeometryPersistenceMixin:
 
             # Persist to disk immediately
             self._geometry_manager.save_all()
+
+
+class PersistentDialog(QDialog):
+    """QDialog subclass with automatic geometry persistence.
+
+    Subclass this instead of QDialog to get automatic window position and
+    size persistence between sessions.  No manual showEvent/hideEvent/
+    closeEvent code is needed — the base class handles it.
+
+    The geometry manager is resolved in this order:
+    1. Explicit ``geometry_manager`` keyword argument
+    2. Module-level default set via ``set_default_geometry_manager()``
+
+    The window ID defaults to the class name, which is unique enough for
+    most dialogs.  Override by passing ``window_id``.
+
+    Example::
+
+        class MyDialog(PersistentDialog):
+            def __init__(self, parent=None):
+                super().__init__(parent=parent)
+                # ... build UI ...
+    """
+
+    def __init__(self, *args, geometry_manager: Optional['WindowGeometryManager'] = None,
+                 window_id: Optional[str] = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._geometry_manager = geometry_manager or _default_geometry_manager
+        self._window_id = window_id or self.__class__.__name__
+        self._geometry_restored = False
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._geometry_restored and self._geometry_manager:
+            self._geometry_manager.restore_geometry(self._window_id, self)
+            self._geometry_restored = True
+
+    def hideEvent(self, event) -> None:
+        if self._geometry_manager:
+            self._geometry_manager.save_geometry(self._window_id, self)
+            self._geometry_manager.save_all()
+        super().hideEvent(event)
+
+    def closeEvent(self, event) -> None:
+        if self._geometry_manager:
+            self._geometry_manager.save_geometry(self._window_id, self)
+            self._geometry_manager.save_all()
+        super().closeEvent(event)
+
+
+class PersistentWidget(QWidget):
+    """QWidget subclass with automatic geometry persistence.
+
+    Same behaviour as ``PersistentDialog`` but for top-level QWidget
+    windows (e.g. result viewers that use QWidget instead of QDialog).
+
+    Example::
+
+        class MyResultWindow(PersistentWidget):
+            def __init__(self, app=None, parent=None):
+                super().__init__(parent=parent)
+                # ... build UI ...
+    """
+
+    def __init__(self, *args, geometry_manager: Optional['WindowGeometryManager'] = None,
+                 window_id: Optional[str] = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._geometry_manager = geometry_manager or _default_geometry_manager
+        self._window_id = window_id or self.__class__.__name__
+        self._geometry_restored = False
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._geometry_restored and self._geometry_manager:
+            self._geometry_manager.restore_geometry(self._window_id, self)
+            self._geometry_restored = True
+
+    def hideEvent(self, event) -> None:
+        if self._geometry_manager:
+            self._geometry_manager.save_geometry(self._window_id, self)
+            self._geometry_manager.save_all()
+        super().hideEvent(event)
+
+    def closeEvent(self, event) -> None:
+        if self._geometry_manager:
+            self._geometry_manager.save_geometry(self._window_id, self)
+            self._geometry_manager.save_all()
+        super().closeEvent(event)

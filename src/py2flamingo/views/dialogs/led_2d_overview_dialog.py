@@ -11,12 +11,12 @@ from typing import Optional, List, Tuple, Dict, Any
 from dataclasses import dataclass
 
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
+    QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
     QLabel, QPushButton, QDoubleSpinBox, QComboBox, QCheckBox,
     QMessageBox, QSizePolicy, QFileDialog
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QShowEvent, QCloseEvent, QHideEvent, QIcon
+from PyQt5.QtGui import QIcon
 
 from py2flamingo.views.colors import WARNING_COLOR, ERROR_COLOR
 
@@ -58,7 +58,10 @@ class ScanConfiguration:
     fast_mode: bool = True  # If True, use continuous scanning (no Z-stacks, much faster)
 
 
-class LED2DOverviewDialog(QDialog):
+from py2flamingo.services.window_geometry_manager import PersistentDialog
+
+
+class LED2DOverviewDialog(PersistentDialog):
     """Configuration dialog for LED 2D Overview scans.
 
     This is a non-modal dialog that allows users to:
@@ -86,7 +89,6 @@ class LED2DOverviewDialog(QDialog):
         super().__init__(parent)
         self._app = app
         self._logger = logging.getLogger(__name__)
-        self._geometry_restored = False
 
         # Stage limits (will be loaded from settings)
         self._stage_limits = {
@@ -1479,34 +1481,4 @@ class LED2DOverviewDialog(QDialog):
         sample_view._update_live_view_state()
 
     # ========== Window Events ==========
-
-    def showEvent(self, event: QShowEvent) -> None:
-        """Handle dialog show event - restore geometry on first show."""
-        super().showEvent(event)
-
-        # Restore geometry on first show
-        if not self._geometry_restored and self._app and hasattr(self._app, 'geometry_manager'):
-            geometry_manager = self._app.geometry_manager
-            if geometry_manager:
-                geometry_manager.restore_geometry("LED2DOverviewDialog", self)
-                self._geometry_restored = True
-
-    def hideEvent(self, event: QHideEvent) -> None:
-        """Handle dialog hide event - save geometry when hidden."""
-        # Save geometry when hiding
-        if self._app and hasattr(self._app, 'geometry_manager'):
-            geometry_manager = self._app.geometry_manager
-            if geometry_manager:
-                geometry_manager.save_geometry("LED2DOverviewDialog", self)
-
-        super().hideEvent(event)
-
-    def closeEvent(self, event: QCloseEvent) -> None:
-        """Handle dialog close event - save geometry."""
-        # Save geometry when closing
-        if self._app and hasattr(self._app, 'geometry_manager'):
-            geometry_manager = self._app.geometry_manager
-            if geometry_manager:
-                geometry_manager.save_geometry("LED2DOverviewDialog", self)
-
-        super().closeEvent(event)
+    # Geometry persistence is handled automatically by PersistentDialog base class.

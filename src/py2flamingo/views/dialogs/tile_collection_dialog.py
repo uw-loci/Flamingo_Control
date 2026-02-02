@@ -12,10 +12,11 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Dict
 
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QGroupBox, QComboBox, QScrollArea, QWidget,
     QMessageBox, QProgressDialog, QFrame, QCheckBox
 )
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
 
@@ -201,7 +202,7 @@ def _min_distance_in_tile_set(tiles: List) -> float:
     return min_distance
 
 
-class TileCollectionDialog(QDialog):
+class TileCollectionDialog(PersistentDialog):
     """Dialog for creating workflows for selected tiles.
 
     Provides workflow configuration (illumination, Z-stack, save settings)

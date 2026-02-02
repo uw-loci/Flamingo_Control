@@ -8,10 +8,11 @@ import logging
 from typing import Optional, Dict, Any
 
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QVBoxLayout, QHBoxLayout, QLabel,
     QDoubleSpinBox, QComboBox, QCheckBox, QGroupBox,
     QPushButton, QDialogButtonBox
 )
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
 
@@ -19,7 +20,7 @@ from PyQt5.QtGui import QIcon
 LED_COLORS = ["Red", "Green", "Blue", "White"]
 
 
-class AdvancedIlluminationDialog(QDialog):
+class AdvancedIlluminationDialog(PersistentDialog):
     """Dialog for advanced illumination settings.
 
     Settings included:

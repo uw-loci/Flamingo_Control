@@ -15,10 +15,11 @@ from typing import Optional, List, Tuple, Set
 import numpy as np
 
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QComboBox,
+    QVBoxLayout, QHBoxLayout, QLabel, QSlider, QComboBox,
     QCheckBox, QPushButton, QGroupBox, QFormLayout, QSpinBox,
     QDoubleSpinBox, QFrame, QSizePolicy, QMessageBox
 )
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QIcon
 
@@ -151,7 +152,7 @@ def calculate_tile_intensity(image: np.ndarray, tiles_x: int, tiles_y: int) -> n
     return intensities
 
 
-class OverviewThresholderDialog(QDialog):
+class OverviewThresholderDialog(PersistentDialog):
     """Dialog for automatic tile selection based on image analysis.
 
     Analyzes the 2D Overview image to detect which tiles contain

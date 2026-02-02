@@ -20,11 +20,13 @@ from typing import Optional, Dict, Any, Tuple, TYPE_CHECKING
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGroupBox, QSlider, QComboBox, QCheckBox, QProgressBar,
-    QSplitter, QSizePolicy, QFrame, QSpinBox, QDialog,
-    QDialogButtonBox, QGridLayout, QLineEdit, QTabWidget
+    QSplitter, QSizePolicy, QFrame, QSpinBox,
+    QGridLayout, QLineEdit, QTabWidget
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, pyqtSignal
 from PyQt5.QtGui import QPixmap, QImage, QFont, QDoubleValidator, QShowEvent, QCloseEvent, QHideEvent
+
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 
 if TYPE_CHECKING:
     from py2flamingo.services.window_geometry_manager import WindowGeometryManager
@@ -266,7 +268,7 @@ class SlicePlaneViewer(QFrame):
         super().mousePressEvent(event)
 
 
-class ViewerControlsDialog(QDialog):
+class ViewerControlsDialog(PersistentDialog):
     """Dialog for controlling napari viewer settings.
 
     Provides controls for:

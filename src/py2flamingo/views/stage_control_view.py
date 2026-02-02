@@ -24,6 +24,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QFont
 
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.controllers.movement_controller import MovementController
 from py2flamingo.models.microscope import Position
 from py2flamingo.views.colors import (
@@ -32,7 +33,7 @@ from py2flamingo.views.colors import (
 )
 
 
-class SetHomePositionDialog(QDialog):
+class SetHomePositionDialog(PersistentDialog):
     """Dialog for setting home position with bounds validation."""
 
     def __init__(self, current_position, stage_limits, parent=None):

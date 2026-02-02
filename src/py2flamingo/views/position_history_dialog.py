@@ -11,16 +11,17 @@ allowing users to:
 import logging
 from typing import Optional, List
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
+    QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QPushButton, QLabel, QGroupBox, QMessageBox
 )
 from PyQt5.QtCore import Qt
 
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.models.microscope import Position
 from py2flamingo.views.colors import SUCCESS_COLOR
 
 
-class PositionHistoryDialog(QDialog):
+class PositionHistoryDialog(PersistentDialog):
     """Dialog for viewing and navigating position history.
 
     Features:

@@ -28,7 +28,10 @@ from .workflow_service import MVCWorkflowService
 from .status_service import StatusService
 from .status_indicator_service import StatusIndicatorService, GlobalStatus
 from .configuration_manager import ConfigurationManager, MicroscopeConfiguration
-from .window_geometry_manager import WindowGeometryManager, GeometryPersistenceMixin
+from .window_geometry_manager import (
+    WindowGeometryManager, GeometryPersistenceMixin,
+    PersistentDialog, PersistentWidget, set_default_geometry_manager
+)
 from .workflow_execution_service import WorkflowExecutionService
 from .initialization_service import MicroscopeInitializationService, InitializationData
 from .image_acquisition_service import ImageAcquisitionService
@@ -67,6 +70,9 @@ __all__ = [
     'MicroscopeConfiguration',
     'WindowGeometryManager',
     'GeometryPersistenceMixin',
+    'PersistentDialog',
+    'PersistentWidget',
+    'set_default_geometry_manager',
     'WorkflowExecutionService',
     'MicroscopeInitializationService',
     'InitializationData',

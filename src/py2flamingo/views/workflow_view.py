@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR, SUCCESS_BG, WARNING_BG
 from py2flamingo.views.workflow_panels import (
     IlluminationPanel, CameraPanel, SavePanel, ZStackPanel,
@@ -1079,7 +1080,7 @@ class WorkflowView(QWidget):
         dialog.exec_()
 
 
-class SaveTemplateDialog(QDialog):
+class SaveTemplateDialog(PersistentDialog):
     """Dialog for saving a workflow template with name and description."""
 
     def __init__(self, parent=None):
@@ -1124,7 +1125,7 @@ class SaveTemplateDialog(QDialog):
         self._name_edit.setCurrentText("")
 
 
-class ValidationResultDialog(QDialog):
+class ValidationResultDialog(PersistentDialog):
     """Dialog for displaying workflow validation results."""
 
     def __init__(self, result: Dict[str, Any], parent=None):

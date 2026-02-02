@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
     QScrollArea, QSplitter, QGroupBox, QFileDialog, QMessageBox,
     QSizePolicy, QFrame, QComboBox, QMenu, QAction, QSlider
 )
+from py2flamingo.services.window_geometry_manager import PersistentWidget
 from PyQt5.QtCore import Qt, QSize, QPoint, QPointF, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QWheelEvent, QMouseEvent, QIcon
 
@@ -827,7 +828,7 @@ class ImagePanel(QWidget):
         return self._image
 
 
-class LED2DOverviewResultWindow(QWidget):
+class LED2DOverviewResultWindow(PersistentWidget):
     """Window displaying LED 2D Overview scan results.
 
     Shows two side-by-side images for the two rotation angles,

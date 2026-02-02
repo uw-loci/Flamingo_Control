@@ -8,16 +8,17 @@ import logging
 from typing import Optional, Dict, Any
 
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QCheckBox, QGroupBox, QGridLayout,
     QPushButton, QDialogButtonBox, QPlainTextEdit, QFileDialog,
     QComboBox
 )
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
 
 
-class AdvancedSaveDialog(QDialog):
+class AdvancedSaveDialog(PersistentDialog):
     """Dialog for advanced save settings.
 
     Settings included:

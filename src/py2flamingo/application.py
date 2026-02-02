@@ -25,7 +25,7 @@ from py2flamingo.models import (
 )
 from py2flamingo.services import (
     MVCConnectionService, MVCWorkflowService, StatusService, ConfigurationManager,
-    StatusIndicatorService, WindowGeometryManager
+    StatusIndicatorService, WindowGeometryManager, set_default_geometry_manager
 )
 from py2flamingo.services.workflow_queue_service import WorkflowQueueService
 from py2flamingo.controllers import ConnectionController, WorkflowController, PositionController
@@ -190,6 +190,7 @@ class FlamingoApplication(QObject):
         self.geometry_manager = WindowGeometryManager(
             config_file="window_geometry.json"
         )
+        set_default_geometry_manager(self.geometry_manager)
 
         # Controllers layer - coordinate services and views
         self.logger.debug("Creating controllers layer components...")

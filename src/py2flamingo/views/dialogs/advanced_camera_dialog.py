@@ -8,10 +8,11 @@ import logging
 from typing import Optional, Dict, Any
 
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QVBoxLayout, QHBoxLayout, QLabel,
     QSpinBox, QDoubleSpinBox, QComboBox, QGroupBox, QGridLayout,
     QPushButton, QDialogButtonBox
 )
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
 
@@ -33,7 +34,7 @@ CAPTURE_MODES = [
 ]
 
 
-class AdvancedCameraDialog(QDialog):
+class AdvancedCameraDialog(PersistentDialog):
     """Dialog for advanced camera settings.
 
     Settings included:
