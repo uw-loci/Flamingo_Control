@@ -5,6 +5,7 @@ Configuration service for managing application settings and file validation.
 This service handles loading configuration files, validating required files,
 and providing configuration data to the application.
 """
+import json
 import os
 import logging
 from typing import Dict, Optional, Any
@@ -69,6 +70,9 @@ class ConfigurationService:
         scope_settings = self._load_scope_settings()
         if scope_settings:
             self.config['scope_settings'] = scope_settings
+
+        # Load persisted drive mappings
+        self._load_drive_mappings()
 
         # Load microscope-specific settings
         microscope_name = self.get_microscope_name()
@@ -315,6 +319,8 @@ class ConfigurationService:
     def set_drive_mapping(self, server_path: str, local_path: str) -> None:
         """Set local path mapping for a server drive.
 
+        Persists immediately to disk so the mapping survives restarts.
+
         Args:
             server_path: Server storage path (e.g., "/media/deploy/ctlsm1")
             local_path: Local mount path (e.g., "G:/CTLSM1")
@@ -322,6 +328,7 @@ class ConfigurationService:
         mappings = self.config.get(self.DRIVE_MAPPINGS_KEY, {})
         mappings[server_path] = local_path
         self.config[self.DRIVE_MAPPINGS_KEY] = mappings
+        self._save_drive_mappings()
         self.logger.info(f"Set drive mapping: {server_path} -> {local_path}")
 
     def get_local_path_for_drive(self, server_path: str) -> Optional[str]:
@@ -348,9 +355,42 @@ class ConfigurationService:
         if server_path in mappings:
             del mappings[server_path]
             self.config[self.DRIVE_MAPPINGS_KEY] = mappings
+            self._save_drive_mappings()
             self.logger.info(f"Removed drive mapping for: {server_path}")
             return True
         return False
+
+    _DRIVE_MAPPINGS_FILE = 'drive_mappings.json'
+
+    def _drive_mappings_path(self) -> Path:
+        """Path to the drive mappings JSON file."""
+        return self.base_path / self._DRIVE_MAPPINGS_FILE
+
+    def _load_drive_mappings(self) -> None:
+        """Load drive mappings from JSON file on disk."""
+        path = self._drive_mappings_path()
+        if not path.exists():
+            return
+        try:
+            with open(path, 'r') as f:
+                data = json.load(f)
+            mappings = data.get('mappings', {})
+            if mappings:
+                self.config[self.DRIVE_MAPPINGS_KEY] = mappings
+                self.logger.info(f"Loaded {len(mappings)} drive mapping(s) from {path}")
+        except Exception as e:
+            self.logger.warning(f"Failed to load drive mappings: {e}")
+
+    def _save_drive_mappings(self) -> None:
+        """Save current drive mappings to JSON file on disk."""
+        path = self._drive_mappings_path()
+        mappings = self.config.get(self.DRIVE_MAPPINGS_KEY, {})
+        try:
+            with open(path, 'w') as f:
+                json.dump({'mappings': mappings}, f, indent=2)
+            self.logger.debug(f"Saved {len(mappings)} drive mapping(s) to {path}")
+        except Exception as e:
+            self.logger.warning(f"Failed to save drive mappings: {e}")
 
     # Session save path methods
     LED_2D_SESSION_PATH_KEY = 'led_2d_overview_session_path'

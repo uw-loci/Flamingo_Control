@@ -1322,6 +1322,8 @@ class TileCollectionDialog(PersistentDialog):
                 self._app.sample_view.update_workflow_progress(status, pct, "--:--")
 
         def on_progress(current, total, message):
+            if self._queue_completed:
+                return
             # current is 1-indexed workflow number
             workflow_idx = current - 1
             pct = calculate_overall_progress(
@@ -1332,6 +1334,8 @@ class TileCollectionDialog(PersistentDialog):
 
         def on_image_progress(acquired, expected):
             """Handle image-level progress updates."""
+            if self._queue_completed:
+                return  # Don't overwrite "Not Running" after completion
             current_workflow_images[0] = acquired
             current_workflow_images[1] = expected
             # Calculate overall progress
