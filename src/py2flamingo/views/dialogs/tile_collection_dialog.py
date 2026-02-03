@@ -1161,6 +1161,66 @@ class TileCollectionDialog(PersistentDialog):
             logger.error(f"Failed to read Z range from {workflow_file.name}: {e}")
             return (0.0, 10.0)
 
+    def _read_laser_channels_from_workflow(self, workflow_file: Path) -> List[int]:
+        """Read enabled laser channels from workflow file.
+
+        Parses the <Illumination Source> block to determine which lasers are enabled.
+        Format: "Laser N N: XXX nm MLE = power enabled"
+        where enabled is 1 (on) or 0 (off).
+
+        Laser mapping:
+            Laser 1 (405nm) -> channel 0
+            Laser 2 (488nm) -> channel 1
+            Laser 3 (561nm) -> channel 2
+            Laser 4 (640nm) -> channel 3
+
+        Args:
+            workflow_file: Path to workflow file
+
+        Returns:
+            Ordered list of enabled channel IDs, e.g. [1, 3] for 488nm + 640nm.
+            Falls back to [0] if parsing fails.
+        """
+        import re
+        try:
+            with open(workflow_file, 'r') as f:
+                content = f.read()
+
+            # Extract Illumination Source block
+            illum_match = re.search(
+                r'<Illumination Source>(.*?)</Illumination Source>',
+                content, re.DOTALL
+            )
+            if not illum_match:
+                logger.warning(f"No Illumination Source block in {workflow_file.name}")
+                return [0]
+
+            illum_block = illum_match.group(1)
+            channels = []
+
+            # Match lines like: "Laser 2 2: 488 nm MLE = 10.00 1"
+            # The last number (1 or 0) indicates enabled/disabled
+            for match in re.finditer(
+                r'Laser\s+(\d+)\s+\d+:\s+\d+\s+nm\s+MLE\s*=\s*[\d.]+\s+(\d+)',
+                illum_block
+            ):
+                laser_num = int(match.group(1))
+                enabled = int(match.group(2))
+                if enabled == 1:
+                    # Laser number to channel: Laser 1 -> ch 0, Laser 2 -> ch 1, etc.
+                    channels.append(laser_num - 1)
+
+            if not channels:
+                logger.warning(f"No enabled lasers found in {workflow_file.name}, defaulting to channel 0")
+                return [0]
+
+            logger.info(f"Parsed laser channels from {workflow_file.name}: {channels}")
+            return channels
+
+        except Exception as e:
+            logger.error(f"Failed to read laser channels from {workflow_file.name}: {e}")
+            return [0]
+
     def _setup_sample_view_integration(self, workflow_files: List[Path], sample_view):
         """Setup Sample View to receive workflow Z-stack frames.
 
@@ -1274,17 +1334,23 @@ class TileCollectionDialog(PersistentDialog):
                     z_min, z_max = self._read_z_range_from_workflow(wf_file)
                     tile_position['z_min'] = z_min
                     tile_position['z_max'] = z_max
+                    tile_position['channels'] = self._read_laser_channels_from_workflow(wf_file)
                     metadata = tile_position
             metadata_list.append(metadata)
 
         # Set up workflow start callback for Sample View integration
+        # Instead of using set_active_tile_position (signal-based, queued by exec_()),
+        # we update tile metadata directly from the background thread (GIL-safe).
+        camera_controller = None
         if add_to_sample_view and hasattr(self._app, 'workflow_controller'):
+            wc = self._app.workflow_controller
+            camera_controller = getattr(wc, '_camera_controller', None)
+
             def on_workflow_start(file_path: Path, metadata: Dict):
-                """Set tile position when workflow starts."""
-                controller = self._app.workflow_controller
-                if metadata and hasattr(controller, 'set_active_tile_position'):
-                    controller.set_active_tile_position(metadata)
-                    logger.debug(f"Set tile position for Sample View: {metadata}")
+                """Update tile metadata directly from background thread (GIL-safe)."""
+                if camera_controller and metadata:
+                    camera_controller._current_tile_position = metadata  # atomic under GIL
+                    camera_controller._z_plane_counter = 0
 
             queue_service.set_workflow_start_callback(on_workflow_start)
 
@@ -1347,6 +1413,8 @@ class TileCollectionDialog(PersistentDialog):
             update_sample_view(status, pct)
 
         def on_workflow_completed(index, total, path):
+            if self._queue_completed:
+                return
             # Reset image progress for next workflow
             current_workflow_images[0] = 0
             current_workflow_images[1] = 0
@@ -1360,10 +1428,10 @@ class TileCollectionDialog(PersistentDialog):
             update_sample_view("Not Running", 0)
 
             # Clean up tile mode when all workflows are done
+            if camera_controller:
+                camera_controller.clear_tile_mode()
             if add_to_sample_view and hasattr(self._app, 'workflow_controller'):
-                controller = self._app.workflow_controller
-                if hasattr(controller, '_camera_controller') and controller._camera_controller:
-                    controller._camera_controller.clear_tile_mode()
+                self._app.workflow_controller._suppress_tile_clear = False
 
             # Reorganize folders AFTER all workflows confirmed complete
             # This is safe because queue_completed only fires after all
@@ -1385,6 +1453,10 @@ class TileCollectionDialog(PersistentDialog):
         def on_queue_cancelled():
             self._queue_completed = True
             update_sample_view("Not Running", 0)
+            if camera_controller:
+                camera_controller.clear_tile_mode()
+            if add_to_sample_view and hasattr(self._app, 'workflow_controller'):
+                self._app.workflow_controller._suppress_tile_clear = False
             QMessageBox.warning(
                 self, "Execution Cancelled",
                 "Workflow queue was cancelled."
@@ -1409,6 +1481,25 @@ class TileCollectionDialog(PersistentDialog):
             # Update Sample View status at start
             update_sample_view(f"Tile Collection: 0/{total_workflows} tiles", 0)
 
+            # Start data receiver and display timer ONCE (on main thread)
+            # This avoids relying on cross-thread signals that get queued by exec_()
+            if camera_controller:
+                wc = self._app.workflow_controller
+                wc._suppress_tile_clear = True  # Prevent per-workflow clear
+                camera_controller._workflow_tile_mode = True
+                camera_controller._current_tile_position = metadata_list[0] if metadata_list else {}
+                camera_controller._z_plane_counter = 0
+                # Start display timer on main thread (QTimer thread affinity)
+                if not camera_controller._display_timer.isActive():
+                    camera_controller._workflow_started_timer = True
+                    camera_controller._display_timer.start(camera_controller._display_timer_interval_ms)
+                # Start data receiver (listen-only, no LIVE_VIEW_START)
+                try:
+                    camera_controller.camera_service.ensure_data_receiver_running()
+                    camera_controller._workflow_started_streaming = True
+                except Exception as e:
+                    logger.warning(f"Could not start data receiver: {e}")
+
             # Enqueue and start workflows
             logger.info(f"Enqueueing {len(workflow_files)} workflows to queue service")
             queue_service.enqueue(workflow_files, metadata_list)
@@ -1429,6 +1520,12 @@ class TileCollectionDialog(PersistentDialog):
             progress.exec_()
 
         finally:
+            # Ensure tile mode is cleaned up even if callbacks didn't fire
+            if camera_controller and camera_controller._workflow_tile_mode:
+                camera_controller.clear_tile_mode()
+            if add_to_sample_view and hasattr(self._app, 'workflow_controller'):
+                self._app.workflow_controller._suppress_tile_clear = False
+
             # Disconnect signals to avoid issues with stale connections
             try:
                 queue_service.progress_updated.disconnect(on_progress)

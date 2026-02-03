@@ -87,6 +87,7 @@ class WorkflowController(QObject):
         # Tile workflow position tracking for Sample View integration
         self._active_tile_position: Optional[Dict] = None
         self._camera_controller = None  # Will be set via setter
+        self._suppress_tile_clear = False  # When True, tile collection manages lifecycle
 
         # Connect signals to slots for thread-safe tile position updates
         self._tile_position_requested.connect(self._apply_tile_position)
@@ -131,6 +132,9 @@ class WorkflowController(QObject):
 
         Emits signal to marshal the camera controller call onto the main thread.
         """
+        if self._suppress_tile_clear:
+            self._logger.debug("Suppressing tile clear (tile collection manages lifecycle)")
+            return
         if self._active_tile_position:
             self._logger.info(f"Clearing tile position: {self._active_tile_position.get('filename', 'unknown')}")
             self._active_tile_position = None

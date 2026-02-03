@@ -2651,14 +2651,22 @@ class SampleView(QWidget):
             return
 
         # Calculate actual Z position from index
-        # Assume linear spacing from z_min to z_max
         z_min = position['z_min']
         z_max = position['z_max']
         z_range = z_max - z_min
 
-        # Estimate total number of planes from Z range and typical step (2.5 um)
-        estimated_planes = max(1, int(z_range / 0.0025) + 1)
-        z_position = z_min + (z_index / max(1, estimated_planes - 1)) * z_range
+        # Determine laser channel from z_index and channel list
+        channels = position.get('channels', [0])
+        num_channels = len(channels)
+        estimated_planes_per_channel = max(1, int(z_range / 0.0025) + 1)
+
+        # Which channel does this z_index belong to?
+        channel_idx = min(z_index // estimated_planes_per_channel, num_channels - 1)
+        self._current_channel = channels[channel_idx]
+
+        # Z position within current channel's pass
+        z_within_channel = z_index % estimated_planes_per_channel
+        z_position = z_min + (z_within_channel / max(1, estimated_planes_per_channel - 1)) * z_range
 
         # Count frames per tile (no image copy — avoids 8MB/frame leak)
         tile_key = (position['x'], position['y'])
