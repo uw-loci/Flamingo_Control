@@ -1950,9 +1950,10 @@ class SampleView(QWidget):
         self.logger.debug(f"Channel {channel} visibility: {visible}")
 
         # Toggle visibility on the actual napari layer via 3D window's channel_layers
-        layer = self._get_channel_layer(channel)
-        if layer is not None:
-            layer.visible = visible
+        if self.sample_3d_window and hasattr(self.sample_3d_window, 'channel_layers'):
+            layer = self.sample_3d_window.channel_layers.get(channel)
+            if layer is not None:
+                layer.visible = visible
 
     def _on_channel_contrast_changed(self, channel: int, value: tuple) -> None:
         """Handle channel contrast range slider change.
@@ -1972,9 +1973,10 @@ class SampleView(QWidget):
             self.channel_max_labels[channel].setText(str(max_val))
 
         # Update contrast on the actual napari layer via 3D window's channel_layers
-        layer = self._get_channel_layer(channel)
-        if layer is not None:
-            layer.contrast_limits = [min_val, max_val]
+        if self.sample_3d_window and hasattr(self.sample_3d_window, 'channel_layers'):
+            layer = self.sample_3d_window.channel_layers.get(channel)
+            if layer is not None:
+                layer.contrast_limits = [min_val, max_val]
 
         self.logger.debug(f"Channel {channel} contrast range: [{min_val}, {max_val}]")
 
