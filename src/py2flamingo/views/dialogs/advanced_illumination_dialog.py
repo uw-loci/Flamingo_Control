@@ -31,7 +31,7 @@ class AdvancedIlluminationDialog(PersistentDialog):
     Note: Light path selection (Left/Right) is now on the main panel.
     """
 
-    def __init__(self, parent: Optional[QDialog] = None):
+    def __init__(self, parent=None):
         """Initialize the dialog.
 
         Args:

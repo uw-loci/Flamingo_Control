@@ -29,7 +29,7 @@ class AdvancedSaveDialog(PersistentDialog):
     - Extended comments field
     """
 
-    def __init__(self, parent: Optional[QDialog] = None,
+    def __init__(self, parent=None,
                  default_drive: str = "",
                  connection_service = None,
                  hide_drive_selection: bool = False):

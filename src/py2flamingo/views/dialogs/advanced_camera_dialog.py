@@ -44,7 +44,7 @@ class AdvancedCameraDialog(PersistentDialog):
     - Camera 2 capture percentage and mode
     """
 
-    def __init__(self, parent: Optional[QDialog] = None):
+    def __init__(self, parent=None):
         """Initialize the dialog.
 
         Args:
