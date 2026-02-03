@@ -1425,6 +1425,7 @@ class TileCollectionDialog(PersistentDialog):
         def on_queue_completed():
             self._queue_completed = True
             progress.setValue(100)  # 100% complete
+            progress.accept()  # Close the dialog so exec_() returns
             update_sample_view("Not Running", 0)
 
             # Clean up tile mode when all workflows are done
@@ -1461,6 +1462,7 @@ class TileCollectionDialog(PersistentDialog):
                 self, "Execution Cancelled",
                 "Workflow queue was cancelled."
             )
+            progress.reject()  # Close the dialog so exec_() returns
 
         def on_error(message):
             self._queue_error = message
@@ -1515,8 +1517,7 @@ class TileCollectionDialog(PersistentDialog):
                 )
                 return
 
-            # Show progress dialog (blocks until closed or queue completes)
-            # Note: The progress dialog will close when setValue reaches max
+            # Show progress dialog (blocks until accept/reject is called)
             progress.exec_()
 
         finally:

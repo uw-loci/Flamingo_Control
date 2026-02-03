@@ -1949,12 +1949,10 @@ class SampleView(QWidget):
         self._channel_states[channel]['visible'] = visible
         self.logger.debug(f"Channel {channel} visibility: {visible}")
 
-        # Update napari layer visibility via the 3D window's viewer
-        viewer = self._get_viewer()
-        if viewer:
-            layer_name = f"Channel {channel + 1}"
-            if layer_name in viewer.layers:
-                viewer.layers[layer_name].visible = visible
+        # Toggle visibility on the actual napari layer via 3D window's channel_layers
+        layer = self._get_channel_layer(channel)
+        if layer is not None:
+            layer.visible = visible
 
     def _on_channel_contrast_changed(self, channel: int, value: tuple) -> None:
         """Handle channel contrast range slider change.
@@ -1973,12 +1971,10 @@ class SampleView(QWidget):
         if channel in self.channel_max_labels:
             self.channel_max_labels[channel].setText(str(max_val))
 
-        # Update napari layer contrast via the 3D window's viewer
-        viewer = self._get_viewer()
-        if viewer:
-            layer_name = f"Channel {channel + 1}"
-            if layer_name in viewer.layers:
-                viewer.layers[layer_name].contrast_limits = [min_val, max_val]
+        # Update contrast on the actual napari layer via 3D window's channel_layers
+        layer = self._get_channel_layer(channel)
+        if layer is not None:
+            layer.contrast_limits = [min_val, max_val]
 
         self.logger.debug(f"Channel {channel} contrast range: [{min_val}, {max_val}]")
 
@@ -2622,6 +2618,12 @@ class SampleView(QWidget):
         self._tile_workflow_active = True
         self._expected_tiles = tile_info
         self._accumulated_zstacks = {}
+
+        # Clear reference stage position so display transform returns untransformed volumes.
+        # Tile data is stored at absolute world coordinates — no stage-delta shift needed.
+        if self.voxel_storage:
+            self.voxel_storage.reference_stage_position = None
+            self.voxel_storage.invalidate_transform_cache()
 
         # Cache pixel FOV once (avoid synchronous TCP call per frame)
         self._cached_pixel_size_mm = None
