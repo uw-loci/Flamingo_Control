@@ -2734,19 +2734,25 @@ class SampleView(QWidget):
         # Apply coordinate inversions to match napari display (PhysicalToNapariMapper)
         # Y is ALWAYS inverted: napari Y=0 is at y_max (chamber top)
         # X is inverted when invert_x=True (low stage X on right side of display)
+        # IMPORTANT: Tile data is captured at the objective focal plane, NOT at the stage Y.
+        # The objective is fixed at the center of the chamber Y range (7.0mm).
+        # Stage Y controls which part of the sample is under the objective, but the
+        # captured image is always AT the objective position in chamber coordinates.
         stage_config = self._config.get('stage_control', {})
         x_range = stage_config.get('x_range_mm', [1.0, 12.31])
         y_range = stage_config.get('y_range_mm', [0.0, 14.0])
+        objective_y_mm = (y_range[0] + y_range[1]) / 2  # Objective at chamber center
 
         if self._invert_x:
             tile_x_um = (x_range[0] + x_range[1] - position['x']) * 1000
         else:
             tile_x_um = position['x'] * 1000
-        tile_y_um = (y_range[1] - position['y']) * 1000  # Y always inverted
+        tile_y_um = (y_range[1] - objective_y_mm) * 1000  # Y inverted, centered at objective
         tile_z_um = z_mm * 1000  # Z not inverted
 
         self.logger.info(
             f"TILE COORDS: Stage=({position['x']:.3f}, {position['y']:.3f}, {z_mm:.3f}) mm | "
+            f"Objective Y={objective_y_mm:.1f} mm | "
             f"Napari world (Z,Y,X)=({tile_z_um:.0f}, {tile_y_um:.0f}, {tile_x_um:.0f}) µm | "
             f"Channel={self._current_channel} | X_inv={self._invert_x}"
         )
