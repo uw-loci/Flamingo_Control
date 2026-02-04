@@ -2620,23 +2620,11 @@ class SampleView(QWidget):
         self._tile_workflow_active = True
         self._expected_tiles = tile_info
         self._accumulated_zstacks = {}
+        self._tile_reference_set = False  # Set reference on first tile frame
 
-        # Clear reference stage position so display transform returns untransformed volumes.
-        # Tile data is stored at absolute world coordinates — no stage-delta shift needed.
-        if self.voxel_storage:
-            self.voxel_storage.reference_stage_position = None
-            self.voxel_storage.invalidate_transform_cache()
-
-        # Cache pixel FOV once (avoid synchronous TCP call per frame)
-        self._cached_pixel_size_mm = None
+        # Cache camera FPS for channel detection
         self._tile_camera_fps = 40.0  # Default
         if self.camera_controller and self.camera_controller.camera_service:
-            try:
-                self._cached_pixel_size_mm = self.camera_controller.camera_service.get_pixel_field_of_view()
-                self.logger.info(f"Sample View: Cached pixel FOV: {self._cached_pixel_size_mm * 1000:.3f} µm/pixel")
-            except Exception as e:
-                self.logger.warning(f"Could not cache pixel FOV: {e}")
-            # Cache camera FPS for channel detection
             try:
                 fps = getattr(self.camera_controller, '_max_display_fps', 40.0)
                 if fps and fps > 0:
@@ -2644,9 +2632,6 @@ class SampleView(QWidget):
                 self.logger.info(f"Sample View: Camera FPS for channel detection: {self._tile_camera_fps}")
             except Exception:
                 pass
-
-        # Precomputed XY coordinate cache: (tile_x, tile_y) -> (x_world_flat, y_world_flat)
-        self._tile_xy_cache = {}
 
         self.logger.info(f"Sample View: Prepared to receive {len(tile_info)} tile workflows")
 
@@ -2706,146 +2691,28 @@ class SampleView(QWidget):
             status = f"Tile {tile_idx}/{total_tiles}: {frame_count} frames (Ch {ch_name})"
             self.update_workflow_progress(status, overall_pct, "--:--")
 
-        # Process frame into 3D volume
-        self._add_frame_to_3d_volume(image, position, z_position)
+        # Set reference on first frame of acquisition
+        if not self._tile_reference_set and self.sample_3d_window:
+            storage = getattr(self.sample_3d_window, 'voxel_storage', None)
+            if storage:
+                storage.set_reference_position({
+                    'x': position['x'],
+                    'y': position['y'],
+                    'z': z_position,
+                    'r': 0
+                })
+                self._tile_reference_set = True
+                self.logger.info(f"Sample View: Tile reference set to X={position['x']:.2f}, "
+                                f"Y={position['y']:.2f}, Z={z_position:.3f}")
+
+        # Delegate to unified method on the 3D visualization window
+        if self.sample_3d_window:
+            self.sample_3d_window.add_frame_to_volume(
+                image=image,
+                stage_position_mm={'x': position['x'], 'y': position['y'], 'z': z_position},
+                channel_id=self._current_channel
+            )
 
         self.logger.debug(f"Sample View: Accumulated Z-plane {z_index} for tile "
                          f"({position['x']:.2f}, {position['y']:.2f})")
 
-    def _add_frame_to_3d_volume(self, image: np.ndarray, position: dict, z_mm: float):
-        """Add tile frame to 3D volume visualization.
-
-        Args:
-            image: Frame data (H, W) uint16
-            position: Tile center position (x, y in mm)
-            z_mm: Z position of this frame (mm)
-        """
-        if not self.sample_3d_window or not self.voxel_storage:
-            return
-
-        viz = self.sample_3d_window
-
-        # Use cached pixel size (no synchronous TCP call)
-        pixel_size_mm = getattr(self, '_cached_pixel_size_mm', None)
-        if pixel_size_mm is None or pixel_size_mm <= 0:
-            return
-        pixel_size_um = pixel_size_mm * 1000
-
-        # Transform tile coordinates using the same logic as the focus frame.
-        #
-        # The coord_mapper (PhysicalToNapariMapper) is the single source of truth
-        # for coordinate transforms. It applies X/Z inversions and range-based
-        # scaling. We read its inversion flags and apply them directly in world µm
-        # space (avoiding integer quantization from physical_to_napari).
-        #
-        # XY: Tile data is captured at the FIXED objective focal plane, not at the
-        # stage position. Use calibration XY (same source as focus frame).
-        # Z: Each z-stack frame has a distinct Z. The z-stack ends at the focal
-        # plane Z, with frames extending in front of or behind it depending on
-        # sweep direction. Z inversions are applied if enabled.
-
-        # Get objective position from calibration (matches focus frame)
-        objective_x_mm = None
-        objective_y_mm = None
-        if self.sample_3d_window and hasattr(self.sample_3d_window, 'objective_xy_calibration'):
-            cal = self.sample_3d_window.objective_xy_calibration
-            if cal:
-                objective_x_mm = cal.get('x')
-                objective_y_mm = cal.get('y')
-
-        # Fallback to range centers (same as focus frame defaults)
-        stage_config = self._config.get('stage_control', {})
-        x_range = stage_config.get('x_range_mm', [1.0, 12.31])
-        y_range = stage_config.get('y_range_mm', [0.0, 14.0])
-        z_range_config = stage_config.get('z_range_mm', [12.5, 26.0])
-        if objective_x_mm is None:
-            objective_x_mm = (x_range[0] + x_range[1]) / 2
-        if objective_y_mm is None:
-            objective_y_mm = (y_range[0] + y_range[1]) / 2
-
-        # Read inversion flags from coord_mapper (single source of truth)
-        invert_x = self._invert_x  # Already read from config
-        invert_z = False
-        if self.sample_3d_window and hasattr(self.sample_3d_window, 'coord_mapper'):
-            mapper = self.sample_3d_window.coord_mapper
-            invert_x = mapper.invert_x
-            invert_z = mapper.invert_z
-
-        # X: at objective position, with inversion if enabled
-        # Matches physical_to_napari: x_eff = 2*center - x when inverted
-        if invert_x:
-            tile_x_um = (x_range[0] + x_range[1] - objective_x_mm) * 1000
-        else:
-            tile_x_um = objective_x_mm * 1000
-
-        # Y: always inverted (y_max maps to napari Y=0), at objective Y
-        tile_y_um = (y_range[1] - objective_y_mm) * 1000
-
-        # Z: per-frame stage Z, with inversion if enabled
-        # Matches physical_to_napari: z_eff = 2*center - z when inverted
-        if invert_z:
-            z_eff = (z_range_config[0] + z_range_config[1]) - z_mm
-        else:
-            z_eff = z_mm
-        tile_z_um = z_eff * 1000
-
-        self.logger.info(
-            f"TILE COORDS: Stage=({position['x']:.3f}, {position['y']:.3f}, {z_mm:.3f}) mm | "
-            f"Objective (X,Y)=({objective_x_mm:.2f}, {objective_y_mm:.1f}) mm | "
-            f"World (Z,Y,X)=({tile_z_um:.0f}, {tile_y_um:.0f}, {tile_x_um:.0f}) µm | "
-            f"Ch={self._current_channel} | inv_x={invert_x} inv_z={invert_z}"
-        )
-
-        # Get or create cached XY world coordinates for this tile
-        # Since all tiles use the same objective XY, cache on image dimensions
-        tile_key = (position['x'], position['y'])
-        tile_xy_cache = getattr(self, '_tile_xy_cache', {})
-        if tile_key not in tile_xy_cache:
-            h, w = image.shape[:2]
-            y_indices, x_indices = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
-            # Pixel offsets are NEGATED for inverted axes (inversion flips direction)
-            x_sign = -1.0 if invert_x else 1.0
-            x_world_flat = (tile_x_um + x_sign * (x_indices - w / 2) * pixel_size_um).ravel()
-            y_world_flat = (tile_y_um - (y_indices - h / 2) * pixel_size_um).ravel()  # Y always inverted
-            tile_xy_cache[tile_key] = (x_world_flat, y_world_flat)
-            self._tile_xy_cache = tile_xy_cache
-            self.logger.info(f"Cached XY world coords for tile ({position['x']:.2f}, {position['y']:.2f}) "
-                            f"[x_sign={x_sign}, y_sign=-1]")
-
-        x_world_flat, y_world_flat = tile_xy_cache[tile_key]
-
-        # Threshold mask FIRST — only build coords for non-background pixels
-        pixel_values = image.ravel().astype(np.uint16)
-        mask = pixel_values > 100
-        pixel_values = pixel_values[mask]
-
-        if len(pixel_values) == 0:
-            return
-
-        # Build coordinate array only for masked pixels
-        world_coords = np.column_stack([
-            np.full(mask.sum(), tile_z_um),
-            y_world_flat[mask],
-            x_world_flat[mask]
-        ])
-
-        try:
-            self.voxel_storage.update_storage(
-                channel_id=self._current_channel,
-                world_coords=world_coords,
-                pixel_values=pixel_values,
-                timestamp=time.time(),
-                update_mode='maximum'
-            )
-
-            if hasattr(viz, '_update_visualization_if_needed'):
-                viz._update_visualization_if_needed()
-
-            self.logger.info(f"Added {len(pixel_values)} voxels at tile "
-                            f"({position['x']:.2f}, {position['y']:.2f}), Z={z_mm:.3f}mm")
-
-            if not self._channel_availability_timer.isActive():
-                self._channel_availability_timer.start()
-
-        except Exception as e:
-            self.logger.error(f"Failed to update voxel storage: {e}")

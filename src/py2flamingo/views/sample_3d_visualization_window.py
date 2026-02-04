@@ -3098,202 +3098,141 @@ class Sample3DVisualizationWindow(QWidget):
         except Exception as e:
             logger.error(f"Error capturing frame: {e}", exc_info=True)
 
-    def _process_camera_frame_to_3d(self, image: np.ndarray, header, channel_id: int, position):
+    def add_frame_to_volume(self, image: np.ndarray, stage_position_mm: dict,
+                            channel_id: int, timestamp: float = None):
         """
-        Transform camera frame to 3D world coordinates and accumulate.
+        Place a camera frame into the 3D voxel storage.
+
+        Both live view and tile workflow call this method. It handles:
+        - Downsampling to storage resolution
+        - Reference-position-delta coordinate calculation
+        - World coordinate generation (ZYX order)
+        - Voxel storage update
 
         Args:
-            image: Camera image (e.g., 2048x2048, uint16)
-            header: Image header with metadata
-            channel_id: Which channel (0-3)
-            position: Position object with x, y, z, r
+            image: Camera image (any resolution, will be downsampled)
+            stage_position_mm: {'x': float, 'y': float, 'z': float} in mm
+            channel_id: Channel index (0-3)
+            timestamp: Optional timestamp in ms (defaults to time.time() * 1000)
         """
         try:
-            logger.debug("Process 3D: Starting downsample")
+            if timestamp is None:
+                timestamp = time.time() * 1000
+
             # Downsample camera image to storage resolution
             downsampled = self._downsample_for_storage(image)
-
             H, W = downsampled.shape
-            logger.debug(f"Process 3D: Downsampled from {image.shape} to {downsampled.shape}")
+            logger.debug(f"add_frame_to_volume: Downsampled from {image.shape} to {downsampled.shape}")
 
             # Generate pixel coordinate grid
-            logger.debug("Process 3D: Creating coordinate grid")
             y_indices, x_indices = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
 
-            # Convert to camera space (micrometers), centered at (0, 0)
-            logger.debug("Process 3D: Converting to camera space")
-
             # Calculate actual FOV from magnification
-            # FOV was calculated as 0.5182mm for 25.69× magnification
-            # This should ideally come from camera_controller or configuration
+            # FOV was calculated as 0.5182mm for 25.69x magnification
             FOV_mm = 0.5182  # mm (field of view width/height)
             FOV_um = FOV_mm * 1000  # Convert to micrometers
-
-            # Scale camera pixels to physical coordinates based on FOV
-            # The camera image spans the full FOV
             pixel_size_um = FOV_um / W  # Micrometers per camera pixel
 
+            # Convert to camera space (micrometers), centered at (0, 0)
             camera_x = (x_indices - W/2) * pixel_size_um
             camera_y = (y_indices - H/2) * pixel_size_um
 
-            logger.debug(f"FOV: {FOV_mm:.3f}mm = {FOV_um:.1f}µm, Pixel size: {pixel_size_um:.3f}µm/pixel")
-
-            # Stack into (N, 2) array for transformation
-            logger.debug("Process 3D: Stacking coordinates")
+            # Stack into (N, 2) array
             camera_coords_2d = np.column_stack([camera_x.ravel(), camera_y.ravel()])
 
-            # DO NOT set rotation for data placement
-            # The objective/camera are fixed - only the sample holder rotates
-            # Setting rotation here was causing data to be placed at wrong Z coordinates
-            logger.debug(f"Process 3D: Sample rotation (ry={position.r}°) - NOT applied to placement")
-            # IMPORTANT: Reset transformer to ensure no rotation is applied to placement
-            self.transformer.set_rotation(rx=0, ry=0, rz=0)  # Reset to no rotation
-
-            # Transform 2D camera coords + stage position to 3D world coords
-            # CRITICAL: Must convert stage Y to chamber Y using the calibration reference
-            # Stage Y is a control parameter; chamber Y is the actual position in the visualization
-            # The imaging data is attached to the sample (at extension tip), so it moves with the holder
-
-            logger.debug("Process 3D: Converting stage coords to sample-relative coords")
-
-            # Storage is in SAMPLE coordinates (fixed relative to sample holder)
-            # The focal plane position in sample coords changes as stage moves
-            #
-            # Physical model:
-            # - Focal plane is FIXED in chamber space (at objective)
-            # - Sample moves with stage
-            # - As stage Z increases (away from objective), we image DEEPER into sample
-            #
-            # Sample coordinate calculation:
-            # - Use a reference point (center of storage) as base
-            # - Offset by stage delta from reference position
-            # - This ensures different stage positions map to different sample positions
+            # Reset transformer rotation — rotation is applied at display time, not storage time
+            self.transformer.set_rotation(rx=0, ry=0, rz=0)
 
             # Get reference position (set on first frame capture)
+            pos_x = stage_position_mm['x']
+            pos_y = stage_position_mm['y']
+            pos_z = stage_position_mm['z']
+
             if self.voxel_storage.reference_stage_position is None:
                 # Will be set below, use current position as temporary reference
-                ref_x, ref_y, ref_z = position.x, position.y, position.z
+                ref_x, ref_y, ref_z = pos_x, pos_y, pos_z
             else:
                 ref_x = self.voxel_storage.reference_stage_position['x']
                 ref_y = self.voxel_storage.reference_stage_position['y']
                 ref_z = self.voxel_storage.reference_stage_position['z']
 
             # Calculate stage delta from reference
-            delta_x = position.x - ref_x
-            delta_y = position.y - ref_y
-            delta_z = position.z - ref_z
+            delta_x = pos_x - ref_x
+            delta_y = pos_y - ref_y
+            delta_z = pos_z - ref_z
 
             # Base storage position (center of sample region in storage coords)
             # Config has [X, Y, Z] order, but we need Z, Y, X for napari
             sample_center = self.config['sample_chamber']['sample_region_center_um']
-            base_x_um = sample_center[0]  # X is index 0 in config
-            base_y_um = sample_center[1]  # Y is index 1 in config
-            base_z_um = sample_center[2]  # Z is index 2 in config
+            base_x_um = sample_center[0]
+            base_y_um = sample_center[1]
+            base_z_um = sample_center[2]
 
             # Storage position = base - delta (in sample coordinates)
             # The negative delta ensures that when the display transform adds +delta,
             # new data appears at the focal plane (base) while old data moves forward
-            #
-            # Example: reference at Z=21mm, current at Z=22mm (delta=+1mm)
-            # - Frame from Z=21 stored at base-0=base, displayed at base+1mm (moved forward)
-            # - Frame from Z=22 stored at base-1mm, displayed at base-1+1=base (focal plane)
-            #
-            # IMPORTANT: Storage expects (Z, Y, X) order for consistency with napari
             world_center_um = np.array([
-                base_z_um - delta_z * 1000,  # Z in sample coords (subtract delta)
-                base_y_um - delta_y * 1000,  # Y in sample coords (subtract delta)
-                base_x_um - delta_x * 1000   # X in sample coords (subtract delta)
+                base_z_um - delta_z * 1000,  # Z in sample coords
+                base_y_um - delta_y * 1000,  # Y in sample coords
+                base_x_um - delta_x * 1000   # X in sample coords
             ])
 
-            logger.debug(f"Stage position (mm): X={position.x:.2f}, Y={position.y:.2f}, Z={position.z:.2f}, R={position.r:.1f}°")
-            logger.debug(f"Stage delta from ref (mm): dX={delta_x:.2f}, dY={delta_y:.2f}, dZ={delta_z:.2f}")
-            logger.debug(f"Sample storage position (µm): Z={world_center_um[0]:.1f}, Y={world_center_um[1]:.1f}, X={world_center_um[2]:.1f}")
+            logger.debug(f"add_frame_to_volume: Stage (mm): X={pos_x:.2f}, Y={pos_y:.2f}, Z={pos_z:.2f}")
+            logger.debug(f"add_frame_to_volume: Delta from ref (mm): dX={delta_x:.2f}, dY={delta_y:.2f}, dZ={delta_z:.2f}")
+            logger.debug(f"add_frame_to_volume: Storage center (µm ZYX): Z={world_center_um[0]:.1f}, Y={world_center_um[1]:.1f}, X={world_center_um[2]:.1f}")
 
-            # For 3D visualization, we need to place the 2D camera image as a thin slice
-            # The imaging plane has some depth (depth of field ~1.9mm in Z)
-            # We'll represent this as a thin slab centered at the focal plane
-
-            # Create 3D coords for camera offsets (relative to imaging plane center)
-            logger.debug("Process 3D: Creating 3D coordinate array for camera offsets")
-
-            # The camera captures a 2D image at the focal plane
-            # We need to give it some thickness for visualization (e.g., 100µm)
-            slice_thickness_um = 100  # Thickness of the imaged slice
-
-            # Create a grid of Z values to give the slice some thickness
+            # Create 3D coords: camera offsets + thin slice thickness
+            slice_thickness_um = 100
             num_pixels = len(camera_coords_2d)
             z_offsets = np.linspace(-slice_thickness_um/2, slice_thickness_um/2, num_pixels)
 
-            # IMPORTANT: Must use (Z, Y, X) order to match storage/napari convention
+            # (Z, Y, X) order to match storage/napari convention
             camera_offsets_3d = np.column_stack([
-                z_offsets,                # Z variation for slice thickness (first)
-                camera_coords_2d[:, 1],   # Camera Y offset (second)
-                camera_coords_2d[:, 0]    # Camera X offset (third)
+                z_offsets,                # Z variation for slice thickness
+                camera_coords_2d[:, 1],   # Camera Y offset
+                camera_coords_2d[:, 0]    # Camera X offset
             ])
 
-            # For R-axis rotation: The sample holder rotates, but the imaging plane stays fixed
-            # The rotation affects how the sample appears in the image, not where the image is placed
-            # Therefore, we should NOT rotate the placement coordinates
-
-            logger.debug(f"Process 3D: R-axis rotation = {position.r}° (sample holder orientation)")
-            logger.debug(f"Note: R-axis rotation affects sample appearance, not image placement in 3D space")
-
-            # The world coordinates are simply the camera offsets plus the stage position
-            # No rotation is applied to the placement (the objective/camera don't rotate)
             world_coords_3d = camera_offsets_3d + world_center_um
 
-            # Debug logging to trace coordinate transformation
-            logger.debug(f"World center (sample coords) µm (ZYX order): {world_center_um}")
-            logger.debug(f"Camera offset range Z: [{camera_offsets_3d[:, 0].min():.1f}, {camera_offsets_3d[:, 0].max():.1f}] µm")
-            logger.debug(f"Camera offset range Y: [{camera_offsets_3d[:, 1].min():.1f}, {camera_offsets_3d[:, 1].max():.1f}] µm")
-            logger.debug(f"Camera offset range X: [{camera_offsets_3d[:, 2].min():.1f}, {camera_offsets_3d[:, 2].max():.1f}] µm")
-            logger.debug(f"World coord range Z: [{world_coords_3d[:, 0].min():.1f}, {world_coords_3d[:, 0].max():.1f}] µm")
-            logger.debug(f"World coord range Y: [{world_coords_3d[:, 1].min():.1f}, {world_coords_3d[:, 1].max():.1f}] µm")
-            logger.debug(f"World coord range X: [{world_coords_3d[:, 2].min():.1f}, {world_coords_3d[:, 2].max():.1f}] µm")
+            logger.debug(f"add_frame_to_volume: World coord range Z: [{world_coords_3d[:, 0].min():.1f}, {world_coords_3d[:, 0].max():.1f}] µm")
+            logger.debug(f"add_frame_to_volume: World coord range Y: [{world_coords_3d[:, 1].min():.1f}, {world_coords_3d[:, 1].max():.1f}] µm")
+            logger.debug(f"add_frame_to_volume: World coord range X: [{world_coords_3d[:, 2].min():.1f}, {world_coords_3d[:, 2].max():.1f}] µm")
 
-            # Extract intensity values
-            logger.debug("Process 3D: Extracting intensity values")
             intensity_values = downsampled.ravel()
 
-            # Set reference position for transform calculations if not already set
-            # This happens on the FIRST frame captured, establishing the "zero point"
-            # for all subsequent stage movements
+            # Set reference position on first frame (establishes "zero point")
             if self.voxel_storage.reference_stage_position is None:
                 stage_pos_dict = {
-                    'x': position.x,
-                    'y': position.y,
-                    'z': position.z,
-                    'r': position.r
+                    'x': pos_x,
+                    'y': pos_y,
+                    'z': pos_z,
+                    'r': 0
                 }
                 self.voxel_storage.set_reference_position(stage_pos_dict)
-                logger.debug(f"First frame captured - reference position set to stage position")
+                logger.info(f"add_frame_to_volume: Reference position set to X={pos_x:.2f}, Y={pos_y:.2f}, Z={pos_z:.2f}")
 
-            # Update voxel storage with transformed coordinates
-            logger.debug(f"Process 3D: Updating voxel storage for channel {channel_id}")
+            # Update voxel storage
             self.voxel_storage.update_storage(
                 channel_id=channel_id,
                 world_coords=world_coords_3d,
-                pixel_values=intensity_values,  # Correct parameter name
-                timestamp=header.timestamp_ms if hasattr(header, 'timestamp_ms') else 0,
-                update_mode='maximum'  # Maximum intensity projection for fluorescence
+                pixel_values=intensity_values,
+                timestamp=timestamp,
+                update_mode='maximum'
             )
 
-            logger.debug(f"Added frame to channel {channel_id}: {np.count_nonzero(intensity_values)} non-zero pixels")
-
-            # Update contrast slider range based on actual data values
-            self._update_contrast_slider_range(channel_id)
-
-            # Diagnostic: Log world coordinate ranges and rotation for debugging
-            logger.debug(f"Stage position: X={position.x:.2f}mm, Y={position.y:.2f}mm, Z={position.z:.2f}mm, R={position.r:.1f}°")
-            logger.debug(f"World coordinate ranges (ZYX order, no rotation applied):")
-            logger.debug(f"  Z: [{world_coords_3d[:, 0].min():.1f}, {world_coords_3d[:, 0].max():.1f}] µm")
-            logger.debug(f"  Y: [{world_coords_3d[:, 1].min():.1f}, {world_coords_3d[:, 1].max():.1f}] µm")
-            logger.debug(f"  X: [{world_coords_3d[:, 2].min():.1f}, {world_coords_3d[:, 2].max():.1f}] µm")
+            logger.debug(f"add_frame_to_volume: Added frame to channel {channel_id}: {np.count_nonzero(intensity_values)} non-zero pixels")
 
         except Exception as e:
-            logger.error(f"Error in _process_camera_frame_to_3d: {e}", exc_info=True)
+            logger.error(f"Error in add_frame_to_volume: {e}", exc_info=True)
             raise
-        logger.debug(f"Sample region center: {self.transformer.sample_center} µm")
+
+    def _process_camera_frame_to_3d(self, image: np.ndarray, header, channel_id: int, position):
+        """Live view path — delegates to unified add_frame_to_volume."""
+        stage_pos = {'x': position.x, 'y': position.y, 'z': position.z}
+        ts = header.timestamp_ms if hasattr(header, 'timestamp_ms') else None
+        self.add_frame_to_volume(image, stage_pos, channel_id, ts)
+        self._update_contrast_slider_range(channel_id)
 
     def _detect_active_channel(self) -> Optional[int]:
         """
