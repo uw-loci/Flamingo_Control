@@ -2707,6 +2707,12 @@ class SampleView(QWidget):
         tile_y_um = position['y'] * 1000
         tile_z_um = z_mm * 1000
 
+        self.logger.info(
+            f"TILE COORDS: Stage=({position['x']:.3f}, {position['y']:.3f}, {z_mm:.3f}) mm | "
+            f"World center (Z,Y,X)=({tile_z_um:.0f}, {tile_y_um:.0f}, {tile_x_um:.0f}) µm | "
+            f"Channel={self._current_channel}"
+        )
+
         # Get or create cached XY world coordinates for this tile
         tile_key = (position['x'], position['y'])
         tile_xy_cache = getattr(self, '_tile_xy_cache', {})
@@ -2748,8 +2754,8 @@ class SampleView(QWidget):
             if hasattr(viz, '_update_visualization_if_needed'):
                 viz._update_visualization_if_needed()
 
-            self.logger.debug(f"Added {len(pixel_values)} voxels at tile "
-                             f"({position['x']:.2f}, {position['y']:.2f}), Z={z_mm:.3f}mm")
+            self.logger.info(f"Added {len(pixel_values)} voxels at tile "
+                            f"({position['x']:.2f}, {position['y']:.2f}), Z={z_mm:.3f}mm")
 
             if not self._channel_availability_timer.isActive():
                 self._channel_availability_timer.start()

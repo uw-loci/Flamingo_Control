@@ -1420,13 +1420,18 @@ class TileCollectionDialog(PersistentDialog):
             current_workflow_images[1] = 0
             pct = calculate_overall_progress(index + 1, 0, 0)
             progress.setValue(pct)
+            # Update Sample View to show transition between workflows
+            if index + 1 < total:
+                update_sample_view(f"Tile {index + 2}/{total}: Starting...", pct)
+            else:
+                update_sample_view(f"Completing...", pct)
             logger.info(f"Workflow {index + 1}/{total} completed: {Path(path).name}")
 
         def on_queue_completed():
             self._queue_completed = True
             progress.setValue(100)  # 100% complete
+            update_sample_view("Not Running", 0)  # Reset BEFORE dialog close
             progress.accept()  # Close the dialog so exec_() returns
-            update_sample_view("Not Running", 0)
 
             # Clean up tile mode when all workflows are done
             if camera_controller:

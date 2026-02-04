@@ -198,6 +198,16 @@ class DualResolutionVoxelStorage:
             axis=1
         )
 
+        logger.info(
+            f"STORAGE: Ch {channel_id}: {np.sum(valid_mask)}/{len(storage_voxels)} voxels valid | "
+            f"World range (Z,Y,X): Z=[{world_coords[:,0].min():.0f},{world_coords[:,0].max():.0f}], "
+            f"Y=[{world_coords[:,1].min():.0f},{world_coords[:,1].max():.0f}], "
+            f"X=[{world_coords[:,2].min():.0f},{world_coords[:,2].max():.0f}] µm | "
+            f"Storage voxel range: Z=[{storage_voxels[:,0].min()},{storage_voxels[:,0].max()}], "
+            f"Y=[{storage_voxels[:,1].min()},{storage_voxels[:,1].max()}], "
+            f"X=[{storage_voxels[:,2].min()},{storage_voxels[:,2].max()}]"
+        )
+
         if not np.any(valid_mask):
             # Log warning - voxels outside storage array bounds (should be rare)
             logger.warning(f"Channel {channel_id}: All {len(storage_voxels)} voxels rejected - outside storage bounds")
@@ -351,10 +361,9 @@ class DualResolutionVoxelStorage:
         # Convert to display voxel coords
         display_origin = self.world_to_display_voxel(region_origin_world)
 
+        logger.info(f"DISPLAY: Ch {channel_id}: region_origin_world (Z,Y,X)={region_origin_world} µm")
+        logger.info(f"DISPLAY: display_origin_voxel (Z,Y,X)={display_origin} | display_dims={self.display_dims}")
         logger.debug(f"  Downsampled shape: {downsampled.shape}")
-        logger.debug(f"  Region origin (world): {region_origin_world}")
-        logger.debug(f"  Display origin (voxel): {display_origin}")
-        logger.debug(f"  Display dims: {self.display_dims}")
 
         # Clear display cache
         self.display_cache[channel_id].fill(0)
@@ -366,9 +375,8 @@ class DualResolutionVoxelStorage:
         valid_start = np.maximum(0, display_origin)
         valid_end = np.minimum(self.display_dims, display_end)
 
+        logger.info(f"DISPLAY: valid_start={valid_start} | valid_end={valid_end}")
         logger.debug(f"  Display end: {display_end}")
-        logger.debug(f"  Valid start: {valid_start}")
-        logger.debug(f"  Valid end: {valid_end}")
 
         # Check if valid region has positive size in all dimensions
         if np.any(valid_end <= valid_start):
