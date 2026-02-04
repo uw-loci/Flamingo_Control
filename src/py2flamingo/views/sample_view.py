@@ -2731,20 +2731,20 @@ class SampleView(QWidget):
             return
         pixel_size_um = pixel_size_mm * 1000
 
-        # Apply coordinate transforms to match napari display (PhysicalToNapariMapper)
-        # IMPORTANT: Tile data is captured at the objective focal plane, which is FIXED
-        # in chamber coordinates. The stage moves the sample under the objective, but the
-        # captured image is always AT the objective position in chamber (X, Y).
-        # Z is different: individual z-stack frames have distinct Z positions that map
-        # directly to chamber Z (stage Z = chamber Z, no offset), so z_mm is used as-is.
+        # Transform tile coordinates using the same logic as the focus frame.
         #
-        # Objective position comes from calibration (same source as focus frame),
-        # with range centers as fallback.
-        stage_config = self._config.get('stage_control', {})
-        x_range = stage_config.get('x_range_mm', [1.0, 12.31])
-        y_range = stage_config.get('y_range_mm', [0.0, 14.0])
+        # The coord_mapper (PhysicalToNapariMapper) is the single source of truth
+        # for coordinate transforms. It applies X/Z inversions and range-based
+        # scaling. We read its inversion flags and apply them directly in world µm
+        # space (avoiding integer quantization from physical_to_napari).
+        #
+        # XY: Tile data is captured at the FIXED objective focal plane, not at the
+        # stage position. Use calibration XY (same source as focus frame).
+        # Z: Each z-stack frame has a distinct Z. The z-stack ends at the focal
+        # plane Z, with frames extending in front of or behind it depending on
+        # sweep direction. Z inversions are applied if enabled.
 
-        # Get objective XY from calibration (matches focus frame positioning)
+        # Get objective position from calibration (matches focus frame)
         objective_x_mm = None
         objective_y_mm = None
         if self.sample_3d_window and hasattr(self.sample_3d_window, 'objective_xy_calibration'):
@@ -2752,42 +2752,64 @@ class SampleView(QWidget):
             if cal:
                 objective_x_mm = cal.get('x')
                 objective_y_mm = cal.get('y')
-        # Fallback to range centers (same as focus frame default)
+
+        # Fallback to range centers (same as focus frame defaults)
+        stage_config = self._config.get('stage_control', {})
+        x_range = stage_config.get('x_range_mm', [1.0, 12.31])
+        y_range = stage_config.get('y_range_mm', [0.0, 14.0])
+        z_range_config = stage_config.get('z_range_mm', [12.5, 26.0])
         if objective_x_mm is None:
             objective_x_mm = (x_range[0] + x_range[1]) / 2
         if objective_y_mm is None:
             objective_y_mm = (y_range[0] + y_range[1]) / 2
 
-        # X: apply same inversion as PhysicalToNapariMapper, at the objective X
-        if self._invert_x:
+        # Read inversion flags from coord_mapper (single source of truth)
+        invert_x = self._invert_x  # Already read from config
+        invert_z = False
+        if self.sample_3d_window and hasattr(self.sample_3d_window, 'coord_mapper'):
+            mapper = self.sample_3d_window.coord_mapper
+            invert_x = mapper.invert_x
+            invert_z = mapper.invert_z
+
+        # X: at objective position, with inversion if enabled
+        # Matches physical_to_napari: x_eff = 2*center - x when inverted
+        if invert_x:
             tile_x_um = (x_range[0] + x_range[1] - objective_x_mm) * 1000
         else:
             tile_x_um = objective_x_mm * 1000
-        # Y: inverted, at the objective Y (fixed focal plane)
+
+        # Y: always inverted (y_max maps to napari Y=0), at objective Y
         tile_y_um = (y_range[1] - objective_y_mm) * 1000
-        # Z: stage Z = chamber Z (no offset), used directly per z-stack frame
-        tile_z_um = z_mm * 1000
+
+        # Z: per-frame stage Z, with inversion if enabled
+        # Matches physical_to_napari: z_eff = 2*center - z when inverted
+        if invert_z:
+            z_eff = (z_range_config[0] + z_range_config[1]) - z_mm
+        else:
+            z_eff = z_mm
+        tile_z_um = z_eff * 1000
 
         self.logger.info(
             f"TILE COORDS: Stage=({position['x']:.3f}, {position['y']:.3f}, {z_mm:.3f}) mm | "
             f"Objective (X,Y)=({objective_x_mm:.2f}, {objective_y_mm:.1f}) mm | "
-            f"Napari world (Z,Y,X)=({tile_z_um:.0f}, {tile_y_um:.0f}, {tile_x_um:.0f}) µm | "
-            f"Channel={self._current_channel} | X_inv={self._invert_x}"
+            f"World (Z,Y,X)=({tile_z_um:.0f}, {tile_y_um:.0f}, {tile_x_um:.0f}) µm | "
+            f"Ch={self._current_channel} | inv_x={invert_x} inv_z={invert_z}"
         )
 
         # Get or create cached XY world coordinates for this tile
+        # Since all tiles use the same objective XY, cache on image dimensions
         tile_key = (position['x'], position['y'])
         tile_xy_cache = getattr(self, '_tile_xy_cache', {})
         if tile_key not in tile_xy_cache:
             h, w = image.shape[:2]
             y_indices, x_indices = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
             # Pixel offsets are NEGATED for inverted axes (inversion flips direction)
-            x_sign = -1.0 if self._invert_x else 1.0
+            x_sign = -1.0 if invert_x else 1.0
             x_world_flat = (tile_x_um + x_sign * (x_indices - w / 2) * pixel_size_um).ravel()
             y_world_flat = (tile_y_um - (y_indices - h / 2) * pixel_size_um).ravel()  # Y always inverted
             tile_xy_cache[tile_key] = (x_world_flat, y_world_flat)
             self._tile_xy_cache = tile_xy_cache
-            self.logger.info(f"Cached XY coordinates for tile ({position['x']:.2f}, {position['y']:.2f}) "
+            self.logger.info(f"Cached XY world coords for tile ({position['x']:.2f}, {position['y']:.2f}) "
                             f"[x_sign={x_sign}, y_sign=-1]")
 
         x_world_flat, y_world_flat = tile_xy_cache[tile_key]
