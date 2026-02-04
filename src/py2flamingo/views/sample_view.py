@@ -2629,12 +2629,21 @@ class SampleView(QWidget):
 
         # Cache pixel FOV once (avoid synchronous TCP call per frame)
         self._cached_pixel_size_mm = None
+        self._tile_camera_fps = 40.0  # Default
         if self.camera_controller and self.camera_controller.camera_service:
             try:
                 self._cached_pixel_size_mm = self.camera_controller.camera_service.get_pixel_field_of_view()
                 self.logger.info(f"Sample View: Cached pixel FOV: {self._cached_pixel_size_mm * 1000:.3f} µm/pixel")
             except Exception as e:
                 self.logger.warning(f"Could not cache pixel FOV: {e}")
+            # Cache camera FPS for channel detection
+            try:
+                fps = getattr(self.camera_controller, '_max_display_fps', 40.0)
+                if fps and fps > 0:
+                    self._tile_camera_fps = fps
+                self.logger.info(f"Sample View: Camera FPS for channel detection: {self._tile_camera_fps}")
+            except Exception:
+                pass
 
         # Precomputed XY coordinate cache: (tile_x, tile_y) -> (x_world_flat, y_world_flat)
         self._tile_xy_cache = {}
@@ -2662,7 +2671,14 @@ class SampleView(QWidget):
         # Determine laser channel from z_index and channel list
         channels = position.get('channels', [0])
         num_channels = len(channels)
-        estimated_planes_per_channel = max(1, int(z_range / 0.0025) + 1)
+
+        # Estimate planes per channel from Z velocity and camera FPS
+        # The camera captures frames at FPS rate while stage sweeps at z_velocity
+        # Actual frame spacing = z_velocity / fps (NOT the workflow z_step_um)
+        z_velocity = position.get('z_velocity', 1.0)  # mm/s
+        camera_fps = getattr(self, '_tile_camera_fps', 40.0)
+        z_step_mm = z_velocity / max(1.0, camera_fps)
+        estimated_planes_per_channel = max(1, int(z_range / z_step_mm))
 
         # Which channel does this z_index belong to?
         channel_idx = min(z_index // estimated_planes_per_channel, num_channels - 1)
@@ -2677,6 +2693,18 @@ class SampleView(QWidget):
         if tile_key not in self._accumulated_zstacks:
             self._accumulated_zstacks[tile_key] = 0
         self._accumulated_zstacks[tile_key] += 1
+
+        # Update workflow progress directly (PyQt signals are starved during frame processing)
+        frame_count = self._accumulated_zstacks[tile_key]
+        total_expected = num_channels * estimated_planes_per_channel
+        total_tiles = max(1, len(self._expected_tiles))
+        tile_idx = len(self._accumulated_zstacks)  # Current tile number
+        if total_expected > 0 and frame_count % 5 == 0:
+            tile_pct = min(1.0, frame_count / total_expected)
+            overall_pct = min(99, int(((tile_idx - 1 + tile_pct) / total_tiles) * 100))
+            ch_name = channels[channel_idx] if channel_idx < len(channels) else '?'
+            status = f"Tile {tile_idx}/{total_tiles}: {frame_count} frames (Ch {ch_name})"
+            self.update_workflow_progress(status, overall_pct, "--:--")
 
         # Process frame into 3D volume
         self._add_frame_to_3d_volume(image, position, z_position)
@@ -2703,14 +2731,24 @@ class SampleView(QWidget):
             return
         pixel_size_um = pixel_size_mm * 1000
 
-        tile_x_um = position['x'] * 1000
-        tile_y_um = position['y'] * 1000
-        tile_z_um = z_mm * 1000
+        # Apply coordinate inversions to match napari display (PhysicalToNapariMapper)
+        # Y is ALWAYS inverted: napari Y=0 is at y_max (chamber top)
+        # X is inverted when invert_x=True (low stage X on right side of display)
+        stage_config = self._config.get('stage_control', {})
+        x_range = stage_config.get('x_range_mm', [1.0, 12.31])
+        y_range = stage_config.get('y_range_mm', [0.0, 14.0])
+
+        if self._invert_x:
+            tile_x_um = (x_range[0] + x_range[1] - position['x']) * 1000
+        else:
+            tile_x_um = position['x'] * 1000
+        tile_y_um = (y_range[1] - position['y']) * 1000  # Y always inverted
+        tile_z_um = z_mm * 1000  # Z not inverted
 
         self.logger.info(
             f"TILE COORDS: Stage=({position['x']:.3f}, {position['y']:.3f}, {z_mm:.3f}) mm | "
-            f"World center (Z,Y,X)=({tile_z_um:.0f}, {tile_y_um:.0f}, {tile_x_um:.0f}) µm | "
-            f"Channel={self._current_channel}"
+            f"Napari world (Z,Y,X)=({tile_z_um:.0f}, {tile_y_um:.0f}, {tile_x_um:.0f}) µm | "
+            f"Channel={self._current_channel} | X_inv={self._invert_x}"
         )
 
         # Get or create cached XY world coordinates for this tile
@@ -2719,11 +2757,14 @@ class SampleView(QWidget):
         if tile_key not in tile_xy_cache:
             h, w = image.shape[:2]
             y_indices, x_indices = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
-            x_world_flat = (tile_x_um + (x_indices - w / 2) * pixel_size_um).ravel()
-            y_world_flat = (tile_y_um + (y_indices - h / 2) * pixel_size_um).ravel()
+            # Pixel offsets are NEGATED for inverted axes (inversion flips direction)
+            x_sign = -1.0 if self._invert_x else 1.0
+            x_world_flat = (tile_x_um + x_sign * (x_indices - w / 2) * pixel_size_um).ravel()
+            y_world_flat = (tile_y_um - (y_indices - h / 2) * pixel_size_um).ravel()  # Y always inverted
             tile_xy_cache[tile_key] = (x_world_flat, y_world_flat)
             self._tile_xy_cache = tile_xy_cache
-            self.logger.info(f"Cached XY coordinates for tile ({position['x']:.2f}, {position['y']:.2f})")
+            self.logger.info(f"Cached XY coordinates for tile ({position['x']:.2f}, {position['y']:.2f}) "
+                            f"[x_sign={x_sign}, y_sign=-1]")
 
         x_world_flat, y_world_flat = tile_xy_cache[tile_key]
 

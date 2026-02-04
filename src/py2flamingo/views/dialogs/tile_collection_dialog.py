@@ -1221,6 +1221,28 @@ class TileCollectionDialog(PersistentDialog):
             logger.error(f"Failed to read laser channels from {workflow_file.name}: {e}")
             return [0]
 
+    def _read_z_velocity_from_workflow(self, workflow_file: Path) -> float:
+        """Read Z stage velocity from workflow file.
+
+        Args:
+            workflow_file: Path to workflow file
+
+        Returns:
+            Z velocity in mm/s (default 1.0)
+        """
+        import re
+        try:
+            with open(workflow_file, 'r') as f:
+                content = f.read()
+            match = re.search(r'Z stage velocity \(mm/s\)\s*=\s*([\d.]+)', content)
+            if match:
+                velocity = float(match.group(1))
+                logger.debug(f"Parsed Z velocity from {workflow_file.name}: {velocity} mm/s")
+                return velocity
+        except Exception as e:
+            logger.error(f"Failed to read Z velocity from {workflow_file.name}: {e}")
+        return 1.0
+
     def _setup_sample_view_integration(self, workflow_files: List[Path], sample_view):
         """Setup Sample View to receive workflow Z-stack frames.
 
@@ -1335,6 +1357,7 @@ class TileCollectionDialog(PersistentDialog):
                     tile_position['z_min'] = z_min
                     tile_position['z_max'] = z_max
                     tile_position['channels'] = self._read_laser_channels_from_workflow(wf_file)
+                    tile_position['z_velocity'] = self._read_z_velocity_from_workflow(wf_file)
                     metadata = tile_position
             metadata_list.append(metadata)
 
