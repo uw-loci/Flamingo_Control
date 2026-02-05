@@ -3,7 +3,7 @@
 
 # Core GUI and imaging
 PyQt5>=5.15.0
-numpy>=1.21.0
+numpy>=1.21.0,<2.0.0  # Pin to 1.x for scipy/napari compatibility
 Pillow>=9.0.0
 
 # Scientific computing (required for image processing and analysis)
@@ -16,5 +16,5 @@ sparse>=0.13.0  # Sparse array support for efficient voxel storage
 PyYAML>=6.0  # YAML configuration file support
 h5py>=3.8.0  # HDF5 file format support (optional, for data export)
 tifffile>=2023.2.0  # TIFF file support (optional, for data import/export)
-zarr>=2.13.0  # Zarr storage format (optional, for large datasets)
-numcodecs>=0.11.0  # Compression codecs for zarr
+zarr>=2.13.0,<3.0.0  # Zarr 2.x for numpy 1.x compatibility
+numcodecs>=0.11.0,<0.16.0  # Pin for zarr 2.x compatibility
