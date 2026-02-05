@@ -140,10 +140,10 @@ class Sample3DVisualizationWindow(QWidget):
         else:
             logger.warning("napari not available - 3D visualization disabled")
 
-        # Update timer for live data
+        # Update timer for live data (reduced from 10Hz to 4Hz for performance)
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self._update_visualization)
-        self.update_timer.setInterval(100)  # 10 Hz update rate
+        self.update_timer.setInterval(250)  # 4 Hz update rate (was 100ms/10Hz)
         self.update_timer.start()  # Start the timer to enable real-time visualization updates
 
         # Debounce timer for rotation spinbox (typing vs arrows)
@@ -2182,8 +2182,8 @@ class Sample3DVisualizationWindow(QWidget):
             self.status_label.setText("Status: Stopped")
             self.populate_timer.stop()
             # Restore normal visualization update rate
-            self.update_timer.setInterval(100)  # 10 Hz
-            logger.info("Stopped populating (viz update restored to 10 Hz)")
+            self.update_timer.setInterval(250)  # 4 Hz (standard rate)
+            logger.info("Stopped populating (viz update restored to 4 Hz)")
 
     def _on_clear_data(self):
         """Clear all accumulated data."""
@@ -2444,6 +2444,10 @@ class Sample3DVisualizationWindow(QWidget):
 
             for ch_id in range(self.voxel_storage.num_channels):
                 if ch_id in self.channel_layers:
+                    # Skip channels with no data (avoids expensive transform pipeline)
+                    if not self.voxel_storage.has_data(ch_id):
+                        continue
+
                     # Get transformed display volume (rotation around holder axis)
                     volume = self.voxel_storage.get_display_volume_transformed(
                         ch_id, self.last_stage_position, holder_pos_voxels

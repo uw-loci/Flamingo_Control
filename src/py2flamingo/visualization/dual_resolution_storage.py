@@ -434,31 +434,33 @@ class DualResolutionVoxelStorage:
         return self.display_cache[channel_id]
 
     def _block_average(self, data: np.ndarray, block_size: Tuple[int, int, int]) -> np.ndarray:
-        """Downsample by averaging blocks of voxels."""
-        # Calculate output shape
-        output_shape = tuple(
-            int(np.ceil(d / b)) for d, b in zip(data.shape, block_size)
+        """Downsample by averaging blocks of voxels using vectorized NumPy operations.
+
+        Much faster than triple-nested Python loops - uses reshape + mean for
+        bulk block averaging in a single vectorized operation.
+        """
+        bz, by, bx = block_size
+        dz, dy, dx = data.shape
+
+        # Pad data to be divisible by block_size (use edge values, not zeros)
+        pad_z = (bz - dz % bz) % bz
+        pad_y = (by - dy % by) % by
+        pad_x = (bx - dx % bx) % bx
+
+        if pad_z or pad_y or pad_x:
+            data = np.pad(data, ((0, pad_z), (0, pad_y), (0, pad_x)), mode='edge')
+
+        # Reshape to group blocks, then average
+        new_shape = (
+            data.shape[0] // bz, bz,
+            data.shape[1] // by, by,
+            data.shape[2] // bx, bx
         )
 
-        # Create output array
-        output = np.zeros(output_shape, dtype=data.dtype)
-
-        # Perform block averaging
-        for i in range(output_shape[0]):
-            for j in range(output_shape[1]):
-                for k in range(output_shape[2]):
-                    # Define block boundaries
-                    i_start = i * block_size[0]
-                    i_end = min((i + 1) * block_size[0], data.shape[0])
-                    j_start = j * block_size[1]
-                    j_end = min((j + 1) * block_size[1], data.shape[1])
-                    k_start = k * block_size[2]
-                    k_end = min((k + 1) * block_size[2], data.shape[2])
-
-                    # Extract and average block
-                    block = data[i_start:i_end, j_start:j_end, k_start:k_end]
-                    if block.size > 0:
-                        output[i, j, k] = np.mean(block)
+        # Reshape and compute mean over block axes (1, 3, 5)
+        # Use float32 for intermediate calculation to avoid overflow
+        reshaped = data.reshape(new_shape).astype(np.float32)
+        output = reshaped.mean(axis=(1, 3, 5))
 
         return output.astype(data.dtype)
 

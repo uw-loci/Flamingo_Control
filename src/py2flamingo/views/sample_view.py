@@ -2621,6 +2621,7 @@ class SampleView(QWidget):
         self._expected_tiles = tile_info
         self._accumulated_zstacks = {}
         self._tile_reference_set = False  # Set reference on first tile frame
+        self._learned_frames_per_tile = None  # Learn from first tile for channel detection
 
         # Cache camera FPS for channel detection
         self._tile_camera_fps = 40.0  # Default
@@ -2657,34 +2658,46 @@ class SampleView(QWidget):
         channels = position.get('channels', [0])
         num_channels = len(channels)
 
-        # Estimate planes per channel from Z velocity and camera FPS
-        # The camera captures frames at FPS rate while stage sweeps at z_velocity
-        # Actual frame spacing = z_velocity / fps (NOT the workflow z_step_um)
-        # The firmware splits the total sweep across channels, so total frames
-        # must be divided by num_channels to get planes per channel.
-        z_velocity = position.get('z_velocity', 1.0)  # mm/s
-        camera_fps = getattr(self, '_tile_camera_fps', 40.0)
-        z_step_mm = z_velocity / max(1.0, camera_fps)
-        total_planes = max(1, int(z_range / z_step_mm))
-        estimated_planes_per_channel = max(1, total_planes // max(1, num_channels))
-
-        # Which channel does this z_index belong to?
-        channel_idx = min(z_index // estimated_planes_per_channel, num_channels - 1)
-        self._current_channel = channels[channel_idx]
-
-        # Z position within current channel's pass
-        z_within_channel = z_index % estimated_planes_per_channel
-        z_position = z_min + (z_within_channel / max(1, estimated_planes_per_channel - 1)) * z_range
-
-        # Count frames per tile (no image copy — avoids 8MB/frame leak)
+        # Track frames per tile to determine channel boundaries dynamically.
+        # The firmware acquires channels sequentially, so we need to detect
+        # when we've passed the midpoint of the total frames.
         tile_key = (position['x'], position['y'])
         if tile_key not in self._accumulated_zstacks:
             self._accumulated_zstacks[tile_key] = 0
+        frame_count = self._accumulated_zstacks[tile_key]
+
+        # Use the learned frame count from the first completed tile, or a default
+        # Typical tile has 30-50 frames, so default to 40 per channel as a fallback
+        frames_per_tile = getattr(self, '_learned_frames_per_tile', None)
+        if frames_per_tile is None:
+            # First tile: use a conservative default, will be updated after first tile
+            frames_per_channel = 20  # Conservative default
+        else:
+            frames_per_channel = max(1, frames_per_tile // max(1, num_channels))
+
+        # Which channel does this z_index belong to?
+        # Channels are acquired sequentially, so divide frame count by frames_per_channel
+        channel_idx = min(z_index // frames_per_channel, num_channels - 1)
+        self._current_channel = channels[channel_idx]
+
+        # Z position: map the current z_index to position within the z_range
+        # Each channel sweeps the full z_range, so use modulo to get position within channel
+        z_within_channel = z_index % max(1, frames_per_channel)
+        z_fraction = z_within_channel / max(1, frames_per_channel - 1) if frames_per_channel > 1 else 0.5
+        z_position = z_min + z_fraction * z_range
+
+        # Increment frame count (tracking was initialized above for channel detection)
         self._accumulated_zstacks[tile_key] += 1
+        frame_count = self._accumulated_zstacks[tile_key]
+
+        # Learn the actual frames per tile from the first tile when it completes
+        # This improves channel routing for subsequent tiles
+        if len(self._accumulated_zstacks) == 1 and frame_count > 5:
+            # Update estimate as we go - will settle on final value
+            self._learned_frames_per_tile = frame_count
 
         # Update workflow progress directly (PyQt signals are starved during frame processing)
-        frame_count = self._accumulated_zstacks[tile_key]
-        total_expected = num_channels * estimated_planes_per_channel
+        total_expected = num_channels * frames_per_channel
         total_tiles = max(1, len(self._expected_tiles))
         tile_idx = len(self._accumulated_zstacks)  # Current tile number
         if total_expected > 0 and frame_count % 5 == 0:
