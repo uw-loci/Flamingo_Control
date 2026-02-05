@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
     QAction, QMessageBox, QScrollArea, QApplication
 )
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QShowEvent, QCloseEvent
+from PyQt5.QtGui import QShowEvent, QCloseEvent, QIcon
 
 from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, ImageControlsWindow, StageControlView
 from py2flamingo.views.camera_live_viewer import CameraLiveViewer
@@ -92,6 +92,7 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._setup_menu()
+        self.setWindowIcon(QIcon())  # Clear inherited napari icon
 
     def _setup_ui(self):
         """Create and layout all UI components.
