@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (
     QLineEdit, QPushButton, QSpinBox, QComboBox, QGroupBox, QTextEdit
 )
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QIcon
 
 from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR
 
@@ -510,6 +510,7 @@ class ConnectionView(QWidget):
         # Create dialog to show results
         dialog = QDialog(self)
         dialog.setWindowTitle(f"{command_name} Debug Query")
+        dialog.setWindowIcon(QIcon())  # Clear inherited napari icon
         dialog.resize(700, 500)
 
         layout = QVBoxLayout()

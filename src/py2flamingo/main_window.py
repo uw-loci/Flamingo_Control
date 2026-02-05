@@ -299,6 +299,10 @@ class MainWindow(QMainWindow):
             "<p>MVC Architecture Edition</p>"
             "<p>Control software for Flamingo light sheet microscopes.</p>"
             "<p>Built with PyQt5 and Python.</p>"
+            "<hr>"
+            "<p><b>Acknowledgments</b></p>"
+            "<p>3D visualization powered by <a href='https://napari.org'>napari</a>, "
+            "a fast, interactive, multi-dimensional image viewer for Python.</p>"
         )
 
     def _show_camera_viewer(self):

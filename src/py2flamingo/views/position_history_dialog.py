@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QLabel, QGroupBox, QMessageBox
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QIcon
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.models.microscope import Position
@@ -43,6 +44,7 @@ class PositionHistoryDialog(PersistentDialog):
         self.logger = logging.getLogger(__name__)
 
         self.setWindowTitle("Position History")
+        self.setWindowIcon(QIcon())  # Clear inherited napari icon
         self.setMinimumSize(800, 600)
 
         self.setup_ui()

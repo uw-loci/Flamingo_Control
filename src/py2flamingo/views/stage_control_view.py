@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import (
     QLineEdit, QInputDialog, QDialog, QDialogButtonBox, QSizePolicy
 )
 from PyQt5.QtCore import Qt, pyqtSlot
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QIcon
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.controllers.movement_controller import MovementController
@@ -47,6 +47,7 @@ class SetHomePositionDialog(PersistentDialog):
         """
         super().__init__(parent)
         self.setWindowTitle("Set Home Position")
+        self.setWindowIcon(QIcon())  # Clear inherited napari icon
         self.current_position = current_position
         self.stage_limits = stage_limits
 
