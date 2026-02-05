@@ -1290,5 +1290,34 @@ def _on_system_idle(self, message):
 
 ---
 
-**Last Updated:** 2026-01-28
+## Monthly Reminders
+
+This section tracks items that should be checked periodically. Claude should remind the user about these items **once per calendar month** if not already reminded that month.
+
+### Active Reminders
+
+| Item | Added | Last Reminded | Check Command |
+|------|-------|---------------|---------------|
+| **Zarr 3.x Upgrade** | 2026-02 | - | `pip install --dry-run "zarr>=3.0" "scipy>=1.14" "napari>=0.5"` |
+
+#### Zarr 3.x Upgrade Details
+
+**Why blocked:** Zarr 3.x requires NumPy 2.x, but scipy/napari still require NumPy 1.x
+
+**What to check:**
+1. Run: `pip install --dry-run "zarr>=3.0" "scipy>=1.14" "napari>=0.5"`
+2. If no conflicts, the ecosystem is ready for upgrade
+3. Update `requirements.txt` to remove version pins on zarr, numpy, numcodecs
+
+**Benefits of zarr 3.x:**
+- Async I/O support
+- Better memory management
+- New codec pipeline
+- V3 spec support
+
+**Reference:** See `requirements.txt` TODO comments and `/home/msnelson/LSControl/claude-reports/PERFORMANCE_BOTTLENECKS.md` Dependency Upgrade section.
+
+---
+
+**Last Updated:** 2026-02-05
 **Maintained By:** Claude Code assistant
