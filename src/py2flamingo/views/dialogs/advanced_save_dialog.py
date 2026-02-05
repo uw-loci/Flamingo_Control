@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
     QComboBox
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.resources import get_app_icon
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
 
@@ -48,7 +49,7 @@ class AdvancedSaveDialog(PersistentDialog):
         self._hide_drive_selection = hide_drive_selection
 
         self.setWindowTitle("Advanced Save Settings")
-        self.setWindowIcon(QIcon())  # Clear inherited napari icon
+        self.setWindowIcon(get_app_icon())  # Use flamingo icon
         self.setMinimumWidth(500)
         self.setMinimumHeight(350 if hide_drive_selection else 400)
         self.setModal(True)

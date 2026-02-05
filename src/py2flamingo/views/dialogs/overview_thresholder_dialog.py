@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox, QFrame, QSizePolicy, QMessageBox
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.resources import get_app_icon
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QIcon
 
@@ -191,7 +192,7 @@ class OverviewThresholderDialog(PersistentDialog):
         self._selected_tiles: Set[Tuple[int, int]] = set()
 
         self.setWindowTitle("2D Overview Tile Thresholder")
-        self.setWindowIcon(QIcon())  # Clear inherited napari icon
+        self.setWindowIcon(get_app_icon())  # Use flamingo icon
         self.setMinimumSize(800, 600)
 
         self._setup_ui()

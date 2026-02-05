@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QDialogButtonBox
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.resources import get_app_icon
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
 
@@ -55,7 +56,7 @@ class AdvancedCameraDialog(PersistentDialog):
         self._updating_preset = False
 
         self.setWindowTitle("Advanced Camera Settings")
-        self.setWindowIcon(QIcon())  # Clear inherited napari icon
+        self.setWindowIcon(get_app_icon())  # Use flamingo icon
         self.setMinimumWidth(400)
         self.setModal(True)
 

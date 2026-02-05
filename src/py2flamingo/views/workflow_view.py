@@ -21,6 +21,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.resources import get_app_icon
 from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR, SUCCESS_BG, WARNING_BG
 from py2flamingo.views.workflow_panels import (
     IlluminationPanel, CameraPanel, SavePanel, ZStackPanel,
@@ -1087,7 +1088,7 @@ class SaveTemplateDialog(PersistentDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Save Workflow Template")
-        self.setWindowIcon(QIcon())  # Clear inherited napari icon
+        self.setWindowIcon(get_app_icon())  # Use flamingo icon
         self.setMinimumWidth(400)
 
         layout = QVBoxLayout(self)
@@ -1133,7 +1134,7 @@ class ValidationResultDialog(PersistentDialog):
     def __init__(self, result: Dict[str, Any], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Workflow Validation")
-        self.setWindowIcon(QIcon())  # Clear inherited napari icon
+        self.setWindowIcon(get_app_icon())  # Use flamingo icon
         self.setMinimumWidth(450)
         self.setMinimumHeight(300)
 

@@ -25,6 +25,7 @@ from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QFont, QIcon
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.resources import get_app_icon
 from py2flamingo.controllers.movement_controller import MovementController
 from py2flamingo.models.microscope import Position
 from py2flamingo.views.colors import (
@@ -47,7 +48,7 @@ class SetHomePositionDialog(PersistentDialog):
         """
         super().__init__(parent)
         self.setWindowTitle("Set Home Position")
-        self.setWindowIcon(QIcon())  # Clear inherited napari icon
+        self.setWindowIcon(get_app_icon())  # Use flamingo icon
         self.current_position = current_position
         self.stage_limits = stage_limits
 

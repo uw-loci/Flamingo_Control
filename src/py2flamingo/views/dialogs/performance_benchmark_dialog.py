@@ -22,6 +22,7 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QIcon
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.resources import get_app_icon
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +52,23 @@ class BenchmarkWorker(QThread):
     error = pyqtSignal(str)
 
     def __init__(self, tests: List[str], volume_size: int, iterations: int,
-                 voxel_storage=None, parent=None):
+                 voxel_storage=None, quality: int = 0, parent=None):
+        """Initialize benchmark worker.
+
+        Args:
+            tests: List of test names to run
+            volume_size: Size of test volume (e.g., 200 for 200³)
+            iterations: Number of iterations per test
+            voxel_storage: Optional storage instance
+            quality: Interpolation order (0=nearest-neighbor/fast, 1=linear/quality)
+            parent: Parent QObject
+        """
         super().__init__(parent)
         self.tests = tests
         self.volume_size = volume_size
         self.iterations = iterations
         self.voxel_storage = voxel_storage
+        self.quality = quality  # 0=fast (nearest-neighbor), 1=quality (linear)
         self._cancelled = False
 
     def cancel(self):
@@ -118,7 +130,7 @@ class BenchmarkWorker(QThread):
 
             elif test_name == "Translation Shift":
                 offset = (10.0, 5.0, -3.0)
-                _ = ndimage.shift(volume, offset, order=1, mode='constant', cval=0)
+                _ = self._run_translation(volume, offset, ndimage)
 
             elif test_name == "Downsample 3x":
                 _ = self._run_downsample(volume, 3)
@@ -127,7 +139,7 @@ class BenchmarkWorker(QThread):
                 # Simulate full pipeline: gaussian + rotation + translation
                 smoothed = ndimage.gaussian_filter(volume, (1.0, 1.0, 1.0))
                 rotated = self._run_rotation(smoothed, 15.0, ndimage)
-                _ = ndimage.shift(rotated, (5.0, 5.0, 5.0), order=1, mode='constant', cval=0)
+                _ = self._run_translation(rotated, (5.0, 5.0, 5.0), ndimage)
 
             elapsed = (time.perf_counter() - start) * 1000  # Convert to ms
             times.append(elapsed)
@@ -163,10 +175,40 @@ class BenchmarkWorker(QThread):
         # Create affine transform matrix (3x3 rotation + offset)
         offset = center - rot_matrix @ center
 
-        # Apply affine transform
+        # Apply affine transform with quality-appropriate interpolation
+        # order=0: nearest-neighbor (fast), order=1: linear (quality)
         return ndimage.affine_transform(
-            volume, rot_matrix, offset=offset, order=1, mode='constant', cval=0
+            volume, rot_matrix, offset=offset, order=self.quality, mode='constant', cval=0
         )
+
+    def _run_translation(self, volume: np.ndarray, offset: tuple, ndimage) -> np.ndarray:
+        """Run translation with quality-appropriate method.
+
+        For fast mode (order=0), uses numpy.roll which is ~10x faster.
+        For quality mode (order=1), uses scipy.ndimage.shift with linear interpolation.
+        """
+        if self.quality == 0:
+            # Fast mode: use numpy.roll for integer shifts
+            offset_array = np.array(offset)
+            int_offset = np.round(offset_array).astype(int)
+
+            result = volume.copy()
+            for axis, shift_val in enumerate(int_offset):
+                if shift_val != 0:
+                    result = np.roll(result, shift_val, axis=axis)
+                    # Zero out wrapped values
+                    if shift_val > 0:
+                        slices = [slice(None)] * 3
+                        slices[axis] = slice(0, shift_val)
+                        result[tuple(slices)] = 0
+                    elif shift_val < 0:
+                        slices = [slice(None)] * 3
+                        slices[axis] = slice(shift_val, None)
+                        result[tuple(slices)] = 0
+            return result
+        else:
+            # Quality mode: use scipy.ndimage.shift with linear interpolation
+            return ndimage.shift(volume, offset, order=1, mode='constant', cval=0)
 
     def _run_downsample(self, volume: np.ndarray, factor: int) -> np.ndarray:
         """Downsample volume by block averaging."""
@@ -228,7 +270,7 @@ class PerformanceBenchmarkDialog(PersistentDialog):
         self.worker: Optional[BenchmarkWorker] = None
 
         self.setWindowTitle("Performance Benchmark")
-        self.setWindowIcon(QIcon())
+        self.setWindowIcon(get_app_icon())  # Use flamingo icon
         self.setMinimumWidth(700)
         self.setMinimumHeight(500)
 
@@ -259,6 +301,20 @@ class PerformanceBenchmarkDialog(PersistentDialog):
         self._iterations_spin.setValue(5)
         self._iterations_spin.setToolTip("Number of times to run each test for averaging")
         config_layout.addWidget(self._iterations_spin, 0, 3)
+
+        # Quality mode selection (Row 1)
+        config_layout.addWidget(QLabel("Interpolation:"), 1, 0)
+        self._quality_combo = QComboBox()
+        self._quality_combo.addItem("Fast (Nearest-Neighbor)", 0)
+        self._quality_combo.addItem("Quality (Linear)", 1)
+        self._quality_combo.setCurrentIndex(0)  # Default to Fast
+        self._quality_combo.setToolTip("FAST: ~3-5x faster, blocky appearance\nQUALITY: smoother results, slower")
+        config_layout.addWidget(self._quality_combo, 1, 1)
+
+        # Compare both checkbox
+        self._compare_both_cb = QCheckBox("Compare Both Modes")
+        self._compare_both_cb.setToolTip("Run benchmarks in both FAST and QUALITY modes for comparison")
+        config_layout.addWidget(self._compare_both_cb, 1, 2, 1, 2)
 
         config_group.setLayout(config_layout)
         layout.addWidget(config_group)
@@ -393,27 +449,96 @@ class PerformanceBenchmarkDialog(PersistentDialog):
         # Get iterations
         iterations = self._iterations_spin.value()
 
+        # Get quality mode
+        quality = self._quality_combo.currentData()
+        compare_both = self._compare_both_cb.isChecked()
+
         # Disable controls
         self._run_btn.setEnabled(False)
         self._cancel_btn.setEnabled(True)
         self._volume_combo.setEnabled(False)
         self._iterations_spin.setEnabled(False)
+        self._quality_combo.setEnabled(False)
+        self._compare_both_cb.setEnabled(False)
         for cb in self._test_checkboxes.values():
             cb.setEnabled(False)
 
-        # Create and start worker
+        # If comparing both modes, we'll run twice
+        if compare_both:
+            # Modify test names to include quality mode
+            fast_tests = [f"{t} [FAST]" for t in selected_tests]
+            quality_tests = [f"{t} [QUALITY]" for t in selected_tests]
+            all_tests = fast_tests + quality_tests
+            # Store quality mapping for the worker to use
+            self._pending_quality_runs = [(0, fast_tests), (1, quality_tests)]
+            self._current_quality_run_idx = 0
+            self._run_next_quality_benchmark(selected_tests, volume_size, iterations)
+        else:
+            # Single quality mode run
+            self._pending_quality_runs = None
+            self.worker = BenchmarkWorker(
+                tests=selected_tests,
+                volume_size=volume_size,
+                iterations=iterations,
+                voxel_storage=self.voxel_storage,
+                quality=quality,
+                parent=self
+            )
+            self.worker.progress.connect(self._on_progress)
+            self.worker.result_ready.connect(self._on_result_ready)
+            self.worker.finished_all.connect(self._on_finished)
+            self.worker.error.connect(self._on_error)
+            self.worker.start()
+
+    def _run_next_quality_benchmark(self, tests: List[str], volume_size: int, iterations: int):
+        """Run the next quality benchmark when comparing both modes."""
+        if self._current_quality_run_idx >= len(self._pending_quality_runs):
+            self._on_finished()
+            return
+
+        quality, labeled_tests = self._pending_quality_runs[self._current_quality_run_idx]
+        quality_name = "FAST" if quality == 0 else "QUALITY"
+
+        self._status_label.setText(f"Running {quality_name} mode benchmarks...")
+
         self.worker = BenchmarkWorker(
-            tests=selected_tests,
+            tests=tests,  # Use original test names
             volume_size=volume_size,
             iterations=iterations,
             voxel_storage=self.voxel_storage,
+            quality=quality,
             parent=self
         )
+        # Store info for labeling results
+        self.worker._quality_suffix = f" [{quality_name}]"
+
         self.worker.progress.connect(self._on_progress)
-        self.worker.result_ready.connect(self._on_result_ready)
-        self.worker.finished_all.connect(self._on_finished)
+        self.worker.result_ready.connect(self._on_result_ready_with_suffix)
+        self.worker.finished_all.connect(lambda: self._on_quality_run_finished(tests, volume_size, iterations))
         self.worker.error.connect(self._on_error)
         self.worker.start()
+
+    def _on_result_ready_with_suffix(self, result: BenchmarkResult):
+        """Handle result with quality suffix added to test name."""
+        if hasattr(self.worker, '_quality_suffix'):
+            # Create new result with suffixed name
+            result = BenchmarkResult(
+                test_name=result.test_name + self.worker._quality_suffix,
+                volume_size=result.volume_size,
+                iterations=result.iterations,
+                mean_time_ms=result.mean_time_ms,
+                std_time_ms=result.std_time_ms,
+                min_time_ms=result.min_time_ms,
+                max_time_ms=result.max_time_ms,
+                throughput_voxels_per_sec=result.throughput_voxels_per_sec
+            )
+        self.results.append(result)
+        self._add_result_to_table(result)
+
+    def _on_quality_run_finished(self, tests: List[str], volume_size: int, iterations: int):
+        """Handle completion of one quality run when comparing both."""
+        self._current_quality_run_idx += 1
+        self._run_next_quality_benchmark(tests, volume_size, iterations)
 
     def _on_cancel_clicked(self):
         """Cancel running benchmarks."""
@@ -477,6 +602,8 @@ class PerformanceBenchmarkDialog(PersistentDialog):
         self._cancel_btn.setEnabled(False)
         self._volume_combo.setEnabled(True)
         self._iterations_spin.setEnabled(True)
+        self._quality_combo.setEnabled(True)
+        self._compare_both_cb.setEnabled(True)
         for cb in self._test_checkboxes.values():
             cb.setEnabled(True)
 

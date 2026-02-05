@@ -27,6 +27,7 @@ from PyQt5.QtCore import Qt, pyqtSlot, QTimer, pyqtSignal
 from PyQt5.QtGui import QPixmap, QImage, QFont, QDoubleValidator, QShowEvent, QCloseEvent, QHideEvent, QIcon
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.resources import get_app_icon
 
 if TYPE_CHECKING:
     from py2flamingo.services.window_geometry_manager import WindowGeometryManager
@@ -746,7 +747,7 @@ class SampleView(QWidget):
 
         # Setup window - sized for 3-column layout
         self.setWindowTitle("Sample View")
-        self.setWindowIcon(QIcon())  # Clear inherited napari icon
+        self.setWindowIcon(get_app_icon())  # Use flamingo icon
         self.setMinimumSize(1000, 800)
         self.resize(1200, 900)
 

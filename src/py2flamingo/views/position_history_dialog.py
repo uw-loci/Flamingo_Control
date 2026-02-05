@@ -18,6 +18,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.resources import get_app_icon
 from py2flamingo.models.microscope import Position
 from py2flamingo.views.colors import SUCCESS_COLOR
 
@@ -44,7 +45,7 @@ class PositionHistoryDialog(PersistentDialog):
         self.logger = logging.getLogger(__name__)
 
         self.setWindowTitle("Position History")
-        self.setWindowIcon(QIcon())  # Clear inherited napari icon
+        self.setWindowIcon(get_app_icon())  # Use flamingo icon
         self.setMinimumSize(800, 600)
 
         self.setup_ui()

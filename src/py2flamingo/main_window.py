@@ -19,6 +19,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QShowEvent, QCloseEvent, QIcon
 
 from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, ImageControlsWindow, StageControlView
+from py2flamingo.resources import get_app_icon
 from py2flamingo.views.camera_live_viewer import CameraLiveViewer
 from py2flamingo.services.window_geometry_manager import WindowGeometryManager
 
@@ -92,7 +93,7 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._setup_menu()
-        self.setWindowIcon(QIcon())  # Clear inherited napari icon
+        self.setWindowIcon(get_app_icon())  # Use flamingo icon
 
     def _setup_ui(self):
         """Create and layout all UI components.

@@ -15,6 +15,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon
 
 from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR
+from py2flamingo.resources import get_app_icon
 
 
 class ConnectionView(QWidget):
@@ -510,7 +511,7 @@ class ConnectionView(QWidget):
         # Create dialog to show results
         dialog = QDialog(self)
         dialog.setWindowTitle(f"{command_name} Debug Query")
-        dialog.setWindowIcon(QIcon())  # Clear inherited napari icon
+        dialog.setWindowIcon(get_app_icon())  # Use flamingo icon
         dialog.resize(700, 500)
 
         layout = QVBoxLayout()

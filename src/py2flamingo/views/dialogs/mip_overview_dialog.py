@@ -28,6 +28,7 @@ from PyQt5.QtWidgets import (
     QComboBox, QProgressDialog, QLineEdit, QFrame,
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.resources import get_app_icon
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon
 
@@ -76,7 +77,7 @@ class MIPOverviewDialog(PersistentDialog):
         self._first_show = True
 
         self.setWindowTitle("MIP Overview")
-        self.setWindowIcon(QIcon())  # Clear inherited napari icon
+        self.setWindowIcon(get_app_icon())  # Use flamingo icon
         self.setMinimumSize(1200, 800)
         self._setup_ui()
 
