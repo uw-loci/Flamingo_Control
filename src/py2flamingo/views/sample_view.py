@@ -2660,10 +2660,13 @@ class SampleView(QWidget):
         # Estimate planes per channel from Z velocity and camera FPS
         # The camera captures frames at FPS rate while stage sweeps at z_velocity
         # Actual frame spacing = z_velocity / fps (NOT the workflow z_step_um)
+        # The firmware splits the total sweep across channels, so total frames
+        # must be divided by num_channels to get planes per channel.
         z_velocity = position.get('z_velocity', 1.0)  # mm/s
         camera_fps = getattr(self, '_tile_camera_fps', 40.0)
         z_step_mm = z_velocity / max(1.0, camera_fps)
-        estimated_planes_per_channel = max(1, int(z_range / z_step_mm))
+        total_planes = max(1, int(z_range / z_step_mm))
+        estimated_planes_per_channel = max(1, total_planes // max(1, num_channels))
 
         # Which channel does this z_index belong to?
         channel_idx = min(z_index // estimated_planes_per_channel, num_channels - 1)
@@ -2712,6 +2715,11 @@ class SampleView(QWidget):
                 stage_position_mm={'x': position['x'], 'y': position['y'], 'z': z_position},
                 channel_id=self._current_channel
             )
+
+        # Kick the debounced channel-availability check so checkboxes
+        # get enabled once storage reports has_data()==True.
+        # The timer is single-shot, so repeated .start() calls just reset it.
+        self._channel_availability_timer.start()
 
         self.logger.debug(f"Sample View: Accumulated Z-plane {z_index} for tile "
                          f"({position['x']:.2f}, {position['y']:.2f})")
