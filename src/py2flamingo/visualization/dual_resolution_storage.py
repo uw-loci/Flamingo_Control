@@ -72,9 +72,21 @@ class DualResolutionVoxelStorage:
 
     The high-resolution storage preserves data quality during rotations,
     while the low-resolution display provides smooth real-time visualization.
+
+    Optionally supports persistent OME-Zarr storage for streaming writes
+    during acquisition and efficient chunked access.
     """
 
-    def __init__(self, config: Optional[DualResolutionConfig] = None, max_history_blocks: int = 500):
+    def __init__(self, config: Optional[DualResolutionConfig] = None, max_history_blocks: int = 500,
+                 zarr_path: Optional[str] = None):
+        """Initialize dual-resolution voxel storage.
+
+        Args:
+            config: Storage configuration
+            max_history_blocks: Maximum history blocks to keep
+            zarr_path: Optional path for persistent Zarr storage. If provided,
+                      data will be written to disk as it's acquired.
+        """
         self.config = config or DualResolutionConfig()
 
         # High-resolution storage (sparse for memory efficiency using dictionaries)
@@ -112,6 +124,16 @@ class DualResolutionVoxelStorage:
             'max': np.array([-np.inf, -np.inf, -np.inf])
         }
 
+        # Optional Zarr backend for persistent storage
+        self.zarr_path = zarr_path
+        self.zarr_store = None
+        self.zarr_arrays: Dict[int, 'zarr.Array'] = {}
+        self._zarr_write_buffer: Dict[int, List] = {}  # Buffer writes for efficiency
+        self._zarr_buffer_size = 1000  # Flush after this many voxels
+
+        if zarr_path:
+            self._init_zarr_backend(zarr_path)
+
         logger.info(f"Initialized dual-resolution storage:")
         logger.info(f"  Storage: {self.storage_dims} voxels at {self.config.storage_voxel_size} µm")
         logger.info(f"  Display: {self.display_dims} voxels at {self.config.display_voxel_size} µm")
@@ -122,6 +144,8 @@ class DualResolutionVoxelStorage:
         else:
             logger.info(f"  Symmetric storage radius: {self.config.sample_region_radius} µm")
         logger.info(f"  Max history blocks: {self.max_history_blocks}")
+        if zarr_path:
+            logger.info(f"  Zarr backend: {zarr_path}")
 
     def _initialize_storage(self):
         """Initialize storage arrays for all channels."""
@@ -759,3 +783,184 @@ class DualResolutionVoxelStorage:
             Maximum intensity value (0 if no data)
         """
         return self.channel_max_values.get(channel_id, 0)
+
+    # ========== Zarr Backend Methods ==========
+
+    def _init_zarr_backend(self, zarr_path: str):
+        """Initialize the Zarr backend for persistent storage.
+
+        Args:
+            zarr_path: Path to the Zarr store directory
+        """
+        try:
+            import zarr
+            from zarr import Blosc
+            from pathlib import Path
+
+            path = Path(zarr_path)
+            path.mkdir(parents=True, exist_ok=True)
+
+            # Create zarr store with zstd compression
+            compressor = Blosc(cname='zstd', clevel=3)
+            self.zarr_store = zarr.DirectoryStore(str(path))
+            self.zarr_root = zarr.group(store=self.zarr_store, overwrite=True)
+
+            # Create arrays for each channel (chunked for efficient streaming)
+            chunk_size = (64, 64, 64)  # Good balance for streaming writes
+
+            for ch in range(self.num_channels):
+                self.zarr_arrays[ch] = self.zarr_root.zeros(
+                    str(ch),
+                    shape=self.display_dims,
+                    chunks=chunk_size,
+                    dtype=np.uint16,
+                    compressor=compressor
+                )
+                self._zarr_write_buffer[ch] = []
+
+            # Store metadata
+            self.zarr_root.attrs['storage_voxel_size_um'] = list(self.config.storage_voxel_size)
+            self.zarr_root.attrs['display_voxel_size_um'] = list(self.config.display_voxel_size)
+            self.zarr_root.attrs['chamber_dimensions_um'] = list(self.config.chamber_dimensions)
+            self.zarr_root.attrs['num_channels'] = self.num_channels
+
+            logger.info(f"Zarr backend initialized at {zarr_path}")
+            logger.info(f"  Chunk size: {chunk_size}")
+            logger.info(f"  Compression: zstd level 3")
+
+        except ImportError:
+            logger.warning("zarr not available - Zarr backend disabled")
+            self.zarr_path = None
+            self.zarr_store = None
+        except Exception as e:
+            logger.error(f"Failed to initialize Zarr backend: {e}")
+            self.zarr_path = None
+            self.zarr_store = None
+
+    def _write_to_zarr(self, channel_id: int, voxel_indices: np.ndarray, values: np.ndarray):
+        """Write voxel data to Zarr backend (buffered for efficiency).
+
+        Args:
+            channel_id: Channel to write to
+            voxel_indices: (N, 3) array of voxel indices (Z, Y, X)
+            values: (N,) array of values
+        """
+        if self.zarr_store is None or channel_id not in self.zarr_arrays:
+            return
+
+        # Add to buffer
+        for idx, val in zip(voxel_indices, values):
+            self._zarr_write_buffer[channel_id].append((tuple(idx), val))
+
+        # Flush if buffer is full
+        if len(self._zarr_write_buffer[channel_id]) >= self._zarr_buffer_size:
+            self._flush_zarr_buffer(channel_id)
+
+    def _flush_zarr_buffer(self, channel_id: int):
+        """Flush buffered writes to Zarr for a channel."""
+        if self.zarr_store is None or channel_id not in self.zarr_arrays:
+            return
+
+        buffer = self._zarr_write_buffer.get(channel_id, [])
+        if not buffer:
+            return
+
+        try:
+            arr = self.zarr_arrays[channel_id]
+
+            # Group writes by chunk for efficiency
+            for idx, val in buffer:
+                z, y, x = idx
+                # Bounds check
+                if (0 <= z < self.display_dims[0] and
+                    0 <= y < self.display_dims[1] and
+                    0 <= x < self.display_dims[2]):
+                    arr[z, y, x] = val
+
+            self._zarr_write_buffer[channel_id] = []
+            logger.debug(f"Flushed {len(buffer)} voxels to Zarr channel {channel_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to flush Zarr buffer for channel {channel_id}: {e}")
+
+    def flush_all_zarr_buffers(self):
+        """Flush all pending Zarr writes."""
+        if self.zarr_store is None:
+            return
+
+        for ch in range(self.num_channels):
+            self._flush_zarr_buffer(ch)
+
+        logger.info("Flushed all Zarr buffers")
+
+    def sync_display_to_zarr(self, channel_id: int):
+        """Sync display cache to Zarr array.
+
+        More efficient than incremental writes for batch updates.
+
+        Args:
+            channel_id: Channel to sync
+        """
+        if self.zarr_store is None or channel_id not in self.zarr_arrays:
+            return
+
+        try:
+            self.zarr_arrays[channel_id][:] = self.display_cache[channel_id]
+            logger.debug(f"Synced display cache to Zarr for channel {channel_id}")
+        except Exception as e:
+            logger.error(f"Failed to sync display to Zarr for channel {channel_id}: {e}")
+
+    def load_from_zarr(self, zarr_path: str) -> bool:
+        """Load data from an existing Zarr store.
+
+        Args:
+            zarr_path: Path to the Zarr store
+
+        Returns:
+            True if loaded successfully
+        """
+        try:
+            import zarr
+            from pathlib import Path
+
+            path = Path(zarr_path)
+            if not path.exists():
+                logger.error(f"Zarr store not found: {zarr_path}")
+                return False
+
+            store = zarr.DirectoryStore(str(path))
+            root = zarr.open_group(store=store, mode='r')
+
+            # Load each channel
+            for ch in range(self.num_channels):
+                ch_key = str(ch)
+                if ch_key in root:
+                    data = np.array(root[ch_key])
+
+                    # Check dimensions match
+                    if data.shape == self.display_dims:
+                        self.display_cache[ch] = data.astype(np.uint16)
+                        self.display_dirty[ch] = False
+                        self.channel_max_values[ch] = int(np.max(data))
+                        logger.debug(f"Loaded channel {ch} from Zarr: max={self.channel_max_values[ch]}")
+                    else:
+                        logger.warning(f"Channel {ch} dimensions mismatch: "
+                                     f"zarr={data.shape}, expected={self.display_dims}")
+
+            logger.info(f"Loaded data from Zarr store: {zarr_path}")
+            return True
+
+        except ImportError:
+            logger.error("zarr not available for loading")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to load from Zarr: {e}")
+            return False
+
+    def close_zarr(self):
+        """Close the Zarr store and flush any pending writes."""
+        if self.zarr_store is not None:
+            self.flush_all_zarr_buffers()
+            self.zarr_store = None
+            self.zarr_arrays.clear()
+            logger.info("Zarr store closed")

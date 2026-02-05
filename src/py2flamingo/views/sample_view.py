@@ -1556,6 +1556,41 @@ class SampleView(QWidget):
         nav_row.addStretch()
         layout.addLayout(nav_row)
 
+        # Row 3: Performance & Session buttons
+        perf_row = QHBoxLayout()
+        perf_row.setSpacing(8)
+
+        # Load Test Data button
+        self.load_test_data_btn = QPushButton("Load Test Data")
+        self.load_test_data_btn.setToolTip("Load .zarr, .tif, or .npy test data into viewer")
+        self.load_test_data_btn.clicked.connect(self._on_load_test_data_clicked)
+        perf_row.addWidget(self.load_test_data_btn)
+
+        # Save Session button
+        self.save_session_btn = QPushButton("Save Session")
+        self.save_session_btn.setToolTip("Save current 3D data and settings to OME-Zarr session")
+        self.save_session_btn.clicked.connect(self._on_save_session_clicked)
+        perf_row.addWidget(self.save_session_btn)
+
+        # Load Session button
+        self.load_session_btn = QPushButton("Load Session")
+        self.load_session_btn.setToolTip("Load a saved OME-Zarr session")
+        self.load_session_btn.clicked.connect(self._on_load_session_clicked)
+        perf_row.addWidget(self.load_session_btn)
+
+        # Benchmark button
+        self.benchmark_btn = QPushButton("Benchmark")
+        self.benchmark_btn.setToolTip("Run performance benchmarks on 3D transforms")
+        self.benchmark_btn.clicked.connect(self._on_benchmark_clicked)
+        self.benchmark_btn.setStyleSheet(
+            "QPushButton { background-color: #2196F3; color: white; }"
+            "QPushButton:hover { background-color: #1976D2; }"
+        )
+        perf_row.addWidget(self.benchmark_btn)
+
+        perf_row.addStretch()
+        layout.addLayout(perf_row)
+
         widget.setLayout(layout)
         return widget
 
@@ -2092,6 +2127,140 @@ class SampleView(QWidget):
                 except Exception as e:
                     self.logger.error(f"Export failed: {e}")
                     QMessageBox.critical(self, "Export Error", f"Failed to export: {e}")
+
+    def _on_load_test_data_clicked(self) -> None:
+        """Load test data from file for benchmarking and testing."""
+        from PyQt5.QtWidgets import QFileDialog, QMessageBox
+
+        if not self.voxel_storage:
+            QMessageBox.warning(self, "Not Ready",
+                              "Voxel storage not initialized. Open 3D visualization first.")
+            return
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Load Test Data", "",
+            "All Supported (*.zarr *.tif *.tiff *.npy);;Zarr Sessions (*.zarr);;TIFF Files (*.tif *.tiff);;NumPy Arrays (*.npy)"
+        )
+
+        if file_path:
+            try:
+                from py2flamingo.visualization.session_manager import load_test_data
+                from pathlib import Path
+
+                success = load_test_data(Path(file_path), self.voxel_storage)
+
+                if success:
+                    self.logger.info(f"Loaded test data from {file_path}")
+                    QMessageBox.information(self, "Data Loaded",
+                                          f"Test data loaded successfully from:\n{file_path}")
+                    # Update visualization
+                    if self.sample_3d_window:
+                        self.sample_3d_window._update_visualization()
+                else:
+                    QMessageBox.warning(self, "Load Failed",
+                                      f"Failed to load data from:\n{file_path}")
+            except Exception as e:
+                self.logger.exception(f"Load test data failed: {e}")
+                QMessageBox.critical(self, "Load Error", f"Error loading data: {e}")
+
+    def _on_save_session_clicked(self) -> None:
+        """Save current 3D data to an OME-Zarr session."""
+        from PyQt5.QtWidgets import QInputDialog, QMessageBox
+
+        if not self.voxel_storage:
+            QMessageBox.warning(self, "Not Ready",
+                              "Voxel storage not initialized. Capture some data first.")
+            return
+
+        try:
+            from py2flamingo.visualization.session_manager import SessionManager
+
+            if not SessionManager.is_available():
+                QMessageBox.warning(self, "Zarr Not Available",
+                                  "zarr library not installed.\nInstall with: pip install zarr")
+                return
+
+            # Prompt for session name
+            session_name, ok = QInputDialog.getText(
+                self, "Save Session",
+                "Enter session name:",
+                text=f"session_{time.strftime('%Y%m%d_%H%M')}"
+            )
+
+            if ok and session_name:
+                manager = SessionManager()
+                session_path = manager.save_session(
+                    self.voxel_storage,
+                    session_name,
+                    description="Saved from Sample View"
+                )
+
+                self.logger.info(f"Session saved to {session_path}")
+                QMessageBox.information(self, "Session Saved",
+                                      f"Session saved to:\n{session_path}")
+        except Exception as e:
+            self.logger.exception(f"Save session failed: {e}")
+            QMessageBox.critical(self, "Save Error", f"Error saving session: {e}")
+
+    def _on_load_session_clicked(self) -> None:
+        """Load a saved OME-Zarr session."""
+        from PyQt5.QtWidgets import QFileDialog, QMessageBox
+
+        if not self.voxel_storage:
+            QMessageBox.warning(self, "Not Ready",
+                              "Voxel storage not initialized.")
+            return
+
+        try:
+            from py2flamingo.visualization.session_manager import SessionManager
+
+            if not SessionManager.is_available():
+                QMessageBox.warning(self, "Zarr Not Available",
+                                  "zarr library not installed.\nInstall with: pip install zarr")
+                return
+
+            # Open file dialog for .zarr directory
+            file_path = QFileDialog.getExistingDirectory(
+                self, "Select Session (.zarr folder)",
+                str(SessionManager().session_dir)
+            )
+
+            if file_path and file_path.endswith('.zarr'):
+                from pathlib import Path
+
+                manager = SessionManager()
+                metadata = manager.restore_to_storage(self.voxel_storage, Path(file_path))
+
+                self.logger.info(f"Session loaded: {metadata.session_name}")
+                QMessageBox.information(self, "Session Loaded",
+                                      f"Loaded session: {metadata.session_name}\n"
+                                      f"Total voxels: {metadata.total_voxels:,}")
+
+                # Update visualization
+                if self.sample_3d_window:
+                    self.sample_3d_window._update_visualization()
+            elif file_path:
+                QMessageBox.warning(self, "Invalid Selection",
+                                  "Please select a .zarr folder")
+        except Exception as e:
+            self.logger.exception(f"Load session failed: {e}")
+            QMessageBox.critical(self, "Load Error", f"Error loading session: {e}")
+
+    def _on_benchmark_clicked(self) -> None:
+        """Open the performance benchmark dialog."""
+        try:
+            from py2flamingo.views.dialogs.performance_benchmark_dialog import PerformanceBenchmarkDialog
+
+            dialog = PerformanceBenchmarkDialog(
+                voxel_storage=self.voxel_storage,
+                parent=self
+            )
+            dialog.exec_()
+        except Exception as e:
+            self.logger.exception(f"Error opening benchmark dialog: {e}")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Error",
+                               f"Could not open benchmark dialog: {e}")
 
     # ========== Data Collection Controls ==========
 

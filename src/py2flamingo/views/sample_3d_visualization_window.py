@@ -185,6 +185,11 @@ class Sample3DVisualizationWindow(QWidget):
         # Connect thread-safe signal
         self.stage_position_update_signal.connect(self._handle_stage_update_threadsafe)
 
+        # Initialize transform manager for async transforms (optional, improves GUI responsiveness)
+        self.transform_manager = None
+        self._use_async_transforms = False
+        self._init_transform_manager()
+
         # Configure window
         self.setWindowTitle("3D Sample Chamber Visualization")
         self.setWindowFlags(Qt.Window)
@@ -403,6 +408,74 @@ class Sample3DVisualizationWindow(QWidget):
         logger.info(f"  Display dimensions (voxels): {self.voxel_storage.display_dims}")
         logger.info(f"  Voxel size (µm): {self.config['display']['voxel_size_um']}")
         logger.info(f"  Using direct dense array updates for performance")
+
+    def _init_transform_manager(self):
+        """Initialize the transform manager for async transforms (optional)."""
+        try:
+            from py2flamingo.visualization.transform_workers import TransformManager
+
+            self.transform_manager = TransformManager(max_workers=2, cache_size=10, parent=self)
+
+            # Connect signals for async transform results
+            self.transform_manager.transform_completed.connect(self._on_async_transform_completed)
+            self.transform_manager.transform_error.connect(self._on_async_transform_error)
+
+            logger.info("TransformManager initialized for async transforms")
+        except ImportError as e:
+            logger.warning(f"TransformManager not available: {e}")
+            self.transform_manager = None
+
+    def _on_async_transform_completed(self, request_id: str, channel_id: int, result):
+        """Handle completion of async transform."""
+        if not self.viewer or channel_id not in self.channel_layers:
+            return
+
+        # Update the napari layer with transformed data
+        self.channel_layers[channel_id].data = result
+        self._update_contrast_slider_range(channel_id)
+
+        logger.debug(f"Async transform {request_id} completed for channel {channel_id}")
+
+    def _on_async_transform_error(self, request_id: str, error_msg: str):
+        """Handle async transform error."""
+        logger.error(f"Async transform {request_id} failed: {error_msg}")
+
+    def set_async_transforms(self, enabled: bool):
+        """Enable or disable async transforms.
+
+        When enabled, expensive rotation/translation transforms run in background
+        threads, keeping the GUI responsive.
+
+        Args:
+            enabled: Whether to use async transforms
+        """
+        self._use_async_transforms = enabled and self.transform_manager is not None
+        logger.info(f"Async transforms {'enabled' if self._use_async_transforms else 'disabled'}")
+
+    def load_test_data(self, file_path) -> bool:
+        """Load test data from file for benchmarking.
+
+        Args:
+            file_path: Path to .zarr, .tif, or .npy file
+
+        Returns:
+            True if loaded successfully
+        """
+        from pathlib import Path
+        try:
+            from py2flamingo.visualization.session_manager import load_test_data
+
+            success = load_test_data(Path(file_path), self.voxel_storage)
+
+            if success:
+                # Update visualization to show loaded data
+                self._update_visualization()
+                logger.info(f"Loaded test data from {file_path}")
+
+            return success
+        except Exception as e:
+            logger.exception(f"Failed to load test data: {e}")
+            return False
 
     def _setup_ui(self):
         """Setup the user interface."""

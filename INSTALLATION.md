@@ -716,6 +716,45 @@ PYTHONPATH=src python -m py2flamingo
 
 ---
 
-**Last Updated:** 2025-10-14
+---
+
+## Performance Testing and Session Management
+
+The 3D visualization includes tools for performance testing and session management.
+
+### Performance Benchmark Dialog
+
+Access via **Benchmark** button in Sample View to test transform performance:
+- Configurable volume sizes (100³, 200³, 300³)
+- Tests: Gaussian smoothing, Rotation (15°/45°/90°), Translation, Full Pipeline
+- Export results to CSV/JSON
+
+### Session Save/Load (OME-Zarr)
+
+Save and reload 3D visualization sessions using the OME-Zarr format:
+- **Save Session**: Preserves all channel data, reference position, and metadata
+- **Load Session**: Restores complete session state
+- Sessions stored in `~/flamingo_sessions/` by default
+
+### Load Test Data
+
+Load external data files for testing:
+- `.zarr` - OME-Zarr sessions
+- `.tif/.tiff` - TIFF stacks
+- `.npy` - NumPy arrays
+
+### Optional Dependencies for Performance Features
+
+```bash
+# Full performance testing suite
+pip install zarr>=2.18.0 tifffile
+
+# High-performance OME-Zarr (optional)
+pip install ome-writers[tensorstore]
+```
+
+---
+
+**Last Updated:** 2026-02-05
 **Supported Platforms:** Windows 10/11, Linux (Ubuntu 20.04+, Fedora 35+), macOS 10.15+
 **Python Versions:** 3.8, 3.9, 3.10, 3.11
