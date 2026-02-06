@@ -7,9 +7,16 @@ physical mm to napari pixel coordinate mapping.
 import numpy as np
 from scipy.spatial.transform import Rotation
 from typing import Tuple, Optional, Dict
+from enum import IntEnum
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+class TransformQuality(IntEnum):
+    """Quality modes for volume transforms."""
+    FAST = 0      # Nearest-neighbor interpolation - ~3-5x faster
+    QUALITY = 1   # Linear interpolation - smoother but slower
 
 
 class CoordinateTransformer:
@@ -309,7 +316,8 @@ class CoordinateTransformer:
                                      stage_offset_mm: Tuple[float, float, float],
                                      rotation_deg: float,
                                      center_voxels: np.ndarray,
-                                     voxel_size_um: float = 50.0) -> np.ndarray:
+                                     voxel_size_um: float = 50.0,
+                                     quality: TransformQuality = TransformQuality.QUALITY) -> np.ndarray:
         """
         Transform entire voxel volume using affine transformation.
         Uses existing rotation utilities for consistency.
@@ -326,6 +334,8 @@ class CoordinateTransformer:
             rotation_deg: Y-axis rotation in degrees
             center_voxels: (x, y, z) rotation center in voxel coordinates
             voxel_size_um: Voxel size in micrometers (default 50)
+            quality: TransformQuality.FAST (nearest-neighbor) or QUALITY (linear)
+                    FAST is ~3-5x faster, suitable for interactive preview
 
         Returns:
             Transformed 3D volume with same shape as input
@@ -364,12 +374,17 @@ class CoordinateTransformer:
         # to correctly map where each output pixel comes from in the input
         combined_inv = np.linalg.inv(combined)
 
+        # Select interpolation order based on quality mode
+        # order=0: nearest-neighbor (~3-5x faster, blocky appearance)
+        # order=1: linear interpolation (smoother, slower)
+        interp_order = int(quality)
+
         # Apply transformation using scipy with the inverse matrix
         transformed = affine_transform(
             volume,
             combined_inv[:3, :3],  # Inverse rotation/scale matrix
             offset=combined_inv[:3, 3],  # Inverse offset
-            order=1,  # Linear interpolation
+            order=interp_order,
             mode='constant',
             cval=0
         )

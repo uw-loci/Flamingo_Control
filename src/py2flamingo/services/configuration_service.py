@@ -449,3 +449,23 @@ class ConfigurationService:
         """
         self.config[self.MIP_BROWSE_PATH_KEY] = path
         self.logger.info(f"Set MIP browse path: {path}")
+
+    # Sample View 3D data path (for Save/Load Data in Sample View)
+    SAMPLE_3D_DATA_PATH_KEY = 'sample_view_3d_data_path'
+
+    def get_sample_3d_data_path(self) -> Optional[str]:
+        """Get the last-used Sample View 3D data path.
+
+        Returns:
+            Path string if set, None otherwise
+        """
+        return self.config.get(self.SAMPLE_3D_DATA_PATH_KEY)
+
+    def set_sample_3d_data_path(self, path: str) -> None:
+        """Set the Sample View 3D data path.
+
+        Args:
+            path: Directory path last used for save/load
+        """
+        self.config[self.SAMPLE_3D_DATA_PATH_KEY] = path
+        self.logger.info(f"Set Sample 3D data path: {path}")

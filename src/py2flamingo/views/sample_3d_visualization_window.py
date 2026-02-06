@@ -871,16 +871,25 @@ class Sample3DVisualizationWindow(QWidget):
         self.show_objective_cb.setChecked(True)
         disp_layout.addWidget(self.show_objective_cb, 1, 0, 1, 2)
 
+        # Transform quality checkbox
+        self.fast_transform_cb = QCheckBox("Fast Transform (less smooth)")
+        self.fast_transform_cb.setChecked(True)  # Default FAST
+        self.fast_transform_cb.setToolTip(
+            "Checked: Nearest-neighbor (~3-5x faster)\n"
+            "Unchecked: Linear interpolation (smoother)"
+        )
+        disp_layout.addWidget(self.fast_transform_cb, 2, 0, 1, 2)
+
         # Rendering mode
-        disp_layout.addWidget(QLabel("Rendering:"), 2, 0)
+        disp_layout.addWidget(QLabel("Rendering:"), 3, 0)
         self.rendering_combo = QComboBox()
         self.rendering_combo.addItems(['mip', 'minip', 'average', 'iso'])
-        disp_layout.addWidget(self.rendering_combo, 2, 1)
+        disp_layout.addWidget(self.rendering_combo, 3, 1)
 
         # Reset view button
         self.reset_view_btn = QPushButton("Reset View")
         self.reset_view_btn.setToolTip("Reset camera to default orientation and zoom")
-        disp_layout.addWidget(self.reset_view_btn, 3, 0, 1, 2)
+        disp_layout.addWidget(self.reset_view_btn, 4, 0, 1, 2)
 
         display_group.setLayout(disp_layout)
         layout.addWidget(display_group)
@@ -1207,6 +1216,7 @@ class Sample3DVisualizationWindow(QWidget):
         # Display settings (now in Sample Control tab)
         self.show_chamber_cb.toggled.connect(self._on_display_settings_changed)
         self.show_objective_cb.toggled.connect(self._on_display_settings_changed)
+        self.fast_transform_cb.toggled.connect(self._on_transform_quality_changed)
         self.reset_view_btn.clicked.connect(self._on_reset_view)
         self.rendering_combo.currentTextChanged.connect(self._on_rendering_mode_changed)
 
@@ -2471,6 +2481,15 @@ class Sample3DVisualizationWindow(QWidget):
         if 'Objective' in self.viewer.layers:
             self.viewer.layers['Objective'].visible = self.show_objective_cb.isChecked()
 
+    def _on_transform_quality_changed(self, fast_mode: bool):
+        """Handle transform quality setting change."""
+        from py2flamingo.visualization.coordinate_transforms import TransformQuality
+        quality = TransformQuality.FAST if fast_mode else TransformQuality.QUALITY
+        if hasattr(self, 'voxel_storage') and self.voxel_storage:
+            self.voxel_storage.transform_quality = quality
+            self._update_visualization()
+        logger.info(f"Transform quality changed to: {quality.name}")
+
     def _on_reset_view(self):
         """Reset camera to default orientation and zoom."""
         if not self.viewer:
@@ -3245,12 +3264,14 @@ class Sample3DVisualizationWindow(QWidget):
             base_y_um = sample_center[1]
             base_z_um = sample_center[2]
 
-            # Storage position = base - delta (in sample coordinates)
-            # The negative delta ensures that when the display transform adds +delta,
-            # new data appears at the focal plane (base) while old data moves forward
+            # Storage position = base ± delta (in sample coordinates)
+            # X, Z: negative delta ensures display transform compensates correctly
+            # Y: POSITIVE delta because napari Y axis is visually inverted
+            #    (higher napari Y index = lower on screen, but we want higher stage Y = higher on screen)
+            #    This makes the 3D view match the LED 2D Overview orientation
             world_center_um = np.array([
                 base_z_um - delta_z * 1000,  # Z in sample coords
-                base_y_um - delta_y * 1000,  # Y in sample coords
+                base_y_um + delta_y * 1000,  # Y INVERTED for napari display orientation
                 base_x_um - delta_x * 1000   # X in sample coords
             ])
 

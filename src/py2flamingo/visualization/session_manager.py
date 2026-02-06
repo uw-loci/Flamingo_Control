@@ -26,12 +26,13 @@ logger = logging.getLogger(__name__)
 # Try to import zarr - it's optional
 try:
     import zarr
-    from zarr import Blosc
+    from numcodecs import Blosc
     ZARR_AVAILABLE = True
 except ImportError:
     ZARR_AVAILABLE = False
     zarr = None
-    logger.warning("zarr not available - session save/load disabled. Install with: pip install zarr")
+    Blosc = None
+    logger.warning("zarr not available - session save/load disabled. Install with: pip install zarr numcodecs")
 
 
 @dataclass

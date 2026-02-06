@@ -679,6 +679,7 @@ class SampleView(QWidget):
         image_controls_window=None,
         sample_3d_window=None,
         geometry_manager: 'WindowGeometryManager' = None,
+        configuration_service=None,
         parent=None
     ):
         """
@@ -692,6 +693,7 @@ class SampleView(QWidget):
             image_controls_window: Optional ImageControlsWindow for advanced settings
             sample_3d_window: Optional Sample3DVisualizationWindow for sharing visualization
             geometry_manager: Optional WindowGeometryManager for saving/restoring geometry
+            configuration_service: Optional ConfigurationService for path persistence
             parent: Parent widget
         """
         super().__init__(parent)
@@ -703,6 +705,7 @@ class SampleView(QWidget):
         self.image_controls_window = image_controls_window
         self.sample_3d_window = sample_3d_window
         self._geometry_manager = geometry_manager
+        self._configuration_service = configuration_service
         self._geometry_restored = False
         self._dialog_state_restored = False
         self.logger = logging.getLogger(__name__)
@@ -2104,13 +2107,25 @@ class SampleView(QWidget):
             self.sample_3d_window.export_data()
         else:
             from PyQt5.QtWidgets import QFileDialog, QMessageBox
+            from pathlib import Path
+
+            # Get last-used path from configuration service
+            default_path = ""
+            if self._configuration_service:
+                saved_path = self._configuration_service.get_sample_3d_data_path()
+                if saved_path and Path(saved_path).exists():
+                    default_path = saved_path
 
             # Basic export dialog
             file_path, _ = QFileDialog.getSaveFileName(
-                self, "Export 3D Data", "",
+                self, "Export 3D Data", default_path,
                 "TIFF Stack (*.tif);;NumPy Array (*.npy);;All Files (*)"
             )
             if file_path:
+                # Remember the directory for next time
+                if self._configuration_service:
+                    self._configuration_service.set_sample_3d_data_path(str(Path(file_path).parent))
+
                 try:
                     if self.voxel_storage:
                         data = self.voxel_storage.get_display_data()
@@ -2133,21 +2148,32 @@ class SampleView(QWidget):
     def _on_load_test_data_clicked(self) -> None:
         """Load test data from file for benchmarking and testing."""
         from PyQt5.QtWidgets import QFileDialog, QMessageBox
+        from pathlib import Path
 
         if not self.voxel_storage:
             QMessageBox.warning(self, "Not Ready",
                               "Voxel storage not initialized. Open 3D visualization first.")
             return
 
+        # Get last-used path from configuration service
+        default_path = ""
+        if self._configuration_service:
+            saved_path = self._configuration_service.get_sample_3d_data_path()
+            if saved_path and Path(saved_path).exists():
+                default_path = saved_path
+
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Load Test Data", "",
+            self, "Load Test Data", default_path,
             "All Supported (*.zarr *.tif *.tiff *.npy);;Zarr Sessions (*.zarr);;TIFF Files (*.tif *.tiff);;NumPy Arrays (*.npy)"
         )
 
         if file_path:
+            # Remember the directory for next time
+            if self._configuration_service:
+                self._configuration_service.set_sample_3d_data_path(str(Path(file_path).parent))
+
             try:
                 from py2flamingo.visualization.session_manager import load_test_data
-                from pathlib import Path
 
                 success = load_test_data(Path(file_path), self.voxel_storage)
 
@@ -2873,7 +2899,7 @@ class SampleView(QWidget):
         tile_idx = len(self._accumulated_zstacks)  # Current tile number
         if total_expected > 0 and frame_count % 5 == 0:
             tile_pct = min(1.0, frame_count / total_expected)
-            overall_pct = min(99, int(((tile_idx - 1 + tile_pct) / total_tiles) * 100))
+            overall_pct = min(100, int(((tile_idx - 1 + tile_pct) / total_tiles) * 100))
             ch_name = channels[channel_idx] if channel_idx < len(channels) else '?'
             status = f"Tile {tile_idx}/{total_tiles}: {frame_count} frames (Ch {ch_name})"
             self.update_workflow_progress(status, overall_pct, "--:--")

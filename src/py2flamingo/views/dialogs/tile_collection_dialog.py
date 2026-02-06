@@ -18,7 +18,7 @@ from PyQt5.QtWidgets import (
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.resources import get_app_icon
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QIcon
 
 from py2flamingo.views.workflow_panels import (
@@ -1454,7 +1454,8 @@ class TileCollectionDialog(PersistentDialog):
         def on_queue_completed():
             self._queue_completed = True
             progress.setValue(100)  # 100% complete
-            update_sample_view("Not Running", 0)  # Reset BEFORE dialog close
+            update_sample_view("Complete!", 100)  # Show 100% with status
+            QTimer.singleShot(1500, lambda: update_sample_view("Not Running", 0))  # Delayed reset
             progress.accept()  # Close the dialog so exec_() returns
 
             # Clean up tile mode when all workflows are done

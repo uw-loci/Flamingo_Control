@@ -11,6 +11,8 @@ import logging
 from scipy import ndimage
 import time
 
+from py2flamingo.visualization.coordinate_transforms import TransformQuality
+
 logger = logging.getLogger(__name__)
 
 
@@ -131,6 +133,10 @@ class DualResolutionVoxelStorage:
         self._zarr_write_buffer: Dict[int, List] = {}  # Buffer writes for efficiency
         self._zarr_buffer_size = 1000  # Flush after this many voxels
 
+        # Transform quality setting - FAST uses nearest-neighbor (~3-5x faster)
+        # QUALITY uses linear interpolation (smoother but slower)
+        self._transform_quality = TransformQuality.FAST  # Default to fast for interactive use
+
         if zarr_path:
             self._init_zarr_backend(zarr_path)
 
@@ -146,6 +152,66 @@ class DualResolutionVoxelStorage:
         logger.info(f"  Max history blocks: {self.max_history_blocks}")
         if zarr_path:
             logger.info(f"  Zarr backend: {zarr_path}")
+
+    @property
+    def transform_quality(self) -> TransformQuality:
+        """Get current transform quality mode."""
+        return self._transform_quality
+
+    @transform_quality.setter
+    def transform_quality(self, quality: TransformQuality):
+        """Set transform quality mode.
+
+        Args:
+            quality: TransformQuality.FAST (nearest-neighbor, ~3-5x faster) or
+                    TransformQuality.QUALITY (linear interpolation, smoother)
+        """
+        if self._transform_quality != quality:
+            self._transform_quality = quality
+            # Invalidate transform cache when quality changes
+            self.transform_cache.clear()
+            logger.info(f"Transform quality set to {quality.name}")
+
+    def _fast_shift(self, volume: np.ndarray, offset_voxels: np.ndarray) -> np.ndarray:
+        """
+        Optimized volume shift using numpy.roll for integer parts.
+
+        For integer shifts, numpy.roll is ~10x faster than scipy.ndimage.shift.
+        For fractional shifts, we use roll for integer part + scipy for fractional.
+
+        Args:
+            volume: 3D array to shift
+            offset_voxels: (z, y, x) offset in voxels
+
+        Returns:
+            Shifted volume
+        """
+        # Separate integer and fractional parts
+        int_offset = np.round(offset_voxels).astype(int)
+        frac_offset = offset_voxels - int_offset
+
+        # If shift is purely integer (or we're in fast mode), use roll
+        if np.max(np.abs(frac_offset)) < 0.01 or self._transform_quality == TransformQuality.FAST:
+            # Use numpy.roll for each axis - much faster than scipy.shift
+            result = volume
+            for axis, shift_val in enumerate(int_offset):
+                if shift_val != 0:
+                    result = np.roll(result, shift_val, axis=axis)
+
+                    # Zero out wrapped values (roll wraps, we want zeros)
+                    if shift_val > 0:
+                        slices = [slice(None)] * 3
+                        slices[axis] = slice(0, shift_val)
+                        result[tuple(slices)] = 0
+                    elif shift_val < 0:
+                        slices = [slice(None)] * 3
+                        slices[axis] = slice(shift_val, None)
+                        result[tuple(slices)] = 0
+            return result
+        else:
+            # Quality mode with fractional shift - use scipy
+            from scipy.ndimage import shift
+            return shift(volume, offset_voxels, order=1, mode='constant', cval=0)
 
     def _initialize_storage(self):
         """Initialize storage arrays for all channels."""
@@ -364,8 +430,9 @@ class DualResolutionVoxelStorage:
             local_coords = (x - min_coords[0], y - min_coords[1], z - min_coords[2])
             dense_region[local_coords] = value
 
-        # Apply smoothing to reduce aliasing during downsampling
-        if self.config.resolution_ratio[0] > 1:
+        # Apply smoothing to reduce aliasing during downsampling (only in QUALITY mode)
+        if (self._transform_quality == TransformQuality.QUALITY and
+                self.config.resolution_ratio[0] > 1):
             # Gaussian filter with sigma proportional to downsampling factor
             sigma = tuple(r / 3.0 for r in self.config.resolution_ratio)
             dense_region = ndimage.gaussian_filter(dense_region, sigma)
@@ -655,7 +722,8 @@ class DualResolutionVoxelStorage:
                     stage_offset_mm=(0, 0, 0),  # No translation for base
                     rotation_deg=dr,
                     center_voxels=center_voxels,
-                    voxel_size_um=self.config.display_voxel_size[0]
+                    voxel_size_um=self.config.display_voxel_size[0],
+                    quality=self._transform_quality
                 )
             else:
                 rotated = volume
@@ -670,12 +738,11 @@ class DualResolutionVoxelStorage:
         # Always apply FULL translation from reference position (not incremental)
         # This ensures returning to original position shows data in correct location
         # Incremental shifts cause data loss at boundaries when shifting back
-        from scipy.ndimage import shift
 
         # Full offset from reference in ZYX order
-        # Y should NOT be inverted here - the storage already accounts for direction
-        # When stage Y decreases (sample moves up), data should shift UP in display (lower napari Y)
-        offset_voxels = np.array([dz, dy, dx]) * 1000 / self.config.display_voxel_size[0]
+        # Y is NEGATED to match the storage Y inversion (storage uses +delta_y for napari display)
+        # This ensures the transform shift compensates correctly when the stage moves
+        offset_voxels = np.array([dz, -dy, dx]) * 1000 / self.config.display_voxel_size[0]
 
         # Check if translation is significant
         if np.max(np.abs(offset_voxels)) < 0.5:
@@ -684,11 +751,11 @@ class DualResolutionVoxelStorage:
             self.last_stage_position = current_stage_pos.copy()
             return rotated
 
-        logger.debug(f"Transform: Applying full offset {offset_voxels} voxels (ZYX, Y inverted) from reference")
+        logger.debug(f"Transform: Applying full offset {offset_voxels} voxels (ZYX) from reference "
+                    f"[quality={self._transform_quality.name}]")
 
-        # Apply translation to the rotated base volume
-        # Using order=1 (linear) for smoother results
-        translated = shift(rotated, offset_voxels, order=1, mode='constant', cval=0)
+        # Apply translation using optimized shift (numpy.roll for integer, scipy for fractional)
+        translated = self._fast_shift(rotated, offset_voxels)
 
         # Update last position for tracking
         self.last_stage_position = current_stage_pos.copy()
@@ -794,7 +861,7 @@ class DualResolutionVoxelStorage:
         """
         try:
             import zarr
-            from zarr import Blosc
+            from numcodecs import Blosc
             from pathlib import Path
 
             path = Path(zarr_path)
