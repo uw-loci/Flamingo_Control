@@ -39,6 +39,14 @@ from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR, WARNING_BG
 # Import camera state for live view control
 from py2flamingo.controllers.camera_controller import CameraState
 
+# napari imports for 3D visualization
+try:
+    import napari
+    NAPARI_AVAILABLE = True
+except ImportError:
+    NAPARI_AVAILABLE = False
+    napari = None
+
 # Axis colors matching napari 3D viewer
 AXIS_COLORS = {
     'x': '#008B8B',  # Cyan
@@ -286,9 +294,17 @@ class ViewerControlsDialog(PersistentDialog):
     channel_contrast_changed = pyqtSignal(int, tuple)
     rendering_mode_changed = pyqtSignal(str)
 
-    def __init__(self, sample_3d_window, config: dict, parent=None):
+    def __init__(self, viewer_container, config: dict, parent=None):
+        """
+        Initialize ViewerControlsDialog.
+
+        Args:
+            viewer_container: Object with 'viewer' and 'channel_layers' attributes (SampleView)
+            config: Visualization config dict
+            parent: Parent widget
+        """
         super().__init__(parent)
-        self.sample_3d_window = sample_3d_window
+        self.viewer_container = viewer_container  # SampleView or similar
         self.config = config
         self.logger = logging.getLogger(__name__)
 
@@ -473,15 +489,15 @@ class ViewerControlsDialog(PersistentDialog):
         return widget
 
     def _get_viewer(self):
-        """Get the napari viewer from the 3D window."""
-        if self.sample_3d_window:
-            return getattr(self.sample_3d_window, 'viewer', None)
+        """Get the napari viewer from the container."""
+        if self.viewer_container:
+            return getattr(self.viewer_container, 'viewer', None)
         return None
 
     def _get_channel_layer(self, channel_id: int):
         """Get the napari layer for a specific channel."""
-        if self.sample_3d_window and hasattr(self.sample_3d_window, 'channel_layers'):
-            return self.sample_3d_window.channel_layers.get(channel_id)
+        if self.viewer_container and hasattr(self.viewer_container, 'channel_layers'):
+            return self.viewer_container.channel_layers.get(channel_id)
         return None
 
     def _on_visibility_changed(self, channel_id: int, visible: bool) -> None:
@@ -521,8 +537,8 @@ class ViewerControlsDialog(PersistentDialog):
 
     def _on_rendering_mode_changed(self, mode: str) -> None:
         """Change rendering mode for all channel layers."""
-        if self.sample_3d_window and hasattr(self.sample_3d_window, 'channel_layers'):
-            for layer in self.sample_3d_window.channel_layers.values():
+        if self.viewer_container and hasattr(self.viewer_container, 'channel_layers'):
+            for layer in self.viewer_container.channel_layers.values():
                 try:
                     layer.rendering = mode
                 except Exception as e:
@@ -564,7 +580,7 @@ class ViewerControlsDialog(PersistentDialog):
 
     def _sync_from_viewer(self) -> None:
         """Sync dialog controls with current napari viewer state."""
-        if not self.sample_3d_window:
+        if not self.viewer_container:
             return
 
         # Sync channel controls
@@ -602,8 +618,8 @@ class ViewerControlsDialog(PersistentDialog):
         viewer = self._get_viewer()
         if viewer:
             # Rendering mode from first channel layer
-            if hasattr(self.sample_3d_window, 'channel_layers') and self.sample_3d_window.channel_layers:
-                first_layer = list(self.sample_3d_window.channel_layers.values())[0]
+            if hasattr(self.viewer_container, 'channel_layers') and self.viewer_container.channel_layers:
+                first_layer = list(self.viewer_container.channel_layers.values())[0]
                 self.rendering_combo.blockSignals(True)
                 self.rendering_combo.setCurrentText(first_layer.rendering)
                 self.rendering_combo.blockSignals(False)
@@ -677,7 +693,6 @@ class SampleView(QWidget):
         laser_led_controller,
         voxel_storage=None,
         image_controls_window=None,
-        sample_3d_window=None,
         geometry_manager: 'WindowGeometryManager' = None,
         configuration_service=None,
         parent=None
@@ -691,7 +706,6 @@ class SampleView(QWidget):
             laser_led_controller: LaserLEDController instance
             voxel_storage: Optional DualResolutionVoxelStorage instance
             image_controls_window: Optional ImageControlsWindow for advanced settings
-            sample_3d_window: Optional Sample3DVisualizationWindow for sharing visualization
             geometry_manager: Optional WindowGeometryManager for saving/restoring geometry
             configuration_service: Optional ConfigurationService for path persistence
             parent: Parent widget
@@ -703,12 +717,15 @@ class SampleView(QWidget):
         self.laser_led_controller = laser_led_controller
         self.voxel_storage = voxel_storage
         self.image_controls_window = image_controls_window
-        self.sample_3d_window = sample_3d_window
         self._geometry_manager = geometry_manager
         self._configuration_service = configuration_service
         self._geometry_restored = False
         self._dialog_state_restored = False
         self.logger = logging.getLogger(__name__)
+
+        # napari viewer and channel layers (owned by Sample View)
+        self.viewer = None
+        self.channel_layers = {}
 
         # Display state
         self._current_image: Optional[np.ndarray] = None
@@ -1088,13 +1105,52 @@ class SampleView(QWidget):
         self.viewer_placeholder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.viewer_placeholder)
 
-        # Zoom display row with reset button
-        zoom_row = QHBoxLayout()
-        zoom_row.addStretch()
+        # Info row: Navigation help, Memory/Voxels stats, Zoom, Reset button
+        info_row = QHBoxLayout()
 
+        # Navigation help button (left side)
+        self.nav_help_btn = QPushButton("?")
+        self.nav_help_btn.setFixedSize(24, 24)
+        self.nav_help_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #555;
+                color: white;
+                border-radius: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #777; }
+        """)
+        self.nav_help_btn.setToolTip(
+            "3D Navigation Controls:\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Left drag        → Rotate view\n"
+            "Shift+Left drag  → Pan/translate\n"
+            "Scroll wheel     → Zoom in/out\n"
+            "Right drag       → Zoom in/out\n"
+            "Double-click     → Zoom in 2x"
+        )
+        info_row.addWidget(self.nav_help_btn)
+
+        info_row.addStretch()
+
+        # Memory usage label
+        self.memory_label = QLabel("Memory: -- MB")
+        self.memory_label.setStyleSheet("color: #888; font-size: 9pt;")
+        info_row.addWidget(self.memory_label)
+
+        info_row.addSpacing(10)
+
+        # Voxel count label
+        self.voxel_label = QLabel("Voxels: --")
+        self.voxel_label.setStyleSheet("color: #888; font-size: 9pt;")
+        info_row.addWidget(self.voxel_label)
+
+        info_row.addStretch()
+
+        # Zoom display
         self.zoom_label = QLabel("Zoom: --")
         self.zoom_label.setStyleSheet("color: #888; font-size: 9pt;")
-        zoom_row.addWidget(self.zoom_label)
+        info_row.addWidget(self.zoom_label)
 
         # Reset view button next to zoom
         self.reset_view_btn = QPushButton("⟲ Reset")
@@ -1115,9 +1171,25 @@ class SampleView(QWidget):
             }
         """)
         self.reset_view_btn.clicked.connect(self._on_reset_zoom_clicked)
-        zoom_row.addWidget(self.reset_view_btn)
+        info_row.addWidget(self.reset_view_btn)
 
-        layout.addLayout(zoom_row)
+        layout.addLayout(info_row)
+
+        # Quality row: Fast Transform checkbox
+        quality_row = QHBoxLayout()
+        quality_row.addStretch()
+
+        self.fast_transform_cb = QCheckBox("Fast Transform")
+        self.fast_transform_cb.setChecked(True)
+        self.fast_transform_cb.setToolTip(
+            "Checked: Faster rendering (nearest-neighbor)\n"
+            "Unchecked: Smoother rendering (linear interpolation)"
+        )
+        self.fast_transform_cb.toggled.connect(self._on_transform_quality_changed)
+        quality_row.addWidget(self.fast_transform_cb)
+
+        quality_row.addStretch()
+        layout.addLayout(quality_row)
 
         group.setLayout(layout)
         group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -1989,9 +2061,9 @@ class SampleView(QWidget):
         self._channel_states[channel]['visible'] = visible
         self.logger.debug(f"Channel {channel} visibility: {visible}")
 
-        # Toggle visibility on the actual napari layer via 3D window's channel_layers
-        if self.sample_3d_window and hasattr(self.sample_3d_window, 'channel_layers'):
-            layer = self.sample_3d_window.channel_layers.get(channel)
+        # Toggle visibility on the actual napari layer
+        if self.channel_layers:
+            layer = self.channel_layers.get(channel)
             if layer is not None:
                 layer.visible = visible
 
@@ -2012,9 +2084,9 @@ class SampleView(QWidget):
         if channel in self.channel_max_labels:
             self.channel_max_labels[channel].setText(str(max_val))
 
-        # Update contrast on the actual napari layer via 3D window's channel_layers
-        if self.sample_3d_window and hasattr(self.sample_3d_window, 'channel_layers'):
-            layer = self.sample_3d_window.channel_layers.get(channel)
+        # Update contrast on the actual napari layer
+        if self.channel_layers:
+            layer = self.channel_layers.get(channel)
             if layer is not None:
                 layer.contrast_limits = [min_val, max_val]
 
@@ -2050,10 +2122,8 @@ class SampleView(QWidget):
                 self.logger.info(f"Channel {ch_id} auto-enabled (data received)")
 
     def _get_viewer(self):
-        """Get the napari viewer from the 3D window."""
-        if self.sample_3d_window:
-            return getattr(self.sample_3d_window, 'viewer', None)
-        return None
+        """Get the napari viewer owned by this Sample View."""
+        return self.viewer
 
     # ========== Dialog Launchers ==========
 
@@ -2074,7 +2144,7 @@ class SampleView(QWidget):
     def _on_viewer_controls_clicked(self) -> None:
         """Open viewer controls dialog for napari layer settings."""
         dialog = ViewerControlsDialog(
-            sample_3d_window=self.sample_3d_window,
+            viewer_container=self,  # SampleView now owns viewer and channel_layers
             config=self._config,
             parent=self
         )
@@ -2098,52 +2168,51 @@ class SampleView(QWidget):
 
     def _on_export_data_clicked(self) -> None:
         """Export accumulated 3D data to file."""
-        if not self.sample_3d_window:
-            self.logger.warning("No 3D window - cannot export data")
+        if not self.voxel_storage:
+            self.logger.warning("No voxel storage - cannot export data")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Not Ready",
+                              "Voxel storage not initialized.")
             return
 
-        # Forward to 3D window's export if available
-        if hasattr(self.sample_3d_window, 'export_data'):
-            self.sample_3d_window.export_data()
-        else:
-            from PyQt5.QtWidgets import QFileDialog, QMessageBox
-            from pathlib import Path
+        from PyQt5.QtWidgets import QFileDialog, QMessageBox
+        from pathlib import Path
 
-            # Get last-used path from configuration service
-            default_path = ""
+        # Get last-used path from configuration service
+        default_path = ""
+        if self._configuration_service:
+            saved_path = self._configuration_service.get_sample_3d_data_path()
+            if saved_path and Path(saved_path).exists():
+                default_path = saved_path
+
+        # Basic export dialog
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export 3D Data", default_path,
+            "TIFF Stack (*.tif);;NumPy Array (*.npy);;All Files (*)"
+        )
+        if file_path:
+            # Remember the directory for next time
             if self._configuration_service:
-                saved_path = self._configuration_service.get_sample_3d_data_path()
-                if saved_path and Path(saved_path).exists():
-                    default_path = saved_path
+                self._configuration_service.set_sample_3d_data_path(str(Path(file_path).parent))
 
-            # Basic export dialog
-            file_path, _ = QFileDialog.getSaveFileName(
-                self, "Export 3D Data", default_path,
-                "TIFF Stack (*.tif);;NumPy Array (*.npy);;All Files (*)"
-            )
-            if file_path:
-                # Remember the directory for next time
-                if self._configuration_service:
-                    self._configuration_service.set_sample_3d_data_path(str(Path(file_path).parent))
-
-                try:
-                    if self.voxel_storage:
-                        data = self.voxel_storage.get_display_data()
-                        if data is not None and data.size > 0:
-                            if file_path.endswith('.npy'):
-                                np.save(file_path, data)
-                            else:
-                                import tifffile
-                                tifffile.imwrite(file_path, data)
-                            self.logger.info(f"Exported data to {file_path}")
-                            QMessageBox.information(self, "Export Complete",
-                                                  f"Data exported to:\n{file_path}")
+            try:
+                if self.voxel_storage:
+                    data = self.voxel_storage.get_display_data()
+                    if data is not None and data.size > 0:
+                        if file_path.endswith('.npy'):
+                            np.save(file_path, data)
                         else:
-                            QMessageBox.warning(self, "No Data",
-                                              "No data to export. Use 'Populate from Live' first.")
-                except Exception as e:
-                    self.logger.error(f"Export failed: {e}")
-                    QMessageBox.critical(self, "Export Error", f"Failed to export: {e}")
+                            import tifffile
+                            tifffile.imwrite(file_path, data)
+                        self.logger.info(f"Exported data to {file_path}")
+                        QMessageBox.information(self, "Export Complete",
+                                              f"Data exported to:\n{file_path}")
+                    else:
+                        QMessageBox.warning(self, "No Data",
+                                          "No data to export. Use 'Populate from Live' first.")
+            except Exception as e:
+                self.logger.error(f"Export failed: {e}")
+                QMessageBox.critical(self, "Export Error", f"Failed to export: {e}")
 
     def _on_load_test_data_clicked(self) -> None:
         """Load test data from file for benchmarking and testing."""
@@ -2182,8 +2251,7 @@ class SampleView(QWidget):
                     QMessageBox.information(self, "Data Loaded",
                                           f"Test data loaded successfully from:\n{file_path}")
                     # Update visualization
-                    if self.sample_3d_window:
-                        self.sample_3d_window._update_visualization()
+                    self._update_visualization()
                 else:
                     QMessageBox.warning(self, "Load Failed",
                                       f"Failed to load data from:\n{file_path}")
@@ -2265,8 +2333,7 @@ class SampleView(QWidget):
                                       f"Total voxels: {metadata.total_voxels:,}")
 
                 # Update visualization
-                if self.sample_3d_window:
-                    self.sample_3d_window._update_visualization()
+                self._update_visualization()
             elif file_path:
                 QMessageBox.warning(self, "Invalid Selection",
                                   "Please select a .zarr folder")
@@ -2294,48 +2361,205 @@ class SampleView(QWidget):
 
     def _on_populate_toggled(self, checked: bool) -> None:
         """Handle populate from live view start/stop."""
-        if not self.sample_3d_window:
-            self.logger.warning("No 3D window - cannot populate")
+        if not self.voxel_storage:
+            self.logger.warning("No voxel storage - cannot populate")
             self.populate_btn.setChecked(False)
             return
 
-        # Forward to the 3D window's populate functionality
-        if hasattr(self.sample_3d_window, 'populate_button'):
-            # Sync state with the 3D window's button
-            self.sample_3d_window.populate_button.setChecked(checked)
-            if checked:
-                self.populate_btn.setText("Stop Populating")
-                self.logger.info("Started populating from live view")
-            else:
-                self.populate_btn.setText("Populate from Live")
-                self.logger.info("Stopped populating from live view")
+        self._is_populating = checked
+        if checked:
+            self.populate_btn.setText("Stop Populating")
+            self.logger.info("Started populating from live view")
+            # Start populate timer if not running
+            if not hasattr(self, '_populate_timer'):
+                self._populate_timer = QTimer()
+                self._populate_timer.timeout.connect(self._on_populate_tick)
+                self._populate_timer.setInterval(100)  # 10 Hz
+            self._populate_timer.start()
         else:
-            self.logger.warning("3D window has no populate_button")
-            self.populate_btn.setChecked(False)
+            self.populate_btn.setText("Populate from Live")
+            self.logger.info("Stopped populating from live view")
+            if hasattr(self, '_populate_timer'):
+                self._populate_timer.stop()
+
+    def _on_populate_tick(self) -> None:
+        """Capture current frame and add to 3D volume."""
+        if not getattr(self, '_is_populating', False) or not self.camera_controller:
+            return
+
+        try:
+            if not self.camera_controller.is_live_view_active():
+                return
+
+            if not self.movement_controller:
+                return
+
+            position = self.movement_controller.get_position()
+            if position is None:
+                return
+
+            frame_data = self.camera_controller.get_latest_frame()
+            if frame_data is None:
+                return
+
+            image, header, frame_num = frame_data
+
+            # Detect active channel
+            channel_id = self._detect_active_channel()
+            if channel_id is None:
+                return
+
+            # Add frame to volume
+            stage_pos = {'x': position.x, 'y': position.y, 'z': position.z}
+            self.add_frame_to_volume(image, stage_pos, channel_id)
+
+        except Exception as e:
+            self.logger.debug(f"Populate tick error: {e}")
+
+    def _detect_active_channel(self) -> Optional[int]:
+        """Detect which channel is currently active based on laser state."""
+        if not self.laser_led_controller:
+            return 0
+
+        try:
+            laser_states = self.laser_led_controller.get_laser_states()
+            for ch_id, is_on in enumerate(laser_states[:4]):
+                if is_on:
+                    return ch_id
+            return None  # No laser on (probably LED)
+        except:
+            return 0
 
     def _on_clear_data_clicked(self) -> None:
         """Clear all accumulated 3D data."""
-        if not self.sample_3d_window:
-            self.logger.warning("No 3D window - cannot clear data")
+        if not self.voxel_storage:
+            self.logger.warning("No voxel storage - cannot clear data")
             return
 
-        # Forward to the 3D window's clear functionality
-        if hasattr(self.sample_3d_window, '_on_clear_data'):
-            self.sample_3d_window._on_clear_data()
-        elif hasattr(self.sample_3d_window, 'clear_button'):
-            self.sample_3d_window.clear_button.click()
-        else:
-            # Direct clear if voxel storage available
-            from PyQt5.QtWidgets import QMessageBox
-            reply = QMessageBox.question(
-                self, "Clear Data",
-                "Are you sure you want to clear all accumulated data?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        from PyQt5.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "Clear Data",
+            "Are you sure you want to clear all accumulated data?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            self.voxel_storage.clear()
+            self._update_visualization()
+            self.logger.info("Cleared all visualization data")
+
+    def add_frame_to_volume(self, image: np.ndarray, stage_position_mm: dict,
+                            channel_id: int, timestamp: float = None) -> None:
+        """
+        Place a camera frame into the 3D voxel storage.
+
+        Args:
+            image: Camera image
+            stage_position_mm: {'x': float, 'y': float, 'z': float} in mm
+            channel_id: Channel index (0-3)
+            timestamp: Optional timestamp in ms
+        """
+        if not self.voxel_storage:
+            return
+
+        try:
+            import time as time_module
+            if timestamp is None:
+                timestamp = time_module.time() * 1000
+
+            # Downsample image to storage resolution
+            downsampled = self._downsample_for_storage(image)
+            H, W = downsampled.shape
+
+            # Generate pixel coordinate grid
+            y_indices, x_indices = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
+
+            # Calculate FOV from magnification
+            FOV_mm = 0.5182  # Field of view in mm
+            FOV_um = FOV_mm * 1000
+            pixel_size_um = FOV_um / W
+
+            # Convert to camera space (micrometers)
+            camera_x = (x_indices - W/2) * pixel_size_um
+            camera_y = (y_indices - H/2) * pixel_size_um
+
+            # Stack into (N, 2) array
+            camera_coords_2d = np.column_stack([camera_x.ravel(), camera_y.ravel()])
+
+            # Get sample region center from config
+            sample_center = self._config.get('sample_chamber', {}).get(
+                'sample_region_center_um', [6655, 7000, 19250]
             )
-            if reply == QMessageBox.Yes:
-                if self.voxel_storage and hasattr(self.voxel_storage, 'clear'):
-                    self.voxel_storage.clear()
-                    self.logger.info("Cleared all visualization data")
+
+            # Get reference position
+            pos_x = stage_position_mm['x']
+            pos_y = stage_position_mm['y']
+            pos_z = stage_position_mm['z']
+
+            if self.voxel_storage.reference_stage_position is None:
+                ref_x, ref_y, ref_z = pos_x, pos_y, pos_z
+            else:
+                ref_x = self.voxel_storage.reference_stage_position['x']
+                ref_y = self.voxel_storage.reference_stage_position['y']
+                ref_z = self.voxel_storage.reference_stage_position['z']
+
+            # Calculate stage delta from reference
+            delta_x = pos_x - ref_x
+            delta_y = pos_y - ref_y
+            delta_z = pos_z - ref_z
+
+            # Storage position (ZYX order)
+            base_z_um = sample_center[2]
+            base_y_um = sample_center[1]
+            base_x_um = sample_center[0]
+
+            world_center_um = np.array([
+                base_z_um - delta_z * 1000,
+                base_y_um + delta_y * 1000,
+                base_x_um - delta_x * 1000
+            ])
+
+            # Create 3D coords
+            slice_thickness_um = 100
+            num_pixels = len(camera_coords_2d)
+            z_offsets = np.linspace(-slice_thickness_um/2, slice_thickness_um/2, num_pixels)
+
+            camera_offsets_3d = np.column_stack([
+                z_offsets,
+                camera_coords_2d[:, 1],
+                camera_coords_2d[:, 0]
+            ])
+
+            world_coords_3d = camera_offsets_3d + world_center_um
+            values = downsampled.ravel()
+
+            # Update voxel storage
+            self.voxel_storage.update_from_frame(
+                world_coords_3d, values, channel_id,
+                stage_position_mm, timestamp
+            )
+
+            # Trigger channel availability check
+            if hasattr(self, '_channel_availability_timer'):
+                self._channel_availability_timer.start()
+
+        except Exception as e:
+            self.logger.debug(f"Error in add_frame_to_volume: {e}")
+
+    def _downsample_for_storage(self, image: np.ndarray) -> np.ndarray:
+        """Downsample camera image to storage resolution."""
+        from scipy.ndimage import zoom
+
+        if image.ndim == 3:
+            image = image[:, :, 0]
+
+        # Calculate downsample factor (camera ~2000px to storage ~100px)
+        target_size = 100
+        current_size = max(image.shape)
+        factor = target_size / current_size
+
+        if factor < 1:
+            return zoom(image, factor, order=1).astype(np.uint16)
+        return image.astype(np.uint16)
 
         # Reset channel controls to disabled
         channels_config = self._config.get('channels', [])
@@ -2359,23 +2583,33 @@ class SampleView(QWidget):
             if xl:
                 xl.setEnabled(False)
 
-    # ========== 3D Viewer Integration (reuses existing Sample3DVisualizationWindow) ==========
+    # ========== 3D Viewer Integration ==========
 
     def _embed_3d_viewer(self) -> None:
-        """Embed the napari viewer from the existing Sample3DVisualizationWindow."""
-        if not self.sample_3d_window:
-            self.logger.warning("No sample_3d_window available - 3D viewer not embedded")
+        """Create and embed the napari 3D viewer."""
+        if not NAPARI_AVAILABLE:
+            self.logger.warning("napari not available - 3D viewer not created")
+            return
+
+        if not self.voxel_storage:
+            self.logger.warning("No voxel_storage available - 3D viewer not created")
             return
 
         try:
-            # Get the viewer from the existing 3D window
-            viewer = getattr(self.sample_3d_window, 'viewer', None)
-            if not viewer:
-                self.logger.warning("Sample3DVisualizationWindow has no viewer")
-                return
+            # Create napari viewer with axis display
+            self.viewer = napari.Viewer(ndisplay=3, show=False)
+
+            # Enable axis display
+            self.viewer.axes.visible = True
+            self.viewer.axes.labels = True
+            self.viewer.axes.colored = True
+
+            # Set initial camera orientation
+            self.viewer.camera.angles = (0, 0, 180)
+            self.viewer.camera.zoom = 1.57
 
             # Get the napari Qt widget
-            napari_window = viewer.window
+            napari_window = self.viewer.window
             viewer_widget = napari_window._qt_viewer
 
             # Replace placeholder with actual viewer
@@ -2388,16 +2622,133 @@ class SampleView(QWidget):
                         self.viewer_placeholder.deleteLater()
                         self.viewer_placeholder = None
 
-            self.logger.info("Embedded existing 3D viewer from Sample3DVisualizationWindow")
+            # Setup visualization components
+            self._setup_chamber_visualization()
+            self._setup_data_layers()
 
-            # Reset camera to desired zoom/angles after embedding
-            # Use a short delay to ensure widget is fully settled after re-parenting
+            self.logger.info("Created napari 3D viewer successfully")
+
+            # Reset camera after setup
             QTimer.singleShot(100, self._reset_viewer_camera)
 
         except Exception as e:
-            self.logger.error(f"Failed to embed 3D viewer: {e}")
+            self.logger.error(f"Failed to create 3D viewer: {e}")
             import traceback
             traceback.print_exc()
+            self.viewer = None
+
+    def _setup_chamber_visualization(self) -> None:
+        """Setup the fixed chamber wireframe as visual guide."""
+        if not self.viewer or not self.voxel_storage:
+            return
+
+        try:
+            dims = self.voxel_storage.display_dims  # (Z, Y, X) order
+
+            # Define the 8 corners of the box in napari (Z, Y, X) order
+            corners = np.array([
+                [0, 0, 0],
+                [dims[0]-1, 0, 0],
+                [dims[0]-1, 0, dims[2]-1],
+                [0, 0, dims[2]-1],
+                [0, dims[1]-1, 0],
+                [dims[0]-1, dims[1]-1, 0],
+                [dims[0]-1, dims[1]-1, dims[2]-1],
+                [0, dims[1]-1, dims[2]-1]
+            ])
+
+            # Z edges (yellow)
+            z_edges = [
+                [corners[0], corners[1]],
+                [corners[3], corners[2]],
+                [corners[4], corners[5]],
+                [corners[7], corners[6]]
+            ]
+
+            # Y edges (magenta)
+            y_edges = [
+                [corners[0], corners[4]],
+                [corners[1], corners[5]],
+                [corners[2], corners[6]],
+                [corners[3], corners[7]]
+            ]
+
+            # X edges (cyan)
+            x_edges = [
+                [corners[0], corners[3]],
+                [corners[1], corners[2]],
+                [corners[4], corners[7]],
+                [corners[5], corners[6]]
+            ]
+
+            self.viewer.add_shapes(
+                data=z_edges, shape_type='line', name='Chamber Z-edges',
+                edge_color='#8B8B00', edge_width=2, opacity=0.6
+            )
+            self.viewer.add_shapes(
+                data=y_edges, shape_type='line', name='Chamber Y-edges',
+                edge_color='#8B008B', edge_width=2, opacity=0.6
+            )
+            self.viewer.add_shapes(
+                data=x_edges, shape_type='line', name='Chamber X-edges',
+                edge_color='#008B8B', edge_width=2, opacity=0.6
+            )
+
+        except Exception as e:
+            self.logger.warning(f"Failed to setup chamber visualization: {e}")
+
+    def _setup_data_layers(self) -> None:
+        """Setup napari layers for multi-channel data."""
+        if not self.viewer or not self.voxel_storage:
+            return
+
+        channels_config = self._config.get('channels', [
+            {'id': 0, 'name': '405nm (DAPI)', 'default_colormap': 'cyan', 'default_visible': True},
+            {'id': 1, 'name': '488nm (GFP)', 'default_colormap': 'green', 'default_visible': True},
+            {'id': 2, 'name': '561nm (RFP)', 'default_colormap': 'red', 'default_visible': True},
+            {'id': 3, 'name': '640nm (Far-Red)', 'default_colormap': 'magenta', 'default_visible': False}
+        ])
+
+        for ch_config in channels_config:
+            ch_id = ch_config['id']
+            ch_name = ch_config['name']
+
+            # Create empty volume
+            empty_volume = np.zeros(self.voxel_storage.display_dims, dtype=np.uint16)
+
+            # Add layer
+            layer = self.viewer.add_image(
+                empty_volume,
+                name=ch_name,
+                colormap=ch_config.get('default_colormap', 'gray'),
+                visible=ch_config.get('default_visible', True),
+                blending='additive',
+                opacity=0.8,
+                rendering='mip',
+                contrast_limits=(0, 50)
+            )
+
+            self.channel_layers[ch_id] = layer
+
+        self.logger.info(f"Setup {len(self.channel_layers)} data layers")
+
+    def _update_visualization(self) -> None:
+        """Update the 3D visualization with latest data from voxel storage."""
+        if not self.viewer or not self.voxel_storage:
+            return
+
+        try:
+            for ch_id in range(self.voxel_storage.num_channels):
+                if ch_id in self.channel_layers:
+                    if not self.voxel_storage.has_data(ch_id):
+                        continue
+
+                    # Get display volume (transformed if needed)
+                    volume = self.voxel_storage.get_display_volume(ch_id)
+                    self.channel_layers[ch_id].data = volume
+
+        except Exception as e:
+            self.logger.debug(f"Error updating visualization: {e}")
 
     def _reset_viewer_camera(self) -> None:
         """Reset the napari viewer camera zoom (preserves orientation from 3D window)."""
@@ -2495,9 +2846,12 @@ class SampleView(QWidget):
             self.logger.info("Reset camera view to defaults (orientation + zoom=1.57)")
 
     def _update_info_displays(self) -> None:
-        """Periodically update zoom and FPS displays."""
+        """Periodically update zoom, FPS, and data stats displays."""
         # Update zoom
         self._update_zoom_display()
+
+        # Update data stats (memory/voxels)
+        self._update_data_stats()
 
         # Update FPS from camera controller if live
         if self._live_view_active and self.camera_controller:
@@ -2508,6 +2862,37 @@ class SampleView(QWidget):
                 self.fps_label.setText("FPS: --")
         elif not self._live_view_active:
             self.fps_label.setText("FPS: --")
+
+    def _update_data_stats(self) -> None:
+        """Update memory and voxel count labels from voxel storage."""
+        if not self.voxel_storage:
+            return
+
+        try:
+            stats = self.voxel_storage.get_memory_usage()
+            self.memory_label.setText(f"Memory: {stats['total_mb']:.1f} MB")
+            voxels = stats['storage_voxels']
+            if voxels >= 1_000_000:
+                self.voxel_label.setText(f"Voxels: {voxels/1_000_000:.1f}M")
+            elif voxels >= 1_000:
+                self.voxel_label.setText(f"Voxels: {voxels/1_000:.1f}K")
+            else:
+                self.voxel_label.setText(f"Voxels: {voxels:,}")
+        except Exception as e:
+            self.logger.debug(f"Error updating data stats: {e}")
+
+    def _on_transform_quality_changed(self, fast_mode: bool) -> None:
+        """Handle Fast Transform checkbox toggle."""
+        try:
+            from py2flamingo.visualization.coordinate_transforms import TransformQuality
+            quality = TransformQuality.FAST if fast_mode else TransformQuality.QUALITY
+            if self.voxel_storage:
+                self.voxel_storage.transform_quality = quality
+                # Trigger visualization update
+                self._update_visualization()
+            self.logger.info(f"Transform quality changed to: {quality.name}")
+        except Exception as e:
+            self.logger.error(f"Error changing transform quality: {e}")
 
     def _on_live_settings_clicked(self) -> None:
         """Open Live Display (image controls) window for advanced settings."""
@@ -2586,7 +2971,7 @@ class SampleView(QWidget):
 
     def _update_plane_overlays(self) -> None:
         """Update overlay positions on all plane viewers."""
-        if not self.sample_3d_window:
+        if not self.viewer:
             return
 
         try:
@@ -2905,26 +3290,23 @@ class SampleView(QWidget):
             self.update_workflow_progress(status, overall_pct, "--:--")
 
         # Set reference on first frame of acquisition
-        if not self._tile_reference_set and self.sample_3d_window:
-            storage = getattr(self.sample_3d_window, 'voxel_storage', None)
-            if storage:
-                storage.set_reference_position({
-                    'x': position['x'],
-                    'y': position['y'],
-                    'z': z_position,
-                    'r': 0
-                })
-                self._tile_reference_set = True
-                self.logger.info(f"Sample View: Tile reference set to X={position['x']:.2f}, "
-                                f"Y={position['y']:.2f}, Z={z_position:.3f}")
+        if not self._tile_reference_set and self.voxel_storage:
+            self.voxel_storage.set_reference_position({
+                'x': position['x'],
+                'y': position['y'],
+                'z': z_position,
+                'r': 0
+            })
+            self._tile_reference_set = True
+            self.logger.info(f"Sample View: Tile reference set to X={position['x']:.2f}, "
+                            f"Y={position['y']:.2f}, Z={z_position:.3f}")
 
-        # Delegate to unified method on the 3D visualization window
-        if self.sample_3d_window:
-            self.sample_3d_window.add_frame_to_volume(
-                image=image,
-                stage_position_mm={'x': position['x'], 'y': position['y'], 'z': z_position},
-                channel_id=self._current_channel
-            )
+        # Add frame to volume
+        self.add_frame_to_volume(
+            image=image,
+            stage_position_mm={'x': position['x'], 'y': position['y'], 'z': z_position},
+            channel_id=self._current_channel
+        )
 
         # Kick the debounced channel-availability check so checkboxes
         # get enabled once storage reports has_data()==True.

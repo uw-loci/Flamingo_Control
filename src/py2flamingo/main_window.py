@@ -58,7 +58,6 @@ class MainWindow(QMainWindow):
                  camera_live_viewer=None,
                  image_controls_window=None,
                  stage_chamber_visualization_window=None,
-                 sample_3d_visualization_window=None,
                  app=None,
                  geometry_manager: Optional[WindowGeometryManager] = None):
         """Initialize main window with view components.
@@ -72,7 +71,6 @@ class MainWindow(QMainWindow):
             camera_live_viewer: Optional CameraLiveViewer instance
             image_controls_window: Optional ImageControlsWindow instance
             stage_chamber_visualization_window: Optional StageChamberVisualizationWindow instance
-            sample_3d_visualization_window: Optional Sample3DVisualizationWindow instance
             app: Optional FlamingoApplication instance for accessing app-level resources
             geometry_manager: Optional WindowGeometryManager for saving/restoring geometry
         """
@@ -89,7 +87,6 @@ class MainWindow(QMainWindow):
         self.camera_live_viewer = camera_live_viewer
         self.image_controls_window = image_controls_window
         self.stage_chamber_visualization_window = stage_chamber_visualization_window
-        self.sample_3d_visualization_window = sample_3d_visualization_window
 
         self._setup_ui()
         self._setup_menu()
@@ -234,14 +231,6 @@ class MainWindow(QMainWindow):
             chamber_viz_action.triggered.connect(self._show_stage_chamber_visualization)
             view_menu.addAction(chamber_viz_action)
 
-        # 3D Sample Visualization action
-        if self.sample_3d_visualization_window is not None:
-            sample_3d_action = QAction("&3D Sample Visualization...", self)
-            sample_3d_action.setShortcut("Ctrl+3")
-            sample_3d_action.setStatusTip("Open 3D Sample Visualization window with rotation-aware data accumulation")
-            sample_3d_action.triggered.connect(self._show_sample_3d_visualization)
-            view_menu.addAction(sample_3d_action)
-
         # Tools menu (requires connection)
         tools_menu = menubar.addMenu("&Tools")
 
@@ -327,13 +316,6 @@ class MainWindow(QMainWindow):
             self.stage_chamber_visualization_window.show()
             self.stage_chamber_visualization_window.raise_()  # Bring to front
             self.stage_chamber_visualization_window.activateWindow()  # Give it focus
-
-    def _show_sample_3d_visualization(self):
-        """Show 3D Sample Visualization window."""
-        if self.sample_3d_visualization_window is not None:
-            self.sample_3d_visualization_window.show()
-            self.sample_3d_visualization_window.raise_()  # Bring to front
-            self.sample_3d_visualization_window.activateWindow()  # Give it focus
 
     # ========== Tools Menu Handlers ==========
 
@@ -697,13 +679,6 @@ class MainWindow(QMainWindow):
                 logger.info("Closed stage chamber visualization window")
             except Exception as e:
                 logger.error(f"Error closing stage chamber visualization: {e}")
-
-        if self.sample_3d_visualization_window is not None:
-            try:
-                self.sample_3d_visualization_window.close()
-                logger.info("Closed 3D sample visualization window")
-            except Exception as e:
-                logger.error(f"Error closing 3D sample visualization: {e}")
 
         # Accept the close event
         event.accept()

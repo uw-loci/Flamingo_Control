@@ -34,7 +34,6 @@ from py2flamingo.controllers.camera_controller import CameraController
 from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, ImageControlsWindow, StageControlView, SampleView
 from py2flamingo.views.camera_live_viewer import CameraLiveViewer
 from py2flamingo.views.stage_chamber_visualization_window import StageChamberVisualizationWindow
-from py2flamingo.views.sample_3d_visualization_window import Sample3DVisualizationWindow
 
 
 class FlamingoApplication(QObject):
@@ -121,8 +120,8 @@ class FlamingoApplication(QObject):
         self.camera_live_viewer: Optional[CameraLiveViewer] = None
         self.image_controls_window: Optional[ImageControlsWindow] = None
         self.stage_chamber_visualization_window: Optional[StageChamberVisualizationWindow] = None
-        self.sample_3d_visualization_window: Optional[Sample3DVisualizationWindow] = None
         self.sample_view: Optional['SampleView'] = None  # Unified sample viewing interface
+        self.voxel_storage = None  # DualResolutionVoxelStorage for 3D visualization
 
         # Setup logging
         self.logger = logging.getLogger(__name__)
@@ -306,16 +305,9 @@ class FlamingoApplication(QObject):
         # Window starts hidden - user can open it via menu
         self.stage_chamber_visualization_window.hide()
 
-        # Create 3D sample visualization window
-        self.logger.debug("Creating 3D sample visualization window...")
-        self.sample_3d_visualization_window = Sample3DVisualizationWindow(
-            movement_controller=self.movement_controller,
-            camera_controller=self.camera_controller,
-            laser_led_controller=self.laser_led_controller,
-            geometry_manager=self.geometry_manager
-        )
-        # Window starts hidden - user can open it via menu
-        self.sample_3d_visualization_window.hide()
+        # Create voxel storage for 3D visualization (used by Sample View)
+        self.logger.debug("Creating voxel storage for 3D visualization...")
+        self._create_voxel_storage()
 
         # Connect image controls to camera live viewer
         if self.image_controls_window and self.camera_live_viewer:
@@ -539,6 +531,146 @@ class FlamingoApplication(QObject):
         if self.stage_control_view:
             self.stage_control_view._set_controls_enabled(False)
 
+    def _create_voxel_storage(self):
+        """Create voxel storage for 3D visualization.
+
+        Creates DualResolutionVoxelStorage and CoordinateTransformer
+        that will be passed to Sample View for 3D data accumulation.
+        """
+        import yaml
+        from pathlib import Path
+
+        # Load visualization config
+        config_path = Path(__file__).parent / "configs" / "visualization_3d_config.yaml"
+        if config_path.exists():
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+            self.logger.info(f"Loaded 3D visualization config from {config_path}")
+        else:
+            self.logger.warning("Using default 3D visualization config")
+            config = self._get_default_visualization_config()
+
+        try:
+            from py2flamingo.visualization.dual_resolution_storage import DualResolutionVoxelStorage, DualResolutionConfig
+            from py2flamingo.visualization.coordinate_transforms import CoordinateTransformer, PhysicalToNapariMapper
+
+            # Initialize coordinate mapper
+            mapper_config = {
+                'x_range_mm': config['stage_control']['x_range_mm'],
+                'y_range_mm': config['stage_control']['y_range_mm'],
+                'z_range_mm': config['stage_control']['z_range_mm'],
+                'voxel_size_um': config['display']['voxel_size_um'][0],
+                'invert_x': config['stage_control']['invert_x_default'],
+                'invert_z': config['stage_control']['invert_z_default']
+            }
+            coord_mapper = PhysicalToNapariMapper(mapper_config)
+
+            # Initialize coordinate transformer
+            sample_center_um = config['sample_chamber']['sample_region_center_um']
+            transformer = CoordinateTransformer(sample_center=sample_center_um)
+
+            # Get dimensions from coordinate mapper
+            mapper_dims = coord_mapper.get_napari_dimensions()
+            voxel_size_um = config['display']['voxel_size_um'][0]
+
+            # Napari expects dimensions in (Z, Y, X) order
+            napari_dims = (mapper_dims[2], mapper_dims[1], mapper_dims[0])
+
+            # Calculate chamber dimensions in µm (Z, Y, X order)
+            chamber_dims_um = (
+                napari_dims[0] * voxel_size_um,
+                napari_dims[1] * voxel_size_um,
+                napari_dims[2] * voxel_size_um
+            )
+
+            # Calculate chamber origin in world coordinates
+            chamber_origin_um = (
+                config['stage_control']['z_range_mm'][0] * 1000,
+                config['stage_control']['y_range_mm'][0] * 1000,
+                config['stage_control']['x_range_mm'][0] * 1000
+            )
+
+            # Check for asymmetric bounds
+            half_widths = None
+            if all(key in config['sample_chamber'] for key in
+                   ['sample_region_half_width_x_um', 'sample_region_half_width_y_um', 'sample_region_half_width_z_um']):
+                half_widths = (
+                    config['sample_chamber']['sample_region_half_width_z_um'],
+                    config['sample_chamber']['sample_region_half_width_y_um'],
+                    config['sample_chamber']['sample_region_half_width_x_um']
+                )
+
+            # Reorder sample_region_center from config's X,Y,Z to storage's Z,Y,X format
+            center_xyz = config['sample_chamber']['sample_region_center_um']
+            center_zyx = (center_xyz[2], center_xyz[1], center_xyz[0])
+
+            # Reorder voxel sizes from X,Y,Z to Z,Y,X
+            storage_voxel_xyz = config['storage']['voxel_size_um']
+            storage_voxel_zyx = (storage_voxel_xyz[2], storage_voxel_xyz[1], storage_voxel_xyz[0])
+
+            display_voxel_xyz = config['display']['voxel_size_um']
+            display_voxel_zyx = (display_voxel_xyz[2], display_voxel_xyz[1], display_voxel_xyz[0])
+
+            storage_config = DualResolutionConfig(
+                storage_voxel_size=storage_voxel_zyx,
+                display_voxel_size=display_voxel_zyx,
+                chamber_dimensions=chamber_dims_um,
+                chamber_origin=chamber_origin_um,
+                sample_region_center=center_zyx,
+                sample_region_radius=config['sample_chamber']['sample_region_radius_um'],
+                sample_region_half_widths=half_widths,
+                invert_x=config['stage_control']['invert_x_default']
+            )
+
+            self.voxel_storage = DualResolutionVoxelStorage(storage_config)
+            self.voxel_storage.set_coordinate_transformer(transformer)
+
+            # Store config and transformer for Sample View to use
+            self._visualization_config = config
+            self._coord_mapper = coord_mapper
+            self._coord_transformer = transformer
+
+            self.logger.info(f"Created voxel storage: display dims {self.voxel_storage.display_dims}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to create voxel storage: {e}")
+            self.voxel_storage = None
+
+    def _get_default_visualization_config(self):
+        """Return default visualization config if YAML not found."""
+        return {
+            'display': {
+                'voxel_size_um': [50, 50, 50],
+                'fps_target': 30,
+                'downsample_factor': 4,
+                'max_channels': 4
+            },
+            'storage': {
+                'voxel_size_um': [5, 5, 5],
+                'backend': 'sparse',
+                'max_memory_mb': 2000
+            },
+            'sample_chamber': {
+                'inner_dimensions_mm': [10, 10, 43],
+                'holder_diameter_mm': 1.0,
+                'sample_region_center_um': [6655, 7000, 19250],
+                'sample_region_radius_um': 2000,
+            },
+            'stage_control': {
+                'x_range_mm': [1.0, 12.31],
+                'y_range_mm': [-5.0, 10.0],
+                'z_range_mm': [12.5, 26.0],
+                'invert_x_default': False,
+                'invert_z_default': False,
+            },
+            'channels': [
+                {'id': 0, 'name': '405nm (DAPI)', 'default_colormap': 'cyan', 'default_visible': True},
+                {'id': 1, 'name': '488nm (GFP)', 'default_colormap': 'green', 'default_visible': True},
+                {'id': 2, 'name': '561nm (RFP)', 'default_colormap': 'red', 'default_visible': True},
+                {'id': 3, 'name': '640nm (Far-Red)', 'default_colormap': 'magenta', 'default_visible': False}
+            ]
+        }
+
     def _open_sample_view(self):
         """Open the integrated Sample View window.
 
@@ -548,18 +680,13 @@ class FlamingoApplication(QObject):
 
         if self.sample_view is None:
             self.logger.debug("Creating new SampleView instance")
-            # Get voxel_storage from 3D visualization window if available
-            voxel_storage = None
-            if self.sample_3d_visualization_window:
-                voxel_storage = getattr(self.sample_3d_visualization_window, 'voxel_storage', None)
 
             self.sample_view = SampleView(
                 camera_controller=self.camera_controller,
                 movement_controller=self.movement_controller,
                 laser_led_controller=self.laser_led_controller,
-                voxel_storage=voxel_storage,
+                voxel_storage=self.voxel_storage,
                 image_controls_window=self.image_controls_window,
-                sample_3d_window=self.sample_3d_visualization_window,
                 geometry_manager=self.geometry_manager,
                 configuration_service=self.config_service,
             )
@@ -619,7 +746,6 @@ class FlamingoApplication(QObject):
             camera_live_viewer=self.camera_live_viewer,
             image_controls_window=self.image_controls_window,
             stage_chamber_visualization_window=self.stage_chamber_visualization_window,
-            sample_3d_visualization_window=self.sample_3d_visualization_window,
             app=self,  # Pass FlamingoApplication reference for accessing sample_view etc.
             geometry_manager=self.geometry_manager
         )

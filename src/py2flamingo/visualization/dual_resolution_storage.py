@@ -36,6 +36,9 @@ class DualResolutionConfig:
     # Asymmetric storage bounds (optional, overrides radius if specified)
     sample_region_half_widths: Optional[Tuple[float, float, float]] = None  # (X, Y, Z) half-widths
 
+    # Whether to invert X axis (stage X direction is mirrored in display)
+    invert_x: bool = False
+
     @property
     def resolution_ratio(self) -> Tuple[int, int, int]:
         """Calculate the resolution ratio between storage and display."""
@@ -742,7 +745,9 @@ class DualResolutionVoxelStorage:
         # Full offset from reference in ZYX order
         # Y is NEGATED to match the storage Y inversion (storage uses +delta_y for napari display)
         # This ensures the transform shift compensates correctly when the stage moves
-        offset_voxels = np.array([dz, -dy, dx]) * 1000 / self.config.display_voxel_size[0]
+        # Negate X delta when invert_x is enabled (stage X direction is mirrored in display)
+        dx_display = -dx if self.config.invert_x else dx
+        offset_voxels = np.array([dz, -dy, dx_display]) * 1000 / self.config.display_voxel_size[0]
 
         # Check if translation is significant
         if np.max(np.abs(offset_voxels)) < 0.5:
