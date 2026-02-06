@@ -797,6 +797,12 @@ class SampleView(QWidget):
         self._channel_availability_timer.setInterval(500)
         self._channel_availability_timer.timeout.connect(self._update_channel_availability)
 
+        # Debounced timer for visualization updates during acquisition
+        self._visualization_update_timer = QTimer(self)
+        self._visualization_update_timer.setSingleShot(True)
+        self._visualization_update_timer.setInterval(500)  # Update 500ms after last frame
+        self._visualization_update_timer.timeout.connect(self._update_visualization)
+
         self.logger.info("SampleView initialized")
 
     def _load_visualization_config(self) -> Dict[str, Any]:
@@ -2533,17 +2539,24 @@ class SampleView(QWidget):
             values = downsampled.ravel()
 
             # Update voxel storage
-            self.voxel_storage.update_from_frame(
-                world_coords_3d, values, channel_id,
-                stage_position_mm, timestamp
+            self.voxel_storage.update_storage(
+                channel_id=channel_id,
+                world_coords=world_coords_3d,
+                pixel_values=values,
+                timestamp=timestamp,
+                update_mode='maximum'
             )
 
             # Trigger channel availability check
             if hasattr(self, '_channel_availability_timer'):
                 self._channel_availability_timer.start()
 
+            # Trigger debounced visualization update
+            if hasattr(self, '_visualization_update_timer'):
+                self._visualization_update_timer.start()
+
         except Exception as e:
-            self.logger.debug(f"Error in add_frame_to_volume: {e}")
+            self.logger.error(f"Error in add_frame_to_volume: {e}", exc_info=True)
 
     def _downsample_for_storage(self, image: np.ndarray) -> np.ndarray:
         """Downsample camera image to storage resolution."""
@@ -3312,6 +3325,7 @@ class SampleView(QWidget):
         # get enabled once storage reports has_data()==True.
         # The timer is single-shot, so repeated .start() calls just reset it.
         self._channel_availability_timer.start()
+        self._visualization_update_timer.start()
 
         self.logger.debug(f"Sample View: Accumulated Z-plane {z_index} for tile "
                          f"({position['x']:.2f}, {position['y']:.2f})")
