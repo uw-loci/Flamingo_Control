@@ -1209,13 +1209,24 @@ class LED2DOverviewDialog(PersistentDialog):
         """Load and display a previously saved scan."""
         from pathlib import Path
 
+        # Get last-used path from configuration service (independent of other dialogs)
+        start_path = ""
+        if self._app and hasattr(self._app, 'config_service'):
+            saved_path = self._app.config_service.get_led_2d_session_path()
+            if saved_path:
+                start_path = saved_path
+
         folder = QFileDialog.getExistingDirectory(
             self, "Select Saved Scan Folder",
-            "",
+            start_path,
             QFileDialog.ShowDirsOnly
         )
         if not folder:
             return
+
+        # Save the selected path for next time
+        if self._app and hasattr(self._app, 'config_service'):
+            self._app.config_service.set_led_2d_session_path(folder)
 
         try:
             from .led_2d_overview_result import LED2DOverviewResultWindow

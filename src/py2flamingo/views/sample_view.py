@@ -2321,14 +2321,25 @@ class SampleView(QWidget):
                                   "zarr library not installed.\nInstall with: pip install zarr")
                 return
 
+            # Get last-used path from configuration service (independent of other dialogs)
+            start_path = str(SessionManager().session_dir)
+            if self._configuration_service:
+                saved_path = self._configuration_service.get_zarr_session_path()
+                if saved_path:
+                    start_path = saved_path
+
             # Open file dialog for .zarr directory
             file_path = QFileDialog.getExistingDirectory(
                 self, "Select Session (.zarr folder)",
-                str(SessionManager().session_dir)
+                start_path
             )
 
             if file_path and file_path.endswith('.zarr'):
                 from pathlib import Path
+
+                # Save the parent directory for next time
+                if self._configuration_service:
+                    self._configuration_service.set_zarr_session_path(str(Path(file_path).parent))
 
                 manager = SessionManager()
                 metadata = manager.restore_to_storage(self.voxel_storage, Path(file_path))

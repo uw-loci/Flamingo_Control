@@ -395,6 +395,7 @@ class ConfigurationService:
     # Session save path methods
     LED_2D_SESSION_PATH_KEY = 'led_2d_overview_session_path'
     MIP_SESSION_PATH_KEY = 'mip_overview_session_path'
+    ZARR_SESSION_PATH_KEY = 'zarr_3d_session_path'
 
     def get_led_2d_session_path(self) -> Optional[str]:
         """Get the last-used LED 2D Overview session save path.
@@ -412,6 +413,23 @@ class ConfigurationService:
         """
         self.config[self.LED_2D_SESSION_PATH_KEY] = path
         self.logger.info(f"Set LED 2D session path: {path}")
+
+    def get_zarr_session_path(self) -> Optional[str]:
+        """Get the last-used 3D Zarr session path (Sample View Load Session).
+
+        Returns:
+            Path string if set, None otherwise
+        """
+        return self.config.get(self.ZARR_SESSION_PATH_KEY)
+
+    def set_zarr_session_path(self, path: str) -> None:
+        """Set the 3D Zarr session path (Sample View Load Session).
+
+        Args:
+            path: Directory path for Zarr sessions
+        """
+        self.config[self.ZARR_SESSION_PATH_KEY] = path
+        self.logger.info(f"Set Zarr session path: {path}")
 
     def get_mip_session_path(self) -> Optional[str]:
         """Get the last-used MIP Overview session save path.
