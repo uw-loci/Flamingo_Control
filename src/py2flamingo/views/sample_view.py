@@ -35,6 +35,7 @@ from superqt import QRangeSlider
 
 from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
 from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR, WARNING_BG
+from py2flamingo.services.position_preset_service import PositionPresetService
 
 # Import camera state for live view control
 from py2flamingo.controllers.camera_controller import CameraState
@@ -776,6 +777,13 @@ class SampleView(QWidget):
         self.current_rotation = {'ry': 0}  # Current rotation angle
         self.coord_mapper = None  # Will be set from voxel_storage
 
+        # Stage position tracking for dynamic 3D updates
+        self.last_stage_position = {'x': 0, 'y': 0, 'z': 0, 'r': 0}
+        self._pending_stage_update = None
+
+        # Load objective calibration from presets
+        self._load_objective_calibration()
+
         # Setup window - sized for 3-column layout
         self.setWindowTitle("Sample View")
         self.setWindowIcon(get_app_icon())  # Use flamingo icon
@@ -814,6 +822,11 @@ class SampleView(QWidget):
         self._visualization_update_timer.setInterval(500)  # Update 500ms after last frame
         self._visualization_update_timer.timeout.connect(self._update_visualization)
 
+        # Throttled timer for stage position → 3D visualization updates (20 FPS max)
+        self._stage_update_timer = QTimer(self)
+        self._stage_update_timer.setInterval(50)
+        self._stage_update_timer.timeout.connect(self._process_pending_stage_update)
+
         self.logger.info("SampleView initialized")
 
     def _load_visualization_config(self) -> Dict[str, Any]:
@@ -835,6 +848,73 @@ class SampleView(QWidget):
                 'invert_z_default': False,
             }
         }
+
+    def _load_objective_calibration(self):
+        """Load objective XY calibration from position presets.
+
+        The calibration point is saved as "Tip of sample mount" in position presets.
+        This represents the stage position when the sample holder tip is centered
+        in the live view - i.e., where the optical axis intersects the sample plane.
+        """
+        try:
+            preset_service = PositionPresetService()
+            preset_name = self._config.get('focus_frame', {}).get(
+                'calibration_preset_name', 'Tip of sample mount'
+            )
+
+            if preset_service.preset_exists(preset_name):
+                preset = preset_service.get_preset(preset_name)
+                self.objective_xy_calibration = {
+                    'x': preset.x,
+                    'y': preset.y,
+                    'z': preset.z,
+                    'r': preset.r
+                }
+                self.logger.info(f"Loaded objective calibration from '{preset_name}': "
+                               f"X={preset.x:.3f}, Y={preset.y:.3f}, Z={preset.z:.3f}")
+            else:
+                # Use default center position if not calibrated
+                self.objective_xy_calibration = {
+                    'x': self._config.get('stage_control', {}).get('x_default_mm', 6.0),
+                    'y': self._config.get('stage_control', {}).get('y_default_mm', 7.0),
+                    'z': self._config.get('stage_control', {}).get('z_default_mm', 19.0),
+                    'r': 0
+                }
+                self.logger.info(f"No '{preset_name}' calibration found, using defaults")
+        except Exception as e:
+            self.logger.warning(f"Failed to load objective calibration: {e}")
+            self.objective_xy_calibration = None
+
+    def set_objective_calibration(self, x: float, y: float, z: float, r: float = 0):
+        """Set and save the objective XY calibration point.
+
+        Args:
+            x, y, z: Stage position in mm when sample holder tip is centered in live view
+            r: Rotation angle (stored but not critical for calibration)
+        """
+        from py2flamingo.models.microscope import Position
+
+        self.objective_xy_calibration = {'x': x, 'y': y, 'z': z, 'r': r}
+
+        # Save to position presets
+        try:
+            preset_service = PositionPresetService()
+            preset_name = self._config.get('focus_frame', {}).get(
+                'calibration_preset_name', 'Tip of sample mount'
+            )
+            position = Position(x=x, y=y, z=z, r=r)
+            preset_service.save_preset(
+                preset_name, position,
+                "Calibration point: sample holder tip centered in live view"
+            )
+            self.logger.info(f"Saved objective calibration to '{preset_name}': "
+                           f"X={x:.3f}, Y={y:.3f}, Z={z:.3f}")
+        except Exception as e:
+            self.logger.error(f"Failed to save objective calibration: {e}")
+
+        # Update focus frame if it exists
+        if self.viewer and 'XY Focus Frame' in self.viewer.layers:
+            self._update_xy_focus_frame()
 
     def _load_channel_settings_from_config(self) -> Dict[int, Dict[str, Any]]:
         """Load channel settings (contrast, visibility) from visualization config.
@@ -1985,6 +2065,11 @@ class SampleView(QWidget):
                 edit.setText(f"{value:.{decimals}f}")
                 edit.blockSignals(False)
 
+        # Queue 3D visualization update (throttled to 20 FPS max)
+        self._pending_stage_update = {'x': x, 'y': y, 'z': z, 'r': r}
+        if not self._stage_update_timer.isActive():
+            self._stage_update_timer.start()
+
     def _on_position_slider_changed(self, axis: str, value: int) -> None:
         """Handle position slider value change (during drag)."""
         if axis in self.position_sliders:
@@ -2740,7 +2825,11 @@ class SampleView(QWidget):
             self.logger.warning(f"Failed to setup chamber visualization: {e}")
 
     def _add_sample_holder(self) -> None:
-        """Add sample holder indicator at the top of the chamber."""
+        """Add sample holder indicator at the top of the chamber.
+
+        The holder is a gray sphere shown at Y=0 (chamber top), representing
+        the mounting point where the sample holder enters the chamber.
+        """
         if not self.viewer or not self.voxel_storage:
             return
 
@@ -2753,35 +2842,48 @@ class SampleView(QWidget):
 
             dims = self.voxel_storage.display_dims  # (Z, Y, X)
 
-            # Get initial position from sliders (use 'x', 'y', 'z' keys)
+            # Get initial position from sliders
             x_mm = 0
+            stage_y_mm = 0
             z_mm = 0
             if 'x' in self.position_sliders:
                 x_mm = self.position_sliders['x'].value() / self._slider_scale
+            if 'y' in self.position_sliders:
+                stage_y_mm = self.position_sliders['y'].value() / self._slider_scale
             if 'z' in self.position_sliders:
                 z_mm = self.position_sliders['z'].value() / self._slider_scale
 
-            # Convert physical mm to napari voxel coordinates
-            # X range from config
+            # Convert stage Y to chamber Y (where extension tip is)
+            chamber_y_tip_mm = self._stage_y_to_chamber_y(stage_y_mm)
+
+            # Get coordinate ranges from config
             x_range = self._config.get('stage_control', {}).get('x_range_mm', [1.0, 12.31])
+            y_range = self._config.get('stage_control', {}).get('y_range_mm', [0.0, 14.0])
             z_range = self._config.get('stage_control', {}).get('z_range_mm', [12.5, 26.0])
 
+            # Convert physical mm to napari voxel coordinates
             # X is inverted in napari if configured
             if self._invert_x:
                 napari_x = int((x_range[1] - x_mm) / voxel_size_mm)
             else:
                 napari_x = int((x_mm - x_range[0]) / voxel_size_mm)
 
+            # Y is inverted in napari (Y=0 at top, increases downward)
+            napari_y_tip = int((y_range[1] - chamber_y_tip_mm) / voxel_size_mm)
+
+            # Z is offset from range minimum
             napari_z = int((z_mm - z_range[0]) / voxel_size_mm)
 
             # Clamp to valid range
             napari_x = max(0, min(dims[2] - 1, napari_x))
+            napari_y_tip = max(0, min(dims[1] - 1, napari_y_tip))
             napari_z = max(0, min(dims[0] - 1, napari_z))
 
-            # Store holder position
-            self.holder_position = {'x': napari_x, 'y': 0, 'z': napari_z}
+            # Store holder TIP position (what matters for extension and sample data)
+            self.holder_position = {'x': napari_x, 'y': napari_y_tip, 'z': napari_z}
 
-            # Create holder indicator at chamber top (Y=0)
+            # Create holder indicator at chamber top (Y=0) - the mounting point
+            # Note: The holder_position stores the TIP, but we display at Y=0
             holder_point = np.array([[napari_z, 0, napari_x]])
 
             self.viewer.add_points(
@@ -2796,12 +2898,18 @@ class SampleView(QWidget):
             )
 
             self.logger.info(f"Added sample holder at napari coords: Z={napari_z}, Y=0, X={napari_x}")
+            self.logger.info(f"  Holder TIP position: Y_tip={napari_y_tip} (stage_y={stage_y_mm:.2f}mm, chamber_y={chamber_y_tip_mm:.2f}mm)")
 
         except Exception as e:
             self.logger.warning(f"Failed to add sample holder: {e}")
 
     def _add_fine_extension(self) -> None:
-        """Add fine extension (thin probe) showing sample position."""
+        """Add fine extension (thin probe) showing sample position.
+
+        The extension tip is at the imaging position (where the sample is attached).
+        Extension extends UPWARD from tip by extension_length_mm toward chamber top.
+        In napari coordinates, upward means DECREASING Y values.
+        """
         if not self.viewer or not self.voxel_storage:
             return
 
@@ -2812,16 +2920,27 @@ class SampleView(QWidget):
 
             extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
 
-            # Get extension position from holder
+            # Get extension TIP position (stored in holder_position)
             napari_x = self.holder_position['x']
+            napari_y_tip = self.holder_position['y']  # Extension tip (where sample is attached)
             napari_z = self.holder_position['z']
 
-            # Extension extends downward from top (Y=0)
-            extension_points = []
-            y_end = min(extension_length_voxels, dims[1] - 1)
+            # Extension extends UPWARD from tip toward chamber top
+            # In napari, upward = decreasing Y (since Y is inverted)
+            napari_y_top = napari_y_tip - extension_length_voxels  # Top is above tip (smaller Y)
 
-            for y in range(0, y_end + 1, 2):
+            extension_points = []
+
+            # Extension goes from top (smaller Y) to tip (larger Y)
+            y_start = max(0, napari_y_top)  # Clamp to chamber top if needed
+            y_end = napari_y_tip  # End at tip
+
+            # Create vertical line of points for extension
+            # Napari coordinates: (Z, Y, X) order
+            for y in range(y_start, y_end + 1, 2):
                 extension_points.append([napari_z, y, napari_x])
+
+            self.logger.info(f"Extension: {len(extension_points)} points from Y={y_start} to Y={y_end}")
 
             if extension_points:
                 extension_array = np.array(extension_points)
@@ -2951,20 +3070,33 @@ class SampleView(QWidget):
             fov_y_voxels = fov_y_mm / voxel_size_mm
 
             # Position at objective focal plane
+            x_range = self._config.get('stage_control', {}).get('x_range_mm', [1.0, 12.31])
             y_range = self._config.get('stage_control', {}).get('y_range_mm', [0, 14])
             z_range = self._config.get('stage_control', {}).get('z_range_mm', [12.5, 26])
 
-            # Center of Z range for focal plane
-            focal_z_mm = (z_range[0] + z_range[1]) / 2
-            napari_z = int(focal_z_mm / voxel_size_mm)
+            # Use calibration if available, otherwise center of ranges
+            if self.objective_xy_calibration:
+                focal_x_mm = self.objective_xy_calibration.get('x', (x_range[0] + x_range[1]) / 2)
+                focal_z_mm = self.objective_xy_calibration.get('z', (z_range[0] + z_range[1]) / 2)
+            else:
+                focal_x_mm = (x_range[0] + x_range[1]) / 2
+                focal_z_mm = (z_range[0] + z_range[1]) / 2
+
+            # Convert physical Z to napari Z (offset from range minimum)
+            napari_z = int((focal_z_mm - z_range[0]) / voxel_size_mm)
             napari_z = min(max(0, napari_z), dims[0] - 1)
 
-            # Y at objective focal plane
+            # Y at objective focal plane (7mm in chamber coordinates)
+            # Y is inverted in napari (Y=0 at top)
             napari_y = int((y_range[1] - self.OBJECTIVE_CHAMBER_Y_MM) / voxel_size_mm)
             napari_y = min(max(0, napari_y), dims[1] - 1)
 
-            # X at center
-            napari_x = dims[2] // 2
+            # X from calibration or center, with proper coordinate conversion
+            if self._invert_x:
+                napari_x = int((x_range[1] - focal_x_mm) / voxel_size_mm)
+            else:
+                napari_x = int((focal_x_mm - x_range[0]) / voxel_size_mm)
+            napari_x = min(max(0, napari_x), dims[2] - 1)
 
             # Frame corners
             half_fov_x = fov_x_voxels / 2
@@ -3029,6 +3161,235 @@ class SampleView(QWidget):
         offset = stage_y_mm - self.STAGE_Y_AT_OBJECTIVE
         return self.OBJECTIVE_CHAMBER_Y_MM + offset
 
+    def _update_sample_holder_position(self, x_mm: float, y_mm: float, z_mm: float):
+        """Update sample holder position when stage moves.
+
+        Args:
+            x_mm, y_mm, z_mm: Physical stage coordinates in mm (y_mm is stage control value)
+        """
+        if not self.viewer or 'Sample Holder' not in self.viewer.layers:
+            return
+        if not self.voxel_storage:
+            return
+
+        # Convert stage Y to chamber Y (where extension tip actually is)
+        chamber_y_tip_mm = self._stage_y_to_chamber_y(y_mm)
+
+        # Get coordinate conversion parameters from config
+        voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+        voxel_size_mm = voxel_size_um / 1000.0
+        x_range = self._config.get('stage_control', {}).get('x_range_mm', [1.0, 12.31])
+        y_range = self._config.get('stage_control', {}).get('y_range_mm', [0.0, 14.0])
+        z_range = self._config.get('stage_control', {}).get('z_range_mm', [12.5, 26.0])
+        dims = self.voxel_storage.display_dims  # (Z, Y, X)
+
+        # Convert physical mm to napari voxel coordinates
+        if self._invert_x:
+            napari_x = int((x_range[1] - x_mm) / voxel_size_mm)
+        else:
+            napari_x = int((x_mm - x_range[0]) / voxel_size_mm)
+
+        napari_y_tip = int((y_range[1] - chamber_y_tip_mm) / voxel_size_mm)
+        napari_z = int((z_mm - z_range[0]) / voxel_size_mm)
+
+        # Clamp to valid range
+        napari_x = max(0, min(dims[2] - 1, napari_x))
+        napari_y_tip = max(0, min(dims[1] - 1, napari_y_tip))
+        napari_z = max(0, min(dims[0] - 1, napari_z))
+
+        # Update holder TIP position
+        self.holder_position = {'x': napari_x, 'y': napari_y_tip, 'z': napari_z}
+
+        # Holder shown as single ball at chamber top (Y=0) - the mounting point
+        holder_point = np.array([[napari_z, 0, napari_x]])
+        self.viewer.layers['Sample Holder'].data = holder_point
+
+        self.logger.debug(f"Updated holder: stage ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) -> "
+                         f"napari (Z={napari_z}, Y_tip={napari_y_tip}, X={napari_x})")
+
+        # Update dependent elements
+        self._update_fine_extension()
+        self._update_rotation_indicator()
+
+    def _update_fine_extension(self):
+        """Update fine extension position based on current holder position."""
+        if not self.viewer or 'Fine Extension' not in self.viewer.layers:
+            return
+        if not self.voxel_storage:
+            return
+
+        napari_x = self.holder_position['x']
+        napari_z = self.holder_position['z']
+
+        # Extension extends from Y=0 (top) down to tip position
+        voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+        voxel_size_mm = voxel_size_um / 1000.0
+        dims = self.voxel_storage.display_dims
+
+        extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
+        y_end = min(extension_length_voxels, dims[1] - 1)
+
+        # Create vertical line of points in (Z, Y, X) order
+        extension_points = []
+        for y in range(0, y_end + 1, 2):
+            extension_points.append([napari_z, y, napari_x])
+
+        if extension_points:
+            self.viewer.layers['Fine Extension'].data = np.array(extension_points)
+        else:
+            self.viewer.layers['Fine Extension'].data = np.array([[napari_z, 0, napari_x]])
+
+    def _update_rotation_indicator(self):
+        """Update rotation indicator based on current rotation angle and holder position."""
+        if not self.viewer or 'Rotation Indicator' not in self.viewer.layers:
+            return
+
+        angle_deg = self.current_rotation.get('ry', 0)
+        angle_rad = np.radians(angle_deg)
+
+        indicator_color = self._get_rotation_gradient_color(angle_deg)
+
+        # Indicator at Y=0 (top of chamber), follows holder X/Z position
+        y_position = 0
+        start = np.array([
+            self.holder_position['z'],
+            y_position,
+            self.holder_position['x']
+        ])
+
+        # End point rotated in ZX plane
+        dx = self.rotation_indicator_length * np.cos(angle_rad)
+        dz = self.rotation_indicator_length * np.sin(angle_rad)
+
+        end = np.array([
+            start[0] + dz,
+            y_position,
+            start[2] + dx
+        ])
+
+        self.viewer.layers['Rotation Indicator'].data = [[start, end]]
+        self.viewer.layers['Rotation Indicator'].edge_color = [indicator_color]
+
+    def _update_xy_focus_frame(self):
+        """Update XY focus frame position based on calibration.
+
+        The focus frame is at a FIXED position (focal plane) and only needs
+        to be updated when the calibration changes, not when the stage moves.
+        """
+        if not self.viewer or 'XY Focus Frame' not in self.viewer.layers:
+            return
+        if not self.voxel_storage:
+            return
+
+        dims = self.voxel_storage.display_dims
+        voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+        voxel_size_mm = voxel_size_um / 1000.0
+
+        focus_config = self._config.get('focus_frame', {})
+        fov_x_mm = focus_config.get('field_of_view_x_mm', 0.52)
+        fov_y_mm = focus_config.get('field_of_view_y_mm', 0.52)
+
+        # Y position at objective focal plane
+        y_range = self._config.get('stage_control', {}).get('y_range_mm', [0, 14])
+        napari_y = int((y_range[1] - self.OBJECTIVE_CHAMBER_Y_MM) / voxel_size_mm)
+        napari_y = min(max(0, napari_y), dims[1] - 1)
+
+        # X and Z from calibration or use defaults
+        if self.objective_xy_calibration:
+            x_mm = self.objective_xy_calibration['x']
+            z_mm = self.objective_xy_calibration['z']
+        else:
+            x_range = self._config.get('stage_control', {}).get('x_range_mm', [1.0, 12.31])
+            z_range = self._config.get('stage_control', {}).get('z_range_mm', [12.5, 26.0])
+            x_mm = (x_range[0] + x_range[1]) / 2
+            z_mm = (z_range[0] + z_range[1]) / 2
+
+        # Convert to napari coordinates
+        x_range = self._config.get('stage_control', {}).get('x_range_mm', [1.0, 12.31])
+        z_range = self._config.get('stage_control', {}).get('z_range_mm', [12.5, 26.0])
+
+        if self._invert_x:
+            napari_x = int((x_range[1] - x_mm) / voxel_size_mm)
+        else:
+            napari_x = int((x_mm - x_range[0]) / voxel_size_mm)
+        napari_z = int((z_mm - z_range[0]) / voxel_size_mm)
+
+        napari_x = max(0, min(dims[2] - 1, napari_x))
+        napari_z = max(0, min(dims[0] - 1, napari_z))
+
+        # FOV in voxels
+        half_fov_x = (fov_x_mm / voxel_size_mm) / 2
+        half_fov_y = (fov_y_mm / voxel_size_mm) / 2
+
+        corners = [
+            [napari_z, napari_y - half_fov_y, napari_x - half_fov_x],
+            [napari_z, napari_y - half_fov_y, napari_x + half_fov_x],
+            [napari_z, napari_y + half_fov_y, napari_x + half_fov_x],
+            [napari_z, napari_y + half_fov_y, napari_x - half_fov_x],
+        ]
+
+        frame_edges = [
+            [corners[0], corners[1]],
+            [corners[1], corners[2]],
+            [corners[2], corners[3]],
+            [corners[3], corners[0]],
+        ]
+
+        self.viewer.layers['XY Focus Frame'].data = frame_edges
+
+        self.logger.info(f"Updated XY focus frame to X={x_mm:.2f}, Z={z_mm:.2f} mm "
+                        f"(napari X={napari_x}, Z={napari_z})")
+
+    def _process_pending_stage_update(self):
+        """Process pending stage position update for 3D visualization.
+
+        Called by the throttle timer (50ms interval / 20 FPS max) to avoid
+        overwhelming the GUI with rapid position updates.
+        """
+        if self._pending_stage_update is None:
+            self._stage_update_timer.stop()
+            return
+
+        # Pop pending position
+        stage_pos = self._pending_stage_update
+        self._pending_stage_update = None
+
+        # Store last stage position
+        self.last_stage_position = stage_pos
+
+        # Update rotation tracking
+        self.current_rotation['ry'] = stage_pos.get('r', 0)
+
+        # Update reference geometry (holder, extension, rotation indicator)
+        self._update_sample_holder_position(
+            stage_pos['x'], stage_pos['y'], stage_pos['z']
+        )
+
+        # Update data layers with transformed volumes (data moves with stage)
+        if not self.voxel_storage:
+            return
+
+        # Get holder position for rotation center
+        holder_pos_voxels = np.array([
+            self.holder_position['x'],
+            self.holder_position['y'],
+            self.holder_position['z']
+        ])
+
+        for ch_id in range(self.voxel_storage.num_channels):
+            if not self.voxel_storage.has_data(ch_id):
+                continue
+
+            volume = self.voxel_storage.get_display_volume_transformed(
+                ch_id, stage_pos, holder_pos_voxels
+            )
+
+            if ch_id in self.channel_layers:
+                self.channel_layers[ch_id].data = volume
+
+                self.logger.debug(f"Stage update: Channel {ch_id} - "
+                                 f"non-zero voxels: {np.count_nonzero(volume)}")
+
     def _setup_data_layers(self) -> None:
         """Setup napari layers for multi-channel data."""
         if not self.viewer or not self.voxel_storage:
@@ -3075,8 +3436,21 @@ class SampleView(QWidget):
                     if not self.voxel_storage.has_data(ch_id):
                         continue
 
-                    # Get display volume (transformed if needed)
-                    volume = self.voxel_storage.get_display_volume(ch_id)
+                    # Use transformed volume if stage has moved from origin
+                    if self.last_stage_position and any(
+                        v != 0 for v in self.last_stage_position.values()
+                    ):
+                        holder_pos = np.array([
+                            self.holder_position['x'],
+                            self.holder_position['y'],
+                            self.holder_position['z']
+                        ])
+                        volume = self.voxel_storage.get_display_volume_transformed(
+                            ch_id, self.last_stage_position, holder_pos
+                        )
+                    else:
+                        volume = self.voxel_storage.get_display_volume(ch_id)
+
                     self.channel_layers[ch_id].data = volume
 
         except Exception as e:
