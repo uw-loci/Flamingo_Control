@@ -3210,31 +3210,35 @@ class SampleView(QWidget):
         self._update_rotation_indicator()
 
     def _update_fine_extension(self):
-        """Update fine extension position based on current holder position."""
+        """Update fine extension position based on current holder position.
+
+        The extension extends from Y=0 (chamber top) down to the tip position
+        stored in holder_position['y']. This tip position is calculated from
+        the stage Y slider value via _stage_y_to_chamber_y().
+        """
         if not self.viewer or 'Fine Extension' not in self.viewer.layers:
             return
         if not self.voxel_storage:
             return
 
         napari_x = self.holder_position['x']
+        napari_y_tip = self.holder_position['y']  # Tip position from stage Y
         napari_z = self.holder_position['z']
 
-        # Extension extends from Y=0 (top) down to tip position
-        voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
-        voxel_size_mm = voxel_size_um / 1000.0
-        dims = self.voxel_storage.display_dims
-
-        extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
-        y_end = min(extension_length_voxels, dims[1] - 1)
+        # Extension extends from Y=0 (chamber top) down to tip position
+        # In napari, downward = increasing Y
+        y_start = 0  # Chamber top
+        y_end = napari_y_tip  # Tip position (calculated from stage Y)
 
         # Create vertical line of points in (Z, Y, X) order
         extension_points = []
-        for y in range(0, y_end + 1, 2):
+        for y in range(y_start, y_end + 1, 2):
             extension_points.append([napari_z, y, napari_x])
 
         if extension_points:
             self.viewer.layers['Fine Extension'].data = np.array(extension_points)
         else:
+            # If tip is at or above chamber top, just show a single point
             self.viewer.layers['Fine Extension'].data = np.array([[napari_z, 0, napari_x]])
 
     def _update_rotation_indicator(self):
