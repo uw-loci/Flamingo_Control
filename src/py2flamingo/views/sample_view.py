@@ -765,6 +765,17 @@ class SampleView(QWidget):
         self._accumulated_zstacks = {}  # (x,y) -> frame count
         self._current_channel = 0  # Default to channel 0 (405nm)
 
+        # 3D visualization state (sample holder, objective, focus frame)
+        self.holder_position = {'x': 0, 'y': 0, 'z': 0}
+        self.rotation_indicator_length = 0
+        self.extension_length_mm = 10.0  # Extension extends 10mm upward from tip
+        self.extension_diameter_mm = 0.22  # Fine extension (220 micrometers)
+        self.STAGE_Y_AT_OBJECTIVE = 7.45  # mm - stage Y at objective focal plane
+        self.OBJECTIVE_CHAMBER_Y_MM = 7.0  # mm - objective focal plane in chamber coords
+        self.objective_xy_calibration = None  # Will be loaded from presets
+        self.current_rotation = {'ry': 0}  # Current rotation angle
+        self.coord_mapper = None  # Will be set from voxel_storage
+
         # Setup window - sized for 3-column layout
         self.setWindowTitle("Sample View")
         self.setWindowIcon(get_app_icon())  # Use flamingo icon
@@ -2718,8 +2729,285 @@ class SampleView(QWidget):
                 edge_color='#008B8B', edge_width=2, opacity=0.6
             )
 
+            # Add additional visualization elements
+            self._add_sample_holder()
+            self._add_fine_extension()
+            self._add_objective_indicator()
+            self._add_rotation_indicator()
+            self._add_xy_focus_frame()
+
         except Exception as e:
             self.logger.warning(f"Failed to setup chamber visualization: {e}")
+
+    def _add_sample_holder(self) -> None:
+        """Add sample holder indicator at the top of the chamber."""
+        if not self.viewer or not self.voxel_storage:
+            return
+
+        try:
+            # Get holder dimensions from config
+            holder_diameter_mm = self._config.get('sample_chamber', {}).get('holder_diameter_mm', 3.0)
+            voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+            holder_radius_voxels = int((holder_diameter_mm * 1000 / 2) / voxel_size_um)
+
+            dims = self.voxel_storage.display_dims  # (Z, Y, X)
+
+            # Get initial position from sliders
+            x_mm = self.position_sliders['x_slider'].value() / self._slider_scale
+            z_mm = self.position_sliders['z_slider'].value() / self._slider_scale
+
+            # Convert to napari coordinates (simplified - just use center for now)
+            napari_x = dims[2] // 2
+            napari_z = dims[0] // 2
+
+            # Store holder position
+            self.holder_position = {'x': napari_x, 'y': 0, 'z': napari_z}
+
+            # Create holder indicator at chamber top (Y=0)
+            holder_point = np.array([[napari_z, 0, napari_x]])
+
+            self.viewer.add_points(
+                holder_point,
+                name='Sample Holder',
+                size=holder_radius_voxels * 2,
+                face_color='gray',
+                border_color='darkgray',
+                border_width=0.05,
+                opacity=0.6,
+                shading='spherical'
+            )
+
+        except Exception as e:
+            self.logger.warning(f"Failed to add sample holder: {e}")
+
+    def _add_fine_extension(self) -> None:
+        """Add fine extension (thin probe) showing sample position."""
+        if not self.viewer or not self.voxel_storage:
+            return
+
+        try:
+            dims = self.voxel_storage.display_dims
+            voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+            voxel_size_mm = voxel_size_um / 1000.0
+
+            extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
+
+            # Get extension position from holder
+            napari_x = self.holder_position['x']
+            napari_z = self.holder_position['z']
+
+            # Extension extends downward from top (Y=0)
+            extension_points = []
+            y_end = min(extension_length_voxels, dims[1] - 1)
+
+            for y in range(0, y_end + 1, 2):
+                extension_points.append([napari_z, y, napari_x])
+
+            if extension_points:
+                extension_array = np.array(extension_points)
+                self.viewer.add_points(
+                    extension_array,
+                    name='Fine Extension',
+                    size=4,
+                    face_color='#FFFF00',  # Bright yellow
+                    border_color='#FFA500',  # Orange border
+                    border_width=0.1,
+                    opacity=0.9,
+                    shading='spherical'
+                )
+
+        except Exception as e:
+            self.logger.warning(f"Failed to add fine extension: {e}")
+
+    def _add_objective_indicator(self) -> None:
+        """Add objective position indicator circle at Z=0 (back wall)."""
+        if not self.viewer or not self.voxel_storage:
+            return
+
+        try:
+            dims = self.voxel_storage.display_dims  # (Z, Y, X)
+
+            # Objective at Z=0 (back wall)
+            z_objective = 0
+
+            # Objective focal plane position
+            voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+            voxel_size_mm = voxel_size_um / 1000.0
+
+            # Y position at objective focal plane (7mm from top in physical coords)
+            # In napari, Y is inverted
+            y_range = self._config.get('stage_control', {}).get('y_range_mm', [0, 14])
+            napari_y_objective = int((y_range[1] - self.OBJECTIVE_CHAMBER_Y_MM) / voxel_size_mm)
+            napari_y_objective = min(max(0, napari_y_objective), dims[1] - 1)
+
+            center_y = napari_y_objective
+            center_x = dims[2] // 2
+
+            # Circle radius (1/6 of smaller dimension)
+            radius = min(dims[1], dims[2]) // 6
+
+            # Create circle as line segments
+            num_points = 36
+            angles = np.linspace(0, 2 * np.pi, num_points, endpoint=False)
+
+            circle_points = []
+            for angle in angles:
+                y = center_y + radius * np.cos(angle)
+                x = center_x + radius * np.sin(angle)
+                circle_points.append([z_objective, y, x])
+
+            # Create circle edges
+            circle_edges = [[circle_points[i], circle_points[(i+1) % len(circle_points)]]
+                           for i in range(len(circle_points))]
+
+            self.viewer.add_shapes(
+                data=circle_edges,
+                shape_type='line',
+                name='Objective',
+                edge_color='#FFCC00',  # Gold/yellow
+                edge_width=3,
+                opacity=0.7
+            )
+
+        except Exception as e:
+            self.logger.warning(f"Failed to add objective indicator: {e}")
+
+    def _add_rotation_indicator(self) -> None:
+        """Add rotation indicator line at top of chamber."""
+        if not self.viewer or not self.voxel_storage:
+            return
+
+        try:
+            dims = self.voxel_storage.display_dims
+
+            # Indicator length - 1/2 shortest dimension
+            indicator_length = min(dims[0], dims[2]) // 2
+            self.rotation_indicator_length = indicator_length
+
+            # Position at Y=0 (top of chamber)
+            y_position = 0
+            holder_z = self.holder_position['z']
+            holder_x = self.holder_position['x']
+
+            # At 0 degrees, extends along +X axis
+            indicator_start = np.array([holder_z, y_position, holder_x])
+            indicator_end = np.array([holder_z, y_position, holder_x + indicator_length])
+
+            # Get color based on rotation angle
+            initial_color = self._get_rotation_gradient_color(self.current_rotation.get('ry', 0))
+
+            self.viewer.add_shapes(
+                data=[[indicator_start, indicator_end]],
+                shape_type='line',
+                name='Rotation Indicator',
+                edge_color=initial_color,
+                edge_width=3,
+                opacity=0.8
+            )
+
+        except Exception as e:
+            self.logger.warning(f"Failed to add rotation indicator: {e}")
+
+    def _add_xy_focus_frame(self) -> None:
+        """Add XY focus frame showing camera field of view at focal plane."""
+        if not self.viewer or not self.voxel_storage:
+            return
+
+        try:
+            dims = self.voxel_storage.display_dims
+            voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+            voxel_size_mm = voxel_size_um / 1000.0
+
+            # Focus frame configuration
+            focus_config = self._config.get('focus_frame', {})
+            fov_x_mm = focus_config.get('field_of_view_x_mm', 0.52)
+            fov_y_mm = focus_config.get('field_of_view_y_mm', 0.52)
+            frame_color = focus_config.get('color', '#FFFF00')
+            edge_width = focus_config.get('edge_width', 3)
+            opacity = focus_config.get('opacity', 0.9)
+
+            # FOV in voxels
+            fov_x_voxels = fov_x_mm / voxel_size_mm
+            fov_y_voxels = fov_y_mm / voxel_size_mm
+
+            # Position at objective focal plane
+            y_range = self._config.get('stage_control', {}).get('y_range_mm', [0, 14])
+            z_range = self._config.get('stage_control', {}).get('z_range_mm', [12.5, 26])
+
+            # Center of Z range for focal plane
+            focal_z_mm = (z_range[0] + z_range[1]) / 2
+            napari_z = int(focal_z_mm / voxel_size_mm)
+            napari_z = min(max(0, napari_z), dims[0] - 1)
+
+            # Y at objective focal plane
+            napari_y = int((y_range[1] - self.OBJECTIVE_CHAMBER_Y_MM) / voxel_size_mm)
+            napari_y = min(max(0, napari_y), dims[1] - 1)
+
+            # X at center
+            napari_x = dims[2] // 2
+
+            # Frame corners
+            half_fov_x = fov_x_voxels / 2
+            half_fov_y = fov_y_voxels / 2
+
+            corners = [
+                [napari_z, napari_y - half_fov_y, napari_x - half_fov_x],
+                [napari_z, napari_y - half_fov_y, napari_x + half_fov_x],
+                [napari_z, napari_y + half_fov_y, napari_x + half_fov_x],
+                [napari_z, napari_y + half_fov_y, napari_x - half_fov_x],
+            ]
+
+            frame_edges = [
+                [corners[0], corners[1]],
+                [corners[1], corners[2]],
+                [corners[2], corners[3]],
+                [corners[3], corners[0]],
+            ]
+
+            self.viewer.add_shapes(
+                data=frame_edges,
+                shape_type='line',
+                name='XY Focus Frame',
+                edge_color=frame_color,
+                edge_width=edge_width,
+                opacity=opacity
+            )
+
+        except Exception as e:
+            self.logger.warning(f"Failed to add XY focus frame: {e}")
+
+    def _get_rotation_gradient_color(self, angle_degrees: float) -> str:
+        """Get color for rotation indicator based on angle."""
+        # Normalize angle to 0-360
+        angle = angle_degrees % 360
+        if angle < 0:
+            angle += 360
+
+        # Color gradient: 0°=red, 90°=yellow, 180°=green, 270°=cyan, 360°=red
+        if angle < 90:
+            r = 255
+            g = int(255 * angle / 90)
+            b = 0
+        elif angle < 180:
+            r = int(255 * (180 - angle) / 90)
+            g = 255
+            b = 0
+        elif angle < 270:
+            r = 0
+            g = 255
+            b = int(255 * (angle - 180) / 90)
+        else:
+            r = 0
+            g = int(255 * (360 - angle) / 90)
+            b = 255
+
+        return f'#{r:02x}{g:02x}{b:02x}'
+
+    def _stage_y_to_chamber_y(self, stage_y_mm: float) -> float:
+        """Convert stage Y position to chamber Y coordinate."""
+        # At stage Y = 7.45mm, extension tip is at objective focal plane (Y=7.0mm)
+        offset = stage_y_mm - self.STAGE_Y_AT_OBJECTIVE
+        return self.OBJECTIVE_CHAMBER_Y_MM + offset
 
     def _setup_data_layers(self) -> None:
         """Setup napari layers for multi-channel data."""
