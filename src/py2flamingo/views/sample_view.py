@@ -2906,41 +2906,39 @@ class SampleView(QWidget):
     def _add_fine_extension(self) -> None:
         """Add fine extension (thin probe) showing sample position.
 
-        The extension tip is at the imaging position (where the sample is attached).
-        Extension extends UPWARD from tip by extension_length_mm toward chamber top.
-        In napari coordinates, upward means DECREASING Y values.
+        The fine extension is a thin probe that extends DOWNWARD from the holder mount
+        (at/above chamber top) to the tip where the sample is attached.
+
+        - Holder mount: at Y=0 (chamber top) or above
+        - Tip position: at holder_position.y (calculated from stage Y)
+        - Extension goes from Y=0 DOWN to holder_position.y (increasing napari Y)
         """
         if not self.viewer or not self.voxel_storage:
             return
 
         try:
             dims = self.voxel_storage.display_dims
-            voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
-            voxel_size_mm = voxel_size_um / 1000.0
-
-            extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
 
             # Get extension TIP position (stored in holder_position)
             napari_x = self.holder_position['x']
             napari_y_tip = self.holder_position['y']  # Extension tip (where sample is attached)
             napari_z = self.holder_position['z']
 
-            # Extension extends UPWARD from tip toward chamber top
-            # In napari, upward = decreasing Y (since Y is inverted)
-            napari_y_top = napari_y_tip - extension_length_voxels  # Top is above tip (smaller Y)
-
+            # Extension extends DOWNWARD from chamber top (Y=0) to tip (holder_position.y)
+            # The holder mount is at/above the chamber top; we show the portion inside the chamber
+            # In napari, downward = increasing Y
             extension_points = []
 
-            # Extension goes from top (smaller Y) to tip (larger Y)
-            y_start = max(0, napari_y_top)  # Clamp to chamber top if needed
-            y_end = napari_y_tip  # End at tip
+            # Extension goes from Y=0 (chamber top) down to the tip
+            y_start = 0  # Chamber top where extension enters
+            y_end = napari_y_tip  # Tip position (where sample is attached)
 
             # Create vertical line of points for extension
             # Napari coordinates: (Z, Y, X) order
             for y in range(y_start, y_end + 1, 2):
                 extension_points.append([napari_z, y, napari_x])
 
-            self.logger.info(f"Extension: {len(extension_points)} points from Y={y_start} to Y={y_end}")
+            self.logger.info(f"Extension: {len(extension_points)} points from Y={y_start} (top) to Y={y_end} (tip)")
 
             if extension_points:
                 extension_array = np.array(extension_points)
