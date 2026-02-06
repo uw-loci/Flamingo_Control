@@ -1296,28 +1296,32 @@ This section tracks items that should be checked periodically. Claude should rem
 
 ### Active Reminders
 
-| Item | Added | Last Reminded | Check Command |
-|------|-------|---------------|---------------|
-| **Zarr 3.x Upgrade** | 2026-02 | - | `pip install --dry-run "zarr>=3.0" "scipy>=1.14" "napari>=0.5"` |
+*No active reminders at this time.*
 
-#### Zarr 3.x Upgrade Details
+### Completed Reminders
 
-**Why blocked:** Zarr 3.x requires NumPy 2.x, but scipy/napari still require NumPy 1.x
+| Item | Added | Completed | Notes |
+|------|-------|-----------|-------|
+| **Zarr 3.x Upgrade** | 2026-02 | 2026-02-06 | Ecosystem now supports numpy 2.x |
 
-**What to check:**
-1. Run: `pip install --dry-run "zarr>=3.0" "scipy>=1.14" "napari>=0.5"`
-2. If no conflicts, the ecosystem is ready for upgrade
-3. Update `requirements.txt` to remove version pins on zarr, numpy, numcodecs
+#### Zarr 3.x Upgrade (COMPLETED)
 
-**Benefits of zarr 3.x:**
-- Async I/O support
-- Better memory management
-- New codec pipeline
-- V3 spec support
+**Status:** ✅ Completed on 2026-02-06
 
-**Reference:** See `requirements.txt` TODO comments and `/home/msnelson/LSControl/claude-reports/PERFORMANCE_BOTTLENECKS.md` Dependency Upgrade section.
+The ecosystem now fully supports NumPy 2.x:
+- zarr 3.1.3 installed
+- scipy 1.16.3 installed
+- napari 0.6.6 installed
+- numpy 2.3.3 installed
+
+`requirements.txt` has been updated to require:
+- `numpy>=2.0.0`
+- `scipy>=1.14.0`
+- `napari[all]>=0.5.0`
+- `zarr>=3.0.0`
+- `numcodecs>=0.14.0`
 
 ---
 
-**Last Updated:** 2026-02-05
+**Last Updated:** 2026-02-06
 **Maintained By:** Claude Code assistant

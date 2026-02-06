@@ -3,23 +3,20 @@
 
 # Core GUI and imaging
 PyQt5>=5.15.0
-numpy>=1.21.0,<2.0.0  # Pin to 1.x for scipy/napari compatibility
+numpy>=2.0.0  # NumPy 2.x now supported by scipy/napari/zarr ecosystem
 Pillow>=9.0.0
 
 # Scientific computing (required for image processing and analysis)
-scipy>=1.8.0
+scipy>=1.14.0  # 1.14+ supports numpy 2.x
 scikit-learn>=1.0.0
 
 # 3D Visualization dependencies
-napari[all]>=0.4.17  # 3D visualization viewer with all optional dependencies
+napari[all]>=0.5.0  # 0.5+ supports numpy 2.x
 sparse>=0.13.0  # Sparse array support for efficient voxel storage
 PyYAML>=6.0  # YAML configuration file support
 h5py>=3.8.0  # HDF5 file format support (optional, for data export)
 tifffile>=2023.2.0  # TIFF file support (optional, for data import/export)
 
-# TODO: Upgrade to zarr 3.x when scipy/napari support numpy 2.x
-# Track: https://github.com/scipy/scipy/issues - numpy 2.0 compatibility
-# Track: https://github.com/napari/napari/issues - numpy 2.0 compatibility
-# As of 2026-02-05: scipy 1.10.1 requires numpy<1.27.0, blocking zarr 3.x
-zarr>=2.13.0,<3.0.0  # Zarr 2.x for numpy 1.x compatibility
-numcodecs>=0.11.0,<0.16.0  # Pin for zarr 2.x compatibility
+# Zarr 3.x with async I/O and V3 spec support
+zarr>=3.0.0  # Zarr 3.x - async I/O, better memory management
+numcodecs>=0.14.0  # Updated codecs for zarr 3.x
