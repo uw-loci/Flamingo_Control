@@ -2906,35 +2906,37 @@ class SampleView(QWidget):
     def _add_fine_extension(self) -> None:
         """Add fine extension (thin probe) showing sample position.
 
-        The fine extension is a thin probe that extends DOWNWARD from the holder mount
-        (at/above chamber top) to the tip where the sample is attached.
+        The extension shows where the sample is positioned. The TIP is at the
+        sample location (holder_position['y']), and it extends UPWARD by 10mm
+        (toward chamber top) for visibility.
 
-        - Holder mount: at Y=0 (chamber top) or above
-        - Tip position: at holder_position.y (calculated from stage Y)
-        - Extension goes from Y=0 DOWN to holder_position.y (increasing napari Y)
+        In napari coordinates, upward = decreasing Y values.
         """
         if not self.viewer or not self.voxel_storage:
             return
 
         try:
             dims = self.voxel_storage.display_dims
+            voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+            voxel_size_mm = voxel_size_um / 1000.0
 
             # Get extension TIP position (stored in holder_position)
             napari_x = self.holder_position['x']
             napari_y_tip = self.holder_position['y']  # Extension tip (where sample is attached)
             napari_z = self.holder_position['z']
 
-            # Extension extends DOWNWARD from chamber top (Y=0) to tip (holder_position.y)
-            # The holder mount is at/above the chamber top; we show the portion inside the chamber
-            # In napari, downward = increasing Y
-            extension_points = []
+            # Extension extends UPWARD from tip by extension_length_mm (10mm)
+            # Napari Y is inverted: upward = DECREASING Y values
+            extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
+            napari_y_top = napari_y_tip - extension_length_voxels  # Top is ABOVE tip (smaller Y)
 
-            # Extension goes from Y=0 (chamber top) down to the tip
-            y_start = 0  # Chamber top where extension enters
-            y_end = napari_y_tip  # Tip position (where sample is attached)
+            # Extension from top (smaller Y) to tip (larger Y)
+            y_start = max(0, napari_y_top)  # Clamp to chamber top if needed
+            y_end = napari_y_tip  # End at tip (sample position)
 
             # Create vertical line of points for extension
             # Napari coordinates: (Z, Y, X) order
+            extension_points = []
             for y in range(y_start, y_end + 1, 2):
                 extension_points.append([napari_z, y, napari_x])
 
@@ -3212,23 +3214,32 @@ class SampleView(QWidget):
     def _update_fine_extension(self):
         """Update fine extension position based on current holder position.
 
-        The extension extends from Y=0 (chamber top) down to the tip position
-        stored in holder_position['y']. This tip position is calculated from
-        the stage Y slider value via _stage_y_to_chamber_y().
+        The extension shows where the sample is positioned. The TIP is at the
+        sample location (holder_position['y']), and it extends UPWARD by 10mm
+        (toward chamber top) for visibility.
+
+        In napari coordinates, upward = decreasing Y values.
         """
         if not self.viewer or 'Fine Extension' not in self.viewer.layers:
             return
         if not self.voxel_storage:
             return
 
+        # Get current TIP position (where sample is attached)
         napari_x = self.holder_position['x']
-        napari_y_tip = self.holder_position['y']  # Tip position from stage Y
+        napari_y_tip = self.holder_position['y']  # Extension tip (sample position)
         napari_z = self.holder_position['z']
 
-        # Extension extends from Y=0 (chamber top) down to tip position
-        # In napari, downward = increasing Y
-        y_start = 0  # Chamber top
-        y_end = napari_y_tip  # Tip position (calculated from stage Y)
+        # Extension extends UPWARD from tip by extension_length_mm (10mm)
+        # Napari Y is inverted: upward = DECREASING Y values
+        voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+        voxel_size_mm = voxel_size_um / 1000.0
+        extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
+        napari_y_top = napari_y_tip - extension_length_voxels  # Top is ABOVE tip (smaller Y)
+
+        # Extension from top (smaller Y) to tip (larger Y)
+        y_start = max(0, napari_y_top)  # Clamp to chamber top if needed
+        y_end = napari_y_tip  # End at tip (sample position)
 
         # Create vertical line of points in (Z, Y, X) order
         extension_points = []
@@ -3238,8 +3249,8 @@ class SampleView(QWidget):
         if extension_points:
             self.viewer.layers['Fine Extension'].data = np.array(extension_points)
         else:
-            # If tip is at or above chamber top, just show a single point
-            self.viewer.layers['Fine Extension'].data = np.array([[napari_z, 0, napari_x]])
+            # If no points, show minimal placeholder
+            self.viewer.layers['Fine Extension'].data = np.array([[napari_z, y_start, napari_x]])
 
     def _update_rotation_indicator(self):
         """Update rotation indicator based on current rotation angle and holder position."""
