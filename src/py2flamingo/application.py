@@ -561,7 +561,7 @@ class FlamingoApplication(QObject):
                 image_controls_window=self.image_controls_window,
                 sample_3d_window=self.sample_3d_visualization_window,
                 geometry_manager=self.geometry_manager,
-                configuration_service=self.configuration_service,
+                configuration_service=self.config_service,
             )
 
             # Connect acquisition lock signals to Sample View
