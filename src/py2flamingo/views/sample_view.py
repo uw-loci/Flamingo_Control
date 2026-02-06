@@ -2749,16 +2749,34 @@ class SampleView(QWidget):
             holder_diameter_mm = self._config.get('sample_chamber', {}).get('holder_diameter_mm', 3.0)
             voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
             holder_radius_voxels = int((holder_diameter_mm * 1000 / 2) / voxel_size_um)
+            voxel_size_mm = voxel_size_um / 1000.0
 
             dims = self.voxel_storage.display_dims  # (Z, Y, X)
 
-            # Get initial position from sliders
-            x_mm = self.position_sliders['x_slider'].value() / self._slider_scale
-            z_mm = self.position_sliders['z_slider'].value() / self._slider_scale
+            # Get initial position from sliders (use 'x', 'y', 'z' keys)
+            x_mm = 0
+            z_mm = 0
+            if 'x' in self.position_sliders:
+                x_mm = self.position_sliders['x'].value() / self._slider_scale
+            if 'z' in self.position_sliders:
+                z_mm = self.position_sliders['z'].value() / self._slider_scale
 
-            # Convert to napari coordinates (simplified - just use center for now)
-            napari_x = dims[2] // 2
-            napari_z = dims[0] // 2
+            # Convert physical mm to napari voxel coordinates
+            # X range from config
+            x_range = self._config.get('stage_control', {}).get('x_range_mm', [1.0, 12.31])
+            z_range = self._config.get('stage_control', {}).get('z_range_mm', [12.5, 26.0])
+
+            # X is inverted in napari if configured
+            if self._invert_x:
+                napari_x = int((x_range[1] - x_mm) / voxel_size_mm)
+            else:
+                napari_x = int((x_mm - x_range[0]) / voxel_size_mm)
+
+            napari_z = int((z_mm - z_range[0]) / voxel_size_mm)
+
+            # Clamp to valid range
+            napari_x = max(0, min(dims[2] - 1, napari_x))
+            napari_z = max(0, min(dims[0] - 1, napari_z))
 
             # Store holder position
             self.holder_position = {'x': napari_x, 'y': 0, 'z': napari_z}
@@ -2776,6 +2794,8 @@ class SampleView(QWidget):
                 opacity=0.6,
                 shading='spherical'
             )
+
+            self.logger.info(f"Added sample holder at napari coords: Z={napari_z}, Y=0, X={napari_x}")
 
         except Exception as e:
             self.logger.warning(f"Failed to add sample holder: {e}")
