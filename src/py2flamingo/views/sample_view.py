@@ -4071,15 +4071,32 @@ class SampleView(QWidget):
             self.update_workflow_progress(status, overall_pct, "--:--")
 
         # Set reference on first frame of acquisition
-        # Use ACTUAL stage position (from last_stage_position) for all coordinates
-        # to ensure consistency between reference and later stage position updates.
-        # Previously used tile workflow target positions which could differ from actual.
+        # Use tile workflow positions for X, Y, Z (where data is being acquired)
+        # Use actual rotation from last_stage_position (not hardcoded to 0)
         if not self._tile_reference_set and self.voxel_storage:
-            # Use actual stage position for reference (not tile workflow targets)
-            ref_x = self.last_stage_position.get('x', position['x'])
-            ref_y = self.last_stage_position.get('y', position['y'])
-            ref_z = self.last_stage_position.get('z', z_position)
-            ref_r = self.last_stage_position.get('r', 0)
+            # Check if last_stage_position has been updated with real values
+            # (it's initialized to all zeros, so check if it has reasonable values)
+            last_pos_updated = (
+                self.last_stage_position.get('x', 0) != 0 or
+                self.last_stage_position.get('y', 0) != 0 or
+                self.last_stage_position.get('z', 0) != 0
+            )
+
+            if last_pos_updated:
+                # Use actual stage position (more accurate)
+                ref_x = self.last_stage_position['x']
+                ref_y = self.last_stage_position['y']
+                ref_z = self.last_stage_position['z']
+                ref_r = self.last_stage_position.get('r', 0)
+                self.logger.info(f"Sample View: Using actual stage position for reference")
+            else:
+                # Fall back to tile workflow positions (last_stage_position not yet updated)
+                ref_x = position['x']
+                ref_y = position['y']
+                ref_z = z_position
+                ref_r = self.last_stage_position.get('r', 0)
+                self.logger.info(f"Sample View: Using tile workflow position for reference "
+                                f"(stage position not yet updated)")
 
             self.voxel_storage.set_reference_position({
                 'x': ref_x,
@@ -4088,9 +4105,8 @@ class SampleView(QWidget):
                 'r': ref_r
             })
             self._tile_reference_set = True
-            self.logger.info(f"Sample View: Tile reference set to actual stage position: "
+            self.logger.info(f"Sample View: Tile reference set to "
                             f"X={ref_x:.3f}, Y={ref_y:.3f}, Z={ref_z:.3f}, R={ref_r:.1f}°")
-            self.logger.debug(f"  (Tile target was X={position['x']:.3f}, Y={position['y']:.3f})")
 
         # Add frame to volume
         self.add_frame_to_volume(
