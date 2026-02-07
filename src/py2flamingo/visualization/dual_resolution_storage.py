@@ -92,8 +92,41 @@ class DualResolutionConfig:
     # Storage resolution (high-res)
     storage_voxel_size: Tuple[float, float, float] = (5, 5, 5)  # micrometers
 
-    # Display resolution (low-res)
+    # Display resolution (low-res) - default is 3x downsample from storage
     display_voxel_size: Tuple[float, float, float] = (15, 15, 15)  # micrometers
+
+    @classmethod
+    def from_settings(cls, settings_service=None, **kwargs) -> 'DualResolutionConfig':
+        """Create config from settings service with optional overrides.
+
+        Args:
+            settings_service: MicroscopeSettingsService instance (optional)
+            **kwargs: Override any config values directly
+
+        Returns:
+            DualResolutionConfig with values from settings or defaults
+        """
+        config_kwargs = {}
+
+        if settings_service:
+            display_settings = settings_service.get_setting("display", {})
+
+            # Get storage voxel size from settings
+            storage_size = display_settings.get("storage_voxel_size_um", 5)
+            config_kwargs['storage_voxel_size'] = (storage_size, storage_size, storage_size)
+
+            # Get downsample factor and compute display voxel size
+            downsample = display_settings.get("downsample_factor", 3)
+            display_size = storage_size * downsample
+            config_kwargs['display_voxel_size'] = (display_size, display_size, display_size)
+
+            logger.info(f"Config from settings: storage={storage_size}µm, "
+                       f"downsample={downsample}x, display={display_size}µm")
+
+        # Apply any direct overrides
+        config_kwargs.update(kwargs)
+
+        return cls(**config_kwargs)
 
     # Chamber dimensions and origin in micrometers
     chamber_dimensions: Tuple[float, float, float] = (10000, 10000, 43000)

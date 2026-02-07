@@ -1762,6 +1762,16 @@ class SampleView(QWidget):
         )
         perf_row.addWidget(self.benchmark_btn)
 
+        # Settings button
+        self.settings_btn = QPushButton("Settings")
+        self.settings_btn.setToolTip("Open application settings dialog")
+        self.settings_btn.clicked.connect(self._on_settings_clicked)
+        self.settings_btn.setStyleSheet(
+            "QPushButton { background-color: #607D8B; color: white; }"
+            "QPushButton:hover { background-color: #455A64; }"
+        )
+        perf_row.addWidget(self.settings_btn)
+
         perf_row.addStretch()
         layout.addLayout(perf_row)
 
@@ -2469,6 +2479,51 @@ class SampleView(QWidget):
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Error",
                                f"Could not open benchmark dialog: {e}")
+
+    def _on_settings_clicked(self) -> None:
+        """Open the application settings dialog."""
+        try:
+            from py2flamingo.views.dialogs.settings_dialog import SettingsDialog
+            from py2flamingo.services.microscope_settings_service import MicroscopeSettingsService
+
+            # Get or create the settings service
+            settings_service = getattr(self, '_settings_service', None)
+            if settings_service is None:
+                # Try to get microscope name from configuration service
+                microscope_name = "n7"  # Default
+                if self._configuration_service:
+                    config = self._configuration_service.get_current_configuration()
+                    if config:
+                        microscope_name = config.get('name', 'n7')
+
+                # Create settings service (will use the microscope_settings directory)
+                from pathlib import Path
+                base_path = Path(__file__).parent.parent.parent.parent  # Go up to project root
+                settings_service = MicroscopeSettingsService(microscope_name, base_path)
+                self._settings_service = settings_service
+
+            dialog = SettingsDialog(
+                settings_service=settings_service,
+                parent=self
+            )
+
+            if dialog.exec_():
+                self.logger.info("Settings dialog accepted - settings saved")
+                # Notify user if display settings changed (requires restart)
+                settings = dialog.get_settings()
+                if 'display' in settings:
+                    from PyQt5.QtWidgets import QMessageBox
+                    QMessageBox.information(
+                        self, "Settings Saved",
+                        "Display settings have been saved.\n\n"
+                        "Note: Changes to storage voxel size or downsample factor "
+                        "will take effect after restarting the application."
+                    )
+        except Exception as e:
+            self.logger.exception(f"Error opening settings dialog: {e}")
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Error",
+                               f"Could not open settings dialog: {e}")
 
     # ========== Data Collection Controls ==========
 
