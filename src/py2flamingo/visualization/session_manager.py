@@ -53,6 +53,23 @@ except ImportError:
     logger.warning("zarr not available - session save/load disabled. Install with: pip install zarr numcodecs")
 
 
+def _create_zarr_store(path: str):
+    """Create a zarr store compatible with both zarr v2 and v3.
+
+    In zarr v2: Uses DirectoryStore
+    In zarr v3: Uses LocalStore (DirectoryStore was removed)
+    """
+    if not ZARR_AVAILABLE:
+        return None
+
+    if ZARR_3_AVAILABLE:
+        # Zarr 3.x uses LocalStore instead of DirectoryStore
+        return zarr.storage.LocalStore(path)
+    else:
+        # Zarr 2.x uses DirectoryStore
+        return zarr.DirectoryStore(path)
+
+
 @dataclass
 class SessionMetadata:
     """Metadata for a saved session."""
@@ -167,7 +184,7 @@ class SessionManager:
 
         # Create zarr store with compression
         compressor = Blosc(cname=self.DEFAULT_COMPRESSOR, clevel=self.DEFAULT_COMPRESSION_LEVEL)
-        store = zarr.DirectoryStore(str(session_path))
+        store = _create_zarr_store(str(session_path))
         root = zarr.group(store=store, overwrite=True)
 
         # Default channel names
@@ -287,7 +304,7 @@ class SessionManager:
 
         # Create zarr store with compression
         compressor = Blosc(cname=self.DEFAULT_COMPRESSOR, clevel=self.DEFAULT_COMPRESSION_LEVEL)
-        store = zarr.DirectoryStore(str(session_path))
+        store = _create_zarr_store(str(session_path))
 
         # Default channel names
         if channel_names is None:
@@ -413,7 +430,7 @@ class SessionManager:
         start_time = time.time()
 
         # Open zarr store
-        store = zarr.DirectoryStore(str(session_path))
+        store = _create_zarr_store(str(session_path))
         root = zarr.open_group(store=store, mode='r')
 
         # Load metadata
@@ -496,7 +513,7 @@ class SessionManager:
         logger.info(f"Loading session from {session_path}")
 
         # Open zarr store
-        store = zarr.DirectoryStore(str(session_path))
+        store = _create_zarr_store(str(session_path))
         root = zarr.open_group(store=store, mode='r')
 
         # Load metadata
@@ -584,7 +601,7 @@ class SessionManager:
                 # Try to load metadata
                 if ZARR_AVAILABLE:
                     try:
-                        store = zarr.DirectoryStore(str(item))
+                        store = _create_zarr_store(str(item))
                         root = zarr.open_group(store=store, mode='r')
                         metadata = root.attrs.get('session_metadata', {})
                         session_info['session_name'] = metadata.get('session_name', item.stem)
