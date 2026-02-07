@@ -204,6 +204,15 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
+        # Edit menu
+        edit_menu = menubar.addMenu("&Edit")
+
+        settings_action = QAction("&Settings...", self)
+        settings_action.setShortcut("Ctrl+,")
+        settings_action.setStatusTip("Open application settings")
+        settings_action.triggered.connect(self._on_settings)
+        edit_menu.addAction(settings_action)
+
         # View menu
         view_menu = menubar.addMenu("&View")
 
@@ -280,6 +289,37 @@ class MainWindow(QMainWindow):
         about_action.setStatusTip("About Flamingo Control")
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+
+    def _on_settings(self):
+        """Open the application settings dialog."""
+        try:
+            from py2flamingo.views.dialogs.settings_dialog import SettingsDialog
+            from py2flamingo.services.microscope_settings_service import MicroscopeSettingsService
+            from pathlib import Path
+
+            # Get or create the settings service
+            if not hasattr(self, '_settings_service') or self._settings_service is None:
+                # Try to get microscope name from connection view
+                microscope_name = "n7"  # Default
+                if hasattr(self.connection_view, 'get_current_microscope_name'):
+                    name = self.connection_view.get_current_microscope_name()
+                    if name:
+                        microscope_name = name
+
+                # Create settings service
+                base_path = Path(__file__).parent.parent  # Go up to project root
+                self._settings_service = MicroscopeSettingsService(microscope_name, base_path)
+
+            dialog = SettingsDialog(
+                settings_service=self._settings_service,
+                parent=self
+            )
+            dialog.exec_()
+
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception(f"Error opening settings dialog: {e}")
+            QMessageBox.critical(self, "Error", f"Could not open settings dialog: {e}")
 
     def _show_about(self):
         """Show About dialog with application information."""
