@@ -893,6 +893,20 @@ class DualResolutionVoxelStorage:
         dz = current_stage_pos.get('z', 0) - self.reference_stage_position['z']
         dr = current_stage_pos.get('r', 0) - self.reference_stage_position['r']
 
+        # Log detailed info on first transform or significant movements
+        if not hasattr(self, '_first_transform_logged') or not self._first_transform_logged:
+            logger.info(f"Transform: FIRST TRANSFORM after data acquisition")
+            logger.info(f"  Reference position: X={self.reference_stage_position['x']:.3f}, "
+                       f"Y={self.reference_stage_position['y']:.3f}, "
+                       f"Z={self.reference_stage_position['z']:.3f}, "
+                       f"R={self.reference_stage_position['r']:.1f}°")
+            logger.info(f"  Current position:   X={current_stage_pos.get('x', 0):.3f}, "
+                       f"Y={current_stage_pos.get('y', 0):.3f}, "
+                       f"Z={current_stage_pos.get('z', 0):.3f}, "
+                       f"R={current_stage_pos.get('r', 0):.1f}°")
+            logger.info(f"  Delta:              dX={dx:.3f}, dY={dy:.3f}, dZ={dz:.3f}, dR={dr:.1f}°")
+            self._first_transform_logged = True
+
         logger.debug(f"Transform: Delta from reference: dx={dx:.3f}, dy={dy:.3f}, dz={dz:.3f}, dr={dr:.1f}°")
 
         # Check if rotation changed - if so, need to recalculate rotated base volume
@@ -1023,6 +1037,8 @@ class DualResolutionVoxelStorage:
         # Initialize last_rotation to match reference, so first stage update
         # doesn't incorrectly detect a rotation change
         self.last_rotation = stage_pos.get('r', 0)
+        # Reset first transform logging flag so we log details on next transform
+        self._first_transform_logged = False
         logger.info(f"Reference position set to X={self.reference_stage_position['x']:.3f}mm, "
                    f"Y={self.reference_stage_position['y']:.3f}mm, "
                    f"Z={self.reference_stage_position['z']:.3f}mm, "

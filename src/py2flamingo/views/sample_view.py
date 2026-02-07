@@ -4071,18 +4071,26 @@ class SampleView(QWidget):
             self.update_workflow_progress(status, overall_pct, "--:--")
 
         # Set reference on first frame of acquisition
-        # Use actual rotation angle at acquisition time, not hardcoded 0
+        # Use ACTUAL stage position (from last_stage_position) for all coordinates
+        # to ensure consistency between reference and later stage position updates.
+        # Previously used tile workflow target positions which could differ from actual.
         if not self._tile_reference_set and self.voxel_storage:
-            current_rotation = self.last_stage_position.get('r', 0)
+            # Use actual stage position for reference (not tile workflow targets)
+            ref_x = self.last_stage_position.get('x', position['x'])
+            ref_y = self.last_stage_position.get('y', position['y'])
+            ref_z = self.last_stage_position.get('z', z_position)
+            ref_r = self.last_stage_position.get('r', 0)
+
             self.voxel_storage.set_reference_position({
-                'x': position['x'],
-                'y': position['y'],
-                'z': z_position,
-                'r': current_rotation
+                'x': ref_x,
+                'y': ref_y,
+                'z': ref_z,
+                'r': ref_r
             })
             self._tile_reference_set = True
-            self.logger.info(f"Sample View: Tile reference set to X={position['x']:.2f}, "
-                            f"Y={position['y']:.2f}, Z={z_position:.3f}, R={current_rotation:.1f}°")
+            self.logger.info(f"Sample View: Tile reference set to actual stage position: "
+                            f"X={ref_x:.3f}, Y={ref_y:.3f}, Z={ref_z:.3f}, R={ref_r:.1f}°")
+            self.logger.debug(f"  (Tile target was X={position['x']:.3f}, Y={position['y']:.3f})")
 
         # Add frame to volume
         self.add_frame_to_volume(
