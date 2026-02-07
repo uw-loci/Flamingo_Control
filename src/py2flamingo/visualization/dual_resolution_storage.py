@@ -987,6 +987,9 @@ class DualResolutionVoxelStorage:
             'z': stage_pos.get('z', 0),
             'r': stage_pos.get('r', 0)
         }
+        # Initialize last_rotation to match reference, so first stage update
+        # doesn't incorrectly detect a rotation change
+        self.last_rotation = stage_pos.get('r', 0)
         logger.info(f"Reference position set to X={self.reference_stage_position['x']:.3f}mm, "
                    f"Y={self.reference_stage_position['y']:.3f}mm, "
                    f"Z={self.reference_stage_position['z']:.3f}mm, "

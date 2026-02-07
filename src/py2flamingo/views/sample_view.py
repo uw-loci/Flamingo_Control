@@ -4016,16 +4016,18 @@ class SampleView(QWidget):
             self.update_workflow_progress(status, overall_pct, "--:--")
 
         # Set reference on first frame of acquisition
+        # Use actual rotation angle at acquisition time, not hardcoded 0
         if not self._tile_reference_set and self.voxel_storage:
+            current_rotation = self.last_stage_position.get('r', 0)
             self.voxel_storage.set_reference_position({
                 'x': position['x'],
                 'y': position['y'],
                 'z': z_position,
-                'r': 0
+                'r': current_rotation
             })
             self._tile_reference_set = True
             self.logger.info(f"Sample View: Tile reference set to X={position['x']:.2f}, "
-                            f"Y={position['y']:.2f}, Z={z_position:.3f}")
+                            f"Y={position['y']:.2f}, Z={z_position:.3f}, R={current_rotation:.1f}°")
 
         # Add frame to volume
         self.add_frame_to_volume(
