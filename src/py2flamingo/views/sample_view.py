@@ -3464,10 +3464,17 @@ class SampleView(QWidget):
                     else:
                         volume = self.voxel_storage.get_display_volume(ch_id)
 
+                    # Diagnostic logging to help debug data display issues
+                    self.logger.info(
+                        f"Channel {ch_id}: volume shape={volume.shape}, "
+                        f"non-zero={np.count_nonzero(volume)}, "
+                        f"max={volume.max()}"
+                    )
+
                     self.channel_layers[ch_id].data = volume
 
         except Exception as e:
-            self.logger.debug(f"Error updating visualization: {e}")
+            self.logger.error(f"Error updating visualization: {e}", exc_info=True)
 
     def _reset_viewer_camera(self) -> None:
         """Reset the napari viewer camera zoom (preserves orientation from 3D window)."""
