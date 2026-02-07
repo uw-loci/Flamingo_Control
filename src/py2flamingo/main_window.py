@@ -560,23 +560,34 @@ class MainWindow(QMainWindow):
         """Handle Load 2D Overview Session menu action."""
         import logging
         from PyQt5.QtWidgets import QFileDialog
+        from pathlib import Path
         logger = logging.getLogger(__name__)
         logger.info("Load 2D Overview Session menu action triggered")
+
+        # Get last-used path from configuration service (independent of other dialogs)
+        start_path = str(Path.home())
+        if self.app and hasattr(self.app, 'configuration_service') and self.app.configuration_service:
+            saved_path = self.app.configuration_service.get_led_2d_session_path()
+            if saved_path:
+                start_path = saved_path
 
         # Ask user to select a saved session folder
         folder = QFileDialog.getExistingDirectory(
             self,
             "Select 2D Overview Session Folder",
-            "",
+            start_path,
             QFileDialog.ShowDirsOnly
         )
 
         if not folder:
             return  # User cancelled
 
+        # Save the selected folder's parent for next time
+        if self.app and hasattr(self.app, 'configuration_service') and self.app.configuration_service:
+            self.app.configuration_service.set_led_2d_session_path(str(Path(folder).parent))
+
         try:
             from py2flamingo.views.dialogs.led_2d_overview_result import LED2DOverviewResultWindow
-            from pathlib import Path
 
             folder_path = Path(folder)
 
