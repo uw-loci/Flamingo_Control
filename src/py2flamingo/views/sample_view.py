@@ -2685,10 +2685,15 @@ class SampleView(QWidget):
             base_y_um = sample_center[1]
             base_x_um = sample_center[0]
 
+            # Match display transform logic: only invert X when invert_x is False
+            # When invert_x=True, storage should NOT invert (display will invert)
+            # When invert_x=False, storage should invert (display won't invert)
+            delta_x_storage = delta_x if self._invert_x else -delta_x
+
             world_center_um = np.array([
                 base_z_um - delta_z * 1000,
                 base_y_um + delta_y * 1000,
-                base_x_um - delta_x * 1000
+                base_x_um + delta_x_storage * 1000
             ])
 
             # Create 3D coords
@@ -2776,8 +2781,12 @@ class SampleView(QWidget):
             return
 
         try:
+            t_start = time.perf_counter()
+
             # Create napari viewer with axis display
             self.viewer = napari.Viewer(ndisplay=3, show=False)
+            t_viewer = time.perf_counter()
+            self.logger.info(f"napari.Viewer() created in {t_viewer - t_start:.2f}s")
 
             # Enable axis display
             self.viewer.axes.visible = True
@@ -2802,11 +2811,18 @@ class SampleView(QWidget):
                         self.viewer_placeholder.deleteLater()
                         self.viewer_placeholder = None
 
+            t_embed = time.perf_counter()
+
             # Setup visualization components
             self._setup_chamber_visualization()
-            self._setup_data_layers()
+            t_chamber = time.perf_counter()
+            self.logger.info(f"Chamber visualization setup in {t_chamber - t_embed:.2f}s")
 
-            self.logger.info("Created napari 3D viewer successfully")
+            self._setup_data_layers()
+            t_layers = time.perf_counter()
+            self.logger.info(f"Data layers setup in {t_layers - t_chamber:.2f}s")
+
+            self.logger.info(f"Created napari 3D viewer successfully (total: {t_layers - t_start:.2f}s)")
 
             # Reset camera after setup
             QTimer.singleShot(100, self._reset_viewer_camera)
@@ -2837,41 +2853,36 @@ class SampleView(QWidget):
                 [0, dims[1]-1, dims[2]-1]
             ])
 
-            # Z edges (yellow)
-            z_edges = [
+            # All 12 chamber edges combined into single layer for performance
+            # Z edges (yellow), Y edges (magenta), X edges (cyan)
+            all_edges = [
+                # Z edges (4)
                 [corners[0], corners[1]],
                 [corners[3], corners[2]],
                 [corners[4], corners[5]],
-                [corners[7], corners[6]]
-            ]
-
-            # Y edges (magenta)
-            y_edges = [
+                [corners[7], corners[6]],
+                # Y edges (4)
                 [corners[0], corners[4]],
                 [corners[1], corners[5]],
                 [corners[2], corners[6]],
-                [corners[3], corners[7]]
-            ]
-
-            # X edges (cyan)
-            x_edges = [
+                [corners[3], corners[7]],
+                # X edges (4)
                 [corners[0], corners[3]],
                 [corners[1], corners[2]],
                 [corners[4], corners[7]],
                 [corners[5], corners[6]]
             ]
 
-            self.viewer.add_shapes(
-                data=z_edges, shape_type='line', name='Chamber Z-edges',
-                edge_color='#8B8B00', edge_width=2, opacity=0.6
+            # Per-edge colors: 4 yellow (Z), 4 magenta (Y), 4 cyan (X)
+            edge_colors = (
+                ['#8B8B00'] * 4 +  # Z edges
+                ['#8B008B'] * 4 +  # Y edges
+                ['#008B8B'] * 4    # X edges
             )
+
             self.viewer.add_shapes(
-                data=y_edges, shape_type='line', name='Chamber Y-edges',
-                edge_color='#8B008B', edge_width=2, opacity=0.6
-            )
-            self.viewer.add_shapes(
-                data=x_edges, shape_type='line', name='Chamber X-edges',
-                edge_color='#008B8B', edge_width=2, opacity=0.6
+                data=all_edges, shape_type='line', name='Chamber Wireframe',
+                edge_color=edge_colors, edge_width=2, opacity=0.6
             )
 
             # Add additional visualization elements
