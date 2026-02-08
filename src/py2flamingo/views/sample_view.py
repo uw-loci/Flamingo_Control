@@ -2685,10 +2685,10 @@ class SampleView(QWidget):
             base_y_um = sample_center[1]
             base_x_um = sample_center[0]
 
-            # Match display transform logic: only invert X when invert_x is False
-            # When invert_x=True, storage should NOT invert (display will invert)
-            # When invert_x=False, storage should invert (display won't invert)
-            delta_x_storage = delta_x if self._invert_x else -delta_x
+            # X-axis storage handling:
+            # - When invert_x=True: use -delta_x (storage inverts, display inverts -> correct)
+            # - When invert_x=False: use +delta_x (storage normal, display normal -> correct)
+            delta_x_storage = -delta_x if self._invert_x else delta_x
 
             world_center_um = np.array([
                 base_z_um - delta_z * 1000,
