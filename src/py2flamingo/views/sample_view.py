@@ -1884,6 +1884,11 @@ class SampleView(QWidget):
             self.logger.info(f"Loading current positions: X={positions['x']:.3f}, "
                            f"Y={positions['y']:.3f}, Z={positions['z']:.3f}, R={positions['r']:.2f}")
 
+            # Update internal position tracking (critical for 3D viewer and transforms!)
+            self.last_stage_position = positions.copy()
+            self.current_rotation['ry'] = positions['r']
+            self.logger.info(f"Updated last_stage_position and current_rotation from hardware")
+
             # Update each slider to current position
             for axis_id, value in positions.items():
                 if axis_id in self.position_sliders and value is not None:
@@ -3099,6 +3104,11 @@ class SampleView(QWidget):
                 opacity=0.8
             )
 
+            # Immediately update indicator to current rotation angle
+            # (indicator was created at 0°, but actual rotation may differ)
+            self._update_rotation_indicator()
+            self.logger.info(f"Rotation indicator initialized at {self.current_rotation.get('ry', 0):.1f}°")
+
         except Exception as e:
             self.logger.warning(f"Failed to add rotation indicator: {e}")
 
@@ -4071,32 +4081,60 @@ class SampleView(QWidget):
             self.update_workflow_progress(status, overall_pct, "--:--")
 
         # Set reference on first frame of acquisition
-        # Use tile workflow positions for X, Y, Z (where data is being acquired)
-        # Use actual rotation from last_stage_position (not hardcoded to 0)
+        # Query actual stage position synchronously to avoid timing issues
         if not self._tile_reference_set and self.voxel_storage:
-            # Check if last_stage_position has been updated with real values
-            # (it's initialized to all zeros, so check if it has reasonable values)
-            last_pos_updated = (
-                self.last_stage_position.get('x', 0) != 0 or
-                self.last_stage_position.get('y', 0) != 0 or
-                self.last_stage_position.get('z', 0) != 0
-            )
-
-            if last_pos_updated:
-                # Use actual stage position (more accurate)
-                ref_x = self.last_stage_position['x']
-                ref_y = self.last_stage_position['y']
-                ref_z = self.last_stage_position['z']
-                ref_r = self.last_stage_position.get('r', 0)
-                self.logger.info(f"Sample View: Using actual stage position for reference")
+            # Query actual position from hardware (synchronous call)
+            actual_pos = None
+            if self.movement_controller:
+                try:
+                    actual_pos = self.movement_controller.get_position()
+                    if actual_pos is None:
+                        self.logger.warning("Sample View: movement_controller.get_position() returned None")
+                except Exception as e:
+                    self.logger.warning(f"Sample View: Failed to query stage position: {e}")
             else:
-                # Fall back to tile workflow positions (last_stage_position not yet updated)
-                ref_x = position['x']
-                ref_y = position['y']
-                ref_z = z_position
-                ref_r = self.last_stage_position.get('r', 0)
-                self.logger.info(f"Sample View: Using tile workflow position for reference "
-                                f"(stage position not yet updated)")
+                self.logger.warning("Sample View: No movement_controller available for position query")
+
+            # Log position comparison for debugging
+            self.logger.info(f"Sample View: Position comparison on first frame:")
+            self.logger.info(f"  Workflow target: X={position['x']:.3f}, Y={position['y']:.3f}, Z={z_position:.3f}")
+            if actual_pos:
+                self.logger.info(f"  Queried actual:  X={actual_pos.x:.3f}, Y={actual_pos.y:.3f}, "
+                                f"Z={actual_pos.z:.3f}, R={actual_pos.r:.1f}°")
+            else:
+                self.logger.info(f"  Cached stage:    X={self.last_stage_position.get('x', 0):.3f}, "
+                                f"Y={self.last_stage_position.get('y', 0):.3f}, "
+                                f"Z={self.last_stage_position.get('z', 0):.3f}, "
+                                f"R={self.last_stage_position.get('r', 0):.1f}°")
+
+            if actual_pos:
+                # Use queried actual stage position (most accurate, avoids timing issues)
+                ref_x = actual_pos.x
+                ref_y = actual_pos.y
+                ref_z = actual_pos.z
+                ref_r = actual_pos.r
+                self.logger.info(f"Sample View: Using QUERIED stage position for reference")
+            else:
+                # Fall back to cached position or workflow
+                last_pos_updated = (
+                    self.last_stage_position.get('x', 0) != 0 or
+                    self.last_stage_position.get('y', 0) != 0 or
+                    self.last_stage_position.get('z', 0) != 0
+                )
+                if last_pos_updated:
+                    ref_x = self.last_stage_position['x']
+                    ref_y = self.last_stage_position['y']
+                    ref_z = self.last_stage_position['z']
+                    ref_r = self.last_stage_position.get('r', 0)
+                    self.logger.info(f"Sample View: Using CACHED stage position for reference")
+                else:
+                    ref_x = position['x']
+                    ref_y = position['y']
+                    ref_z = z_position
+                    # Get rotation from workflow position dict (parsed from filename like R90_X...)
+                    ref_r = position.get('r', self.last_stage_position.get('r', 0))
+                    self.logger.warning(f"Sample View: Using WORKFLOW position for reference "
+                                       f"(stage position not available - potential for jump!)")
 
             self.voxel_storage.set_reference_position({
                 'x': ref_x,

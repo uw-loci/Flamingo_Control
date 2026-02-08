@@ -910,7 +910,9 @@ class DualResolutionVoxelStorage:
         logger.debug(f"Transform: Delta from reference: dx={dx:.3f}, dy={dy:.3f}, dz={dz:.3f}, dr={dr:.1f}°")
 
         # Check if rotation changed - if so, need to recalculate rotated base volume
-        rotation_changed = abs(dr - self.last_rotation) > 0.01
+        # Compare ABSOLUTE rotations, not delta vs absolute (dr is delta, last_rotation is absolute)
+        current_r = current_stage_pos.get('r', 0)
+        rotation_changed = abs(current_r - self.last_rotation) > 0.01
 
         # Check if we have a cached base volume (rotated but not translated)
         # We store the ROTATED volume in cache, then apply FULL translation each time
@@ -939,7 +941,7 @@ class DualResolutionVoxelStorage:
 
             # Cache the rotated base volume
             self.transform_cache[cache_key] = rotated
-            self.last_rotation = current_stage_pos.get('r', 0)
+            self.last_rotation = current_r
             logger.info(f"Transform: Cached rotated base volume for channel {channel_id}")
         else:
             rotated = self.transform_cache[cache_key]
@@ -956,14 +958,21 @@ class DualResolutionVoxelStorage:
         offset_voxels = np.array([dz, -dy, dx_display]) * 1000 / self.config.display_voxel_size[0]
 
         # Check if translation is significant
-        if np.max(np.abs(offset_voxels)) < 0.5:
+        max_offset = np.max(np.abs(offset_voxels))
+        if max_offset < 0.5:
             # Less than half a voxel - no shift needed
             logger.debug(f"Transform: Offset < 0.5 voxels, returning rotated volume")
             self.last_stage_position = current_stage_pos.copy()
             return rotated
 
-        logger.debug(f"Transform: Applying full offset {offset_voxels} voxels (ZYX) from reference "
-                    f"[quality={self._transform_quality.name}]")
+        # Log large offsets as INFO (potential jumps), small as DEBUG
+        if max_offset > 10:
+            logger.info(f"Transform: LARGE offset {offset_voxels} voxels (ZYX) "
+                       f"= ({dz*1000:.0f}, {-dy*1000:.0f}, {dx_display*1000:.0f}) µm "
+                       f"[quality={self._transform_quality.name}]")
+        else:
+            logger.debug(f"Transform: Applying offset {offset_voxels} voxels (ZYX) from reference "
+                        f"[quality={self._transform_quality.name}]")
 
         # Apply translation using optimized shift (numpy.roll for integer, scipy for fractional)
         translated = self._fast_shift(rotated, offset_voxels)

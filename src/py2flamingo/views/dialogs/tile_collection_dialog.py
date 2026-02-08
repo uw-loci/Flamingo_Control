@@ -1109,24 +1109,32 @@ class TileCollectionDialog(PersistentDialog):
         return None
 
     def _parse_workflow_position(self, workflow_file: Path) -> Optional[Dict]:
-        """Extract X, Y position from workflow filename.
+        """Extract R, X, Y position from workflow filename.
 
-        Filename format: tile_collection_R0_X10.50_Y20.75.txt
+        Filename format: tile_collection_R90_X10.50_Y20.75.txt
 
         Args:
             workflow_file: Path to workflow file
 
         Returns:
-            Dictionary with 'x', 'y', 'filename' or None if parse fails
+            Dictionary with 'x', 'y', 'r', 'filename' or None if parse fails
         """
         import re
-        match = re.search(r'X([-\d.]+)_Y([-\d.]+)', workflow_file.stem)
-        if match:
-            return {
-                'x': float(match.group(1)),
-                'y': float(match.group(2)),
+        # Match X and Y (required)
+        xy_match = re.search(r'X([-\d.]+)_Y([-\d.]+)', workflow_file.stem)
+        if xy_match:
+            result = {
+                'x': float(xy_match.group(1)),
+                'y': float(xy_match.group(2)),
                 'filename': workflow_file.name
             }
+            # Also extract rotation if present (R90, R-45, etc.)
+            r_match = re.search(r'_R([-\d.]+)_', workflow_file.stem)
+            if r_match:
+                result['r'] = float(r_match.group(1))
+            else:
+                result['r'] = 0.0  # Default to 0 if not in filename
+            return result
         logger.warning(f"Could not parse position from filename: {workflow_file.name}")
         return None
 
