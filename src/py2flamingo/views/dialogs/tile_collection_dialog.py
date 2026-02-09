@@ -1386,13 +1386,16 @@ class TileCollectionDialog(PersistentDialog):
 
             queue_service.set_workflow_start_callback(on_workflow_start)
 
-        # Create progress dialog
+        # Create progress dialog as a top-level window (no parent)
+        # This allows the tile collection dialog to close while progress remains visible
         # Use 0-100 range for percentage-based progress
         progress = QProgressDialog(
-            "Executing workflows...", "Cancel", 0, 100, self
+            "Executing workflows...", "Cancel", 0, 100, None
         )
-        progress.setWindowModality(Qt.WindowModal)
+        progress.setWindowModality(Qt.NonModal)  # Non-modal so user can interact with other windows
         progress.setMinimumDuration(0)
+        progress.setWindowTitle("Workflow Progress")
+        progress.setAttribute(Qt.WA_DeleteOnClose)  # Clean up when closed
 
         # Track completion and current state
         self._queue_completed = False
@@ -1464,7 +1467,12 @@ class TileCollectionDialog(PersistentDialog):
             progress.setValue(100)  # 100% complete
             update_sample_view("Complete!", 100)  # Show 100% with status
             QTimer.singleShot(1500, lambda: update_sample_view("Not Running", 0))  # Delayed reset
-            progress.accept()  # Close the dialog so exec_() returns
+
+            # Clean up signals before closing progress dialog
+            if hasattr(progress, '_cleanup_signals'):
+                progress._cleanup_signals()
+
+            progress.close()  # Close the progress dialog
 
             # Clean up tile mode when all workflows are done
             if camera_controller:
@@ -1477,30 +1485,37 @@ class TileCollectionDialog(PersistentDialog):
             # SYSTEM_STATE_IDLE callbacks have been received
             reorganized = self._reorganize_tile_folders()
 
+            # Use None as parent since tile collection dialog is closed
             if reorganized:
                 QMessageBox.information(
-                    self, "Execution Complete",
+                    None, "Execution Complete",
                     f"Successfully executed {len(workflow_files)} workflows.\n\n"
                     f"Folders reorganized into nested structure for MIP Overview compatibility."
                 )
             else:
                 QMessageBox.information(
-                    self, "Execution Complete",
+                    None, "Execution Complete",
                     f"Successfully executed {len(workflow_files)} workflows."
                 )
 
         def on_queue_cancelled():
             self._queue_completed = True
             update_sample_view("Not Running", 0)
+
+            # Clean up signals before closing progress dialog
+            if hasattr(progress, '_cleanup_signals'):
+                progress._cleanup_signals()
+
             if camera_controller:
                 camera_controller.clear_tile_mode()
             if add_to_sample_view and hasattr(self._app, 'workflow_controller'):
                 self._app.workflow_controller._suppress_tile_clear = False
+            progress.close()  # Close the progress dialog
+            # Use None as parent since tile collection dialog is closed
             QMessageBox.warning(
-                self, "Execution Cancelled",
+                None, "Execution Cancelled",
                 "Workflow queue was cancelled."
             )
-            progress.reject()  # Close the dialog so exec_() returns
 
         def on_error(message):
             self._queue_error = message
@@ -1549,32 +1564,38 @@ class TileCollectionDialog(PersistentDialog):
 
             if not started:
                 update_sample_view("Not Running", 0)
+                progress.close()
                 QMessageBox.warning(
-                    self, "Queue Error",
+                    None, "Queue Error",
                     "Failed to start workflow queue. Check logs for details."
                 )
                 return
 
-            # Show progress dialog (blocks until accept/reject is called)
-            progress.exec_()
+            # Show progress dialog (non-blocking - allows tile collection dialog to close)
+            progress.show()
 
-        finally:
-            # Ensure tile mode is cleaned up even if callbacks didn't fire
+            # Store cleanup function for callbacks to use
+            def cleanup_signals():
+                """Disconnect signals to avoid issues with stale connections."""
+                try:
+                    queue_service.progress_updated.disconnect(on_progress)
+                    queue_service.workflow_progress.disconnect(on_image_progress)
+                    queue_service.workflow_completed.disconnect(on_workflow_completed)
+                    queue_service.queue_completed.disconnect(on_queue_completed)
+                    queue_service.queue_cancelled.disconnect(on_queue_cancelled)
+                    queue_service.error_occurred.disconnect(on_error)
+                except Exception:
+                    pass  # Signals may already be disconnected
+
+            # Store cleanup function on progress dialog for callbacks to access
+            progress._cleanup_signals = cleanup_signals
+
+        except Exception as e:
+            logger.error(f"Error setting up workflow execution: {e}")
             if camera_controller and camera_controller._workflow_tile_mode:
                 camera_controller.clear_tile_mode()
             if add_to_sample_view and hasattr(self._app, 'workflow_controller'):
                 self._app.workflow_controller._suppress_tile_clear = False
-
-            # Disconnect signals to avoid issues with stale connections
-            try:
-                queue_service.progress_updated.disconnect(on_progress)
-                queue_service.workflow_progress.disconnect(on_image_progress)
-                queue_service.workflow_completed.disconnect(on_workflow_completed)
-                queue_service.queue_completed.disconnect(on_queue_completed)
-                queue_service.queue_cancelled.disconnect(on_queue_cancelled)
-                queue_service.error_occurred.disconnect(on_error)
-            except Exception:
-                pass  # Signals may already be disconnected
 
     def _execute_workflows_fallback(self, workflow_files: List[Path], add_to_sample_view: bool):
         """Fallback workflow execution without queue service.
