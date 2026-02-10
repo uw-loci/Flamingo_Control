@@ -3152,7 +3152,8 @@ class SampleView(QWidget):
             self.logger.info("Cleared all visualization data")
 
     def add_frame_to_volume(self, image: np.ndarray, stage_position_mm: dict,
-                            channel_id: int, timestamp: float = None) -> None:
+                            channel_id: int, timestamp: float = None,
+                            use_stage_y_delta: bool = False) -> None:
         """
         Place a camera frame into the 3D voxel storage.
 
@@ -3161,6 +3162,10 @@ class SampleView(QWidget):
             stage_position_mm: {'x': float, 'y': float, 'z': float} in mm
             channel_id: Channel index (0-3)
             timestamp: Optional timestamp in ms
+            use_stage_y_delta: If True, use stage Y position delta for 3D placement
+                (for tile workflows where tiles are at different Y positions).
+                If False, place all data at focal plane Y (for live view where
+                data is always collected at the focal plane).
         """
         if not self.voxel_storage:
             return
@@ -3231,9 +3236,13 @@ class SampleView(QWidget):
             delta_x_storage = -delta_x if self._invert_x else delta_x
 
             # World coordinates for this frame based on stage position deltas
+            # Y behavior depends on workflow:
+            # - Tile workflow (use_stage_y_delta=True): Y varies with tile position
+            # - Live view (use_stage_y_delta=False): Y fixed at focal plane
+            y_offset = delta_y * 1000 if use_stage_y_delta else 0
             world_center_um = np.array([
                 base_z_um - delta_z * 1000,       # Z varies with stage movement
-                base_y_um + delta_y * 1000,       # Y varies with stage movement
+                base_y_um + y_offset,             # Y: conditional on workflow
                 base_x_um + delta_x_storage * 1000  # X varies with stage movement
             ])
 
@@ -4784,10 +4793,12 @@ class SampleView(QWidget):
                             f"X={ref_x:.3f}, Y={ref_y:.3f}, Z={ref_z:.3f}, R={ref_r:.1f}°")
 
         # Add frame to volume
+        # use_stage_y_delta=True because tile workflow places tiles at different Y positions
         self.add_frame_to_volume(
             image=image,
             stage_position_mm={'x': position['x'], 'y': position['y'], 'z': z_position},
-            channel_id=self._current_channel
+            channel_id=self._current_channel,
+            use_stage_y_delta=True
         )
 
         # Kick the debounced channel-availability check so checkboxes
