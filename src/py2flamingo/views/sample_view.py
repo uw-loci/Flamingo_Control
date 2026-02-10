@@ -3189,52 +3189,39 @@ class SampleView(QWidget):
             # Stack into (N, 2) array
             camera_coords_2d = np.column_stack([camera_x.ravel(), camera_y.ravel()])
 
-            # Get sample region center from config
-            sample_center = self._config.get('sample_chamber', {}).get(
-                'sample_region_center_um', [6655, 7000, 19250]
-            )
-
-            # Get reference position
+            # Get stage position in mm
             pos_x = stage_position_mm['x']
             pos_y = stage_position_mm['y']
             pos_z = stage_position_mm['z']
 
+            # Set reference position on first frame (used for display transformation)
             if self.voxel_storage.reference_stage_position is None:
-                # Set the reference position on first frame - this persists it
-                # so subsequent frames calculate deltas relative to this reference
                 self.voxel_storage.set_reference_position(stage_position_mm)
                 self.logger.info(f"First frame - set reference position to ({pos_x:.3f}, {pos_y:.3f}, {pos_z:.3f})")
 
-            # Always use the stored reference position
-            ref_x = self.voxel_storage.reference_stage_position['x']
-            ref_y = self.voxel_storage.reference_stage_position['y']
-            ref_z = self.voxel_storage.reference_stage_position['z']
-
-            # Calculate stage delta from reference
-            delta_x = pos_x - ref_x
-            delta_y = pos_y - ref_y
-            delta_z = pos_z - ref_z
-
-            # Log delta values for debugging 3D distribution
-            self.logger.debug(f"add_frame_to_volume: pos=({pos_x:.3f}, {pos_y:.3f}, {pos_z:.3f}), "
-                             f"ref=({ref_x:.3f}, {ref_y:.3f}, {ref_z:.3f}), "
-                             f"delta=({delta_x:.3f}, {delta_y:.3f}, {delta_z:.3f})")
-
-            # Storage position (ZYX order)
-            base_z_um = sample_center[2]
-            base_y_um = sample_center[1]
-            base_x_um = sample_center[0]
-
-            # X-axis storage handling:
-            # - When invert_x=True: use -delta_x (storage inverts, display inverts -> correct)
-            # - When invert_x=False: use +delta_x (storage normal, display normal -> correct)
-            delta_x_storage = -delta_x if self._invert_x else delta_x
+            # Convert stage position directly to world coordinates (µm)
+            # This ensures data appears at the same napari voxel as the holder/focal plane
+            # overlay, which also uses direct stage-to-voxel conversion.
+            #
+            # The coordinate system matches the holder position calculation:
+            # - Z: stage Z in µm directly
+            # - Y: stage Y in µm directly (Y increases away from chamber back)
+            # - X: stage X in µm, optionally inverted
+            world_x_um = pos_x * 1000
+            if self._invert_x:
+                # Invert X around the center of the X range
+                x_range = self._config.get('stage_control', {}).get('x_range_mm', [1.0, 12.31])
+                x_center = (x_range[0] + x_range[1]) / 2 * 1000  # µm
+                world_x_um = 2 * x_center - world_x_um
 
             world_center_um = np.array([
-                base_z_um - delta_z * 1000,
-                base_y_um + delta_y * 1000,
-                base_x_um + delta_x_storage * 1000
+                pos_z * 1000,  # Z: direct stage position in µm
+                pos_y * 1000,  # Y: direct stage position in µm
+                world_x_um     # X: stage position, optionally inverted
             ])
+
+            self.logger.debug(f"add_frame_to_volume: stage=({pos_x:.3f}, {pos_y:.3f}, {pos_z:.3f}) mm -> "
+                             f"world=({world_center_um[2]:.0f}, {world_center_um[1]:.0f}, {world_center_um[0]:.0f}) µm")
 
             # Log world center for debugging 3D placement
             self.logger.info(f"Frame placed at world_center_um (Z,Y,X): ({world_center_um[0]:.1f}, {world_center_um[1]:.1f}, {world_center_um[2]:.1f})")
