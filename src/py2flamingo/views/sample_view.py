@@ -3211,6 +3211,11 @@ class SampleView(QWidget):
             delta_y = pos_y - ref_y
             delta_z = pos_z - ref_z
 
+            # Log delta values for debugging 3D distribution
+            self.logger.debug(f"add_frame_to_volume: pos=({pos_x:.3f}, {pos_y:.3f}, {pos_z:.3f}), "
+                             f"ref=({ref_x:.3f}, {ref_y:.3f}, {ref_z:.3f}), "
+                             f"delta=({delta_x:.3f}, {delta_y:.3f}, {delta_z:.3f})")
+
             # Storage position (ZYX order)
             base_z_um = sample_center[2]
             base_y_um = sample_center[1]
@@ -3226,6 +3231,9 @@ class SampleView(QWidget):
                 base_y_um + delta_y * 1000,
                 base_x_um + delta_x_storage * 1000
             ])
+
+            # Log world center for debugging 3D placement
+            self.logger.info(f"Frame placed at world_center_um (Z,Y,X): ({world_center_um[0]:.1f}, {world_center_um[1]:.1f}, {world_center_um[2]:.1f})")
 
             # Create 3D coords
             slice_thickness_um = 100
