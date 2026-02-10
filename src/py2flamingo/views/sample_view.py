@@ -3230,13 +3230,10 @@ class SampleView(QWidget):
             # - When invert_x=False: use +delta_x (storage normal, display normal -> correct)
             delta_x_storage = -delta_x if self._invert_x else delta_x
 
-            # Data is ALWAYS collected at the focal plane (objective Y position).
-            # The stage Y moves the sample, but data appears at the fixed focal plane.
-            # When stage moves, the display transformation shifts all data to follow the sample.
-            # base_y_um = sample_center[1] = 7000 µm = objective focal plane Y
+            # World coordinates for this frame based on stage position deltas
             world_center_um = np.array([
-                base_z_um - delta_z * 1000,  # Z varies with stage movement
-                base_y_um,                    # Y is FIXED at focal plane (no delta_y)
+                base_z_um - delta_z * 1000,       # Z varies with stage movement
+                base_y_um + delta_y * 1000,       # Y varies with stage movement
                 base_x_um + delta_x_storage * 1000  # X varies with stage movement
             ])
 
@@ -4692,21 +4689,12 @@ class SampleView(QWidget):
         channel_idx = min(z_index // frames_per_channel, num_channels - 1)
         self._current_channel = channels[channel_idx]
 
-        # Z position: query actual stage Z for accurate 3D placement
-        z_position = None
-        if self.movement_controller:
-            try:
-                actual_pos = self.movement_controller.get_position()
-                if actual_pos:
-                    z_position = actual_pos.z
-            except Exception as e:
-                self.logger.debug(f"Could not query stage Z: {e}")
-
-        # Fallback to calculated position if query fails
-        if z_position is None:
-            z_within_channel = z_index % max(1, frames_per_channel)
-            z_fraction = z_within_channel / max(1, frames_per_channel - 1) if frames_per_channel > 1 else 0.5
-            z_position = z_min + z_fraction * z_range
+        # For tile workflows, ALWAYS calculate Z from z_index
+        # Hardware position doesn't update mid-Z-sweep, so querying returns
+        # the same Z for all frames. Use the calculated position instead.
+        z_within_channel = z_index % max(1, frames_per_channel)
+        z_fraction = z_within_channel / max(1, frames_per_channel - 1) if frames_per_channel > 1 else 0.5
+        z_position = z_min + z_fraction * z_range
 
         # Increment frame count (tracking was initialized above for channel detection)
         self._accumulated_zstacks[tile_key] += 1
