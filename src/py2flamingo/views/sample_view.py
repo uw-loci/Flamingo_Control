@@ -4659,8 +4659,23 @@ class SampleView(QWidget):
         # The firmware acquires channels sequentially, so we need to detect
         # when we've passed the midpoint of the total frames.
         tile_key = (position['x'], position['y'])
-        if tile_key not in self._accumulated_zstacks:
+        is_new_tile = tile_key not in self._accumulated_zstacks
+        if is_new_tile:
             self._accumulated_zstacks[tile_key] = 0
+
+            # CRITICAL: Force position update at start of each new tile
+            # This ensures the display transform is current before new data arrives,
+            # so existing data shifts correctly and new data is stored with proper deltas.
+            if self.movement_controller:
+                try:
+                    pos = self.movement_controller.get_position()
+                    if pos:
+                        self.logger.info(f"New tile starting - forcing position update: "
+                                        f"X={pos.x:.3f}, Y={pos.y:.3f}, Z={pos.z:.3f}")
+                        self._on_position_changed(pos.x, pos.y, pos.z, pos.r)
+                except Exception as e:
+                    self.logger.warning(f"Could not force position update for new tile: {e}")
+
         frame_count = self._accumulated_zstacks[tile_key]
 
         # Use the learned frame count from the first completed tile, or a default
