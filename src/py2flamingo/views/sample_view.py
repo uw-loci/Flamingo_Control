@@ -2692,7 +2692,7 @@ class SampleView(QWidget):
             if not self.voxel_storage.has_data(ch_id):
                 continue
 
-            volume = self.voxel_storage.get_volume(ch_id)
+            volume = self.voxel_storage.get_display_volume(ch_id)
             if volume is None or volume.size == 0:
                 continue
 
@@ -2757,6 +2757,11 @@ class SampleView(QWidget):
                     min_lbl.setEnabled(True)
                 if max_lbl:
                     max_lbl.setEnabled(True)
+
+                # Explicitly set layer visibility (don't rely only on signal)
+                if ch_id in self.channel_layers:
+                    self.channel_layers[ch_id].visible = True
+                    self._channel_states[ch_id]['visible'] = True
 
                 name = channels_config[ch_id].get('name', f'Ch {ch_id}') if ch_id < len(channels_config) else f'Ch {ch_id}'
                 checkbox.setToolTip(f"{name} — Data available. Click to toggle visibility.")
