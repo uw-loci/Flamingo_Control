@@ -4728,25 +4728,33 @@ class SampleView(QWidget):
         frame_count = self._accumulated_zstacks[tile_key]
 
         # Calculate frames_per_channel for proper Z distribution
-        # For first tile: estimate from z_velocity and z_range
-        # For subsequent tiles: use learned value from first tile
+        # For first tile: estimate from z_velocity and z_range (use for ENTIRE first tile)
+        # For subsequent tiles: use learned value from completed first tile
+        is_first_tile = len(self._accumulated_zstacks) == 1
         frames_per_tile = getattr(self, '_learned_frames_per_tile', None)
-        if frames_per_tile is None:
-            # First tile: calculate expected frames from z_velocity and z_range
+
+        if is_first_tile or frames_per_tile is None:
+            # First tile (or no learned value yet): calculate from z_velocity and z_range
+            # IMPORTANT: Use this calculation for the ENTIRE first tile, even after
+            # _learned_frames_per_tile starts being updated, to ensure consistent
+            # Z distribution throughout the tile.
             z_velocity = position.get('z_velocity', 0)
             camera_fps = getattr(self, '_tile_camera_fps', 40.0)
             if z_velocity > 0 and z_range > 0:
                 sweep_duration = z_range / z_velocity  # seconds
                 expected_frames = int(sweep_duration * camera_fps)
                 frames_per_channel = max(1, expected_frames // max(1, num_channels))
-                self.logger.debug(f"First tile: estimated {expected_frames} frames "
-                                 f"({frames_per_channel}/channel) from z_vel={z_velocity:.3f}, "
-                                 f"z_range={z_range:.3f}, fps={camera_fps}")
+                if frame_count == 0:  # Only log once per tile
+                    self.logger.info(f"First tile: estimated {expected_frames} frames "
+                                    f"({frames_per_channel}/channel) from z_vel={z_velocity:.3f}, "
+                                    f"z_range={z_range:.3f}, fps={camera_fps}")
             else:
                 # Fallback if z_velocity not available
-                frames_per_channel = 50  # Conservative high value to avoid wrap
-                self.logger.warning(f"First tile: no z_velocity, using fallback frames_per_channel={frames_per_channel}")
+                frames_per_channel = 100  # Conservative high value to avoid wrap
+                if frame_count == 0:
+                    self.logger.warning(f"First tile: no z_velocity, using fallback frames_per_channel={frames_per_channel}")
         else:
+            # Subsequent tiles: use learned value from completed first tile
             frames_per_channel = max(1, frames_per_tile // max(1, num_channels))
 
         # Which channel does this z_index belong to?
