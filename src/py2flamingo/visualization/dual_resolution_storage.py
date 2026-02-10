@@ -210,7 +210,7 @@ class DualResolutionVoxelStorage:
 
         # Transform caching and stage position tracking
         self.transform_cache: Dict[int, np.ndarray] = {}  # Channel -> cached transformed volume
-        self.last_rotation = 0.0  # Last rotation angle for cache invalidation
+        self.last_rotation_per_channel: Dict[int, float] = {}  # Per-channel rotation tracking
         self.last_stage_position = {'x': 0, 'y': 0, 'z': 0, 'r': 0}  # Last stage position
         self.data_collection_positions = []  # Track where data was collected
         self.max_history_blocks = max_history_blocks  # Limit memory growth
@@ -909,10 +909,12 @@ class DualResolutionVoxelStorage:
 
         logger.debug(f"Transform: Delta from reference: dx={dx:.3f}, dy={dy:.3f}, dz={dz:.3f}, dr={dr:.1f}°")
 
-        # Check if rotation changed - if so, need to recalculate rotated base volume
-        # Compare ABSOLUTE rotations, not delta vs absolute (dr is delta, last_rotation is absolute)
+        # Check if rotation changed FOR THIS CHANNEL - if so, need to recalculate rotated base volume
+        # Track rotation per-channel to avoid stale cache when processing multiple channels
+        # in sequence (otherwise channel N+1 would see rotation_changed=False after channel N)
         current_r = current_stage_pos.get('r', 0)
-        rotation_changed = abs(current_r - self.last_rotation) > 0.01
+        last_rotation_for_channel = self.last_rotation_per_channel.get(channel_id, 0.0)
+        rotation_changed = abs(current_r - last_rotation_for_channel) > 0.01
 
         # Check if we have a cached base volume (rotated but not translated)
         # We store the ROTATED volume in cache, then apply FULL translation each time
@@ -921,7 +923,8 @@ class DualResolutionVoxelStorage:
 
         if rotation_changed or cache_key not in self.transform_cache:
             # Need to recalculate rotated base volume
-            logger.info(f"Transform: Calculating rotated base volume (rotation delta={dr:.1f}°)")
+            logger.info(f"Transform: Calculating rotated base volume for channel {channel_id} "
+                       f"(rotation delta={dr:.1f}°, channel last_r={last_rotation_for_channel:.1f}°)")
             volume = self.get_display_volume(channel_id)
             # Use holder position as rotation center if provided (rotation axis is the holder)
             center_voxels = self._get_rotation_center_voxels(holder_position_voxels)
@@ -939,9 +942,9 @@ class DualResolutionVoxelStorage:
             else:
                 rotated = volume
 
-            # Cache the rotated base volume
+            # Cache the rotated base volume and update per-channel rotation tracking
             self.transform_cache[cache_key] = rotated
-            self.last_rotation = current_r
+            self.last_rotation_per_channel[channel_id] = current_r
             logger.info(f"Transform: Cached rotated base volume for channel {channel_id}")
         else:
             rotated = self.transform_cache[cache_key]
@@ -1043,9 +1046,11 @@ class DualResolutionVoxelStorage:
             'z': stage_pos.get('z', 0),
             'r': stage_pos.get('r', 0)
         }
-        # Initialize last_rotation to match reference, so first stage update
-        # doesn't incorrectly detect a rotation change
-        self.last_rotation = stage_pos.get('r', 0)
+        # Initialize per-channel rotation tracking to match reference, so first stage update
+        # doesn't incorrectly detect a rotation change. Initialize all channels.
+        ref_r = stage_pos.get('r', 0)
+        for ch_id in range(self.num_channels):
+            self.last_rotation_per_channel[ch_id] = ref_r
         # Reset first transform logging flag so we log details on next transform
         self._first_transform_logged = False
         logger.info(f"Reference position set to X={self.reference_stage_position['x']:.3f}mm, "
