@@ -74,6 +74,9 @@ class ConfigurationService:
         # Load persisted drive mappings
         self._load_drive_mappings()
 
+        # Load persisted session paths (for file dialogs)
+        self._load_session_paths()
+
         # Load microscope-specific settings
         microscope_name = self.get_microscope_name()
         print(f"[ConfigurationService] Detected microscope name: '{microscope_name}' from ScopeSettings.txt")
@@ -396,6 +399,41 @@ class ConfigurationService:
     LED_2D_SESSION_PATH_KEY = 'led_2d_overview_session_path'
     MIP_SESSION_PATH_KEY = 'mip_overview_session_path'
     ZARR_SESSION_PATH_KEY = 'zarr_3d_session_path'
+    _SESSION_PATHS_FILE = 'session_paths.json'
+
+    def _session_paths_file(self) -> Path:
+        """Path to the session paths JSON file."""
+        return self.base_path / self._SESSION_PATHS_FILE
+
+    def _load_session_paths(self) -> None:
+        """Load session paths from JSON file on disk."""
+        path = self._session_paths_file()
+        if not path.exists():
+            return
+        try:
+            with open(path, 'r') as f:
+                data = json.load(f)
+            # Load each session path key
+            for key in [self.LED_2D_SESSION_PATH_KEY, self.MIP_SESSION_PATH_KEY, self.ZARR_SESSION_PATH_KEY]:
+                if key in data:
+                    self.config[key] = data[key]
+            self.logger.info(f"Loaded session paths from {path}")
+        except Exception as e:
+            self.logger.warning(f"Failed to load session paths: {e}")
+
+    def _save_session_paths(self) -> None:
+        """Save session paths to JSON file on disk."""
+        path = self._session_paths_file()
+        data = {}
+        for key in [self.LED_2D_SESSION_PATH_KEY, self.MIP_SESSION_PATH_KEY, self.ZARR_SESSION_PATH_KEY]:
+            if key in self.config:
+                data[key] = self.config[key]
+        try:
+            with open(path, 'w') as f:
+                json.dump(data, f, indent=2)
+            self.logger.debug(f"Saved session paths to {path}")
+        except Exception as e:
+            self.logger.warning(f"Failed to save session paths: {e}")
 
     def get_led_2d_session_path(self) -> Optional[str]:
         """Get the last-used LED 2D Overview session save path.
@@ -412,6 +450,7 @@ class ConfigurationService:
             path: Directory path to save sessions to
         """
         self.config[self.LED_2D_SESSION_PATH_KEY] = path
+        self._save_session_paths()
         self.logger.info(f"Set LED 2D session path: {path}")
 
     def get_zarr_session_path(self) -> Optional[str]:
@@ -429,6 +468,7 @@ class ConfigurationService:
             path: Directory path for Zarr sessions
         """
         self.config[self.ZARR_SESSION_PATH_KEY] = path
+        self._save_session_paths()
         self.logger.info(f"Set Zarr session path: {path}")
 
     def get_mip_session_path(self) -> Optional[str]:
@@ -446,6 +486,7 @@ class ConfigurationService:
             path: Directory path to save sessions to
         """
         self.config[self.MIP_SESSION_PATH_KEY] = path
+        self._save_session_paths()
         self.logger.info(f"Set MIP session path: {path}")
 
     # MIP browse path (for Load MIP Files)
