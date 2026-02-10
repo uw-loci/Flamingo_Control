@@ -3091,6 +3091,10 @@ class SampleView(QWidget):
         if not getattr(self, '_is_populating', False) or not self.camera_controller:
             return
 
+        # Don't populate during tile workflows - they write their own data
+        if getattr(self, '_tile_workflow_active', False):
+            return
+
         try:
             if not self.camera_controller.is_live_view_active():
                 return
@@ -4631,6 +4635,19 @@ class SampleView(QWidget):
         self._tile_reference_set = False  # Set reference on first tile frame
         self._learned_frames_per_tile = None  # Learn from first tile for channel detection
 
+        # Disable Populate from Live during tile workflows to prevent interference
+        if getattr(self, '_is_populating', False):
+            self._was_populating_before_workflow = True
+            self.populate_btn.setChecked(False)  # This triggers _on_populate_toggled
+            self.logger.info("Disabled Populate from Live for tile workflow")
+        else:
+            self._was_populating_before_workflow = False
+
+        # Disable the populate button during tile workflows
+        if hasattr(self, 'populate_btn'):
+            self.populate_btn.setEnabled(False)
+            self.populate_btn.setToolTip("Disabled during tile workflow")
+
         # Cache camera FPS for channel detection
         self._tile_camera_fps = 40.0  # Default
         if self.camera_controller and self.camera_controller.camera_service:
@@ -4643,6 +4660,27 @@ class SampleView(QWidget):
                 pass
 
         self.logger.info(f"Sample View: Prepared to receive {len(tile_info)} tile workflows")
+
+    def finish_tile_workflows(self):
+        """Mark tile workflows as complete and restore UI state.
+
+        Call this when all tile workflows have finished to:
+        - Re-enable Populate from Live button
+        - Allow other 3D Volume View interactions
+        """
+        self._tile_workflow_active = False
+        self.logger.info(f"Sample View: Tile workflows finished. "
+                        f"Processed {len(self._accumulated_zstacks)} tiles.")
+
+        # Re-enable the populate button
+        if hasattr(self, 'populate_btn'):
+            self.populate_btn.setEnabled(True)
+            self.populate_btn.setToolTip("Capture frames from Live View and accumulate into 3D volume")
+
+        # Optionally restore populate state if it was active before
+        # (commented out - user should manually re-enable if desired)
+        # if getattr(self, '_was_populating_before_workflow', False):
+        #     self.populate_btn.setChecked(True)
 
     def _on_tile_zstack_frame(self, image: np.ndarray, position: dict,
                               z_index: int, frame_num: int):

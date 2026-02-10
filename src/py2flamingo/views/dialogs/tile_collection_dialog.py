@@ -1480,6 +1480,12 @@ class TileCollectionDialog(PersistentDialog):
             if add_to_sample_view and hasattr(self._app, 'workflow_controller'):
                 self._app.workflow_controller._suppress_tile_clear = False
 
+            # Notify Sample View that tile workflows are complete
+            if add_to_sample_view:
+                sample_view = self._get_sample_view_instance()
+                if sample_view and hasattr(sample_view, 'finish_tile_workflows'):
+                    sample_view.finish_tile_workflows()
+
             # Reorganize folders AFTER all workflows confirmed complete
             # This is safe because queue_completed only fires after all
             # SYSTEM_STATE_IDLE callbacks have been received
@@ -1510,6 +1516,13 @@ class TileCollectionDialog(PersistentDialog):
                 camera_controller.clear_tile_mode()
             if add_to_sample_view and hasattr(self._app, 'workflow_controller'):
                 self._app.workflow_controller._suppress_tile_clear = False
+
+            # Notify Sample View that tile workflows are complete (even if cancelled)
+            if add_to_sample_view:
+                sample_view = self._get_sample_view_instance()
+                if sample_view and hasattr(sample_view, 'finish_tile_workflows'):
+                    sample_view.finish_tile_workflows()
+
             progress.close()  # Close the progress dialog
             # Use None as parent since tile collection dialog is closed
             QMessageBox.warning(
