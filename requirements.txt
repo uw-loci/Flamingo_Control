@@ -20,3 +20,6 @@ tifffile>=2023.2.0  # TIFF file support (optional, for data import/export)
 # Zarr 3.x with async I/O and V3 spec support
 zarr>=3.0.0  # Zarr 3.x - async I/O, better memory management
 numcodecs>=0.14.0  # Updated codecs for zarr 3.x
+
+# OpenGL acceleration (optional but recommended for faster 3D viewer startup)
+PyOpenGL-accelerate>=3.1.0  # C-accelerated OpenGL bindings

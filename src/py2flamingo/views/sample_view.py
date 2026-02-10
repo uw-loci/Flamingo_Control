@@ -3200,11 +3200,15 @@ class SampleView(QWidget):
             pos_z = stage_position_mm['z']
 
             if self.voxel_storage.reference_stage_position is None:
-                ref_x, ref_y, ref_z = pos_x, pos_y, pos_z
-            else:
-                ref_x = self.voxel_storage.reference_stage_position['x']
-                ref_y = self.voxel_storage.reference_stage_position['y']
-                ref_z = self.voxel_storage.reference_stage_position['z']
+                # Set the reference position on first frame - this persists it
+                # so subsequent frames calculate deltas relative to this reference
+                self.voxel_storage.set_reference_position(stage_position_mm)
+                self.logger.info(f"First frame - set reference position to ({pos_x:.3f}, {pos_y:.3f}, {pos_z:.3f})")
+
+            # Always use the stored reference position
+            ref_x = self.voxel_storage.reference_stage_position['x']
+            ref_y = self.voxel_storage.reference_stage_position['y']
+            ref_z = self.voxel_storage.reference_stage_position['z']
 
             # Calculate stage delta from reference
             delta_x = pos_x - ref_x

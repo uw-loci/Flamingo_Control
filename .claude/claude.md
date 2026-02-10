@@ -1323,5 +1323,49 @@ The ecosystem now fully supports NumPy 2.x:
 
 ---
 
-**Last Updated:** 2026-02-06
+## Logging and Debugging
+
+### Log Files Location
+
+**IMPORTANT:** Log files are stored OUTSIDE the repository at:
+
+```
+/home/msnelson/LSControl/Logs/
+```
+
+This is the same level as `Flamingo_Control/`, NOT inside it. Log files follow the naming pattern:
+```
+flamingo_YYYYMMDD_HHMMSS.log
+```
+
+### Log Parsing Tool
+
+Use `parse_log.py` to analyze log files instead of reading them directly:
+
+```
+/home/msnelson/LSControl/toolsAndTesting/parse_log.py
+```
+
+**Usage examples:**
+```bash
+python parse_log.py flamingo.log --summary
+python parse_log.py flamingo.log --min-level WARNING --short-time
+python parse_log.py flamingo.log --logger sample_view --grep "tile|voxel" --short-time
+python parse_log.py flamingo.log --level ERROR --context 10
+python parse_log.py flamingo.log --count
+python parse_log.py flamingo.log --time-range 15:30:00 15:32:00 --short-time
+```
+
+**Key options:**
+- `--summary`: Show counts by logger and level
+- `--min-level LEVEL`: Filter by minimum log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+- `--logger NAME`: Filter by logger name (partial match)
+- `--grep PATTERN`: Filter messages by regex pattern
+- `--context N`: Show N lines of context around matches
+- `--count`: Show only counts, no messages
+- `--short-time`: Display HH:MM:SS instead of full timestamp
+
+---
+
+**Last Updated:** 2026-02-10
 **Maintained By:** Claude Code assistant
