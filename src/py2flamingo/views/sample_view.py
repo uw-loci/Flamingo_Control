@@ -3230,10 +3230,14 @@ class SampleView(QWidget):
             # - When invert_x=False: use +delta_x (storage normal, display normal -> correct)
             delta_x_storage = -delta_x if self._invert_x else delta_x
 
+            # Data is ALWAYS collected at the focal plane (objective Y position).
+            # The stage Y moves the sample, but data appears at the fixed focal plane.
+            # When stage moves, the display transformation shifts all data to follow the sample.
+            # base_y_um = sample_center[1] = 7000 µm = objective focal plane Y
             world_center_um = np.array([
-                base_z_um - delta_z * 1000,
-                base_y_um + delta_y * 1000,
-                base_x_um + delta_x_storage * 1000
+                base_z_um - delta_z * 1000,  # Z varies with stage movement
+                base_y_um,                    # Y is FIXED at focal plane (no delta_y)
+                base_x_um + delta_x_storage * 1000  # X varies with stage movement
             ])
 
             # Log world center for debugging 3D placement
