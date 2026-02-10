@@ -4689,12 +4689,25 @@ class SampleView(QWidget):
 
         frame_count = self._accumulated_zstacks[tile_key]
 
-        # Use the learned frame count from the first completed tile, or a default
-        # Typical tile has 30-50 frames, so default to 40 per channel as a fallback
+        # Calculate frames_per_channel for proper Z distribution
+        # For first tile: estimate from z_velocity and z_range
+        # For subsequent tiles: use learned value from first tile
         frames_per_tile = getattr(self, '_learned_frames_per_tile', None)
         if frames_per_tile is None:
-            # First tile: use a conservative default, will be updated after first tile
-            frames_per_channel = 20  # Conservative default
+            # First tile: calculate expected frames from z_velocity and z_range
+            z_velocity = position.get('z_velocity', 0)
+            camera_fps = getattr(self, '_tile_camera_fps', 40.0)
+            if z_velocity > 0 and z_range > 0:
+                sweep_duration = z_range / z_velocity  # seconds
+                expected_frames = int(sweep_duration * camera_fps)
+                frames_per_channel = max(1, expected_frames // max(1, num_channels))
+                self.logger.debug(f"First tile: estimated {expected_frames} frames "
+                                 f"({frames_per_channel}/channel) from z_vel={z_velocity:.3f}, "
+                                 f"z_range={z_range:.3f}, fps={camera_fps}")
+            else:
+                # Fallback if z_velocity not available
+                frames_per_channel = 50  # Conservative high value to avoid wrap
+                self.logger.warning(f"First tile: no z_velocity, using fallback frames_per_channel={frames_per_channel}")
         else:
             frames_per_channel = max(1, frames_per_tile // max(1, num_channels))
 
