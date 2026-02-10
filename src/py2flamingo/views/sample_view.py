@@ -4846,21 +4846,28 @@ class SampleView(QWidget):
                     self.logger.warning(f"Sample View: Using WORKFLOW position for reference "
                                        f"(stage position not available - potential for jump!)")
 
+            # Convert stage Y to chamber Y for correct 3D placement
+            # Stage coords use Y=7.45mm at focal plane, chamber coords use Y=7.0mm
+            chamber_y_ref = self.OBJECTIVE_CHAMBER_Y_MM + (ref_y - self.STAGE_Y_AT_OBJECTIVE)
+
             self.voxel_storage.set_reference_position({
                 'x': ref_x,
-                'y': ref_y,
+                'y': chamber_y_ref,
                 'z': ref_z,
                 'r': ref_r
             })
             self._tile_reference_set = True
             self.logger.info(f"Sample View: Tile reference set to "
-                            f"X={ref_x:.3f}, Y={ref_y:.3f}, Z={ref_z:.3f}, R={ref_r:.1f}°")
+                            f"X={ref_x:.3f}, Y={chamber_y_ref:.3f} (stage Y={ref_y:.3f}), "
+                            f"Z={ref_z:.3f}, R={ref_r:.1f}°")
 
         # Add frame to volume
         # use_stage_y_delta=True because tile workflow places tiles at different Y positions
+        # Convert stage Y to chamber Y for correct 3D placement
+        chamber_y = self.OBJECTIVE_CHAMBER_Y_MM + (position['y'] - self.STAGE_Y_AT_OBJECTIVE)
         self.add_frame_to_volume(
             image=image,
-            stage_position_mm={'x': position['x'], 'y': position['y'], 'z': z_position},
+            stage_position_mm={'x': position['x'], 'y': chamber_y, 'z': z_position},
             channel_id=self._current_channel,
             use_stage_y_delta=True
         )
