@@ -4076,6 +4076,11 @@ class SampleView(QWidget):
             for ch_id in range(self.voxel_storage.num_channels):
                 if ch_id in self.channel_layers:
                     if not self.voxel_storage.has_data(ch_id):
+                        # Clear the layer if storage has no data (e.g., after Clear Data)
+                        layer = self.channel_layers[ch_id]
+                        if layer.data is not None and np.any(layer.data):
+                            layer.data = np.zeros_like(layer.data)
+                            self.logger.info(f"Cleared display for channel {ch_id}")
                         continue
 
                     # Use transformed volume if stage has moved from origin
