@@ -105,7 +105,25 @@ class SessionMetadata:
     memory_mb: float
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        """Convert to dict with JSON-serializable types."""
+        d = asdict(self)
+        return self._convert_numpy_types(d)
+
+    @staticmethod
+    def _convert_numpy_types(obj):
+        """Recursively convert numpy types to native Python types for JSON serialization."""
+        if isinstance(obj, dict):
+            return {k: SessionMetadata._convert_numpy_types(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            converted = [SessionMetadata._convert_numpy_types(v) for v in obj]
+            return tuple(converted) if isinstance(obj, tuple) else converted
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return obj
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'SessionMetadata':
