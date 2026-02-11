@@ -4697,10 +4697,16 @@ class SampleView(QWidget):
         Call this when all tile workflows have finished to:
         - Re-enable Populate from Live button
         - Allow other 3D Volume View interactions
+        - Trigger final visualization update to show last tile
         """
         self._tile_workflow_active = False
         self.logger.info(f"Sample View: Tile workflows finished. "
                         f"Processed {len(self._accumulated_zstacks)} tiles.")
+
+        # Trigger visualization update to show the final tile(s)
+        # During acquisition, visualization only updates when a NEW tile starts,
+        # so we need this final update to show the last tile.
+        self._visualization_update_timer.start()
 
         # Re-enable the populate button
         if hasattr(self, 'populate_btn'):
@@ -4911,7 +4917,12 @@ class SampleView(QWidget):
         # get enabled once storage reports has_data()==True.
         # The timer is single-shot, so repeated .start() calls just reset it.
         self._channel_availability_timer.start()
-        self._visualization_update_timer.start()
+
+        # Only kick visualization timer on FIRST frame of each tile.
+        # This ensures the previous tile is complete before we refresh the display.
+        # The current tile will show on the NEXT tile's first frame (or workflow completion).
+        if frame_count == 1:
+            self._visualization_update_timer.start()
 
         self.logger.debug(f"Sample View: Accumulated Z-plane {z_index} for tile "
                          f"({position['x']:.2f}, {position['y']:.2f})")
