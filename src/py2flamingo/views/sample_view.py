@@ -4321,27 +4321,43 @@ class SampleView(QWidget):
             self.logger.info("Live View Settings clicked (window not available)")
 
     def _on_plane_click(self, plane: str, h_coord: float, v_coord: float) -> None:
-        """Handle click-to-move from plane viewers."""
+        """Handle click-to-move from plane viewers.
+
+        Uses move_to_position for multi-axis moves to avoid movement lock conflicts.
+        """
         if not self.movement_controller:
             return
 
         try:
-            # Map plane coordinates to axis movements
+            # Get current position to preserve unchanged axes
+            current_pos = self.movement_controller.get_position()
+            if not current_pos:
+                self.logger.warning("Cannot get current position for plane click move")
+                return
+
+            # Import Position class
+            from py2flamingo.models.hardware.stage import Position
+
+            # Map plane coordinates to target position
             if plane == 'xz':
-                # XZ plane: h=X, v=Z
-                self.movement_controller.move_absolute('x', h_coord, verify=False)
-                self.movement_controller.move_absolute('z', v_coord, verify=False)
-                self.logger.info(f"Moving to X={h_coord:.3f}, Z={v_coord:.3f}")
+                # XZ plane: h=X, v=Z, keep Y and R
+                target = Position(x=h_coord, y=current_pos.y, z=v_coord, r=current_pos.r)
+                self.logger.info(f"Moving to X={h_coord:.3f}, Z={v_coord:.3f} (Y={current_pos.y:.3f} unchanged)")
             elif plane == 'xy':
-                # XY plane: h=X, v=Y
-                self.movement_controller.move_absolute('x', h_coord, verify=False)
-                self.movement_controller.move_absolute('y', v_coord, verify=False)
-                self.logger.info(f"Moving to X={h_coord:.3f}, Y={v_coord:.3f}")
+                # XY plane: h=X, v=Y, keep Z and R
+                target = Position(x=h_coord, y=v_coord, z=current_pos.z, r=current_pos.r)
+                self.logger.info(f"Moving to X={h_coord:.3f}, Y={v_coord:.3f} (Z={current_pos.z:.3f} unchanged)")
             elif plane == 'yz':
-                # YZ plane: h=Z, v=Y
-                self.movement_controller.move_absolute('z', h_coord, verify=False)
-                self.movement_controller.move_absolute('y', v_coord, verify=False)
-                self.logger.info(f"Moving to Z={h_coord:.3f}, Y={v_coord:.3f}")
+                # YZ plane: h=Z, v=Y, keep X and R
+                target = Position(x=current_pos.x, y=v_coord, z=h_coord, r=current_pos.r)
+                self.logger.info(f"Moving to Z={h_coord:.3f}, Y={v_coord:.3f} (X={current_pos.x:.3f} unchanged)")
+            else:
+                self.logger.warning(f"Unknown plane: {plane}")
+                return
+
+            # Use move_to_position for multi-axis move (handles lock properly)
+            self.movement_controller.position_controller.move_to_position(target, validate=True)
+
         except Exception as e:
             self.logger.error(f"Error moving from plane click: {e}")
 
