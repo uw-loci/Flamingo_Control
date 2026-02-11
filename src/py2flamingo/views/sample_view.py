@@ -1940,9 +1940,14 @@ class SampleView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Get stage ranges from config
+        # Use actual stage limits for 2D plane views (not chamber visualization range)
+        # so that coordinates match the position sliders
         stage_config = self._config.get('stage_control', {})
         x_range = tuple(stage_config.get('x_range_mm', [1.0, 12.31]))
-        y_range = tuple(stage_config.get('y_range_mm', [5.0, 25.0]))
+        # Y uses stage limits, not chamber visualization range (which may differ)
+        y_min = stage_config.get('y_stage_min_mm', stage_config.get('y_range_mm', [5.0, 25.0])[0])
+        y_max = stage_config.get('y_stage_max_mm', stage_config.get('y_range_mm', [5.0, 25.0])[1])
+        y_range = (y_min, y_max)
         z_range = tuple(stage_config.get('z_range_mm', [12.5, 26.0]))
 
         # XZ Plane (Top-Down) - X horizontal, Z vertical
