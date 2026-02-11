@@ -4848,13 +4848,16 @@ class SampleView(QWidget):
             self.logger.info(f"Sample View: Using WORKFLOW position for reference "
                             f"(ensures delta=0 for first tile)")
 
-            # For tile workflows, do NOT set voxel_storage reference position.
-            # Data is stored at base + delta positions, and we want the display
-            # to show untransformed data (no additional shift).
-            # Setting reference_stage_position would cause get_display_volume_transformed()
-            # to apply a second delta shift, resulting in incorrect positions.
+            # Store reference both locally (for storage delta) and in voxel_storage (for display transform).
+            # The storage delta places each tile at its relative position: base + (tile_pos - reference).
+            # The display transform shifts the volume by -(current - reference) to show the correct
+            # focal plane relationship: whichever tile is at the current stage position appears at the focal plane.
             #
-            # Instead, just store the reference locally for delta calculations in add_frame_to_volume.
+            # This works because:
+            # - Storage: base + delta (where delta = tile_pos - reference)
+            # - Display: shifts by -delta (where delta = current - reference)
+            # - When current = tile_pos (at capture position): combined = base + delta - delta = base (focal plane)
+            # - When current != tile_pos: tile appears offset from focal plane (as expected)
             self._tile_reference_position = {
                 'x': ref_x,
                 'y': ref_y,
@@ -4862,8 +4865,14 @@ class SampleView(QWidget):
                 'r': ref_r
             }
             self._tile_reference_set = True
-            self.logger.info(f"Sample View: Tile reference (local) set to "
-                            f"X={ref_x:.3f}, Y={ref_y:.3f}, Z={ref_z:.3f}, R={ref_r:.1f}°")
+
+            # Also set voxel_storage reference so display transform is applied
+            # The display transform uses NEGATIVE delta for all axes, which cancels the storage delta
+            # when viewing from the tile's capture position.
+            self.voxel_storage.set_reference_position(self._tile_reference_position)
+            self.logger.info(f"Sample View: Tile reference set to "
+                            f"X={ref_x:.3f}, Y={ref_y:.3f}, Z={ref_z:.3f}, R={ref_r:.1f}° "
+                            f"(both local and voxel_storage)")
 
         # Add frame to volume - pass reference explicitly to avoid enabling display transform
         self.add_frame_to_volume(

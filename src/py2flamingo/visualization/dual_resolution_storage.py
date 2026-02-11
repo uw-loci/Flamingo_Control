@@ -954,11 +954,19 @@ class DualResolutionVoxelStorage:
         # Incremental shifts cause data loss at boundaries when shifting back
 
         # Full offset from reference in ZYX order
-        # Y is NEGATED to match the storage Y inversion (storage uses +delta_y for napari display)
-        # This ensures the transform shift compensates correctly when the stage moves
-        # Negate X delta when invert_x is enabled (stage X direction is mirrored in display)
-        dx_display = -dx if self.config.invert_x else dx
-        offset_voxels = np.array([dz, -dy, dx_display]) * 1000 / self.config.display_voxel_size[0]
+        # ALL axes are NEGATED so display shift CANCELS storage delta.
+        # This ensures that when viewing from the position where a tile was captured,
+        # that tile appears at the focal plane (base position).
+        #
+        # Storage places data at: base + storage_delta
+        # Display shifts by: -display_delta
+        # When current = capture position: combined = base + delta - delta = base (focal plane)
+        #
+        # For X with invert_x:
+        # - Storage uses: -delta_x (when invert_x=True) or +delta_x (when invert_x=False)
+        # - Display should use OPPOSITE: +delta_x (when invert_x=True) or -delta_x (when invert_x=False)
+        dx_display = dx if self.config.invert_x else -dx
+        offset_voxels = np.array([-dz, -dy, dx_display]) * 1000 / self.config.display_voxel_size[0]
 
         # Check if translation is significant
         max_offset = np.max(np.abs(offset_voxels))
@@ -971,7 +979,7 @@ class DualResolutionVoxelStorage:
         # Log large offsets as INFO (potential jumps), small as DEBUG
         if max_offset > 10:
             logger.info(f"Transform: LARGE offset {offset_voxels} voxels (ZYX) "
-                       f"= ({dz*1000:.0f}, {-dy*1000:.0f}, {dx_display*1000:.0f}) µm "
+                       f"= ({-dz*1000:.0f}, {-dy*1000:.0f}, {dx_display*1000:.0f}) µm "
                        f"[quality={self._transform_quality.name}]")
         else:
             logger.debug(f"Transform: Applying offset {offset_voxels} voxels (ZYX) from reference "
