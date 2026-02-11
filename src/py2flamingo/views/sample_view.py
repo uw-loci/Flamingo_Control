@@ -2262,6 +2262,9 @@ class SampleView(QWidget):
         if self.movement_controller:
             self.movement_controller.position_changed.connect(self._on_position_changed)
 
+        # Internal signals for plane view updates (triggered by contrast/colormap/visibility changes)
+        self.plane_views_update_requested.connect(self._update_plane_views)
+
         self.logger.info("SampleView signals connected")
 
     def _init_stage_limits(self) -> None:
@@ -4372,13 +4375,20 @@ class SampleView(QWidget):
 
                 # Data is in (Z, Y, X) order - generate MIP projections
                 # XZ plane (top-down) - project along Y axis (axis 1)
+                # Result shape: (Z, X) where Z=rows(vertical), X=cols(horizontal)
+                # Viewer has h_axis='x', v_axis='z' - matches naturally
                 xz_channel_mips[ch_id] = np.max(volume, axis=1)
 
                 # XY plane (front view) - project along Z axis (axis 0)
+                # Result shape: (Y, X) where Y=rows(vertical), X=cols(horizontal)
+                # Viewer has h_axis='x', v_axis='y' - matches naturally
                 xy_channel_mips[ch_id] = np.max(volume, axis=0)
 
                 # YZ plane (side view) - project along X axis (axis 2)
-                yz_channel_mips[ch_id] = np.max(volume, axis=2)
+                # Result shape: (Z, Y) where Z=rows(vertical), Y=cols(horizontal)
+                # Viewer has h_axis='z', v_axis='y' - need Z horizontal, Y vertical
+                # Transpose to get (Y, Z) where Y=rows(vertical), Z=cols(horizontal)
+                yz_channel_mips[ch_id] = np.max(volume, axis=2).T
 
                 # Get channel settings from napari layer or use defaults
                 settings = {
