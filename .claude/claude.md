@@ -1,5 +1,41 @@
 # Claude Code Project Guidelines
 
+## Codemap Reference
+
+**IMPORTANT:** Before exploring the codebase manually, consult the codemap at:
+
+```
+Flamingo_Control/codemap/codemap.json
+```
+
+This JSON file provides a complete structural overview of the py2flamingo project:
+
+- **Module Hierarchy**: All packages and their child modules
+- **Import Relationships**: `imports_from` (what a module uses) and `imports_to` (what depends on it)
+- **Root Node**: `py2flamingo` with children including:
+  - `controllers/` - UI controllers (camera, stage, workflow, etc.)
+  - `core/` - TCP protocol, errors, events
+  - `models/` - Data models (hardware, samples, workflows)
+  - `services/` - Business logic services
+  - `views/` - Qt UI components and dialogs
+  - `workflows/` - Workflow execution system
+  - `visualization/` - 3D rendering and transforms
+
+**Usage Example:** To understand what a module depends on:
+```json
+"py2flamingo.services.stage_service": {
+  "imports_to": ["py2flamingo.core.tcp_connection", "py2flamingo.models.hardware.stage", ...]
+}
+```
+
+The codemap helps identify:
+- Where to find specific functionality
+- What modules need updating when changing an interface
+- Circular dependency risks
+- Entry points for new features
+
+---
+
 ## Environment Setup
 
 ### Python Virtual Environment
