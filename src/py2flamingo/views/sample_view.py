@@ -4120,6 +4120,9 @@ class SampleView(QWidget):
                         self._auto_contrast_channels()
                         layer._auto_contrast_applied = True
 
+            # Update 2D plane views with MIP projections
+            self._update_plane_views()
+
         except Exception as e:
             self.logger.error(f"Error updating visualization: {e}", exc_info=True)
 

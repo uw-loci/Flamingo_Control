@@ -82,15 +82,31 @@ set_show_coordinate_readout(show: bool) # Toggle mouse position display
 reset_view()                            # Reset pan/zoom
 ```
 
-## Integration with ViewerControlsDialog
+## Data Update Flow
 
-When channel settings change in the Viewer Controls dialog, the plane views update automatically:
+The 2D plane views update automatically alongside the 3D visualization:
+
+### Automatic Updates (Primary Path)
+1. Visualization timer fires every 500ms
+2. `SampleView._update_visualization()` updates napari channel layers
+3. At the end of `_update_visualization()`, calls `_update_plane_views()`
+4. `_update_plane_views()` fetches per-channel MIP data from `voxel_storage`
+5. Channel settings read from napari layer properties
+6. Calls `set_multi_channel_mip()` on each plane viewer
+
+### Manual Updates (ViewerControlsDialog)
+When channel settings change in the Viewer Controls dialog:
 
 1. `ViewerControlsDialog` emits `plane_views_update_requested` signal
 2. Signal connected to `SampleView._update_plane_views()`
-3. `_update_plane_views()` fetches per-channel data from `voxel_storage`
-4. Channel settings read from napari layer properties
-5. Calls `set_multi_channel_mip()` on each plane viewer
+3. Same update logic as automatic path
+
+### Bug Fix (2026-02)
+**Issue:** The 2D plane views were not displaying MIP data despite having data in the 3D view.
+
+**Root Cause:** `_update_plane_views()` was only connected to the `ViewerControlsDialog.plane_views_update_requested` signal, which only fires when users manually change channel settings. It was never called automatically when new tile/frame data arrived.
+
+**Fix:** Added a call to `_update_plane_views()` at the end of `_update_visualization()` (line 4124 in `sample_view.py`). This ensures that whenever the 3D visualization updates from the timer, the 2D MIP viewers also update with the same voxel storage data.
 
 ## Signals
 
