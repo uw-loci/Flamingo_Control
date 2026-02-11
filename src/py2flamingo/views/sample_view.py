@@ -2262,9 +2262,6 @@ class SampleView(QWidget):
         if self.movement_controller:
             self.movement_controller.position_changed.connect(self._on_position_changed)
 
-        # Internal signals for plane view updates (triggered by contrast/colormap/visibility changes)
-        self.plane_views_update_requested.connect(self._update_plane_views)
-
         self.logger.info("SampleView signals connected")
 
     def _init_stage_limits(self) -> None:
