@@ -79,7 +79,7 @@ class SlicePlaneViewer(QFrame):
     }
 
     def __init__(self, plane: str, h_axis: str, v_axis: str,
-                 width: int, height: int, parent=None):
+                 width: int, height: int, v_axis_inverted: bool = False, parent=None):
         """
         Initialize slice plane viewer.
 
@@ -89,6 +89,8 @@ class SlicePlaneViewer(QFrame):
             v_axis: Vertical axis ('x', 'y', or 'z')
             width: Widget width in pixels
             height: Widget height in pixels
+            v_axis_inverted: If True, v_range[0] (min) is at bottom, v_range[1] (max) at top.
+                           Use for axes where physical "up" is positive (like Y axis).
             parent: Parent widget
         """
         super().__init__(parent)
@@ -98,6 +100,7 @@ class SlicePlaneViewer(QFrame):
         self.v_axis = v_axis
         self._width = width
         self._height = height
+        self._v_axis_inverted = v_axis_inverted
 
         # Physical coordinate ranges (will be set from config)
         self.h_range = (0.0, 1.0)  # (min, max) in mm
@@ -353,7 +356,12 @@ class SlicePlaneViewer(QFrame):
         def to_pixel(h_coord, v_coord):
             """Convert physical coordinates to pixel coordinates on the final pixmap."""
             px = int((h_coord - self.h_range[0]) * h_scale + center_x)
-            py = int((v_coord - self.v_range[0]) * v_scale + center_y)
+            if self._v_axis_inverted:
+                # Inverted: v_range[1] (max) at top, v_range[0] (min) at bottom
+                py = int((self.v_range[1] - v_coord) * v_scale + center_y)
+            else:
+                # Normal: v_range[0] (min) at top, v_range[1] (max) at bottom
+                py = int((v_coord - self.v_range[0]) * v_scale + center_y)
             return px, py
 
         # Draw focal plane indicator (cyan dashed horizontal line)
@@ -475,8 +483,14 @@ class SlicePlaneViewer(QFrame):
             draw_label(h_max_str, img_right - 2, img_bottom - 16, align_right=True)
 
             # V-axis labels (top and bottom edges)
-            draw_label(v_min_str, img_left + 2, img_top + 2)
-            draw_label(v_max_str, img_left + 2, img_bottom - 32)
+            if self._v_axis_inverted:
+                # Inverted: max at top, min at bottom (physical "up" is positive)
+                draw_label(v_max_str, img_left + 2, img_top + 2)
+                draw_label(v_min_str, img_left + 2, img_bottom - 32)
+            else:
+                # Normal: min at top, max at bottom
+                draw_label(v_min_str, img_left + 2, img_top + 2)
+                draw_label(v_max_str, img_left + 2, img_bottom - 32)
 
         # Draw coordinate readout (mouse position)
         if self._show_coordinate_readout and self._mouse_pos is not None:
@@ -730,7 +744,12 @@ class SlicePlaneViewer(QFrame):
 
         # Convert to physical coordinates
         h_coord = self.h_range[0] + ((px - img_x) / scaled_w) * (self.h_range[1] - self.h_range[0])
-        v_coord = self.v_range[0] + ((py - img_y) / scaled_h) * (self.v_range[1] - self.v_range[0])
+        if self._v_axis_inverted:
+            # Inverted: top of image is v_max, bottom is v_min
+            v_coord = self.v_range[1] - ((py - img_y) / scaled_h) * (self.v_range[1] - self.v_range[0])
+        else:
+            # Normal: top of image is v_min, bottom is v_max
+            v_coord = self.v_range[0] + ((py - img_y) / scaled_h) * (self.v_range[1] - self.v_range[0])
 
         return (h_coord, v_coord)
 
@@ -1932,11 +1951,12 @@ class SampleView(QWidget):
         z_range = tuple(stage_config.get('z_range_mm', [12.5, 26.0]))
 
         # XZ Plane (Top-Down) - X horizontal, Z vertical
+        # Z axis: min at back (top of view), max at front (bottom) - no inversion needed
         xz_group = QGroupBox("XZ Plane (Top-Down)")
         xz_layout = QVBoxLayout()
         xz_layout.setContentsMargins(4, 4, 4, 4)
         # Aspect ~11:13.5 ≈ 0.81, use 180x220
-        self.xz_plane_viewer = SlicePlaneViewer('xz', 'x', 'z', 180, 220)
+        self.xz_plane_viewer = SlicePlaneViewer('xz', 'x', 'z', 180, 220, v_axis_inverted=False)
         self.xz_plane_viewer.set_ranges(x_range, z_range)
         self.xz_plane_viewer.position_clicked.connect(
             lambda h, v: self._on_plane_click('xz', h, v)
@@ -1950,11 +1970,12 @@ class SampleView(QWidget):
         bottom_row.setSpacing(4)
 
         # XY Plane (Front View) - X horizontal, Y vertical
+        # Y axis: physical "up" is positive, so invert (min at bottom, max at top)
         xy_group = QGroupBox("XY Plane (Front)")
         xy_layout = QVBoxLayout()
         xy_layout.setContentsMargins(4, 4, 4, 4)
         # Aspect ~11:20 ≈ 0.55, use 130x240
-        self.xy_plane_viewer = SlicePlaneViewer('xy', 'x', 'y', 130, 240)
+        self.xy_plane_viewer = SlicePlaneViewer('xy', 'x', 'y', 130, 240, v_axis_inverted=True)
         self.xy_plane_viewer.set_ranges(x_range, y_range)
         self.xy_plane_viewer.position_clicked.connect(
             lambda h, v: self._on_plane_click('xy', h, v)
@@ -1964,11 +1985,12 @@ class SampleView(QWidget):
         bottom_row.addWidget(xy_group)
 
         # YZ Plane (Side View) - Z horizontal, Y vertical
+        # Y axis: physical "up" is positive, so invert (min at bottom, max at top)
         yz_group = QGroupBox("YZ Plane (Side)")
         yz_layout = QVBoxLayout()
         yz_layout.setContentsMargins(4, 4, 4, 4)
         # Aspect ~13.5:20 ≈ 0.675, use 160x240
-        self.yz_plane_viewer = SlicePlaneViewer('yz', 'z', 'y', 160, 240)
+        self.yz_plane_viewer = SlicePlaneViewer('yz', 'z', 'y', 160, 240, v_axis_inverted=True)
         self.yz_plane_viewer.set_ranges(z_range, y_range)
         self.yz_plane_viewer.position_clicked.connect(
             lambda h, v: self._on_plane_click('yz', h, v)
@@ -4077,6 +4099,8 @@ class SampleView(QWidget):
 
         if channels_updated > 0:
             self.logger.info(f"  Updated {channels_updated} channel(s) with transformed data")
+            # Also update 2D plane views with the same transformed data
+            self._update_plane_views()
 
     def _setup_data_layers(self) -> None:
         """Setup napari layers for multi-channel data."""
@@ -4362,6 +4386,8 @@ class SampleView(QWidget):
         """Update the MIP (Maximum Intensity Projection) plane views from voxel data.
 
         Supports multi-channel display with colormaps from Viewer Controls settings.
+        Uses the transformed data from napari layers (if available) so that 2D planes
+        show the same data position as the 3D viewer when the stage moves.
         """
         if not self.voxel_storage:
             return
@@ -4381,27 +4407,35 @@ class SampleView(QWidget):
                 if not self.voxel_storage.has_data(ch_id):
                     continue
 
-                # Get channel volume from storage
-                volume = self.voxel_storage.get_display_volume(ch_id)
+                # Prefer using napari layer data (already transformed with stage position)
+                # over raw voxel storage data, so 2D planes match 3D viewer position
+                if ch_id in self.channel_layers and self.channel_layers[ch_id].data is not None:
+                    volume = self.channel_layers[ch_id].data
+                else:
+                    # Fallback to raw storage data
+                    volume = self.voxel_storage.get_display_volume(ch_id)
+
                 if volume is None or volume.size == 0:
                     continue
 
                 # Data is in (Z, Y, X) order - generate MIP projections
                 # XZ plane (top-down) - project along Y axis (axis 1)
                 # Result shape: (Z, X) where Z=rows(vertical), X=cols(horizontal)
-                # Viewer has h_axis='x', v_axis='z' - matches naturally
+                # Viewer has h_axis='x', v_axis='z', v_axis_inverted=False
+                # Z_min at back (top), Z_max at front (bottom) - no flip needed
                 xz_channel_mips[ch_id] = np.max(volume, axis=1)
 
                 # XY plane (front view) - project along Z axis (axis 0)
                 # Result shape: (Y, X) where Y=rows(vertical), X=cols(horizontal)
-                # Viewer has h_axis='x', v_axis='y' - matches naturally
-                xy_channel_mips[ch_id] = np.max(volume, axis=0)
+                # Viewer has h_axis='x', v_axis='y', v_axis_inverted=True
+                # Data row 0 = Y_min, but we want Y_max at top -> flip vertically
+                xy_channel_mips[ch_id] = np.max(volume, axis=0)[::-1, :]
 
                 # YZ plane (side view) - project along X axis (axis 2)
-                # Result shape: (Z, Y) where Z=rows(vertical), Y=cols(horizontal)
-                # Viewer has h_axis='z', v_axis='y' - need Z horizontal, Y vertical
-                # Transpose to get (Y, Z) where Y=rows(vertical), Z=cols(horizontal)
-                yz_channel_mips[ch_id] = np.max(volume, axis=2).T
+                # Result shape: (Z, Y) -> transpose to (Y, Z)
+                # Viewer has h_axis='z', v_axis='y', v_axis_inverted=True
+                # After transpose: row 0 = Y_min, but we want Y_max at top -> flip vertically
+                yz_channel_mips[ch_id] = np.max(volume, axis=2).T[::-1, :]
 
                 # Get channel settings from napari layer or use defaults
                 settings = {
