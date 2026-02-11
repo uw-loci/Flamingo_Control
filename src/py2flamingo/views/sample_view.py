@@ -3240,9 +3240,10 @@ class SampleView(QWidget):
             delta_x_storage = -delta_x if self._invert_x else delta_x
 
             # World coordinates for this frame based on stage position deltas
-            # Y is fixed at focal plane (use_stage_y_delta=False for both live view and tile workflows)
-            # because all imaging physically occurs at the fixed focal plane location.
-            # Z varies to represent the sample's 3D structure as it passes through the focal plane.
+            # Y behavior depends on workflow type:
+            # - Tile workflows (use_stage_y_delta=True): Y varies with tile position for proper distribution
+            # - Live view (use_stage_y_delta=False): Y fixed at focal plane
+            # Z varies to represent the sample's 3D structure.
             #
             # Z sign convention: smaller stage Z = closer to objective = smaller napari Z (back wall at Z=0)
             # So we use +delta_z to maintain the same orientation in napari as physical space.
@@ -4862,13 +4863,13 @@ class SampleView(QWidget):
             self.logger.info(f"Sample View: Tile reference set to "
                             f"X={ref_x:.3f}, Y={ref_y:.3f}, Z={ref_z:.3f}, R={ref_r:.1f}°")
 
-        # Add frame to volume at focal plane (like live view)
-        # use_stage_y_delta=False stores data at base_y_um, display transform handles positioning
+        # Add frame to volume with Y delta for proper tile distribution
+        # use_stage_y_delta=True places tiles at different Y positions based on stage Y
         self.add_frame_to_volume(
             image=image,
             stage_position_mm={'x': position['x'], 'y': position['y'], 'z': z_position},
             channel_id=self._current_channel,
-            use_stage_y_delta=False
+            use_stage_y_delta=True
         )
 
         # Kick the debounced channel-availability check so checkboxes
