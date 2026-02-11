@@ -4836,34 +4836,17 @@ class SampleView(QWidget):
                                 f"Z={self.last_stage_position.get('z', 0):.3f}, "
                                 f"R={self.last_stage_position.get('r', 0):.1f}°")
 
-            if actual_pos:
-                # Use queried actual stage position (most accurate, avoids timing issues)
-                ref_x = actual_pos.x
-                ref_y = actual_pos.y
-                ref_z = actual_pos.z
-                ref_r = actual_pos.r
-                self.logger.info(f"Sample View: Using QUERIED stage position for reference")
-            else:
-                # Fall back to cached position or workflow
-                last_pos_updated = (
-                    self.last_stage_position.get('x', 0) != 0 or
-                    self.last_stage_position.get('y', 0) != 0 or
-                    self.last_stage_position.get('z', 0) != 0
-                )
-                if last_pos_updated:
-                    ref_x = self.last_stage_position['x']
-                    ref_y = self.last_stage_position['y']
-                    ref_z = self.last_stage_position['z']
-                    ref_r = self.last_stage_position.get('r', 0)
-                    self.logger.info(f"Sample View: Using CACHED stage position for reference")
-                else:
-                    ref_x = position['x']
-                    ref_y = position['y']
-                    ref_z = z_position
-                    # Get rotation from workflow position dict (parsed from filename like R90_X...)
-                    ref_r = position.get('r', self.last_stage_position.get('r', 0))
-                    self.logger.warning(f"Sample View: Using WORKFLOW position for reference "
-                                       f"(stage position not available - potential for jump!)")
+            # CRITICAL: Use WORKFLOW position for reference, not actual stage position.
+            # Data position also comes from workflow position, so using the same source
+            # ensures delta = 0 for the first tile (data appears at base position).
+            # If we used actual stage position for reference but workflow position for data,
+            # any difference would cause an offset in the first tile.
+            ref_x = position['x']
+            ref_y = position['y']
+            ref_z = z_position
+            ref_r = position.get('r', self.last_stage_position.get('r', 0))
+            self.logger.info(f"Sample View: Using WORKFLOW position for reference "
+                            f"(ensures delta=0 for first tile)")
 
             # For tile workflows, do NOT set voxel_storage reference position.
             # Data is stored at base + delta positions, and we want the display
