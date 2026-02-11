@@ -64,6 +64,135 @@ In this light sheet microscope:
    - New data appears at the (now empty) focal plane location
 4. Result: Multiple Z-stacks tiled together in 3D space
 
+---
+
+## Tile Workflow Display System (Detailed)
+
+### The Mental Model: "Window into the Sample"
+
+Think of the napari 3D viewer as a **window** with the focal plane at the center:
+- **The window (focal plane) stays fixed** in the display
+- **The sample data moves past** as the stage moves
+- **New data always appears at the window** because that's where the camera is looking
+- **Old data shifts away** to show its position relative to the current view
+
+### Two-Stage System: Storage + Display Transform
+
+#### Stage 1: Storage (Preserves Spatial Relationships)
+
+Each tile is stored at a position relative to the **reference** (first tile):
+
+```
+storage_position = base_position + (tile_position - reference_position) * 1000
+
+Example:
+- Reference (Tile 1): stage (5, 7, 19) mm
+- Tile 2: stage (6, 7, 19) mm
+- Delta = (1, 0, 0) mm
+- Tile 2 stored at: base + (1000, 0, 0) µm
+```
+
+#### Stage 2: Display Transform (Shows Focal Plane Relationship)
+
+The display transform shifts the **entire volume** based on current stage position:
+
+```
+display_shift = -(current_position - reference_position)
+
+When viewing from Tile 2 position:
+- Shift = -(6-5, 7-7, 19-19) = (-1, 0, 0) mm = (-1000, 0, 0) µm
+
+Combined effect:
+- Tile 1 (stored at base + 0): displayed at base + 0 - 1000 = base - 1000 (shifted left)
+- Tile 2 (stored at base + 1000): displayed at base + 1000 - 1000 = base (focal plane!)
+```
+
+### Concrete Example with Numbers
+
+**Setup:**
+- Napari focal plane position: X=5, Y=10 (in display voxels)
+- Stage positions:
+  - Tile 1: (5, 7, 19) mm
+  - Tile 2: (6, 7, 19) mm — moved +1mm in X
+  - Tile 3: (7, 7, 19) mm — moved +2mm total
+
+**What the user sees:**
+
+| Capturing | Stage X | Tile 1 Display | Tile 2 Display | Tile 3 Display |
+|-----------|---------|----------------|----------------|----------------|
+| Tile 1    | 5 mm    | X=5 (focal plane) | — | — |
+| Tile 2    | 6 mm    | X=4 (shifted -1) | X=5 (focal plane) | — |
+| Tile 3    | 7 mm    | X=3 (shifted -2) | X=4 (shifted -1) | X=5 (focal plane) |
+
+**Key insight:** Stage moved +1 in X → existing data shifts -1 in display X.
+
+### The Math
+
+For any tile N, when viewing from position P:
+
+```
+display_position(Tile_N) = base + storage_delta(N) + display_shift(P)
+                        = base + (Tile_N - Reference) - (P - Reference)
+                        = base + Tile_N - P
+
+When P = Tile_N (viewing from capture position):
+  display_position = base + Tile_N - Tile_N = base (focal plane!)
+
+When P ≠ Tile_N:
+  display_position = base + (Tile_N - P) (offset from focal plane)
+```
+
+### Implementation Requirements
+
+1. **Reference must match data source:**
+   ```python
+   # Use WORKFLOW position for reference (not hardware position)
+   # Data position comes from workflow, so reference must too
+   reference = workflow_position
+   ```
+
+2. **Display transform uses NEGATIVE delta:**
+   ```python
+   # In get_display_volume_transformed()
+   offset = -(current - reference)  # Negative to cancel storage delta
+   ```
+
+3. **Gate competing code paths:**
+   ```python
+   # During tile workflow, disable hardware position updates
+   if self._tile_workflow_active:
+       return  # Skip display updates from hardware callbacks
+   ```
+
+4. **Update position only on new tile:**
+   ```python
+   # Only update last_stage_position on first frame of each tile
+   if frame_count == 1:
+       self.last_stage_position = tile_position
+   ```
+
+5. **Visualize once per complete Z-stack:**
+   ```python
+   # Kick visualization timer only when new tile starts
+   if frame_count == 1:
+       self._visualization_update_timer.start()
+
+   # Also kick at workflow completion for last tile
+   def finish_tile_workflows(self):
+       self._visualization_update_timer.start()
+   ```
+
+### Why This Design?
+
+The storage + display transform design has important advantages:
+
+1. **Preserves spatial relationships:** Tiles are stored at correct relative positions
+2. **Dynamic focal plane view:** The currently captured tile always appears at the focal plane
+3. **Supports any viewing position:** After acquisition, moving the stage shows different perspectives
+4. **Memory efficient:** Data is stored once, transform is applied at display time
+
+---
+
 ## Critical Concept: Three Coordinate Systems
 
 There are THREE distinct coordinate systems that must be understood:
@@ -195,25 +324,44 @@ voxel_y = world_y_um / voxel_size
 voxel_x = world_x_um / voxel_size
 ```
 
-### Display Transform (After Acquisition)
+### Display Transform (Tile Workflows)
+
+The display transform shifts the ENTIRE voxel volume so that the currently captured tile appears at the focal plane:
+
 ```python
-# When stage moves after data is captured, display transform shifts the volume
 # In get_display_volume_transformed() - dual_resolution_storage.py
 
-# Current stage position vs reference (where data was captured)
+# Calculate delta from reference position
 dx = current_stage_x - reference_x  # mm
 dy = current_stage_y - reference_y  # mm
 dz = current_stage_z - reference_z  # mm
 
-# Convert to voxel offset
+# ALL AXES ARE NEGATED to cancel storage delta
+# This ensures: storage_delta + display_shift = 0 when at capture position
+# Which means: tile appears at focal plane when viewing from its capture position
+
+dx_display = dx if invert_x else -dx  # Handle X-axis inversion setting
 offset_voxels = [
-    dz * 1000 / voxel_size,   # Z
-    -dy * 1000 / voxel_size,  # Y (inverted)
-    dx * 1000 / voxel_size    # X
+    -dz * 1000 / voxel_size,   # Z: negated
+    -dy * 1000 / voxel_size,   # Y: negated
+    dx_display * 1000 / voxel_size  # X: negated (unless invert_x)
 ]
 
-# Shift the display volume by this offset
-# Result: data appears to move with the stage
+# Apply shift via np.roll()
+translated_volume = np.roll(volume, offset_voxels.astype(int), axis=(0, 1, 2))
+```
+
+**Why negative?**
+- Storage places tile at: `base + (tile_pos - reference)`
+- Display shifts by: `-(current_pos - reference)`
+- When `current_pos = tile_pos`: combined = `base + delta - delta = base` (focal plane!)
+
+**Example:**
+```
+Tile 2 at stage (6, 7, 19), reference at (5, 7, 19):
+- Storage delta = (1, 0, 0) mm → stored at base + 1000 µm
+- Display shift when at tile 2 = -(1, 0, 0) = (-1, 0, 0) mm
+- Combined: base + 1000 - 1000 = base (focal plane) ✓
 ```
 
 ### World → Napari Coordinates
@@ -504,11 +652,25 @@ self.voxel_storage.update_storage(channel_id, world_coords_3d, pixel_values, ...
 | Mode | reference_stage_position | Data Placement | Display Transform |
 |------|--------------------------|----------------|-------------------|
 | **Live View** | Set on first frame | Relative to `sample_region_center - (current - reference)` | `get_display_volume_transformed()` applies rotation + translation delta |
-| **Tile Workflow** | Cleared to `None` | Absolute world coordinates (`tile_x * 1000 + pixel_offset`) | `get_display_volume_transformed()` returns untransformed volume |
+| **Tile Workflow** | Set to first tile position | Relative to reference: `base + (tile - reference)` | `get_display_volume_transformed()` applies NEGATIVE delta |
 
-**Why this matters**: If live view sets `reference_stage_position` and then tile collection starts without clearing it, `get_display_volume_transformed()` will shift all tile data by `(current_stage - stale_reference)`, corrupting positions.
+**Tile Workflow Reference Management:**
 
-**Fix**: `prepare_for_tile_workflows()` clears `reference_stage_position = None` and `invalidate_transform_cache()`.
+1. **First tile, first frame:** Reference set to workflow position
+   ```python
+   self._tile_reference_position = {'x': workflow_x, 'y': workflow_y, 'z': z_min}
+   self.voxel_storage.set_reference_position(self._tile_reference_position)
+   ```
+
+2. **Each new tile (first frame):** Update `last_stage_position` for display transform
+   ```python
+   if frame_count == 1:
+       self.last_stage_position = {'x': tile_x, 'y': tile_y, 'z': z_min}
+   ```
+
+3. **Display transform:** Uses `last_stage_position - reference_stage_position` to shift volume
+
+**Critical:** Reference must come from WORKFLOW position (not hardware), because data position also comes from workflow. Any mismatch causes offset!
 
 ---
 
