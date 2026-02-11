@@ -4874,7 +4874,17 @@ class SampleView(QWidget):
                             f"X={ref_x:.3f}, Y={ref_y:.3f}, Z={ref_z:.3f}, R={ref_r:.1f}° "
                             f"(both local and voxel_storage)")
 
-        # Add frame to volume - pass reference explicitly to avoid enabling display transform
+        # Update last_stage_position so display transform shifts volume during acquisition
+        # This makes the entire data volume move as the stage moves between tiles,
+        # showing the correct focal plane relationship: currently captured tile at focal plane.
+        self.last_stage_position = {
+            'x': position['x'],
+            'y': position['y'],
+            'z': z_position,
+            'r': position.get('r', self.last_stage_position.get('r', 0))
+        }
+
+        # Add frame to volume - pass reference explicitly for storage delta calculation
         self.add_frame_to_volume(
             image=image,
             stage_position_mm={'x': position['x'], 'y': position['y'], 'z': z_position},
