@@ -1624,8 +1624,8 @@ class LED2DOverviewResultWindow(PersistentWidget):
         default_folder = None
 
         # Check for user's saved preference via configuration service
-        if self._app and hasattr(self._app, 'configuration_service'):
-            saved_path = self._app.configuration_service.get_led_2d_session_path()
+        if self._app and hasattr(self._app, 'config_service'):
+            saved_path = self._app.config_service.get_led_2d_session_path()
             if saved_path and Path(saved_path).exists():
                 default_folder = saved_path
 
@@ -1652,8 +1652,8 @@ class LED2DOverviewResultWindow(PersistentWidget):
             return
 
         # Remember user's choice for future sessions
-        if self._app and hasattr(self._app, 'configuration_service'):
-            self._app.configuration_service.set_led_2d_session_path(folder)
+        if self._app and hasattr(self._app, 'config_service'):
+            self._app.config_service.set_led_2d_session_path(folder)
 
         try:
             import tifffile

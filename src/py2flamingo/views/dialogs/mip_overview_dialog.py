@@ -226,8 +226,8 @@ class MIPOverviewDialog(PersistentDialog):
         """Browse for folder containing tile acquisitions."""
         # Remember last browse location
         default_path = str(Path.home())
-        if self._app and hasattr(self._app, 'configuration_service'):
-            saved = self._app.configuration_service.get_mip_browse_path()
+        if self._app and hasattr(self._app, 'config_service'):
+            saved = self._app.config_service.get_mip_browse_path()
             if saved and Path(saved).exists():
                 default_path = saved
 
@@ -237,8 +237,8 @@ class MIPOverviewDialog(PersistentDialog):
         )
         if folder:
             # Save browse location for next time
-            if self._app and hasattr(self._app, 'configuration_service'):
-                self._app.configuration_service.set_mip_browse_path(folder)
+            if self._app and hasattr(self._app, 'config_service'):
+                self._app.config_service.set_mip_browse_path(folder)
             self._folder_edit.setText(folder)
             self._update_date_combo(Path(folder))
 
@@ -666,8 +666,8 @@ class MIPOverviewDialog(PersistentDialog):
         default_folder = None
 
         # Check for user's saved preference via configuration service
-        if self._app and hasattr(self._app, 'configuration_service'):
-            saved_path = self._app.configuration_service.get_mip_session_path()
+        if self._app and hasattr(self._app, 'config_service'):
+            saved_path = self._app.config_service.get_mip_session_path()
             if saved_path and Path(saved_path).exists():
                 default_folder = saved_path
 
@@ -697,8 +697,8 @@ class MIPOverviewDialog(PersistentDialog):
             return
 
         # Remember user's choice for future sessions
-        if self._app and hasattr(self._app, 'configuration_service'):
-            self._app.configuration_service.set_mip_session_path(folder)
+        if self._app and hasattr(self._app, 'config_service'):
+            self._app.config_service.set_mip_session_path(folder)
 
         save_path = Path(folder) / default_name
         try:
@@ -741,8 +741,8 @@ class MIPOverviewDialog(PersistentDialog):
         """Load a previously saved MIP overview session."""
         # Determine default browse location (same as save session path)
         default_folder = str(Path.home())
-        if self._app and hasattr(self._app, 'configuration_service'):
-            saved_path = self._app.configuration_service.get_mip_session_path()
+        if self._app and hasattr(self._app, 'config_service'):
+            saved_path = self._app.config_service.get_mip_session_path()
             if saved_path and Path(saved_path).exists():
                 default_folder = saved_path
             else:
