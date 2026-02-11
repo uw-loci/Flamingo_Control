@@ -972,18 +972,13 @@ class DualResolutionVoxelStorage:
         max_offset = np.max(np.abs(offset_voxels))
         if max_offset < 0.5:
             # Less than half a voxel - no shift needed
-            logger.debug(f"Transform: Offset < 0.5 voxels, returning rotated volume")
+            logger.info(f"Transform: Offset {max_offset:.2f} voxels < 0.5, skipping shift")
             self.last_stage_position = current_stage_pos.copy()
             return rotated
 
-        # Log large offsets as INFO (potential jumps), small as DEBUG
-        if max_offset > 10:
-            logger.info(f"Transform: LARGE offset {offset_voxels} voxels (ZYX) "
-                       f"= ({-dz*1000:.0f}, {-dy*1000:.0f}, {dx_display*1000:.0f}) µm "
-                       f"[quality={self._transform_quality.name}]")
-        else:
-            logger.debug(f"Transform: Applying offset {offset_voxels} voxels (ZYX) from reference "
-                        f"[quality={self._transform_quality.name}]")
+        # Log offset being applied (INFO for visibility during debugging)
+        logger.info(f"Transform: Applying offset {offset_voxels.astype(int)} voxels (ZYX) "
+                   f"= ({-dz*1000:.0f}, {-dy*1000:.0f}, {dx_display*1000:.0f}) µm")
 
         # Apply translation using optimized shift (numpy.roll for integer, scipy for fractional)
         translated = self._fast_shift(rotated, offset_voxels)

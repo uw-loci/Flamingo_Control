@@ -2530,6 +2530,7 @@ class SampleView(QWidget):
     @pyqtSlot(float, float, float, float)
     def _on_position_changed(self, x: float, y: float, z: float, r: float) -> None:
         """Handle position change from movement controller."""
+        self.logger.debug(f"Position changed signal received: X={x:.3f}, Y={y:.3f}, Z={z:.3f}, R={r:.1f}")
         positions = {'x': x, 'y': y, 'z': z, 'r': r}
 
         for axis_id, value in positions.items():
@@ -4015,11 +4016,15 @@ class SampleView(QWidget):
         stage_pos = self._pending_stage_update
         self._pending_stage_update = None
 
+        self.logger.info(f"Stage update received: X={stage_pos['x']:.3f}, Y={stage_pos['y']:.3f}, "
+                        f"Z={stage_pos['z']:.3f}, R={stage_pos['r']:.1f}")
+
         # During tile workflows, don't update last_stage_position from hardware -
         # _on_tile_zstack_frame() manages it based on workflow positions.
         # Also skip data layer updates since _update_visualization() handles that.
         if getattr(self, '_tile_workflow_active', False):
             # Still update geometry (holder position) but not data transforms
+            self.logger.info("  Skipping data transform (tile workflow active)")
             self.current_rotation['ry'] = stage_pos.get('r', 0)
             self._update_sample_holder_position(
                 stage_pos['x'], stage_pos['y'], stage_pos['z']
@@ -4039,6 +4044,12 @@ class SampleView(QWidget):
 
         # Update data layers with transformed volumes (data moves with stage)
         if not self.voxel_storage:
+            self.logger.info("  Skipping data transform (no voxel_storage)")
+            return
+
+        # Check if reference position is set (required for transform)
+        if self.voxel_storage.reference_stage_position is None:
+            self.logger.info("  Skipping data transform (reference_stage_position not set)")
             return
 
         # Get holder position for rotation center
@@ -4048,6 +4059,7 @@ class SampleView(QWidget):
             self.holder_position['z']
         ])
 
+        channels_updated = 0
         for ch_id in range(self.voxel_storage.num_channels):
             if not self.voxel_storage.has_data(ch_id):
                 continue
@@ -4058,9 +4070,13 @@ class SampleView(QWidget):
 
             if ch_id in self.channel_layers:
                 self.channel_layers[ch_id].data = volume
+                channels_updated += 1
 
                 self.logger.debug(f"Stage update: Channel {ch_id} - "
                                  f"non-zero voxels: {np.count_nonzero(volume)}")
+
+        if channels_updated > 0:
+            self.logger.info(f"  Updated {channels_updated} channel(s) with transformed data")
 
     def _setup_data_layers(self) -> None:
         """Setup napari layers for multi-channel data."""

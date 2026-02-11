@@ -201,8 +201,10 @@ class SessionManager:
             display_data = voxel_storage.get_display_volume(ch)
 
             # Create dataset with compression and chunking
+            # zarr v3 requires shape as explicit keyword argument
             root.create_dataset(
                 str(ch),
+                shape=display_data.shape,
                 data=display_data,
                 chunks=self.DEFAULT_CHUNK_SIZE,
                 compressor=compressor,
@@ -401,8 +403,10 @@ class SessionManager:
         root = zarr.open_group(store=store, mode='a')
 
         # Create dataset with write_empty_chunks=False for sparse data efficiency
+        # zarr v3 requires shape as explicit keyword argument
         root.create_dataset(
             str(channel_id),
+            shape=data.shape,
             data=data,
             chunks=self.DEFAULT_CHUNK_SIZE,
             compressor=compressor,
