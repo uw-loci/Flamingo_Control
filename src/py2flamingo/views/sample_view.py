@@ -3156,7 +3156,8 @@ class SampleView(QWidget):
             self.logger.info("Cleared all visualization data")
 
     def add_frame_to_volume(self, image: np.ndarray, stage_position_mm: dict,
-                            channel_id: int, timestamp: float = None) -> None:
+                            channel_id: int, timestamp: float = None,
+                            reference_position: dict = None) -> None:
         """
         Place a camera frame into the 3D voxel storage.
 
@@ -3169,6 +3170,9 @@ class SampleView(QWidget):
             stage_position_mm: {'x': float, 'y': float, 'z': float} in mm
             channel_id: Channel index (0-3)
             timestamp: Optional timestamp in ms
+            reference_position: Optional reference position for delta calculation.
+                If provided, uses this instead of voxel_storage.reference_stage_position.
+                This allows tile workflows to use deltas without enabling display transform.
         """
         if not self.voxel_storage:
             return
@@ -3207,16 +3211,26 @@ class SampleView(QWidget):
             pos_y = stage_position_mm['y']
             pos_z = stage_position_mm['z']
 
-            if self.voxel_storage.reference_stage_position is None:
-                # Set the reference position on first frame - this persists it
-                # so subsequent frames calculate deltas relative to this reference
+            # Get reference position for delta calculation
+            if reference_position is not None:
+                # Use explicitly provided reference (for tile workflows)
+                # This avoids setting voxel_storage.reference_stage_position,
+                # which would enable display transform (causing double-delta)
+                ref_x = reference_position['x']
+                ref_y = reference_position['y']
+                ref_z = reference_position['z']
+            elif self.voxel_storage.reference_stage_position is not None:
+                # Use stored reference (for live view)
+                ref_x = self.voxel_storage.reference_stage_position['x']
+                ref_y = self.voxel_storage.reference_stage_position['y']
+                ref_z = self.voxel_storage.reference_stage_position['z']
+            else:
+                # First frame in live view - set reference in voxel_storage
                 self.voxel_storage.set_reference_position(stage_position_mm)
                 self.logger.info(f"First frame - set reference position to ({pos_x:.3f}, {pos_y:.3f}, {pos_z:.3f})")
-
-            # Always use the stored reference position
-            ref_x = self.voxel_storage.reference_stage_position['x']
-            ref_y = self.voxel_storage.reference_stage_position['y']
-            ref_z = self.voxel_storage.reference_stage_position['z']
+                ref_x = pos_x
+                ref_y = pos_y
+                ref_z = pos_z
 
             # Calculate stage delta from reference
             delta_x = pos_x - ref_x
@@ -4637,6 +4651,7 @@ class SampleView(QWidget):
         self._expected_tiles = tile_info
         self._accumulated_zstacks = {}
         self._tile_reference_set = False  # Set reference on first tile frame
+        self._tile_reference_position = None  # Local reference (not in voxel_storage to avoid transform)
         self._learned_frames_per_tile = None  # Learn from first tile for channel detection
 
         # Disable Populate from Live during tile workflows to prevent interference
@@ -4850,21 +4865,29 @@ class SampleView(QWidget):
                     self.logger.warning(f"Sample View: Using WORKFLOW position for reference "
                                        f"(stage position not available - potential for jump!)")
 
-            self.voxel_storage.set_reference_position({
+            # For tile workflows, do NOT set voxel_storage reference position.
+            # Data is stored at base + delta positions, and we want the display
+            # to show untransformed data (no additional shift).
+            # Setting reference_stage_position would cause get_display_volume_transformed()
+            # to apply a second delta shift, resulting in incorrect positions.
+            #
+            # Instead, just store the reference locally for delta calculations in add_frame_to_volume.
+            self._tile_reference_position = {
                 'x': ref_x,
                 'y': ref_y,
                 'z': ref_z,
                 'r': ref_r
-            })
+            }
             self._tile_reference_set = True
-            self.logger.info(f"Sample View: Tile reference set to "
+            self.logger.info(f"Sample View: Tile reference (local) set to "
                             f"X={ref_x:.3f}, Y={ref_y:.3f}, Z={ref_z:.3f}, R={ref_r:.1f}°")
 
-        # Add frame to volume - all axes use deltas from reference position consistently
+        # Add frame to volume - pass reference explicitly to avoid enabling display transform
         self.add_frame_to_volume(
             image=image,
             stage_position_mm={'x': position['x'], 'y': position['y'], 'z': z_position},
-            channel_id=self._current_channel
+            channel_id=self._current_channel,
+            reference_position=self._tile_reference_position
         )
 
         # Kick the debounced channel-availability check so checkboxes
