@@ -4015,7 +4015,18 @@ class SampleView(QWidget):
         stage_pos = self._pending_stage_update
         self._pending_stage_update = None
 
-        # Store last stage position
+        # During tile workflows, don't update last_stage_position from hardware -
+        # _on_tile_zstack_frame() manages it based on workflow positions.
+        # Also skip data layer updates since _update_visualization() handles that.
+        if getattr(self, '_tile_workflow_active', False):
+            # Still update geometry (holder position) but not data transforms
+            self.current_rotation['ry'] = stage_pos.get('r', 0)
+            self._update_sample_holder_position(
+                stage_pos['x'], stage_pos['y'], stage_pos['z']
+            )
+            return
+
+        # Store last stage position (only when NOT in tile workflow)
         self.last_stage_position = stage_pos
 
         # Update rotation tracking
@@ -4874,15 +4885,19 @@ class SampleView(QWidget):
                             f"X={ref_x:.3f}, Y={ref_y:.3f}, Z={ref_z:.3f}, R={ref_r:.1f}° "
                             f"(both local and voxel_storage)")
 
-        # Update last_stage_position so display transform shifts volume during acquisition
-        # This makes the entire data volume move as the stage moves between tiles,
+        # Update last_stage_position only on FIRST FRAME of each new tile
+        # This makes the display transform shift once per tile (not every Z frame),
         # showing the correct focal plane relationship: currently captured tile at focal plane.
-        self.last_stage_position = {
-            'x': position['x'],
-            'y': position['y'],
-            'z': z_position,
-            'r': position.get('r', self.last_stage_position.get('r', 0))
-        }
+        # Using z_min as the representative Z position for the tile.
+        if frame_count == 1:
+            self.last_stage_position = {
+                'x': position['x'],
+                'y': position['y'],
+                'z': z_min,  # Use tile's starting Z, not varying z_position
+                'r': position.get('r', self.last_stage_position.get('r', 0))
+            }
+            self.logger.info(f"Sample View: New tile at ({position['x']:.3f}, {position['y']:.3f}), "
+                            f"updated last_stage_position for display transform")
 
         # Add frame to volume - pass reference explicitly for storage delta calculation
         self.add_frame_to_volume(
