@@ -708,16 +708,7 @@ class SlicePlaneViewer(QFrame):
         display_width = self._width - 6
         display_height = self._height - 6
 
-        # Get scaled image dimensions
-        pixmap = self.image_label.pixmap()
-        if not pixmap:
-            return None
-
-        # Calculate the actual image position considering zoom and pan
-        base_scale = min(display_width / max(1, pixmap.width()), display_height / max(1, pixmap.height()))
-        effective_scale = base_scale * self._zoom_level
-
-        # Estimate original image dimensions from channel data or MIP
+        # Get original image dimensions from channel data or MIP
         if self._channel_mips:
             for ch_data in self._channel_mips.values():
                 if ch_data is not None and ch_data.size > 0:
@@ -729,6 +720,10 @@ class SlicePlaneViewer(QFrame):
             orig_h, orig_w = self._mip_data.shape
         else:
             return None
+
+        # Calculate scale to fit image in display area (same as _update_display)
+        base_scale = min(display_width / orig_w, display_height / orig_h) if orig_w > 0 and orig_h > 0 else 1.0
+        effective_scale = base_scale * self._zoom_level
 
         scaled_w = orig_w * effective_scale
         scaled_h = orig_h * effective_scale
