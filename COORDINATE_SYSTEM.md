@@ -7,8 +7,14 @@
 - Fixed position in space
 - Dimensions defined by stage limits:
   - X: 1.0 - 12.31 mm (width, left-right)
-  - Y: 5.0 - 25.0 mm (height, up-down from objective)
-  - Z: 12.5 - 26.0 mm (depth, toward objective)
+  - Y: 5.0 - 25.0 mm (height, up-down)
+  - Z: 12.5 - 26.0 mm (depth, detection axis)
+
+### Z Axis Orientation
+- **Smaller Z** = closer to the detection objective (back wall of chamber in 3D viewer)
+- **Larger Z** = farther from the detection objective (front of chamber in 3D viewer)
+- The objective is painted on the back wall of the 3D visualization
+- Stage +Z movement moves the sample AWAY from the objective
 
 ### Sample Holder (Movable Straw)
 - Like a **straw dipped into the glass**
@@ -17,19 +23,41 @@
 - Has fine extension at the tip (~220 µm diameter)
 - **Sample is glued to the tip of the extension**
 
-### Imaging Plane (Where Data is Captured)
-- Determined by objective focus + Z position
-- Camera always images perpendicular to the sample holder axis
+### Focal Plane (FIXED HARDWARE - Critical Concept)
+
+**The focal plane is a fixed physical location - it NEVER moves.**
+
+In this light sheet microscope:
+- The **focal plane** is where the light sheet intersects the detection objective's focal plane
+- This is a **fixed location** in the imaging chamber - part of the hardware setup
+- The focal plane is defined by a specific **Z position** (the detection/focus axis)
+- X and Y coordinates define the field of view within that plane
 - Field of view: ~518 µm (at 25.69x magnification)
 
-## Critical Concept: Data Attachment
+### How Z-Stacks Work
 
-**The imaging data is PHYSICALLY ATTACHED to the sample holder**, not to the chamber:
+**The stage moves the SAMPLE through the fixed focal plane:**
 
-1. **When capturing**: Image is taken at the focal plane (specific Z position)
-2. **Data location**: Voxels are placed at the stage position (X, Y, Z, R) when captured
-3. **When stage moves**: The captured data conceptually moves with it (because it's attached to the sample)
-4. **3D reconstruction**: All captured slices must align in the sample's reference frame
+1. Stage moves to position (X, Y, Z)
+2. The sample (attached to the holder) passes through the focal plane
+3. Camera captures the slice of sample currently AT the focal plane
+4. Stage moves to next Z position, capturing the next slice
+5. Result: A 3D stack of 2D images, each captured at the same physical location (the focal plane)
+
+**Important distinction:**
+- The focal plane does NOT move
+- The SAMPLE moves through the focal plane
+- All imaging happens AT the focal plane
+
+## Critical Concept: Data Placement in 3D Viewer
+
+**All data is captured at the focal plane location, so it should be placed there in the 3D viewer.**
+
+1. **During acquisition**: Every frame is captured at the focal plane (fixed location)
+2. **Storage**: Data is placed at the focal plane location in napari coordinates (`base_y_um = 7000`)
+3. **Z variation**: The Z coordinate varies to represent the sample's 3D structure (different slices captured as sample moves through focal plane)
+4. **Display transform**: When stage moves after acquisition, the display transform shifts the volume to show relationship to current stage position
+5. **Visual result**: Data appears at the yellow square (focal plane) and moves with the stage
 
 ## Coordinate Systems
 
@@ -60,24 +88,92 @@
 
 ## Coordinate Transformations
 
-### Stage → World Coordinates
+### Stage → World Coordinates (Data Placement)
+
+**Key insight:** Stage coordinates are in real-world mm, but data is placed in napari's world coordinate system (µm). The transformation depends on `use_stage_y_delta`:
+
 ```python
-# For imaging data captured at stage position (stage_x, stage_y, stage_z, stage_r)
+# In add_frame_to_volume() - sample_view.py
+
+# Stage position comes in as mm
+pos_x, pos_y, pos_z = stage_position_mm['x'], stage_position_mm['y'], stage_position_mm['z']
+
+# Reference position (first frame's stage position)
+ref_x, ref_y, ref_z = reference_stage_position['x'], 'y'], ['z']
+
+# Calculate delta from reference (in mm)
+delta_x = pos_x - ref_x
+delta_y = pos_y - ref_y
+delta_z = pos_z - ref_z
+
+# Base position in napari world coordinates (µm)
+# sample_region_center_um = [6655, 7000, 19250]  # [X, Y, Z] in config
+base_x_um = 6655   # X center of sample region
+base_y_um = 7000   # Y position of focal plane in 3D viewer
+base_z_um = 19250  # Z center of sample region
+
+# Calculate world coordinates (ZYX order for napari)
+# Y behavior depends on workflow mode:
+y_offset = delta_y * 1000 if use_stage_y_delta else 0  # 0 for live view and tiles
+
+world_center_um = [
+    base_z_um + delta_z * 1000,        # Z: varies with stage Z (same orientation)
+    base_y_um + y_offset,               # Y: fixed at focal plane (7000µm)
+    base_x_um + delta_x_storage * 1000  # X: varies with stage X
+]
+```
+
+**Result with `use_stage_y_delta=False` (live view and tile workflows):**
+- Y is ALWAYS `base_y_um = 7000` (focal plane location)
+- Z varies to show the sample's 3D structure
+- X varies with stage X movement
+- All data appears at the yellow square (focal plane) in the 3D viewer
+
+### Camera Pixel → World Coordinates
+```python
 # Each camera pixel at (cam_x_px, cam_y_px):
 
-# 1. Convert camera pixels to micrometers (offsets from stage position)
+# 1. Convert camera pixels to micrometers (offsets from frame center)
 cam_x_um = (cam_x_px - width/2) * pixel_size_um
 cam_y_um = (cam_y_px - height/2) * pixel_size_um
 
-# 2. Translate to world coordinates using stage position
-world_x = cam_x_um + (stage_x * 1000)  # mm to µm
-world_y = cam_y_um + (stage_y * 1000)
-world_z = stage_z * 1000
+# 2. Add to world_center to get final world position
+world_coords_3d = [
+    world_center_um[0] + z_offset,    # Z
+    world_center_um[1] + cam_y_um,    # Y
+    world_center_um[2] + cam_x_um     # X
+]
+```
 
-# 3. Apply rotation around sample center (display-time only)
-centered = [world_x, world_y, world_z] - sample_region_center
-rotated = apply_rotation_matrix(centered, stage_r)
-final_world = rotated + sample_region_center
+### World → Napari Voxel Coordinates
+```python
+# World coordinates (µm) to voxel indices
+# voxel_size = 15 µm (display resolution)
+
+voxel_z = world_z_um / voxel_size
+voxel_y = world_y_um / voxel_size
+voxel_x = world_x_um / voxel_size
+```
+
+### Display Transform (After Acquisition)
+```python
+# When stage moves after data is captured, display transform shifts the volume
+# In get_display_volume_transformed() - dual_resolution_storage.py
+
+# Current stage position vs reference (where data was captured)
+dx = current_stage_x - reference_x  # mm
+dy = current_stage_y - reference_y  # mm
+dz = current_stage_z - reference_z  # mm
+
+# Convert to voxel offset
+offset_voxels = [
+    dz * 1000 / voxel_size,   # Z
+    -dy * 1000 / voxel_size,  # Y (inverted)
+    dx * 1000 / voxel_size    # X
+]
+
+# Shift the display volume by this offset
+# Result: data appears to move with the stage
 ```
 
 ### World → Napari Coordinates
