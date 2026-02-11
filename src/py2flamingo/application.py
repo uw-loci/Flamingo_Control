@@ -1,15 +1,16 @@
 """
-Application Layer - Dependency Injection and Component Wiring
+Application Layer - Lifecycle Management and Orchestration
 
 This module provides the main FlamingoApplication class that handles:
-- Dependency injection and component creation
-- Wiring all MVC layers together (Core → Models → Services → Controllers → Views)
-- Application lifecycle management
-- Clean resource management
+- Application lifecycle (startup, shutdown, resource cleanup)
+- Dependency setup orchestration (delegates to component_factory and signal_wiring)
+- Connection lifecycle handlers
+- Lazy Sample View creation
+- Main window composition
 
-The FlamingoApplication class follows the dependency injection pattern,
-creating components in the correct order and passing dependencies through
-constructor injection.
+Component creation is handled by services.component_factory.
+Signal wiring is handled by services.signal_wiring.
+Voxel storage creation is handled by visualization.voxel_storage_factory.
 """
 
 import sys
@@ -18,40 +19,30 @@ from typing import Optional
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QObject, pyqtSignal
 
-from py2flamingo.core import ProtocolEncoder, TCPConnection, QueueManager
-from py2flamingo.core.events import EventManager
-from py2flamingo.models import (
-    ConnectionModel, WorkflowModel, WorkflowType, Position, ImageDisplayModel
+from py2flamingo.services.component_factory import (
+    create_core_layer, create_models_layer, create_services_layer,
+    create_controllers_layer, create_views_layer
 )
-from py2flamingo.services import (
-    MVCConnectionService, MVCWorkflowService, StatusService, ConfigurationManager,
-    StatusIndicatorService, WindowGeometryManager, set_default_geometry_manager
-)
-from py2flamingo.services.workflow_queue_service import WorkflowQueueService
-from py2flamingo.controllers import ConnectionController, WorkflowController, PositionController
-from py2flamingo.controllers.movement_controller import MovementController
-from py2flamingo.controllers.camera_controller import CameraController
-from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, ImageControlsWindow, StageControlView, SampleView
-from py2flamingo.views.camera_live_viewer import CameraLiveViewer
-from py2flamingo.views.stage_chamber_visualization_window import StageChamberVisualizationWindow
+from py2flamingo.services.signal_wiring import wire_all_signals
+from py2flamingo.visualization.voxel_storage_factory import create_voxel_storage
 
 
 class FlamingoApplication(QObject):
     """Main application class handling dependency injection and lifecycle.
 
-    This class creates and wires all application components using dependency
-    injection, following the MVC architecture:
+    This class orchestrates component creation and wiring using the MVC
+    architecture:
 
     Core Layer (tcp_connection, protocol_encoder)
-        ↓
+        |
     Models Layer (connection_model)
-        ↓
+        |
     Services Layer (connection_service, workflow_service, status_service)
-        ↓
+        |
     Controllers Layer (connection_controller, workflow_controller)
-        ↓
+        |
     Views Layer (connection_view, workflow_view)
-        ↓
+        |
     Main Window (composition of views)
 
     Signals:
@@ -89,38 +80,38 @@ class FlamingoApplication(QObject):
         self.main_window = None
 
         # Core layer components (initialized in setup_dependencies)
-        self.tcp_connection: Optional[TCPConnection] = None
-        self.protocol_encoder: Optional[ProtocolEncoder] = None
+        self.tcp_connection = None
+        self.protocol_encoder = None
 
         # Models layer components
-        self.connection_model: Optional[ConnectionModel] = None
-        self.workflow_model: Optional[WorkflowModel] = None
-        self.display_model: Optional[ImageDisplayModel] = None
+        self.connection_model = None
+        self.workflow_model = None
+        self.display_model = None
 
         # Services layer components
-        self.connection_service: Optional[MVCConnectionService] = None
-        self.workflow_service: Optional[MVCWorkflowService] = None
-        self.workflow_queue_service: Optional[WorkflowQueueService] = None
-        self.status_service: Optional[StatusService] = None
-        self.status_indicator_service: Optional[StatusIndicatorService] = None
-        self.config_manager: Optional[ConfigurationManager] = None
-        self.geometry_manager: Optional[WindowGeometryManager] = None
+        self.connection_service = None
+        self.workflow_service = None
+        self.workflow_queue_service = None
+        self.status_service = None
+        self.status_indicator_service = None
+        self.config_manager = None
+        self.geometry_manager = None
 
         # Controllers layer components
-        self.connection_controller: Optional[ConnectionController] = None
-        self.workflow_controller: Optional[WorkflowController] = None
-        self.movement_controller: Optional[MovementController] = None
-        self.camera_controller: Optional[CameraController] = None
+        self.connection_controller = None
+        self.workflow_controller = None
+        self.movement_controller = None
+        self.camera_controller = None
 
         # Views layer components
-        self.connection_view: Optional[ConnectionView] = None
-        self.workflow_view: Optional[WorkflowView] = None
-        self.sample_info_view: Optional[SampleInfoView] = None
-        self.stage_control_view: Optional[StageControlView] = None
-        self.camera_live_viewer: Optional[CameraLiveViewer] = None
-        self.image_controls_window: Optional[ImageControlsWindow] = None
-        self.stage_chamber_visualization_window: Optional[StageChamberVisualizationWindow] = None
-        self.sample_view: Optional['SampleView'] = None  # Unified sample viewing interface
+        self.connection_view = None
+        self.workflow_view = None
+        self.sample_info_view = None
+        self.stage_control_view = None
+        self.camera_live_viewer = None
+        self.image_controls_window = None
+        self.stage_chamber_visualization_window = None
+        self.sample_view = None  # Unified sample viewing interface
         self.voxel_storage = None  # DualResolutionVoxelStorage for 3D visualization
 
         # Setup logging
@@ -129,325 +120,86 @@ class FlamingoApplication(QObject):
     def setup_dependencies(self):
         """Create and wire all application components using dependency injection.
 
-        Components are created in dependency order:
-        1. Core layer (no dependencies)
-        2. Models layer (no dependencies)
-        3. Services layer (depend on Core and Models)
-        4. Controllers layer (depend on Services and Models)
-        5. Views layer (depend on Controllers)
-
-        This method ensures all components are properly initialized and
-        dependencies are injected correctly.
+        Delegates to factory functions in services.component_factory for creation
+        and services.signal_wiring for signal connections.
         """
         self.logger.info("Setting up application dependencies...")
 
-        # Core layer - foundation components
-        self.logger.debug("Creating core layer components...")
-        self.tcp_connection = TCPConnection()
-        self.protocol_encoder = ProtocolEncoder()
-        self.queue_manager = QueueManager()
-        self.event_manager = EventManager()
+        # --- Core layer ---
+        core = create_core_layer()
+        self.tcp_connection = core['tcp_connection']
+        self.protocol_encoder = core['protocol_encoder']
+        self.queue_manager = core['queue_manager']
+        self.event_manager = core['event_manager']
 
-        # Models layer - data models
-        self.logger.debug("Creating models layer components...")
-        self.connection_model = ConnectionModel()
+        # --- Models layer ---
+        models = create_models_layer()
+        self.connection_model = models['connection_model']
+        self.workflow_model = models['workflow_model']
+        self.display_model = models['display_model']
 
-        # Create a default workflow model for state tracking
-        self.workflow_model = WorkflowModel.create_snapshot(
-            position=Position(x=0.0, y=0.0, z=0.0, r=0.0)
+        # --- Services layer ---
+        services = create_services_layer(
+            self.tcp_connection, self.protocol_encoder, self.queue_manager,
+            self.connection_model, self.event_manager
         )
+        self.connection_service = services['connection_service']
+        self.workflow_service = services['workflow_service']
+        self.status_service = services['status_service']
+        self.status_indicator_service = services['status_indicator_service']
+        self.config_manager = services['config_manager']
+        self.geometry_manager = services['geometry_manager']
 
-        # Create image display settings model
-        self.display_model = ImageDisplayModel()
-
-        # Services layer - business logic
-        self.logger.debug("Creating services layer components...")
-        self.connection_service = MVCConnectionService(
-            self.tcp_connection,
-            self.protocol_encoder,
-            self.queue_manager,
-            connection_model=self.connection_model
+        # --- Controllers layer ---
+        controllers = create_controllers_layer(
+            self.connection_service, self.connection_model, self.config_manager,
+            self.workflow_service, self.workflow_model,
+            self.status_indicator_service
         )
+        self.connection_controller = controllers['connection_controller']
+        self.workflow_controller = controllers['workflow_controller']
+        self.workflow_queue_service = controllers['workflow_queue_service']
+        self.position_controller = controllers['position_controller']
+        self.movement_controller = controllers['movement_controller']
+        self.config_service = controllers['config_service']
+        self.laser_led_service = controllers['laser_led_service']
+        self.laser_led_controller = controllers['laser_led_controller']
+        self.camera_service = controllers['camera_service']
+        self.camera_controller = controllers['camera_controller']
 
-        self.workflow_service = MVCWorkflowService(
-            self.connection_service,
-            self.event_manager
+        # --- Views layer ---
+        views = create_views_layer(
+            self.connection_controller, self.config_manager,
+            self.position_controller, self.workflow_service,
+            self.workflow_controller, self.movement_controller,
+            self.camera_controller, self.laser_led_controller,
+            self.geometry_manager
         )
-
-        self.status_service = StatusService(
-            self.connection_service
-        )
-
-        self.status_indicator_service = StatusIndicatorService(
-            self.connection_service
-        )
-
-        self.config_manager = ConfigurationManager(
-            config_file="saved_configurations.json"
-        )
-
-        self.geometry_manager = WindowGeometryManager(
-            config_file="window_geometry.json"
-        )
-        set_default_geometry_manager(self.geometry_manager)
-
-        # Controllers layer - coordinate services and views
-        self.logger.debug("Creating controllers layer components...")
-        self.connection_controller = ConnectionController(
-            self.connection_service,
-            self.connection_model,
-            self.config_manager
-        )
-
-        self.workflow_controller = WorkflowController(
-            self.workflow_service,
-            self.connection_model,
-            self.workflow_model,
-            connection_service=self.connection_service
-        )
-
-        # Create workflow queue service for sequential multi-tile execution
-        # This service manages a queue of workflows and executes them one at a time,
-        # waiting for each to complete before starting the next
-        self.workflow_queue_service = WorkflowQueueService(
-            workflow_controller=self.workflow_controller,
-            connection_service=self.connection_service,
-            status_indicator_service=self.status_indicator_service
-        )
-        self.logger.info("WorkflowQueueService created for sequential multi-tile execution")
-
-        self.position_controller = PositionController(
-            self.connection_service
-        )
-
-        # Create enhanced movement controller for stage control
-        self.movement_controller = MovementController(
-            self.connection_service,
-            self.position_controller
-        )
-
-        # Create camera controller for live feed
-        from py2flamingo.services.camera_service import CameraService
-        from py2flamingo.services.configuration_service import ConfigurationService
-        from py2flamingo.services.laser_led_service import LaserLEDService
-        from py2flamingo.controllers.laser_led_controller import LaserLEDController
-
-        # Configuration service for laser/LED settings
-        self.config_service = ConfigurationService()
-
-        # Laser/LED service and controller
-        self.laser_led_service = LaserLEDService(self.connection_service, self.config_service)
-        self.laser_led_controller = LaserLEDController(self.laser_led_service)
-
-        # Camera service and controller with laser/LED coordination
-        self.camera_service = CameraService(self.connection_service)
-        self.camera_controller = CameraController(self.camera_service, self.laser_led_controller)
-        self.camera_controller.set_max_display_fps(30.0)
-
-        # Wire motion tracking from MovementController to status indicator
-        # This connects the enhanced stage controller's motion signals to the global status indicator
-        from py2flamingo.controllers.position_controller_adapter import wire_motion_tracking
-        wire_motion_tracking(self.movement_controller, self.status_indicator_service)
-
-        # Set movement controller for workflow position polling
-        # This allows the status indicator to start/stop position polling during workflows
-        self.status_indicator_service.set_movement_controller(self.movement_controller)
-
-        # Wire camera controller to workflow controller for tile→Sample View data flow
-        self.workflow_controller.set_camera_controller(self.camera_controller)
-
-        # Views layer - UI components
-        self.logger.debug("Creating views layer components...")
-        self.connection_view = ConnectionView(
-            self.connection_controller,
-            config_manager=self.config_manager,
-            position_controller=self.position_controller,  # For debug features
-            workflow_service=self.workflow_service  # For workflow test buttons
-        )
-        self.workflow_view = WorkflowView(self.workflow_controller)
+        self.connection_view = views['connection_view']
+        self.workflow_view = views['workflow_view']
+        self.sample_info_view = views['sample_info_view']
+        self.stage_control_view = views['stage_control_view']
+        self.image_controls_window = views['image_controls_window']
+        self.camera_live_viewer = views['camera_live_viewer']
+        self.stage_chamber_visualization_window = views['stage_chamber_visualization_window']
         # Set app reference for save drive persistence
         self.workflow_view.set_app(self)
 
-        # Create sample info view
-        self.logger.debug("Creating sample info view...")
-        self.sample_info_view = SampleInfoView()
-
-        # Create stage control view
-        self.logger.debug("Creating stage control view...")
-        self.stage_control_view = StageControlView(
-            movement_controller=self.movement_controller
-        )
-
-        # Create independent image controls window FIRST
-        self.logger.debug("Creating image controls window...")
-        self.image_controls_window = ImageControlsWindow(geometry_manager=self.geometry_manager)
-        # Window starts hidden - user can open it via menu
-        self.image_controls_window.hide()
-
-        # Create camera live viewer with laser/LED control and image controls reference
-        self.logger.debug("Creating camera live viewer...")
-        self.camera_live_viewer = CameraLiveViewer(
-            camera_controller=self.camera_controller,
-            laser_led_controller=self.laser_led_controller,
-            image_controls_window=self.image_controls_window,
-            geometry_manager=self.geometry_manager
-        )
-
-        # Camera live viewer also starts hidden - user can open it via menu
-        self.camera_live_viewer.hide()
-
-        # Create stage chamber visualization window
-        self.logger.debug("Creating stage chamber visualization window...")
-        self.stage_chamber_visualization_window = StageChamberVisualizationWindow(
-            movement_controller=self.movement_controller,
-            geometry_manager=self.geometry_manager
-        )
-        # Window starts hidden - user can open it via menu
-        self.stage_chamber_visualization_window.hide()
-
-        # Create voxel storage for 3D visualization (used by Sample View)
+        # --- Voxel storage for 3D visualization ---
         self.logger.debug("Creating voxel storage for 3D visualization...")
-        self._create_voxel_storage()
+        bundle = create_voxel_storage()
+        if bundle is not None:
+            self.voxel_storage = bundle.voxel_storage
+            self._visualization_config = bundle.config
+            self._coord_mapper = bundle.coord_mapper
+            self._coord_transformer = bundle.coord_transformer
+        else:
+            self.voxel_storage = None
 
-        # Connect image controls to camera live viewer
-        if self.image_controls_window and self.camera_live_viewer:
-            # Connect display transformation signals
-            self.image_controls_window.rotation_changed.connect(
-                self.camera_live_viewer.set_rotation
-            )
-            self.image_controls_window.flip_horizontal_changed.connect(
-                self.camera_live_viewer.set_flip_horizontal
-            )
-            self.image_controls_window.flip_vertical_changed.connect(
-                self.camera_live_viewer.set_flip_vertical
-            )
-            self.image_controls_window.colormap_changed.connect(
-                self.camera_live_viewer.set_colormap
-            )
-            self.image_controls_window.intensity_range_changed.connect(
-                self.camera_live_viewer.set_intensity_range
-            )
-            self.image_controls_window.auto_scale_changed.connect(
-                self.camera_live_viewer.set_auto_scale
-            )
-            self.image_controls_window.zoom_changed.connect(
-                self.camera_live_viewer.set_zoom
-            )
-            self.image_controls_window.crosshair_changed.connect(
-                self.camera_live_viewer.set_crosshair
-            )
-            self.logger.debug("Connected image controls to camera live viewer")
-
-        # Set default connection values in view if provided via CLI
-        if self.default_ip is not None and self.default_port is not None:
-            self.logger.debug(f"Setting CLI defaults: {self.default_ip}:{self.default_port}")
-            self.connection_view.set_connection_info(self.default_ip, self.default_port)
-
-        # Connect connection status to enhanced stage control view
-        if hasattr(self.connection_view, 'connection_established'):
-            self.connection_view.connection_established.connect(
-                lambda: self._on_stage_connection_established()
-            )
-            self.logger.debug("Connected connection_established to enhanced stage control")
-        if hasattr(self.connection_view, 'connection_closed'):
-            self.connection_view.connection_closed.connect(
-                lambda: self._on_stage_connection_closed()
-            )
-            self.logger.debug("Connected connection_closed to enhanced stage control")
-
-        # Connect connection status to status indicator service
-        if hasattr(self.connection_view, 'connection_established'):
-            self.connection_view.connection_established.connect(
-                lambda: self.status_indicator_service.on_connection_established()
-            )
-            self.logger.debug("Connected connection_established to status indicator service")
-        if hasattr(self.connection_view, 'connection_closed'):
-            self.connection_view.connection_closed.connect(
-                lambda: self.status_indicator_service.on_connection_closed()
-            )
-            self.logger.debug("Connected connection_closed to status indicator service")
-
-        # Connect connection error to status indicator service
-        if hasattr(self.connection_view, 'connection_error'):
-            self.connection_view.connection_error.connect(
-                lambda msg: self.status_indicator_service.on_connection_error(msg)
-            )
-            self.logger.debug("Connected connection_error to status indicator service")
-
-        # Connect settings_loaded to trigger position queries
-        # This happens AFTER settings retrieval to avoid race condition with SocketReader pause
-        if hasattr(self.connection_view, 'settings_loaded'):
-            self.connection_view.settings_loaded.connect(
-                lambda: self._on_settings_loaded()
-            )
-            self.logger.debug("Connected settings_loaded to position query handler")
-
-        # Connect workflow events to status indicator service
-        if hasattr(self.workflow_view, 'workflow_started'):
-            self.workflow_view.workflow_started.connect(
-                lambda: self.status_indicator_service.on_workflow_started()
-            )
-            self.logger.debug("Connected workflow_started to status indicator service")
-        if hasattr(self.workflow_view, 'workflow_stopped'):
-            self.workflow_view.workflow_stopped.connect(
-                lambda: self.status_indicator_service.on_workflow_stopped()
-            )
-            self.logger.debug("Connected workflow_stopped to status indicator service")
-
-        # Connect workflow view to position controller for "Use Current Position" button
-        if hasattr(self.workflow_view, 'set_position_callback') and self.position_controller:
-            self.workflow_view.set_position_callback(
-                self.position_controller.get_current_position
-            )
-            self.logger.debug("Connected workflow view to position controller")
-
-        # Connect workflow view to preset service for "Load Saved Position" dropdowns
-        if hasattr(self.workflow_view, 'set_preset_service') and self.position_controller:
-            self.workflow_view.set_preset_service(
-                self.position_controller.preset_service
-            )
-            self.logger.debug("Connected workflow view to position preset service")
-
-        # Connect workflow view to connection state for enable/disable
-        if hasattr(self.connection_view, 'connection_established') and hasattr(self.workflow_view, 'update_for_connection_state'):
-            self.connection_view.connection_established.connect(
-                lambda: self.workflow_view.update_for_connection_state(True)
-            )
-            self.logger.debug("Connected connection_established to workflow view")
-        if hasattr(self.connection_view, 'connection_closed') and hasattr(self.workflow_view, 'update_for_connection_state'):
-            self.connection_view.connection_closed.connect(
-                lambda: self.workflow_view.update_for_connection_state(False)
-            )
-            self.logger.debug("Connected connection_closed to workflow view")
-
-        # Connect Sample View request signal
-        if hasattr(self.connection_view, 'sample_view_requested'):
-            self.connection_view.sample_view_requested.connect(self._open_sample_view)
-            self.logger.debug("Connected sample_view_requested signal")
-
-        # Connect acquisition lock signals to stage control view
-        if self.stage_control_view:
-            self.acquisition_started.connect(
-                lambda: self.stage_control_view._set_controls_enabled(False)
-            )
-            self.acquisition_stopped.connect(
-                lambda: self.stage_control_view._set_controls_enabled(True)
-            )
-            self.logger.debug("Connected acquisition signals to stage control view")
-
-        # Connect acquisition lock signals to stage chamber visualization
-        if self.stage_chamber_visualization_window:
-            if hasattr(self.stage_chamber_visualization_window, '_set_sliders_enabled'):
-                self.acquisition_started.connect(
-                    lambda: self.stage_chamber_visualization_window._set_sliders_enabled(False)
-                )
-                self.acquisition_stopped.connect(
-                    lambda: self.stage_chamber_visualization_window._set_sliders_enabled(True)
-                )
-                self.logger.debug("Connected acquisition signals to stage chamber visualization")
+        # --- Signal wiring ---
+        wire_all_signals(self)
 
         self.logger.info("Application dependencies setup complete")
-
 
     def _on_stage_connection_established(self):
         """Handle connection established event for enhanced stage control view.
@@ -531,151 +283,13 @@ class FlamingoApplication(QObject):
         if self.stage_control_view:
             self.stage_control_view._set_controls_enabled(False)
 
-    def _create_voxel_storage(self):
-        """Create voxel storage for 3D visualization.
-
-        Creates DualResolutionVoxelStorage and CoordinateTransformer
-        that will be passed to Sample View for 3D data accumulation.
-        """
-        import yaml
-        from pathlib import Path
-
-        # Load visualization config
-        config_path = Path(__file__).parent / "configs" / "visualization_3d_config.yaml"
-        if config_path.exists():
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f)
-            self.logger.info(f"Loaded 3D visualization config from {config_path}")
-        else:
-            self.logger.warning("Using default 3D visualization config")
-            config = self._get_default_visualization_config()
-
-        try:
-            from py2flamingo.visualization.dual_resolution_storage import DualResolutionVoxelStorage, DualResolutionConfig
-            from py2flamingo.visualization.coordinate_transforms import CoordinateTransformer, PhysicalToNapariMapper
-
-            # Initialize coordinate mapper
-            mapper_config = {
-                'x_range_mm': config['stage_control']['x_range_mm'],
-                'y_range_mm': config['stage_control']['y_range_mm'],
-                'z_range_mm': config['stage_control']['z_range_mm'],
-                'voxel_size_um': config['display']['voxel_size_um'][0],
-                'invert_x': config['stage_control']['invert_x_default'],
-                'invert_z': config['stage_control']['invert_z_default']
-            }
-            coord_mapper = PhysicalToNapariMapper(mapper_config)
-
-            # Initialize coordinate transformer
-            sample_center_um = config['sample_chamber']['sample_region_center_um']
-            transformer = CoordinateTransformer(sample_center=sample_center_um)
-
-            # Get dimensions from coordinate mapper
-            mapper_dims = coord_mapper.get_napari_dimensions()
-            voxel_size_um = config['display']['voxel_size_um'][0]
-
-            # Napari expects dimensions in (Z, Y, X) order
-            napari_dims = (mapper_dims[2], mapper_dims[1], mapper_dims[0])
-
-            # Calculate chamber dimensions in µm (Z, Y, X order)
-            chamber_dims_um = (
-                napari_dims[0] * voxel_size_um,
-                napari_dims[1] * voxel_size_um,
-                napari_dims[2] * voxel_size_um
-            )
-
-            # Calculate chamber origin in world coordinates
-            chamber_origin_um = (
-                config['stage_control']['z_range_mm'][0] * 1000,
-                config['stage_control']['y_range_mm'][0] * 1000,
-                config['stage_control']['x_range_mm'][0] * 1000
-            )
-
-            # Check for asymmetric bounds
-            half_widths = None
-            if all(key in config['sample_chamber'] for key in
-                   ['sample_region_half_width_x_um', 'sample_region_half_width_y_um', 'sample_region_half_width_z_um']):
-                half_widths = (
-                    config['sample_chamber']['sample_region_half_width_z_um'],
-                    config['sample_chamber']['sample_region_half_width_y_um'],
-                    config['sample_chamber']['sample_region_half_width_x_um']
-                )
-
-            # Reorder sample_region_center from config's X,Y,Z to storage's Z,Y,X format
-            center_xyz = config['sample_chamber']['sample_region_center_um']
-            center_zyx = (center_xyz[2], center_xyz[1], center_xyz[0])
-
-            # Reorder voxel sizes from X,Y,Z to Z,Y,X
-            storage_voxel_xyz = config['storage']['voxel_size_um']
-            storage_voxel_zyx = (storage_voxel_xyz[2], storage_voxel_xyz[1], storage_voxel_xyz[0])
-
-            display_voxel_xyz = config['display']['voxel_size_um']
-            display_voxel_zyx = (display_voxel_xyz[2], display_voxel_xyz[1], display_voxel_xyz[0])
-
-            storage_config = DualResolutionConfig(
-                storage_voxel_size=storage_voxel_zyx,
-                display_voxel_size=display_voxel_zyx,
-                chamber_dimensions=chamber_dims_um,
-                chamber_origin=chamber_origin_um,
-                sample_region_center=center_zyx,
-                sample_region_radius=config['sample_chamber']['sample_region_radius_um'],
-                sample_region_half_widths=half_widths,
-                invert_x=config['stage_control']['invert_x_default']
-            )
-
-            self.voxel_storage = DualResolutionVoxelStorage(storage_config)
-            self.voxel_storage.set_coordinate_transformer(transformer)
-
-            # Store config and transformer for Sample View to use
-            self._visualization_config = config
-            self._coord_mapper = coord_mapper
-            self._coord_transformer = transformer
-
-            self.logger.info(f"Created voxel storage: display dims {self.voxel_storage.display_dims}")
-
-        except Exception as e:
-            self.logger.error(f"Failed to create voxel storage: {e}")
-            self.voxel_storage = None
-
-    def _get_default_visualization_config(self):
-        """Return default visualization config if YAML not found."""
-        return {
-            'display': {
-                'voxel_size_um': [50, 50, 50],
-                'fps_target': 30,
-                'downsample_factor': 4,
-                'max_channels': 4
-            },
-            'storage': {
-                'voxel_size_um': [5, 5, 5],
-                'backend': 'sparse',
-                'max_memory_mb': 2000
-            },
-            'sample_chamber': {
-                'inner_dimensions_mm': [10, 10, 43],
-                'holder_diameter_mm': 1.0,
-                'sample_region_center_um': [6655, 7000, 19250],
-                'sample_region_radius_um': 2000,
-            },
-            'stage_control': {
-                'x_range_mm': [1.0, 12.31],
-                'y_range_mm': [-5.0, 10.0],
-                'z_range_mm': [12.5, 26.0],
-                'invert_x_default': False,
-                'invert_z_default': False,
-            },
-            'channels': [
-                {'id': 0, 'name': '405nm (DAPI)', 'default_colormap': 'cyan', 'default_visible': True},
-                {'id': 1, 'name': '488nm (GFP)', 'default_colormap': 'green', 'default_visible': True},
-                {'id': 2, 'name': '561nm (RFP)', 'default_colormap': 'red', 'default_visible': True},
-                {'id': 3, 'name': '640nm (Far-Red)', 'default_colormap': 'magenta', 'default_visible': False}
-            ]
-        }
-
     def _open_sample_view(self):
         """Open the integrated Sample View window.
 
         Creates the SampleView if it doesn't exist, then shows and raises it.
         """
+        from py2flamingo.views import SampleView
+
         self.logger.info("Opening Sample View")
 
         if self.sample_view is None:
