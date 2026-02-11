@@ -37,7 +37,7 @@ from py2flamingo.models.mip_overview import (
     parse_coords_from_folder, calculate_grid_indices,
     find_date_folders, find_tile_folders, load_invert_x_setting,
 )
-from py2flamingo.workflows.led_2d_overview_workflow import TileResult
+from py2flamingo.models.data.overview_results import TileResult
 
 # Import ImagePanel from LED 2D Overview (reuse UI components)
 from .led_2d_overview_result import ImagePanel

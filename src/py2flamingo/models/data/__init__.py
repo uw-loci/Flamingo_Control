@@ -10,6 +10,17 @@ throughout the Flamingo Control application.
 # from .sample import Sample, SampleMetadata, SampleRegion
 # from .dataset import Dataset, DatasetMetadata
 
+from .overview_results import (
+    VISUALIZATION_TYPES,
+    TileResult,
+    RotationResult,
+    EffectiveBoundingBox,
+)
+
 __all__ = [
-    # Will be populated as models are created
+    # Overview result types
+    "VISUALIZATION_TYPES",
+    "TileResult",
+    "RotationResult",
+    "EffectiveBoundingBox",
 ]

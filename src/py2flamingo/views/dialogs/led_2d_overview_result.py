@@ -1176,7 +1176,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
     def _populate_visualization_types(self):
         """Populate the visualization type dropdown."""
-        from py2flamingo.workflows.led_2d_overview_workflow import VISUALIZATION_TYPES
+        from py2flamingo.models.data.overview_results import VISUALIZATION_TYPES
 
         self.viz_combo.clear()
         for viz_type, display_name in VISUALIZATION_TYPES:
@@ -1770,7 +1770,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
             )
 
         # Load rotations
-        from py2flamingo.workflows.led_2d_overview_workflow import TileResult, RotationResult
+        from py2flamingo.models.data.overview_results import TileResult, RotationResult
         import tifffile
 
         results = []
