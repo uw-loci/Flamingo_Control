@@ -25,39 +25,81 @@
 
 ### Focal Plane (FIXED HARDWARE - Critical Concept)
 
-**The focal plane is a fixed physical location - it NEVER moves.**
+**The focal plane is a fixed physical location in 3D space - it NEVER moves.**
 
 In this light sheet microscope:
-- The **focal plane** is where the light sheet intersects the detection objective's focal plane
-- This is a **fixed location** in the imaging chamber - part of the hardware setup
-- The focal plane is defined by a specific **Z position** (the detection/focus axis)
-- X and Y coordinates define the field of view within that plane
+- The **focal plane** is a 2D XY region where the light sheet intersects the detection objective's focal plane
+- This is a **fixed location** in the imaging chamber at specific X, Y, AND Z coordinates
+- The focal plane is **perpendicular to the Z axis** (detection/focus axis)
+- **No axis is special** - the focal plane has fixed X, Y, and Z coordinates
 - Field of view: ~518 µm (at 25.69x magnification)
 
 ### How Z-Stacks Work
 
 **The stage moves the SAMPLE through the fixed focal plane:**
 
-1. Stage moves to position (X, Y, Z)
-2. The sample (attached to the holder) passes through the focal plane
-3. Camera captures the slice of sample currently AT the focal plane
-4. Stage moves to next Z position, capturing the next slice
-5. Result: A 3D stack of 2D images, each captured at the same physical location (the focal plane)
+1. Stage positions the sample at (X, Y, Z_start)
+2. Camera captures a 2D slice at the focal plane
+3. Stage moves in Z, bringing different sample depths through the focal plane
+4. Each frame is captured at the SAME physical location (the focal plane)
+5. The Z-stack ends when stage reaches Z_end (which is at the focal plane Z)
+6. Result: A 3D stack representing sample structure, with the END of the stack at the focal plane
 
-**Important distinction:**
-- The focal plane does NOT move
-- The SAMPLE moves through the focal plane
-- All imaging happens AT the focal plane
+**Key insight:**
+- All imaging happens AT the focal plane (fixed X, Y, Z in chamber coordinates)
+- The Z position of the captured data represents WHERE IN THE SAMPLE it came from
+- The last frame of a Z-stack is captured when the sample surface is at the focal plane
 
-## Critical Concept: Data Placement in 3D Viewer
+### How Tile Collection Works
 
-**All data is captured at the focal plane location, so it should be placed there in the 3D viewer.**
+**Multiple Z-stacks are collected at different stage XY positions:**
 
-1. **During acquisition**: Every frame is captured at the focal plane (fixed location)
-2. **Storage**: Data is placed at the focal plane location in napari coordinates (`base_y_um = 7000`)
-3. **Z variation**: The Z coordinate varies to represent the sample's 3D structure (different slices captured as sample moves through focal plane)
-4. **Display transform**: When stage moves after acquisition, the display transform shifts the volume to show relationship to current stage position
-5. **Visual result**: Data appears at the yellow square (focal plane) and moves with the stage
+1. Collect Z-stack #1 at stage position (X1, Y1, Z_range)
+   - Data stored with reference to current stage position
+   - Z-stack ends at focal plane
+2. Stage moves to new position (X2, Y2)
+   - **Previously collected data should SHIFT in the display** by the stage delta
+   - This clears the focal plane area for new data
+3. Collect Z-stack #2 at new position
+   - New data appears at the (now empty) focal plane location
+4. Result: Multiple Z-stacks tiled together in 3D space
+
+## Critical Concept: Three Coordinate Systems
+
+There are THREE distinct coordinate systems that must be understood:
+
+### 1. Stage Coordinates (Physical Reality)
+- Where the motorized stage is positioned (X, Y, Z in mm, R in degrees)
+- The sample moves WITH the stage
+- All imaging happens at the focal plane, but stage position determines WHICH PART of the sample is at the focal plane
+
+### 2. Storage Coordinates (Voxel Grid)
+- Where data is stored in the 3D voxel array
+- Data is stored at positions calculated from stage position DELTAS from a reference
+- **All three axes (X, Y, Z) should use deltas consistently**
+- Storage position = base_position + (current_stage - reference_stage) * 1000
+
+### 3. Display Coordinates (What the User Sees)
+- The 3D napari viewer shows the storage data
+- A **display transform** shifts the entire volume based on current stage position
+- When stage moves, existing data appears to move WITH the sample
+- New data collected after movement appears at the (now shifted) focal plane location
+
+### Data Flow for Tile Workflows
+
+1. **First Z-stack**: Reference position set to stage position at first frame
+   - Data stored at base position (delta = 0 for first tile)
+   - Display shows data at focal plane location
+
+2. **Stage moves to next tile**: Delta = new_position - reference_position
+   - Display transform shifts ALL existing data by this delta
+   - Focal plane location in display is now "empty"
+
+3. **Second Z-stack collected**:
+   - Data stored at base + delta (different storage position than first tile)
+   - Display shows new data at focal plane, old data shifted away
+
+4. **Result**: Tiles spread out in storage AND display, showing the 3D sample structure
 
 ## Coordinate Systems
 
@@ -90,7 +132,7 @@ In this light sheet microscope:
 
 ### Stage → World Coordinates (Data Placement)
 
-**Key insight:** Stage coordinates are in real-world mm, but data is placed in napari's world coordinate system (µm). The transformation depends on `use_stage_y_delta`:
+**Key insight:** Stage coordinates are in real-world mm, but data is placed in napari's world coordinate system (µm). All three axes should be treated consistently:
 
 ```python
 # In add_frame_to_volume() - sample_view.py
@@ -99,7 +141,7 @@ In this light sheet microscope:
 pos_x, pos_y, pos_z = stage_position_mm['x'], stage_position_mm['y'], stage_position_mm['z']
 
 # Reference position (first frame's stage position)
-ref_x, ref_y, ref_z = reference_stage_position['x'], 'y'], ['z']
+ref_x, ref_y, ref_z = reference_stage_position['x'], ['y'], ['z']
 
 # Calculate delta from reference (in mm)
 delta_x = pos_x - ref_x
@@ -109,25 +151,23 @@ delta_z = pos_z - ref_z
 # Base position in napari world coordinates (µm)
 # sample_region_center_um = [6655, 7000, 19250]  # [X, Y, Z] in config
 base_x_um = 6655   # X center of sample region
-base_y_um = 7000   # Y position of focal plane in 3D viewer
+base_y_um = 7000   # Y center of sample region
 base_z_um = 19250  # Z center of sample region
 
 # Calculate world coordinates (ZYX order for napari)
-# Y behavior depends on workflow mode:
-y_offset = delta_y * 1000 if use_stage_y_delta else 0  # 0 for live view and tiles
-
+# ALL THREE AXES use deltas consistently:
 world_center_um = [
-    base_z_um + delta_z * 1000,        # Z: varies with stage Z (same orientation)
-    base_y_um + y_offset,               # Y: fixed at focal plane (7000µm)
-    base_x_um + delta_x_storage * 1000  # X: varies with stage X
+    base_z_um + delta_z * 1000,        # Z: varies with stage Z
+    base_y_um + delta_y * 1000,        # Y: varies with stage Y
+    base_x_um + delta_x_storage * 1000 # X: varies with stage X (may be inverted)
 ]
 ```
 
-**Result with `use_stage_y_delta=False` (live view and tile workflows):**
-- Y is ALWAYS `base_y_um = 7000` (focal plane location)
-- Z varies to show the sample's 3D structure
-- X varies with stage X movement
-- All data appears at the yellow square (focal plane) in the 3D viewer
+**Result:**
+- First tile (delta = 0): data stored at base position (sample_region_center)
+- Subsequent tiles: data stored at base + delta, spreading tiles in storage
+- Display transform shifts everything based on current stage position
+- Visual result: tiles appear at correct relative positions in 3D viewer
 
 ### Camera Pixel → World Coordinates
 ```python

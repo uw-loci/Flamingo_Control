@@ -3156,20 +3156,19 @@ class SampleView(QWidget):
             self.logger.info("Cleared all visualization data")
 
     def add_frame_to_volume(self, image: np.ndarray, stage_position_mm: dict,
-                            channel_id: int, timestamp: float = None,
-                            use_stage_y_delta: bool = False) -> None:
+                            channel_id: int, timestamp: float = None) -> None:
         """
         Place a camera frame into the 3D voxel storage.
+
+        All three axes (X, Y, Z) use stage position deltas from the reference
+        position consistently. The focal plane is a 2D XY region at fixed
+        chamber coordinates - no axis receives special treatment.
 
         Args:
             image: Camera image
             stage_position_mm: {'x': float, 'y': float, 'z': float} in mm
             channel_id: Channel index (0-3)
             timestamp: Optional timestamp in ms
-            use_stage_y_delta: If True, use stage Y position delta for 3D placement
-                (for tile workflows where tiles are at different Y positions).
-                If False, place all data at focal plane Y (for live view where
-                data is always collected at the focal plane).
         """
         if not self.voxel_storage:
             return
@@ -3240,16 +3239,15 @@ class SampleView(QWidget):
             delta_x_storage = -delta_x if self._invert_x else delta_x
 
             # World coordinates for this frame based on stage position deltas
-            # Y is fixed at focal plane (use_stage_y_delta=False for both live view and tile workflows)
-            # because all imaging physically occurs at the fixed focal plane location.
-            # Z varies to represent the sample's 3D structure as it passes through the focal plane.
+            # All three axes (X, Y, Z) use deltas consistently - no axis is special.
+            # The focal plane is a 2D XY region at fixed X, Y, Z in chamber coordinates.
+            # Data position = base_position + delta from reference position.
             #
             # Z sign convention: smaller stage Z = closer to objective = smaller napari Z (back wall at Z=0)
             # So we use +delta_z to maintain the same orientation in napari as physical space.
-            y_offset = delta_y * 1000 if use_stage_y_delta else 0
             world_center_um = np.array([
-                base_z_um + delta_z * 1000,       # Z varies with stage movement (+ to preserve orientation)
-                base_y_um + y_offset,             # Y: conditional on workflow
+                base_z_um + delta_z * 1000,         # Z varies with stage movement
+                base_y_um + delta_y * 1000,         # Y varies with stage movement
                 base_x_um + delta_x_storage * 1000  # X varies with stage movement
             ])
 
@@ -4862,13 +4860,11 @@ class SampleView(QWidget):
             self.logger.info(f"Sample View: Tile reference set to "
                             f"X={ref_x:.3f}, Y={ref_y:.3f}, Z={ref_z:.3f}, R={ref_r:.1f}°")
 
-        # Add frame to volume at focal plane (like live view)
-        # use_stage_y_delta=False stores data at base_y_um, display transform handles positioning
+        # Add frame to volume - all axes use deltas from reference position consistently
         self.add_frame_to_volume(
             image=image,
             stage_position_mm={'x': position['x'], 'y': position['y'], 'z': z_position},
-            channel_id=self._current_channel,
-            use_stage_y_delta=False
+            channel_id=self._current_channel
         )
 
         # Kick the debounced channel-availability check so checkboxes
