@@ -79,7 +79,8 @@ class SlicePlaneViewer(QFrame):
     }
 
     def __init__(self, plane: str, h_axis: str, v_axis: str,
-                 width: int, height: int, v_axis_inverted: bool = False, parent=None):
+                 width: int, height: int, h_axis_inverted: bool = False,
+                 v_axis_inverted: bool = False, parent=None):
         """
         Initialize slice plane viewer.
 
@@ -89,6 +90,8 @@ class SlicePlaneViewer(QFrame):
             v_axis: Vertical axis ('x', 'y', or 'z')
             width: Widget width in pixels
             height: Widget height in pixels
+            h_axis_inverted: If True, h_range[1] (max) is at left, h_range[0] (min) at right.
+                           Use for axes where the stage is inverted (like X axis on Flamingo).
             v_axis_inverted: If True, v_range[0] (min) is at bottom, v_range[1] (max) at top.
                            Use for axes where physical "up" is positive (like Y axis).
             parent: Parent widget
@@ -100,6 +103,7 @@ class SlicePlaneViewer(QFrame):
         self.v_axis = v_axis
         self._width = width
         self._height = height
+        self._h_axis_inverted = h_axis_inverted
         self._v_axis_inverted = v_axis_inverted
 
         # Physical coordinate ranges (will be set from config)
@@ -355,7 +359,12 @@ class SlicePlaneViewer(QFrame):
 
         def to_pixel(h_coord, v_coord):
             """Convert physical coordinates to pixel coordinates on the final pixmap."""
-            px = int((h_coord - self.h_range[0]) * h_scale + center_x)
+            if self._h_axis_inverted:
+                # Inverted: h_range[1] (max) at left, h_range[0] (min) at right
+                px = int((self.h_range[1] - h_coord) * h_scale + center_x)
+            else:
+                # Normal: h_range[0] (min) at left, h_range[1] (max) at right
+                px = int((h_coord - self.h_range[0]) * h_scale + center_x)
             if self._v_axis_inverted:
                 # Inverted: v_range[1] (max) at top, v_range[0] (min) at bottom
                 py = int((self.v_range[1] - v_coord) * v_scale + center_y)
@@ -479,8 +488,14 @@ class SlicePlaneViewer(QFrame):
                 painter.drawText(int(x + padding), int(y + text_height - padding), text)
 
             # H-axis labels (left and right edges)
-            draw_label(h_min_str, img_left + 2, img_bottom - 16)
-            draw_label(h_max_str, img_right - 2, img_bottom - 16, align_right=True)
+            if self._h_axis_inverted:
+                # Inverted: max at left, min at right (stage X is inverted on Flamingo)
+                draw_label(h_max_str, img_left + 2, img_bottom - 16)
+                draw_label(h_min_str, img_right - 2, img_bottom - 16, align_right=True)
+            else:
+                # Normal: min at left, max at right
+                draw_label(h_min_str, img_left + 2, img_bottom - 16)
+                draw_label(h_max_str, img_right - 2, img_bottom - 16, align_right=True)
 
             # V-axis labels (top and bottom edges)
             if self._v_axis_inverted:
@@ -738,7 +753,12 @@ class SlicePlaneViewer(QFrame):
             pass
 
         # Convert to physical coordinates
-        h_coord = self.h_range[0] + ((px - img_x) / scaled_w) * (self.h_range[1] - self.h_range[0])
+        if self._h_axis_inverted:
+            # Inverted: left of image is h_max, right is h_min
+            h_coord = self.h_range[1] - ((px - img_x) / scaled_w) * (self.h_range[1] - self.h_range[0])
+        else:
+            # Normal: left of image is h_min, right is h_max
+            h_coord = self.h_range[0] + ((px - img_x) / scaled_w) * (self.h_range[1] - self.h_range[0])
         if self._v_axis_inverted:
             # Inverted: top of image is v_max, bottom is v_min
             v_coord = self.v_range[1] - ((py - img_y) / scaled_h) * (self.v_range[1] - self.v_range[0])
@@ -1950,13 +1970,18 @@ class SampleView(QWidget):
         y_range = (y_min, y_max)
         z_range = tuple(stage_config.get('z_range_mm', [12.5, 26.0]))
 
+        # Get axis inversion settings from config
+        # X axis is inverted on Flamingo: low X on right, high X on left
+        invert_x = stage_config.get('invert_x_default', False)
+
         # XZ Plane (Top-Down) - X horizontal, Z vertical
         # Z axis: min at back (top of view), max at front (bottom) - no inversion needed
         xz_group = QGroupBox("XZ Plane (Top-Down)")
         xz_layout = QVBoxLayout()
         xz_layout.setContentsMargins(4, 4, 4, 4)
         # Aspect ~11:13.5 ≈ 0.81, use 180x220
-        self.xz_plane_viewer = SlicePlaneViewer('xz', 'x', 'z', 180, 220, v_axis_inverted=False)
+        self.xz_plane_viewer = SlicePlaneViewer('xz', 'x', 'z', 180, 220,
+                                                 h_axis_inverted=invert_x, v_axis_inverted=False)
         self.xz_plane_viewer.set_ranges(x_range, z_range)
         self.xz_plane_viewer.position_clicked.connect(
             lambda h, v: self._on_plane_click('xz', h, v)
@@ -1970,12 +1995,13 @@ class SampleView(QWidget):
         bottom_row.setSpacing(4)
 
         # XY Plane (Front View) - X horizontal, Y vertical
-        # Y axis: physical "up" is positive, so invert (min at bottom, max at top)
+        # X axis: inverted per config, Y axis: physical "up" is positive
         xy_group = QGroupBox("XY Plane (Front)")
         xy_layout = QVBoxLayout()
         xy_layout.setContentsMargins(4, 4, 4, 4)
         # Aspect ~11:20 ≈ 0.55, use 130x240
-        self.xy_plane_viewer = SlicePlaneViewer('xy', 'x', 'y', 130, 240, v_axis_inverted=True)
+        self.xy_plane_viewer = SlicePlaneViewer('xy', 'x', 'y', 130, 240,
+                                                 h_axis_inverted=invert_x, v_axis_inverted=True)
         self.xy_plane_viewer.set_ranges(x_range, y_range)
         self.xy_plane_viewer.position_clicked.connect(
             lambda h, v: self._on_plane_click('xy', h, v)
@@ -1985,12 +2011,13 @@ class SampleView(QWidget):
         bottom_row.addWidget(xy_group)
 
         # YZ Plane (Side View) - Z horizontal, Y vertical
-        # Y axis: physical "up" is positive, so invert (min at bottom, max at top)
+        # Z axis: not inverted, Y axis: physical "up" is positive
         yz_group = QGroupBox("YZ Plane (Side)")
         yz_layout = QVBoxLayout()
         yz_layout.setContentsMargins(4, 4, 4, 4)
         # Aspect ~13.5:20 ≈ 0.675, use 160x240
-        self.yz_plane_viewer = SlicePlaneViewer('yz', 'z', 'y', 160, 240, v_axis_inverted=True)
+        self.yz_plane_viewer = SlicePlaneViewer('yz', 'z', 'y', 160, 240,
+                                                 h_axis_inverted=False, v_axis_inverted=True)
         self.yz_plane_viewer.set_ranges(z_range, y_range)
         self.yz_plane_viewer.position_clicked.connect(
             lambda h, v: self._on_plane_click('yz', h, v)
@@ -2681,6 +2708,9 @@ class SampleView(QWidget):
             if layer is not None:
                 layer.visible = visible
 
+        # Update 2D plane views with new visibility settings
+        self._update_plane_views()
+
     def _on_channel_contrast_changed(self, channel: int, value: tuple) -> None:
         """Handle channel contrast range slider change.
 
@@ -2705,6 +2735,9 @@ class SampleView(QWidget):
                 layer.contrast_limits = [min_val, max_val]
 
         self.logger.debug(f"Channel {channel} contrast range: [{min_val}, {max_val}]")
+
+        # Update 2D plane views with new contrast settings
+        self._update_plane_views()
 
     def _auto_contrast_channels(self) -> None:
         """Calculate and apply contrast based on actual data statistics."""
@@ -4399,6 +4432,10 @@ class SampleView(QWidget):
             yz_channel_mips: Dict[int, np.ndarray] = {}
             channel_settings: Dict[int, dict] = {}
 
+            # Get axis inversion settings from config
+            stage_config = self._config.get('stage_control', {})
+            invert_x = stage_config.get('invert_x_default', False)
+
             # Get channel settings from napari layers (if available)
             viewer = self._get_viewer()
 
@@ -4421,20 +4458,26 @@ class SampleView(QWidget):
                 # Data is in (Z, Y, X) order - generate MIP projections
                 # XZ plane (top-down) - project along Y axis (axis 1)
                 # Result shape: (Z, X) where Z=rows(vertical), X=cols(horizontal)
-                # Viewer has h_axis='x', v_axis='z', v_axis_inverted=False
-                # Z_min at back (top), Z_max at front (bottom) - no flip needed
-                xz_channel_mips[ch_id] = np.max(volume, axis=1)
+                # Viewer has h_axis='x', v_axis='z'
+                # If invert_x: flip columns so X_max is on left, X_min on right
+                xz_mip = np.max(volume, axis=1)
+                if invert_x:
+                    xz_mip = xz_mip[:, ::-1]  # Flip columns (X axis)
+                xz_channel_mips[ch_id] = xz_mip
 
                 # XY plane (front view) - project along Z axis (axis 0)
                 # Result shape: (Y, X) where Y=rows(vertical), X=cols(horizontal)
                 # Viewer has h_axis='x', v_axis='y', v_axis_inverted=True
-                # Data row 0 = Y_min, but we want Y_max at top -> flip vertically
-                xy_channel_mips[ch_id] = np.max(volume, axis=0)[::-1, :]
+                # Flip rows for Y (v_axis_inverted), flip columns for X if invert_x
+                xy_mip = np.max(volume, axis=0)[::-1, :]  # Flip rows (Y axis)
+                if invert_x:
+                    xy_mip = xy_mip[:, ::-1]  # Flip columns (X axis)
+                xy_channel_mips[ch_id] = xy_mip
 
                 # YZ plane (side view) - project along X axis (axis 2)
                 # Result shape: (Z, Y) -> transpose to (Y, Z)
                 # Viewer has h_axis='z', v_axis='y', v_axis_inverted=True
-                # After transpose: row 0 = Y_min, but we want Y_max at top -> flip vertically
+                # Flip rows for Y (v_axis_inverted), Z is not inverted
                 yz_channel_mips[ch_id] = np.max(volume, axis=2).T[::-1, :]
 
                 # Get channel settings from napari layer or use defaults
