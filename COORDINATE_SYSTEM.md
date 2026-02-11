@@ -941,7 +941,75 @@ All visualization parameters live in `src/py2flamingo/configs/visualization_3d_c
 | `sample_chamber` | `sample_region_half_width_x_um` | 6000 | ±X storage extent |
 | `sample_chamber` | `sample_region_half_width_y_um` | 12000 | ±Y storage extent |
 | `sample_chamber` | `sample_region_half_width_z_um` | 7000 | ±Z storage extent |
-| `stage_control` | `x_range_mm` | [1.0, 12.31] | Visualization X bounds |
-| `stage_control` | `y_range_mm` | [0.0, 14.0] | Visualization Y bounds |
-| `stage_control` | `z_range_mm` | [12.5, 26.0] | Visualization Z bounds |
+| `stage_control` | `x_range_mm` | [1.0, 12.31] | 3D chamber visualization X bounds |
+| `stage_control` | `y_range_mm` | [0.0, 14.0] | 3D chamber visualization Y bounds (NOT stage limits!) |
+| `stage_control` | `z_range_mm` | [12.5, 26.0] | 3D chamber visualization Z bounds |
+| `stage_control` | `y_stage_min_mm` | 5.0 | Actual stage Y minimum (used by 2D planes) |
+| `stage_control` | `y_stage_max_mm` | 25.0 | Actual stage Y maximum (used by 2D planes) |
 | `channels` | (list of 4) | 405/488/561/640nm | Channel names, colormaps, defaults |
+
+---
+
+## 2D Plane Views vs 3D Visualization Coordinates
+
+### The Two Y-Axis Coordinate Systems
+
+**IMPORTANT:** The config file has TWO different Y-axis ranges that serve different purposes:
+
+| Setting | Values | Purpose | Used By |
+|---------|--------|---------|---------|
+| `y_range_mm` | [0.0, 14.0] | 3D chamber visualization bounds | Napari 3D viewer, chamber wireframe |
+| `y_stage_min_mm` / `y_stage_max_mm` | 5.0 / 25.0 | Actual physical stage limits | 2D plane views, position sliders |
+
+### Why Two Systems?
+
+The **3D chamber visualization** uses a coordinate system centered on the objective:
+- Y range: 0-14mm represents the visible chamber region
+- The chamber is a "fixed container" that the sample moves through
+- Origin (Y=0) is at the top of the chamber, Y=14 at the bottom
+
+The **2D plane views** and **position sliders** use actual stage coordinates:
+- Y range: 5-25mm represents where the stage can physically move
+- These match the hardware limits and what the user sees on position readouts
+- Users expect clicked coordinates to match slider values
+
+### Code Implementation
+
+In `_create_plane_views_section()` (sample_view.py):
+
+```python
+# Get stage ranges from config
+stage_config = self._config.get('stage_control', {})
+x_range = tuple(stage_config.get('x_range_mm', [1.0, 12.31]))
+
+# Y uses STAGE LIMITS, not chamber visualization range
+# This ensures 2D plane coordinates match position sliders
+y_min = stage_config.get('y_stage_min_mm', stage_config.get('y_range_mm', [5.0, 25.0])[0])
+y_max = stage_config.get('y_stage_max_mm', stage_config.get('y_range_mm', [5.0, 25.0])[1])
+y_range = (y_min, y_max)
+
+z_range = tuple(stage_config.get('z_range_mm', [12.5, 26.0]))
+```
+
+### X and Z Axes
+
+For X and Z, the same ranges are used for both 3D and 2D views because:
+- X: Stage limits (1.0-12.31mm) match the chamber width
+- Z: Stage limits (12.5-26.0mm) match the chamber depth
+
+### Vertical Axis Inversion
+
+The Y axis in 2D plane views is **inverted** so that:
+- Y increases upward (physical "up" is positive)
+- Y min (5mm) appears at the **bottom** of XY and YZ planes
+- Y max (25mm) appears at the **top**
+
+This is controlled by `v_axis_inverted=True` when creating XY and YZ SlicePlaneViewers.
+
+### Adding New Stage Control Settings
+
+If you add new stage-related settings to the config, consider:
+1. Whether it applies to 3D chamber visualization, 2D plane views, or both
+2. Use `_range_mm` suffix for visualization bounds
+3. Use `_stage_min_mm` / `_stage_max_mm` suffix for physical stage limits
+4. Document which components use which settings
