@@ -566,8 +566,8 @@ class MainWindow(QMainWindow):
 
         # Get last-used path from configuration service (independent of other dialogs)
         start_path = str(Path.home())
-        if self.app and hasattr(self.app, 'configuration_service') and self.app.configuration_service:
-            saved_path = self.app.configuration_service.get_led_2d_session_path()
+        if self.app and hasattr(self.app, 'config_service') and self.app.config_service:
+            saved_path = self.app.config_service.get_led_2d_session_path()
             if saved_path:
                 start_path = saved_path
 
@@ -583,8 +583,8 @@ class MainWindow(QMainWindow):
             return  # User cancelled
 
         # Save the selected folder's parent for next time
-        if self.app and hasattr(self.app, 'configuration_service') and self.app.configuration_service:
-            self.app.configuration_service.set_led_2d_session_path(str(Path(folder).parent))
+        if self.app and hasattr(self.app, 'config_service') and self.app.config_service:
+            self.app.config_service.set_led_2d_session_path(str(Path(folder).parent))
 
         try:
             from py2flamingo.views.dialogs.led_2d_overview_result import LED2DOverviewResultWindow
