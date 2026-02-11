@@ -34,7 +34,6 @@ logger = logging.getLogger(__name__)
 # Try to import zarr - it's optional
 try:
     import zarr
-    from numcodecs import Blosc
 
     # Check for Zarr 3.x async support
     ZARR_VERSION = tuple(int(x) for x in zarr.__version__.split('.')[:2])
@@ -42,15 +41,20 @@ try:
     ZARR_AVAILABLE = True
 
     if ZARR_3_AVAILABLE:
+        # Zarr 3.x uses built-in codecs instead of numcodecs
+        from zarr.codecs import BloscCodec
         logger.info(f"Zarr {zarr.__version__} with async I/O support detected")
     else:
+        # Zarr 2.x uses numcodecs
+        from numcodecs import Blosc
+        BloscCodec = None
         logger.info(f"Zarr {zarr.__version__} detected (async I/O requires 3.x)")
 except ImportError:
     ZARR_AVAILABLE = False
     ZARR_3_AVAILABLE = False
     zarr = None
-    Blosc = None
-    logger.warning("zarr not available - session save/load disabled. Install with: pip install zarr numcodecs")
+    BloscCodec = None
+    logger.warning("zarr not available - session save/load disabled. Install with: pip install zarr")
 
 
 def _create_zarr_store(path: str):
@@ -182,8 +186,7 @@ class SessionManager:
 
         logger.info(f"Saving session to {session_path}")
 
-        # Create zarr store with compression
-        compressor = Blosc(cname=self.DEFAULT_COMPRESSOR, clevel=self.DEFAULT_COMPRESSION_LEVEL)
+        # Create zarr store
         store = _create_zarr_store(str(session_path))
         root = zarr.group(store=store, overwrite=True)
 
@@ -201,15 +204,25 @@ class SessionManager:
             display_data = voxel_storage.get_display_volume(ch)
 
             # Create dataset with compression and chunking
-            # zarr v3 requires shape as explicit keyword argument
-            root.create_dataset(
-                str(ch),
-                shape=display_data.shape,
-                data=display_data,
-                chunks=self.DEFAULT_CHUNK_SIZE,
-                compressor=compressor,
-                dtype=display_data.dtype
-            )
+            # zarr v3 uses different codec API than v2
+            if ZARR_3_AVAILABLE:
+                root.create_dataset(
+                    str(ch),
+                    shape=display_data.shape,
+                    data=display_data,
+                    chunks=self.DEFAULT_CHUNK_SIZE,
+                    compressors=BloscCodec(cname=self.DEFAULT_COMPRESSOR, clevel=self.DEFAULT_COMPRESSION_LEVEL),
+                    dtype=display_data.dtype
+                )
+            else:
+                root.create_dataset(
+                    str(ch),
+                    shape=display_data.shape,
+                    data=display_data,
+                    chunks=self.DEFAULT_CHUNK_SIZE,
+                    compressor=Blosc(cname=self.DEFAULT_COMPRESSOR, clevel=self.DEFAULT_COMPRESSION_LEVEL),
+                    dtype=display_data.dtype
+                )
 
             total_voxels += np.count_nonzero(display_data)
             logger.debug(f"Saved channel {ch}: shape={display_data.shape}, "
@@ -304,8 +317,7 @@ class SessionManager:
         logger.info(f"Async saving session to {session_path}")
         start_time = time.time()
 
-        # Create zarr store with compression
-        compressor = Blosc(cname=self.DEFAULT_COMPRESSOR, clevel=self.DEFAULT_COMPRESSION_LEVEL)
+        # Create zarr store
         store = _create_zarr_store(str(session_path))
 
         # Default channel names
@@ -326,7 +338,7 @@ class SessionManager:
             await loop.run_in_executor(
                 None,
                 self._save_channel_sync,
-                store, ch, display_data, compressor
+                store, ch, display_data
             )
 
             return np.count_nonzero(display_data)
@@ -398,21 +410,31 @@ class SessionManager:
 
         return session_path
 
-    def _save_channel_sync(self, store, channel_id: int, data: np.ndarray, compressor):
+    def _save_channel_sync(self, store, channel_id: int, data: np.ndarray):
         """Synchronous helper to save a single channel to zarr."""
         root = zarr.open_group(store=store, mode='a')
 
-        # Create dataset with write_empty_chunks=False for sparse data efficiency
-        # zarr v3 requires shape as explicit keyword argument
-        root.create_dataset(
-            str(channel_id),
-            shape=data.shape,
-            data=data,
-            chunks=self.DEFAULT_CHUNK_SIZE,
-            compressor=compressor,
-            dtype=data.dtype,
-            write_empty_chunks=False  # Skip empty chunks for sparse voxel data
-        )
+        # Create dataset with compression
+        # zarr v3 uses different codec API than v2
+        if ZARR_3_AVAILABLE:
+            root.create_dataset(
+                str(channel_id),
+                shape=data.shape,
+                data=data,
+                chunks=self.DEFAULT_CHUNK_SIZE,
+                compressors=BloscCodec(cname=self.DEFAULT_COMPRESSOR, clevel=self.DEFAULT_COMPRESSION_LEVEL),
+                dtype=data.dtype
+            )
+        else:
+            root.create_dataset(
+                str(channel_id),
+                shape=data.shape,
+                data=data,
+                chunks=self.DEFAULT_CHUNK_SIZE,
+                compressor=Blosc(cname=self.DEFAULT_COMPRESSOR, clevel=self.DEFAULT_COMPRESSION_LEVEL),
+                dtype=data.dtype,
+                write_empty_chunks=False  # Skip empty chunks for sparse voxel data
+            )
 
     async def load_session_async(self, session_path: Path) -> Tuple[Dict[int, np.ndarray], SessionMetadata]:
         """Load session using Zarr 3.x async I/O for 2-5x faster reads.
