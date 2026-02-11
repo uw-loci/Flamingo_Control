@@ -15,7 +15,6 @@ from PyQt5.QtWidgets import (
     QSizePolicy, QFrame, QComboBox, QMenu, QAction, QSlider
 )
 from py2flamingo.services.window_geometry_manager import PersistentWidget
-from py2flamingo.resources import get_app_icon
 from PyQt5.QtCore import Qt, QSize, QPoint, QPointF, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QWheelEvent, QMouseEvent, QIcon
 
@@ -854,7 +853,6 @@ class LED2DOverviewResultWindow(PersistentWidget):
         self._app = app
 
         self.setWindowTitle("LED 2D Overview - Results" if not preview_mode else "LED 2D Overview - Preview")
-        self.setWindowIcon(get_app_icon())  # Use flamingo icon
         self.setMinimumSize(800, 500)
 
         # Track first show for auto-fit

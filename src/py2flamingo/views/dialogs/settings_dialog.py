@@ -21,7 +21,6 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
-from py2flamingo.resources import get_app_icon
 
 
 # Downsample factor presets (storage to display ratio)
@@ -59,7 +58,6 @@ class SettingsDialog(PersistentDialog):
         self._original_settings = {}
 
         self.setWindowTitle("Settings")
-        self.setWindowIcon(get_app_icon())
         self.setMinimumWidth(500)
         self.setMinimumHeight(400)
         self.setModal(True)

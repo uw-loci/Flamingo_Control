@@ -22,7 +22,6 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QIcon
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
-from py2flamingo.resources import get_app_icon
 
 logger = logging.getLogger(__name__)
 
@@ -270,7 +269,6 @@ class PerformanceBenchmarkDialog(PersistentDialog):
         self.worker: Optional[BenchmarkWorker] = None
 
         self.setWindowTitle("Performance Benchmark")
-        self.setWindowIcon(get_app_icon())  # Use flamingo icon
         self.setMinimumWidth(700)
         self.setMinimumHeight(500)
 

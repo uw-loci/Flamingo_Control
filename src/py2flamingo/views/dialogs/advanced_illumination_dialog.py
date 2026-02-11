@@ -13,7 +13,6 @@ from PyQt5.QtWidgets import (
     QPushButton, QDialogButtonBox
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
-from py2flamingo.resources import get_app_icon
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
 
@@ -42,7 +41,6 @@ class AdvancedIlluminationDialog(PersistentDialog):
         self._logger = logging.getLogger(__name__)
 
         self.setWindowTitle("Advanced Illumination Settings")
-        self.setWindowIcon(get_app_icon())  # Use flamingo icon
         self.setMinimumWidth(400)
         self.setModal(True)
 

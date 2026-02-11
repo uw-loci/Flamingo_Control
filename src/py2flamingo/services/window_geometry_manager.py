@@ -19,6 +19,8 @@ from typing import Dict, Any, Optional, List
 from PyQt5.QtWidgets import QWidget, QMainWindow, QDialog, QSplitter
 from PyQt5.QtCore import QByteArray
 
+from py2flamingo.resources import get_app_icon
+
 
 logger = logging.getLogger(__name__)
 
@@ -432,6 +434,7 @@ class PersistentDialog(QDialog):
     def __init__(self, *args, geometry_manager: Optional['WindowGeometryManager'] = None,
                  window_id: Optional[str] = None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.setWindowIcon(get_app_icon())
         self._geometry_manager = geometry_manager or _default_geometry_manager
         self._window_id = window_id or self.__class__.__name__
         self._geometry_restored = False
@@ -472,6 +475,7 @@ class PersistentWidget(QWidget):
     def __init__(self, *args, geometry_manager: Optional['WindowGeometryManager'] = None,
                  window_id: Optional[str] = None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.setWindowIcon(get_app_icon())
         self._geometry_manager = geometry_manager or _default_geometry_manager
         self._window_id = window_id or self.__class__.__name__
         self._geometry_restored = False

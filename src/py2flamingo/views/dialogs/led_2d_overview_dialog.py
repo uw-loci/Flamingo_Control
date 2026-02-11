@@ -59,7 +59,6 @@ class ScanConfiguration:
 
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
-from py2flamingo.resources import get_app_icon
 
 
 class LED2DOverviewDialog(PersistentDialog):
@@ -104,7 +103,6 @@ class LED2DOverviewDialog(PersistentDialog):
         self._current_led_intensity = 0.0  # percentage (0-100)
 
         self.setWindowTitle("LED 2D Overview")
-        self.setWindowIcon(get_app_icon())  # Use flamingo icon
         self.setMinimumWidth(580)
         # Non-modal so user can interact with Sample View and other dialogs
         self.setModal(False)
