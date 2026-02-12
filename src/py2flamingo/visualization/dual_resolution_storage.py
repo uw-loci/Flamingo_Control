@@ -966,19 +966,20 @@ class DualResolutionVoxelStorage:
         # Incremental shifts cause data loss at boundaries when shifting back
 
         # Full offset from reference in ZYX order
-        # ALL axes are NEGATED so display shift CANCELS storage delta.
-        # This ensures that when viewing from the position where a tile was captured,
-        # that tile appears at the focal plane (base position).
+        # "Rigid body" convention: display shift matches holder movement direction.
+        # When the stage moves, data and holder both shift the same way in napari,
+        # keeping them visually in sync (data is attached to the stage).
         #
-        # Storage places data at: base + storage_delta
-        # Display shifts by: -display_delta
-        # When current = capture position: combined = base + delta - delta = base (focal plane)
+        # Holder napari directions for +stage delta:
+        #   Z: napari_z = (z - z_min)/vs  → +napari_Z  → display: +dz
+        #   Y: napari_y = (y_max - y)/vs  → -napari_Y  → display: -dy
+        #   X(invert): napari_x = (x_max - x)/vs → -napari_X → display: -dx
+        #   X(normal): napari_x = (x - x_min)/vs → +napari_X → display: +dx
         #
-        # For X with invert_x:
-        # - Storage uses: -delta_x (when invert_x=True) or +delta_x (when invert_x=False)
-        # - Display should use OPPOSITE: +delta_x (when invert_x=True) or -delta_x (when invert_x=False)
-        dx_display = dx if self.config.invert_x else -dx
-        offset_voxels = np.array([-dz, -dy, dx_display]) * 1000 / self.config.display_voxel_size[0]
+        # Storage uses opposite signs so storage + display = 0 at capture position
+        # (tile appears centered at focal plane when viewed from capture position).
+        dx_display = -dx if self.config.invert_x else dx
+        offset_voxels = np.array([dz, -dy, dx_display]) * 1000 / self.config.display_voxel_size[0]
 
         # Check if translation is significant
         max_offset = np.max(np.abs(offset_voxels))
@@ -990,7 +991,7 @@ class DualResolutionVoxelStorage:
 
         # Log offset being applied (INFO for visibility during debugging)
         logger.info(f"Transform: Applying offset {offset_voxels.astype(int)} voxels (ZYX) "
-                   f"= ({-dz*1000:.0f}, {-dy*1000:.0f}, {dx_display*1000:.0f}) µm")
+                   f"= ({dz*1000:.0f}, {-dy*1000:.0f}, {dx_display*1000:.0f}) µm")
 
         # Apply translation using optimized shift (numpy.roll for integer, scipy for fractional)
         translated = self._fast_shift(rotated, offset_voxels)

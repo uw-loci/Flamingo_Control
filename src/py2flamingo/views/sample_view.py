@@ -853,7 +853,7 @@ class SampleView(QWidget):
         xy_layout.setContentsMargins(4, 4, 4, 4)
         # Aspect ~11:14 ≈ 0.79, use 130x240
         self.xy_plane_viewer = SlicePlaneViewer('xy', 'x', 'y', 130, 240,
-                                                 h_axis_inverted=self._invert_x, v_axis_inverted=False)
+                                                 h_axis_inverted=self._invert_x, v_axis_inverted=True)
         self.xy_plane_viewer.set_ranges(x_range, y_range)
         self.xy_plane_viewer.position_clicked.connect(
             lambda h, v: self._on_plane_click('xy', h, v)
@@ -868,7 +868,7 @@ class SampleView(QWidget):
         yz_layout.setContentsMargins(4, 4, 4, 4)
         # Aspect ~13.5:14 ≈ 0.96, use 160x240
         self.yz_plane_viewer = SlicePlaneViewer('yz', 'z', 'y', 160, 240,
-                                                 h_axis_inverted=False, v_axis_inverted=False)
+                                                 h_axis_inverted=False, v_axis_inverted=True)
         self.yz_plane_viewer.set_ranges(z_range, y_range)
         self.yz_plane_viewer.position_clicked.connect(
             lambda h, v: self._on_plane_click('yz', h, v)
@@ -2155,22 +2155,16 @@ class SampleView(QWidget):
             base_y_um = sample_center[1]
             base_x_um = sample_center[0]
 
-            # X-axis storage handling:
-            # - When invert_x=True: use -delta_x (storage inverts, display inverts -> correct)
-            # - When invert_x=False: use +delta_x (storage normal, display normal -> correct)
-            delta_x_storage = -delta_x if self._invert_x else delta_x
+            # Storage signs are OPPOSITE to display transform signs, so they cancel
+            # at the capture position (tile appears centered at focal plane).
+            # Display uses: [+dz, -dy, -dx(invert)/+dx(normal)]
+            # Storage uses: [-dz, +dy, +dx(invert)/-dx(normal)]
+            delta_x_storage = delta_x if self._invert_x else -delta_x
 
-            # World coordinates for this frame based on stage position deltas
-            # All three axes (X, Y, Z) use deltas consistently - no axis is special.
-            # The focal plane is a 2D XY region at fixed X, Y, Z in chamber coordinates.
-            # Data position = base_position + delta from reference position.
-            #
-            # Z sign convention: smaller stage Z = closer to objective = smaller napari Z (back wall at Z=0)
-            # So we use +delta_z to maintain the same orientation in napari as physical space.
             world_center_um = np.array([
-                base_z_um + delta_z * 1000,         # Z varies with stage movement
-                base_y_um + delta_y * 1000,         # Y varies with stage movement
-                base_x_um + delta_x_storage * 1000  # X varies with stage movement
+                base_z_um - delta_z * 1000,         # Z: negated (opposite of display +dz)
+                base_y_um + delta_y * 1000,         # Y: positive (opposite of display -dy)
+                base_x_um + delta_x_storage * 1000  # X: conditional (opposite of display)
             ])
 
             # Log world center for debugging 3D placement
@@ -2580,9 +2574,10 @@ class SampleView(QWidget):
         The focal plane (objective focal point) is the anchor — the stage moves to
         shift the sample such that the clicked feature lands on it.
 
-        Movement formula accounts for the data transform:
-        - X, Z: target = current + (click - focal)  [transform negates stage delta]
-        - Y: target = current + (focal - click)  [napari Y inversion double-negates]
+        With rigid-body display (data moves with stage), the formula is:
+          target = current + (focal - click)
+        for all axes. The stage moves so that the clicked data point
+        lands on the focal plane.
         """
         if not self.movement_controller:
             return
@@ -2605,23 +2600,24 @@ class SampleView(QWidget):
             from py2flamingo.models.hardware.stage import Position
 
             # Compute target: move stage so clicked data point ends up at focal plane
+            # All axes: target = current + (focal - click)
             if plane == 'xz':
                 # XZ plane: h=X, v=Z — Y unchanged
-                target_x = current_pos.x + (h_coord - focal_x)
-                target_z = current_pos.z + (v_coord - focal_z)
+                target_x = current_pos.x + (focal_x - h_coord)
+                target_z = current_pos.z + (focal_z - v_coord)
                 target = Position(x=target_x, y=current_pos.y, z=target_z, r=current_pos.r)
                 self.logger.info(f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
                                  f"stage X={target_x:.3f}, Z={target_z:.3f}")
             elif plane == 'xy':
                 # XY plane: h=X, v=Y(viz) — Z unchanged
-                target_x = current_pos.x + (h_coord - focal_x)
+                target_x = current_pos.x + (focal_x - h_coord)
                 target_y = current_pos.y + (focal_y_viz - v_coord)
                 target = Position(x=target_x, y=target_y, z=current_pos.z, r=current_pos.r)
                 self.logger.info(f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
                                  f"stage X={target_x:.3f}, Y={target_y:.3f}")
             elif plane == 'yz':
                 # YZ plane: h=Z, v=Y(viz) — X unchanged
-                target_z = current_pos.z + (h_coord - focal_z)
+                target_z = current_pos.z + (focal_z - h_coord)
                 target_y = current_pos.y + (focal_y_viz - v_coord)
                 target = Position(x=current_pos.x, y=target_y, z=target_z, r=current_pos.r)
                 self.logger.info(f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
@@ -2676,20 +2672,20 @@ class SampleView(QWidget):
                     continue
 
                 # Data is in (Z, Y, X) order - generate MIP projections
-                # napari volume has Y inverted (row 0 = Y_max = chamber bottom)
-                # flipud on Y-containing planes so row 0 = Y_min (chamber top)
+                # No data flips: raw projections preserve movement direction from 3D.
+                # Y label inversion handled by v_axis_inverted=True on viewers.
 
                 # XZ plane (top-down) - project along Y axis (axis 1)
                 # Result shape: (Z, X) where Z=rows(vertical), X=cols(horizontal)
                 xz_channel_mips[ch_id] = np.max(volume, axis=1)
 
                 # XY plane (front view) - project along Z axis (axis 0)
-                # Result shape: (Y, X) - flipud so row 0 = Y_min (chamber top)
-                xy_channel_mips[ch_id] = np.flipud(np.max(volume, axis=0))
+                # Result shape: (Y, X) where Y=rows(vertical), X=cols(horizontal)
+                xy_channel_mips[ch_id] = np.max(volume, axis=0)
 
                 # YZ plane (side view) - project along X axis (axis 2)
-                # Result shape: (Z, Y) -> transpose to (Y, Z) - flipud so row 0 = Y_min
-                yz_channel_mips[ch_id] = np.flipud(np.max(volume, axis=2).T)
+                # Result shape: (Z, Y) -> transpose to (Y, Z)
+                yz_channel_mips[ch_id] = np.max(volume, axis=2).T
 
                 # Get channel settings from napari layer or use defaults
                 settings = {
