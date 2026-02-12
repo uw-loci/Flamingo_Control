@@ -1898,9 +1898,17 @@ class SampleView(QWidget):
                                       f"Loaded session: {metadata.session_name}\n"
                                       f"Total voxels: {metadata.total_voxels:,}")
 
+                # Sync last_stage_position from hardware so the transform
+                # places loaded data at the correct chamber location
+                self._load_current_positions()
+
                 # Update visualization
                 self._update_visualization()
                 self._update_data_stats()
+
+                # Enable channel controls now that data exists
+                self._update_channel_availability()
+                self._auto_contrast_channels()
             elif file_path:
                 QMessageBox.warning(self, "Invalid Selection",
                                   "Please select a .zarr folder")
