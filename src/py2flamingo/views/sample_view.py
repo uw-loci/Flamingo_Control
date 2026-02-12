@@ -2183,10 +2183,15 @@ class SampleView(QWidget):
             num_pixels = len(camera_coords_2d)
             z_offsets = np.linspace(-slice_thickness_um/2, slice_thickness_um/2, num_pixels)
 
+            # When invert_x, camera image X is mirrored relative to world X
+            # (optics flip X). Negate camera X so pixels within each tile
+            # have correct orientation. Inter-tile positioning (delta_x_storage)
+            # is handled separately above.
+            camera_x_offset = -camera_coords_2d[:, 0] if self._invert_x else camera_coords_2d[:, 0]
             camera_offsets_3d = np.column_stack([
                 z_offsets,
                 camera_coords_2d[:, 1],
-                camera_coords_2d[:, 0]
+                camera_x_offset
             ])
 
             world_coords_3d = camera_offsets_3d + world_center_um
