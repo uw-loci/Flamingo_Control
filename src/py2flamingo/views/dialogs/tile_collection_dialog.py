@@ -5,8 +5,6 @@ from the LED 2D Overview result window.
 """
 
 import logging
-import math
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict
@@ -29,177 +27,14 @@ from py2flamingo.services.tiff_size_validator import (
     validate_workflow_params, parse_workflow_file, get_recommended_planes,
     TiffSizeEstimate, TIFF_4GB_LIMIT
 )
+from py2flamingo.utils.tile_z_range import calculate_tile_z_ranges
+from py2flamingo.utils.tile_workflow_parser import (
+    parse_workflow_position, read_z_range_from_workflow,
+    read_laser_channels_from_workflow, read_z_velocity_from_workflow
+)
+from py2flamingo.utils.tile_folder_organizer import reorganize_tile_folders
 
 logger = logging.getLogger(__name__)
-
-
-def calculate_tile_z_ranges(
-    primary_tiles: List,
-    secondary_tiles: List,
-    fallback_z_min: float,
-    fallback_z_max: float
-) -> Dict[Tuple[int, int], Tuple[float, float]]:
-    """Calculate Z range for each primary tile based on secondary tile overlap.
-
-    When tiles are selected from two orthogonal views (e.g., 0° and 90°),
-    this function determines the Z range for each primary tile using the
-    Z-stack bounds from secondary tiles that spatially overlap.
-
-    Since tiles now store rotation_angle and z_stack_min/max, this function
-    uses a simplified approach: for each primary tile, find all secondary tiles
-    whose positions are reasonably close (within FOV distance) and aggregate
-    their Z-stack bounds.
-
-    Args:
-        primary_tiles: Tiles from the primary view (where Z-stacks will be taken)
-        secondary_tiles: Tiles from the secondary view (defines Z limits)
-        fallback_z_min: Fallback minimum Z if no secondary tiles
-        fallback_z_max: Fallback maximum Z if no secondary tiles
-
-    Returns:
-        Dictionary mapping (tile_x_idx, tile_y_idx) to (z_min, z_max)
-    """
-    # If no secondary tiles, use fallback range for all primary tiles
-    if not secondary_tiles:
-        logger.info(f"No secondary tiles - using fallback Z range [{fallback_z_min:.3f}, {fallback_z_max:.3f}] mm "
-                   f"for all {len(primary_tiles)} primary tiles")
-        return {
-            (tile.tile_x_idx, tile.tile_y_idx): (fallback_z_min, fallback_z_max)
-            for tile in primary_tiles
-        }
-
-    # Calculate FOV from tile spacing (tiles are adjacent with no overlap)
-    fov_mm = _estimate_fov_from_tiles(primary_tiles, secondary_tiles)
-    logger.info(f"Estimated FOV: {fov_mm*1000:.1f} µm for spatial overlap calculation")
-
-    # For each primary tile, find overlapping secondary tiles and collect Z-stack bounds
-    tile_z_ranges = {}
-    fallback_count = 0
-
-    for p_tile in primary_tiles:
-        # Collect Z-stack bounds from all secondary tiles that could overlap
-        # Use a generous distance threshold (2x FOV) to account for rotation effects
-        overlap_threshold = 2.0 * fov_mm
-        overlapping_z_bounds = []
-
-        for s_tile in secondary_tiles:
-            # Calculate 3D distance between tile centers
-            dx = p_tile.x - s_tile.x
-            dy = p_tile.y - s_tile.y
-            dz = p_tile.z - s_tile.z
-            distance = math.sqrt(dx*dx + dy*dy + dz*dz)
-
-            # If tiles are within overlap threshold, use secondary's Z-stack bounds
-            if distance < overlap_threshold:
-                # Use the Z-stack bounds from the secondary tile
-                # These represent the actual Z range that was scanned
-                if s_tile.z_stack_min != 0.0 or s_tile.z_stack_max != 0.0:
-                    overlapping_z_bounds.append((s_tile.z_stack_min, s_tile.z_stack_max))
-                    logger.debug(
-                        f"Tile ({p_tile.tile_x_idx},{p_tile.tile_y_idx}) overlaps with secondary tile at "
-                        f"({s_tile.x:.3f},{s_tile.y:.3f},{s_tile.z:.3f}), distance={distance*1000:.1f}µm, "
-                        f"Z bounds=[{s_tile.z_stack_min:.3f}, {s_tile.z_stack_max:.3f}]"
-                    )
-
-        # Determine Z range for this primary tile
-        if overlapping_z_bounds:
-            # Use the envelope (min of mins, max of maxes) from all overlapping tiles
-            all_z_mins = [bounds[0] for bounds in overlapping_z_bounds]
-            all_z_maxs = [bounds[1] for bounds in overlapping_z_bounds]
-            z_min = min(all_z_mins)
-            z_max = max(all_z_maxs)
-            logger.debug(
-                f"Tile ({p_tile.tile_x_idx},{p_tile.tile_y_idx}) at ({p_tile.x:.3f},{p_tile.y:.3f},{p_tile.z:.3f}): "
-                f"Found {len(overlapping_z_bounds)} overlapping tiles, Z range [{z_min:.3f}, {z_max:.3f}] mm"
-            )
-        else:
-            # No overlap found - use fallback
-            # This can happen with non-contiguous selections or gaps
-            z_min = fallback_z_min
-            z_max = fallback_z_max
-            fallback_count += 1
-            logger.warning(
-                f"Tile ({p_tile.tile_x_idx},{p_tile.tile_y_idx}) at ({p_tile.x:.3f},{p_tile.y:.3f},{p_tile.z:.3f}): "
-                f"No spatial overlap with secondary tiles. Using fallback Z range [{z_min:.3f}, {z_max:.3f}] mm"
-            )
-
-        # Validate Z range
-        if z_max <= z_min:
-            logger.error(f"Invalid Z range for tile ({p_tile.tile_x_idx},{p_tile.tile_y_idx}): "
-                        f"[{z_min:.3f}, {z_max:.3f}] - z_max <= z_min!")
-        elif abs(z_max - z_min) < 0.001:  # Less than 1 um
-            logger.warning(f"Very small Z range for tile ({p_tile.tile_x_idx},{p_tile.tile_y_idx}): "
-                          f"{(z_max-z_min)*1000:.1f} µm")
-
-        tile_z_ranges[(p_tile.tile_x_idx, p_tile.tile_y_idx)] = (z_min, z_max)
-
-    # Log summary
-    overlap_count = len(tile_z_ranges) - fallback_count
-    logger.info(f"Z range calculation complete: {overlap_count} tiles with overlap-based ranges, "
-               f"{fallback_count} tiles using fallback")
-
-    return tile_z_ranges
-
-
-def _estimate_fov_from_tiles(primary_tiles: List, secondary_tiles: List) -> float:
-    """Estimate field of view from tile spacing.
-
-    Since tiles are adjacent with no overlap, the distance between
-    adjacent tiles equals the FOV. We estimate from tiles in a single
-    rotation to avoid mixing coordinate frames.
-
-    Args:
-        primary_tiles: Tiles from primary view
-        secondary_tiles: Tiles from secondary view
-
-    Returns:
-        Estimated FOV in mm
-    """
-    # Try to estimate from primary tiles first (same rotation)
-    if len(primary_tiles) >= 2:
-        fov = _min_distance_in_tile_set(primary_tiles)
-        if fov < float('inf'):
-            logger.debug(f"FOV estimated from primary tiles: {fov*1000:.1f} µm")
-            return fov
-
-    # Fallback to secondary tiles if primary insufficient
-    if len(secondary_tiles) >= 2:
-        fov = _min_distance_in_tile_set(secondary_tiles)
-        if fov < float('inf'):
-            logger.debug(f"FOV estimated from secondary tiles: {fov*1000:.1f} µm")
-            return fov
-
-    # Ultimate fallback - use reasonable default for lightsheet microscopy
-    logger.warning("Insufficient tiles for FOV estimation, using default 0.4mm (400µm)")
-    return 0.4  # 400 um default
-
-
-def _min_distance_in_tile_set(tiles: List) -> float:
-    """Find minimum non-zero distance between tiles in a set.
-
-    Args:
-        tiles: List of TileResult objects
-
-    Returns:
-        Minimum distance in mm, or inf if no valid distance found
-    """
-    if len(tiles) < 2:
-        return float('inf')
-
-    min_distance = float('inf')
-
-    for i, tile1 in enumerate(tiles):
-        for tile2 in tiles[i+1:]:
-            # Calculate Euclidean distance in XY plane
-            dx = tile1.x - tile2.x
-            dy = tile1.y - tile2.y
-            distance = math.sqrt(dx*dx + dy*dy)
-
-            # Skip zero distances (same tile) and update minimum
-            if distance > 1e-6 and distance < min_distance:
-                min_distance = distance
-
-    return min_distance
 
 
 class TileCollectionDialog(PersistentDialog):
@@ -1106,150 +941,6 @@ class TileCollectionDialog(PersistentDialog):
             return self._app.sample_view
         return None
 
-    def _parse_workflow_position(self, workflow_file: Path) -> Optional[Dict]:
-        """Extract R, X, Y position from workflow filename.
-
-        Filename format: tile_collection_R90_X10.50_Y20.75.txt
-
-        Args:
-            workflow_file: Path to workflow file
-
-        Returns:
-            Dictionary with 'x', 'y', 'r', 'filename' or None if parse fails
-        """
-        import re
-        # Match X and Y (required)
-        xy_match = re.search(r'X([-\d.]+)_Y([-\d.]+)', workflow_file.stem)
-        if xy_match:
-            result = {
-                'x': float(xy_match.group(1)),
-                'y': float(xy_match.group(2)),
-                'filename': workflow_file.name
-            }
-            # Also extract rotation if present (R90, R-45, etc.)
-            r_match = re.search(r'_R([-\d.]+)_', workflow_file.stem)
-            if r_match:
-                result['r'] = float(r_match.group(1))
-            else:
-                result['r'] = 0.0  # Default to 0 if not in filename
-            return result
-        logger.warning(f"Could not parse position from filename: {workflow_file.name}")
-        return None
-
-    def _read_z_range_from_workflow(self, workflow_file: Path) -> Tuple[float, float]:
-        """Read Z-stack range from workflow file.
-
-        Args:
-            workflow_file: Path to workflow file
-
-        Returns:
-            Tuple of (z_min, z_max) in mm
-        """
-        try:
-            with open(workflow_file, 'r') as f:
-                content = f.read()
-
-            # Parse Start Position Z
-            z_min = 0.0
-            z_max = 0.0
-
-            import re
-            start_match = re.search(r'<Start Position>.*?Z \(mm\) = ([-\d.]+)', content, re.DOTALL)
-            if start_match:
-                z_min = float(start_match.group(1))
-
-            end_match = re.search(r'<End Position>.*?Z \(mm\) = ([-\d.]+)', content, re.DOTALL)
-            if end_match:
-                z_max = float(end_match.group(1))
-
-            return (z_min, z_max)
-
-        except Exception as e:
-            logger.error(f"Failed to read Z range from {workflow_file.name}: {e}")
-            return (0.0, 10.0)
-
-    def _read_laser_channels_from_workflow(self, workflow_file: Path) -> List[int]:
-        """Read enabled laser channels from workflow file.
-
-        Parses the <Illumination Source> block to determine which lasers are enabled.
-        Format: "Laser N N: XXX nm MLE = power enabled"
-        where enabled is 1 (on) or 0 (off).
-
-        Laser mapping:
-            Laser 1 (405nm) -> channel 0
-            Laser 2 (488nm) -> channel 1
-            Laser 3 (561nm) -> channel 2
-            Laser 4 (640nm) -> channel 3
-
-        Args:
-            workflow_file: Path to workflow file
-
-        Returns:
-            Ordered list of enabled channel IDs, e.g. [1, 3] for 488nm + 640nm.
-            Falls back to [0] if parsing fails.
-        """
-        import re
-        try:
-            with open(workflow_file, 'r') as f:
-                content = f.read()
-
-            # Extract Illumination Source block
-            illum_match = re.search(
-                r'<Illumination Source>(.*?)</Illumination Source>',
-                content, re.DOTALL
-            )
-            if not illum_match:
-                logger.warning(f"No Illumination Source block in {workflow_file.name}")
-                return [0]
-
-            illum_block = illum_match.group(1)
-            channels = []
-
-            # Match lines like: "Laser 2 2: 488 nm MLE = 10.00 1"
-            # The last number (1 or 0) indicates enabled/disabled
-            for match in re.finditer(
-                r'Laser\s+(\d+)\s+\d+:\s+\d+\s+nm\s+MLE\s*=\s*[\d.]+\s+(\d+)',
-                illum_block
-            ):
-                laser_num = int(match.group(1))
-                enabled = int(match.group(2))
-                if enabled == 1:
-                    # Laser number to channel: Laser 1 -> ch 0, Laser 2 -> ch 1, etc.
-                    channels.append(laser_num - 1)
-
-            if not channels:
-                logger.warning(f"No enabled lasers found in {workflow_file.name}, defaulting to channel 0")
-                return [0]
-
-            logger.info(f"Parsed laser channels from {workflow_file.name}: {channels}")
-            return channels
-
-        except Exception as e:
-            logger.error(f"Failed to read laser channels from {workflow_file.name}: {e}")
-            return [0]
-
-    def _read_z_velocity_from_workflow(self, workflow_file: Path) -> float:
-        """Read Z stage velocity from workflow file.
-
-        Args:
-            workflow_file: Path to workflow file
-
-        Returns:
-            Z velocity in mm/s (default 1.0)
-        """
-        import re
-        try:
-            with open(workflow_file, 'r') as f:
-                content = f.read()
-            match = re.search(r'Z stage velocity \(mm/s\)\s*=\s*([\d.]+)', content)
-            if match:
-                velocity = float(match.group(1))
-                logger.debug(f"Parsed Z velocity from {workflow_file.name}: {velocity} mm/s")
-                return velocity
-        except Exception as e:
-            logger.error(f"Failed to read Z velocity from {workflow_file.name}: {e}")
-        return 1.0
-
     def _setup_sample_view_integration(self, workflow_files: List[Path], sample_view):
         """Setup Sample View to receive workflow Z-stack frames.
 
@@ -1260,10 +951,10 @@ class TileCollectionDialog(PersistentDialog):
         # Calculate expected Z-stack parameters from workflows
         z_stack_info = []
         for wf_file in workflow_files:
-            position = self._parse_workflow_position(wf_file)
+            position = parse_workflow_position(wf_file)
             if position:
                 # Read Z-range from workflow file
-                z_min, z_max = self._read_z_range_from_workflow(wf_file)
+                z_min, z_max = read_z_range_from_workflow(wf_file)
                 position['z_min'] = z_min
                 position['z_max'] = z_max
                 z_stack_info.append(position)
@@ -1358,13 +1049,13 @@ class TileCollectionDialog(PersistentDialog):
         for wf_file in workflow_files:
             metadata = {}
             if add_to_sample_view:
-                tile_position = self._parse_workflow_position(wf_file)
+                tile_position = parse_workflow_position(wf_file)
                 if tile_position:
-                    z_min, z_max = self._read_z_range_from_workflow(wf_file)
+                    z_min, z_max = read_z_range_from_workflow(wf_file)
                     tile_position['z_min'] = z_min
                     tile_position['z_max'] = z_max
-                    tile_position['channels'] = self._read_laser_channels_from_workflow(wf_file)
-                    tile_position['z_velocity'] = self._read_z_velocity_from_workflow(wf_file)
+                    tile_position['channels'] = read_laser_channels_from_workflow(wf_file)
+                    tile_position['z_velocity'] = read_z_velocity_from_workflow(wf_file)
                     metadata = tile_position
             metadata_list.append(metadata)
 
@@ -1487,7 +1178,10 @@ class TileCollectionDialog(PersistentDialog):
             # Reorganize folders AFTER all workflows confirmed complete
             # This is safe because queue_completed only fires after all
             # SYSTEM_STATE_IDLE callbacks have been received
-            reorganized = self._reorganize_tile_folders()
+            reorganized = reorganize_tile_folders(
+                self._local_path, self._base_save_directory,
+                self._tile_folder_mapping, self._local_access_enabled
+            )
 
             # Use None as parent since tile collection dialog is closed
             if reorganized:
@@ -1631,9 +1325,9 @@ class TileCollectionDialog(PersistentDialog):
             # Parse workflow position for Sample View integration
             tile_position = None
             if add_to_sample_view:
-                tile_position = self._parse_workflow_position(workflow_file)
+                tile_position = parse_workflow_position(workflow_file)
                 if tile_position:
-                    z_min, z_max = self._read_z_range_from_workflow(workflow_file)
+                    z_min, z_max = read_z_range_from_workflow(workflow_file)
                     tile_position['z_min'] = z_min
                     tile_position['z_max'] = z_max
 
@@ -1675,97 +1369,6 @@ class TileCollectionDialog(PersistentDialog):
         if self._app and hasattr(self._app, 'config_service'):
             return self._app.config_service
         return None
-
-    def _reorganize_tile_folders(self) -> bool:
-        """Reorganize flattened folders into nested structure for MIP Overview compatibility.
-
-        Moves: base_date_tile/ -> base/date/tile/
-
-        Only runs if local path was configured in save settings and is accessible.
-        This method is called AFTER queue_completed signal, which guarantees all
-        workflows have finished and all files are written.
-
-        Returns:
-            True if any folders were reorganized, False otherwise
-        """
-        # Check if we have folder mapping from collection
-        if not hasattr(self, '_tile_folder_mapping') or not self._tile_folder_mapping:
-            logger.debug("No tile folder mapping - skipping reorganization")
-            return False
-
-        # Check if local access was enabled and path was configured
-        if not getattr(self, '_local_access_enabled', False):
-            logger.info("Local access not enabled - skipping folder reorganization")
-            return False
-
-        local_path = getattr(self, '_local_path', None)
-        if not local_path:
-            logger.info("No local path configured - skipping folder reorganization")
-            return False
-
-        local_base = Path(local_path)
-        if not local_base.exists():
-            logger.warning(f"Local drive path does not exist: {local_base} - skipping reorganization")
-            return False
-
-        logger.info(f"Starting folder reorganization: {local_base}")
-        reorganized_count = 0
-
-        # Find the timestamped folders created by server
-        # They'll be named like: 20260127_123617_Test_2026-01-27_X11.09_Y14.46
-        for flattened_name, (date_folder, tile_folder) in self._tile_folder_mapping.items():
-            # Search for matching folder (with any timestamp prefix)
-            # Pattern: *_{flattened_name} where flattened_name is like "Test_2026-01-27_X11.09_Y14.46"
-            pattern = f"*_{flattened_name}"
-            matching_folders = list(local_base.glob(pattern))
-
-            if not matching_folders:
-                logger.warning(f"Could not find folder matching pattern: {pattern}")
-                continue
-
-            for src_folder in matching_folders:
-                if not src_folder.is_dir():
-                    continue
-
-                # Target nested structure: base/date/tile/
-                dest_folder = local_base / self._base_save_directory / date_folder / tile_folder
-
-                try:
-                    dest_folder.mkdir(parents=True, exist_ok=True)
-
-                    # Move contents (not the folder itself)
-                    items_moved = 0
-                    for item in src_folder.iterdir():
-                        dest_path = dest_folder / item.name
-                        # Handle existing files by overwriting
-                        if dest_path.exists():
-                            if dest_path.is_dir():
-                                shutil.rmtree(str(dest_path))
-                            else:
-                                dest_path.unlink()
-                        shutil.move(str(item), str(dest_path))
-                        items_moved += 1
-                        logger.debug(f"Moved: {item.name} -> {dest_path}")
-
-                    # Remove now-empty source folder
-                    try:
-                        src_folder.rmdir()
-                    except OSError:
-                        # Folder not empty (might have hidden files)
-                        logger.warning(f"Could not remove source folder (not empty): {src_folder}")
-
-                    logger.info(f"Reorganized: {src_folder.name} -> {self._base_save_directory}/{date_folder}/{tile_folder}/ ({items_moved} items)")
-                    reorganized_count += 1
-
-                except Exception as e:
-                    logger.error(f"Failed to reorganize {src_folder}: {e}")
-
-        if reorganized_count > 0:
-            logger.info(f"Tile folder reorganization complete: {reorganized_count} folders moved")
-        else:
-            logger.info("No folders were reorganized")
-
-        return reorganized_count > 0
 
     def _get_geometry_manager(self):
         """Get WindowGeometryManager from application."""
