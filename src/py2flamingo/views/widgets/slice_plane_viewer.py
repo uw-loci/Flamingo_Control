@@ -342,28 +342,20 @@ class SlicePlaneViewer(QFrame):
                 py = int((v_coord - self.v_range[0]) * v_scale + center_y)
             return px, py
 
-        # Draw focal plane indicator (cyan dashed horizontal line)
+        # Draw focal plane indicator (cyan dashed line through objective position)
         if self._focal_plane_pos is not None:
             pen = QPen(QColor('#00FFFF'))
             pen.setWidth(1)
             pen.setStyle(Qt.DashLine)
             painter.setPen(pen)
-            # The focal plane is drawn as a line perpendicular to the projection axis
-            # For XZ plane: focal plane is Y position, draw horizontal line at that Y
-            # For XY plane: focal plane is Z position, draw horizontal line at that Z
-            # For YZ plane: focal plane is X position, draw vertical line at that X
-            if self.plane == 'xz':
-                # Show Y focal position - not applicable (Y is projected out)
-                pass
-            elif self.plane == 'xy':
-                # Show Z focal position as horizontal line
-                py = int((self._focal_plane_pos - self.v_range[0]) * v_scale + center_y)
+            if self.plane in ('xz', 'xy'):
+                # Focal plane is a V-axis value: draw horizontal line spanning full width
+                _, py = to_pixel(self.h_range[0], self._focal_plane_pos)
                 painter.drawLine(int(center_x), py, int(center_x + img_w), py)
             elif self.plane == 'yz':
-                # Show X focal position as vertical line (h_axis is Z, v_axis is Y)
-                # Actually for YZ, X is the projected axis, so we'd show X position
-                # But X isn't one of our axes here, so skip
-                pass
+                # Focal plane is an H-axis value (Z): draw vertical line spanning full height
+                px, _ = to_pixel(self._focal_plane_pos, self.v_range[0])
+                painter.drawLine(px, int(center_y), px, int(center_y + img_h))
 
         # Draw target marker (orange active, purple stale)
         if self._target_pos:

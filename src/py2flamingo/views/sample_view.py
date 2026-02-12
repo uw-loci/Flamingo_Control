@@ -2720,26 +2720,30 @@ class SampleView(QWidget):
                     self.xy_plane_viewer.set_holder_position(x, viz_y)
                     self.yz_plane_viewer.set_holder_position(z, viz_y)
 
-            # Get objective position
-            # Z is always z_range[0] (back wall/coverslip where objective is mounted)
-            stage_config = self._config.get('stage_control', {})
-            obj_z_wall = stage_config.get('z_range_mm', [12.5, 26])[0]
-
+            # Get objective focal point position from calibration
             cal = self.objective_xy_calibration
             if cal:
-                obj_x, obj_y = cal['x'], cal['y']
+                obj_x, obj_y, obj_z = cal['x'], cal['y'], cal['z']
             else:
+                # Fallback to defaults
+                stage_config = self._config.get('stage_control', {})
                 obj_x = (stage_config.get('x_range_mm', [1, 12.31])[0] +
                          stage_config.get('x_range_mm', [1, 12.31])[1]) / 2
                 obj_y = self._chamber_viz.STAGE_Y_AT_OBJECTIVE  # 7.45mm
+                obj_z = stage_config.get('z_range_mm', [12.5, 26])[0]
 
             # Convert objective Y from stage coords to viz coords
             obj_y_viz = self._stage_y_to_viz_y(obj_y)
 
-            # Update objective position on each plane
-            self.xz_plane_viewer.set_objective_position(obj_x, obj_z_wall)
+            # Update objective circle (focal point) on each plane
+            self.xz_plane_viewer.set_objective_position(obj_x, obj_z)
             self.xy_plane_viewer.set_objective_position(obj_x, obj_y_viz)
-            self.yz_plane_viewer.set_objective_position(obj_z_wall, obj_y_viz)
+            self.yz_plane_viewer.set_objective_position(obj_z, obj_y_viz)
+
+            # Update focal plane lines (cyan dashed) through objective position
+            self.xz_plane_viewer.set_focal_plane_position(obj_z)   # horizontal at obj Z
+            self.xy_plane_viewer.set_focal_plane_position(obj_y_viz)  # horizontal at obj Y
+            self.yz_plane_viewer.set_focal_plane_position(obj_z)   # vertical at obj Z
 
         except Exception as e:
             self.logger.error(f"Error updating plane overlays: {e}")
