@@ -251,8 +251,8 @@ class SlicePlaneViewer(QFrame):
         display_height = self._height - 6
 
         # Reserve margin space for axis labels outside the image area
-        label_margin_top = 14
-        label_margin_bottom = 14
+        label_margin_top = 16
+        label_margin_bottom = 16
         img_area_height = display_height - label_margin_top - label_margin_bottom
 
         # Determine if we have multi-channel or single-channel data
@@ -384,13 +384,16 @@ class SlicePlaneViewer(QFrame):
             painter.drawLine(px, py - 12, px, py - 4)
             painter.drawLine(px, py + 4, px, py + 12)
 
-        # Draw objective (green circle)
+        # Draw objective (gold/yellow outline circle, proportionally sized)
         if self._objective_pos:
-            pen = QPen(QColor('#00FF00'))
+            pen = QPen(QColor('#FFCC00'))
             pen.setWidth(2)
             painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
             px, py = to_pixel(*self._objective_pos)
-            painter.drawEllipse(px - 8, py - 8, 16, 16)
+            obj_radius = max(6, min(40, min(img_w, img_h) // 6))
+            painter.drawEllipse(px - obj_radius, py - obj_radius,
+                                obj_radius * 2, obj_radius * 2)
 
         # Draw sample holder position (white cross)
         if self._holder_pos:
@@ -398,9 +401,9 @@ class SlicePlaneViewer(QFrame):
             pen.setWidth(2)
             painter.setPen(pen)
             px, py = to_pixel(*self._holder_pos)
-            # Draw as small cross
-            painter.drawLine(px - 6, py, px + 6, py)
-            painter.drawLine(px, py - 6, px, py + 6)
+            # Draw as cross
+            painter.drawLine(px - 10, py, px + 10, py)
+            painter.drawLine(px, py - 10, px, py + 10)
 
         # Draw viewing frame (cyan dashed rectangle)
         if self._frame_pos:
@@ -458,22 +461,22 @@ class SlicePlaneViewer(QFrame):
             # H-axis labels (below image in bottom margin)
             if self._h_axis_inverted:
                 # Inverted: max at left, min at right
-                draw_label(h_max_str, img_left + 2, img_bottom + 1)
-                draw_label(h_min_str, img_right - 2, img_bottom + 1, align_right=True)
+                draw_label(h_max_str, img_left + 2, img_bottom + 2)
+                draw_label(h_min_str, img_right - 2, img_bottom + 2, align_right=True)
             else:
                 # Normal: min at left, max at right
-                draw_label(h_min_str, img_left + 2, img_bottom + 1)
-                draw_label(h_max_str, img_right - 2, img_bottom + 1, align_right=True)
+                draw_label(h_min_str, img_left + 2, img_bottom + 2)
+                draw_label(h_max_str, img_right - 2, img_bottom + 2, align_right=True)
 
             # V-axis labels (above and below image in margin area)
             if self._v_axis_inverted:
                 # Inverted: max at top, min at bottom
-                draw_label(v_max_str, img_left + 2, img_top - 13)
-                draw_label(v_min_str, img_right - 2, img_bottom + 1, align_right=True, align_bottom=True)
+                draw_label(v_max_str, img_left + 2, img_top - 15)
+                draw_label(v_min_str, img_right - 2, img_bottom + 2, align_right=True, align_bottom=True)
             else:
                 # Normal: min at top, max at bottom
-                draw_label(v_min_str, img_left + 2, img_top - 13)
-                draw_label(v_max_str, img_right - 2, img_bottom + 1, align_right=True, align_bottom=True)
+                draw_label(v_min_str, img_left + 2, img_top - 15)
+                draw_label(v_max_str, img_right - 2, img_bottom + 2, align_right=True, align_bottom=True)
 
         # Draw coordinate readout (mouse position)
         if self._show_coordinate_readout and self._mouse_pos is not None:
@@ -691,8 +694,8 @@ class SlicePlaneViewer(QFrame):
         display_height = self._height - 6
 
         # Must match the margin constants from _update_display
-        label_margin_top = 14
-        label_margin_bottom = 14
+        label_margin_top = 16
+        label_margin_bottom = 16
         img_area_height = display_height - label_margin_top - label_margin_bottom
 
         # Get original image dimensions from channel data or MIP

@@ -774,6 +774,42 @@ class SampleView(QWidget):
         layout.setSpacing(4)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        # Header row with help button
+        header_row = QHBoxLayout()
+        header_row.addStretch()
+        plane_help_btn = QPushButton("?")
+        plane_help_btn.setFixedSize(24, 24)
+        plane_help_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #555;
+                color: white;
+                border-radius: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #777; }
+        """)
+        plane_help_btn.setToolTip(
+            "2D MIP Plane View Controls:\n"
+            "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+            "\n"
+            "Overlay Markers:\n"
+            "  \u25cb Yellow circle    \u2192 Objective focal point\n"
+            "  + White cross      \u2192 Current stage position\n"
+            "  \u2295 Orange crosshair \u2192 Move target (active)\n"
+            "  \u2295 Purple crosshair \u2192 Move target (reached)\n"
+            "  \u2508 Cyan dashed box  \u2192 3D viewing frame\n"
+            "  \u2508 Cyan dashed line \u2192 Focal plane\n"
+            "\n"
+            "Mouse Controls:\n"
+            "  Double-click \u2192 Move stage (2 axes)\n"
+            "  Left drag    \u2192 Pan view\n"
+            "  Scroll wheel \u2192 Zoom in/out\n"
+            "\n"
+            "Coordinate readout shown at top-right."
+        )
+        header_row.addWidget(plane_help_btn)
+        layout.addLayout(header_row)
+
         # Get stage ranges from config
         # Use actual stage limits for 2D plane views (not chamber visualization range)
         # so that coordinates match the position sliders
@@ -2672,13 +2708,17 @@ class SampleView(QWidget):
                     self.xy_plane_viewer.set_holder_position(x, y)
                     self.yz_plane_viewer.set_holder_position(z, y)
 
-            # Get objective position from config
-            stage_config = self._config.get('stage_control', {})
-            obj_x = (stage_config.get('x_range_mm', [1, 12.31])[0] +
-                     stage_config.get('x_range_mm', [1, 12.31])[1]) / 2
-            obj_y = (stage_config.get('y_range_mm', [5, 25])[0] +
-                     stage_config.get('y_range_mm', [5, 25])[1]) / 2
-            obj_z = stage_config.get('z_range_mm', [12.5, 26])[0]  # Objective at back
+            # Get objective position from calibration (matches 3D view focal point)
+            cal = self.objective_xy_calibration
+            if cal:
+                obj_x, obj_y, obj_z = cal['x'], cal['y'], cal['z']
+            else:
+                # Fallback to defaults
+                stage_config = self._config.get('stage_control', {})
+                obj_x = (stage_config.get('x_range_mm', [1, 12.31])[0] +
+                         stage_config.get('x_range_mm', [1, 12.31])[1]) / 2
+                obj_y = self._chamber_viz.STAGE_Y_AT_OBJECTIVE  # 7.45mm
+                obj_z = stage_config.get('z_range_mm', [12.5, 26])[0]
 
             # Update objective position on each plane
             self.xz_plane_viewer.set_objective_position(obj_x, obj_z)
