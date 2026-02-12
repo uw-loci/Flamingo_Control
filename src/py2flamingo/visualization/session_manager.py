@@ -615,6 +615,7 @@ class SessionManager:
                     max_val = int(np.max(data))
                     if max_val > 0:
                         voxel_storage.channel_max_values[ch] = max_val
+                        voxel_storage._session_loaded_channels.add(ch)
                 else:
                     logger.warning(f"Channel {ch} shape mismatch: "
                                  f"session={data.shape}, storage={voxel_storage.display_dims}")

@@ -323,6 +323,8 @@ class DualResolutionVoxelStorage:
         """Initialize storage arrays for all channels."""
         # Track max intensity per channel for dynamic contrast adjustment
         self.channel_max_values = {}
+        # Track channels populated via session load (display_cache only, no storage_data)
+        self._session_loaded_channels = set()
 
         for ch in range(self.num_channels):
             # High-res sparse storage using Python dictionaries (faster than sparse.DOK and no Numba compilation)
@@ -782,6 +784,16 @@ class DualResolutionVoxelStorage:
         self.transform_cache.clear()
         logger.info("Cleared all voxel storage and reset reference position")
 
+    def _count_voxels(self) -> int:
+        """Count total voxels across all channels, including session-loaded data."""
+        storage_voxels = sum(len(self.storage_data[ch]) for ch in range(self.num_channels))
+        if storage_voxels == 0 and self._session_loaded_channels:
+            storage_voxels = sum(
+                int(np.count_nonzero(self.display_cache[ch]))
+                for ch in self._session_loaded_channels
+            )
+        return storage_voxels
+
     def get_memory_usage(self) -> Dict[str, float]:
         """Report memory usage statistics."""
         # Calculate storage bytes from dictionary sizes
@@ -801,7 +813,7 @@ class DualResolutionVoxelStorage:
             'storage_mb': storage_bytes / (1024 * 1024),
             'display_mb': display_bytes / (1024 * 1024),
             'total_mb': (storage_bytes + display_bytes) / (1024 * 1024),
-            'storage_voxels': sum(len(self.storage_data[ch]) for ch in range(self.num_channels)),
+            'storage_voxels': self._count_voxels(),
             'display_voxels': np.prod(self.display_dims) * self.num_channels
         }
 
@@ -1068,7 +1080,9 @@ class DualResolutionVoxelStorage:
 
     def has_data(self, channel_id: int) -> bool:
         """Check if a channel has any data."""
-        return len(self.storage_data.get(channel_id, {})) > 0
+        if len(self.storage_data.get(channel_id, {})) > 0:
+            return True
+        return channel_id in self._session_loaded_channels
 
     # ========== Pyramid Generation for napari ==========
 
