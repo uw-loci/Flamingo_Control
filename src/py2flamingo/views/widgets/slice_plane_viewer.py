@@ -376,16 +376,28 @@ class SlicePlaneViewer(QFrame):
             painter.drawLine(px, py - 12, px, py - 4)
             painter.drawLine(px, py + 4, px, py + 12)
 
-        # Draw objective (gold/yellow outline circle, proportionally sized)
+        # Draw objective indicator (gold/yellow)
         if self._objective_pos:
             pen = QPen(QColor('#FFCC00'))
-            pen.setWidth(2)
-            painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             px, py = to_pixel(*self._objective_pos)
             obj_radius = max(6, min(40, min(img_w, img_h) // 6))
-            painter.drawEllipse(px - obj_radius, py - obj_radius,
-                                obj_radius * 2, obj_radius * 2)
+            if self.plane == 'xy':
+                # Front view: objective is a circle in XY plane
+                pen.setWidth(2)
+                painter.setPen(pen)
+                painter.drawEllipse(px - obj_radius, py - obj_radius,
+                                    obj_radius * 2, obj_radius * 2)
+            elif self.plane == 'xz':
+                # Top-down view: objective circle seen edge-on → horizontal line at Z_min
+                pen.setWidth(3)
+                painter.setPen(pen)
+                painter.drawLine(px - obj_radius, py, px + obj_radius, py)
+            elif self.plane == 'yz':
+                # Side view: objective circle seen edge-on → vertical line at Z_min
+                pen.setWidth(3)
+                painter.setPen(pen)
+                painter.drawLine(px, py - obj_radius, px, py + obj_radius)
 
         # Draw sample holder position (white cross)
         if self._holder_pos:
