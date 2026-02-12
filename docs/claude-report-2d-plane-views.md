@@ -7,8 +7,8 @@ The `SlicePlaneViewer` widgets (XZ, XY, YZ) in `sample_view.py` provide 2D Maxim
 ## Architecture
 
 ### Location
-- **File**: `src/py2flamingo/views/sample_view.py`
-- **Class**: `SlicePlaneViewer` (lines 59-627)
+- **File**: `src/py2flamingo/views/widgets/slice_plane_viewer.py` (extracted from `sample_view.py` in Phase 6)
+- **Class**: `SlicePlaneViewer`
 - **Parent**: `SampleView` contains three instances (`xz_plane_viewer`, `xy_plane_viewer`, `yz_plane_viewer`)
 
 ### Plane Configuration

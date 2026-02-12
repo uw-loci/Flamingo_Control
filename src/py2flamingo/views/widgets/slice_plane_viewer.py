@@ -250,6 +250,11 @@ class SlicePlaneViewer(QFrame):
         display_width = self._width - 6  # Account for borders
         display_height = self._height - 6
 
+        # Reserve margin space for axis labels outside the image area
+        label_margin_top = 14
+        label_margin_bottom = 14
+        img_area_height = display_height - label_margin_top - label_margin_bottom
+
         # Determine if we have multi-channel or single-channel data
         has_multi_channel = bool(self._channel_mips)
         has_single_channel = self._mip_data is not None and self._mip_data.size > 0
@@ -264,7 +269,7 @@ class SlicePlaneViewer(QFrame):
                 qimage = QImage(rgb_image.data, w, h, w * 3, QImage.Format_RGB888)
                 pixmap = QPixmap.fromImage(qimage)
             else:
-                pixmap = QPixmap(display_width, display_height)
+                pixmap = QPixmap(display_width, img_area_height)
                 pixmap.fill(Qt.black)
         elif has_single_channel:
             # Single channel grayscale (backwards compatibility)
@@ -284,11 +289,11 @@ class SlicePlaneViewer(QFrame):
             pixmap = QPixmap.fromImage(qimage)
         else:
             # Create empty pixmap
-            pixmap = QPixmap(display_width, display_height)
+            pixmap = QPixmap(display_width, img_area_height)
             pixmap.fill(Qt.black)
 
-        # Apply zoom and pan transforms
-        base_scale = min(display_width / pixmap.width(), display_height / pixmap.height()) if pixmap.width() > 0 else 1.0
+        # Apply zoom and pan transforms - fit image within the reduced image area
+        base_scale = min(display_width / pixmap.width(), img_area_height / pixmap.height()) if pixmap.width() > 0 else 1.0
         effective_scale = base_scale * self._zoom_level
 
         # Calculate scaled dimensions
@@ -308,9 +313,9 @@ class SlicePlaneViewer(QFrame):
         painter = QPainter(final_pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Calculate centered position with pan offset
+        # Calculate centered position with pan offset, shifted down by top margin
         center_x = (display_width - scaled_pixmap.width()) / 2 + self._pan_offset[0]
-        center_y = (display_height - scaled_pixmap.height()) / 2 + self._pan_offset[1]
+        center_y = label_margin_top + (img_area_height - scaled_pixmap.height()) / 2 + self._pan_offset[1]
 
         # Draw the scaled MIP image
         painter.drawPixmap(int(center_x), int(center_y), scaled_pixmap)
@@ -450,25 +455,25 @@ class SlicePlaneViewer(QFrame):
                 painter.setPen(label_fg)
                 painter.drawText(int(x + padding), int(y + text_height - padding), text)
 
-            # H-axis labels (left and right edges)
+            # H-axis labels (below image in bottom margin)
             if self._h_axis_inverted:
-                # Inverted: max at left, min at right (stage X is inverted on Flamingo)
-                draw_label(h_max_str, img_left + 2, img_bottom - 16)
-                draw_label(h_min_str, img_right - 2, img_bottom - 16, align_right=True)
+                # Inverted: max at left, min at right
+                draw_label(h_max_str, img_left + 2, img_bottom + 1)
+                draw_label(h_min_str, img_right - 2, img_bottom + 1, align_right=True)
             else:
                 # Normal: min at left, max at right
-                draw_label(h_min_str, img_left + 2, img_bottom - 16)
-                draw_label(h_max_str, img_right - 2, img_bottom - 16, align_right=True)
+                draw_label(h_min_str, img_left + 2, img_bottom + 1)
+                draw_label(h_max_str, img_right - 2, img_bottom + 1, align_right=True)
 
-            # V-axis labels (top and bottom edges)
+            # V-axis labels (above and below image in margin area)
             if self._v_axis_inverted:
-                # Inverted: max at top, min at bottom (physical "up" is positive)
-                draw_label(v_max_str, img_left + 2, img_top + 2)
-                draw_label(v_min_str, img_left + 2, img_bottom - 32)
+                # Inverted: max at top, min at bottom
+                draw_label(v_max_str, img_left + 2, img_top - 13)
+                draw_label(v_min_str, img_right - 2, img_bottom + 1, align_right=True, align_bottom=True)
             else:
                 # Normal: min at top, max at bottom
-                draw_label(v_min_str, img_left + 2, img_top + 2)
-                draw_label(v_max_str, img_left + 2, img_bottom - 32)
+                draw_label(v_min_str, img_left + 2, img_top - 13)
+                draw_label(v_max_str, img_right - 2, img_bottom + 1, align_right=True, align_bottom=True)
 
         # Draw coordinate readout (mouse position)
         if self._show_coordinate_readout and self._mouse_pos is not None:
@@ -685,6 +690,11 @@ class SlicePlaneViewer(QFrame):
         display_width = self._width - 6
         display_height = self._height - 6
 
+        # Must match the margin constants from _update_display
+        label_margin_top = 14
+        label_margin_bottom = 14
+        img_area_height = display_height - label_margin_top - label_margin_bottom
+
         # Get original image dimensions from channel data or MIP
         if self._channel_mips:
             for ch_data in self._channel_mips.values():
@@ -698,16 +708,16 @@ class SlicePlaneViewer(QFrame):
         else:
             return None
 
-        # Calculate scale to fit image in display area (same as _update_display)
-        base_scale = min(display_width / orig_w, display_height / orig_h) if orig_w > 0 and orig_h > 0 else 1.0
+        # Calculate scale to fit image in reduced area (same as _update_display)
+        base_scale = min(display_width / orig_w, img_area_height / orig_h) if orig_w > 0 and orig_h > 0 else 1.0
         effective_scale = base_scale * self._zoom_level
 
         scaled_w = orig_w * effective_scale
         scaled_h = orig_h * effective_scale
 
-        # Image position on display
+        # Image position on display (shifted down by top margin)
         img_x = (display_width - scaled_w) / 2 + self._pan_offset[0]
-        img_y = (display_height - scaled_h) / 2 + self._pan_offset[1]
+        img_y = label_margin_top + (img_area_height - scaled_h) / 2 + self._pan_offset[1]
 
         # Check if click is within image bounds
         if px < img_x or px > img_x + scaled_w or py < img_y or py > img_y + scaled_h:
