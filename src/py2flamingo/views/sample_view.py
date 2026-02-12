@@ -150,6 +150,12 @@ class SampleView(QWidget):
         self.last_stage_position = {'x': 0, 'y': 0, 'z': 0, 'r': 0}
         self._pending_stage_update = None
 
+        # Focal point for 2D plane click-to-move (set by _update_plane_overlays)
+        # These are the coordinates where the objective focuses (data capture point)
+        self._focal_point = None  # (obj_x, obj_y_viz, obj_z) in view coords
+        # Computed stage targets per plane for stale-check (set by _on_plane_click)
+        self._plane_stage_targets = {}  # plane -> Position
+
         # Load objective calibration from presets
         self._chamber_viz.load_objective_calibration()
 
@@ -1894,6 +1900,7 @@ class SampleView(QWidget):
 
                 # Update visualization
                 self._update_visualization()
+                self._update_data_stats()
             elif file_path:
                 QMessageBox.warning(self, "Invalid Selection",
                                   "Please select a .zarr folder")
@@ -2569,12 +2576,25 @@ class SampleView(QWidget):
     def _on_plane_click(self, plane: str, h_coord: float, v_coord: float) -> None:
         """Handle click-to-move from plane viewers.
 
-        Uses move_to_position for multi-axis moves to avoid movement lock conflicts.
+        Moves the stage so that the clicked data point ends up at the focal plane.
+        The focal plane (objective focal point) is the anchor — the stage moves to
+        shift the sample such that the clicked feature lands on it.
+
+        Movement formula accounts for the data transform:
+        - X, Z: target = current + (click - focal)  [transform negates stage delta]
+        - Y: target = current + (focal - click)  [napari Y inversion double-negates]
         """
         if not self.movement_controller:
             return
 
         try:
+            # Need focal point to compute movement
+            if not self._focal_point:
+                self.logger.warning("Focal point not set, cannot compute plane click move")
+                return
+
+            focal_x, focal_y_viz, focal_z = self._focal_point
+
             # Get current position to preserve unchanged axes
             current_pos = self.movement_controller.get_position()
             if not current_pos:
@@ -2584,24 +2604,34 @@ class SampleView(QWidget):
             # Import Position class
             from py2flamingo.models.hardware.stage import Position
 
-            # Map plane coordinates to target position
+            # Compute target: move stage so clicked data point ends up at focal plane
             if plane == 'xz':
-                # XZ plane: h=X, v=Z, keep Y and R
-                target = Position(x=h_coord, y=current_pos.y, z=v_coord, r=current_pos.r)
-                self.logger.info(f"Moving to X={h_coord:.3f}, Z={v_coord:.3f} (Y={current_pos.y:.3f} unchanged)")
+                # XZ plane: h=X, v=Z — Y unchanged
+                target_x = current_pos.x + (h_coord - focal_x)
+                target_z = current_pos.z + (v_coord - focal_z)
+                target = Position(x=target_x, y=current_pos.y, z=target_z, r=current_pos.r)
+                self.logger.info(f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
+                                 f"stage X={target_x:.3f}, Z={target_z:.3f}")
             elif plane == 'xy':
-                # XY plane: h=X, v=Y (viz coords), keep Z and R
-                stage_y = self._viz_y_to_stage_y(v_coord)
-                target = Position(x=h_coord, y=stage_y, z=current_pos.z, r=current_pos.r)
-                self.logger.info(f"Moving to X={h_coord:.3f}, Y={stage_y:.3f} (Z={current_pos.z:.3f} unchanged)")
+                # XY plane: h=X, v=Y(viz) — Z unchanged
+                target_x = current_pos.x + (h_coord - focal_x)
+                target_y = current_pos.y + (focal_y_viz - v_coord)
+                target = Position(x=target_x, y=target_y, z=current_pos.z, r=current_pos.r)
+                self.logger.info(f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
+                                 f"stage X={target_x:.3f}, Y={target_y:.3f}")
             elif plane == 'yz':
-                # YZ plane: h=Z, v=Y (viz coords), keep X and R
-                stage_y = self._viz_y_to_stage_y(v_coord)
-                target = Position(x=current_pos.x, y=stage_y, z=h_coord, r=current_pos.r)
-                self.logger.info(f"Moving to Z={h_coord:.3f}, Y={stage_y:.3f} (X={current_pos.x:.3f} unchanged)")
+                # YZ plane: h=Z, v=Y(viz) — X unchanged
+                target_z = current_pos.z + (h_coord - focal_z)
+                target_y = current_pos.y + (focal_y_viz - v_coord)
+                target = Position(x=current_pos.x, y=target_y, z=target_z, r=current_pos.r)
+                self.logger.info(f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
+                                 f"stage Z={target_z:.3f}, Y={target_y:.3f}")
             else:
                 self.logger.warning(f"Unknown plane: {plane}")
                 return
+
+            # Store computed target for stale check
+            self._plane_stage_targets[plane] = target
 
             # Use move_to_position for multi-axis move (handles lock properly)
             self.movement_controller.position_controller.move_to_position(target, validate=True)
@@ -2720,36 +2750,45 @@ class SampleView(QWidget):
                     self.xy_plane_viewer.set_holder_position(x, viz_y)
                     self.yz_plane_viewer.set_holder_position(z, viz_y)
 
-            # Get objective focal point position from calibration
+            # Get objective position and focal point from calibration
+            stage_config = self._config.get('stage_control', {})
+            obj_z_wall = stage_config.get('z_range_mm', [12.5, 26])[0]
+
             cal = self.objective_xy_calibration
             if cal:
-                obj_x, obj_y, obj_z = cal['x'], cal['y'], cal['z']
+                obj_x, obj_y = cal['x'], cal['y']
+                focal_z = cal['z']  # Z where objective focuses (data capture depth)
             else:
                 # Fallback to defaults
-                stage_config = self._config.get('stage_control', {})
                 obj_x = (stage_config.get('x_range_mm', [1, 12.31])[0] +
                          stage_config.get('x_range_mm', [1, 12.31])[1]) / 2
                 obj_y = self._chamber_viz.STAGE_Y_AT_OBJECTIVE  # 7.45mm
-                obj_z = stage_config.get('z_range_mm', [12.5, 26])[0]
+                focal_z = obj_z_wall  # No calibration, assume wall position
 
             # Convert objective Y from stage coords to viz coords
             obj_y_viz = self._stage_y_to_viz_y(obj_y)
 
-            # Update objective circle (focal point) on each plane
-            self.xz_plane_viewer.set_objective_position(obj_x, obj_z)
-            self.xy_plane_viewer.set_objective_position(obj_x, obj_y_viz)
-            self.yz_plane_viewer.set_objective_position(obj_z, obj_y_viz)
+            # Store focal point for click-to-move calculations
+            self._focal_point = (obj_x, obj_y_viz, focal_z)
 
-            # Update focal plane lines (cyan dashed) through objective position
-            self.xz_plane_viewer.set_focal_plane_position(obj_z)   # horizontal at obj Z
+            # Objective circle = physical lens position (yellow, at Z_min wall)
+            self.xz_plane_viewer.set_objective_position(obj_x, obj_z_wall)
+            self.xy_plane_viewer.set_objective_position(obj_x, obj_y_viz)
+            self.yz_plane_viewer.set_objective_position(obj_z_wall, obj_y_viz)
+
+            # Focal plane lines = where data is captured (cyan dashed, at cal Z)
+            self.xz_plane_viewer.set_focal_plane_position(focal_z)   # horizontal at focal Z
             self.xy_plane_viewer.set_focal_plane_position(obj_y_viz)  # horizontal at obj Y
-            self.yz_plane_viewer.set_focal_plane_position(obj_z)   # vertical at obj Z
+            self.yz_plane_viewer.set_focal_plane_position(focal_z)   # vertical at focal Z
 
         except Exception as e:
             self.logger.error(f"Error updating plane overlays: {e}")
 
     def _check_and_mark_targets_stale(self, x: float, y: float, z: float) -> None:
-        """Check if stage has reached target positions and mark targets as stale.
+        """Check if stage has reached computed target positions and mark targets as stale.
+
+        Compares current stage position against the computed stage targets from
+        _on_plane_click, not the raw click positions (which are in view coords).
 
         Args:
             x: Current X position in mm
@@ -2757,28 +2796,19 @@ class SampleView(QWidget):
             z: Current Z position in mm
         """
         threshold = 0.05  # 50 microns tolerance
-        viz_y = self._stage_y_to_viz_y(y)
 
-        # Check XZ plane target
-        target = self.xz_plane_viewer._target_pos
-        if target and self.xz_plane_viewer._target_active:
-            target_x, target_z = target
-            if abs(x - target_x) < threshold and abs(z - target_z) < threshold:
-                self.xz_plane_viewer.set_target_stale()
-
-        # Check XY plane target (target Y is in viz coords)
-        target = self.xy_plane_viewer._target_pos
-        if target and self.xy_plane_viewer._target_active:
-            target_x, target_y = target
-            if abs(x - target_x) < threshold and abs(viz_y - target_y) < threshold:
-                self.xy_plane_viewer.set_target_stale()
-
-        # Check YZ plane target (note: h=Z, v=Y in YZ plane, target Y is in viz coords)
-        target = self.yz_plane_viewer._target_pos
-        if target and self.yz_plane_viewer._target_active:
-            target_z, target_y = target
-            if abs(z - target_z) < threshold and abs(viz_y - target_y) < threshold:
-                self.yz_plane_viewer.set_target_stale()
+        for plane, viewer in [('xz', self.xz_plane_viewer),
+                              ('xy', self.xy_plane_viewer),
+                              ('yz', self.yz_plane_viewer)]:
+            if not (viewer._target_pos and viewer._target_active):
+                continue
+            stage_target = self._plane_stage_targets.get(plane)
+            if not stage_target:
+                continue
+            if (abs(x - stage_target.x) < threshold and
+                abs(y - stage_target.y) < threshold and
+                abs(z - stage_target.z) < threshold):
+                viewer.set_target_stale()
 
     # ========== Public Methods ==========
 
