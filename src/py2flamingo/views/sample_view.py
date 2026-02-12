@@ -810,15 +810,11 @@ class SampleView(QWidget):
         header_row.addWidget(plane_help_btn)
         layout.addLayout(header_row)
 
-        # Get stage ranges from config
-        # Use actual stage limits for 2D plane views (not chamber visualization range)
-        # so that coordinates match the position sliders
+        # Get ranges from config
+        # Use visualization/chamber Y range (matches napari volume coords)
         stage_config = self._config.get('stage_control', {})
         x_range = tuple(stage_config.get('x_range_mm', [1.0, 12.31]))
-        # Y uses stage limits, not chamber visualization range (which may differ)
-        y_min = stage_config.get('y_stage_min_mm', stage_config.get('y_range_mm', [5.0, 25.0])[0])
-        y_max = stage_config.get('y_stage_max_mm', stage_config.get('y_range_mm', [5.0, 25.0])[1])
-        y_range = (y_min, y_max)
+        y_range = tuple(stage_config.get('y_range_mm', [0.0, 14.0]))
         z_range = tuple(stage_config.get('z_range_mm', [12.5, 26.0]))
 
         # XZ Plane (Top-Down) - X horizontal, Z vertical
@@ -845,7 +841,7 @@ class SampleView(QWidget):
         xy_group = QGroupBox("XY Plane (Front)")
         xy_layout = QVBoxLayout()
         xy_layout.setContentsMargins(4, 4, 4, 4)
-        # Aspect ~11:20 ≈ 0.55, use 130x240
+        # Aspect ~11:14 ≈ 0.79, use 130x240
         self.xy_plane_viewer = SlicePlaneViewer('xy', 'x', 'y', 130, 240,
                                                  h_axis_inverted=False, v_axis_inverted=False)
         self.xy_plane_viewer.set_ranges(x_range, y_range)
@@ -860,7 +856,7 @@ class SampleView(QWidget):
         yz_group = QGroupBox("YZ Plane (Side)")
         yz_layout = QVBoxLayout()
         yz_layout.setContentsMargins(4, 4, 4, 4)
-        # Aspect ~13.5:20 ≈ 0.675, use 160x240
+        # Aspect ~13.5:14 ≈ 0.96, use 160x240
         self.yz_plane_viewer = SlicePlaneViewer('yz', 'z', 'y', 160, 240,
                                                  h_axis_inverted=False, v_axis_inverted=False)
         self.yz_plane_viewer.set_ranges(z_range, y_range)
@@ -2590,13 +2586,15 @@ class SampleView(QWidget):
                 target = Position(x=h_coord, y=current_pos.y, z=v_coord, r=current_pos.r)
                 self.logger.info(f"Moving to X={h_coord:.3f}, Z={v_coord:.3f} (Y={current_pos.y:.3f} unchanged)")
             elif plane == 'xy':
-                # XY plane: h=X, v=Y, keep Z and R
-                target = Position(x=h_coord, y=v_coord, z=current_pos.z, r=current_pos.r)
-                self.logger.info(f"Moving to X={h_coord:.3f}, Y={v_coord:.3f} (Z={current_pos.z:.3f} unchanged)")
+                # XY plane: h=X, v=Y (viz coords), keep Z and R
+                stage_y = self._viz_y_to_stage_y(v_coord)
+                target = Position(x=h_coord, y=stage_y, z=current_pos.z, r=current_pos.r)
+                self.logger.info(f"Moving to X={h_coord:.3f}, Y={stage_y:.3f} (Z={current_pos.z:.3f} unchanged)")
             elif plane == 'yz':
-                # YZ plane: h=Z, v=Y, keep X and R
-                target = Position(x=current_pos.x, y=v_coord, z=h_coord, r=current_pos.r)
-                self.logger.info(f"Moving to Z={h_coord:.3f}, Y={v_coord:.3f} (X={current_pos.x:.3f} unchanged)")
+                # YZ plane: h=Z, v=Y (viz coords), keep X and R
+                stage_y = self._viz_y_to_stage_y(v_coord)
+                target = Position(x=current_pos.x, y=stage_y, z=h_coord, r=current_pos.r)
+                self.logger.info(f"Moving to Z={h_coord:.3f}, Y={stage_y:.3f} (X={current_pos.x:.3f} unchanged)")
             else:
                 self.logger.warning(f"Unknown plane: {plane}")
                 return
@@ -2691,6 +2689,14 @@ class SampleView(QWidget):
         except Exception as e:
             self.logger.error(f"Error updating plane views: {e}")
 
+    def _stage_y_to_viz_y(self, stage_y: float) -> float:
+        """Convert stage Y coordinate to visualization/chamber Y coordinate."""
+        return stage_y - self._chamber_viz.STAGE_Y_AT_OBJECTIVE + self._chamber_viz.OBJECTIVE_CHAMBER_Y_MM
+
+    def _viz_y_to_stage_y(self, viz_y: float) -> float:
+        """Convert visualization/chamber Y coordinate to stage Y coordinate."""
+        return viz_y + self._chamber_viz.STAGE_Y_AT_OBJECTIVE - self._chamber_viz.OBJECTIVE_CHAMBER_Y_MM
+
     def _update_plane_overlays(self) -> None:
         """Update overlay positions on all plane viewers."""
         if not self.viewer:
@@ -2702,11 +2708,12 @@ class SampleView(QWidget):
                 pos = self.movement_controller.get_position()
                 if pos:
                     x, y, z = pos.x, pos.y, pos.z
+                    viz_y = self._stage_y_to_viz_y(y)
 
                     # Update holder position on each plane
                     self.xz_plane_viewer.set_holder_position(x, z)
-                    self.xy_plane_viewer.set_holder_position(x, y)
-                    self.yz_plane_viewer.set_holder_position(z, y)
+                    self.xy_plane_viewer.set_holder_position(x, viz_y)
+                    self.yz_plane_viewer.set_holder_position(z, viz_y)
 
             # Get objective position from calibration (matches 3D view focal point)
             cal = self.objective_xy_calibration
@@ -2720,10 +2727,13 @@ class SampleView(QWidget):
                 obj_y = self._chamber_viz.STAGE_Y_AT_OBJECTIVE  # 7.45mm
                 obj_z = stage_config.get('z_range_mm', [12.5, 26])[0]
 
+            # Convert objective Y from stage coords to viz coords
+            obj_y_viz = self._stage_y_to_viz_y(obj_y)
+
             # Update objective position on each plane
             self.xz_plane_viewer.set_objective_position(obj_x, obj_z)
-            self.xy_plane_viewer.set_objective_position(obj_x, obj_y)
-            self.yz_plane_viewer.set_objective_position(obj_z, obj_y)
+            self.xy_plane_viewer.set_objective_position(obj_x, obj_y_viz)
+            self.yz_plane_viewer.set_objective_position(obj_z, obj_y_viz)
 
         except Exception as e:
             self.logger.error(f"Error updating plane overlays: {e}")
@@ -2733,10 +2743,11 @@ class SampleView(QWidget):
 
         Args:
             x: Current X position in mm
-            y: Current Y position in mm
+            y: Current Y position in mm (stage coords)
             z: Current Z position in mm
         """
         threshold = 0.05  # 50 microns tolerance
+        viz_y = self._stage_y_to_viz_y(y)
 
         # Check XZ plane target
         target = self.xz_plane_viewer._target_pos
@@ -2745,18 +2756,18 @@ class SampleView(QWidget):
             if abs(x - target_x) < threshold and abs(z - target_z) < threshold:
                 self.xz_plane_viewer.set_target_stale()
 
-        # Check XY plane target
+        # Check XY plane target (target Y is in viz coords)
         target = self.xy_plane_viewer._target_pos
         if target and self.xy_plane_viewer._target_active:
             target_x, target_y = target
-            if abs(x - target_x) < threshold and abs(y - target_y) < threshold:
+            if abs(x - target_x) < threshold and abs(viz_y - target_y) < threshold:
                 self.xy_plane_viewer.set_target_stale()
 
-        # Check YZ plane target (note: h=Z, v=Y in YZ plane)
+        # Check YZ plane target (note: h=Z, v=Y in YZ plane, target Y is in viz coords)
         target = self.yz_plane_viewer._target_pos
         if target and self.yz_plane_viewer._target_active:
             target_z, target_y = target
-            if abs(z - target_z) < threshold and abs(y - target_y) < threshold:
+            if abs(z - target_z) < threshold and abs(viz_y - target_y) < threshold:
                 self.yz_plane_viewer.set_target_stale()
 
     # ========== Public Methods ==========
