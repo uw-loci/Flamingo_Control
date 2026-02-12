@@ -171,6 +171,10 @@ class SampleView(QWidget):
         # Embed 3D viewer from existing window (if available)
         self._embed_3d_viewer()
 
+        # Initialize 2D plane overlays now that self.viewer is set
+        # (position_changed signal won't fire until stage actually moves)
+        self._update_plane_overlays()
+
         # Update live view button state
         self._update_live_view_state()
 
