@@ -811,20 +811,20 @@ class SampleView(QWidget):
         layout.addLayout(header_row)
 
         # Get ranges from config
-        # Use visualization/chamber Y range (matches napari volume coords)
+        # Y range is in chamber/visualization coordinates (0-14mm)
         stage_config = self._config.get('stage_control', {})
         x_range = tuple(stage_config.get('x_range_mm', [1.0, 12.31]))
         y_range = tuple(stage_config.get('y_range_mm', [0.0, 14.0]))
         z_range = tuple(stage_config.get('z_range_mm', [12.5, 26.0]))
 
         # XZ Plane (Top-Down) - X horizontal, Z vertical
-        # No axis inversion - raw data orientation matches napari 3D view
+        # X axis inverted to match 3D view (high X on left when invert_x is True)
         xz_group = QGroupBox("XZ Plane (Top-Down)")
         xz_layout = QVBoxLayout()
         xz_layout.setContentsMargins(4, 4, 4, 4)
         # Aspect ~11:13.5 ≈ 0.81, use 180x220
         self.xz_plane_viewer = SlicePlaneViewer('xz', 'x', 'z', 180, 220,
-                                                 h_axis_inverted=False, v_axis_inverted=False)
+                                                 h_axis_inverted=self._invert_x, v_axis_inverted=False)
         self.xz_plane_viewer.set_ranges(x_range, z_range)
         self.xz_plane_viewer.position_clicked.connect(
             lambda h, v: self._on_plane_click('xz', h, v)
@@ -843,7 +843,7 @@ class SampleView(QWidget):
         xy_layout.setContentsMargins(4, 4, 4, 4)
         # Aspect ~11:14 ≈ 0.79, use 130x240
         self.xy_plane_viewer = SlicePlaneViewer('xy', 'x', 'y', 130, 240,
-                                                 h_axis_inverted=False, v_axis_inverted=False)
+                                                 h_axis_inverted=self._invert_x, v_axis_inverted=False)
         self.xy_plane_viewer.set_ranges(x_range, y_range)
         self.xy_plane_viewer.position_clicked.connect(
             lambda h, v: self._on_plane_click('xy', h, v)
@@ -2642,19 +2642,20 @@ class SampleView(QWidget):
                     continue
 
                 # Data is in (Z, Y, X) order - generate MIP projections
-                # No data flips applied - raw projections match napari 3D view orientation
+                # napari volume has Y inverted (row 0 = Y_max = chamber bottom)
+                # flipud on Y-containing planes so row 0 = Y_min (chamber top)
 
                 # XZ plane (top-down) - project along Y axis (axis 1)
                 # Result shape: (Z, X) where Z=rows(vertical), X=cols(horizontal)
                 xz_channel_mips[ch_id] = np.max(volume, axis=1)
 
                 # XY plane (front view) - project along Z axis (axis 0)
-                # Result shape: (Y, X) where Y=rows(vertical), X=cols(horizontal)
-                xy_channel_mips[ch_id] = np.max(volume, axis=0)
+                # Result shape: (Y, X) - flipud so row 0 = Y_min (chamber top)
+                xy_channel_mips[ch_id] = np.flipud(np.max(volume, axis=0))
 
                 # YZ plane (side view) - project along X axis (axis 2)
-                # Result shape: (Z, Y) -> transpose to (Y, Z)
-                yz_channel_mips[ch_id] = np.max(volume, axis=2).T
+                # Result shape: (Z, Y) -> transpose to (Y, Z) - flipud so row 0 = Y_min
+                yz_channel_mips[ch_id] = np.flipud(np.max(volume, axis=2).T)
 
                 # Get channel settings from napari layer or use defaults
                 settings = {
@@ -2715,25 +2716,26 @@ class SampleView(QWidget):
                     self.xy_plane_viewer.set_holder_position(x, viz_y)
                     self.yz_plane_viewer.set_holder_position(z, viz_y)
 
-            # Get objective position from calibration (matches 3D view focal point)
+            # Get objective position
+            # Z is always z_range[0] (back wall/coverslip where objective is mounted)
+            stage_config = self._config.get('stage_control', {})
+            obj_z_wall = stage_config.get('z_range_mm', [12.5, 26])[0]
+
             cal = self.objective_xy_calibration
             if cal:
-                obj_x, obj_y, obj_z = cal['x'], cal['y'], cal['z']
+                obj_x, obj_y = cal['x'], cal['y']
             else:
-                # Fallback to defaults
-                stage_config = self._config.get('stage_control', {})
                 obj_x = (stage_config.get('x_range_mm', [1, 12.31])[0] +
                          stage_config.get('x_range_mm', [1, 12.31])[1]) / 2
                 obj_y = self._chamber_viz.STAGE_Y_AT_OBJECTIVE  # 7.45mm
-                obj_z = stage_config.get('z_range_mm', [12.5, 26])[0]
 
             # Convert objective Y from stage coords to viz coords
             obj_y_viz = self._stage_y_to_viz_y(obj_y)
 
             # Update objective position on each plane
-            self.xz_plane_viewer.set_objective_position(obj_x, obj_z)
+            self.xz_plane_viewer.set_objective_position(obj_x, obj_z_wall)
             self.xy_plane_viewer.set_objective_position(obj_x, obj_y_viz)
-            self.yz_plane_viewer.set_objective_position(obj_z, obj_y_viz)
+            self.yz_plane_viewer.set_objective_position(obj_z_wall, obj_y_viz)
 
         except Exception as e:
             self.logger.error(f"Error updating plane overlays: {e}")
