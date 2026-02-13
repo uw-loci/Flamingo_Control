@@ -9,6 +9,7 @@ import struct
 import socket
 import threading
 import numpy as np
+from collections import deque
 from typing import Tuple, Optional, Callable
 from dataclasses import dataclass
 
@@ -133,7 +134,6 @@ class CameraService(MicroscopeCommandService):
         # Fast frame buffer (thread-safe queue)
         # Camera sends frames fast -> buffer them ALL
         # Downstream processing pulls and drops as needed
-        from collections import deque
         self._frame_buffer_lock = threading.Lock()
         self._frame_buffer = deque(maxlen=20)  # Keep last 20 frames max
         self._dropped_frame_count = 0
