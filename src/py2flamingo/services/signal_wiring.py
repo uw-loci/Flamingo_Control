@@ -143,15 +143,13 @@ def wire_workflow_signals(workflow_view, status_indicator_service,
 
 
 def wire_acquisition_lock_signals(acquisition_started, acquisition_stopped,
-                                  stage_control_view,
-                                  stage_chamber_visualization_window):
+                                  stage_control_view):
     """Connect acquisition lock signals to disable/enable controls during scans.
 
     Args:
         acquisition_started: pyqtSignal emitted when acquisition begins
         acquisition_stopped: pyqtSignal emitted when acquisition ends
         stage_control_view: StageControlView instance
-        stage_chamber_visualization_window: StageChamberVisualizationWindow instance
     """
     if stage_control_view:
         acquisition_started.connect(
@@ -161,16 +159,6 @@ def wire_acquisition_lock_signals(acquisition_started, acquisition_stopped,
             lambda: stage_control_view._set_controls_enabled(True)
         )
         logger.debug("Connected acquisition signals to stage control view")
-
-    if stage_chamber_visualization_window:
-        if hasattr(stage_chamber_visualization_window, '_set_sliders_enabled'):
-            acquisition_started.connect(
-                lambda: stage_chamber_visualization_window._set_sliders_enabled(False)
-            )
-            acquisition_stopped.connect(
-                lambda: stage_chamber_visualization_window._set_sliders_enabled(True)
-            )
-            logger.debug("Connected acquisition signals to stage chamber visualization")
 
 
 def wire_sample_view_signal(connection_view, open_sample_view_callback):
@@ -217,7 +205,6 @@ def wire_all_signals(app):
         app.acquisition_started,
         app.acquisition_stopped,
         app.stage_control_view,
-        app.stage_chamber_visualization_window
     )
 
     wire_sample_view_signal(app.connection_view, app._open_sample_view)

@@ -110,7 +110,6 @@ class FlamingoApplication(QObject):
         self.stage_control_view = None
         self.camera_live_viewer = None
         self.image_controls_window = None
-        self.stage_chamber_visualization_window = None
         self.sample_view = None  # Unified sample viewing interface
         self.voxel_storage = None  # DualResolutionVoxelStorage for 3D visualization
 
@@ -181,7 +180,6 @@ class FlamingoApplication(QObject):
         self.stage_control_view = views['stage_control_view']
         self.image_controls_window = views['image_controls_window']
         self.camera_live_viewer = views['camera_live_viewer']
-        self.stage_chamber_visualization_window = views['stage_chamber_visualization_window']
         # Set app reference for save drive persistence
         self.workflow_view.set_app(self)
 
@@ -359,7 +357,6 @@ class FlamingoApplication(QObject):
             stage_control_view=self.stage_control_view,
             camera_live_viewer=self.camera_live_viewer,
             image_controls_window=self.image_controls_window,
-            stage_chamber_visualization_window=self.stage_chamber_visualization_window,
             app=self,  # Pass FlamingoApplication reference for accessing sample_view etc.
             geometry_manager=self.geometry_manager
         )

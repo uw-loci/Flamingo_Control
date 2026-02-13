@@ -216,15 +216,13 @@ def create_views_layer(connection_controller, config_manager, position_controlle
 
     Returns:
         Dict with keys: connection_view, workflow_view, sample_info_view,
-            stage_control_view, image_controls_window, camera_live_viewer,
-            stage_chamber_visualization_window
+            stage_control_view, image_controls_window, camera_live_viewer
     """
     from py2flamingo.views import (
         ConnectionView, WorkflowView, SampleInfoView,
         ImageControlsWindow, StageControlView
     )
     from py2flamingo.views.camera_live_viewer import CameraLiveViewer
-    from py2flamingo.views.stage_chamber_visualization_window import StageChamberVisualizationWindow
 
     logger.debug("Creating views layer components...")
 
@@ -256,13 +254,6 @@ def create_views_layer(connection_controller, config_manager, position_controlle
     )
     camera_live_viewer.hide()
 
-    # Create stage chamber visualization window (starts hidden)
-    stage_chamber_visualization_window = StageChamberVisualizationWindow(
-        movement_controller=movement_controller,
-        geometry_manager=geometry_manager
-    )
-    stage_chamber_visualization_window.hide()
-
     return {
         'connection_view': connection_view,
         'workflow_view': workflow_view,
@@ -270,5 +261,4 @@ def create_views_layer(connection_controller, config_manager, position_controlle
         'stage_control_view': stage_control_view,
         'image_controls_window': image_controls_window,
         'camera_live_viewer': camera_live_viewer,
-        'stage_chamber_visualization_window': stage_chamber_visualization_window,
     }

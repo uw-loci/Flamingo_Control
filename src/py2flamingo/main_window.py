@@ -38,6 +38,7 @@ class MainWindow(QMainWindow):
     - Status bar for application messages
     - Intelligent auto-sizing based on screen dimensions (90% of screen height)
     - Access to independent windows: Camera Live Viewer and Image Controls
+    - Benchmark 3D Viewer action in Tools menu
 
     Example:
         main_window = MainWindow(connection_view, workflow_view, sample_info_view,
@@ -57,7 +58,6 @@ class MainWindow(QMainWindow):
                  stage_control_view=None,
                  camera_live_viewer=None,
                  image_controls_window=None,
-                 stage_chamber_visualization_window=None,
                  app=None,
                  geometry_manager: Optional[WindowGeometryManager] = None):
         """Initialize main window with view components.
@@ -70,7 +70,6 @@ class MainWindow(QMainWindow):
             stage_control_view: Optional StageControlView instance
             camera_live_viewer: Optional CameraLiveViewer instance
             image_controls_window: Optional ImageControlsWindow instance
-            stage_chamber_visualization_window: Optional StageChamberVisualizationWindow instance
             app: Optional FlamingoApplication instance for accessing app-level resources
             geometry_manager: Optional WindowGeometryManager for saving/restoring geometry
         """
@@ -86,7 +85,6 @@ class MainWindow(QMainWindow):
         self.stage_control_view = stage_control_view
         self.camera_live_viewer = camera_live_viewer
         self.image_controls_window = image_controls_window
-        self.stage_chamber_visualization_window = stage_chamber_visualization_window
 
         self._setup_ui()
         self._setup_menu()
@@ -232,14 +230,6 @@ class MainWindow(QMainWindow):
             image_controls_action.triggered.connect(self._show_image_controls)
             view_menu.addAction(image_controls_action)
 
-        # Stage Chamber Visualization action
-        if self.stage_chamber_visualization_window is not None:
-            chamber_viz_action = QAction("&Stage Chamber Visualization...", self)
-            chamber_viz_action.setShortcut("Ctrl+M")
-            chamber_viz_action.setStatusTip("Open Stage Chamber Visualization window")
-            chamber_viz_action.triggered.connect(self._show_stage_chamber_visualization)
-            view_menu.addAction(chamber_viz_action)
-
         # Tools menu (requires connection)
         tools_menu = menubar.addMenu("&Tools")
 
@@ -260,6 +250,13 @@ class MainWindow(QMainWindow):
         self.calibrate_action.triggered.connect(self._on_calibrate_objective)
         self.calibrate_action.setEnabled(False)
         tools_menu.addAction(self.calibrate_action)
+
+        tools_menu.addSeparator()
+        self.benchmark_action = QAction("&Benchmark 3D Viewer...", self)
+        self.benchmark_action.setStatusTip("Run performance benchmarks on 3D transforms")
+        self.benchmark_action.triggered.connect(self._on_benchmark_3d)
+        self.benchmark_action.setEnabled(False)
+        tools_menu.addAction(self.benchmark_action)
 
         # Extensions menu (requires connection + Sample View open)
         extensions_menu = menubar.addMenu("&Extensions")
@@ -350,13 +347,6 @@ class MainWindow(QMainWindow):
             self.image_controls_window.raise_()  # Bring to front
             self.image_controls_window.activateWindow()  # Give it focus
 
-    def _show_stage_chamber_visualization(self):
-        """Show Stage Chamber Visualization window."""
-        if self.stage_chamber_visualization_window is not None:
-            self.stage_chamber_visualization_window.show()
-            self.stage_chamber_visualization_window.raise_()  # Bring to front
-            self.stage_chamber_visualization_window.activateWindow()  # Give it focus
-
     # ========== Tools Menu Handlers ==========
 
     def update_menu_states(self, connected: bool = False):
@@ -369,6 +359,7 @@ class MainWindow(QMainWindow):
         self.voxel_test_action.setEnabled(connected)
         self.volume_scan_action.setEnabled(connected)
         self.calibrate_action.setEnabled(connected)
+        self.benchmark_action.setEnabled(connected)
 
         # Extensions menu requires connection AND Sample View open
         sample_view_open = self.app is not None and self.app.sample_view is not None
@@ -518,6 +509,29 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error during calibration: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Calibration failed: {e}")
+
+    def _on_benchmark_3d(self):
+        """Handle Benchmark 3D Viewer menu action."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("Benchmark 3D Viewer menu action triggered")
+
+        if not self.app:
+            QMessageBox.warning(self, "Error", "Application not available")
+            return
+
+        try:
+            from py2flamingo.views.dialogs.performance_benchmark_dialog import PerformanceBenchmarkDialog
+
+            dialog = PerformanceBenchmarkDialog(
+                voxel_storage=self.app.voxel_storage,
+                parent=self
+            )
+            dialog.exec_()
+        except Exception as e:
+            logger.error(f"Error opening benchmark dialog: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error",
+                               f"Could not open benchmark dialog: {e}")
 
     # ========== Extensions Menu Handlers ==========
 
@@ -723,13 +737,6 @@ class MainWindow(QMainWindow):
                 logger.info("Closed image controls window")
             except Exception as e:
                 logger.error(f"Error closing image controls window: {e}")
-
-        if self.stage_chamber_visualization_window is not None:
-            try:
-                self.stage_chamber_visualization_window.close()
-                logger.info("Closed stage chamber visualization window")
-            except Exception as e:
-                logger.error(f"Error closing stage chamber visualization: {e}")
 
         # Accept the close event
         event.accept()

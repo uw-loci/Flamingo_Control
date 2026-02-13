@@ -1093,11 +1093,6 @@ class SampleView(QWidget):
         self.saved_positions_btn.clicked.connect(self._on_saved_positions_clicked)
         nav_row.addWidget(self.saved_positions_btn)
 
-        # Stage Control button
-        self.stage_control_btn = QPushButton("Stage Control")
-        self.stage_control_btn.clicked.connect(self._on_stage_control_clicked)
-        nav_row.addWidget(self.stage_control_btn)
-
         # Export Data button
         self.export_data_btn = QPushButton("Export Data")
         self.export_data_btn.clicked.connect(self._on_export_data_clicked)
@@ -1127,16 +1122,6 @@ class SampleView(QWidget):
         self.load_session_btn.setToolTip("Load a saved OME-Zarr session")
         self.load_session_btn.clicked.connect(self._on_load_session_clicked)
         perf_row.addWidget(self.load_session_btn)
-
-        # Benchmark button
-        self.benchmark_btn = QPushButton("Benchmark")
-        self.benchmark_btn.setToolTip("Run performance benchmarks on 3D transforms")
-        self.benchmark_btn.clicked.connect(self._on_benchmark_clicked)
-        self.benchmark_btn.setStyleSheet(
-            "QPushButton { background-color: #2196F3; color: white; }"
-            "QPushButton:hover { background-color: #1976D2; }"
-        )
-        perf_row.addWidget(self.benchmark_btn)
 
         # Settings button
         self.settings_btn = QPushButton("Settings")
@@ -1713,22 +1698,6 @@ class SampleView(QWidget):
         dialog.plane_views_update_requested.connect(self._update_plane_views)
         dialog.exec_()
 
-    def _on_stage_control_clicked(self) -> None:
-        """Open the Stage Chamber Visualization window."""
-        # Try to find and show the stage chamber visualization window
-        from PyQt5.QtWidgets import QApplication
-        app = QApplication.instance()
-        if app:
-            for widget in app.topLevelWidgets():
-                if widget.__class__.__name__ == 'StageChamberVisualizationWindow':
-                    widget.show()
-                    widget.raise_()
-                    widget.activateWindow()
-                    self.logger.info("Opened Stage Chamber Visualization window")
-                    return
-
-        self.logger.info("Stage Chamber Visualization window not available")
-
     def _on_export_data_clicked(self) -> None:
         """Export accumulated 3D data to file."""
         if not self.voxel_storage:
@@ -1923,22 +1892,6 @@ class SampleView(QWidget):
         except Exception as e:
             self.logger.exception(f"Load session failed: {e}")
             QMessageBox.critical(self, "Load Error", f"Error loading session: {e}")
-
-    def _on_benchmark_clicked(self) -> None:
-        """Open the performance benchmark dialog."""
-        try:
-            from py2flamingo.views.dialogs.performance_benchmark_dialog import PerformanceBenchmarkDialog
-
-            dialog = PerformanceBenchmarkDialog(
-                voxel_storage=self.voxel_storage,
-                parent=self
-            )
-            dialog.exec_()
-        except Exception as e:
-            self.logger.exception(f"Error opening benchmark dialog: {e}")
-            from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "Error",
-                               f"Could not open benchmark dialog: {e}")
 
     def _on_settings_clicked(self) -> None:
         """Open the application settings dialog."""
