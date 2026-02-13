@@ -279,6 +279,14 @@ class MainWindow(QMainWindow):
         self.mip_overview_action.triggered.connect(self._on_mip_overview)
         extensions_menu.addAction(self.mip_overview_action)
 
+        extensions_menu.addSeparator()
+
+        self.union_thresholder_action = QAction("&Union of Thresholders...", self)
+        self.union_thresholder_action.setStatusTip("Threshold 3D volumes and generate variable-depth acquisition profiles")
+        self.union_thresholder_action.triggered.connect(self._on_union_thresholder)
+        self.union_thresholder_action.setEnabled(False)
+        extensions_menu.addAction(self.union_thresholder_action)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -364,6 +372,7 @@ class MainWindow(QMainWindow):
         # Extensions menu requires connection AND Sample View open
         sample_view_open = self.app is not None and self.app.sample_view is not None
         self.led_2d_overview_action.setEnabled(connected and sample_view_open)
+        self.union_thresholder_action.setEnabled(connected and sample_view_open)
 
     def _on_voxel_test(self):
         """Handle 3D voxel rotation test menu action."""
@@ -651,6 +660,39 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error opening MIP Overview: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to open MIP Overview:\n{e}")
+
+    def _on_union_thresholder(self):
+        """Handle Union of Thresholders menu action."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("Union of Thresholders menu action triggered")
+
+        if not self.app or not self.app.sample_view:
+            QMessageBox.warning(
+                self, "Sample View Required",
+                "Please open the Sample View before using this extension."
+            )
+            return
+
+        try:
+            from py2flamingo.views.dialogs.union_thresholder_dialog import UnionThresholderDialog
+
+            self._union_thresholder_dialog = UnionThresholderDialog(
+                app=self.app,
+                parent=None
+            )
+            self._union_thresholder_dialog.show()
+
+        except ImportError as e:
+            logger.error(f"Could not import Union of Thresholders dialog: {e}")
+            QMessageBox.critical(
+                self, "Error",
+                "Union of Thresholders dialog not available.\n"
+                "The extension may not be fully implemented yet."
+            )
+        except Exception as e:
+            logger.error(f"Error opening Union of Thresholders: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to open dialog: {e}")
 
     def _on_tab_changed(self, index: int) -> None:
         """Handle tab change event - log which tab user switched to.

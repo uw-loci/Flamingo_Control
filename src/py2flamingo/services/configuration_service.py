@@ -399,6 +399,7 @@ class ConfigurationService:
     LED_2D_SESSION_PATH_KEY = 'led_2d_overview_session_path'
     MIP_SESSION_PATH_KEY = 'mip_overview_session_path'
     ZARR_SESSION_PATH_KEY = 'zarr_3d_session_path'
+    THRESHOLDER_PRESET_PATH_KEY = 'thresholder_preset_path'
     _SESSION_PATHS_FILE = 'session_paths.json'
 
     def _session_paths_file(self) -> Path:
@@ -414,7 +415,8 @@ class ConfigurationService:
             with open(path, 'r') as f:
                 data = json.load(f)
             # Load each session path key
-            for key in [self.LED_2D_SESSION_PATH_KEY, self.MIP_SESSION_PATH_KEY, self.ZARR_SESSION_PATH_KEY]:
+            for key in [self.LED_2D_SESSION_PATH_KEY, self.MIP_SESSION_PATH_KEY,
+                        self.ZARR_SESSION_PATH_KEY, self.THRESHOLDER_PRESET_PATH_KEY]:
                 if key in data:
                     self.config[key] = data[key]
             self.logger.info(f"Loaded session paths from {path}")
@@ -425,7 +427,8 @@ class ConfigurationService:
         """Save session paths to JSON file on disk."""
         path = self._session_paths_file()
         data = {}
-        for key in [self.LED_2D_SESSION_PATH_KEY, self.MIP_SESSION_PATH_KEY, self.ZARR_SESSION_PATH_KEY]:
+        for key in [self.LED_2D_SESSION_PATH_KEY, self.MIP_SESSION_PATH_KEY,
+                    self.ZARR_SESSION_PATH_KEY, self.THRESHOLDER_PRESET_PATH_KEY]:
             if key in self.config:
                 data[key] = self.config[key]
         try:
@@ -528,3 +531,22 @@ class ConfigurationService:
         """
         self.config[self.SAMPLE_3D_DATA_PATH_KEY] = path
         self.logger.info(f"Set Sample 3D data path: {path}")
+
+    # Thresholder preset path (for Save/Load Preset in Union of Thresholders)
+    def get_thresholder_preset_path(self) -> Optional[str]:
+        """Get the last-used thresholder preset file path.
+
+        Returns:
+            Path string if set, None otherwise
+        """
+        return self.config.get(self.THRESHOLDER_PRESET_PATH_KEY)
+
+    def set_thresholder_preset_path(self, path: str) -> None:
+        """Set the thresholder preset file path.
+
+        Args:
+            path: Directory path last used for preset save/load
+        """
+        self.config[self.THRESHOLDER_PRESET_PATH_KEY] = path
+        self._save_session_paths()
+        self.logger.info(f"Set thresholder preset path: {path}")
