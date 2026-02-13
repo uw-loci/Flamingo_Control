@@ -1253,6 +1253,8 @@ class TileCollectionDialog(PersistentDialog):
                 if not camera_controller._display_timer.isActive():
                     camera_controller._workflow_started_timer = True
                     camera_controller._display_timer.start(camera_controller._display_timer_interval_ms)
+                # Enlarge frame buffer so GUI-thread stalls don't cause frame loss
+                camera_controller.camera_service.set_tile_mode_buffer(True)
                 # Start data receiver (listen-only, no LIVE_VIEW_START)
                 try:
                     camera_controller.camera_service.ensure_data_receiver_running()

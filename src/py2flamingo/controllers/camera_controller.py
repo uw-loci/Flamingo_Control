@@ -244,6 +244,9 @@ class CameraController(QObject):
         self._z_plane_counter = 0
         self.logger.info(f"CameraController: Activated tile mode for {position.get('filename', 'unknown')}")
 
+        # Enlarge frame buffer so GUI-thread stalls don't cause frame loss
+        self.camera_service.set_tile_mode_buffer(True)
+
         # Ensure display timer runs so _pull_and_display_frame routes frames
         if not self._display_timer.isActive():
             self.logger.info("Starting display timer for tile workflow frame routing")
@@ -281,6 +284,9 @@ class CameraController(QObject):
         self._z_plane_counter = 0
         self._workflow_started_timer = False
         self._workflow_started_streaming = False
+
+        # Restore default frame buffer size
+        self.camera_service.set_tile_mode_buffer(False)
 
     def _route_frame_to_sample_view(self, image, header):
         """Route workflow Z-stack frame to Sample View integration.

@@ -2210,8 +2210,9 @@ class SampleView(QWidget):
             if hasattr(self, '_channel_availability_timer'):
                 self._channel_availability_timer.start()
 
-            # Trigger debounced visualization update
-            if hasattr(self, '_visualization_update_timer'):
+            # Trigger debounced visualization update (skip during tile workflows
+            # to avoid expensive GUI-thread transforms that block frame draining)
+            if hasattr(self, '_visualization_update_timer') and not getattr(self, '_tile_workflow_active', False):
                 self._visualization_update_timer.start()
 
         except Exception as e:
@@ -3275,11 +3276,9 @@ class SampleView(QWidget):
         # The timer is single-shot, so repeated .start() calls just reset it.
         self._channel_availability_timer.start()
 
-        # Only kick visualization timer on FIRST frame of each tile.
-        # This ensures the previous tile is complete before we refresh the display.
-        # The current tile will show on the NEXT tile's first frame (or workflow completion).
-        if frame_count == 1:
-            self._visualization_update_timer.start()
+        # Visualization updates are deferred until finish_tile_workflows() to avoid
+        # expensive GUI-thread transforms that block frame buffer draining and cause
+        # entire tiles to be silently lost.
 
         self.logger.debug(f"Sample View: Accumulated Z-plane {z_index} for tile "
                          f"({position['x']:.2f}, {position['y']:.2f})")

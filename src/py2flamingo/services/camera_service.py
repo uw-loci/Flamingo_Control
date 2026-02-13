@@ -136,6 +136,7 @@ class CameraService(MicroscopeCommandService):
         from collections import deque
         self._frame_buffer_lock = threading.Lock()
         self._frame_buffer = deque(maxlen=20)  # Keep last 20 frames max
+        self._dropped_frame_count = 0
 
         # Cached image size from live streaming (when camera query returns 0x0)
         self._cached_image_size: Optional[Tuple[int, int]] = None
@@ -650,6 +651,26 @@ class CameraService(MicroscopeCommandService):
             if count > 0:
                 self.logger.info(f"Cleared {count} frames from buffer")
 
+    def set_tile_mode_buffer(self, enabled: bool) -> None:
+        """Switch to larger buffer for tile workflows where every frame matters.
+
+        During tile workflows, the GUI thread may block on visualization transforms,
+        preventing drain_all_frames() from being called. A larger buffer prevents
+        frame loss during these stalls.
+
+        Args:
+            enabled: True to use large buffer (500 frames), False to restore default (20)
+        """
+        with self._frame_buffer_lock:
+            frames = list(self._frame_buffer)
+            new_maxlen = 500 if enabled else 20
+            self._frame_buffer = deque(frames, maxlen=new_maxlen)
+            if enabled:
+                self._dropped_frame_count = 0
+            self.logger.info(f"Frame buffer resized to maxlen={new_maxlen} "
+                           f"(tile_mode={'ON' if enabled else 'OFF'}, "
+                           f"preserved {len(frames)} frames)")
+
     def _data_receiver_loop(self) -> None:
         """
         Background thread that receives image data from data socket.
@@ -715,6 +736,12 @@ class CameraService(MicroscopeCommandService):
 
                 # Fast buffering: Just add to queue (deque handles overflow by dropping oldest)
                 with self._frame_buffer_lock:
+                    if len(self._frame_buffer) >= self._frame_buffer.maxlen:
+                        self._dropped_frame_count += 1
+                        if self._dropped_frame_count % 50 == 1:
+                            self.logger.warning(
+                                f"Frame buffer full (maxlen={self._frame_buffer.maxlen}), "
+                                f"dropping oldest frame ({self._dropped_frame_count} total dropped)")
                     self._frame_buffer.append((image_array, header))
 
                 # Optional: Trigger callback for notification (but don't do work in it!)
