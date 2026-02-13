@@ -53,6 +53,10 @@ class SampleView(QWidget):
     position sliders, and illumination controls in a single interface.
     """
 
+    # Signal to deliver background visualization results to GUI thread
+    # Dict maps channel_id → transformed volume (numpy array)
+    _viz_results_ready = pyqtSignal(dict)
+
     def __init__(
         self,
         camera_controller,
@@ -200,6 +204,10 @@ class SampleView(QWidget):
         self._visualization_update_timer.setSingleShot(True)
         self._visualization_update_timer.setInterval(500)  # Update 500ms after last frame
         self._visualization_update_timer.timeout.connect(self._update_visualization)
+
+        # Background visualization update machinery
+        self._viz_update_in_progress = False  # Guard against concurrent bg updates
+        self._viz_results_ready.connect(self._apply_visualization_results)
 
         # Throttled timer for stage position → 3D visualization updates (20 FPS max)
         self._stage_update_timer = QTimer(self)
@@ -2210,9 +2218,8 @@ class SampleView(QWidget):
             if hasattr(self, '_channel_availability_timer'):
                 self._channel_availability_timer.start()
 
-            # Trigger debounced visualization update (skip during tile workflows
-            # to avoid expensive GUI-thread transforms that block frame draining)
-            if hasattr(self, '_visualization_update_timer') and not getattr(self, '_tile_workflow_active', False):
+            # Trigger debounced visualization update
+            if hasattr(self, '_visualization_update_timer'):
                 self._visualization_update_timer.start()
 
         except Exception as e:
@@ -2383,6 +2390,12 @@ class SampleView(QWidget):
 
     def _update_visualization(self) -> None:
         """Update the 3D visualization with latest data from voxel storage."""
+        # During tile workflows, run transforms off the GUI thread to avoid
+        # blocking frame buffer draining
+        if getattr(self, '_tile_workflow_active', False):
+            self._update_visualization_async()
+            return
+
         if not self.viewer or not self.voxel_storage:
             return
 
@@ -2432,6 +2445,77 @@ class SampleView(QWidget):
 
         except Exception as e:
             self.logger.error(f"Error updating visualization: {e}", exc_info=True)
+
+    def _update_visualization_async(self):
+        """Run visualization transforms in a background thread during tile workflows.
+
+        Computes get_display_volume_transformed() off the GUI thread, then
+        signals the GUI thread to apply the fast layer.data assignment.
+        Skips if a previous background update is still running.
+        """
+        if self._viz_update_in_progress:
+            self.logger.debug("Skipping viz update — previous still in progress")
+            return
+        if not self.viewer or not self.voxel_storage:
+            return
+
+        # Capture current state (immutable snapshot for the thread)
+        stage_pos = dict(self.last_stage_position) if self.last_stage_position else None
+        holder_pos = np.array([
+            self.holder_position['x'],
+            self.holder_position['y'],
+            self.holder_position['z']
+        ])
+        channels_with_data = [
+            ch_id for ch_id in range(self.voxel_storage.num_channels)
+            if ch_id in self.channel_layers and self.voxel_storage.has_data(ch_id)
+        ]
+        if not channels_with_data:
+            return
+
+        self._viz_update_in_progress = True
+
+        import threading
+        def _compute():
+            try:
+                results = {}
+                for ch_id in channels_with_data:
+                    if stage_pos and any(v != 0 for v in stage_pos.values()):
+                        vol = self.voxel_storage.get_display_volume_transformed(
+                            ch_id, stage_pos, holder_pos
+                        )
+                    else:
+                        vol = self.voxel_storage.get_display_volume(ch_id)
+                    results[ch_id] = vol
+                self._viz_results_ready.emit(results)
+            except Exception as e:
+                self.logger.error(f"Background viz update error: {e}", exc_info=True)
+                self._viz_update_in_progress = False
+
+        thread = threading.Thread(target=_compute, daemon=True, name="VizUpdate")
+        thread.start()
+
+    def _apply_visualization_results(self, results: dict):
+        """Apply pre-computed visualization volumes to napari layers (GUI thread)."""
+        try:
+            for ch_id, volume in results.items():
+                if ch_id in self.channel_layers:
+                    self.logger.info(
+                        f"Channel {ch_id}: volume shape={volume.shape}, "
+                        f"non-zero={np.count_nonzero(volume)}, max={volume.max()}"
+                    )
+                    self.channel_layers[ch_id].data = volume
+
+                    layer = self.channel_layers[ch_id]
+                    if not getattr(layer, '_auto_contrast_applied', False):
+                        self._auto_contrast_channels()
+                        layer._auto_contrast_applied = True
+
+            self._update_plane_views()
+        except Exception as e:
+            self.logger.error(f"Error applying viz results: {e}", exc_info=True)
+        finally:
+            self._viz_update_in_progress = False
 
     def _reset_viewer_camera(self) -> None:
         """Reset the napari viewer camera zoom (delegated to manager)."""
@@ -3276,9 +3360,11 @@ class SampleView(QWidget):
         # The timer is single-shot, so repeated .start() calls just reset it.
         self._channel_availability_timer.start()
 
-        # Visualization updates are deferred until finish_tile_workflows() to avoid
-        # expensive GUI-thread transforms that block frame buffer draining and cause
-        # entire tiles to be silently lost.
+        # Kick visualization timer on first frame of each tile.
+        # During tile workflows this dispatches to a background thread,
+        # so it won't block frame buffer draining.
+        if frame_count == 1:
+            self._visualization_update_timer.start()
 
         self.logger.debug(f"Sample View: Accumulated Z-plane {z_index} for tile "
                          f"({position['x']:.2f}, {position['y']:.2f})")
