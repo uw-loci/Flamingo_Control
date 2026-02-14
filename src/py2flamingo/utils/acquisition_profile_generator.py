@@ -184,9 +184,22 @@ def generate_tile_profile(
 
     for angle in rotation_angles:
         if abs(angle) > 0.01 and tip_position is None:
-            logger.warning(
-                f"Skipping angle {angle}° - tip position required for rotation"
+            # Single angle — tile directly, angle is metadata only
+            profiles = _generate_tiles_for_angle(
+                mask=mask,
+                x_min_mm=x_min_mm - buffer_mm,
+                x_max_mm=x_max_mm + buffer_mm,
+                y_min_mm=y_min_mm - buffer_mm,
+                y_max_mm=y_max_mm + buffer_mm,
+                z_buffer_mm=z_buffer_mm,
+                fov_mm=fov_mm,
+                fov_half_voxels=fov_half_voxels,
+                voxel_to_stage_fn=voxel_to_stage_fn,
+                voxel_size_mm=voxel_size_mm,
+                mask_shape=(nz, ny, nx),
+                rotation_angle=angle,
             )
+            all_profiles.extend(profiles)
             continue
 
         # For the base angle (first in list), tile directly over mask bbox

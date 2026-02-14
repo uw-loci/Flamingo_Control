@@ -98,11 +98,19 @@ class UnionThresholderDialog(PersistentDialog):
         self._min_object_spin.setRange(0, 10000)
         self._min_object_spin.setSingleStep(100)
         self._min_object_spin.setValue(0)
-        self._min_object_spin.setToolTip("Remove components smaller than N voxels (0 = disabled)")
+        self._min_object_spin.setToolTip(
+            "Remove connected components smaller than N display voxels (0 = disabled)"
+        )
         self._min_object_spin.valueChanged.connect(self._schedule_update)
+        self._min_object_spin.valueChanged.connect(self._update_min_object_volume_label)
         minobj_row.addWidget(self._min_object_spin)
         minobj_row.addStretch()
         proc_layout.addLayout(minobj_row)
+
+        # Volume readout label
+        self._min_object_volume_label = QLabel("")
+        self._min_object_volume_label.setStyleSheet("color: gray; margin-left: 4px;")
+        proc_layout.addWidget(self._min_object_volume_label)
 
         # Morphological opening
         opening_row = QHBoxLayout()
@@ -258,6 +266,22 @@ class UnionThresholderDialog(PersistentDialog):
     # Threshold / mask computation
     # ------------------------------------------------------------------
 
+    def _update_min_object_volume_label(self, value):
+        """Update the volume readout label below the min object size spinner."""
+        if value <= 0:
+            self._min_object_volume_label.setText("")
+            return
+        voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])
+        if isinstance(voxel_size_um, list):
+            vz, vy, vx = voxel_size_um
+        else:
+            vz = vy = vx = float(voxel_size_um)
+        vol_um3 = value * vz * vy * vx
+        if vol_um3 >= 1e9:  # >= 1 mm³
+            self._min_object_volume_label.setText(f"\u2248 {vol_um3 / 1e9:.2f} mm\u00b3")
+        else:
+            self._min_object_volume_label.setText(f"\u2248 {vol_um3:,.0f} \u00b5m\u00b3")
+
     def _schedule_update(self, *_args):
         """Debounce threshold changes."""
         self._update_timer.start()
@@ -362,6 +386,7 @@ class UnionThresholderDialog(PersistentDialog):
             return
 
         count = int(mask.sum())
+        total_voxels = mask.size
 
         # Volume in mm³
         voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])
@@ -395,8 +420,13 @@ class UnionThresholderDialog(PersistentDialog):
             x_lo = x_range[0] + nx_indices[0] * voxel_size_mm
             x_hi = x_range[0] + nx_indices[-1] * voxel_size_mm
 
+        pct = 100.0 * count / total_voxels if total_voxels > 0 else 0.0
+        total_vol_mm3 = total_voxels * voxel_vol_mm3
+
         self._stats_label.setText(
-            f"Voxels: {count:,}  |  Volume: {volume_mm3:.2f} mm\u00b3\n"
+            f"Positive voxels: {count:,} / {total_voxels:,} ({pct:.1f}%)\n"
+            f"Mask volume: {volume_mm3:.2f} mm\u00b3  |  "
+            f"Total volume: {total_vol_mm3:.1f} mm\u00b3\n"
             f"X [{x_lo:.2f}, {x_hi:.2f}]  "
             f"Y [{y_lo:.2f}, {y_hi:.2f}]  "
             f"Z [{z_lo:.2f}, {z_hi:.2f}] mm"
@@ -602,15 +632,15 @@ class UnionThresholderDialog(PersistentDialog):
 
         # Angles & tip
         angles = self._parse_angles()
-        has_nonzero_angle = any(abs(a) > 0.01 for a in angles)
-        tip_pos = self._get_tip_position() if has_nonzero_angle else None
+        needs_rotation = len(set(angles)) > 1
+        tip_pos = self._get_tip_position() if needs_rotation else None
 
-        if has_nonzero_angle and tip_pos is None:
+        if needs_rotation and tip_pos is None:
             QMessageBox.warning(
                 self, "Tip Not Calibrated",
                 "Multi-angle profiles require the 'Tip of sample mount' "
                 "position preset.\nPlease calibrate the tip first, or use "
-                "a single angle of 0."
+                "a single angle."
             )
             return
 
@@ -880,6 +910,7 @@ class UnionThresholderDialog(PersistentDialog):
             self._min_object_spin.blockSignals(True)
             self._min_object_spin.setValue(int(min_obj))
             self._min_object_spin.blockSignals(False)
+            self._update_min_object_volume_label(int(min_obj))
 
         opening_enabled = processing.get('opening_enabled')
         if opening_enabled is None:
