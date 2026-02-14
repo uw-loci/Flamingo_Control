@@ -236,7 +236,7 @@ class UnionThresholderDialog(PersistentDialog):
 
         self._current_mask = combined
         self._update_statistics(combined)
-        self._generate_btn.setEnabled(combined is not None and combined.any())
+        self._generate_btn.setEnabled(bool(combined is not None and combined.any()))
 
         if self._show_mask_cb.isChecked():
             self._update_napari_mask(combined)
