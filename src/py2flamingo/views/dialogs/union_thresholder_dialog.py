@@ -46,8 +46,10 @@ class UnionThresholderDialog(PersistentDialog):
 
         # Channel slider state: {ch_id: (checkbox, slider, value_label)}
         self._channel_controls = {}
-        # Current mask (kept for statistics / profile generation)
+        # Current mask (boolean union for statistics / profile generation)
         self._current_mask: Optional[np.ndarray] = None
+        # Per-channel labels array (label = ch_id + 1) for napari display
+        self._current_labels: Optional[np.ndarray] = None
 
         self.setWindowTitle("Union of Thresholders")
         self.setMinimumWidth(420)
@@ -205,8 +207,13 @@ class UnionThresholderDialog(PersistentDialog):
         self._update_timer.start()
 
     def _recompute_mask(self):
-        """Compute union of per-channel thresholds and update napari."""
+        """Compute union of per-channel thresholds and update napari.
+
+        Builds a per-channel labels array (label = ch_id + 1) so each channel
+        is visually distinct, plus a boolean union mask for statistics/profiles.
+        """
         combined: Optional[np.ndarray] = None
+        labels: Optional[np.ndarray] = None
 
         for ch_id, (cb, slider, _) in self._channel_controls.items():
             if not cb.isChecked() or not cb.isEnabled():
@@ -225,21 +232,25 @@ class UnionThresholderDialog(PersistentDialog):
 
             if combined is None:
                 combined = ch_mask
+                labels = np.zeros(ch_mask.shape, dtype=np.int32)
             else:
-                # Ensure shapes match (all display volumes should be same size)
-                if combined.shape == ch_mask.shape:
-                    combined = combined | ch_mask
-                else:
+                if combined.shape != ch_mask.shape:
                     logger.warning(
                         f"Shape mismatch ch {ch_id}: {ch_mask.shape} vs {combined.shape}"
                     )
+                    continue
+                combined = combined | ch_mask
+
+            # Per-channel label (ch_id + 1); later channels overwrite in overlap
+            labels[ch_mask] = ch_id + 1
 
         self._current_mask = combined
+        self._current_labels = labels
         self._update_statistics(combined)
         self._generate_btn.setEnabled(bool(combined is not None and combined.any()))
 
         if self._show_mask_cb.isChecked():
-            self._update_napari_mask(combined)
+            self._update_napari_mask(labels)
         else:
             self._remove_napari_mask()
 
@@ -294,26 +305,65 @@ class UnionThresholderDialog(PersistentDialog):
     # Napari mask layer management
     # ------------------------------------------------------------------
 
-    def _update_napari_mask(self, mask: Optional[np.ndarray]):
-        """Add or update the Labels layer in napari."""
+    def _build_label_colormap(self) -> dict:
+        """Build a color dict mapping label values to channel colors.
+
+        Label value = ch_id + 1.  Colors are taken from the channel's
+        default_colormap in the config, falling back to napari defaults.
+        """
+        colormap_to_rgba = {
+            'blue':    (0.58, 0.44, 0.86, 1.0),   # #9370DB  (matches 3D viewer)
+            'green':   (0.20, 0.80, 0.20, 1.0),   # #32CD32
+            'red':     (0.86, 0.08, 0.24, 1.0),   # #DC143C
+            'magenta': (1.00, 0.00, 1.00, 1.0),   # #FF00FF
+            'cyan':    (0.00, 0.81, 0.82, 1.0),   # #00CED1
+            'gray':    (0.75, 0.75, 0.75, 1.0),   # #C0C0C0
+        }
+        fallback_colors = [
+            (0.58, 0.44, 0.86, 1.0),
+            (0.20, 0.80, 0.20, 1.0),
+            (0.86, 0.08, 0.24, 1.0),
+            (1.00, 0.00, 1.00, 1.0),
+        ]
+
+        color_dict = {None: (0.0, 0.0, 0.0, 0.0)}  # background transparent
+        channels_config = self._config.get('channels', [])
+
+        for ch_cfg in channels_config:
+            ch_id = ch_cfg['id']
+            label_val = ch_id + 1
+            cmap_name = ch_cfg.get('default_colormap', 'gray')
+            color = colormap_to_rgba.get(cmap_name)
+            if color is None:
+                color = fallback_colors[ch_id % len(fallback_colors)]
+            color_dict[label_val] = color
+
+        return color_dict
+
+    def _update_napari_mask(self, labels: Optional[np.ndarray]):
+        """Add or update the Labels layer in napari with contour rendering."""
         viewer = self._sample_view.viewer
         if viewer is None:
             return
 
-        if mask is None or not mask.any():
+        if labels is None or not labels.any():
             self._remove_napari_mask()
             return
 
-        labels = mask.astype(np.int32)
         opacity = self._opacity_slider.value() / 100.0
+        color_dict = self._build_label_colormap()
 
-        # Check if layer already exists
         existing = self._find_mask_layer()
         if existing is not None:
             existing.data = labels
             existing.opacity = opacity
+            existing.color = color_dict
         else:
-            viewer.add_labels(labels, name=_MASK_LAYER_NAME, opacity=opacity)
+            layer = viewer.add_labels(
+                labels, name=_MASK_LAYER_NAME, opacity=opacity,
+            )
+            layer.color = color_dict
+            layer.contour = 2
 
     def _remove_napari_mask(self):
         """Remove the mask Labels layer if it exists."""
@@ -341,8 +391,8 @@ class UnionThresholderDialog(PersistentDialog):
             layer.opacity = value / 100.0
 
     def _on_show_mask_toggled(self, checked):
-        if checked and self._current_mask is not None:
-            self._update_napari_mask(self._current_mask)
+        if checked and self._current_labels is not None:
+            self._update_napari_mask(self._current_labels)
         else:
             self._remove_napari_mask()
 
