@@ -12,6 +12,7 @@ import os
 from typing import Optional, List, Tuple
 
 import numpy as np
+from scipy import ndimage
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QSlider, QCheckBox,
@@ -71,6 +72,57 @@ class UnionThresholderDialog(PersistentDialog):
         self._setup_channel_sliders(thresh_layout)
         thresh_group.setLayout(thresh_layout)
         layout.addWidget(thresh_group)
+
+        # --- Processing ---
+        proc_group = QGroupBox("Processing")
+        proc_layout = QVBoxLayout()
+        proc_layout.setSpacing(4)
+
+        # Gaussian sigma
+        gauss_row = QHBoxLayout()
+        gauss_row.addWidget(QLabel("Gaussian sigma:"))
+        self._gauss_sigma_spin = QDoubleSpinBox()
+        self._gauss_sigma_spin.setRange(0.0, 5.0)
+        self._gauss_sigma_spin.setSingleStep(0.5)
+        self._gauss_sigma_spin.setValue(0.0)
+        self._gauss_sigma_spin.setToolTip("3D Gaussian smoothing sigma (0 = disabled)")
+        self._gauss_sigma_spin.valueChanged.connect(self._schedule_update)
+        gauss_row.addWidget(self._gauss_sigma_spin)
+        gauss_row.addStretch()
+        proc_layout.addLayout(gauss_row)
+
+        # Min object size
+        minobj_row = QHBoxLayout()
+        minobj_row.addWidget(QLabel("Min object size:"))
+        self._min_object_spin = QSpinBox()
+        self._min_object_spin.setRange(0, 10000)
+        self._min_object_spin.setSingleStep(100)
+        self._min_object_spin.setValue(0)
+        self._min_object_spin.setToolTip("Remove components smaller than N voxels (0 = disabled)")
+        self._min_object_spin.valueChanged.connect(self._schedule_update)
+        minobj_row.addWidget(self._min_object_spin)
+        minobj_row.addStretch()
+        proc_layout.addLayout(minobj_row)
+
+        # Morphological opening
+        opening_row = QHBoxLayout()
+        self._opening_cb = QCheckBox("Morphological opening")
+        self._opening_cb.setToolTip("Binary opening removes thin protrusions")
+        self._opening_cb.toggled.connect(self._schedule_update)
+        opening_row.addWidget(self._opening_cb)
+        opening_row.addWidget(QLabel("radius:"))
+        self._opening_radius_spin = QSpinBox()
+        self._opening_radius_spin.setRange(1, 3)
+        self._opening_radius_spin.setValue(1)
+        self._opening_radius_spin.setEnabled(False)
+        self._opening_radius_spin.valueChanged.connect(self._schedule_update)
+        self._opening_cb.toggled.connect(self._opening_radius_spin.setEnabled)
+        opening_row.addWidget(self._opening_radius_spin)
+        opening_row.addStretch()
+        proc_layout.addLayout(opening_row)
+
+        proc_group.setLayout(proc_layout)
+        layout.addWidget(proc_group)
 
         # --- Presets ---
         preset_group = QGroupBox("Presets")
@@ -181,7 +233,11 @@ class UnionThresholderDialog(PersistentDialog):
             if has_data:
                 # Set slider max to observed max intensity in display volume
                 try:
-                    vol = self._voxel_storage.get_display_volume(ch_id)
+                    if (ch_id in self._sample_view.channel_layers
+                            and self._sample_view.channel_layers[ch_id].data is not None):
+                        vol = self._sample_view.channel_layers[ch_id].data
+                    else:
+                        vol = self._voxel_storage.get_display_volume(ch_id)
                     max_val = int(vol.max()) if vol.size > 0 else 65535
                     slider.setRange(0, max(1, max_val))
                 except Exception:
@@ -209,11 +265,20 @@ class UnionThresholderDialog(PersistentDialog):
     def _recompute_mask(self):
         """Compute union of per-channel thresholds and update napari.
 
-        Builds a per-channel labels array (label = ch_id + 1) so each channel
-        is visually distinct, plus a boolean union mask for statistics/profiles.
+        Pipeline per-channel:
+          1. Get transformed volume (napari layer data, fallback to storage)
+          2. Gaussian smooth if sigma > 0
+          3. Threshold -> boolean mask
+          4. Assign per-channel label (ch_id + 1)
+
+        Post-union:
+          5. Morphological opening if enabled
+          6. Remove small objects if min_size > 0
+          7. Zero out labels wherever combined mask became False
         """
         combined: Optional[np.ndarray] = None
         labels: Optional[np.ndarray] = None
+        gauss_sigma = self._gauss_sigma_spin.value()
 
         for ch_id, (cb, slider, _) in self._channel_controls.items():
             if not cb.isChecked() or not cb.isEnabled():
@@ -223,10 +288,20 @@ class UnionThresholderDialog(PersistentDialog):
                 continue
 
             try:
-                vol = self._voxel_storage.get_display_volume(ch_id)
+                if (ch_id in self._sample_view.channel_layers
+                        and self._sample_view.channel_layers[ch_id].data is not None):
+                    vol = self._sample_view.channel_layers[ch_id].data
+                else:
+                    vol = self._voxel_storage.get_display_volume(ch_id)
             except Exception as e:
                 logger.warning(f"Could not get display volume for ch {ch_id}: {e}")
                 continue
+
+            # Gaussian smoothing (pre-threshold)
+            if gauss_sigma > 0:
+                vol = ndimage.gaussian_filter(
+                    vol.astype(np.float32), sigma=gauss_sigma, truncate=3.0
+                )
 
             ch_mask = vol >= threshold
 
@@ -243,6 +318,32 @@ class UnionThresholderDialog(PersistentDialog):
 
             # Per-channel label (ch_id + 1); later channels overwrite in overlap
             labels[ch_mask] = ch_id + 1
+
+        # --- Post-union processing ---
+        if combined is not None and combined.any():
+            # Morphological opening
+            if self._opening_cb.isChecked():
+                radius = self._opening_radius_spin.value()
+                struct = ndimage.generate_binary_structure(3, 1)
+                struct = ndimage.iterate_structure(struct, radius)
+                combined = ndimage.binary_opening(combined, structure=struct)
+
+            # Remove small objects
+            min_size = self._min_object_spin.value()
+            if min_size > 0:
+                labeled_arr, num_features = ndimage.label(combined)
+                if num_features > 0:
+                    comp_sizes = np.bincount(labeled_arr.ravel())
+                    # comp_sizes[0] is background, keep all >= min_size
+                    small_labels = np.where(comp_sizes < min_size)[0]
+                    small_labels = small_labels[small_labels > 0]  # skip background
+                    if small_labels.size > 0:
+                        remove_mask = np.isin(labeled_arr, small_labels)
+                        combined[remove_mask] = False
+
+            # Zero out labels wherever combined mask became False
+            if labels is not None:
+                labels[~combined] = 0
 
         self._current_mask = combined
         self._current_labels = labels
@@ -649,6 +750,10 @@ class UnionThresholderDialog(PersistentDialog):
             'show_mask': self._show_mask_cb.isChecked(),
             'buffer_fraction': self._buffer_spin.value(),
             'angles': self._angles_edit.text(),
+            'gauss_sigma': self._gauss_sigma_spin.value(),
+            'min_object_size': self._min_object_spin.value(),
+            'opening_enabled': self._opening_cb.isChecked(),
+            'opening_radius': self._opening_radius_spin.value(),
         }
 
         try:
@@ -682,7 +787,7 @@ class UnionThresholderDialog(PersistentDialog):
     def _build_preset_dict(self) -> dict:
         """Build a preset dictionary from current dialog state."""
         return {
-            'version': 1,
+            'version': 2,
             'channels': {
                 str(ch_id): {
                     'enabled': cb.isChecked(),
@@ -693,6 +798,12 @@ class UnionThresholderDialog(PersistentDialog):
             'display': {
                 'opacity': self._opacity_slider.value() / 100.0,
                 'show_mask': self._show_mask_cb.isChecked(),
+            },
+            'processing': {
+                'gauss_sigma': self._gauss_sigma_spin.value(),
+                'min_object_size': self._min_object_spin.value(),
+                'opening_enabled': self._opening_cb.isChecked(),
+                'opening_radius': self._opening_radius_spin.value(),
             },
             'profile': {
                 'buffer_fraction': self._buffer_spin.value(),
@@ -750,6 +861,42 @@ class UnionThresholderDialog(PersistentDialog):
             self._show_mask_cb.blockSignals(True)
             self._show_mask_cb.setChecked(show_mask)
             self._show_mask_cb.blockSignals(False)
+
+        # --- Processing settings (preset nests under 'processing', dialog state is flat) ---
+        processing = state.get('processing', {})
+
+        gauss_sigma = processing.get('gauss_sigma')
+        if gauss_sigma is None:
+            gauss_sigma = state.get('gauss_sigma')
+        if gauss_sigma is not None:
+            self._gauss_sigma_spin.blockSignals(True)
+            self._gauss_sigma_spin.setValue(float(gauss_sigma))
+            self._gauss_sigma_spin.blockSignals(False)
+
+        min_obj = processing.get('min_object_size')
+        if min_obj is None:
+            min_obj = state.get('min_object_size')
+        if min_obj is not None:
+            self._min_object_spin.blockSignals(True)
+            self._min_object_spin.setValue(int(min_obj))
+            self._min_object_spin.blockSignals(False)
+
+        opening_enabled = processing.get('opening_enabled')
+        if opening_enabled is None:
+            opening_enabled = state.get('opening_enabled')
+        if opening_enabled is not None:
+            self._opening_cb.blockSignals(True)
+            self._opening_cb.setChecked(bool(opening_enabled))
+            self._opening_cb.blockSignals(False)
+            self._opening_radius_spin.setEnabled(bool(opening_enabled))
+
+        opening_radius = processing.get('opening_radius')
+        if opening_radius is None:
+            opening_radius = state.get('opening_radius')
+        if opening_radius is not None:
+            self._opening_radius_spin.blockSignals(True)
+            self._opening_radius_spin.setValue(int(opening_radius))
+            self._opening_radius_spin.blockSignals(False)
 
         # --- Profile settings (preset nests under 'profile', dialog state is flat) ---
         profile = state.get('profile', {})
