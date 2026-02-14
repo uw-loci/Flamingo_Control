@@ -2760,13 +2760,10 @@ class SampleView(QWidget):
 
                 channel_settings[ch_id] = settings
 
-            # Update plane viewers with multi-channel data
-            if xz_channel_mips:
-                self.xz_plane_viewer.set_multi_channel_mip(xz_channel_mips, channel_settings)
-            if xy_channel_mips:
-                self.xy_plane_viewer.set_multi_channel_mip(xy_channel_mips, channel_settings)
-            if yz_channel_mips:
-                self.yz_plane_viewer.set_multi_channel_mip(yz_channel_mips, channel_settings)
+            # Update plane viewers with multi-channel data (empty dicts clear the display)
+            self.xz_plane_viewer.set_multi_channel_mip(xz_channel_mips, channel_settings)
+            self.xy_plane_viewer.set_multi_channel_mip(xy_channel_mips, channel_settings)
+            self.yz_plane_viewer.set_multi_channel_mip(yz_channel_mips, channel_settings)
 
         except Exception as e:
             self.logger.error(f"Error updating plane views: {e}")
