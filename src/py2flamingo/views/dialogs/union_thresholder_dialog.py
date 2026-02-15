@@ -681,6 +681,9 @@ class UnionThresholderDialog(PersistentDialog):
 
     def _open_tile_collection(self, profiles, angles: List[float]):
         """Convert TileProfiles to TileResults and open TileCollectionDialog."""
+        # Remove the threshold mask - stale during acquisition
+        self._remove_napari_mask()
+
         from py2flamingo.models.data.overview_results import TileResult
         from py2flamingo.views.dialogs.tile_collection_dialog import TileCollectionDialog
 

@@ -542,14 +542,18 @@ class TileCollectionDialog(PersistentDialog):
 
             logger.info(f"90° overlap mode: {len(primary_tiles)} primary tiles at R={primary_rotation}°")
         else:
-            # Single view mode: use all tiles with bounding box Z range
+            # Single view mode: use per-tile Z range if available, else bounding box
             bbox_z_min = self._config.bounding_box.z_min if self._config else 0.0
             bbox_z_max = self._config.bounding_box.z_max if self._config else 10.0
 
             for tile in self._left_tiles:
-                tiles_to_process.append((tile, self._left_rotation, bbox_z_min, bbox_z_max))
+                z_min = tile.z_stack_min if tile.z_stack_min != tile.z_stack_max else bbox_z_min
+                z_max = tile.z_stack_max if tile.z_stack_min != tile.z_stack_max else bbox_z_max
+                tiles_to_process.append((tile, self._left_rotation, z_min, z_max))
             for tile in self._right_tiles:
-                tiles_to_process.append((tile, self._right_rotation, bbox_z_min, bbox_z_max))
+                z_min = tile.z_stack_min if tile.z_stack_min != tile.z_stack_max else bbox_z_min
+                z_max = tile.z_stack_max if tile.z_stack_min != tile.z_stack_max else bbox_z_max
+                tiles_to_process.append((tile, self._right_rotation, z_min, z_max))
 
         total = len(tiles_to_process)
         if total == 0:
@@ -958,6 +962,10 @@ class TileCollectionDialog(PersistentDialog):
                 position['z_min'] = z_min
                 position['z_max'] = z_max
                 z_stack_info.append(position)
+
+        # Clear old data before starting new tile workflows
+        if hasattr(sample_view, 'clear_data_for_workflows'):
+            sample_view.clear_data_for_workflows()
 
         # Pass to Sample View for initialization
         if hasattr(sample_view, 'prepare_for_tile_workflows'):

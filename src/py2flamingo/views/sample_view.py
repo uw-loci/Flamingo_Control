@@ -2032,6 +2032,21 @@ class SampleView(QWidget):
             self._update_visualization()
             self.logger.info("Cleared all visualization data")
 
+    def clear_data_for_workflows(self):
+        """Clear all data in preparation for tile workflows (no confirmation)."""
+        if self.voxel_storage:
+            self.voxel_storage.clear()
+            self._update_visualization()
+            self.logger.info("Cleared visualization data for tile workflows")
+
+        # Remove threshold mask layer if present
+        if self.viewer:
+            for layer in list(self.viewer.layers):
+                if layer.name == "Threshold Mask":
+                    self.viewer.layers.remove(layer)
+                    self.logger.info("Removed threshold mask layer")
+                    break
+
     def add_frame_to_volume(self, image: np.ndarray, stage_position_mm: dict,
                             channel_id: int, timestamp: float = None,
                             reference_position: dict = None) -> None:
