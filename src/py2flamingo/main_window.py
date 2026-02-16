@@ -461,7 +461,11 @@ class MainWindow(QMainWindow):
         self.volume_scan_action.setText("&Volume Scan")
 
     def _on_calibrate_objective(self):
-        """Handle calibrate objective menu action."""
+        """Handle calibrate objective menu action.
+
+        Uses a non-modal dialog so the user can interact with stage controls
+        and camera live view while the calibration instructions are visible.
+        """
         import logging
         logger = logging.getLogger(__name__)
         logger.info("Calibrate Objective menu action triggered")
@@ -470,54 +474,60 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Error", "Application not available")
             return
 
-        # Show instructions dialog
-        reply = QMessageBox.information(
-            self,
-            "Calibrate Objective XY Center",
+        # Create non-modal message box so user can move the stage
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Calibrate Objective XY Center")
+        msg.setText(
             "This calibration helps show where the camera is capturing in 3D.\n\n"
             "Instructions:\n\n"
             "1. Open the Camera Live View\n"
             "2. Use the stage controls to move until you can see\n"
             "   the very tip of the sample holder (fine extension)\n"
             "3. Center the tip in the camera view\n"
-            "4. Click OK to save this position\n\n"
-            "Note: Rotation (R) should not affect centering.",
-            QMessageBox.Ok | QMessageBox.Cancel
+            "4. Click Save to save this position\n\n"
+            "Note: Rotation (R) should not affect centering."
         )
+        msg.setIcon(QMessageBox.Information)
+        save_btn = msg.addButton("Save Position", QMessageBox.AcceptRole)
+        msg.addButton(QMessageBox.Cancel)
+        msg.setWindowModality(Qt.NonModal)
 
-        if reply != QMessageBox.Ok:
-            return
+        def on_finished():
+            if msg.clickedButton() != save_btn:
+                return
+            try:
+                movement_controller = getattr(self.app, 'movement_controller', None)
+                if not movement_controller:
+                    raise RuntimeError("Movement controller not available")
 
-        try:
-            # Get current position from movement controller
-            movement_controller = getattr(self.app, 'movement_controller', None)
-            if not movement_controller:
-                raise RuntimeError("Movement controller not available")
+                current_pos = movement_controller.get_position()
+                if not current_pos:
+                    raise RuntimeError("Could not read current position")
 
-            current_pos = movement_controller.get_position()
-            if not current_pos:
-                raise RuntimeError("Could not read current position")
+                preset_service = getattr(self.app, 'position_preset_service', None)
+                if preset_service:
+                    preset_service.save_preset(
+                        name="Tip of sample mount",
+                        position=current_pos,
+                        description="Calibrated objective center position"
+                    )
+                    logger.info(f"Saved calibration: {current_pos}")
+                    QMessageBox.information(
+                        self, "Calibration Saved",
+                        f"Position saved:\nX={current_pos.x:.3f}, Y={current_pos.y:.3f}, "
+                        f"Z={current_pos.z:.3f}, R={current_pos.r:.1f}°"
+                    )
+                else:
+                    QMessageBox.warning(self, "Warning", "Preset service not available")
 
-            # Save as preset
-            preset_service = getattr(self.app, 'position_preset_service', None)
-            if preset_service:
-                preset_service.save_preset(
-                    name="Tip of sample mount",
-                    position=current_pos,
-                    description="Calibrated objective center position"
-                )
-                logger.info(f"Saved calibration: {current_pos}")
-                QMessageBox.information(
-                    self, "Calibration Saved",
-                    f"Position saved:\nX={current_pos.x:.3f}, Y={current_pos.y:.3f}, "
-                    f"Z={current_pos.z:.3f}, R={current_pos.r:.1f}°"
-                )
-            else:
-                QMessageBox.warning(self, "Warning", "Preset service not available")
+            except Exception as e:
+                logger.error(f"Error during calibration: {e}", exc_info=True)
+                QMessageBox.critical(self, "Error", f"Calibration failed: {e}")
 
-        except Exception as e:
-            logger.error(f"Error during calibration: {e}", exc_info=True)
-            QMessageBox.critical(self, "Error", f"Calibration failed: {e}")
+        msg.finished.connect(on_finished)
+        # Keep reference to prevent garbage collection
+        self._calibration_dialog = msg
+        msg.show()
 
     def _on_benchmark_3d(self):
         """Handle Benchmark 3D Viewer menu action."""
