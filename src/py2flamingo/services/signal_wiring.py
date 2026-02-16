@@ -97,11 +97,12 @@ def wire_connection_signals(connection_view, on_established, on_closed,
 
 
 def wire_workflow_signals(workflow_view, status_indicator_service,
-                          position_controller, connection_view):
+                          position_controller, connection_view,
+                          workflow_controller=None):
     """Connect workflow view signals to status indicator and position services.
 
     Wires workflow started/stopped, position callback, preset service,
-    and connection state enable/disable.
+    connection state enable/disable, and template management signals.
     """
     # Workflow events to status indicator service
     if hasattr(workflow_view, 'workflow_started'):
@@ -140,6 +141,48 @@ def wire_workflow_signals(workflow_view, status_indicator_service,
             lambda: workflow_view.update_for_connection_state(False)
         )
         logger.debug("Connected connection_closed to workflow view")
+
+    # Template management signals
+    if workflow_controller:
+        def _on_save_template(name, description):
+            workflow_dict = workflow_view.get_workflow_dict()
+            workflow_type = workflow_view.get_current_workflow_type()
+            success, msg = workflow_controller.save_template(
+                name, workflow_type, workflow_dict, description
+            )
+            if success:
+                # Refresh template list in view
+                names = workflow_controller.get_template_names()
+                workflow_view.update_template_list(names)
+            logger.info(f"Template save: {msg}")
+
+        def _on_load_template(name):
+            success, data, msg = workflow_controller.load_template(name)
+            if success and data:
+                workflow_view.set_workflow_dict(data['settings'], data['workflow_type'])
+            logger.info(f"Template load: {msg}")
+
+        def _on_delete_template(name):
+            success, msg = workflow_controller.delete_template(name)
+            if success:
+                names = workflow_controller.get_template_names()
+                workflow_view.update_template_list(names)
+            logger.info(f"Template delete: {msg}")
+
+        def _on_check_workflow():
+            workflow_dict = workflow_view.get_workflow_dict()
+            result = workflow_controller.check_workflow(workflow_dict)
+            workflow_view.show_validation_result(result)
+
+        workflow_view.template_save_requested.connect(_on_save_template)
+        workflow_view.template_load_requested.connect(_on_load_template)
+        workflow_view.template_delete_requested.connect(_on_delete_template)
+        workflow_view.check_workflow_requested.connect(_on_check_workflow)
+
+        # Load initial template list
+        names = workflow_controller.get_template_names()
+        workflow_view.update_template_list(names)
+        logger.debug("Connected template and check signals to workflow controller")
 
 
 def wire_acquisition_lock_signals(acquisition_started, acquisition_stopped,
@@ -198,7 +241,8 @@ def wire_all_signals(app):
         app.workflow_view,
         app.status_indicator_service,
         app.position_controller,
-        app.connection_view
+        app.connection_view,
+        workflow_controller=getattr(app, 'workflow_controller', None)
     )
 
     wire_acquisition_lock_signals(

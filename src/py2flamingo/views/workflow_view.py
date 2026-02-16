@@ -20,7 +20,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon
 
-from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.services.window_geometry_manager import PersistentDialog, _default_geometry_manager
 from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR, SUCCESS_BG, WARNING_BG
 from py2flamingo.views.workflow_panels import (
     IlluminationPanel, CameraPanel, SavePanel, ZStackPanel,
@@ -85,12 +85,16 @@ class WorkflowView(QWidget):
         self._logger = logging.getLogger(__name__)
 
         # Track current workflow type
-        self._current_type = WorkflowType.SNAPSHOT
+        self._current_type = WorkflowType.TILE  # Default to Tile Scan
 
         # Position callback will be set by application
         self._get_position_callback = None
 
         self._setup_ui()
+
+        # Restore persisted workflow type (default: Tile Scan = index 3)
+        self._restore_workflow_type()
+
         self._logger.info("WorkflowView initialized with comprehensive workflow builder")
 
     def _setup_ui(self) -> None:
@@ -355,6 +359,27 @@ class WorkflowView(QWidget):
 
         self.workflow_type_changed.emit(workflow_type.value)
         self._logger.info(f"Workflow type changed to: {name}")
+
+        # Persist selection
+        self._save_workflow_type(index)
+
+    def _save_workflow_type(self, index: int) -> None:
+        """Persist workflow type selection."""
+        gm = _default_geometry_manager
+        if gm:
+            gm.save_dialog_state('WorkflowView', {'workflow_type_index': index})
+
+    def _restore_workflow_type(self) -> None:
+        """Restore persisted workflow type selection, defaulting to Tile Scan."""
+        gm = _default_geometry_manager
+        default_index = 3  # Tile Scan
+        if gm:
+            state = gm.restore_dialog_state('WorkflowView')
+            idx = state.get('workflow_type_index', default_index)
+        else:
+            idx = default_index
+        if 0 <= idx < len(WORKFLOW_TYPES):
+            self._type_combo.setCurrentIndex(idx)
 
     def _apply_visibility_matrix(self, workflow_type: WorkflowType) -> None:
         """Apply parameter visibility based on workflow type.
@@ -626,7 +651,7 @@ class WorkflowView(QWidget):
 
         elif workflow.workflow_type == WorkflowType.TILE:
             settings = self._tiling_panel.get_settings()
-            if settings.tiles_x < 1 or settings.tiles_y < 1:
+            if settings.num_tiles_x < 1 or settings.num_tiles_y < 1:
                 errors.append("Tile count must be at least 1")
 
         elif workflow.workflow_type == WorkflowType.MULTI_ANGLE:

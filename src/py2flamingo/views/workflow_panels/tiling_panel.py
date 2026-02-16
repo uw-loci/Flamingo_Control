@@ -41,7 +41,7 @@ class TilingPanel(QWidget):
         """
         super().__init__(parent)
         self._logger = logging.getLogger(__name__)
-        self._tile_size_um = 2048.0  # Default tile size in microns (based on camera FOV)
+        self._tile_size_um = 520.0  # Default tile size in microns (camera FOV ~0.52mm)
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -174,8 +174,8 @@ class TilingPanel(QWidget):
             TileSettings object with current values
         """
         return TileSettings(
-            tiles_x=self._tiles_x.value(),
-            tiles_y=self._tiles_y.value(),
+            num_tiles_x=self._tiles_x.value(),
+            num_tiles_y=self._tiles_y.value(),
             overlap_percent=self._overlap.value(),
         )
 
@@ -199,8 +199,8 @@ class TilingPanel(QWidget):
         Args:
             settings: TileSettings to apply
         """
-        self._tiles_x.setValue(settings.tiles_x)
-        self._tiles_y.setValue(settings.tiles_y)
+        self._tiles_x.setValue(settings.num_tiles_x)
+        self._tiles_y.setValue(settings.num_tiles_y)
         self._overlap.setValue(settings.overlap_percent)
 
     def set_tile_size(self, tile_size_um: float) -> None:
