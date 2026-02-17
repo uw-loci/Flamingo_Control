@@ -44,9 +44,9 @@ class PipelineEditorDialog(PersistentDialog):
 
     def __init__(self, app=None, parent=None):
         super().__init__(
-            "PipelineEditor",
-            geometry_manager=getattr(app, 'geometry_manager', None),
             parent=parent,
+            geometry_manager=getattr(app, 'geometry_manager', None),
+            window_id="PipelineEditor",
         )
         self.app = app
         self._pipeline = Pipeline(name="New Pipeline")
