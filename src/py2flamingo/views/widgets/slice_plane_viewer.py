@@ -702,18 +702,21 @@ class SlicePlaneViewer(QFrame):
         label_margin_bottom = 16
         img_area_height = display_height - label_margin_top - label_margin_bottom
 
-        # Get original image dimensions from channel data or MIP
+        # Get original image dimensions from channel data or MIP.
+        # When no data is loaded, use display area dimensions to match the
+        # empty pixmap created in _update_display (display_width x img_area_height),
+        # so pixel-to-physical mapping stays consistent with overlay drawing.
         if self._channel_mips:
             for ch_data in self._channel_mips.values():
                 if ch_data is not None and ch_data.size > 0:
                     orig_h, orig_w = ch_data.shape
                     break
             else:
-                return None
+                orig_h, orig_w = img_area_height, display_width
         elif self._mip_data is not None:
             orig_h, orig_w = self._mip_data.shape
         else:
-            return None
+            orig_h, orig_w = img_area_height, display_width
 
         # Calculate scale to fit image in reduced area (same as _update_display)
         base_scale = min(display_width / orig_w, img_area_height / orig_h) if orig_w > 0 and orig_h > 0 else 1.0
