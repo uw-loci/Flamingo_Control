@@ -21,7 +21,7 @@ from PyQt5.QtCore import QObject, pyqtSignal
 
 from py2flamingo.services.component_factory import (
     create_core_layer, create_models_layer, create_services_layer,
-    create_controllers_layer, create_views_layer
+    create_controllers_layer, create_views_layer, create_pipeline_layer
 )
 from py2flamingo.services.signal_wiring import wire_all_signals
 from py2flamingo.visualization.voxel_storage_factory import create_voxel_storage
@@ -113,6 +113,10 @@ class FlamingoApplication(QObject):
         self.sample_view = None  # Unified sample viewing interface
         self.voxel_storage = None  # DualResolutionVoxelStorage for 3D visualization
 
+        # Pipeline layer components
+        self.pipeline_service = None
+        self.pipeline_controller = None
+
         # Setup logging
         self.logger = logging.getLogger(__name__)
 
@@ -196,6 +200,11 @@ class FlamingoApplication(QObject):
 
         # --- Signal wiring ---
         wire_all_signals(self)
+
+        # --- Pipeline layer ---
+        pipeline = create_pipeline_layer(app=self)
+        self.pipeline_service = pipeline['pipeline_service']
+        self.pipeline_controller = pipeline['pipeline_controller']
 
         self.logger.info("Application dependencies setup complete")
 

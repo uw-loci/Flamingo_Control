@@ -262,3 +262,29 @@ def create_views_layer(connection_controller, config_manager, position_controlle
         'image_controls_window': image_controls_window,
         'camera_live_viewer': camera_live_viewer,
     }
+
+
+def create_pipeline_layer(app=None) -> dict:
+    """Create pipeline layer components.
+
+    Args:
+        app: FlamingoApplication instance for service injection
+
+    Returns:
+        Dict with keys: pipeline_service, pipeline_controller
+    """
+    from py2flamingo.pipeline.services.pipeline_service import PipelineService
+    from py2flamingo.pipeline.controllers.pipeline_controller import PipelineController
+
+    logger.debug("Creating pipeline layer components...")
+
+    pipeline_service = PipelineService()
+    pipeline_controller = PipelineController(
+        service=pipeline_service,
+        app=app,
+    )
+
+    return {
+        'pipeline_service': pipeline_service,
+        'pipeline_controller': pipeline_controller,
+    }

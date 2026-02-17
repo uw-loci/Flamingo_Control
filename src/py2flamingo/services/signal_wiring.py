@@ -216,6 +216,20 @@ def wire_sample_view_signal(connection_view, open_sample_view_callback):
         logger.debug("Connected sample_view_requested signal")
 
 
+def wire_pipeline_signals(app):
+    """Connect pipeline executor signals to editor UI (if pipeline components exist).
+
+    The pipeline controller manages its own internal signal wiring when
+    executing pipelines. This function handles any cross-cutting concerns
+    like acquisition locking during pipeline runs.
+    """
+    pipeline_controller = getattr(app, 'pipeline_controller', None)
+    if not pipeline_controller:
+        return
+
+    logger.debug("Pipeline components available, signals will be wired on execution")
+
+
 def wire_all_signals(app):
     """Top-level orchestrator that wires all application signals.
 
@@ -252,3 +266,5 @@ def wire_all_signals(app):
     )
 
     wire_sample_view_signal(app.connection_view, app._open_sample_view)
+
+    wire_pipeline_signals(app)

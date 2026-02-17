@@ -13,6 +13,10 @@ from typing import Optional, List, Tuple
 
 import numpy as np
 from scipy import ndimage
+
+from py2flamingo.pipeline.services.threshold_analysis_service import (
+    ThresholdAnalysisService, ThresholdSettings,
+)
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QSlider, QCheckBox,
@@ -289,20 +293,18 @@ class UnionThresholderDialog(PersistentDialog):
     def _recompute_mask(self):
         """Compute union of per-channel thresholds and update napari.
 
-        Pipeline per-channel:
+        Delegates the processing pipeline to ThresholdAnalysisService:
           1. Get transformed volume (napari layer data, fallback to storage)
           2. Gaussian smooth if sigma > 0
           3. Threshold -> boolean mask
           4. Assign per-channel label (ch_id + 1)
-
-        Post-union:
           5. Morphological opening if enabled
           6. Remove small objects if min_size > 0
           7. Zero out labels wherever combined mask became False
         """
-        combined: Optional[np.ndarray] = None
-        labels: Optional[np.ndarray] = None
-        gauss_sigma = self._gauss_sigma_spin.value()
+        # Gather volumes and settings from UI controls
+        volumes = {}
+        channel_thresholds = {}
 
         for ch_id, (cb, slider, _) in self._channel_controls.items():
             if not cb.isChecked() or not cb.isEnabled():
@@ -317,65 +319,45 @@ class UnionThresholderDialog(PersistentDialog):
                     vol = self._sample_view.channel_layers[ch_id].data
                 else:
                     vol = self._voxel_storage.get_display_volume(ch_id)
+                volumes[ch_id] = vol
+                channel_thresholds[ch_id] = threshold
             except Exception as e:
                 logger.warning(f"Could not get display volume for ch {ch_id}: {e}")
                 continue
 
-            # Gaussian smoothing (pre-threshold)
-            if gauss_sigma > 0:
-                vol = ndimage.gaussian_filter(
-                    vol.astype(np.float32), sigma=gauss_sigma, truncate=3.0
-                )
-
-            ch_mask = vol >= threshold
-
-            if combined is None:
-                combined = ch_mask
-                labels = np.zeros(ch_mask.shape, dtype=np.int32)
+        if not volumes:
+            self._current_mask = None
+            self._current_labels = None
+            self._update_statistics(None)
+            self._generate_btn.setEnabled(False)
+            if self._show_mask_cb.isChecked():
+                self._update_napari_mask(None)
             else:
-                if combined.shape != ch_mask.shape:
-                    logger.warning(
-                        f"Shape mismatch ch {ch_id}: {ch_mask.shape} vs {combined.shape}"
-                    )
-                    continue
-                combined = combined | ch_mask
+                self._remove_napari_mask()
+            return
 
-            # Per-channel label (ch_id + 1); later channels overwrite in overlap
-            labels[ch_mask] = ch_id + 1
+        settings = ThresholdSettings(
+            channel_thresholds=channel_thresholds,
+            gauss_sigma=self._gauss_sigma_spin.value(),
+            opening_enabled=self._opening_cb.isChecked(),
+            opening_radius=self._opening_radius_spin.value(),
+            min_object_size=self._min_object_spin.value(),
+        )
 
-        # --- Post-union processing ---
-        if combined is not None and combined.any():
-            # Morphological opening
-            if self._opening_cb.isChecked():
-                radius = self._opening_radius_spin.value()
-                struct = ndimage.generate_binary_structure(3, 1)
-                struct = ndimage.iterate_structure(struct, radius)
-                combined = ndimage.binary_opening(combined, structure=struct)
+        if not hasattr(self, '_threshold_service'):
+            self._threshold_service = ThresholdAnalysisService()
 
-            # Remove small objects
-            min_size = self._min_object_spin.value()
-            if min_size > 0:
-                labeled_arr, num_features = ndimage.label(combined)
-                if num_features > 0:
-                    comp_sizes = np.bincount(labeled_arr.ravel())
-                    # comp_sizes[0] is background, keep all >= min_size
-                    small_labels = np.where(comp_sizes < min_size)[0]
-                    small_labels = small_labels[small_labels > 0]  # skip background
-                    if small_labels.size > 0:
-                        remove_mask = np.isin(labeled_arr, small_labels)
-                        combined[remove_mask] = False
+        result = self._threshold_service.analyze(volumes=volumes, settings=settings)
 
-            # Zero out labels wherever combined mask became False
-            if labels is not None:
-                labels[~combined] = 0
-
-        self._current_mask = combined
-        self._current_labels = labels
-        self._update_statistics(combined)
-        self._generate_btn.setEnabled(bool(combined is not None and combined.any()))
+        self._current_mask = result.combined_mask
+        self._current_labels = result.labels
+        self._update_statistics(result.combined_mask)
+        self._generate_btn.setEnabled(
+            bool(result.combined_mask is not None and result.combined_mask.any())
+        )
 
         if self._show_mask_cb.isChecked():
-            self._update_napari_mask(labels)
+            self._update_napari_mask(result.labels)
         else:
             self._remove_napari_mask()
 

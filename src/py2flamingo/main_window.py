@@ -287,6 +287,13 @@ class MainWindow(QMainWindow):
         self.union_thresholder_action.setEnabled(False)
         extensions_menu.addAction(self.union_thresholder_action)
 
+        extensions_menu.addSeparator()
+
+        self.pipeline_editor_action = QAction("&Pipeline Editor...", self)
+        self.pipeline_editor_action.setStatusTip("Visual pipeline editor for composing acquisition and analysis workflows")
+        self.pipeline_editor_action.triggered.connect(self._on_pipeline_editor)
+        extensions_menu.addAction(self.pipeline_editor_action)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -701,6 +708,34 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error opening Union of Thresholders: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to open dialog: {e}")
+
+    def _on_pipeline_editor(self):
+        """Handle Pipeline Editor menu action."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("Pipeline Editor menu action triggered")
+
+        if not self.app:
+            QMessageBox.warning(self, "Error", "Application not available")
+            return
+
+        try:
+            pipeline_controller = getattr(self.app, 'pipeline_controller', None)
+            if pipeline_controller:
+                pipeline_controller.open_editor()
+            else:
+                # Lazy creation if not yet initialized
+                from py2flamingo.pipeline.controllers.pipeline_controller import PipelineController
+                from py2flamingo.pipeline.services.pipeline_service import PipelineService
+                self.app.pipeline_service = PipelineService()
+                self.app.pipeline_controller = PipelineController(
+                    service=self.app.pipeline_service, app=self.app
+                )
+                self.app.pipeline_controller.open_editor()
+
+        except Exception as e:
+            logger.error(f"Error opening Pipeline Editor: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to open Pipeline Editor:\n{e}")
 
     def _on_tab_changed(self, index: int) -> None:
         """Handle tab change event - log which tab user switched to.
