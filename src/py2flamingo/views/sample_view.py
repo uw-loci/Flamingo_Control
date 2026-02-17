@@ -792,8 +792,15 @@ class SampleView(QWidget):
         layout.setSpacing(4)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Header row with help button
+        # Header row with checkbox and help button
         header_row = QHBoxLayout()
+        self._move_data_to_focus_cb = QCheckBox("Move data to focus")
+        self._move_data_to_focus_cb.setChecked(False)
+        self._move_data_to_focus_cb.setToolTip(
+            "Checked: double-click moves data so clicked feature reaches focal plane\n"
+            "Unchecked: double-click moves stage directly to clicked coordinate"
+        )
+        header_row.addWidget(self._move_data_to_focus_cb)
         header_row.addStretch()
         plane_help_btn = QPushButton("?")
         plane_help_btn.setFixedSize(24, 24)
@@ -2030,6 +2037,8 @@ class SampleView(QWidget):
         if reply == QMessageBox.Yes:
             self.voxel_storage.clear()
             self._update_visualization()
+            if hasattr(self, '_move_data_to_focus_cb'):
+                self._move_data_to_focus_cb.setChecked(False)
             self.logger.info("Cleared all visualization data")
 
     def clear_data_for_workflows(self):
@@ -2037,6 +2046,8 @@ class SampleView(QWidget):
         if self.voxel_storage:
             self.voxel_storage.clear()
             self._update_visualization()
+            if hasattr(self, '_move_data_to_focus_cb'):
+                self._move_data_to_focus_cb.setChecked(False)
             self.logger.info("Cleared visualization data for tile workflows")
 
         # Remove threshold mask layer if present
@@ -2181,6 +2192,10 @@ class SampleView(QWidget):
                 timestamp=timestamp,
                 update_mode='maximum'
             )
+
+            # Auto-enable focal move mode now that data is present
+            if hasattr(self, '_move_data_to_focus_cb') and not self._move_data_to_focus_cb.isChecked():
+                self._move_data_to_focus_cb.setChecked(True)
 
             # Trigger channel availability check
             if hasattr(self, '_channel_availability_timer'):
@@ -2636,25 +2651,21 @@ class SampleView(QWidget):
     def _on_plane_click(self, plane: str, h_coord: float, v_coord: float) -> None:
         """Handle click-to-move from plane viewers.
 
-        Moves the stage so that the clicked data point ends up at the focal plane.
-        The focal plane (objective focal point) is the anchor — the stage moves to
-        shift the sample such that the clicked feature lands on it.
+        Two modes controlled by the "Move data to focus" checkbox:
 
-        With rigid-body display (data moves with stage), the formula is:
-          target = current + (focal - click)
-        for all axes. The stage moves so that the clicked data point
-        lands on the focal plane.
+        Focal mode (checked + focal point set):
+          Moves the stage so that the clicked data point ends up at the focal plane.
+          Formula: target = current + (focal - click)
+
+        Direct mode (unchecked or no focal point):
+          Moves the stage directly to the clicked coordinate.
         """
         if not self.movement_controller:
             return
 
         try:
-            # Need focal point to compute movement
-            if not self._focal_point:
-                self.logger.warning("Focal point not set, cannot compute plane click move")
-                return
-
-            focal_x, focal_y_viz, focal_z = self._focal_point
+            # Determine mode: focal (checkbox checked AND focal point available) vs direct
+            use_focal = (self._move_data_to_focus_cb.isChecked() and self._focal_point)
 
             # Get current position to preserve unchanged axes
             current_pos = self.movement_controller.get_position()
@@ -2665,32 +2676,54 @@ class SampleView(QWidget):
             # Import Position class
             from py2flamingo.models.hardware.stage import Position
 
-            # Compute target: move stage so clicked data point ends up at focal plane
-            # All axes: target = current + (focal - click)
-            if plane == 'xz':
-                # XZ plane: h=X, v=Z — Y unchanged
-                target_x = current_pos.x + (focal_x - h_coord)
-                target_z = current_pos.z + (focal_z - v_coord)
-                target = Position(x=target_x, y=current_pos.y, z=target_z, r=current_pos.r)
-                self.logger.info(f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
-                                 f"stage X={target_x:.3f}, Z={target_z:.3f}")
-            elif plane == 'xy':
-                # XY plane: h=X, v=Y(viz) — Z unchanged
-                target_x = current_pos.x + (focal_x - h_coord)
-                target_y = current_pos.y + (focal_y_viz - v_coord)
-                target = Position(x=target_x, y=target_y, z=current_pos.z, r=current_pos.r)
-                self.logger.info(f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
-                                 f"stage X={target_x:.3f}, Y={target_y:.3f}")
-            elif plane == 'yz':
-                # YZ plane: h=Z, v=Y(viz) — X unchanged
-                target_z = current_pos.z + (focal_z - h_coord)
-                target_y = current_pos.y + (focal_y_viz - v_coord)
-                target = Position(x=current_pos.x, y=target_y, z=target_z, r=current_pos.r)
-                self.logger.info(f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
-                                 f"stage Z={target_z:.3f}, Y={target_y:.3f}")
+            if use_focal:
+                # Focal mode: move stage so clicked data point ends up at focal plane
+                # All axes: target = current + (focal - click)
+                focal_x, focal_y_viz, focal_z = self._focal_point
+
+                if plane == 'xz':
+                    target_x = current_pos.x + (focal_x - h_coord)
+                    target_z = current_pos.z + (focal_z - v_coord)
+                    target = Position(x=target_x, y=current_pos.y, z=target_z, r=current_pos.r)
+                    self.logger.info(f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
+                                     f"stage X={target_x:.3f}, Z={target_z:.3f}")
+                elif plane == 'xy':
+                    target_x = current_pos.x + (focal_x - h_coord)
+                    target_y = current_pos.y + (focal_y_viz - v_coord)
+                    target = Position(x=target_x, y=target_y, z=current_pos.z, r=current_pos.r)
+                    self.logger.info(f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
+                                     f"stage X={target_x:.3f}, Y={target_y:.3f}")
+                elif plane == 'yz':
+                    target_z = current_pos.z + (focal_z - h_coord)
+                    target_y = current_pos.y + (focal_y_viz - v_coord)
+                    target = Position(x=current_pos.x, y=target_y, z=target_z, r=current_pos.r)
+                    self.logger.info(f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
+                                     f"stage Z={target_z:.3f}, Y={target_y:.3f}")
+                else:
+                    self.logger.warning(f"Unknown plane: {plane}")
+                    return
             else:
-                self.logger.warning(f"Unknown plane: {plane}")
-                return
+                # Direct mode: move stage directly to clicked coordinate
+                if plane == 'xz':
+                    # h=X, v=Z — Y unchanged
+                    target = Position(x=h_coord, y=current_pos.y, z=v_coord, r=current_pos.r)
+                    self.logger.info(f"Direct move: click=({h_coord:.2f},{v_coord:.2f}) → "
+                                     f"stage X={h_coord:.3f}, Z={v_coord:.3f}")
+                elif plane == 'xy':
+                    # h=X, v=Y(viz) — Z unchanged; convert viz Y to stage Y
+                    target_y = self._viz_y_to_stage_y(v_coord)
+                    target = Position(x=h_coord, y=target_y, z=current_pos.z, r=current_pos.r)
+                    self.logger.info(f"Direct move: click=({h_coord:.2f},{v_coord:.2f}) → "
+                                     f"stage X={h_coord:.3f}, Y={target_y:.3f}")
+                elif plane == 'yz':
+                    # h=Z, v=Y(viz) — X unchanged; convert viz Y to stage Y
+                    target_y = self._viz_y_to_stage_y(v_coord)
+                    target = Position(x=current_pos.x, y=target_y, z=h_coord, r=current_pos.r)
+                    self.logger.info(f"Direct move: click=({h_coord:.2f},{v_coord:.2f}) → "
+                                     f"stage Z={h_coord:.3f}, Y={target_y:.3f}")
+                else:
+                    self.logger.warning(f"Unknown plane: {plane}")
+                    return
 
             # Store computed target for stale check
             self._plane_stage_targets[plane] = target
