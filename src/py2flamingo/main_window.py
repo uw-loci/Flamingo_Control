@@ -504,21 +504,19 @@ class MainWindow(QMainWindow):
                 if not current_pos:
                     raise RuntimeError("Could not read current position")
 
-                preset_service = getattr(self.app, 'position_preset_service', None)
-                if preset_service:
-                    preset_service.save_preset(
-                        name="Tip of sample mount",
-                        position=current_pos,
-                        description="Calibrated objective center position"
-                    )
-                    logger.info(f"Saved calibration: {current_pos}")
-                    QMessageBox.information(
-                        self, "Calibration Saved",
-                        f"Position saved:\nX={current_pos.x:.3f}, Y={current_pos.y:.3f}, "
-                        f"Z={current_pos.z:.3f}, R={current_pos.r:.1f}°"
-                    )
-                else:
-                    QMessageBox.warning(self, "Warning", "Preset service not available")
+                from py2flamingo.services.position_preset_service import PositionPresetService
+                preset_service = PositionPresetService()
+                preset_service.save_preset(
+                    name="Tip of sample mount",
+                    position=current_pos,
+                    description="Calibrated objective center position"
+                )
+                logger.info(f"Saved calibration: {current_pos}")
+                QMessageBox.information(
+                    self, "Calibration Saved",
+                    f"Position saved:\nX={current_pos.x:.3f}, Y={current_pos.y:.3f}, "
+                    f"Z={current_pos.z:.3f}, R={current_pos.r:.1f}°"
+                )
 
             except Exception as e:
                 logger.error(f"Error during calibration: {e}", exc_info=True)
