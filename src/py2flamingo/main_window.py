@@ -297,6 +297,33 @@ class MainWindow(QMainWindow):
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
+        # Documentation links (open in browser)
+        docs_menu = help_menu.addMenu("&Documentation")
+
+        self._doc_links = [
+            ("&Acquisition Workflow Guide",
+             "Step-by-step guide to acquiring data",
+             "https://github.com/uw-loci/Flamingo_Control/blob/main/claude-reports/acquisition-workflow-guide.md"),
+            ("&Pipeline System Reference",
+             "Visual pipeline editor and execution engine reference",
+             "https://github.com/uw-loci/Flamingo_Control/blob/main/claude-reports/pipeline-system.md"),
+        ]
+        for label, tip, url in self._doc_links:
+            action = QAction(label, self)
+            action.setStatusTip(tip)
+            action.triggered.connect(lambda checked, u=url: self._open_url(u))
+            docs_menu.addAction(action)
+
+        docs_menu.addSeparator()
+        repo_action = QAction("&GitHub Repository", self)
+        repo_action.setStatusTip("Open the Flamingo Control GitHub repository")
+        repo_action.triggered.connect(
+            lambda: self._open_url("https://github.com/uw-loci/Flamingo_Control")
+        )
+        docs_menu.addAction(repo_action)
+
+        help_menu.addSeparator()
+
         about_action = QAction("&About", self)
         about_action.setStatusTip("About Flamingo Control")
         about_action.triggered.connect(self._show_about)
@@ -332,6 +359,12 @@ class MainWindow(QMainWindow):
             import logging
             logging.getLogger(__name__).exception(f"Error opening settings dialog: {e}")
             QMessageBox.critical(self, "Error", f"Could not open settings dialog: {e}")
+
+    def _open_url(self, url: str):
+        """Open a URL in the system default browser."""
+        from PyQt5.QtCore import QUrl
+        from PyQt5.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl(url))
 
     def _show_about(self):
         """Show About dialog with application information."""
