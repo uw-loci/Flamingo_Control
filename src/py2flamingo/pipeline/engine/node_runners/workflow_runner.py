@@ -130,7 +130,7 @@ class WorkflowRunner(AbstractNodeRunner):
                 sx, sy, sz = position_data.centroid_stage
                 from py2flamingo.models import Position
                 pos = Position(x=sx, y=sy, z=sz, r=0.0)
-                workflow.position = pos
+                workflow.start_position = pos
                 logger.info(f"Overriding workflow position from DetectedObject: {pos}")
             elif isinstance(position_data, (tuple, list)) and len(position_data) >= 3:
                 from py2flamingo.models import Position
@@ -138,32 +138,68 @@ class WorkflowRunner(AbstractNodeRunner):
                     x=position_data[0], y=position_data[1], z=position_data[2],
                     r=position_data[3] if len(position_data) > 3 else 0.0
                 )
-                workflow.position = pos
+                workflow.start_position = pos
                 logger.info(f"Overriding workflow position from tuple: {pos}")
 
         # Z-range override from DetectedObject bounding box
-        z_range_obj = self._get_input(node, pipeline, context, 'z_range')
-        if z_range_obj and config.get('auto_z_range', False) and hasattr(z_range_obj, 'bounding_box'):
-            coord_config = context.get_service('coordinate_config')
-            if coord_config:
-                try:
-                    bb = z_range_obj.bounding_box  # (z_slice, y_slice, x_slice)
-                    voxel_um = coord_config['display'].get('voxel_size_um', [50.0, 50.0, 50.0])
-                    z_range_mm = coord_config['stage_control']['z_range_mm']
-                    z_start = z_range_mm[0] + bb[0].start * voxel_um[0] / 1000.0
-                    z_stop = z_range_mm[0] + bb[0].stop * voxel_um[0] / 1000.0
-                    margin = config.get('z_margin_um', 50.0) / 1000.0
-                    z_start_with_margin = max(z_range_mm[0], z_start - margin)
-                    z_stop_with_margin = min(z_range_mm[1], z_stop + margin)
-                    if hasattr(workflow, 'z_start') and hasattr(workflow, 'z_end'):
-                        workflow.z_start = z_start_with_margin
-                        workflow.z_end = z_stop_with_margin
-                    logger.info(
-                        f"Auto Z-range from object bounding box: "
-                        f"{z_start_with_margin:.3f} - {z_stop_with_margin:.3f} mm"
-                    )
-                except (KeyError, TypeError, AttributeError) as e:
-                    logger.warning(f"Could not apply auto Z-range: {e}")
+        if config.get('auto_z_range', False):
+            # Prefer the same object from position input; fall back to z_range port
+            detected_obj = None
+            if position_data is not None and hasattr(position_data, 'bounding_box'):
+                detected_obj = position_data
+            else:
+                z_range_input = self._get_input(node, pipeline, context, 'z_range')
+                if z_range_input is not None and hasattr(z_range_input, 'bounding_box'):
+                    detected_obj = z_range_input
+
+            if detected_obj is not None:
+                coord_config = context.get_service('coordinate_config')
+                if coord_config:
+                    try:
+                        display_cfg = coord_config['display']
+                        stage_cfg = coord_config['stage_control']
+                        voxel_um = tuple(display_cfg.get('voxel_size_um', [50.0, 50.0, 50.0]))
+                        z_range_mm = tuple(stage_cfg['z_range_mm'])
+                        y_range_mm = tuple(stage_cfg['y_range_mm'])
+                        x_range_mm = tuple(stage_cfg['x_range_mm'])
+                        invert_x = stage_cfg.get('invert_x_default', False)
+
+                        bb = detected_obj.bounding_box_mm(
+                            voxel_size_um=voxel_um,
+                            z_range_mm=z_range_mm,
+                            y_range_mm=y_range_mm,
+                            x_range_mm=x_range_mm,
+                            invert_x=invert_x,
+                        )
+
+                        # Apply proportional buffer
+                        z_extent = bb['z_max'] - bb['z_min']
+                        buffer_frac = config.get('buffer_percent', 25.0) / 100.0
+                        buffer_mm = z_extent * buffer_frac
+
+                        z_bottom = max(z_range_mm[0], bb['z_min'] - buffer_mm)
+                        z_top = min(z_range_mm[1], bb['z_max'] + buffer_mm)
+                        total_z_um = (z_top - z_bottom) * 1000.0
+
+                        # Set start Z to bottom of buffered region
+                        workflow.start_position.z = z_bottom
+
+                        # Update stack settings z_range_um → validate() recalculates num_planes
+                        if workflow.stack_settings is None:
+                            from py2flamingo.models.data.workflow import StackSettings
+                            workflow.stack_settings = StackSettings()
+                        workflow.stack_settings.z_range_um = total_z_um
+                        workflow.stack_settings.validate()
+
+                        logger.info(
+                            f"Auto Z-range from bounding box: "
+                            f"z={z_bottom:.3f}-{z_top:.3f} mm "
+                            f"({total_z_um:.1f} um, "
+                            f"{workflow.stack_settings.num_planes} planes, "
+                            f"step={workflow.stack_settings.z_step_um:.1f} um)"
+                        )
+                    except (KeyError, TypeError, AttributeError) as e:
+                        logger.warning(f"Could not apply auto Z-range: {e}")
 
         # Execute workflow
         logger.info(f"Starting workflow: {node.name}")

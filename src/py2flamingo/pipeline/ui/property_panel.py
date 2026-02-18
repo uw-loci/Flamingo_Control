@@ -28,7 +28,7 @@ _CONFIG_SCHEMAS: Dict[NodeType, list] = {
          {'filter': 'Workflow files (*.wf *.txt);;All files (*)'}),
         ('use_input_position', 'Override Position from Input', 'bool', True),
         ('auto_z_range', 'Auto Z-Range from Object', 'bool', False),
-        ('z_margin_um', 'Z Margin (um)', 'float', 50.0),
+        ('buffer_percent', 'BBox Buffer (%)', 'float', 25.0),
         ('workflow_type', 'Workflow Type', 'combo', 'zstack',
          ['zstack', 'tile_scan', 'snapshot']),
     ],
