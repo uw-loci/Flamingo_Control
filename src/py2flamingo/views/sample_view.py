@@ -1893,6 +1893,10 @@ class SampleView(QWidget):
                 # Enable channel controls now that data exists
                 self._update_channel_availability()
                 self._auto_contrast_channels()
+
+                # Auto-enable focal move mode now that data is present
+                if hasattr(self, '_move_data_to_focus_cb') and not self._move_data_to_focus_cb.isChecked():
+                    self._move_data_to_focus_cb.setChecked(True)
             elif file_path:
                 QMessageBox.warning(self, "Invalid Selection",
                                   "Please select a .zarr folder")
@@ -3147,6 +3151,10 @@ class SampleView(QWidget):
         # During acquisition, visualization only updates when a NEW tile starts,
         # so we need this final update to show the last tile.
         self._visualization_update_timer.start()
+
+        # Auto-enable focal move mode now that data is present
+        if hasattr(self, '_move_data_to_focus_cb') and not self._move_data_to_focus_cb.isChecked():
+            self._move_data_to_focus_cb.setChecked(True)
 
         # Re-enable the populate button
         if hasattr(self, 'populate_btn'):
