@@ -180,6 +180,8 @@ class PipelineEditorDialog(PersistentDialog):
 
         for btn in [self._new_btn, self._open_btn, self._save_btn,
                     self._validate_btn, self._run_btn, self._stop_btn]:
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
             self._toolbar_layout.addWidget(btn)
 
         self._toolbar_layout.addStretch()
