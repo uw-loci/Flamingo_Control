@@ -187,6 +187,9 @@ class ChamberVisualizationManager:
                 edge_color=edge_colors, edge_width=2, opacity=0.6
             )
 
+            # Add reference walls (subtle fill for orientation when rotating)
+            self._add_reference_walls(dims)
+
             # Add additional visualization elements
             self._add_sample_holder()
             self._add_fine_extension()
@@ -196,6 +199,67 @@ class ChamberVisualizationManager:
 
         except Exception as e:
             self.logger.warning(f"Failed to setup chamber visualization: {e}")
+
+    def _add_reference_walls(self, dims) -> None:
+        """Add subtle filled walls for orientation when rotating the 3D view.
+
+        Two walls are drawn:
+        - Back wall at Z=0 (where the objective is located)
+        - Bottom wall at Y=dims[1]-1 (physical bottom of the chamber)
+
+        Args:
+            dims: Display dimensions tuple (Z, Y, X) in voxels
+        """
+        if not self.viewer:
+            return
+
+        try:
+            z_max = dims[0] - 1
+            y_max = dims[1] - 1
+            x_max = dims[2] - 1
+
+            wall_opacity = 0.04
+
+            # --- Back wall (Z=0 plane, where objective is) ---
+            back_verts = np.array([
+                [0, 0, 0],          # top-left
+                [0, 0, x_max],      # top-right
+                [0, y_max, x_max],  # bottom-right
+                [0, y_max, 0],      # bottom-left
+            ], dtype=np.float32)
+            back_faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
+            back_values = np.ones(len(back_verts), dtype=np.float32)
+
+            self.viewer.add_surface(
+                (back_verts, back_faces, back_values),
+                name='Back Wall',
+                colormap='gray',
+                opacity=wall_opacity,
+                shading='none',
+            )
+
+            # --- Bottom wall (Y=max plane, physical bottom of chamber) ---
+            bottom_verts = np.array([
+                [0, y_max, 0],          # back-left
+                [0, y_max, x_max],      # back-right
+                [z_max, y_max, x_max],  # front-right
+                [z_max, y_max, 0],      # front-left
+            ], dtype=np.float32)
+            bottom_faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
+            bottom_values = np.ones(len(bottom_verts), dtype=np.float32)
+
+            self.viewer.add_surface(
+                (bottom_verts, bottom_faces, bottom_values),
+                name='Bottom Wall',
+                colormap='gray',
+                opacity=wall_opacity,
+                shading='none',
+            )
+
+            self.logger.info(f"Added reference walls (back Z=0, bottom Y={y_max}) at {wall_opacity:.0%} opacity")
+
+        except Exception as e:
+            self.logger.warning(f"Failed to add reference walls: {e}")
 
     def _add_sample_holder(self) -> None:
         """Add sample holder indicator at the top of the chamber.
