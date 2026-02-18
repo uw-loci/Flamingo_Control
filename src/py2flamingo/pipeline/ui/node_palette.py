@@ -46,6 +46,7 @@ class NodePalette(QWidget):
         self._list = QListWidget()
         self._list.setDragEnabled(True)
         self._list.setDefaultDropAction(Qt.CopyAction)
+        self._list.setCursor(Qt.OpenHandCursor)
         self._list.setStyleSheet("""
             QListWidget {
                 background: #2d2d2d;
@@ -66,7 +67,7 @@ class NodePalette(QWidget):
             display_name = node_type.name.replace('_', ' ').title()
             description = _NODE_DESCRIPTIONS.get(node_type, '')
             item.setText(display_name)
-            item.setToolTip(description)
+            item.setToolTip(f"{description}\n(Drag onto canvas to add)")
             item.setData(Qt.UserRole, node_type.name)
 
             # Color indicator
@@ -77,6 +78,13 @@ class NodePalette(QWidget):
 
         self._list.startDrag = self._start_drag
         layout.addWidget(self._list)
+
+        hint = QLabel("Drag items into the canvas\nto add pipeline nodes")
+        hint.setStyleSheet(
+            "color: #777; font-size: 10px; padding: 6px 4px;"
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
 
         layout.addStretch()
 

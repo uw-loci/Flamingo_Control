@@ -44,7 +44,7 @@ class PipelineGraphView(QGraphicsView):
         # Appearance
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setStyleSheet("border: none; background: #1e1e1e;")
+        self.setStyleSheet("border: none;")
 
     def mousePressEvent(self, event):
         # Middle button -> pan

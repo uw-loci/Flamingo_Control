@@ -63,19 +63,23 @@ class PipelineEditorDialog(PersistentDialog):
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         # Toolbar placeholder (added in _setup_toolbar)
         self._toolbar_widget = QWidget()
+        self._toolbar_widget.setStyleSheet(
+            "background: #2a2a2a; border-bottom: 1px solid #444;"
+        )
         self._toolbar_layout = QHBoxLayout(self._toolbar_widget)
-        self._toolbar_layout.setContentsMargins(4, 2, 4, 2)
+        self._toolbar_layout.setContentsMargins(6, 4, 6, 4)
         layout.addWidget(self._toolbar_widget)
 
-        # Main splitter
+        # Main splitter (takes all available space)
         splitter = QSplitter(Qt.Horizontal)
 
         # Left: Node palette
         self._palette = NodePalette()
-        self._palette.setMinimumWidth(140)
+        self._palette.setMinimumWidth(150)
         self._palette.setMaximumWidth(200)
         splitter.addWidget(self._palette)
 
@@ -94,16 +98,22 @@ class PipelineEditorDialog(PersistentDialog):
         self._property_panel.setMaximumWidth(300)
         splitter.addWidget(self._property_panel)
 
-        splitter.setSizes([160, 600, 240])
-        layout.addWidget(splitter)
+        splitter.setSizes([170, 600, 240])
+        # Let the center panel stretch when the window resizes
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 0)
+        layout.addWidget(splitter, stretch=1)
 
-        # Bottom: Log area
+        # Bottom: Log area (compact)
         self._log_text = QTextEdit()
         self._log_text.setReadOnly(True)
-        self._log_text.setMaximumHeight(120)
+        self._log_text.setFixedHeight(80)
         self._log_text.setStyleSheet(
-            "background: #1a1a1a; color: #aaa; font-family: monospace; font-size: 11px;"
+            "background: #1a1a1a; color: #aaa; font-family: monospace;"
+            "font-size: 11px; border-top: 1px solid #444;"
         )
+        self._log_text.setPlaceholderText("Pipeline execution log...")
         layout.addWidget(self._log_text)
 
         # Wire scene selection to property panel
@@ -115,7 +125,7 @@ class PipelineEditorDialog(PersistentDialog):
             "QPushButton { padding: 4px 12px; border: 1px solid #555; "
             "border-radius: 3px; background: #2d2d2d; color: #ccc; }"
             "QPushButton:hover { background: #3d3d3d; }"
-            "QPushButton:disabled { color: #666; }"
+            "QPushButton:disabled { color: #555; background: #222; }"
         )
 
         from PyQt5.QtWidgets import QPushButton
@@ -140,23 +150,33 @@ class PipelineEditorDialog(PersistentDialog):
         self._validate_btn.clicked.connect(self._on_validate)
         self._validate_btn.setStyleSheet(btn_style)
 
+        run_style = (
+            "QPushButton { padding: 4px 12px; border: 1px solid #2e7d32; "
+            "border-radius: 3px; background: #1b5e20; color: #fff; }"
+            "QPushButton:hover { background: #2e7d32; }"
+            "QPushButton:disabled { color: #555; background: #222; border-color: #555; }"
+        )
         self._run_btn = QPushButton("Run")
         self._run_btn.setToolTip("Execute the pipeline")
         self._run_btn.clicked.connect(self._on_run)
-        self._run_btn.setStyleSheet(
-            btn_style.replace("background: #2d2d2d", "background: #1b5e20")
-        )
+        self._run_btn.setStyleSheet(run_style)
 
+        stop_style = (
+            "QPushButton { padding: 4px 12px; border: 1px solid #c62828; "
+            "border-radius: 3px; background: #b71c1c; color: #fff; }"
+            "QPushButton:hover { background: #c62828; }"
+            "QPushButton:disabled { color: #555; background: #222; border-color: #555; }"
+        )
         self._stop_btn = QPushButton("Stop")
         self._stop_btn.setToolTip("Cancel pipeline execution")
         self._stop_btn.clicked.connect(self._on_stop)
         self._stop_btn.setEnabled(False)
-        self._stop_btn.setStyleSheet(
-            btn_style.replace("background: #2d2d2d", "background: #b71c1c")
-        )
+        self._stop_btn.setStyleSheet(stop_style)
 
         self._status_label = QLabel("Ready")
-        self._status_label.setStyleSheet("color: #aaa; padding-left: 12px;")
+        self._status_label.setStyleSheet(
+            "color: #8abf8a; font-weight: bold; padding-left: 12px;"
+        )
 
         for btn in [self._new_btn, self._open_btn, self._save_btn,
                     self._validate_btn, self._run_btn, self._stop_btn]:
@@ -285,7 +305,16 @@ class PipelineEditorDialog(PersistentDialog):
         self._running = running
         self._run_btn.setEnabled(not running)
         self._stop_btn.setEnabled(running)
-        self._status_label.setText("Running..." if running else "Ready")
+        if running:
+            self._status_label.setText("Running...")
+            self._status_label.setStyleSheet(
+                "color: #64b5f6; font-weight: bold; padding-left: 12px;"
+            )
+        else:
+            self._status_label.setText("Ready")
+            self._status_label.setStyleSheet(
+                "color: #8abf8a; font-weight: bold; padding-left: 12px;"
+            )
 
     # ---- Execution feedback (called by controller) ----
 

@@ -1,6 +1,6 @@
 # Visual Pipeline Workflow System — Reference Guide
 
-**Commit:** `1ba0b33` + fix (2026-02-17)
+**Commit:** `1ba0b33` + UI fixes (2026-02-17)
 **Location:** `src/py2flamingo/pipeline/`
 
 ---
@@ -370,29 +370,38 @@ No behavioral change for existing users.
 
 ### PipelineEditorDialog (`ui/pipeline_editor_dialog.py`)
 
-Three-panel layout via QSplitter:
+Three-panel layout via QSplitter, with toolbar at top and compact log at bottom:
 
 ```
-┌──────────┬──────────────────────────┬────────────────┐
-│ Node     │                          │ Property       │
-│ Palette  │     Graph Canvas         │ Panel          │
-│          │     (PipelineGraphView)  │                │
-│ Workflow │                          │ Name: [____]   │
-│ Threshold│     ┌──────┐──►┌──────┐ │ Type: [combo]  │
-│ ForEach  │     │Acq   │   │Thr   │ │ Sigma: [spin]  │
-│ Condtnl  │     └──────┘   └──────┘ │ ...            │
-│ ExtCmd   │                          │                │
+┌──────────────────────────────────────────────────────┐
+│ [New] [Open] [Save] [Validate] [Run] [Stop]   Ready │  ← toolbar bar
+├──────────┬──────────────────────────┬────────────────┤
+│ Node     │  · · · · · · · · · · ·  │ Properties     │
+│ Types    │  · · · · · · · · · · ·  │                │
+│          │  · · ┌──────┐──►┌─────┐ │ Name: [____]   │
+│ Workflow │  · · │Acq   │   │Thr  │ │ Type: [combo]  │
+│ Threshold│  · · └──────┘   └─────┘ │ Sigma: [spin]  │
+│ ForEach  │  · · · · · · · · · · ·  │ ...            │
+│ Condtnl  │  · · · · · · · · · · ·  │                │
+│ ExtCmd   │  (dot grid canvas)       │                │
+│          │                          │ Select a node  │
+│ Drag     │  "Drag node types from   │ to edit its    │
+│ items... │   the palette..."        │ properties     │
 ├──────────┴──────────────────────────┴────────────────┤
-│ [New] [Open] [Save] [Validate] [Run] [Stop]  Ready  │
-├──────────────────────────────────────────────────────┤
-│ Log: Running node: Acquire (WORKFLOW)                │
-│      Running node: Threshold (THRESHOLD)             │
-│      Pipeline completed successfully                 │
+│ Pipeline execution log...                            │  ← compact 80px
 └──────────────────────────────────────────────────────┘
 ```
 
-**Toolbar:** New, Open, Save, Validate, Run, Stop
-**Drop support:** Drag from NodePalette → drop on canvas → creates node at drop position
+**Key UI features:**
+- **Toolbar** at top with styled background and separator border
+- **Dot grid canvas** — dark background (#252525) with subtle dot grid at 30px spacing; visually distinct from other panels
+- **Empty canvas hint** — centered text appears when no nodes exist, auto-hides once first node is dropped
+- **Palette hint** — "Drag items into the canvas to add pipeline nodes" below the node type list; open-hand cursor on list items
+- **Property panel hint** — "Select a node on the canvas to edit its properties" when nothing selected
+- **Run/Stop buttons** — white text on green/red background; disabled state is uniform gray (not colored)
+- **Status label** — bold green "Ready" / bold blue "Running..."
+- **Compact log** — fixed 80px height with placeholder text and top border separator
+
 **Keyboard:** Delete/Backspace removes selected node or connection, Escape cancels drag
 
 Extends `PersistentDialog` for geometry save/restore.
@@ -401,7 +410,7 @@ Extends `PersistentDialog` for geometry save/restore.
 
 | Action | Behavior |
 |--------|----------|
-| Drag from NodePalette | Creates node at drop position |
+| Drag from NodePalette | Creates node at drop position; canvas hint disappears |
 | Left-click node | Select → shows config in PropertyPanel |
 | Drag node | Move (updates model x,y, redraws wires) |
 | Left-drag from output port | Draws temporary wire; green highlight on compatible targets |
@@ -414,12 +423,15 @@ Extends `PersistentDialog` for geometry save/restore.
 
 | Element | Appearance |
 |---------|-----------|
+| **Canvas** | Dark background (#252525) with subtle dot grid (#333, 30px spacing) |
+| **Empty canvas** | Centered hint text in gray (#555): "Drag node types from the palette onto this canvas to build a pipeline" |
 | **Node body** | Dark rounded rect (#2d2d2d), 180px wide |
 | **Node header** | Colored by type: blue (Workflow), orange (Threshold), purple (ForEach), yellow (Conditional), green (External) |
 | **Ports** | Small colored circles (color = port type), left=inputs, right=outputs |
 | **Wires** | Cubic bezier curves, color matches source port type |
 | **Status dot** | Top-right of header: gray=idle, blue=running, green=completed, red=error |
 | **Selection** | Blue border highlight (#4fc3f7) |
+| **Toolbar** | Dark background (#2a2a2a) with bottom border; styled Run (green) and Stop (red) buttons |
 
 ### PropertyPanel Config Schemas
 
@@ -624,14 +636,14 @@ svc = context.get_service('my_service')
 | `services/threshold_analysis_service.py` | ~170 | Extracted threshold pipeline |
 | `services/pipeline_repository.py` | ~80 | JSON file persistence |
 | `services/pipeline_service.py` | ~110 | Facade + example pipeline |
-| `ui/pipeline_editor_dialog.py` | ~275 | Top-level editor dialog |
-| `ui/graph_scene.py` | ~225 | QGraphicsScene management |
-| `ui/graph_view.py` | ~125 | Pan/zoom/drag view |
+| `ui/pipeline_editor_dialog.py` | ~360 | Top-level editor dialog (toolbar, splitter, log) |
+| `ui/graph_scene.py` | ~290 | QGraphicsScene with dot grid + empty hint |
+| `ui/graph_view.py` | ~145 | Pan/zoom/drag view |
 | `ui/node_item.py` | ~190 | Node rectangle rendering |
 | `ui/port_item.py` | ~95 | Port circle rendering |
 | `ui/connection_item.py` | ~115 | Bezier wire rendering |
-| `ui/node_palette.py` | ~100 | Drag sidebar |
-| `ui/property_panel.py` | ~205 | Dynamic config form |
+| `ui/node_palette.py` | ~115 | Drag sidebar with hint text |
+| `ui/property_panel.py` | ~240 | Dynamic config form with empty state |
 | `controllers/pipeline_controller.py` | ~115 | UI ↔ Engine mediator |
 
 **Total new code:** ~3,975 lines across 31 files

@@ -67,9 +67,19 @@ class PropertyPanel(QWidget):
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(4, 4, 4, 4)
 
-        self._header = QLabel("No Selection")
+        self._header = QLabel("Properties")
         self._header.setStyleSheet("font-weight: bold; padding: 4px;")
         outer_layout.addWidget(self._header)
+
+        # Empty state hint
+        self._empty_hint = QLabel(
+            "Select a node on the canvas\nto edit its properties"
+        )
+        self._empty_hint.setStyleSheet(
+            "color: #777; font-size: 10px; padding: 12px 4px;"
+        )
+        self._empty_hint.setWordWrap(True)
+        outer_layout.addWidget(self._empty_hint)
 
         # Name editor
         self._name_group = QGroupBox("Name")
@@ -100,19 +110,22 @@ class PropertyPanel(QWidget):
         self._clear_config()
 
         if not node_id or not self._pipeline:
-            self._header.setText("No Selection")
+            self._header.setText("Properties")
+            self._empty_hint.show()
             self._name_group.hide()
             self._current_node = None
             return
 
         node = self._pipeline.get_node(node_id)
         if not node:
-            self._header.setText("No Selection")
+            self._header.setText("Properties")
+            self._empty_hint.show()
             self._name_group.hide()
             self._current_node = None
             return
 
         self._current_node = node
+        self._empty_hint.hide()
         type_label = node.node_type.name.replace('_', ' ').title()
         self._header.setText(f"{type_label} Node")
 

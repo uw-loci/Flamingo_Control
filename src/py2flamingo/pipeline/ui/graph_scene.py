@@ -8,9 +8,9 @@ and manages the drag-to-connect interaction for creating new wires.
 import logging
 from typing import Dict, Optional
 
-from PyQt5.QtWidgets import QGraphicsScene
-from PyQt5.QtCore import Qt, QPointF, pyqtSignal
-from PyQt5.QtGui import QColor
+from PyQt5.QtWidgets import QGraphicsScene, QGraphicsSimpleTextItem
+from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSignal
+from PyQt5.QtGui import QColor, QPen, QBrush, QPainter, QFont, QPolygonF
 
 from py2flamingo.pipeline.models.pipeline import Pipeline, PipelineNode, Connection, create_node, NodeType
 from py2flamingo.pipeline.ui.node_item import NodeItem
@@ -18,6 +18,11 @@ from py2flamingo.pipeline.ui.port_item import PortItem
 from py2flamingo.pipeline.ui.connection_item import ConnectionItem, DragWireItem
 
 logger = logging.getLogger(__name__)
+
+# Grid settings
+GRID_SPACING = 30
+GRID_DOT_COLOR = QColor('#333333')
+GRID_DOT_RADIUS = 1.0
 
 
 class PipelineGraphScene(QGraphicsScene):
@@ -39,7 +44,7 @@ class PipelineGraphScene(QGraphicsScene):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setBackgroundBrush(QColor('#1e1e1e'))
+        self.setBackgroundBrush(QColor('#252525'))
 
         self._pipeline: Optional[Pipeline] = None
         self._node_items: Dict[str, NodeItem] = {}
@@ -49,7 +54,54 @@ class PipelineGraphScene(QGraphicsScene):
         self._drag_wire: Optional[DragWireItem] = None
         self._drag_source_port: Optional[PortItem] = None
 
+        # Empty canvas hint
+        self._hint_text: Optional[QGraphicsSimpleTextItem] = None
+        self._create_hint()
+
+        # Set a reasonable initial scene rect so the canvas fills the view
+        self.setSceneRect(-2000, -2000, 4000, 4000)
+
         self.selectionChanged.connect(self._on_selection_changed)
+
+    def _create_hint(self):
+        """Create the 'drop nodes here' hint shown on empty canvas."""
+        self._hint_text = QGraphicsSimpleTextItem()
+        self._hint_text.setText("Drag node types from the palette\nonto this canvas to build a pipeline")
+        font = QFont('Sans', 12)
+        self._hint_text.setFont(font)
+        self._hint_text.setBrush(QBrush(QColor('#555555')))
+        self._hint_text.setPos(-140, -20)
+        self.addItem(self._hint_text)
+
+    def _update_hint_visibility(self):
+        """Show hint only when there are no nodes."""
+        if self._hint_text:
+            self._hint_text.setVisible(len(self._node_items) == 0)
+
+    def drawBackground(self, painter: QPainter, rect: QRectF):
+        """Draw dot grid background."""
+        super().drawBackground(painter, rect)
+
+        pen = QPen(GRID_DOT_COLOR)
+        pen.setWidthF(GRID_DOT_RADIUS * 2)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+
+        # Calculate grid bounds aligned to spacing
+        left = int(rect.left() // GRID_SPACING) * GRID_SPACING
+        top = int(rect.top() // GRID_SPACING) * GRID_SPACING
+
+        polygon = QPolygonF()
+        x = left
+        while x < rect.right():
+            y = top
+            while y < rect.bottom():
+                polygon.append(QPointF(x, y))
+                y += GRID_SPACING
+            x += GRID_SPACING
+
+        if not polygon.isEmpty():
+            painter.drawPoints(polygon)
 
     @property
     def pipeline(self) -> Optional[Pipeline]:
@@ -68,6 +120,8 @@ class PipelineGraphScene(QGraphicsScene):
         for conn in pipeline.connections.values():
             self._add_connection_item(conn)
 
+        self._update_hint_visibility()
+
     def clear_all(self):
         """Remove all items and reset state."""
         self._node_items.clear()
@@ -75,6 +129,9 @@ class PipelineGraphScene(QGraphicsScene):
         self._drag_wire = None
         self._drag_source_port = None
         self.clear()
+        # Re-create hint after clear() removes all items
+        self._create_hint()
+        self._update_hint_visibility()
 
     # ---- Node management ----
 
@@ -91,6 +148,7 @@ class PipelineGraphScene(QGraphicsScene):
         node = create_node(node_type, name=name, x=x, y=y)
         self._pipeline.add_node(node)
         self._add_node_item(node)
+        self._update_hint_visibility()
         self.node_added.emit(node.id)
         return node.id
 
@@ -114,6 +172,7 @@ class PipelineGraphScene(QGraphicsScene):
             self.removeItem(node_item)
 
         self._pipeline.remove_node(node_id)
+        self._update_hint_visibility()
         self.node_removed.emit(node_id)
 
     def _add_node_item(self, node: PipelineNode):
