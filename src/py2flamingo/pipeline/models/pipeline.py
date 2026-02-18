@@ -24,6 +24,7 @@ class NodeType(Enum):
     FOR_EACH = auto()
     CONDITIONAL = auto()
     EXTERNAL_COMMAND = auto()
+    SAMPLE_VIEW_DATA = auto()
 
 
 class PortDirection(Enum):
@@ -38,6 +39,7 @@ NODE_COLORS: Dict[NodeType, str] = {
     NodeType.FOR_EACH: '#ab47bc',          # Purple
     NodeType.CONDITIONAL: '#ffee58',       # Yellow
     NodeType.EXTERNAL_COMMAND: '#66bb6a',  # Green
+    NodeType.SAMPLE_VIEW_DATA: '#26c6da',  # Teal
 }
 
 
@@ -140,6 +142,7 @@ def create_default_ports(node_type: NodeType) -> Tuple[List[Port], List[Port]]:
         inputs = [
             _make_port('trigger', PortType.TRIGGER, inp),
             _make_port('position', PortType.POSITION, inp),
+            _make_port('z_range', PortType.OBJECT, inp),
         ]
         outputs = [
             _make_port('volume', PortType.VOLUME, out),
@@ -188,6 +191,15 @@ def create_default_ports(node_type: NodeType) -> Tuple[List[Port], List[Port]]:
             _make_port('file_path', PortType.FILE_PATH, out),
             _make_port('completed', PortType.TRIGGER, out),
         ]
+
+    elif node_type == NodeType.SAMPLE_VIEW_DATA:
+        inputs = []
+        outputs = [
+            _make_port('volume', PortType.VOLUME, out),
+            _make_port('position', PortType.POSITION, out),
+            _make_port('config', PortType.ANY, out),
+        ]
+
     else:
         inputs, outputs = [], []
 

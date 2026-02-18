@@ -1,6 +1,6 @@
 # Visual Pipeline Workflow System — Reference Guide
 
-**Commit:** `1ba0b33` + UI fixes (2026-02-17)
+**Commit:** `1ba0b33` + Node Enhancements (2026-02-17)
 **Location:** `src/py2flamingo/pipeline/`
 
 ---
@@ -78,7 +78,8 @@ pipeline/
 │       ├── threshold_runner.py      # → ThresholdAnalysisService
 │       ├── foreach_runner.py        # Iterates collection
 │       ├── conditional_runner.py    # Evaluates condition, picks branch
-│       └── external_command_runner.py  # subprocess with temp I/O
+│       ├── external_command_runner.py  # subprocess with temp I/O
+│       └── sample_view_data_runner.py  # Reads current 3D viewer state
 ├── services/
 │   ├── __init__.py
 │   ├── threshold_analysis_service.py  # Extracted from UnionThresholderDialog
@@ -177,6 +178,10 @@ class DetectedObject:
 
 Supports `to_dict()` / `from_dict()` for JSON serialization. Bounding boxes are serialized as `[[start, stop], ...]`.
 
+**Helper methods:**
+- `bounding_box_mm(voxel_size_um, z_range_mm, y_range_mm, x_range_mm, invert_x)` — converts voxel bounding box to stage coordinate ranges (mm). Returns dict with `x_min, x_max, y_min, y_max, z_min, z_max`. Uses project coord conventions (Y inverted, X optionally inverted).
+- `extent_mm(voxel_size_um)` — returns physical size as `(x, y, z)` in mm.
+
 ---
 
 ## Execution Engine
@@ -227,6 +232,8 @@ Per-run state shared across all runners:
 - `'workflow_facade'` — WorkflowFacade
 - `'workflow_queue_service'` — WorkflowQueueService
 - `'voxel_storage'` — DualResolutionVoxelStorage
+- `'position_controller'` — PositionController (for reading current stage position)
+- `'coordinate_config'` — dict with `display` and `stage_control` sections from visualization YAML (for voxel↔stage coordinate transforms)
 
 ### ScopeResolver (`engine/scope_resolver.py`)
 
@@ -249,30 +256,34 @@ Key methods:
 
 | | |
 |---|---|
-| **Config** | `workflow_type`, `template_file`, `use_input_position`, `workflow_settings` |
-| **Inputs** | `trigger` (TRIGGER), `position` (POSITION, optional) |
-| **Outputs** | `volume` (VOLUME), `file_path` (FILE_PATH), `completed` (TRIGGER) |
+| **Config** | `config_mode` (template/inline), `template_file`, `workflow_type`, `use_input_position`, `auto_z_range`, `z_margin_um`, inline settings (laser/camera/z-stack/save) |
+| **Inputs** | `trigger` (TRIGGER), `position` (POSITION, optional), `z_range` (OBJECT, optional — DetectedObject for bounding box) |
+| **Outputs** | `volume` (VOLUME — dict of all channels), `file_path` (FILE_PATH), `completed` (TRIGGER) |
 
 **Behavior:**
-- Loads workflow from template file or creates from `workflow_settings` dict
+- **Template mode**: loads workflow from file selected via file browser dialog
+- **Inline mode**: builds workflow dict from grouped config sections (illumination, camera, z-stack, save) via `_build_inline_workflow_dict()`
 - If `position` input connected and `use_input_position=True`, overrides workflow position
 - Accepts `DetectedObject` on position input (extracts `centroid_stage`)
+- **Z-range auto-override**: if `z_range` input connected to a DetectedObject and `auto_z_range=True`, extracts Z extent from bounding box + configurable margin (`z_margin_um`, default 50um) and applies to workflow start/end Z
 - Starts workflow via `WorkflowFacade.start_workflow()`
 - Polls `get_workflow_status()` until COMPLETED/IDLE/STOPPED (1s interval, 30min timeout)
-- Tries to read volume from voxel_storage after completion
+- Outputs multi-channel volume dict (all channels with data) from voxel_storage
 
 ### 2. Threshold Node (`node_runners/threshold_runner.py`)
 
 | | |
 |---|---|
-| **Config** | `channel_thresholds` (dict), `gauss_sigma`, `opening_enabled`, `opening_radius`, `min_object_size`, `default_threshold` |
+| **Config** | `channel_thresholds` (dict), `enabled_channels` (list), `gauss_sigma`, `opening_enabled`, `opening_radius`, `min_object_size`, `default_threshold` |
 | **Inputs** | `volume` (VOLUME, optional — falls back to voxel_storage) |
 | **Outputs** | `objects` (OBJECT_LIST), `mask` (VOLUME), `count` (SCALAR) |
 
 **Behavior:**
+- Filters `channel_thresholds` by `enabled_channels` list before processing (UI has per-channel enable checkbox)
 - If volume input connected: uses it for all configured channel thresholds
 - If unconnected: reads from `voxel_storage` service per channel
-- Delegates to `ThresholdAnalysisService.analyze()`
+- **Coordinate transforms**: builds `voxel_to_stage_fn` from `coordinate_config` service, using project conventions (Y inverted, X optionally inverted per `invert_x_default`). Passes to `ThresholdAnalysisService.analyze()` so detected objects have real stage coordinates in `centroid_stage` (no longer `(0,0,0)`)
+- Gets `voxel_size_um` from coordinate config display section
 
 ### 3. ForEach Node (`node_runners/foreach_runner.py`)
 
@@ -319,6 +330,21 @@ Key methods:
 - Runs command via `subprocess.run()` with `{input_file}` and `{output_dir}` placeholders
 - Parses first output file in output_dir
 - Command template example: `python3 my_script.py --input {input_file} --outdir {output_dir}`
+
+### 6. Sample View Data Node (`node_runners/sample_view_data_runner.py`)
+
+| | |
+|---|---|
+| **Config** | `channel_0`..`channel_3` (bool — which channels to include) |
+| **Inputs** | (none — source node) |
+| **Outputs** | `volume` (VOLUME — Dict[int, np.ndarray]), `position` (POSITION — (x,y,z,r) tuple), `config` (ANY — coordinate config dict) |
+
+**Behavior:**
+- Source node that reads current 3D viewer state (no inputs required)
+- Reads volumes from `voxel_storage` for each enabled channel (checks `has_data()` first)
+- Reads current stage position from `position_controller.get_current_position()`
+- Passes coordinate config (voxel_size_um, stage ranges, invert_x) as config output
+- Designed to feed into Threshold → ForEach → Workflow pipelines
 
 ---
 
@@ -415,8 +441,11 @@ Extends `PersistentDialog` for geometry save/restore.
 | Drag node | Move (updates model x,y, redraws wires) |
 | Left-drag from output port | Draws temporary wire; green highlight on compatible targets |
 | Release on compatible input | Creates Connection in model + visual wire |
-| Middle-drag on canvas | Pan |
-| Ctrl+Scroll | Zoom (0.2x – 3.0x) |
+| Middle-drag or Right-drag | Pan canvas |
+| Scroll wheel | Zoom (0.2x – 3.0x, anchored under mouse, no Ctrl required) |
+| Right-click (no drag) on node | Context menu: Delete Node |
+| Right-click on connection | Context menu: Delete Connection |
+| Right-click on empty canvas | Context menu: Add Node (all 6 types), Fit to Content, Reset Zoom |
 | Delete/Backspace | Remove selected connection or node |
 
 ### Visual Design
@@ -426,7 +455,7 @@ Extends `PersistentDialog` for geometry save/restore.
 | **Canvas** | Dark background (#252525) with subtle dot grid (#333, 30px spacing) |
 | **Empty canvas** | Centered hint text in gray (#555): "Drag node types from the palette onto this canvas to build a pipeline" |
 | **Node body** | Dark rounded rect (#2d2d2d), 180px wide |
-| **Node header** | Colored by type: blue (Workflow), orange (Threshold), purple (ForEach), yellow (Conditional), green (External) |
+| **Node header** | Colored by type: blue (Workflow), orange (Threshold), purple (ForEach), yellow (Conditional), green (External), teal (Sample View Data) |
 | **Ports** | Small colored circles (color = port type), left=inputs, right=outputs |
 | **Wires** | Cubic bezier curves, color matches source port type |
 | **Status dot** | Top-right of header: gray=idle, blue=running, green=completed, red=error |
@@ -437,11 +466,14 @@ Extends `PersistentDialog` for geometry save/restore.
 
 | Node Type | Config Fields |
 |-----------|--------------|
-| Workflow | workflow_type (combo), template_file (text), use_input_position (bool) |
-| Threshold | gauss_sigma (float), opening_enabled (bool), opening_radius (int), min_object_size (int), default_threshold (int), + per-channel threshold spinboxes (ch 0-3) |
+| Workflow | config_mode (combo: template/inline), template_file (file browser), use_input_position (bool), auto_z_range (bool), z_margin_um (float). **Inline mode** shows grouped sections: Illumination (4 lasers + LED), Camera (exposure/fps/AOI), Z-Stack (step/planes), Save (folder browser/prefix/format/MIP) |
+| Threshold | gauss_sigma (float), opening_enabled (bool), opening_radius (int), min_object_size (int), default_threshold (int), + per-channel: enable checkbox + threshold spinbox (ch 0-3) |
 | ForEach | (none — auto-configured) |
 | Conditional | comparison_op (combo: >,<,==,!=,>=,<=), threshold_value (float) |
 | External Command | command_template (text), input_format (combo), output_format (combo), timeout_seconds (int) |
+| Sample View Data | channel_0..channel_3 (bool checkboxes — which channels to read from viewer) |
+
+**Widget types** available in property panel schemas: `str`, `int`, `float`, `bool`, `combo`, `file` (QLineEdit + browse button with file filter), `folder` (QLineEdit + browse button for directories), `header` (bold section label).
 
 ---
 
@@ -622,29 +654,30 @@ svc = context.get_service('my_service')
 | File | Lines | Purpose |
 |------|-------|---------|
 | `models/port_types.py` | ~100 | PortType enum, compatibility, colors |
-| `models/pipeline.py` | ~420 | Pipeline graph model + algorithms |
-| `models/detected_object.py` | ~65 | DetectedObject dataclass |
+| `models/pipeline.py` | ~440 | Pipeline graph model + algorithms (6 node types) |
+| `models/detected_object.py` | ~115 | DetectedObject dataclass + coordinate helpers |
 | `engine/executor.py` | ~140 | PipelineExecutor QThread |
 | `engine/context.py` | ~100 | ExecutionContext per-run state |
 | `engine/scope_resolver.py` | ~155 | ForEach/Conditional scope identification |
 | `engine/node_runners/base_runner.py` | ~60 | AbstractNodeRunner ABC |
-| `engine/node_runners/workflow_runner.py` | ~115 | WorkflowFacade delegation |
-| `engine/node_runners/threshold_runner.py` | ~90 | ThresholdAnalysisService delegation |
+| `engine/node_runners/workflow_runner.py` | ~195 | WorkflowFacade delegation, inline config builder, z-range override |
+| `engine/node_runners/threshold_runner.py` | ~120 | ThresholdAnalysisService + coordinate transforms |
 | `engine/node_runners/foreach_runner.py` | ~95 | Collection iteration |
 | `engine/node_runners/conditional_runner.py` | ~100 | Branch evaluation |
 | `engine/node_runners/external_command_runner.py` | ~125 | Subprocess I/O |
+| `engine/node_runners/sample_view_data_runner.py` | ~80 | Reads current 3D viewer state |
 | `services/threshold_analysis_service.py` | ~170 | Extracted threshold pipeline |
 | `services/pipeline_repository.py` | ~80 | JSON file persistence |
 | `services/pipeline_service.py` | ~110 | Facade + example pipeline |
 | `ui/pipeline_editor_dialog.py` | ~360 | Top-level editor dialog (toolbar, splitter, log) |
 | `ui/graph_scene.py` | ~290 | QGraphicsScene with dot grid + empty hint |
-| `ui/graph_view.py` | ~145 | Pan/zoom/drag view |
+| `ui/graph_view.py` | ~220 | Pan/zoom/drag view + right-click context menu |
 | `ui/node_item.py` | ~190 | Node rectangle rendering |
 | `ui/port_item.py` | ~95 | Port circle rendering |
 | `ui/connection_item.py` | ~115 | Bezier wire rendering |
 | `ui/node_palette.py` | ~115 | Drag sidebar with hint text |
-| `ui/property_panel.py` | ~240 | Dynamic config form with empty state |
-| `controllers/pipeline_controller.py` | ~115 | UI ↔ Engine mediator |
+| `ui/property_panel.py` | ~490 | Dynamic config form with file/folder browsers, inline workflow groups |
+| `controllers/pipeline_controller.py` | ~145 | UI ↔ Engine mediator + coordinate config loader |
 
-**Total new code:** ~3,975 lines across 31 files
+**Total new code:** ~4,500 lines across 32 files
 **Modified existing code:** ~125 lines changed across 5 files

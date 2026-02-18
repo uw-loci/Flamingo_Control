@@ -18,6 +18,7 @@ from py2flamingo.pipeline.engine.node_runners.threshold_runner import ThresholdR
 from py2flamingo.pipeline.engine.node_runners.foreach_runner import ForEachRunner
 from py2flamingo.pipeline.engine.node_runners.conditional_runner import ConditionalRunner
 from py2flamingo.pipeline.engine.node_runners.external_command_runner import ExternalCommandRunner
+from py2flamingo.pipeline.engine.node_runners.sample_view_data_runner import SampleViewDataRunner
 from py2flamingo.pipeline.services.pipeline_service import PipelineService
 from py2flamingo.pipeline.ui.pipeline_editor_dialog import PipelineEditorDialog
 
@@ -90,6 +91,14 @@ class PipelineController(QObject):
             if hasattr(self._app, 'voxel_storage'):
                 services['voxel_storage'] = self._app.voxel_storage
 
+            if hasattr(self._app, 'position_controller'):
+                services['position_controller'] = self._app.position_controller
+
+            # Build coordinate config from visualization YAML
+            coord_config = self._build_coordinate_config()
+            if coord_config:
+                services['coordinate_config'] = coord_config
+
         context = ExecutionContext(services=services)
 
         # Create runners
@@ -99,6 +108,7 @@ class PipelineController(QObject):
             NodeType.FOR_EACH: ForEachRunner(),
             NodeType.CONDITIONAL: ConditionalRunner(),
             NodeType.EXTERNAL_COMMAND: ExternalCommandRunner(),
+            NodeType.SAMPLE_VIEW_DATA: SampleViewDataRunner(),
         }
 
         # Create executor
@@ -120,6 +130,25 @@ class PipelineController(QObject):
         # Start
         logger.info(f"Starting pipeline execution: {pipeline.name}")
         self._executor.start()
+
+    def _build_coordinate_config(self) -> Optional[dict]:
+        """Load visualization config and extract display + stage_control sections."""
+        try:
+            import yaml
+            from pathlib import Path
+            config_path = Path(__file__).parent.parent.parent / 'configs' / 'visualization_3d_config.yaml'
+            if not config_path.exists():
+                logger.warning(f"Visualization config not found: {config_path}")
+                return None
+            with open(config_path) as f:
+                full_config = yaml.safe_load(f)
+            return {
+                'display': full_config.get('display', {}),
+                'stage_control': full_config.get('stage_control', {}),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to load coordinate config: {e}")
+            return None
 
     def _on_executor_finished(self):
         """Clean up after executor thread finishes."""

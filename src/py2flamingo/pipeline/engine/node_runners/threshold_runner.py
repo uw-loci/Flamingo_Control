@@ -43,9 +43,22 @@ class ThresholdRunner(AbstractNodeRunner):
             context: ExecutionContext) -> None:
         config = node.config
 
+        # Filter channel thresholds by enabled channels
+        all_thresholds = config.get('channel_thresholds', {})
+        enabled_channels = config.get('enabled_channels', None)
+        if enabled_channels is not None:
+            if isinstance(enabled_channels, list):
+                enabled_channels = set(enabled_channels)
+            filtered_thresholds = {
+                ch: val for ch, val in all_thresholds.items()
+                if ch in enabled_channels or int(ch) in enabled_channels
+            }
+        else:
+            filtered_thresholds = all_thresholds
+
         # Build settings from config
         settings = ThresholdSettings(
-            channel_thresholds=config.get('channel_thresholds', {}),
+            channel_thresholds=filtered_thresholds,
             gauss_sigma=config.get('gauss_sigma', 0.0),
             opening_enabled=config.get('opening_enabled', False),
             opening_radius=config.get('opening_radius', 1),
@@ -85,14 +98,44 @@ class ThresholdRunner(AbstractNodeRunner):
         if not volumes:
             raise RuntimeError("No input volumes available for threshold analysis")
 
-        # Get voxel size from config or context
+        # Build voxel_to_stage coordinate transform from coordinate_config
+        coord_config = context.get_service('coordinate_config')
+        voxel_to_stage_fn = None
         voxel_size_um = tuple(config.get('voxel_size_um', [50.0, 50.0, 50.0]))
+
+        if coord_config:
+            try:
+                stage = coord_config['stage_control']
+                display = coord_config['display']
+                voxel_um = display.get('voxel_size_um', [50.0, 50.0, 50.0])
+                voxel_size_um = tuple(voxel_um)
+                z_range = stage['z_range_mm']
+                y_range = stage['y_range_mm']
+                x_range = stage['x_range_mm']
+                invert_x = stage.get('invert_x_default', False)
+
+                def voxel_to_stage(z_vox, y_vox, x_vox,
+                                   _z_range=z_range, _y_range=y_range,
+                                   _x_range=x_range, _voxel_um=voxel_um,
+                                   _invert_x=invert_x):
+                    z_mm = _z_range[0] + z_vox * _voxel_um[0] / 1000.0
+                    y_mm = _y_range[1] - y_vox * _voxel_um[1] / 1000.0  # Y inverted
+                    if _invert_x:
+                        x_mm = _x_range[1] - x_vox * _voxel_um[2] / 1000.0
+                    else:
+                        x_mm = _x_range[0] + x_vox * _voxel_um[2] / 1000.0
+                    return (x_mm, y_mm, z_mm)
+
+                voxel_to_stage_fn = voxel_to_stage
+            except (KeyError, TypeError) as e:
+                logger.warning(f"Could not build voxel_to_stage transform: {e}")
 
         # Run analysis
         result = self._service.analyze(
             volumes=volumes,
             settings=settings,
             voxel_size_um=voxel_size_um,
+            voxel_to_stage_fn=voxel_to_stage_fn,
         )
 
         # Set outputs

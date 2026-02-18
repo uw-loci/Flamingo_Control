@@ -23,6 +23,7 @@ _NODE_DESCRIPTIONS = {
     NodeType.FOR_EACH: "Iterate over a list of detected objects",
     NodeType.CONDITIONAL: "Branch based on a condition (>, <, ==, etc.)",
     NodeType.EXTERNAL_COMMAND: "Run an external script or command",
+    NodeType.SAMPLE_VIEW_DATA: "Read current 3D viewer data (volumes, position)",
 }
 
 MIME_TYPE = 'application/x-pipeline-node-type'

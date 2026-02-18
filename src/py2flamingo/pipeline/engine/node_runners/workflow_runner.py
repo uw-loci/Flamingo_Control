@@ -36,6 +36,58 @@ class WorkflowRunner(AbstractNodeRunner):
     TIMEOUT_SECONDS = 1800  # 30 minutes
     POLL_INTERVAL = 1.0     # seconds between polls
 
+    @staticmethod
+    def _build_inline_workflow_dict(config: dict) -> dict:
+        """Map inline config keys to workflow dict format for WorkflowFacade.create_from_dict()."""
+        workflow_dict = {
+            'workflow_type': config.get('workflow_type', 'zstack'),
+        }
+
+        # Illumination — lasers
+        lasers = []
+        for i in range(4):
+            if config.get(f'laser_{i}_enabled', False):
+                lasers.append({
+                    'channel': i,
+                    'power_percent': config.get(f'laser_{i}_power', 0.0),
+                })
+        if lasers:
+            workflow_dict['lasers'] = lasers
+
+        # LED
+        if config.get('led_enabled', False):
+            workflow_dict['led'] = {
+                'enabled': True,
+                'intensity': config.get('led_intensity', 0),
+            }
+
+        # Camera
+        workflow_dict['camera'] = {
+            'exposure_us': config.get('exposure_us', 10000),
+            'frame_rate': config.get('frame_rate', 40.0),
+            'aoi_width': config.get('aoi_width', 2048),
+            'aoi_height': config.get('aoi_height', 2048),
+        }
+
+        # Z-Stack
+        if config.get('workflow_type') == 'zstack':
+            workflow_dict['z_stack'] = {
+                'z_step_um': config.get('z_step_um', 5.0),
+                'num_planes': config.get('num_planes', 100),
+            }
+
+        # Save settings
+        save_drive = config.get('save_drive', '')
+        if save_drive:
+            workflow_dict['save'] = {
+                'drive': save_drive,
+                'prefix': config.get('file_prefix', ''),
+                'format': config.get('save_format', 'TIFF'),
+                'save_mip': config.get('save_mip', False),
+            }
+
+        return workflow_dict
+
     def run(self, node: PipelineNode, pipeline: Pipeline,
             context: ExecutionContext) -> None:
         config = node.config
@@ -48,18 +100,26 @@ class WorkflowRunner(AbstractNodeRunner):
             raise RuntimeError("WorkflowFacade service not available in context")
 
         # Load or create workflow
+        config_mode = config.get('config_mode', 'template')
         template_file = config.get('template_file')
-        if template_file:
+
+        if config_mode == 'template' and template_file:
             workflow = workflow_facade.load_workflow(Path(template_file))
+        elif config_mode == 'inline':
+            workflow_dict = self._build_inline_workflow_dict(config)
+            workflow = workflow_facade.create_from_dict(workflow_dict)
         else:
-            workflow_type = config.get('workflow_type', 'zstack')
-            workflow_dict = config.get('workflow_settings', {})
-            if workflow_dict:
-                workflow = workflow_facade.create_from_dict(workflow_dict)
+            # Fallback: try template_file then workflow_settings
+            if template_file:
+                workflow = workflow_facade.load_workflow(Path(template_file))
             else:
-                raise RuntimeError(
-                    "Workflow node requires either template_file or workflow_settings"
-                )
+                workflow_dict = config.get('workflow_settings', {})
+                if workflow_dict:
+                    workflow = workflow_facade.create_from_dict(workflow_dict)
+                else:
+                    raise RuntimeError(
+                        "Workflow node requires either a template file or inline configuration"
+                    )
 
         # Override position from input port
         position_data = self._get_input(node, pipeline, context, 'position')
@@ -80,6 +140,30 @@ class WorkflowRunner(AbstractNodeRunner):
                 )
                 workflow.position = pos
                 logger.info(f"Overriding workflow position from tuple: {pos}")
+
+        # Z-range override from DetectedObject bounding box
+        z_range_obj = self._get_input(node, pipeline, context, 'z_range')
+        if z_range_obj and config.get('auto_z_range', False) and hasattr(z_range_obj, 'bounding_box'):
+            coord_config = context.get_service('coordinate_config')
+            if coord_config:
+                try:
+                    bb = z_range_obj.bounding_box  # (z_slice, y_slice, x_slice)
+                    voxel_um = coord_config['display'].get('voxel_size_um', [50.0, 50.0, 50.0])
+                    z_range_mm = coord_config['stage_control']['z_range_mm']
+                    z_start = z_range_mm[0] + bb[0].start * voxel_um[0] / 1000.0
+                    z_stop = z_range_mm[0] + bb[0].stop * voxel_um[0] / 1000.0
+                    margin = config.get('z_margin_um', 50.0) / 1000.0
+                    z_start_with_margin = max(z_range_mm[0], z_start - margin)
+                    z_stop_with_margin = min(z_range_mm[1], z_stop + margin)
+                    if hasattr(workflow, 'z_start') and hasattr(workflow, 'z_end'):
+                        workflow.z_start = z_start_with_margin
+                        workflow.z_end = z_stop_with_margin
+                    logger.info(
+                        f"Auto Z-range from object bounding box: "
+                        f"{z_start_with_margin:.3f} - {z_stop_with_margin:.3f} mm"
+                    )
+                except (KeyError, TypeError, AttributeError) as e:
+                    logger.warning(f"Could not apply auto Z-range: {e}")
 
         # Execute workflow
         logger.info(f"Starting workflow: {node.name}")
@@ -128,17 +212,18 @@ class WorkflowRunner(AbstractNodeRunner):
                 str(current.output_path)
             )
 
-        # Try to get volume data from voxel storage
+        # Try to get volume data from voxel storage (all channels with data)
         voxel_storage = context.get_service('voxel_storage')
         if voxel_storage:
             try:
-                # Get the most recently captured channel data
-                for ch_id in range(4):  # Try channels 0-3
+                volumes = {}
+                for ch_id in range(4):
                     vol = voxel_storage.get_display_volume(ch_id)
                     if vol is not None and vol.any():
-                        self._set_output(
-                            node, context, 'volume', PortType.VOLUME, vol
-                        )
-                        break
+                        volumes[ch_id] = vol
+                if volumes:
+                    self._set_output(
+                        node, context, 'volume', PortType.VOLUME, volumes
+                    )
             except Exception as e:
                 logger.debug(f"Could not retrieve volume after workflow: {e}")
