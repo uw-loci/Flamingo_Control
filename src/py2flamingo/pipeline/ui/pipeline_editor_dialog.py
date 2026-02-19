@@ -94,6 +94,7 @@ class PipelineEditorDialog(PersistentDialog):
 
         # Right: Property panel
         self._property_panel = PropertyPanel()
+        self._property_panel.set_app(self.app)
         self._property_panel.setMinimumWidth(200)
         self._property_panel.setMaximumWidth(300)
         splitter.addWidget(self._property_panel)

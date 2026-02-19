@@ -2,9 +2,10 @@
 WorkflowRunner — executes a Workflow node by delegating to WorkflowFacade.
 
 Config:
-    workflow_type: str — type of workflow (e.g. 'zstack', 'tile_scan')
-    template_file: str — path to workflow template file
+    template_file: str — path to workflow template .txt file
     use_input_position: bool — override workflow position with input port value
+    auto_z_range: bool — auto Z-range from detected object bounding box
+    buffer_percent: float — BBox buffer percentage for Z-range
 
 Inputs:
     trigger — execution ordering
@@ -36,58 +37,6 @@ class WorkflowRunner(AbstractNodeRunner):
     TIMEOUT_SECONDS = 1800  # 30 minutes
     POLL_INTERVAL = 1.0     # seconds between polls
 
-    @staticmethod
-    def _build_inline_workflow_dict(config: dict) -> dict:
-        """Map inline config keys to workflow dict format for WorkflowFacade.create_from_dict()."""
-        workflow_dict = {
-            'workflow_type': config.get('workflow_type', 'zstack'),
-        }
-
-        # Illumination — lasers
-        lasers = []
-        for i in range(4):
-            if config.get(f'laser_{i}_enabled', False):
-                lasers.append({
-                    'channel': i,
-                    'power_percent': config.get(f'laser_{i}_power', 0.0),
-                })
-        if lasers:
-            workflow_dict['lasers'] = lasers
-
-        # LED
-        if config.get('led_enabled', False):
-            workflow_dict['led'] = {
-                'enabled': True,
-                'intensity': config.get('led_intensity', 0),
-            }
-
-        # Camera
-        workflow_dict['camera'] = {
-            'exposure_us': config.get('exposure_us', 10000),
-            'frame_rate': config.get('frame_rate', 40.0),
-            'aoi_width': config.get('aoi_width', 2048),
-            'aoi_height': config.get('aoi_height', 2048),
-        }
-
-        # Z-Stack
-        if config.get('workflow_type') == 'zstack':
-            workflow_dict['z_stack'] = {
-                'z_step_um': config.get('z_step_um', 5.0),
-                'num_planes': config.get('num_planes', 100),
-            }
-
-        # Save settings
-        save_drive = config.get('save_drive', '')
-        if save_drive:
-            workflow_dict['save'] = {
-                'drive': save_drive,
-                'prefix': config.get('file_prefix', ''),
-                'format': config.get('save_format', 'TIFF'),
-                'save_mip': config.get('save_mip', False),
-            }
-
-        return workflow_dict
-
     def run(self, node: PipelineNode, pipeline: Pipeline,
             context: ExecutionContext) -> None:
         config = node.config
@@ -99,27 +48,27 @@ class WorkflowRunner(AbstractNodeRunner):
         if not workflow_facade:
             raise RuntimeError("WorkflowFacade service not available in context")
 
-        # Load or create workflow
-        config_mode = config.get('config_mode', 'template')
+        # Load workflow from template file
         template_file = config.get('template_file')
 
-        if config_mode == 'template' and template_file:
-            workflow = workflow_facade.load_workflow(Path(template_file))
-        elif config_mode == 'inline':
-            workflow_dict = self._build_inline_workflow_dict(config)
-            workflow = workflow_facade.create_from_dict(workflow_dict)
-        else:
-            # Fallback: try template_file then workflow_settings
-            if template_file:
-                workflow = workflow_facade.load_workflow(Path(template_file))
-            else:
-                workflow_dict = config.get('workflow_settings', {})
-                if workflow_dict:
-                    workflow = workflow_facade.create_from_dict(workflow_dict)
-                else:
-                    raise RuntimeError(
-                        "Workflow node requires either a template file or inline configuration"
-                    )
+        # Legacy fallback: old pipelines may have config_mode='inline'
+        config_mode = config.get('config_mode', 'template')
+        if config_mode == 'inline':
+            logger.warning(
+                "Workflow node '%s' uses legacy inline mode which is no longer "
+                "supported. Please re-configure using 'Configure Workflow...' "
+                "button. Skipping execution.", node.name
+            )
+            self._set_output(node, context, 'completed', PortType.TRIGGER, True)
+            return
+
+        if not template_file:
+            raise RuntimeError(
+                "Workflow node requires a template file. Use 'Configure Workflow...' "
+                "to create one."
+            )
+
+        workflow = workflow_facade.load_workflow(Path(template_file))
 
         # Override position from input port
         position_data = self._get_input(node, pipeline, context, 'position')

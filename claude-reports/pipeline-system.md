@@ -1,6 +1,6 @@
 # Visual Pipeline Workflow System — Reference Guide
 
-**Commit:** `1ba0b33` + Node Enhancements (2026-02-17)
+**Commit:** `1ba0b33` + Node Enhancements + Workflow Config Dialog (2026-02-19)
 **Location:** `src/py2flamingo/pipeline/`
 
 ---
@@ -94,6 +94,7 @@ pipeline/
 │   ├── connection_item.py           # Bezier wires + drag wire
 │   ├── node_palette.py              # Draggable node type list
 │   ├── property_panel.py            # Dynamic config form
+│   ├── workflow_config_dialog.py    # Full workflow configuration dialog
 │   └── pipeline_editor_dialog.py    # Top-level dialog
 └── controllers/
     ├── __init__.py
@@ -256,19 +257,28 @@ Key methods:
 
 | | |
 |---|---|
-| **Config** | `config_mode` (template/inline), `template_file`, `workflow_type`, `use_input_position`, `auto_z_range`, `z_margin_um`, inline settings (laser/camera/z-stack/save) |
+| **Config** | `template_file` (path to .txt workflow file), `use_input_position` (bool), `auto_z_range` (bool), `buffer_percent` (float) |
 | **Inputs** | `trigger` (TRIGGER), `position` (POSITION, optional), `z_range` (OBJECT, optional — DetectedObject for bounding box) |
 | **Outputs** | `volume` (VOLUME — dict of all channels), `file_path` (FILE_PATH), `completed` (TRIGGER) |
 
+**Configuration UI:**
+- **"Configure Workflow..." button** in PropertyPanel opens `PipelineWorkflowConfigDialog` — a full dialog embedding the same reusable panels (IlluminationPanel, CameraPanel, ZStackPanel, SavePanel) used by TileCollectionDialog
+- The dialog saves a standard `.txt` workflow file to `~/.flamingo/pipelines/workflow_templates/` and sets the `template_file` path on the node
+- Alternatively, users can manually browse to any existing `.txt` workflow file
+- Position fields in the template are placeholders (0,0,0) — overridden at runtime
+
 **Behavior:**
-- **Template mode**: loads workflow from file selected via file browser dialog
-- **Inline mode**: builds workflow dict from grouped config sections (illumination, camera, z-stack, save) via `_build_inline_workflow_dict()`
+- Loads workflow from `.txt` template file via `WorkflowFacade.load_workflow()`
 - If `position` input connected and `use_input_position=True`, overrides workflow position
 - Accepts `DetectedObject` on position input (extracts `centroid_stage`)
-- **Z-range auto-override**: if `z_range` input connected to a DetectedObject and `auto_z_range=True`, extracts Z extent from bounding box + configurable margin (`z_margin_um`, default 50um) and applies to workflow start/end Z
+- **Z-range auto-override**: if `auto_z_range=True` and a DetectedObject with bounding box is available, extracts Z extent from bounding box + configurable buffer (`buffer_percent`, default 25%) and applies to workflow Z range
 - Starts workflow via `WorkflowFacade.start_workflow()`
 - Polls `get_workflow_status()` until COMPLETED/IDLE/STOPPED (1s interval, 30min timeout)
 - Outputs multi-channel volume dict (all channels with data) from voxel_storage
+- **Legacy**: old pipelines with `config_mode='inline'` are detected and skipped with a warning
+
+**Example workflow templates** are provided in `workflows/`:
+- `PipelineZStack.txt` — default pipeline Z-stack (3 lasers, 500µm range, placeholder positions)
 
 ### 2. Threshold Node (`node_runners/threshold_runner.py`)
 
@@ -466,7 +476,7 @@ Extends `PersistentDialog` for geometry save/restore.
 
 | Node Type | Config Fields |
 |-----------|--------------|
-| Workflow | config_mode (combo: template/inline), template_file (file browser), use_input_position (bool), auto_z_range (bool), z_margin_um (float). **Inline mode** shows grouped sections: Illumination (4 lasers + LED), Camera (exposure/fps/AOI), Z-Stack (step/planes), Save (folder browser/prefix/format/MIP) |
+| Workflow | **"Configure Workflow..." button** (opens full dialog with IlluminationPanel, CameraPanel, ZStackPanel, SavePanel), template_file (file browser), use_input_position (bool), auto_z_range (bool), buffer_percent (float) |
 | Threshold | gauss_sigma (float), opening_enabled (bool), opening_radius (int), min_object_size (int), default_threshold (int), + per-channel: enable checkbox + threshold spinbox (ch 0-3) |
 | ForEach | (none — auto-configured) |
 | Conditional | comparison_op (combo: >,<,==,!=,>=,<=), threshold_value (float) |
@@ -660,7 +670,7 @@ svc = context.get_service('my_service')
 | `engine/context.py` | ~100 | ExecutionContext per-run state |
 | `engine/scope_resolver.py` | ~155 | ForEach/Conditional scope identification |
 | `engine/node_runners/base_runner.py` | ~60 | AbstractNodeRunner ABC |
-| `engine/node_runners/workflow_runner.py` | ~195 | WorkflowFacade delegation, inline config builder, z-range override |
+| `engine/node_runners/workflow_runner.py` | ~215 | WorkflowFacade delegation, template loading, position + z-range override |
 | `engine/node_runners/threshold_runner.py` | ~120 | ThresholdAnalysisService + coordinate transforms |
 | `engine/node_runners/foreach_runner.py` | ~95 | Collection iteration |
 | `engine/node_runners/conditional_runner.py` | ~100 | Branch evaluation |
@@ -676,7 +686,8 @@ svc = context.get_service('my_service')
 | `ui/port_item.py` | ~95 | Port circle rendering |
 | `ui/connection_item.py` | ~115 | Bezier wire rendering |
 | `ui/node_palette.py` | ~115 | Drag sidebar with hint text |
-| `ui/property_panel.py` | ~490 | Dynamic config form with file/folder browsers, inline workflow groups |
+| `ui/property_panel.py` | ~370 | Dynamic config form with file/folder browsers, "Configure Workflow..." button |
+| `ui/workflow_config_dialog.py` | ~265 | Full workflow config dialog (embeds IlluminationPanel, CameraPanel, ZStackPanel, SavePanel) |
 | `controllers/pipeline_controller.py` | ~145 | UI ↔ Engine mediator + coordinate config loader |
 
 **Total new code:** ~4,500 lines across 32 files

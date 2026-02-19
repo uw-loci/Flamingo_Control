@@ -316,12 +316,14 @@ This is the canonical smart microscopy workflow:
 2. **Connect** ports by dragging from an output (right) to an input (left)
    - Color coding shows port types; green highlight indicates compatible connections
 3. **Configure** each node by clicking it and editing properties in the right panel
+   - **Workflow nodes**: Click **"Configure Workflow..."** to open a full dialog with the same illumination, camera, Z-stack, and save panels used in Tile Collection. The dialog saves a `.txt` workflow template that the pipeline uses at runtime. Position values are placeholders — the pipeline overrides them from detected objects
+   - You can also point the template file at any existing `.txt` workflow file (e.g., from `workflows/PipelineZStack.txt`)
 4. **Validate** to check for errors (cycles, missing connections, type mismatches)
 5. **Save** the pipeline as JSON for reuse
 6. **Run** to execute — node status dots show progress (blue=running, green=done, red=error)
 7. **Stop** to cancel at any time
 
-Pipelines are saved as JSON files to `~/.flamingo/pipelines/`.
+Pipelines are saved as JSON files to `~/.flamingo/pipelines/`. Workflow templates created via "Configure Workflow..." are saved to `~/.flamingo/pipelines/workflow_templates/`.
 
 ---
 

@@ -23,14 +23,11 @@ logger = logging.getLogger(__name__)
 # Per-node-type config schema: list of (key, label, widget_type, default, options)
 _CONFIG_SCHEMAS: Dict[NodeType, list] = {
     NodeType.WORKFLOW: [
-        ('config_mode', 'Configuration', 'combo', 'template', ['template', 'inline']),
-        ('template_file', 'Template File', 'file', '',
-         {'filter': 'Workflow files (*.wf *.txt);;All files (*)'}),
+        ('template_file', 'Workflow Template', 'file', '',
+         {'filter': 'Workflow files (*.txt);;All files (*)'}),
         ('use_input_position', 'Override Position from Input', 'bool', True),
         ('auto_z_range', 'Auto Z-Range from Object', 'bool', False),
         ('buffer_percent', 'BBox Buffer (%)', 'float', 25.0),
-        ('workflow_type', 'Workflow Type', 'combo', 'zstack',
-         ['zstack', 'tile_scan', 'snapshot']),
     ],
     NodeType.THRESHOLD: [
         ('gauss_sigma', 'Gaussian Sigma', 'float', 0.0),
@@ -70,8 +67,13 @@ class PropertyPanel(QWidget):
         self._pipeline: Optional[Pipeline] = None
         self._current_node: Optional[PipelineNode] = None
         self._widgets: Dict[str, QWidget] = {}
+        self._app = None
 
         self._setup_ui()
+
+    def set_app(self, app):
+        """Set the application reference (needed for workflow config dialog)."""
+        self._app = app
 
     def _setup_ui(self):
         outer_layout = QVBoxLayout(self)
@@ -166,10 +168,9 @@ class PropertyPanel(QWidget):
         if node.node_type == NodeType.THRESHOLD:
             self._add_channel_threshold_widgets(node)
 
-        # Workflow inline config widgets
+        # "Configure Workflow..." button for Workflow nodes
         if node.node_type == NodeType.WORKFLOW:
-            self._add_workflow_inline_widgets(node)
-            self._on_workflow_mode_changed(node.config.get('config_mode', 'template'))
+            self._add_workflow_configure_button(node)
 
     def _create_widget(self, widget_type: str, value, options, key: str) -> QWidget:
         """Create an appropriate input widget."""
@@ -311,167 +312,45 @@ class PropertyPanel(QWidget):
                 self._current_node.config['channel_thresholds'] = {}
             self._current_node.config['channel_thresholds'][ch_id] = value
 
-    def _add_workflow_inline_widgets(self, node: PipelineNode):
-        """Add grouped inline config sections for Workflow nodes."""
-        config = node.config
-
-        # --- Illumination Group ---
-        illum_group = QGroupBox("Illumination")
-        illum_layout = QFormLayout(illum_group)
-        laser_names = ['405nm', '488nm', '561nm', '640nm']
-        for i, name in enumerate(laser_names):
-            row = QWidget()
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            cb = QCheckBox("Enable")
-            cb.setChecked(config.get(f'laser_{i}_enabled', False))
-            cb.stateChanged.connect(
-                lambda state, k=f'laser_{i}_enabled': self._on_config_changed(k, state == Qt.Checked)
-            )
-            row_layout.addWidget(cb)
-            spin = QDoubleSpinBox()
-            spin.setRange(0.0, 100.0)
-            spin.setSuffix(" %")
-            spin.setValue(config.get(f'laser_{i}_power', 0.0))
-            spin.valueChanged.connect(
-                lambda v, k=f'laser_{i}_power': self._on_config_changed(k, v)
-            )
-            row_layout.addWidget(spin)
-            illum_layout.addRow(name, row)
-
-        # LED row
-        led_row = QWidget()
-        led_layout = QHBoxLayout(led_row)
-        led_layout.setContentsMargins(0, 0, 0, 0)
-        led_cb = QCheckBox("Enable")
-        led_cb.setChecked(config.get('led_enabled', False))
-        led_cb.stateChanged.connect(
-            lambda state: self._on_config_changed('led_enabled', state == Qt.Checked)
+    def _add_workflow_configure_button(self, node: PipelineNode):
+        """Add a 'Configure Workflow...' button above the template file field."""
+        btn = QPushButton("Configure Workflow...")
+        btn.setToolTip("Open full workflow configuration dialog")
+        btn.setStyleSheet(
+            "QPushButton { padding: 6px 12px; font-weight: bold; }"
         )
-        led_layout.addWidget(led_cb)
-        led_spin = QSpinBox()
-        led_spin.setRange(0, 255)
-        led_spin.setValue(config.get('led_intensity', 0))
-        led_spin.valueChanged.connect(
-            lambda v: self._on_config_changed('led_intensity', v)
+        btn.clicked.connect(self._on_configure_workflow)
+        self._config_layout.insertRow(0, btn)
+        self._widgets['_configure_btn'] = btn
+
+    def _on_configure_workflow(self):
+        """Open the workflow config dialog and update node on accept."""
+        if not self._current_node:
+            return
+
+        from py2flamingo.pipeline.ui.workflow_config_dialog import PipelineWorkflowConfigDialog
+
+        current_template = self._current_node.config.get('template_file', '')
+        dialog = PipelineWorkflowConfigDialog(
+            app=self._app,
+            template_file=current_template,
+            parent=self,
         )
-        led_layout.addWidget(led_spin)
-        illum_layout.addRow("LED", led_row)
-        self._config_layout.addRow(illum_group)
-        self._widgets['_illum_group'] = illum_group
-
-        # --- Camera Group ---
-        cam_group = QGroupBox("Camera")
-        cam_layout = QFormLayout(cam_group)
-        exposure = QSpinBox()
-        exposure.setRange(1, 1000000)
-        exposure.setSuffix(" us")
-        exposure.setValue(config.get('exposure_us', 10000))
-        exposure.valueChanged.connect(lambda v: self._on_config_changed('exposure_us', v))
-        cam_layout.addRow("Exposure", exposure)
-
-        fps = QDoubleSpinBox()
-        fps.setRange(0.1, 1000.0)
-        fps.setSuffix(" fps")
-        fps.setValue(config.get('frame_rate', 40.0))
-        fps.valueChanged.connect(lambda v: self._on_config_changed('frame_rate', v))
-        cam_layout.addRow("Frame Rate", fps)
-
-        aoi_w = QSpinBox()
-        aoi_w.setRange(1, 4096)
-        aoi_w.setValue(config.get('aoi_width', 2048))
-        aoi_w.valueChanged.connect(lambda v: self._on_config_changed('aoi_width', v))
-        cam_layout.addRow("AOI Width", aoi_w)
-
-        aoi_h = QSpinBox()
-        aoi_h.setRange(1, 4096)
-        aoi_h.setValue(config.get('aoi_height', 2048))
-        aoi_h.valueChanged.connect(lambda v: self._on_config_changed('aoi_height', v))
-        cam_layout.addRow("AOI Height", aoi_h)
-        self._config_layout.addRow(cam_group)
-        self._widgets['_cam_group'] = cam_group
-
-        # --- Z-Stack Group ---
-        zstack_group = QGroupBox("Z-Stack")
-        zstack_layout = QFormLayout(zstack_group)
-        z_step = QDoubleSpinBox()
-        z_step.setRange(0.1, 1000.0)
-        z_step.setSuffix(" um")
-        z_step.setValue(config.get('z_step_um', 5.0))
-        z_step.valueChanged.connect(lambda v: self._on_config_changed('z_step_um', v))
-        zstack_layout.addRow("Z Step", z_step)
-
-        n_planes = QSpinBox()
-        n_planes.setRange(1, 10000)
-        n_planes.setValue(config.get('num_planes', 100))
-        n_planes.valueChanged.connect(lambda v: self._on_config_changed('num_planes', v))
-        zstack_layout.addRow("Num Planes", n_planes)
-        self._config_layout.addRow(zstack_group)
-        self._widgets['_zstack_group'] = zstack_group
-
-        # --- Save Group ---
-        save_group = QGroupBox("Save")
-        save_layout = QFormLayout(save_group)
-
-        save_drive_container = QWidget()
-        sd_layout = QHBoxLayout(save_drive_container)
-        sd_layout.setContentsMargins(0, 0, 0, 0)
-        save_drive_edit = QLineEdit(config.get('save_drive', ''))
-        save_drive_edit.textChanged.connect(lambda v: self._on_config_changed('save_drive', v))
-        sd_layout.addWidget(save_drive_edit)
-        sd_btn = QPushButton("...")
-        sd_btn.setFixedWidth(30)
-        sd_btn.clicked.connect(lambda _, le=save_drive_edit: self._browse_folder(le))
-        sd_layout.addWidget(sd_btn)
-        save_layout.addRow("Save Drive", save_drive_container)
-
-        prefix = QLineEdit(config.get('file_prefix', ''))
-        prefix.textChanged.connect(lambda v: self._on_config_changed('file_prefix', v))
-        save_layout.addRow("File Prefix", prefix)
-
-        fmt = QComboBox()
-        fmt.addItems(['TIFF', 'BigTIFF'])
-        idx = fmt.findText(config.get('save_format', 'TIFF'))
-        if idx >= 0:
-            fmt.setCurrentIndex(idx)
-        fmt.currentTextChanged.connect(lambda v: self._on_config_changed('save_format', v))
-        save_layout.addRow("Format", fmt)
-
-        save_mip = QCheckBox()
-        save_mip.setChecked(config.get('save_mip', False))
-        save_mip.stateChanged.connect(
-            lambda state: self._on_config_changed('save_mip', state == Qt.Checked)
-        )
-        save_layout.addRow("Save MIP", save_mip)
-        self._config_layout.addRow(save_group)
-        self._widgets['_save_group'] = save_group
-
-    def _on_workflow_mode_changed(self, mode: str):
-        """Show/hide inline groups based on config_mode combo value."""
-        is_inline = (mode == 'inline')
-        for key in ('_illum_group', '_cam_group', '_zstack_group', '_save_group'):
-            widget = self._widgets.get(key)
-            if widget:
-                widget.setVisible(is_inline)
-        # Template file widget: show in template mode
-        template_widget = self._widgets.get('template_file')
-        if template_widget:
-            template_widget.setVisible(not is_inline)
-            # Also hide the label — find it in the form layout
-            for i in range(self._config_layout.rowCount()):
-                label_item = self._config_layout.itemAt(i, QFormLayout.LabelRole)
-                field_item = self._config_layout.itemAt(i, QFormLayout.FieldRole)
-                if field_item and field_item.widget() is template_widget:
-                    if label_item and label_item.widget():
-                        label_item.widget().setVisible(not is_inline)
-                    break
+        if dialog.exec_() == dialog.Accepted:
+            result_path = dialog.get_result_path()
+            if result_path:
+                self._current_node.config['template_file'] = result_path
+                # Update the file path widget display
+                template_widget = self._widgets.get('template_file')
+                if template_widget:
+                    line_edit = template_widget.findChild(QLineEdit)
+                    if line_edit:
+                        line_edit.setText(result_path)
 
     def _on_config_changed(self, key: str, value):
         """Update a config value on the current node."""
         if self._current_node:
             self._current_node.config[key] = value
-            if key == 'config_mode':
-                self._on_workflow_mode_changed(value)
 
     def _on_name_changed(self, name: str):
         """Update the node's display name."""
