@@ -1092,6 +1092,8 @@ class TileCollectionDialog(PersistentDialog):
         progress.setWindowModality(Qt.NonModal)  # Non-modal so user can interact with other windows
         progress.setMinimumDuration(0)
         progress.setWindowTitle("Workflow Progress")
+        progress.setMinimumWidth(400)
+        progress.setWindowFlag(Qt.WindowStaysOnTopHint, True)
         progress.setAttribute(Qt.WA_DeleteOnClose)  # Clean up when closed
 
         # Track completion and current state
