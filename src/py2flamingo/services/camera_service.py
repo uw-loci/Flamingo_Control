@@ -633,6 +633,24 @@ class CameraService(MicroscopeCommandService):
             self._frame_buffer.clear()
             return frames
 
+    def prepend_frames(self, frames: list) -> None:
+        """Put frames back at the front of the buffer.
+
+        Used when bounded batch processing can't handle all drained
+        frames in one timer tick. The remaining frames are returned
+        to the buffer so they'll be processed on the next tick.
+
+        Args:
+            frames: List of (image, header) tuples to prepend
+        """
+        with self._frame_buffer_lock:
+            existing = list(self._frame_buffer)
+            self._frame_buffer.clear()
+            for f in frames:
+                self._frame_buffer.append(f)
+            for f in existing:
+                self._frame_buffer.append(f)
+
     def get_buffer_size(self) -> int:
         """
         Get current number of frames in buffer.
@@ -736,12 +754,22 @@ class CameraService(MicroscopeCommandService):
 
                 # Fast buffering: Just add to queue (deque handles overflow by dropping oldest)
                 with self._frame_buffer_lock:
-                    if len(self._frame_buffer) >= self._frame_buffer.maxlen:
+                    buf_len = len(self._frame_buffer)
+                    buf_max = self._frame_buffer.maxlen
+                    if buf_len >= buf_max:
                         self._dropped_frame_count += 1
                         if self._dropped_frame_count % 50 == 1:
                             self.logger.warning(
-                                f"Frame buffer full (maxlen={self._frame_buffer.maxlen}), "
+                                f"Frame buffer full (maxlen={buf_max}), "
                                 f"dropping oldest frame ({self._dropped_frame_count} total dropped)")
+                    elif buf_max > 20 and buf_len >= int(buf_max * 0.8):
+                        # High-water-mark warning: buffer is 80%+ full in tile mode
+                        # This gives early visibility before frames are actually dropped
+                        if buf_len % 50 == 0:  # Don't spam logs
+                            self.logger.warning(
+                                f"Frame buffer high-water: {buf_len}/{buf_max} "
+                                f"({100 * buf_len // buf_max}% full) - "
+                                f"GUI thread may be falling behind")
                     self._frame_buffer.append((image_array, header))
 
                 # Optional: Trigger callback for notification (but don't do work in it!)

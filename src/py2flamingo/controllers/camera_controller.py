@@ -429,18 +429,31 @@ class CameraController(QObject):
         - Processing time doesn't cause lag accumulation
         """
         try:
-            # In tile workflow mode: process ALL buffered frames (each is a unique Z-plane)
+            # In tile workflow mode: process buffered frames in bounded batches
+            # Processing ALL frames at once can block the GUI thread, causing
+            # cascading delays. Limit to MAX_FRAMES_PER_TICK per timer tick.
             if self._workflow_tile_mode and self._current_tile_position:
+                MAX_FRAMES_PER_TICK = 10
                 all_frames = self.camera_service.drain_all_frames()
                 if all_frames:
                     self.logger.debug(f"Tile mode: drained {len(all_frames)} frames, routing to Sample View")
-                for image, header in all_frames:
+
+                # Process at most MAX_FRAMES_PER_TICK frames this tick
+                frames_to_process = all_frames[:MAX_FRAMES_PER_TICK]
+                remaining = all_frames[MAX_FRAMES_PER_TICK:]
+
+                # Put unprocessed frames back at the front of the buffer
+                if remaining:
+                    self.camera_service.prepend_frames(remaining)
+                    self.logger.debug(f"Tile mode: deferred {len(remaining)} frames to next tick")
+
+                for image, header in frames_to_process:
                     self._route_frame_to_sample_view(image, header)
                     self._z_plane_counter += 1
 
                 # Also emit latest frame for live display (if any frames were available)
-                if all_frames:
-                    image, header = all_frames[-1]
+                if frames_to_process:
+                    image, header = frames_to_process[-1]
                     if self._auto_scale and header.image_scale_min != header.image_scale_max:
                         self._display_min = header.image_scale_min
                         self._display_max = header.image_scale_max

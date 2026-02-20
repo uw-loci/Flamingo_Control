@@ -3239,7 +3239,10 @@ class SampleView(QWidget):
                     self.logger.warning(f"First tile: no z_velocity, using fallback frames_per_channel={frames_per_channel}")
         else:
             # Subsequent tiles: use learned value from completed first tile
-            frames_per_channel = max(1, frames_per_tile // max(1, num_channels))
+            # Add 5% buffer to prevent modulo wrap when subsequent tiles have
+            # slightly more frames than the first tile due to timing jitter
+            buffered_frames = int(frames_per_tile * 1.05)
+            frames_per_channel = max(1, buffered_frames // max(1, num_channels))
 
         # Which channel does this z_index belong to?
         # Channels are acquired sequentially, so divide frame count by frames_per_channel
@@ -3366,11 +3369,13 @@ class SampleView(QWidget):
         # The timer is single-shot, so repeated .start() calls just reset it.
         self._channel_availability_timer.start()
 
-        # Kick visualization timer on first frame of each tile.
-        # During tile workflows this dispatches to a background thread,
-        # so it won't block frame buffer draining.
-        if frame_count == 1:
-            self._visualization_update_timer.start()
+        # NOTE: Visualization is NOT triggered per-tile here.
+        # Starting _visualization_update_timer on frame_count==1 caused
+        # expensive transforms on the GUI thread at the worst time (when
+        # a new tile's frames are streaming in), contributing to frame
+        # buffer overflow. Instead, visualization is triggered:
+        #   - At the END of all tile workflows via finish_tile_workflows()
+        #   - Periodically via the position-change throttle timer
 
         self.logger.debug(f"Sample View: Accumulated Z-plane {z_index} for tile "
                          f"({position['x']:.2f}, {position['y']:.2f})")
