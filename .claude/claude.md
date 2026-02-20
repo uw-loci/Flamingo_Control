@@ -111,6 +111,8 @@ All technical reports, implementation details, session summaries, and developmen
 
 **IMPORTANT:** This directory is at the **same level** as `Flamingo_Control/`, NOT inside it. Reports should NOT be committed to GitHub.
 
+**CRITICAL:** NEVER delete, move, or overwrite files in this directory. NEVER create `claude-report/`, `claude-reports/`, or `claude-report.md` inside the Flamingo_Control repository. Do not perform "cleanup" operations on this directory without explicit user request.
+
 **Naming Convention:**
 All files in `claude-reports/` must follow this naming pattern:
 ```

@@ -60,11 +60,13 @@ Install test dependencies: `pip install -r requirements-dev.txt`
 
 ## Claude Reports
 
-When asked to write a report (e.g., "update claude-report"), create an individual markdown file in the `claude-report/` directory (gitignored). **Do NOT create or append to a monolithic `claude-report.md` file in the repo root.**
+Reports are stored **outside** this git repository at `/home/msnelson/LSControl/claude-reports/` (one level above `Flamingo_Control/`). This directory is private and must NEVER be deleted, moved, or placed inside any git repository.
 
-- Location: `claude-report/<descriptive_name>.md`
+- Location: `/home/msnelson/LSControl/claude-reports/<descriptive_name>.md`
 - Naming: use lowercase with underscores (e.g., `main_thread_starvation_fix.md`)
 - One report per file, one topic per report
+- **Do NOT** create `claude-report.md`, `claude-report/`, or `claude-reports/` inside this repository
+- **Do NOT** delete or modify existing files in the claude-reports directory without explicit user request
 - Existing reports in that directory serve as examples of the expected format
 
 ## Architecture
