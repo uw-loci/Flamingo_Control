@@ -927,7 +927,7 @@ class TileCollectionDialog(PersistentDialog):
         lines.append("  </Illumination Path>")
         # Illumination Options
         lines.append("  <Illumination Options>")
-        multi_laser = len(enabled_lasers) > 1
+        multi_laser = illum_ui_state.get('multi_laser_mode', False)
         lines.append(f"    Run stack with multiple lasers on = {'true' if multi_laser else 'false'}")
         lines.append("  </Illumination Options>")
         lines.append("</Workflow Settings>")
