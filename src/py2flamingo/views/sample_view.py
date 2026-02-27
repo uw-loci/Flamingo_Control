@@ -2042,6 +2042,9 @@ class SampleView(QWidget):
             self._update_visualization()
             if hasattr(self, '_move_data_to_focus_cb'):
                 self._move_data_to_focus_cb.setChecked(False)
+            # Uncheck all channel visibility checkboxes
+            for cb in self.channel_checkboxes.values():
+                cb.setChecked(False)
             self.logger.info("Cleared all visualization data")
 
     def clear_data_for_workflows(self):
@@ -2051,6 +2054,9 @@ class SampleView(QWidget):
             self._update_visualization()
             if hasattr(self, '_move_data_to_focus_cb'):
                 self._move_data_to_focus_cb.setChecked(False)
+            # Uncheck all channel visibility checkboxes
+            for cb in self.channel_checkboxes.values():
+                cb.setChecked(False)
             self.logger.info("Cleared visualization data for tile workflows")
 
         # Remove threshold mask layer if present
