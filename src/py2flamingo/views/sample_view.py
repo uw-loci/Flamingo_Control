@@ -179,11 +179,10 @@ class SampleView(QWidget):
         self._init_stage_limits()
 
         # Embed 3D viewer from existing window (if available)
+        # Chamber geometry + data layers are deferred to the next event loop
+        # iteration so the window can appear without blocking.  Plane overlays
+        # are set up in _on_3d_viewer_ready() once layers exist.
         self._embed_3d_viewer()
-
-        # Initialize 2D plane overlays now that self.viewer is set
-        # (position_changed signal won't fire until stage actually moves)
-        self._update_plane_overlays()
 
         # Update live view button state
         self._update_live_view_state()
@@ -2280,14 +2279,30 @@ class SampleView(QWidget):
         self._chamber_viz.objective_xy_calibration = value
 
     def _embed_3d_viewer(self) -> None:
-        """Create and embed the napari 3D viewer (delegated to manager)."""
+        """Create and embed the napari 3D viewer (delegated to manager).
+
+        Uses deferred setup: the napari viewport is embedded immediately so the
+        window can display, while chamber geometry and data layers are populated
+        on the next event loop iteration (~5s saved from blocking __init__).
+        """
         self._chamber_viz._position_sliders = getattr(self, 'position_sliders', None)
         placeholder = getattr(self, 'viewer_placeholder', None)
-        self._chamber_viz.embed_viewer(placeholder)
+
+        # Set callback so we copy channel_layers once deferred setup completes
+        self._chamber_viz._on_setup_complete = self._on_3d_viewer_ready
+
+        self._chamber_viz.embed_viewer(placeholder, deferred_setup=True)
+        # Viewer ref is available immediately (created in embed_viewer phase 1)
         self.viewer = self._chamber_viz.viewer
-        self.channel_layers = self._chamber_viz.channel_layers
         if placeholder:
             self.viewer_placeholder = None
+
+    def _on_3d_viewer_ready(self) -> None:
+        """Called when deferred chamber + data layer setup is complete."""
+        self.channel_layers = self._chamber_viz.channel_layers
+        # Update plane overlays now that layers exist
+        self._update_plane_overlays()
+        self.logger.info("Deferred 3D viewer setup complete, channel layers ready")
 
     def _update_sample_holder_position(self, x_mm: float, y_mm: float, z_mm: float):
         """Update sample holder position (delegated to manager)."""

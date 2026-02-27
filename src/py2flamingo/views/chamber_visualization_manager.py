@@ -68,12 +68,18 @@ class ChamberVisualizationManager:
         self.OBJECTIVE_CHAMBER_Y_MM = 7.0  # mm - objective focal plane in chamber coords
         self.objective_xy_calibration = None  # Will be loaded from presets
         self.current_rotation = {'ry': 0}  # Current rotation angle
+        self._on_setup_complete = None  # Callback after deferred setup finishes
+        self._embed_start_time = 0  # For deferred timing
 
-    def embed_viewer(self, placeholder_widget) -> None:
+    def embed_viewer(self, placeholder_widget, deferred_setup: bool = True) -> None:
         """Create and embed the napari 3D viewer.
 
         Args:
             placeholder_widget: QWidget placeholder to replace with the viewer
+            deferred_setup: If True, defer chamber geometry and data layer
+                setup to the next event loop iteration so the window can
+                appear immediately.  Set False to do everything synchronously
+                (useful for tests).
         """
         if not NAPARI_AVAILABLE:
             self.logger.warning("napari not available - 3D viewer not created")
@@ -114,26 +120,51 @@ class ChamberVisualizationManager:
                         placeholder_widget.deleteLater()
 
             t_embed = time.perf_counter()
+            self.logger.info(f"napari viewer embedded in {t_embed - t_start:.2f}s")
 
-            # Setup visualization components
-            self._setup_chamber()
-            t_chamber = time.perf_counter()
-            self.logger.info(f"Chamber visualization setup in {t_chamber - t_embed:.2f}s")
-
-            self.setup_data_layers()
-            t_layers = time.perf_counter()
-            self.logger.info(f"Data layers setup in {t_layers - t_chamber:.2f}s")
-
-            self.logger.info(f"Created napari 3D viewer successfully (total: {t_layers - t_start:.2f}s)")
-
-            # Reset camera after setup
-            QTimer.singleShot(100, self.reset_camera)
+            if deferred_setup:
+                # Defer heavy geometry/layer setup so the window appears fast
+                self._embed_start_time = t_start
+                QTimer.singleShot(0, self._deferred_viewer_setup)
+            else:
+                self._finish_viewer_setup(t_start)
 
         except Exception as e:
             self.logger.error(f"Failed to create 3D viewer: {e}")
             import traceback
             traceback.print_exc()
             self.viewer = None
+
+    def _deferred_viewer_setup(self) -> None:
+        """Complete chamber geometry and data layer setup (deferred from embed_viewer)."""
+        try:
+            self._finish_viewer_setup(self._embed_start_time)
+        except Exception as e:
+            self.logger.error(f"Failed deferred viewer setup: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _finish_viewer_setup(self, t_start: float) -> None:
+        """Shared logic for completing viewer setup (chamber + data layers)."""
+        t_before_chamber = time.perf_counter()
+
+        # Setup visualization components
+        self._setup_chamber()
+        t_chamber = time.perf_counter()
+        self.logger.info(f"Chamber visualization setup in {t_chamber - t_before_chamber:.2f}s")
+
+        self.setup_data_layers()
+        t_layers = time.perf_counter()
+        self.logger.info(f"Data layers setup in {t_layers - t_chamber:.2f}s")
+
+        self.logger.info(f"Created napari 3D viewer successfully (total: {t_layers - t_start:.2f}s)")
+
+        # Notify listeners that deferred setup is complete
+        if self._on_setup_complete:
+            self._on_setup_complete()
+
+        # Reset camera after setup
+        QTimer.singleShot(100, self.reset_camera)
 
     def _setup_chamber(self) -> None:
         """Setup the fixed chamber wireframe as visual guide."""
