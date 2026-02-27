@@ -22,6 +22,10 @@ from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QIcon
 logger = logging.getLogger(__name__)
 
 from py2flamingo.views.widgets.zoomable_image_label import ZoomableImageLabel
+from py2flamingo.visualization.zarr_2d_session import (
+    ZARR_AVAILABLE, save_2d_zarr_session, load_2d_zarr_session,
+    detect_session_format,
+)
 
 
 class ImagePanel(QWidget):
@@ -1381,7 +1385,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
         pass
 
     def _save_session(self):
-        """Save all scan results to a folder for later loading."""
+        """Save all scan results (Zarr if available, TIFF fallback)."""
         from pathlib import Path
         from datetime import datetime
         import json
@@ -1426,81 +1430,97 @@ class LED2DOverviewResultWindow(PersistentWidget):
         if self._app and hasattr(self._app, 'config_service'):
             self._app.config_service.set_led_2d_session_path(folder)
 
-        try:
-            import tifffile
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-            save_path = Path(folder)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            result_folder = save_path / f"led_2d_overview_{timestamp}"
-            result_folder.mkdir(parents=True, exist_ok=True)
+        # Build metadata
+        metadata = {
+            'version': '1.0',
+            'saved_at': datetime.now().isoformat(),
+            'config': {},
+            'rotations': []
+        }
 
-            # Build metadata
-            metadata = {
-                'version': '1.0',
-                'saved_at': datetime.now().isoformat(),
-                'config': {},
-                'rotations': []
+        # Save config if available
+        if self._config:
+            metadata['config'] = {
+                'bounding_box': {
+                    'x_min': self._config.bounding_box.x_min,
+                    'x_max': self._config.bounding_box.x_max,
+                    'y_min': self._config.bounding_box.y_min,
+                    'y_max': self._config.bounding_box.y_max,
+                    'z_min': self._config.bounding_box.z_min,
+                    'z_max': self._config.bounding_box.z_max,
+                },
+                'starting_r': self._config.starting_r,
+                'led_name': self._config.led_name,
+                'led_intensity': self._config.led_intensity,
+                'z_step_size': getattr(self._config, 'z_step_size', 0.250),
             }
 
-            # Save config if available
-            if self._config:
-                metadata['config'] = {
-                    'bounding_box': {
-                        'x_min': self._config.bounding_box.x_min,
-                        'x_max': self._config.bounding_box.x_max,
-                        'y_min': self._config.bounding_box.y_min,
-                        'y_max': self._config.bounding_box.y_max,
-                        'z_min': self._config.bounding_box.z_min,
-                        'z_max': self._config.bounding_box.z_max,
-                    },
-                    'starting_r': self._config.starting_r,
-                    'led_name': self._config.led_name,
-                    'led_intensity': self._config.led_intensity,
-                    'z_step_size': getattr(self._config, 'z_step_size', 0.250),
-                }
+        # Collect rotation metadata (without images)
+        for rotation in self._results:
+            metadata['rotations'].append(rotation.to_dict())
 
-            # Save each rotation
-            for i, rotation in enumerate(self._results):
-                rot_folder = result_folder / f"rotation_{i}"
-                rot_folder.mkdir()
+        if ZARR_AVAILABLE:
+            save_path = Path(folder) / f"led_2d_overview_{timestamp}.zarr"
+            try:
+                # Build hierarchical images dict
+                images = {}
+                for i, rotation in enumerate(self._results):
+                    for vis_type, image in rotation.stitched_images.items():
+                        if image is not None:
+                            images[f"rotation_{i}/stitched_{vis_type}"] = image
 
-                rot_data = rotation.to_dict()
+                save_2d_zarr_session(save_path, metadata, images, "led_2d_overview")
+            except Exception as e:
+                logger.error(f"Error saving zarr session: {e}", exc_info=True)
+                QMessageBox.critical(self, "Error", f"Failed to save session:\n{e}")
+                return
+        else:
+            save_path = Path(folder) / f"led_2d_overview_{timestamp}"
+            try:
+                self._save_session_tiff(save_path, metadata)
+            except Exception as e:
+                logger.error(f"Error saving session: {e}", exc_info=True)
+                QMessageBox.critical(self, "Error", f"Failed to save session:\n{e}")
+                return
 
-                # Save stitched images
-                for vis_type, image in rotation.stitched_images.items():
-                    if image is not None:
-                        img_path = rot_folder / f"stitched_{vis_type}.tif"
-                        tifffile.imwrite(str(img_path), image)
+        logger.info(f"Saved LED 2D Overview session to {save_path}")
+        QMessageBox.information(
+            self, "Session Saved",
+            f"Session saved to:\n{save_path}\n\n"
+            f"Contains {len(self._results)} rotation(s) with all visualization types."
+        )
 
-                metadata['rotations'].append(rot_data)
+    def _save_session_tiff(self, result_folder: 'Path', metadata: dict):
+        """TIFF fallback for session save when zarr is unavailable."""
+        from pathlib import Path
+        import json
+        import tifffile
 
-            # Save metadata JSON
-            with open(result_folder / 'metadata.json', 'w') as f:
-                json.dump(metadata, f, indent=2)
+        result_folder = Path(result_folder)
+        result_folder.mkdir(parents=True, exist_ok=True)
 
-            logger.info(f"Saved LED 2D Overview session to {result_folder}")
-            QMessageBox.information(
-                self, "Session Saved",
-                f"Session saved to:\n{result_folder}\n\n"
-                f"Contains {len(self._results)} rotation(s) with all visualization types."
-            )
+        # Save each rotation's images as TIFF
+        for i, rotation in enumerate(self._results):
+            rot_folder = result_folder / f"rotation_{i}"
+            rot_folder.mkdir()
 
-        except ImportError:
-            QMessageBox.critical(
-                self, "Missing Dependency",
-                "tifffile library required for saving sessions.\n"
-                "Install with: pip install tifffile"
-            )
-        except Exception as e:
-            logger.error(f"Error saving session: {e}", exc_info=True)
-            QMessageBox.critical(self, "Error", f"Failed to save session:\n{e}")
+            for vis_type, image in rotation.stitched_images.items():
+                if image is not None:
+                    img_path = rot_folder / f"stitched_{vis_type}.tif"
+                    tifffile.imwrite(str(img_path), image)
+
+        # Save metadata JSON
+        with open(result_folder / 'metadata.json', 'w') as f:
+            json.dump(metadata, f, indent=2)
 
     @classmethod
     def load_from_folder(cls, folder_path, app=None) -> 'LED2DOverviewResultWindow':
-        """Load saved results from folder and create result window.
+        """Load saved results from folder and create result window (Zarr or TIFF).
 
         Args:
-            folder_path: Path to saved session folder (containing metadata.json)
+            folder_path: Path to saved session folder
             app: Optional FlamingoApplication reference
 
         Returns:
@@ -1510,12 +1530,20 @@ class LED2DOverviewResultWindow(PersistentWidget):
         import json
 
         folder_path = Path(folder_path)
-        metadata_path = folder_path / 'metadata.json'
-        if not metadata_path.exists():
-            raise FileNotFoundError(f"No metadata.json found in {folder_path}")
+        fmt = detect_session_format(folder_path)
 
-        with open(metadata_path) as f:
-            metadata = json.load(f)
+        if fmt == 'zarr':
+            metadata, images = load_2d_zarr_session(folder_path)
+        elif fmt == 'tiff':
+            metadata_path = folder_path / 'metadata.json'
+            if not metadata_path.exists():
+                raise FileNotFoundError(f"No metadata.json found in {folder_path}")
+
+            with open(metadata_path) as f:
+                metadata = json.load(f)
+            images = None  # loaded separately below
+        else:
+            raise FileNotFoundError(f"No valid session found in {folder_path}")
 
         # Reconstruct config
         config = None
@@ -1542,18 +1570,27 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
         # Load rotations
         from py2flamingo.models.data.overview_results import TileResult, RotationResult
-        import tifffile
 
         results = []
         for i, rot_data in enumerate(metadata.get('rotations', [])):
-            rot_folder = folder_path / f"rotation_{i}"
-
-            # Load stitched images
-            stitched_images = {}
-            for vis_type in rot_data.get('stitched_image_types', ['best_focus']):
-                img_path = rot_folder / f"stitched_{vis_type}.tif"
-                if img_path.exists():
-                    stitched_images[vis_type] = tifffile.imread(str(img_path))
+            if fmt == 'zarr':
+                # Map zarr datasets back to stitched_images dict
+                prefix = f"rotation_{i}/"
+                stitched_images = {}
+                for key, img in images.items():
+                    if key.startswith(prefix):
+                        # e.g. "rotation_0/stitched_best_focus" → "best_focus"
+                        vis_type = key[len(prefix):].replace('stitched_', '', 1)
+                        stitched_images[vis_type] = img
+            else:
+                # TIFF path
+                import tifffile
+                rot_folder = folder_path / f"rotation_{i}"
+                stitched_images = {}
+                for vis_type in rot_data.get('stitched_image_types', ['best_focus']):
+                    img_path = rot_folder / f"stitched_{vis_type}.tif"
+                    if img_path.exists():
+                        stitched_images[vis_type] = tifffile.imread(str(img_path))
 
             # Reconstruct tiles (for coordinate display)
             tiles = []
