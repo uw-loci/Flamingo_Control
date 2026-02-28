@@ -154,6 +154,10 @@ Display is decoupled via `views/viewer_interface.py`:
 
 To add a new viewer, implement `ViewerInterface` and update `__main__.py`.
 
+### Deferred 3D Viewer Setup
+
+`embed_viewer()` uses deferred setup by default: the `napari.Viewer()` is created synchronously (~5s), but chamber geometry and data layers are deferred to the next event loop iteration via `QTimer.singleShot(0)`. This means `channel_layers` is not available until the `_on_setup_complete` callback fires. Code that accesses `channel_layers` during `__init__` must be moved to the `_on_3d_viewer_ready()` callback in `SampleView`.
+
 ### LED 2D Overview Feature
 
 Extension for quick sample orientation scanning. Creates 2D overview maps at dual rotation angles (R and R+90).
@@ -164,6 +168,7 @@ Extension for quick sample orientation scanning. Creates 2D overview maps at dua
 - `views/dialogs/led_2d_overview_result.py` - Results display window (68KB)
 - `views/dialogs/tile_collection_dialog.py` - Workflow generation from selected tiles (73KB)
 - `views/dialogs/overview_thresholder_dialog.py` - Auto-selection tool (20KB)
+- `visualization/zarr_2d_session.py` - Zarr-based 2D session save/load utilities
 
 **Architecture:** Clean extension with minimal integration:
 - Menu entry in `main_window.py` (lines 267-276)

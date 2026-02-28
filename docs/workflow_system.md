@@ -162,6 +162,23 @@ Laser 4 640 nm = 0.00 0
 LED_RGB_Board = 50.00 0
 ```
 
+#### Illumination Options
+
+The `<Illumination Options>` section controls how multi-channel acquisitions are executed:
+
+| Parameter | Values | Description |
+|-----------|--------|-------------|
+| `Run stack with multiple lasers on` | `true` / `false` | Controls simultaneous vs sequential laser firing |
+
+**Behavior:**
+- `false` (default) — **Sequential acquisition**: when multiple lasers are enabled, the system runs a separate Z-stack for each laser channel. The filter wheel switches between channels. This is the standard acquisition mode.
+- `true` — **Simultaneous acquisition**: all enabled lasers fire at the same time during a single Z-stack pass. No filter wheel changes occur.
+
+**Setting this option:**
+- Controlled via the **Advanced Illumination** dialog checkbox ("Run stack with multiple lasers on")
+- Accessible from the Illumination panel's "Advanced..." button
+- Also set automatically by Tile Collection Dialog based on the user's Advanced Illumination preference
+
 ---
 
 ## Parameter Calculations

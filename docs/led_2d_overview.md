@@ -2,7 +2,7 @@
 
 Quick sample orientation scanning for finding samples and planning acquisitions.
 
-**Last Updated:** 2026-01-28
+**Last Updated:** 2026-02-27
 
 ---
 
@@ -47,7 +47,7 @@ The feature uses LED illumination (rather than lasers) for safe, quick scanning 
 - **Interactive tile selection** - Click to select tiles for detailed imaging
 - **Auto-selection** - Threshold-based automatic tile selection to find sample regions
 - **Direct workflow integration** - Generate Tile Collection workflows from selected tiles
-- **Save/load sessions** - Save complete scan sessions for later review and workflow generation
+- **Save/load sessions** - Save complete scan sessions as compressed Zarr stores for later review and workflow generation (backward-compatible TIFF loading supported)
 - **Fast mode** - Continuous Z sweeps for quick scanning (~6 Z-planes with 250µm steps)
 
 ---
@@ -169,6 +169,25 @@ Select from dropdown to change view:
 - Click and drag to pan
 - **"Fit"** button to fit image to view
 - **"1:1"** button for 100% zoom
+
+### Session Save & Load
+
+Scan sessions can be saved and reloaded later for review, tile selection, or workflow generation.
+
+**Saving:**
+- Click **"Save Session"** after a scan completes
+- Sessions are saved as `.zarr` stores using Blosc zstd compression (~2.7x smaller than raw TIFF)
+- All visualization types (best focus, EDF, min/max/mean) are stored per rotation
+
+**Loading:**
+- Click **"Load Session"** to open a previously saved session
+- Format is auto-detected: both `.zarr` (new) and `.tiff` (legacy) sessions are loadable
+- Old TIFF-based sessions saved before the Zarr update remain fully compatible
+
+**Storage Format:**
+- Default: Zarr with chunked 2D datasets (512x512 chunks, zstd compression)
+- Fallback: TIFF saving is used automatically when `zarr` is not installed
+- File naming: `led_2d_overview_{timestamp}.zarr` (or `.tiff` for legacy)
 
 ### Stage 4: Tile Collection
 

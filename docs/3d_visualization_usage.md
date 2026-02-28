@@ -143,8 +143,12 @@ From the Flamingo Control main window:
    - Reduce `display.downsample_factor` in config for faster updates
    - Increase `display.voxel_size_um` for lower resolution but better performance
 
-3. **Data Persistence**:
-   - Use "Clear Data" button to reset accumulation
+3. **Startup Time**:
+   - The Sample View window uses deferred viewer setup — the window appears in ~5 seconds, while chamber geometry and data layers populate in the background afterward
+   - Channel layers (`channel_layers`) are not available until the `_on_setup_complete` callback fires
+
+4. **Data Persistence**:
+   - Use "Clear Data" button to reset accumulation — this also unchecks all channel visibility checkboxes since the underlying volumes are empty
    - Export accumulated volumes via "Export..." button (future feature)
 
 ## Troubleshooting

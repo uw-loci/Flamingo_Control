@@ -369,7 +369,13 @@ Flamingo_Control/
 
 ## Version History
 
-### Latest (2025-10-14)
+### 2026-02
+- Zarr-based 2D session save/load for MIP and LED 2D Overview (compressed, backward-compatible TIFF loading)
+- Fix multi-laser mode ignoring user setting in tile collection workflows
+- Deferred 3D viewer setup — Sample View window appears ~5s faster
+- Clear Data now unchecks channel visibility checkboxes
+
+### 2025-10-14
 - ✅ Configuration management with auto-discovery
 - ✅ Connection testing before connecting
 - ✅ Comprehensive network diagnostics
@@ -397,6 +403,7 @@ Flamingo_Control/
 - PyQt5 for GUI
 - NumPy for image processing
 - Optional: Napari for advanced visualization
+- Optional: Zarr for compressed 2D session save/load
 
 ---
 
@@ -426,5 +433,5 @@ Developed at the University of Wisconsin Laboratory for Optical and Computationa
 ---
 
 **Repository:** https://github.com/uw-loci/Flamingo_Control
-**Last Updated:** 2025-10-14
+**Last Updated:** 2026-02-27
 **Status:** Production Ready
