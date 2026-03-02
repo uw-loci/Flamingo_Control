@@ -1076,10 +1076,18 @@ class TileCollectionDialog(PersistentDialog):
             camera_controller = getattr(wc, '_camera_controller', None)
 
             def on_workflow_start(file_path: Path, metadata: Dict):
-                """Update tile metadata directly from background thread (GIL-safe)."""
+                """Signal a pending tile transition from the background thread.
+
+                Sets a flag that the GUI thread (_pull_and_display_frame) checks
+                to atomically flush stale frames and adopt the new tile position.
+                This avoids the race condition where resetting z_plane_counter
+                from the background thread causes stale frames to be mis-routed.
+                """
                 if camera_controller and metadata:
-                    camera_controller._current_tile_position = metadata  # atomic under GIL
-                    camera_controller._z_plane_counter = 0
+                    camera_controller._pending_tile_position = metadata
+                    camera_controller._tile_transition_pending = True
+                    # Do NOT touch _z_plane_counter or _current_tile_position here;
+                    # the GUI thread handles both atomically after flushing stale frames.
 
             queue_service.set_workflow_start_callback(on_workflow_start)
 

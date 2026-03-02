@@ -99,6 +99,13 @@ class CameraController(QObject):
         self._workflow_started_timer = False
         self._workflow_started_streaming = False
 
+        # Pending-tile mechanism: background thread sets these flags;
+        # GUI thread (_pull_and_display_frame) handles the transition atomically
+        # to avoid race condition where stale frames get mis-routed to wrong channels.
+        self._pending_tile_position = None
+        self._tile_transition_pending = False
+        self._tile_transition_flush_count = 0
+
         # Timer-based frame pulling (ensures display always updates)
         # This timer pulls latest frame from buffer and discards accumulated frames
         self._display_timer = QTimer()
@@ -267,7 +274,9 @@ class CameraController(QObject):
     def clear_tile_mode(self):
         """Deactivate tile workflow mode."""
         if self._workflow_tile_mode:
-            self.logger.info(f"CameraController: Cleared tile mode after {self._z_plane_counter} frames")
+            self.logger.info(
+                f"CameraController: Cleared tile mode after {self._z_plane_counter} frames, "
+                f"{self._tile_transition_flush_count} stale frames flushed across all transitions")
 
             if getattr(self, '_workflow_started_timer', False):
                 self._display_timer.stop()
@@ -284,6 +293,9 @@ class CameraController(QObject):
         self._z_plane_counter = 0
         self._workflow_started_timer = False
         self._workflow_started_streaming = False
+        self._pending_tile_position = None
+        self._tile_transition_pending = False
+        self._tile_transition_flush_count = 0
 
         # Restore default frame buffer size
         self.camera_service.set_tile_mode_buffer(False)
@@ -432,8 +444,23 @@ class CameraController(QObject):
             # In tile workflow mode: process buffered frames in bounded batches
             # Processing ALL frames at once can block the GUI thread, causing
             # cascading delays. Limit to MAX_FRAMES_PER_TICK per timer tick.
-            if self._workflow_tile_mode and self._current_tile_position:
-                MAX_FRAMES_PER_TICK = 10
+            if self._workflow_tile_mode and (self._current_tile_position or self._tile_transition_pending):
+                # Handle pending tile transition: flush stale frames from previous tile,
+                # reset z_plane_counter, and adopt the new tile position — all atomically
+                # on the GUI thread to avoid race conditions with background thread.
+                if self._tile_transition_pending:
+                    stale = self.camera_service.drain_all_frames()
+                    self._tile_transition_flush_count += len(stale)
+                    self._z_plane_counter = 0
+                    self._current_tile_position = self._pending_tile_position
+                    self._tile_transition_pending = False
+                    self._pending_tile_position = None
+                    self.logger.info(
+                        f"Tile transition: flushed {len(stale)} stale frames, "
+                        f"new tile: {self._current_tile_position.get('filename', 'unknown')}")
+                    return  # Start fresh next tick
+
+                MAX_FRAMES_PER_TICK = 25
                 all_frames = self.camera_service.drain_all_frames()
                 if all_frames:
                     self.logger.debug(f"Tile mode: drained {len(all_frames)} frames, routing to Sample View")

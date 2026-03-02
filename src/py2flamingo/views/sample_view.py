@@ -2210,9 +2210,11 @@ class SampleView(QWidget):
             if hasattr(self, '_channel_availability_timer'):
                 self._channel_availability_timer.start()
 
-            # Trigger debounced visualization update
-            if hasattr(self, '_visualization_update_timer'):
-                self._visualization_update_timer.start()
+            # Trigger debounced visualization update (suppress during tile workflows
+            # to avoid expensive 3D transforms blocking the GUI thread mid-acquisition)
+            if not getattr(self, '_tile_workflow_active', False):
+                if hasattr(self, '_visualization_update_timer'):
+                    self._visualization_update_timer.start()
 
         except Exception as e:
             self.logger.error(f"Error in add_frame_to_volume: {e}", exc_info=True)
@@ -3129,6 +3131,7 @@ class SampleView(QWidget):
         self._tile_reference_set = False  # Set reference on first tile frame
         self._tile_reference_position = None  # Local reference (not in voxel_storage to avoid transform)
         self._learned_frames_per_tile = None  # Learn from first tile for channel detection
+        self._tile_channel_frame_counts = {}  # (tile_key, channel_id) -> count for completeness report
 
         # Disable Populate from Live during tile workflows to prevent interference
         if getattr(self, '_is_populating', False):
@@ -3167,6 +3170,38 @@ class SampleView(QWidget):
         self._tile_workflow_active = False
         self.logger.info(f"Sample View: Tile workflows finished. "
                         f"Processed {len(self._accumulated_zstacks)} tiles.")
+
+        # Log per-tile per-channel completeness report
+        tile_channel_counts = getattr(self, '_tile_channel_frame_counts', {})
+        if tile_channel_counts and self._accumulated_zstacks:
+            # Determine expected frames per channel from learned value
+            frames_per_tile = getattr(self, '_learned_frames_per_tile', None)
+            all_channels = set()
+            tile_keys = list(self._accumulated_zstacks.keys())
+            for (tk, ch) in tile_channel_counts:
+                all_channels.add(ch)
+            all_channels = sorted(all_channels)
+            num_ch = len(all_channels) if all_channels else 1
+            expected_per_ch = (frames_per_tile // num_ch) if frames_per_tile else None
+
+            gaps = 0
+            for tk in tile_keys:
+                parts = []
+                for ch in all_channels:
+                    count = tile_channel_counts.get((tk, ch), 0)
+                    if expected_per_ch and expected_per_ch > 0:
+                        pct = count * 100 // expected_per_ch
+                        gap_flag = " GAP" if pct < 90 else ""
+                        parts.append(f"Ch{ch}={count}/{expected_per_ch} ({pct}%{gap_flag})")
+                        if pct < 90:
+                            gaps += 1
+                    else:
+                        parts.append(f"Ch{ch}={count}")
+                self.logger.info(f"  Tile ({tk[0]:.2f}, {tk[1]:.2f}): {', '.join(parts)}")
+
+            if expected_per_ch:
+                self.logger.info(
+                    f"Channel completeness: {gaps}/{len(tile_keys)} tile-channels have gaps >10%")
 
         # Trigger visualization update to show the final tile(s)
         # During acquisition, visualization only updates when a NEW tile starts,
@@ -3269,6 +3304,10 @@ class SampleView(QWidget):
         # Channels are acquired sequentially, so divide frame count by frames_per_channel
         channel_idx = min(z_index // frames_per_channel, num_channels - 1)
         self._current_channel = channels[channel_idx]
+
+        # Track per-tile per-channel frame counts for completeness report
+        count_key = (tile_key, self._current_channel)
+        self._tile_channel_frame_counts[count_key] = self._tile_channel_frame_counts.get(count_key, 0) + 1
 
         # For tile workflows, ALWAYS calculate Z from z_index
         # Hardware position doesn't update mid-Z-sweep, so querying returns
