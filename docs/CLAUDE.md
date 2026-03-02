@@ -184,6 +184,15 @@ LED2DOverviewDialog → LED2DOverviewWorkflow → LED2DOverviewResultWindow → 
 
 See [LED 2D Overview Guide](led_2d_overview.md) for complete documentation.
 
+### Pipeline System
+
+Visual DAG-based processing pipelines for automated microscope workflows. Access via Extensions → Pipeline Editor.
+
+- **[Pipeline JSON Format](pipeline_json_format.md)** — Human-facing reference for the pipeline serialization format
+- **[Pipeline AI Prompt](pipeline_ai_prompt.md)** — Self-contained reference for AI assistants to generate valid pipeline JSON
+- Pipeline files saved to `~/.flamingo/pipelines/` as JSON with `format_version: "1.0"`
+- Source code: `src/py2flamingo/pipeline/`
+
 ## Important Configuration Files
 
 **Required for operation:**

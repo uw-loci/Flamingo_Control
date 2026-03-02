@@ -16,6 +16,8 @@ from py2flamingo.pipeline.models.port_types import PortType, can_connect
 
 logger = logging.getLogger(__name__)
 
+PIPELINE_FORMAT_VERSION = "1.0"
+
 
 class NodeType(Enum):
     """Built-in pipeline node types."""
@@ -574,6 +576,7 @@ class Pipeline:
     def to_dict(self) -> Dict[str, Any]:
         """Serialize the entire pipeline to a JSON-compatible dict."""
         return {
+            'format_version': PIPELINE_FORMAT_VERSION,
             'name': self.name,
             'nodes': [n.to_dict() for n in self.nodes.values()],
             'connections': [c.to_dict() for c in self.connections.values()],
@@ -581,7 +584,13 @@ class Pipeline:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> 'Pipeline':
-        """Deserialize a pipeline from a dict."""
+        """Deserialize a pipeline from a dict.
+
+        Tolerates missing format_version for backward compatibility
+        with pipelines saved before versioning was added.
+        """
+        version = d.get('format_version', '1.0')
+        logger.debug("Loading pipeline format_version=%s", version)
         pipeline = cls(name=d.get('name', 'Untitled Pipeline'))
         for nd in d.get('nodes', []):
             pipeline.nodes[nd['id']] = PipelineNode.from_dict(nd)
