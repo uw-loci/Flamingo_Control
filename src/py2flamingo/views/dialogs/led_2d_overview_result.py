@@ -198,10 +198,10 @@ class ImagePanel(QWidget):
 
         self._update_contrast_label()
 
-        # Redraw image with new contrast settings (interactive=True for smooth dragging)
+        # Redraw image with new contrast settings
         if self._image is not None:
             self._invalidate_base_pixmap()
-            self._redraw_overlay(interactive=True)
+            self._redraw_overlay()
 
     def _update_contrast_label(self):
         """Update the contrast percentage label."""
@@ -342,8 +342,8 @@ class ImagePanel(QWidget):
             self._selected_tiles.add(tile_key)
             logger.debug(f"Selected tile {tile_key}")
 
-        # Redraw to show selection (interactive=True for fast response)
-        self._redraw_overlay(interactive=True)
+        # Redraw to show selection
+        self._redraw_overlay()
         self.selection_changed.emit()
 
     def _on_tile_right_clicked(self, tile_x_idx: int, tile_y_idx: int):
