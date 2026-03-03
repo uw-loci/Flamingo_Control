@@ -31,6 +31,13 @@ from py2flamingo.visualization.zarr_2d_session import (
 class ImagePanel(QWidget):
     """Widget displaying a single image with coordinate overlay and zoom/pan."""
 
+    # Max dimension (pixels) for the display copy of the image.
+    # Full-res images (e.g. 26624×22528) are downsampled to this size
+    # before converting to QPixmap, which makes load and contrast
+    # adjustments ~40× faster while preserving enough detail for the
+    # overview use case.
+    MAX_DISPLAY_DIM = 4096
+
     # Signal emitted when tile selection changes
     selection_changed = pyqtSignal()
 
@@ -42,6 +49,8 @@ class ImagePanel(QWidget):
 
         self._title = title
         self._image: Optional[np.ndarray] = None
+        self._display_image: Optional[np.ndarray] = None  # Downsampled for display
+        self._display_scale: int = 1  # Stride factor used for downsampling
         self._pixmap: Optional[QPixmap] = None
         self._base_pixmap: Optional[QPixmap] = None  # Cached base (image + grid + coords, no selections)
         self._show_grid = True
@@ -213,16 +222,29 @@ class ImagePanel(QWidget):
         self._tiles_y = tiles_y
 
         if image is not None:
-            logger.info(f"ImagePanel.set_image: image shape={image.shape}, tiles={tiles_x}x{tiles_y}, "
-                       f"existing coords={len(self._tile_coords)}, invert_x={self._invert_x}")
+            # Downsample large images for display performance.
+            # A 26624×22528 image takes ~10s to convert to QPixmap at full res;
+            # at 4096px max dim it takes <0.5s with no visible quality loss.
+            max_dim = max(image.shape[0], image.shape[1])
+            import math
+            self._display_scale = max(1, math.ceil(max_dim / self.MAX_DISPLAY_DIM))
+            if self._display_scale > 1:
+                self._display_image = image[::self._display_scale, ::self._display_scale].copy()
+                logger.info(f"ImagePanel.set_image: image shape={image.shape}, "
+                           f"downsampled {self._display_scale}x to {self._display_image.shape}, "
+                           f"tiles={tiles_x}x{tiles_y}")
+            else:
+                self._display_image = image
+                logger.info(f"ImagePanel.set_image: image shape={image.shape}, tiles={tiles_x}x{tiles_y}, "
+                           f"existing coords={len(self._tile_coords)}, invert_x={self._invert_x}")
 
             # Calculate image intensity range for contrast sliders
-            # Use min and 95th percentile as the slider range endpoints
-            if len(image.shape) == 2:
-                flat = image.ravel()
+            # Use the display image (representative subsample) for speed
+            display = self._display_image
+            if len(display.shape) == 2:
+                flat = display.ravel()
             else:
-                # For RGB, use first channel or convert to grayscale
-                flat = image[:, :, 0].ravel() if image.shape[2] >= 1 else image.ravel()
+                flat = display[:, :, 0].ravel() if display.shape[2] >= 1 else display.ravel()
 
             self._image_min = float(np.min(flat))
             self._image_max_pct = float(np.percentile(flat, 99.5))
@@ -296,6 +318,9 @@ class ImagePanel(QWidget):
         # Update image label's tile grid for click detection
         self.image_label.set_tile_grid(self._tiles_x, self._tiles_y, invert_x)
 
+        # Forward coordinates to image label for on-demand rendering when zoomed in
+        self.image_label.set_tile_coordinates(coords, invert_x)
+
         if self._image is not None and self._show_grid:
             # Rebuild base pixmap and redraw
             self._rebuild_base_pixmap()
@@ -347,9 +372,9 @@ class ImagePanel(QWidget):
 
     def _rebuild_base_pixmap(self):
         """Rebuild the cached base pixmap (image + grid + coordinates, no selections)."""
-        if self._image is None:
+        if self._display_image is None:
             return
-        self._base_pixmap = self._array_to_pixmap(self._image)
+        self._base_pixmap = self._array_to_pixmap(self._display_image)
         if self._show_grid and self._tiles_x > 0 and self._tiles_y > 0:
             self._draw_base_overlay()
         logger.debug(f"Rebuilt base pixmap: {self._base_pixmap.width()}x{self._base_pixmap.height()}")
@@ -442,7 +467,11 @@ class ImagePanel(QWidget):
         return QPixmap.fromImage(qimg.copy())  # Copy to ensure data persists
 
     def _draw_base_overlay(self):
-        """Draw grid lines and coordinates on the base pixmap (cached, expensive)."""
+        """Draw grid lines on the base pixmap.
+
+        Coordinate labels are NOT drawn on the base pixmap — they are only
+        useful when zoomed in and are rendered on demand by ZoomableImageLabel.
+        """
         if self._base_pixmap is None or self._tiles_x <= 0 or self._tiles_y <= 0:
             return
 
@@ -470,77 +499,7 @@ class ImagePanel(QWidget):
             y = int(i * tile_h)
             painter.drawLine(0, y, w, y)
 
-        # Draw coordinate labels if available
-        if self._tile_coords:
-            # Calculate font size: 8.5% of tile height (half of previous 17%)
-            font_pixel_size = int(tile_h * 0.085)
-            # Ensure minimum reasonable size
-            font_pixel_size = max(font_pixel_size, 10)
-
-            font = QFont("Arial")  # Arial renders more predictably than Courier
-            font.setPixelSize(font_pixel_size)
-            font.setBold(True)
-            painter.setFont(font)
-
-            # Get font metrics
-            from PyQt5.QtGui import QFontMetrics
-            fm = QFontMetrics(font)
-            line_height = fm.height()
-
-            coords_drawn = 0
-            coords_skipped = 0
-            for coord in self._tile_coords:
-                # Support both formats: (x, y, tile_x_idx, tile_y_idx) or legacy (x, y, z)
-                if len(coord) >= 4:
-                    x, y, tile_x_idx, tile_y_idx = coord[:4]
-                else:
-                    continue
-
-                # Calculate display X index (invert if needed to match tile placement)
-                if self._invert_x:
-                    display_x_idx = (self._tiles_x - 1) - tile_x_idx
-                else:
-                    display_x_idx = tile_x_idx
-
-                # Calculate tile boundaries
-                tile_left = int(display_x_idx * tile_w)
-                tile_top = int(tile_y_idx * tile_h)
-                tile_center_x = tile_left + tile_w / 2
-                tile_center_y = tile_top + tile_h / 2
-
-                # Draw X,Y coordinates (two lines, centered in tile)
-                text1 = f"X:{x:.2f}"
-                text2 = f"Y:{y:.2f}"
-
-                # Calculate text widths for horizontal centering
-                text1_width = fm.horizontalAdvance(text1)
-                text2_width = fm.horizontalAdvance(text2)
-
-                # Position: center both lines vertically in tile
-                text1_x = int(tile_center_x - text1_width / 2)
-                text2_x = int(tile_center_x - text2_width / 2)
-                text1_y = int(tile_center_y - line_height * 0.1)  # Slightly above center
-                text2_y = int(tile_center_y + line_height * 0.9)  # Below center
-
-                # Check if coordinates are within pixmap bounds
-                if (text1_x < 0 or text1_x >= w or text1_y < 0 or text1_y >= h or
-                    text2_x < 0 or text2_x >= w or text2_y < 0 or text2_y >= h):
-                    coords_skipped += 1
-                    if coords_skipped <= 5:  # Only log first few
-                        logger.warning(f"Coordinate label out of bounds: tile({tile_x_idx},{tile_y_idx}) "
-                                      f"text_pos=({text1_x},{text1_y})/({text2_x},{text2_y}), "
-                                      f"pixmap={w}x{h}")
-                    continue
-
-                # White text
-                painter.setPen(QColor(255, 255, 255))
-                painter.drawText(text1_x, text1_y, text1)
-                painter.drawText(text2_x, text2_y, text2)
-                coords_drawn += 1
-
-            # Log summary
-            logger.info(f"_draw_base_overlay: drew {coords_drawn} coordinate labels, "
-                       f"skipped {coords_skipped} (out of bounds), total coords={len(self._tile_coords)}")
+        logger.debug(f"_draw_base_overlay: drew grid lines, {self._tiles_x}x{self._tiles_y} tiles")
 
         painter.end()
 

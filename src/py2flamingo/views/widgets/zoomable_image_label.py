@@ -5,11 +5,14 @@ extracted from led_2d_overview_result.py.
 """
 
 import logging
-from typing import Optional
+from typing import Optional, List
 
 from PyQt5.QtWidgets import QLabel, QScrollArea
 from PyQt5.QtCore import Qt, QSize, QPoint, QTimer, pyqtSignal
-from PyQt5.QtGui import QPixmap, QWheelEvent, QMouseEvent
+from PyQt5.QtGui import (
+    QPixmap, QWheelEvent, QMouseEvent, QPainter, QFont, QColor,
+    QFontMetrics, QPaintEvent,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -39,6 +42,7 @@ class ZoomableImageLabel(QLabel):
         self._drag_distance = 0
         self._click_start = QPoint()
         self._interactive = False  # Whether current display uses fast scaling
+        self._tile_coords: List[tuple] = []  # (x, y, tile_x_idx, tile_y_idx)
 
         # Deferred smooth scaling timer (fires after interaction stops)
         self._smooth_timer = QTimer()
@@ -50,11 +54,25 @@ class ZoomableImageLabel(QLabel):
         self.setCursor(Qt.OpenHandCursor)
         self.setAlignment(Qt.AlignCenter)
 
+    # Minimum tile display size (pixels) before coordinate labels appear
+    _LABEL_MIN_TILE_PX = 80
+
     def set_tile_grid(self, tiles_x: int, tiles_y: int, invert_x: bool = False):
         """Set tile grid dimensions for click detection."""
         self._tiles_x = tiles_x
         self._tiles_y = tiles_y
         self._invert_x = invert_x
+
+    def set_tile_coordinates(self, coords: List[tuple], invert_x: bool = False):
+        """Set tile coordinate labels for on-demand rendering when zoomed in.
+
+        Args:
+            coords: List of (x, y, tile_x_idx, tile_y_idx) tuples.
+            invert_x: Whether X axis is inverted for display.
+        """
+        self._tile_coords = coords
+        self._invert_x = invert_x
+        self.update()  # Trigger repaint to show/hide labels
 
     def set_scroll_area(self, scroll_area: QScrollArea):
         """Set reference to parent scroll area for panning."""
@@ -104,6 +122,83 @@ class ZoomableImageLabel(QLabel):
         """Re-render with smooth scaling after interaction stops."""
         self._interactive = False
         self._update_display()
+
+    def paintEvent(self, event: QPaintEvent):
+        """Paint the label, then overlay coordinate labels when zoomed in."""
+        super().paintEvent(event)
+
+        if (not self._tile_coords or self._tiles_x <= 0 or self._tiles_y <= 0
+                or self._original_pixmap is None):
+            return
+
+        # Only draw labels when tiles are large enough on screen to read
+        display_w = self.width()
+        display_h = self.height()
+        tile_display_w = display_w / self._tiles_x
+        tile_display_h = display_h / self._tiles_y
+        if min(tile_display_w, tile_display_h) < self._LABEL_MIN_TILE_PX:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Font size: 8.5% of tile display height, min 10px
+        font_px = max(10, int(tile_display_h * 0.085))
+        font = QFont("Arial")
+        font.setPixelSize(font_px)
+        font.setBold(True)
+        painter.setFont(font)
+        fm = QFontMetrics(font)
+        line_height = fm.height()
+
+        # Get the visible rect from the scroll area to skip off-screen tiles
+        visible_rect = None
+        if self._scroll_area:
+            vp = self._scroll_area.viewport().rect()
+            # Map viewport rect to label coordinates
+            top_left = self.mapFrom(self._scroll_area.viewport(),
+                                     vp.topLeft())
+            bottom_right = self.mapFrom(self._scroll_area.viewport(),
+                                         vp.bottomRight())
+            from PyQt5.QtCore import QRect
+            visible_rect = QRect(top_left, bottom_right)
+
+        painter.setPen(QColor(255, 255, 255))
+
+        for coord in self._tile_coords:
+            if len(coord) < 4:
+                continue
+            x_val, y_val, tile_x_idx, tile_y_idx = coord[:4]
+
+            if self._invert_x:
+                display_x_idx = (self._tiles_x - 1) - tile_x_idx
+            else:
+                display_x_idx = tile_x_idx
+
+            tile_left = display_x_idx * tile_display_w
+            tile_top = tile_y_idx * tile_display_h
+            tile_cx = tile_left + tile_display_w / 2
+            tile_cy = tile_top + tile_display_h / 2
+
+            # Skip tiles not visible in viewport
+            if visible_rect is not None:
+                if (tile_left + tile_display_w < visible_rect.left()
+                        or tile_left > visible_rect.right()
+                        or tile_top + tile_display_h < visible_rect.top()
+                        or tile_top > visible_rect.bottom()):
+                    continue
+
+            text1 = f"X:{x_val:.2f}"
+            text2 = f"Y:{y_val:.2f}"
+            t1w = fm.horizontalAdvance(text1)
+            t2w = fm.horizontalAdvance(text2)
+
+            painter.drawText(int(tile_cx - t1w / 2),
+                           int(tile_cy - line_height * 0.1), text1)
+            painter.drawText(int(tile_cx - t2w / 2),
+                           int(tile_cy + line_height * 0.9), text2)
+
+        painter.end()
 
     def wheelEvent(self, event: QWheelEvent):
         """Handle mouse wheel for zoom."""
