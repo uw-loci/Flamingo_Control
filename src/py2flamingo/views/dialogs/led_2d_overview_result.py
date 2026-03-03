@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 from py2flamingo.views.widgets.zoomable_image_label import ZoomableImageLabel
 from py2flamingo.visualization.zarr_2d_session import (
     ZARR_AVAILABLE, save_2d_zarr_session, load_2d_zarr_session,
-    detect_session_format,
+    load_2d_zarr_session_lazy, detect_session_format,
 )
 
 
@@ -189,10 +189,10 @@ class ImagePanel(QWidget):
 
         self._update_contrast_label()
 
-        # Redraw image with new contrast settings
+        # Redraw image with new contrast settings (interactive=True for smooth dragging)
         if self._image is not None:
             self._invalidate_base_pixmap()
-            self._redraw_overlay()
+            self._redraw_overlay(interactive=True)
 
     def _update_contrast_label(self):
         """Update the contrast percentage label."""
@@ -317,8 +317,8 @@ class ImagePanel(QWidget):
             self._selected_tiles.add(tile_key)
             logger.debug(f"Selected tile {tile_key}")
 
-        # Redraw to show selection
-        self._redraw_overlay()
+        # Redraw to show selection (interactive=True for fast response)
+        self._redraw_overlay(interactive=True)
         self.selection_changed.emit()
 
     def _on_tile_right_clicked(self, tile_x_idx: int, tile_y_idx: int):
@@ -326,8 +326,13 @@ class ImagePanel(QWidget):
         logger.debug(f"Tile right-clicked in panel: ({tile_x_idx}, {tile_y_idx})")
         self.tile_right_clicked.emit(tile_x_idx, tile_y_idx)
 
-    def _redraw_overlay(self):
-        """Redraw the selection overlay using cached base pixmap (fast path)."""
+    def _redraw_overlay(self, interactive: bool = False):
+        """Redraw the selection overlay using cached base pixmap (fast path).
+
+        Args:
+            interactive: If True, use fast scaling initially and defer
+                smooth scaling. Use for rapid updates (tile clicks, slider drags).
+        """
         if self._image is None:
             return
 
@@ -338,7 +343,7 @@ class ImagePanel(QWidget):
         # Copy base pixmap and draw selections on top (fast)
         self._pixmap = self._base_pixmap.copy()
         self._draw_selection_overlay()
-        self.image_label.setPixmap(self._pixmap)
+        self.image_label.setPixmap(self._pixmap, interactive=interactive)
 
     def _rebuild_base_pixmap(self):
         """Rebuild the cached base pixmap (image + grid + coordinates, no selections)."""
@@ -628,6 +633,9 @@ class LED2DOverviewResultWindow(PersistentWidget):
         self._config = config
         self._preview_mode = preview_mode
         self._app = app
+        self._zarr_root = None  # Zarr group for on-demand dataset loading
+        self._session_folder = None  # Path to loaded session folder
+        self._session_format = None  # 'zarr' or 'tiff'
 
         self.setWindowTitle("LED 2D Overview - Results" if not preview_mode else "LED 2D Overview - Preview")
         self.setMinimumSize(800, 500)
@@ -965,7 +973,28 @@ class LED2DOverviewResultWindow(PersistentWidget):
         viz_type = self.viz_combo.currentData()
         if viz_type:
             logger.info(f"Switching to visualization: {viz_type} ({display_name})")
+            self._load_visualization_on_demand(viz_type)
             self._display_visualization(viz_type)
+
+    def _load_visualization_on_demand(self, viz_type: str):
+        """Load a visualization type from zarr if not already in memory.
+
+        For zarr sessions, datasets are loaded lazily — only when the user
+        switches to a visualization type that hasn't been loaded yet.
+        """
+        if self._zarr_root is None or not self._results:
+            return
+
+        for i, result in enumerate(self._results):
+            if viz_type in result.stitched_images:
+                continue  # Already loaded
+
+            zarr_key = f"rotation_{i}/stitched_{viz_type}"
+            try:
+                result.stitched_images[viz_type] = np.array(self._zarr_root[zarr_key])
+                logger.info(f"On-demand loaded: {zarr_key}")
+            except KeyError:
+                logger.debug(f"Dataset not found in zarr: {zarr_key}")
 
     def _display_visualization(self, visualization_type: str):
         """Display the selected visualization type for both panels.
@@ -1519,6 +1548,10 @@ class LED2DOverviewResultWindow(PersistentWidget):
     def load_from_folder(cls, folder_path, app=None) -> 'LED2DOverviewResultWindow':
         """Load saved results from folder and create result window (Zarr or TIFF).
 
+        For zarr sessions, only the default visualization type is loaded
+        eagerly; other types are loaded on demand when the user switches
+        the visualization dropdown.
+
         Args:
             folder_path: Path to saved session folder
             app: Optional FlamingoApplication reference
@@ -1532,8 +1565,10 @@ class LED2DOverviewResultWindow(PersistentWidget):
         folder_path = Path(folder_path)
         fmt = detect_session_format(folder_path)
 
+        zarr_root = None  # Kept alive for on-demand loading
+
         if fmt == 'zarr':
-            metadata, images = load_2d_zarr_session(folder_path)
+            metadata, zarr_root = load_2d_zarr_session_lazy(folder_path)
         elif fmt == 'tiff':
             metadata_path = folder_path / 'metadata.json'
             if not metadata_path.exists():
@@ -1541,7 +1576,6 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
             with open(metadata_path) as f:
                 metadata = json.load(f)
-            images = None  # loaded separately below
         else:
             raise FileNotFoundError(f"No valid session found in {folder_path}")
 
@@ -1568,22 +1602,37 @@ class LED2DOverviewResultWindow(PersistentWidget):
                 z_step_size=metadata['config'].get('z_step_size', 0.250)
             )
 
+        # Determine default viz type (matches _populate_visualization_types index 2)
+        from py2flamingo.models.data.overview_results import VISUALIZATION_TYPES
+        default_viz_type = VISUALIZATION_TYPES[2][0] if len(VISUALIZATION_TYPES) > 2 else "best_focus"
+
         # Load rotations
         from py2flamingo.models.data.overview_results import TileResult, RotationResult
 
         results = []
         for i, rot_data in enumerate(metadata.get('rotations', [])):
             if fmt == 'zarr':
-                # Map zarr datasets back to stitched_images dict
-                prefix = f"rotation_{i}/"
+                # Only load the default viz type eagerly
                 stitched_images = {}
-                for key, img in images.items():
-                    if key.startswith(prefix):
-                        # e.g. "rotation_0/stitched_best_focus" → "best_focus"
-                        vis_type = key[len(prefix):].replace('stitched_', '', 1)
-                        stitched_images[vis_type] = img
+                zarr_key = f"rotation_{i}/stitched_{default_viz_type}"
+                try:
+                    stitched_images[default_viz_type] = np.array(zarr_root[zarr_key])
+                    logger.debug(f"Eagerly loaded {zarr_key}")
+                except KeyError:
+                    logger.warning(f"Default viz key not found: {zarr_key}")
+                    # Fall back to first available dataset in this rotation
+                    rot_group_key = f"rotation_{i}"
+                    if rot_group_key in zarr_root:
+                        rot_group = zarr_root[rot_group_key]
+                        for child_key in rot_group:
+                            child = rot_group[child_key]
+                            if hasattr(child, 'shape') and len(child.shape) > 0:
+                                vis_type = child_key.replace('stitched_', '', 1)
+                                stitched_images[vis_type] = np.array(child)
+                                logger.debug(f"Fallback loaded {rot_group_key}/{child_key}")
+                                break
             else:
-                # TIFF path
+                # TIFF path — load all (usually just a few files)
                 import tifffile
                 rot_folder = folder_path / f"rotation_{i}"
                 stitched_images = {}
@@ -1607,4 +1656,8 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
         # Create and return window
         window = cls(results=results, config=config, app=app)
+        # Store zarr root for on-demand loading of other viz types
+        window._zarr_root = zarr_root
+        window._session_folder = folder_path
+        window._session_format = fmt
         return window

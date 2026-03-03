@@ -8,7 +8,7 @@ import logging
 from typing import Optional
 
 from PyQt5.QtWidgets import QLabel, QScrollArea
-from PyQt5.QtCore import Qt, QSize, QPoint, pyqtSignal
+from PyQt5.QtCore import Qt, QSize, QPoint, QTimer, pyqtSignal
 from PyQt5.QtGui import QPixmap, QWheelEvent, QMouseEvent
 
 
@@ -38,6 +38,13 @@ class ZoomableImageLabel(QLabel):
         self._invert_x = False
         self._drag_distance = 0
         self._click_start = QPoint()
+        self._interactive = False  # Whether current display uses fast scaling
+
+        # Deferred smooth scaling timer (fires after interaction stops)
+        self._smooth_timer = QTimer()
+        self._smooth_timer.setSingleShot(True)
+        self._smooth_timer.setInterval(150)
+        self._smooth_timer.timeout.connect(self._apply_smooth_scaling)
 
         self.setMouseTracking(True)
         self.setCursor(Qt.OpenHandCursor)
@@ -53,9 +60,17 @@ class ZoomableImageLabel(QLabel):
         """Set reference to parent scroll area for panning."""
         self._scroll_area = scroll_area
 
-    def setPixmap(self, pixmap: QPixmap):
-        """Set the pixmap and store original for zooming."""
+    def setPixmap(self, pixmap: QPixmap, interactive: bool = False):
+        """Set the pixmap and store original for zooming.
+
+        Args:
+            pixmap: The pixmap to display.
+            interactive: If True, use fast scaling initially and defer
+                smooth scaling by 150ms. Use for rapid updates like
+                tile clicks and contrast slider drags.
+        """
         self._original_pixmap = pixmap
+        self._interactive = interactive
         self._update_display()
 
     def _update_display(self):
@@ -70,15 +85,25 @@ class ZoomableImageLabel(QLabel):
         if new_width < 1 or new_height < 1:
             return
 
+        transform = Qt.FastTransformation if self._interactive else Qt.SmoothTransformation
         scaled = self._original_pixmap.scaled(
             new_width, new_height,
             Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
+            transform
         )
         super().setPixmap(scaled)
 
         # Resize the label to match the scaled pixmap
         self.setFixedSize(scaled.size())
+
+        # Schedule deferred smooth scaling if we used fast mode
+        if self._interactive:
+            self._smooth_timer.start()
+
+    def _apply_smooth_scaling(self):
+        """Re-render with smooth scaling after interaction stops."""
+        self._interactive = False
+        self._update_display()
 
     def wheelEvent(self, event: QWheelEvent):
         """Handle mouse wheel for zoom."""

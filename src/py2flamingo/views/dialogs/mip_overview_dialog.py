@@ -39,7 +39,7 @@ from py2flamingo.models.mip_overview import (
 from py2flamingo.models.data.overview_results import TileResult
 from py2flamingo.visualization.zarr_2d_session import (
     ZARR_AVAILABLE, save_2d_zarr_session, load_2d_zarr_session,
-    detect_session_format,
+    load_2d_zarr_session_lazy, detect_session_format,
 )
 
 # Import ImagePanel from LED 2D Overview (reuse UI components)
@@ -778,13 +778,16 @@ class MIPOverviewDialog(PersistentDialog):
 
         if fmt == 'zarr':
             try:
-                metadata, images = load_2d_zarr_session(folder_path)
+                metadata, zarr_root = load_2d_zarr_session_lazy(folder_path)
+                # Only load the single overview dataset
+                stitched_image = None
+                if 'stitched_overview' in zarr_root:
+                    stitched_image = np.array(zarr_root['stitched_overview'])
             except Exception as e:
                 QMessageBox.critical(self, "Load Error", f"Failed to load zarr session:\n{e}")
                 return
 
             config = MIPOverviewConfig.from_dict(metadata['config'])
-            stitched_image = images.get('stitched_overview')
             tiles = []
             for tile_data in metadata.get('tiles', []):
                 tiles.append(MIPTileResult.from_dict(tile_data))
@@ -868,13 +871,16 @@ class MIPOverviewDialog(PersistentDialog):
 
         if fmt == 'zarr':
             try:
-                metadata, images = load_2d_zarr_session(folder)
+                metadata, zarr_root = load_2d_zarr_session_lazy(folder)
+                # Only load the single overview dataset
+                stitched_image = None
+                if 'stitched_overview' in zarr_root:
+                    stitched_image = np.array(zarr_root['stitched_overview'])
             except Exception as e:
                 logger.error(f"Failed to load zarr session: {e}")
                 return None
 
             config = MIPOverviewConfig.from_dict(metadata['config'])
-            stitched_image = images.get('stitched_overview')
             tiles = []
             for tile_data in metadata.get('tiles', []):
                 tiles.append(MIPTileResult.from_dict(tile_data))

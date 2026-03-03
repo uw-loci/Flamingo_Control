@@ -3146,13 +3146,15 @@ class SampleView(QWidget):
             self.populate_btn.setEnabled(False)
             self.populate_btn.setToolTip("Disabled during tile workflow")
 
-        # Cache camera FPS for channel detection
-        self._tile_camera_fps = 40.0  # Default
+        # Cache camera FPS for channel detection.
+        # Use the actual hardware frame rate (~40 fps), NOT _max_display_fps
+        # which is a GUI display limit (30 fps) and much too low.
+        self._tile_camera_fps = 40.0  # Default matches typical Flamingo hardware
         if self.camera_controller and self.camera_controller.camera_service:
             try:
-                fps = getattr(self.camera_controller, '_max_display_fps', 40.0)
-                if fps and fps > 0:
-                    self._tile_camera_fps = fps
+                hw_fps = self.camera_controller.camera_service.get_frame_rate()
+                if hw_fps and hw_fps > 0:
+                    self._tile_camera_fps = hw_fps
                 self.logger.info(f"Sample View: Camera FPS for channel detection: {self._tile_camera_fps}")
             except Exception:
                 pass
@@ -3203,9 +3205,9 @@ class SampleView(QWidget):
                 self.logger.info(
                     f"Channel completeness: {gaps}/{len(tile_keys)} tile-channels have gaps >10%")
 
-        # Trigger visualization update to show the final tile(s)
-        # During acquisition, visualization only updates when a NEW tile starts,
-        # so we need this final update to show the last tile.
+        # Trigger final visualization update to show the last tile's data.
+        # During acquisition, visualization updates at each tile transition,
+        # but the last tile has no following transition to trigger an update.
         self._visualization_update_timer.start()
 
         # Auto-enable focal move mode now that data is present
@@ -3282,12 +3284,15 @@ class SampleView(QWidget):
             camera_fps = getattr(self, '_tile_camera_fps', 40.0)
             if z_velocity > 0 and z_range > 0:
                 sweep_duration = z_range / z_velocity  # seconds
-                expected_frames = int(sweep_duration * camera_fps)
-                frames_per_channel = max(1, expected_frames // max(1, num_channels))
+                single_sweep_frames = int(sweep_duration * camera_fps)
+                # With multi_laser OFF (sequential mode), the firmware does N
+                # separate Z sweeps — one per channel. Each sweep produces
+                # single_sweep_frames. Do NOT divide by num_channels.
+                frames_per_channel = max(1, single_sweep_frames)
                 if frame_count == 0:  # Only log once per tile
-                    self.logger.info(f"First tile: estimated {expected_frames} frames "
-                                    f"({frames_per_channel}/channel) from z_vel={z_velocity:.3f}, "
-                                    f"z_range={z_range:.3f}, fps={camera_fps}")
+                    self.logger.info(f"First tile: estimated {single_sweep_frames * num_channels} total frames "
+                                    f"({frames_per_channel}/channel, {num_channels} channels) from "
+                                    f"z_vel={z_velocity:.3f}, z_range={z_range:.3f}, fps={camera_fps}")
             else:
                 # Fallback if z_velocity not available
                 frames_per_channel = 100  # Conservative high value to avoid wrap
@@ -3429,13 +3434,14 @@ class SampleView(QWidget):
         # The timer is single-shot, so repeated .start() calls just reset it.
         self._channel_availability_timer.start()
 
-        # NOTE: Visualization is NOT triggered per-tile here.
-        # Starting _visualization_update_timer on frame_count==1 caused
-        # expensive transforms on the GUI thread at the worst time (when
-        # a new tile's frames are streaming in), contributing to frame
-        # buffer overflow. Instead, visualization is triggered:
-        #   - At the END of all tile workflows via finish_tile_workflows()
-        #   - Periodically via the position-change throttle timer
+        # Trigger a debounced visualization update when a NEW tile starts.
+        # This means the previous tile's data is complete in storage and
+        # can be rendered. The 500ms timer delay ensures we don't interfere
+        # with the initial burst of frames for the new tile, and the async
+        # path runs transforms off the GUI thread.
+        if is_new_tile and len(self._accumulated_zstacks) > 1:
+            if hasattr(self, '_visualization_update_timer'):
+                self._visualization_update_timer.start()
 
         self.logger.debug(f"Sample View: Accumulated Z-plane {z_index} for tile "
                          f"({position['x']:.2f}, {position['y']:.2f})")

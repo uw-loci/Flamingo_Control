@@ -197,6 +197,56 @@ def _collect_datasets(group, prefix: str, out: Dict[str, np.ndarray]):
             _collect_datasets(child, full_key, out)
 
 
+def load_2d_zarr_session_lazy(
+    load_path: Path,
+) -> Tuple[Dict[str, Any], 'zarr.Group']:
+    """Load metadata from a 2D zarr session without reading any array data.
+
+    Returns the zarr root group so callers can load individual datasets
+    on demand with ``np.array(root[key])``.
+
+    Args:
+        load_path: Path to the .zarr directory.
+
+    Returns:
+        Tuple of (metadata_dict, zarr_root_group).
+
+    Raises:
+        RuntimeError: If zarr is not available.
+        FileNotFoundError: If the path does not exist.
+        ValueError: If session metadata is missing.
+    """
+    if not ZARR_AVAILABLE:
+        raise RuntimeError("zarr not available. Install with: pip install zarr")
+
+    load_path = Path(load_path)
+    if not load_path.exists():
+        raise FileNotFoundError(f"Session not found: {load_path}")
+
+    store = _create_zarr_store(str(load_path))
+    root = zarr.open_group(store=store, mode='r')
+
+    metadata = dict(root.attrs.get('session_metadata', {}))
+    if not metadata:
+        raise ValueError(f"No session_metadata in {load_path}")
+
+    logger.info(f"2D zarr session opened lazily: {load_path}")
+    return metadata, root
+
+
+def _collect_dataset_keys(group, prefix: str = '') -> list:
+    """Recursively enumerate all dataset keys in a zarr group without loading data."""
+    keys = []
+    for key in group:
+        child = group[key]
+        full_key = f"{prefix}{key}" if not prefix else f"{prefix}/{key}"
+        if hasattr(child, 'shape') and len(child.shape) > 0:
+            keys.append(full_key)
+        elif hasattr(child, 'keys'):
+            keys.extend(_collect_dataset_keys(child, full_key))
+    return keys
+
+
 def detect_session_format(folder_path: Path) -> Optional[str]:
     """Detect whether a session folder is zarr or tiff format.
 
