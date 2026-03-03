@@ -102,7 +102,8 @@ Executes a microscope acquisition workflow (e.g., Z-stack).
 | `template_file` | string | `""` | Path to workflow template (.txt) |
 | `use_input_position` | bool | `true` | Override stage position from input port |
 | `auto_z_range` | bool | `false` | Derive Z-range from input object bounding box |
-| `buffer_percent` | float | `25.0` | Extra bounding box buffer (%) |
+| `auto_tiling` | bool | `false` | Auto-compute tiling grid from object XY extent vs. FOV. If object fits in one FOV, stays single-tile; otherwise applies buffer and computes NxM grid |
+| `buffer_percent` | float | `25.0` | Extra bounding box buffer (%) for Z-range and XY tiling |
 
 ### THRESHOLD
 
@@ -336,7 +337,7 @@ All `id` fields use UUID4 format (e.g., `"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"`
         {"id": "a1000001-0000-4000-8000-000000000005", "name": "file_path", "port_type": "FILE_PATH", "direction": "OUTPUT", "required": false},
         {"id": "a1000001-0000-4000-8000-000000000006", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
       ],
-      "config": {"template_file": "", "use_input_position": false, "auto_z_range": false, "buffer_percent": 25.0},
+      "config": {"template_file": "", "use_input_position": false, "auto_z_range": false, "auto_tiling": false, "buffer_percent": 25.0},
       "x": 50.0,
       "y": 100.0
     },
@@ -386,7 +387,7 @@ All `id` fields use UUID4 format (e.g., `"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"`
         {"id": "d4000001-0000-4000-8000-000000000005", "name": "file_path", "port_type": "FILE_PATH", "direction": "OUTPUT", "required": false},
         {"id": "d4000001-0000-4000-8000-000000000006", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
       ],
-      "config": {"template_file": "", "use_input_position": true, "auto_z_range": false, "buffer_percent": 25.0},
+      "config": {"template_file": "", "use_input_position": true, "auto_z_range": false, "auto_tiling": false, "buffer_percent": 25.0},
       "x": 800.0,
       "y": 100.0
     }

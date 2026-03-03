@@ -27,6 +27,7 @@ _CONFIG_SCHEMAS: Dict[NodeType, list] = {
          {'filter': 'Workflow files (*.txt);;All files (*)'}),
         ('use_input_position', 'Override Position from Input', 'bool', True),
         ('auto_z_range', 'Auto Z-Range from Object', 'bool', False),
+        ('auto_tiling', 'Auto Tiling from Object', 'bool', False),
         ('buffer_percent', 'BBox Buffer (%)', 'float', 25.0),
     ],
     NodeType.THRESHOLD: [

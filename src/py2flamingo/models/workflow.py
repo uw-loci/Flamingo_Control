@@ -111,6 +111,11 @@ class TileSettings:
     overlap_percent: float = 10.0
     snake_pattern: bool = True
 
+    @property
+    def total_tiles(self) -> int:
+        """Get total number of tiles."""
+        return self.num_tiles_x * self.num_tiles_y
+
 @dataclass
 class ExperimentSettings:
     """
@@ -210,7 +215,7 @@ class WorkflowModel:
         
         # Stack settings
         if self.stack_settings:
-            workflow["Stack Settings"] = {
+            stack_dict = {
                 "Number of planes": self.stack_settings.num_planes,
                 "Change in Z axis (mm)": self.stack_settings.z_step_mm,
                 "Z stage velocity (mm/s)": str(self.stack_settings.z_velocity_mm_s),
@@ -218,12 +223,24 @@ class WorkflowModel:
             }
         else:
             # Default stack settings for snapshot
-            workflow["Stack Settings"] = {
+            stack_dict = {
                 "Number of planes": 1,
                 "Change in Z axis (mm)": 0.01,
                 "Z stage velocity (mm/s)": "0.4",
                 "Bidirectional": "false"
             }
+
+        # Tile settings
+        if self.tile_settings and self.tile_settings.total_tiles > 1:
+            stack_dict["Stack option"] = "Tile"
+            stack_dict["Stack option settings 1"] = self.tile_settings.num_tiles_x
+            stack_dict["Stack option settings 2"] = self.tile_settings.num_tiles_y
+        else:
+            stack_dict["Stack option"] = "ZStack"
+            stack_dict["Stack option settings 1"] = 0
+            stack_dict["Stack option settings 2"] = 0
+
+        workflow["Stack Settings"] = stack_dict
         
         # Experiment settings
         workflow["Experiment Settings"] = {

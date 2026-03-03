@@ -5,7 +5,8 @@ Config:
     template_file: str — path to workflow template .txt file
     use_input_position: bool — override workflow position with input port value
     auto_z_range: bool — auto Z-range from detected object bounding box
-    buffer_percent: float — BBox buffer percentage for Z-range
+    auto_tiling: bool — auto-compute tiling grid from object XY extent vs. FOV
+    buffer_percent: float — BBox buffer percentage for Z-range and XY tiling
 
 Inputs:
     trigger — execution ordering
@@ -149,6 +150,95 @@ class WorkflowRunner(AbstractNodeRunner):
                         )
                     except (KeyError, TypeError, AttributeError) as e:
                         logger.warning(f"Could not apply auto Z-range: {e}")
+
+        # Auto-tiling from DetectedObject XY extent
+        if config.get('auto_tiling', False):
+            detected_obj = None
+            if position_data is not None and hasattr(position_data, 'bounding_box'):
+                detected_obj = position_data
+            else:
+                z_range_input = self._get_input(node, pipeline, context, 'z_range')
+                if z_range_input is not None and hasattr(z_range_input, 'bounding_box'):
+                    detected_obj = z_range_input
+
+            if detected_obj is not None:
+                coord_config = context.get_service('coordinate_config')
+                if coord_config:
+                    try:
+                        display_cfg = coord_config['display']
+                        stage_cfg = coord_config['stage_control']
+                        voxel_um = tuple(display_cfg.get('voxel_size_um', [50.0, 50.0, 50.0]))
+
+                        # Get object XY extent
+                        x_extent, y_extent, _z_extent = detected_obj.extent_mm(voxel_um)
+
+                        # Get FOV from focus_frame config
+                        focus_cfg = coord_config.get('focus_frame', {})
+                        fov_x = focus_cfg.get('field_of_view_x_mm', 0.52)
+                        fov_y = focus_cfg.get('field_of_view_y_mm', 0.52)
+
+                        if x_extent <= fov_x and y_extent <= fov_y:
+                            # Object fits in single FOV — skip tiling
+                            workflow.tile_settings = None
+                            logger.info(
+                                f"Auto-tiling: {x_extent:.3f}x{y_extent:.3f}mm object "
+                                f"fits in 1x1 tile (FOV={fov_x:.2f}x{fov_y:.2f}mm), "
+                                f"skipping XY tiling"
+                            )
+                        else:
+                            # Object needs tiling — apply buffer and compute grid
+                            buffer_frac = config.get('buffer_percent', 25.0) / 100.0
+                            buffered_x = x_extent * (1 + 2 * buffer_frac)
+                            buffered_y = y_extent * (1 + 2 * buffer_frac)
+
+                            # Get overlap from existing tile settings or default 10%
+                            overlap = 10.0
+                            if workflow.tile_settings:
+                                overlap = workflow.tile_settings.overlap_percent
+                            effective_fov_x = fov_x * (1 - overlap / 100.0)
+                            effective_fov_y = fov_y * (1 - overlap / 100.0)
+
+                            import math
+                            num_tiles_x = max(1, math.ceil(buffered_x / effective_fov_x))
+                            num_tiles_y = max(1, math.ceil(buffered_y / effective_fov_y))
+
+                            # Create/update tile settings
+                            from py2flamingo.models.data.workflow import TileSettings
+                            workflow.tile_settings = TileSettings(
+                                num_tiles_x=num_tiles_x,
+                                num_tiles_y=num_tiles_y,
+                                tile_size_x_mm=fov_x,
+                                tile_size_y_mm=fov_y,
+                                overlap_percent=overlap,
+                            )
+
+                            # Compute scan area and set start/end positions
+                            scan_w, scan_h = workflow.tile_settings.calculate_scan_area()
+                            cx, cy, cz = detected_obj.centroid_stage
+                            from py2flamingo.models import Position
+                            workflow.start_position = Position(
+                                x=cx - scan_w / 2,
+                                y=cy - scan_h / 2,
+                                z=workflow.start_position.z,
+                                r=workflow.start_position.r,
+                            )
+                            workflow.end_position = Position(
+                                x=cx + scan_w / 2,
+                                y=cy + scan_h / 2,
+                                z=workflow.start_position.z,
+                                r=workflow.start_position.r,
+                            )
+
+                            logger.info(
+                                f"Auto-tiling: {x_extent:.3f}x{y_extent:.3f}mm object "
+                                f"-> {num_tiles_x}x{num_tiles_y} tiles "
+                                f"(FOV={fov_x:.2f}x{fov_y:.2f}mm, "
+                                f"overlap={overlap:.0f}%, "
+                                f"scan={scan_w:.3f}x{scan_h:.3f}mm)"
+                            )
+
+                    except (KeyError, TypeError, AttributeError) as e:
+                        logger.warning(f"Could not apply auto-tiling: {e}")
 
         # Execute workflow
         logger.info(f"Starting workflow: {node.name}")

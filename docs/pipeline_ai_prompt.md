@@ -229,7 +229,8 @@ Every node MUST include exactly these ports with exactly these names, types, and
 | `template_file` | string | `""` | File path (`.txt`) | Path to workflow template file |
 | `use_input_position` | bool | `true` | — | If true, use position from input port instead of current stage |
 | `auto_z_range` | bool | `false` | — | If true, derive Z-range from input object bounding box |
-| `buffer_percent` | float | `25.0` | >= 0 | Extra buffer around bounding box (percentage) |
+| `auto_tiling` | bool | `false` | — | If true, auto-compute tiling from object XY extent vs. camera FOV. Single-FOV objects stay 1x1; larger objects get NxM grid with buffer |
+| `buffer_percent` | float | `25.0` | >= 0 | Extra buffer around bounding box (%) for Z-range and XY tiling |
 
 ### THRESHOLD Config
 
@@ -412,6 +413,7 @@ A connection from source→target is valid only if the pair appears below.
         "template_file": "",
         "use_input_position": false,
         "auto_z_range": false,
+        "auto_tiling": false,
         "buffer_percent": 25.0
       },
       "x": 50.0,
@@ -475,6 +477,7 @@ A connection from source→target is valid only if the pair appears below.
         "template_file": "",
         "use_input_position": true,
         "auto_z_range": false,
+        "auto_tiling": false,
         "buffer_percent": 25.0
       },
       "x": 800.0,
@@ -530,7 +533,7 @@ A connection from source→target is valid only if the pair appears below.
         {"id": "a1100001-0001-4001-8001-000000000005", "name": "file_path", "port_type": "FILE_PATH", "direction": "OUTPUT", "required": false},
         {"id": "a1100001-0001-4001-8001-000000000006", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
       ],
-      "config": {"template_file": "", "use_input_position": false, "auto_z_range": false, "buffer_percent": 25.0},
+      "config": {"template_file": "", "use_input_position": false, "auto_z_range": false, "auto_tiling": false, "buffer_percent": 25.0},
       "x": 50.0,
       "y": 100.0
     },
@@ -597,7 +600,7 @@ A connection from source→target is valid only if the pair appears below.
         {"id": "e5500001-0001-4001-8001-000000000005", "name": "file_path", "port_type": "FILE_PATH", "direction": "OUTPUT", "required": false},
         {"id": "e5500001-0001-4001-8001-000000000006", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
       ],
-      "config": {"template_file": "", "use_input_position": true, "auto_z_range": false, "buffer_percent": 25.0},
+      "config": {"template_file": "", "use_input_position": true, "auto_z_range": false, "auto_tiling": false, "buffer_percent": 25.0},
       "x": 1050.0,
       "y": 50.0
     }
