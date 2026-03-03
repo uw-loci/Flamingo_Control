@@ -2054,9 +2054,19 @@ class SampleView(QWidget):
             self._update_visualization()
             if hasattr(self, '_move_data_to_focus_cb'):
                 self._move_data_to_focus_cb.setChecked(False)
-            # Uncheck all channel visibility checkboxes
-            for cb in self.channel_checkboxes.values():
+            # Reset channel controls to disabled (same as initial state).
+            # _check_channel_availability() re-enables them when new data arrives
+            # by checking `not checkbox.isEnabled()`. If we only uncheck without
+            # disabling, the auto-enable logic never fires and layers stay invisible.
+            for ch_id, cb in self.channel_checkboxes.items():
                 cb.setChecked(False)
+                cb.setEnabled(False)
+                if ch_id in self.channel_contrast_sliders:
+                    self.channel_contrast_sliders[ch_id].setEnabled(False)
+                if ch_id in self.channel_min_labels:
+                    self.channel_min_labels[ch_id].setEnabled(False)
+                if ch_id in self.channel_max_labels:
+                    self.channel_max_labels[ch_id].setEnabled(False)
             self.logger.info("Cleared visualization data for tile workflows")
 
         # Remove threshold mask layer if present
@@ -3145,6 +3155,21 @@ class SampleView(QWidget):
         if hasattr(self, 'populate_btn'):
             self.populate_btn.setEnabled(False)
             self.populate_btn.setToolTip("Disabled during tile workflow")
+
+        # Uncheck LED (RGB) if the workflow uses lasers, not LED.
+        # The LED checkbox persists from previous sessions and can cause confusion
+        # when starting a laser-only acquisition.
+        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+            channels_in_use = set()
+            for ti in tile_info:
+                for ch in ti.get('channels', []):
+                    channels_in_use.add(ch)
+            if channels_in_use:
+                # Workflow specifies laser channels — uncheck LED
+                led_radio = getattr(self.laser_led_panel, '_led_radio', None)
+                if led_radio and led_radio.isChecked():
+                    led_radio.setChecked(False)
+                    self.logger.info("Unchecked LED (RGB) — workflow uses laser channels")
 
         # Cache camera FPS for channel detection.
         # Use the actual hardware frame rate (~40 fps), NOT _max_display_fps
