@@ -1,0 +1,117 @@
+{
+  "format_version": "1.0",
+  "name": "Acquire-Analyze-Reacquire",
+  "nodes": [
+    {
+      "id": "aa110001-0001-4001-8001-000000000001",
+      "node_type": "WORKFLOW",
+      "name": "Initial Acquisition",
+      "inputs": [
+        {"id": "aa110001-0001-4001-8001-100000000001", "name": "trigger", "port_type": "TRIGGER", "direction": "INPUT", "required": false},
+        {"id": "aa110001-0001-4001-8001-100000000002", "name": "position", "port_type": "POSITION", "direction": "INPUT", "required": false},
+        {"id": "aa110001-0001-4001-8001-100000000003", "name": "z_range", "port_type": "OBJECT", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "aa110001-0001-4001-8001-100000000004", "name": "volume", "port_type": "VOLUME", "direction": "OUTPUT", "required": false},
+        {"id": "aa110001-0001-4001-8001-100000000005", "name": "file_path", "port_type": "FILE_PATH", "direction": "OUTPUT", "required": false},
+        {"id": "aa110001-0001-4001-8001-100000000006", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "template_file": "",
+        "use_input_position": false,
+        "auto_z_range": false,
+        "auto_tiling": false,
+        "buffer_percent": 25.0
+      },
+      "x": 50.0,
+      "y": 100.0
+    },
+    {
+      "id": "aa220001-0001-4001-8001-000000000002",
+      "node_type": "THRESHOLD",
+      "name": "Detect Objects",
+      "inputs": [
+        {"id": "aa220001-0001-4001-8001-200000000001", "name": "volume", "port_type": "VOLUME", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "aa220001-0001-4001-8001-200000000002", "name": "objects", "port_type": "OBJECT_LIST", "direction": "OUTPUT", "required": false},
+        {"id": "aa220001-0001-4001-8001-200000000003", "name": "mask", "port_type": "VOLUME", "direction": "OUTPUT", "required": false},
+        {"id": "aa220001-0001-4001-8001-200000000004", "name": "count", "port_type": "SCALAR", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "channel_thresholds": {"0": 200},
+        "enabled_channels": [0],
+        "gauss_sigma": 1.0,
+        "opening_enabled": false,
+        "opening_radius": 1,
+        "min_object_size": 100,
+        "default_threshold": 100
+      },
+      "x": 300.0,
+      "y": 100.0
+    },
+    {
+      "id": "aa330001-0001-4001-8001-000000000003",
+      "node_type": "FOR_EACH",
+      "name": "For Each Object",
+      "inputs": [
+        {"id": "aa330001-0001-4001-8001-300000000001", "name": "collection", "port_type": "OBJECT_LIST", "direction": "INPUT", "required": true}
+      ],
+      "outputs": [
+        {"id": "aa330001-0001-4001-8001-300000000002", "name": "current_item", "port_type": "OBJECT", "direction": "OUTPUT", "required": false},
+        {"id": "aa330001-0001-4001-8001-300000000003", "name": "index", "port_type": "SCALAR", "direction": "OUTPUT", "required": false},
+        {"id": "aa330001-0001-4001-8001-300000000004", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {},
+      "x": 550.0,
+      "y": 100.0
+    },
+    {
+      "id": "aa440001-0001-4001-8001-000000000004",
+      "node_type": "WORKFLOW",
+      "name": "Re-acquire at Object",
+      "inputs": [
+        {"id": "aa440001-0001-4001-8001-400000000001", "name": "trigger", "port_type": "TRIGGER", "direction": "INPUT", "required": false},
+        {"id": "aa440001-0001-4001-8001-400000000002", "name": "position", "port_type": "POSITION", "direction": "INPUT", "required": false},
+        {"id": "aa440001-0001-4001-8001-400000000003", "name": "z_range", "port_type": "OBJECT", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "aa440001-0001-4001-8001-400000000004", "name": "volume", "port_type": "VOLUME", "direction": "OUTPUT", "required": false},
+        {"id": "aa440001-0001-4001-8001-400000000005", "name": "file_path", "port_type": "FILE_PATH", "direction": "OUTPUT", "required": false},
+        {"id": "aa440001-0001-4001-8001-400000000006", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "template_file": "",
+        "use_input_position": true,
+        "auto_z_range": true,
+        "auto_tiling": false,
+        "buffer_percent": 25.0
+      },
+      "x": 800.0,
+      "y": 100.0
+    }
+  ],
+  "connections": [
+    {
+      "id": "aac00001-0001-4001-8001-000000000001",
+      "source_node_id": "aa110001-0001-4001-8001-000000000001",
+      "source_port_id": "aa110001-0001-4001-8001-100000000004",
+      "target_node_id": "aa220001-0001-4001-8001-000000000002",
+      "target_port_id": "aa220001-0001-4001-8001-200000000001"
+    },
+    {
+      "id": "aac00002-0001-4001-8001-000000000002",
+      "source_node_id": "aa220001-0001-4001-8001-000000000002",
+      "source_port_id": "aa220001-0001-4001-8001-200000000002",
+      "target_node_id": "aa330001-0001-4001-8001-000000000003",
+      "target_port_id": "aa330001-0001-4001-8001-300000000001"
+    },
+    {
+      "id": "aac00003-0001-4001-8001-000000000003",
+      "source_node_id": "aa330001-0001-4001-8001-000000000003",
+      "source_port_id": "aa330001-0001-4001-8001-300000000002",
+      "target_node_id": "aa440001-0001-4001-8001-000000000004",
+      "target_port_id": "aa440001-0001-4001-8001-400000000002"
+    }
+  ]
+}
