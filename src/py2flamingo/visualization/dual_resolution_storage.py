@@ -5,6 +5,7 @@ Maintains high-resolution data storage separate from display resolution.
 
 import numpy as np
 import sparse
+import threading
 from typing import Dict, Tuple, Optional, List
 from dataclasses import dataclass
 import logging
@@ -14,6 +15,22 @@ import time
 from py2flamingo.visualization.coordinate_transforms import TransformQuality
 
 logger = logging.getLogger(__name__)
+
+
+def _locked(method):
+    """Decorator that wraps a method with self._storage_lock (RLock).
+
+    Provides thread safety for storage read/write operations so the
+    background TileProcessingWorker can safely call update_storage_vectorized
+    while the GUI thread reads via get_display_volume_transformed.
+    """
+    import functools
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._storage_lock:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 def _vectorized_accumulate(valid_voxels: np.ndarray, valid_values: np.ndarray,
@@ -197,6 +214,10 @@ class DualResolutionVoxelStorage:
         """
         self.config = config or DualResolutionConfig()
 
+        # Thread safety: RLock because get_display_volume_transformed calls
+        # get_display_volume which calls downsample_to_display (reentrant chain)
+        self._storage_lock = threading.RLock()
+
         # High-resolution storage (sparse for memory efficiency using dictionaries)
         self.storage_dims = self.config.storage_dimensions
         self.storage_data: Dict[int, Dict] = {}  # Channel -> dict of (x,y,z) -> value
@@ -319,6 +340,7 @@ class DualResolutionVoxelStorage:
             from scipy.ndimage import shift
             return shift(volume, offset_voxels, order=1, mode='constant', cval=0)
 
+    @_locked
     def _initialize_storage(self):
         """Initialize storage arrays for all channels."""
         # Track max intensity per channel for dynamic contrast adjustment
@@ -373,6 +395,7 @@ class DualResolutionVoxelStorage:
         voxel_coords = (world_coords - np.array(self.config.chamber_origin)) / np.array(self.config.display_voxel_size)
         return np.round(voxel_coords).astype(int)
 
+    @_locked
     def update_storage(self, channel_id: int, world_coords: np.ndarray,
                       pixel_values: np.ndarray, timestamp: float,
                       update_mode: str = 'latest'):
@@ -494,6 +517,7 @@ class DualResolutionVoxelStorage:
         else:
             return new_val
 
+    @_locked
     def update_storage_vectorized(self, channel_id: int, world_coords: np.ndarray,
                                    pixel_values: np.ndarray, timestamp: float,
                                    update_mode: str = 'maximum'):
@@ -584,6 +608,7 @@ class DualResolutionVoxelStorage:
                 np.max(world_coords, axis=0)
             )
 
+    @_locked
     def downsample_to_display(self, channel_id: int, force: bool = False) -> np.ndarray:
         """
         Downsample high-resolution storage to display resolution.
@@ -752,6 +777,7 @@ class DualResolutionVoxelStorage:
 
         return output.astype(data.dtype)
 
+    @_locked
     def get_display_volume(self, channel_id: Optional[int] = None) -> np.ndarray:
         """
         Get display-resolution volume for visualization.
@@ -856,6 +882,7 @@ class DualResolutionVoxelStorage:
             # Remove oldest blocks
             self.data_collection_positions.pop(0)
 
+    @_locked
     def get_display_volume_transformed(self, channel_id: int,
                                       current_stage_pos: dict,
                                       holder_position_voxels: np.ndarray = None) -> np.ndarray:
@@ -1046,6 +1073,7 @@ class DualResolutionVoxelStorage:
         self.coord_transformer = transformer
         logger.info("Coordinate transformer set for volume transformations")
 
+    @_locked
     def set_reference_position(self, stage_pos: dict):
         """
         Set the reference stage position for transformation calculations.
@@ -1079,6 +1107,7 @@ class DualResolutionVoxelStorage:
         self.transform_cache.clear()
         logger.debug("Transform cache invalidated")
 
+    @_locked
     def has_data(self, channel_id: int) -> bool:
         """Check if a channel has any data."""
         if len(self.storage_data.get(channel_id, {})) > 0:

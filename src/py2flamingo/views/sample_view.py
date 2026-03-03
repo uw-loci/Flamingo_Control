@@ -28,6 +28,7 @@ from PyQt5.QtGui import QPixmap, QImage, QFont, QDoubleValidator, QShowEvent, QC
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.resources import get_app_icon
+from py2flamingo.visualization.tile_processing_worker import TileFrameBuffer, TileProcessingWorker
 
 if TYPE_CHECKING:
     from py2flamingo.services.window_geometry_manager import WindowGeometryManager
@@ -2988,6 +2989,9 @@ class SampleView(QWidget):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Handle window close event - save geometry and dialog state."""
+        # Stop tile processing worker if running
+        self._stop_tile_worker()
+
         # Save geometry and dialog state
         if self._geometry_manager:
             self._geometry_manager.save_geometry("SampleView", self)
@@ -3137,11 +3141,21 @@ class SampleView(QWidget):
         """
         self._tile_workflow_active = True
         self._expected_tiles = tile_info
-        self._accumulated_zstacks = {}
+        self._tile_buffers_submitted = {}  # Track which tiles have been submitted
+        self._current_tile_buffer = None  # Current TileFrameBuffer being filled
         self._tile_reference_set = False  # Set reference on first tile frame
         self._tile_reference_position = None  # Local reference (not in voxel_storage to avoid transform)
-        self._learned_frames_per_tile = None  # Learn from first tile for channel detection
-        self._tile_channel_frame_counts = {}  # (tile_key, channel_id) -> count for completeness report
+
+        # Cache camera FPS for progress-bar estimates (display only, not data)
+        self._tile_camera_fps = 40.0  # Default matches typical Flamingo hardware
+        if self.camera_controller and self.camera_controller.camera_service:
+            try:
+                hw_fps = self.camera_controller.camera_service.get_frame_rate()
+                if hw_fps and hw_fps > 0:
+                    self._tile_camera_fps = hw_fps
+                self.logger.info(f"Sample View: Camera FPS for progress display: {self._tile_camera_fps}")
+            except Exception:
+                pass
 
         # Disable Populate from Live during tile workflows to prevent interference
         if getattr(self, '_is_populating', False):
@@ -3157,32 +3171,19 @@ class SampleView(QWidget):
             self.populate_btn.setToolTip("Disabled during tile workflow")
 
         # Uncheck LED (RGB) if the workflow uses lasers, not LED.
-        # The LED checkbox persists from previous sessions and can cause confusion
-        # when starting a laser-only acquisition.
         if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
             channels_in_use = set()
             for ti in tile_info:
                 for ch in ti.get('channels', []):
                     channels_in_use.add(ch)
             if channels_in_use:
-                # Workflow specifies laser channels — uncheck LED
                 led_radio = getattr(self.laser_led_panel, '_led_radio', None)
                 if led_radio and led_radio.isChecked():
                     led_radio.setChecked(False)
                     self.logger.info("Unchecked LED (RGB) — workflow uses laser channels")
 
-        # Cache camera FPS for channel detection.
-        # Use the actual hardware frame rate (~40 fps), NOT _max_display_fps
-        # which is a GUI display limit (30 fps) and much too low.
-        self._tile_camera_fps = 40.0  # Default matches typical Flamingo hardware
-        if self.camera_controller and self.camera_controller.camera_service:
-            try:
-                hw_fps = self.camera_controller.camera_service.get_frame_rate()
-                if hw_fps and hw_fps > 0:
-                    self._tile_camera_fps = hw_fps
-                self.logger.info(f"Sample View: Camera FPS for channel detection: {self._tile_camera_fps}")
-            except Exception:
-                pass
+        # Start background tile processing worker
+        self._start_tile_worker()
 
         self.logger.info(f"Sample View: Prepared to receive {len(tile_info)} tile workflows")
 
@@ -3190,49 +3191,57 @@ class SampleView(QWidget):
         """Mark tile workflows as complete and restore UI state.
 
         Call this when all tile workflows have finished to:
+        - Submit the last tile buffer to the background worker
+        - Wait for all tiles to finish processing
+        - Log completeness report
         - Re-enable Populate from Live button
-        - Allow other 3D Volume View interactions
         - Trigger final visualization update to show last tile
         """
         self._tile_workflow_active = False
-        self.logger.info(f"Sample View: Tile workflows finished. "
-                        f"Processed {len(self._accumulated_zstacks)} tiles.")
 
-        # Log per-tile per-channel completeness report
-        tile_channel_counts = getattr(self, '_tile_channel_frame_counts', {})
-        if tile_channel_counts and self._accumulated_zstacks:
-            # Determine expected frames per channel from learned value
-            frames_per_tile = getattr(self, '_learned_frames_per_tile', None)
-            all_channels = set()
-            tile_keys = list(self._accumulated_zstacks.keys())
-            for (tk, ch) in tile_channel_counts:
-                all_channels.add(ch)
-            all_channels = sorted(all_channels)
-            num_ch = len(all_channels) if all_channels else 1
-            expected_per_ch = (frames_per_tile // num_ch) if frames_per_tile else None
+        # Submit the last tile buffer (no subsequent tile transition to trigger it)
+        if self._current_tile_buffer is not None and self._current_tile_buffer.frame_count > 0:
+            self.logger.info(f"Submitting final tile buffer: {self._current_tile_buffer.tile_key} "
+                            f"({self._current_tile_buffer.frame_count} frames)")
+            if hasattr(self, '_tile_worker') and self._tile_worker:
+                self._tile_worker.submit_tile(self._current_tile_buffer)
+            self._current_tile_buffer = None
 
-            gaps = 0
-            for tk in tile_keys:
-                parts = []
-                for ch in all_channels:
-                    count = tile_channel_counts.get((tk, ch), 0)
-                    if expected_per_ch and expected_per_ch > 0:
-                        pct = count * 100 // expected_per_ch
-                        gap_flag = " GAP" if pct < 90 else ""
-                        parts.append(f"Ch{ch}={count}/{expected_per_ch} ({pct}%{gap_flag})")
-                        if pct < 90:
-                            gaps += 1
-                    else:
+        # Wait for background worker to finish processing all tiles
+        if hasattr(self, '_tile_worker') and self._tile_worker:
+            self.logger.info("Waiting for tile processing worker to finish...")
+            idle = self._tile_worker.wait_for_idle(timeout_ms=30000)
+            if not idle:
+                self.logger.warning("Tile processing worker did not finish within timeout")
+            else:
+                self.logger.info(f"Tile processing worker idle. "
+                                f"Processed {self._tile_worker.tiles_processed} tiles.")
+
+            # Log per-tile per-channel completeness report from worker stats
+            tile_channel_counts = self._tile_worker.channel_frame_counts
+            if tile_channel_counts:
+                all_channels = set()
+                tile_keys_set = set()
+                for (tk, ch) in tile_channel_counts:
+                    all_channels.add(ch)
+                    tile_keys_set.add(tk)
+                all_channels = sorted(all_channels)
+                tile_keys = sorted(tile_keys_set)
+
+                for tk in tile_keys:
+                    parts = []
+                    for ch in all_channels:
+                        count = tile_channel_counts.get((tk, ch), 0)
                         parts.append(f"Ch{ch}={count}")
-                self.logger.info(f"  Tile ({tk[0]:.2f}, {tk[1]:.2f}): {', '.join(parts)}")
+                    self.logger.info(f"  Tile ({tk[0]:.2f}, {tk[1]:.2f}): {', '.join(parts)}")
 
-            if expected_per_ch:
-                self.logger.info(
-                    f"Channel completeness: {gaps}/{len(tile_keys)} tile-channels have gaps >10%")
+        # Stop the background worker thread
+        self._stop_tile_worker()
+
+        self.logger.info(f"Sample View: Tile workflows finished. "
+                        f"Submitted {len(self._tile_buffers_submitted)} tiles.")
 
         # Trigger final visualization update to show the last tile's data.
-        # During acquisition, visualization updates at each tile transition,
-        # but the last tile has no following transition to trigger an update.
         self._visualization_update_timer.start()
 
         # Auto-enable focal move mode now that data is present
@@ -3244,14 +3253,13 @@ class SampleView(QWidget):
             self.populate_btn.setEnabled(True)
             self.populate_btn.setToolTip("Capture frames from Live View and accumulate into 3D volume")
 
-        # Optionally restore populate state if it was active before
-        # (commented out - user should manually re-enable if desired)
-        # if getattr(self, '_was_populating_before_workflow', False):
-        #     self.populate_btn.setChecked(True)
-
     def _on_tile_zstack_frame(self, image: np.ndarray, position: dict,
                               z_index: int, frame_num: int):
         """Handle incoming Z-stack frame from tile workflow.
+
+        Buffers downsampled frames on the GUI thread (~0.5ms per frame).
+        When a new tile starts, the previous tile's complete buffer is
+        submitted to the background TileProcessingWorker for processing.
 
         Args:
             image: Frame data (H, W) uint16 array
@@ -3262,26 +3270,32 @@ class SampleView(QWidget):
         if not self._tile_workflow_active:
             return
 
-        # Calculate actual Z position from index
         z_min = position['z_min']
         z_max = position['z_max']
-        z_range = z_max - z_min
-
-        # Determine laser channel from z_index and channel list
         channels = position.get('channels', [0])
         num_channels = len(channels)
-
-        # Track frames per tile to determine channel boundaries dynamically.
-        # The firmware acquires channels sequentially, so we need to detect
-        # when we've passed the midpoint of the total frames.
         tile_key = (position['x'], position['y'])
-        is_new_tile = tile_key not in self._accumulated_zstacks
+
+        is_new_tile = tile_key not in self._tile_buffers_submitted and (
+            self._current_tile_buffer is None or
+            self._current_tile_buffer.tile_key != tile_key
+        )
+
         if is_new_tile:
-            self._accumulated_zstacks[tile_key] = 0
+            # Submit PREVIOUS tile's buffer to background worker
+            if self._current_tile_buffer is not None and self._current_tile_buffer.frame_count > 0:
+                self.logger.info(f"Tile {self._current_tile_buffer.tile_key} complete: "
+                                f"{self._current_tile_buffer.frame_count} frames buffered, "
+                                f"submitting to worker")
+                self._tile_buffers_submitted[self._current_tile_buffer.tile_key] = True
+                if hasattr(self, '_tile_worker') and self._tile_worker:
+                    self._tile_worker.submit_tile(self._current_tile_buffer)
+
+                # Trigger visualization update for the previous tile
+                if hasattr(self, '_visualization_update_timer'):
+                    self._visualization_update_timer.start()
 
             # CRITICAL: Force position update at start of each new tile
-            # This ensures the display transform is current before new data arrives,
-            # so existing data shifts correctly and new data is stored with proper deltas.
             if self.movement_controller:
                 try:
                     pos = self.movement_controller.get_position()
@@ -3292,182 +3306,128 @@ class SampleView(QWidget):
                 except Exception as e:
                     self.logger.warning(f"Could not force position update for new tile: {e}")
 
-        frame_count = self._accumulated_zstacks[tile_key]
+            # Set reference on first tile
+            if not self._tile_reference_set and self.voxel_storage:
+                ref_x = position['x']
+                ref_y = position['y']
+                z_mid = (z_min + z_max) / 2
+                ref_z = z_mid
+                ref_r = position.get('r', self.last_stage_position.get('r', 0))
 
-        # Calculate frames_per_channel for proper Z distribution
-        # For first tile: estimate from z_velocity and z_range (use for ENTIRE first tile)
-        # For subsequent tiles: use learned value from completed first tile
-        is_first_tile = len(self._accumulated_zstacks) == 1
-        frames_per_tile = getattr(self, '_learned_frames_per_tile', None)
+                self._tile_reference_position = {
+                    'x': ref_x, 'y': ref_y, 'z': ref_z, 'r': ref_r
+                }
+                self._tile_reference_set = True
+                self.voxel_storage.set_reference_position(self._tile_reference_position)
+                self.logger.info(f"Sample View: Tile reference set to "
+                                f"X={ref_x:.3f}, Y={ref_y:.3f}, Z={ref_z:.3f}, R={ref_r:.1f}°")
 
-        if is_first_tile or frames_per_tile is None:
-            # First tile (or no learned value yet): calculate from z_velocity and z_range
-            # IMPORTANT: Use this calculation for the ENTIRE first tile, even after
-            # _learned_frames_per_tile starts being updated, to ensure consistent
-            # Z distribution throughout the tile.
-            z_velocity = position.get('z_velocity', 0)
-            camera_fps = getattr(self, '_tile_camera_fps', 40.0)
-            if z_velocity > 0 and z_range > 0:
-                sweep_duration = z_range / z_velocity  # seconds
-                single_sweep_frames = int(sweep_duration * camera_fps)
-                # With multi_laser OFF (sequential mode), the firmware does N
-                # separate Z sweeps — one per channel. Each sweep produces
-                # single_sweep_frames. Do NOT divide by num_channels.
-                frames_per_channel = max(1, single_sweep_frames)
-                if frame_count == 0:  # Only log once per tile
-                    self.logger.info(f"First tile: estimated {single_sweep_frames * num_channels} total frames "
-                                    f"({frames_per_channel}/channel, {num_channels} channels) from "
-                                    f"z_vel={z_velocity:.3f}, z_range={z_range:.3f}, fps={camera_fps}")
-            else:
-                # Fallback if z_velocity not available
-                frames_per_channel = 100  # Conservative high value to avoid wrap
-                if frame_count == 0:
-                    self.logger.warning(f"First tile: no z_velocity, using fallback frames_per_channel={frames_per_channel}")
-        else:
-            # Subsequent tiles: use learned value from completed first tile
-            # Add 5% buffer to prevent modulo wrap when subsequent tiles have
-            # slightly more frames than the first tile due to timing jitter
-            buffered_frames = int(frames_per_tile * 1.05)
-            frames_per_channel = max(1, buffered_frames // max(1, num_channels))
-
-        # Which channel does this z_index belong to?
-        # Channels are acquired sequentially, so divide frame count by frames_per_channel
-        channel_idx = min(z_index // frames_per_channel, num_channels - 1)
-        self._current_channel = channels[channel_idx]
-
-        # Track per-tile per-channel frame counts for completeness report
-        count_key = (tile_key, self._current_channel)
-        self._tile_channel_frame_counts[count_key] = self._tile_channel_frame_counts.get(count_key, 0) + 1
-
-        # For tile workflows, ALWAYS calculate Z from z_index
-        # Hardware position doesn't update mid-Z-sweep, so querying returns
-        # the same Z for all frames. Use the calculated position instead.
-        z_within_channel = z_index % max(1, frames_per_channel)
-        z_fraction = z_within_channel / max(1, frames_per_channel - 1) if frames_per_channel > 1 else 0.5
-        z_position = z_min + z_fraction * z_range
-
-        # Increment frame count (tracking was initialized above for channel detection)
-        self._accumulated_zstacks[tile_key] += 1
-        frame_count = self._accumulated_zstacks[tile_key]
-
-        # Learn the actual frames per tile from the first tile when it completes
-        # This improves channel routing for subsequent tiles
-        if len(self._accumulated_zstacks) == 1 and frame_count > 5:
-            # Update estimate as we go - will settle on final value
-            self._learned_frames_per_tile = frame_count
-
-        # Update workflow progress directly (PyQt signals are starved during frame processing)
-        total_expected = num_channels * frames_per_channel
-        total_tiles = max(1, len(self._expected_tiles))
-        tile_idx = len(self._accumulated_zstacks)  # Current tile number
-        if total_expected > 0 and frame_count % 5 == 0:
-            tile_pct = min(1.0, frame_count / total_expected)
-            overall_pct = min(100, int(((tile_idx - 1 + tile_pct) / total_tiles) * 100))
-            ch_name = channels[channel_idx] if channel_idx < len(channels) else '?'
-            status = f"Tile {tile_idx}/{total_tiles}: {frame_count} frames (Ch {ch_name})"
-            self.update_workflow_progress(status, overall_pct, "--:--")
-
-        # Set reference on first frame of acquisition
-        # Query actual stage position synchronously to avoid timing issues
-        if not self._tile_reference_set and self.voxel_storage:
-            # Query actual position from hardware (synchronous call)
-            actual_pos = None
-            if self.movement_controller:
-                try:
-                    actual_pos = self.movement_controller.get_position()
-                    if actual_pos is None:
-                        self.logger.warning("Sample View: movement_controller.get_position() returned None")
-                except Exception as e:
-                    self.logger.warning(f"Sample View: Failed to query stage position: {e}")
-            else:
-                self.logger.warning("Sample View: No movement_controller available for position query")
-
-            # Log position comparison for debugging
-            self.logger.info(f"Sample View: Position comparison on first frame:")
-            self.logger.info(f"  Workflow target: X={position['x']:.3f}, Y={position['y']:.3f}, Z={z_position:.3f}")
-            if actual_pos:
-                self.logger.info(f"  Queried actual:  X={actual_pos.x:.3f}, Y={actual_pos.y:.3f}, "
-                                f"Z={actual_pos.z:.3f}, R={actual_pos.r:.1f}°")
-            else:
-                self.logger.info(f"  Cached stage:    X={self.last_stage_position.get('x', 0):.3f}, "
-                                f"Y={self.last_stage_position.get('y', 0):.3f}, "
-                                f"Z={self.last_stage_position.get('z', 0):.3f}, "
-                                f"R={self.last_stage_position.get('r', 0):.1f}°")
-
-            # CRITICAL: Use WORKFLOW position for reference, not actual stage position.
-            # Data position also comes from workflow position, so using the same source
-            # ensures delta = 0 for the first tile (data appears at base position).
-            # If we used actual stage position for reference but workflow position for data,
-            # any difference would cause an offset in the first tile.
-            ref_x = position['x']
-            ref_y = position['y']
-            ref_z = z_position
-            ref_r = position.get('r', self.last_stage_position.get('r', 0))
-            self.logger.info(f"Sample View: Using WORKFLOW position for reference "
-                            f"(ensures delta=0 for first tile)")
-
-            # Store reference both locally (for storage delta) and in voxel_storage (for display transform).
-            # The storage delta places each tile at its relative position: base + (tile_pos - reference).
-            # The display transform shifts the volume by -(current - reference) to show the correct
-            # focal plane relationship: whichever tile is at the current stage position appears at the focal plane.
-            #
-            # This works because:
-            # - Storage: base + delta (where delta = tile_pos - reference)
-            # - Display: shifts by -delta (where delta = current - reference)
-            # - When current = tile_pos (at capture position): combined = base + delta - delta = base (focal plane)
-            # - When current != tile_pos: tile appears offset from focal plane (as expected)
-            self._tile_reference_position = {
-                'x': ref_x,
-                'y': ref_y,
-                'z': ref_z,
-                'r': ref_r
-            }
-            self._tile_reference_set = True
-
-            # Also set voxel_storage reference so display transform is applied
-            # The display transform uses NEGATIVE delta for all axes, which cancels the storage delta
-            # when viewing from the tile's capture position.
-            self.voxel_storage.set_reference_position(self._tile_reference_position)
-            self.logger.info(f"Sample View: Tile reference set to "
-                            f"X={ref_x:.3f}, Y={ref_y:.3f}, Z={ref_z:.3f}, R={ref_r:.1f}° "
-                            f"(both local and voxel_storage)")
-
-        # Update last_stage_position only on FIRST FRAME of each new tile
-        # This makes the display transform shift once per tile (not every Z frame),
-        # showing the correct focal plane relationship: currently captured tile at focal plane.
-        # Using z_min as the representative Z position for the tile.
-        if frame_count == 1:
+            # Update last_stage_position for display transform (once per tile)
+            z_mid_tile = (z_min + z_max) / 2
             self.last_stage_position = {
                 'x': position['x'],
                 'y': position['y'],
-                'z': z_min,  # Use tile's starting Z, not varying z_position
+                'z': z_mid_tile,
                 'r': position.get('r', self.last_stage_position.get('r', 0))
             }
-            self.logger.info(f"Sample View: New tile at ({position['x']:.3f}, {position['y']:.3f}), "
-                            f"updated last_stage_position for display transform")
 
-        # Add frame to volume - pass reference explicitly for storage delta calculation
-        self.add_frame_to_volume(
-            image=image,
-            stage_position_mm={'x': position['x'], 'y': position['y'], 'z': z_position},
-            channel_id=self._current_channel,
-            reference_position=self._tile_reference_position
-        )
+            # Create new buffer for this tile
+            self._current_tile_buffer = TileFrameBuffer(
+                tile_key=tile_key,
+                position=position,
+                channels=channels,
+                z_min=z_min,
+                z_max=z_max,
+                reference_position=self._tile_reference_position
+            )
+            self.logger.info(f"Sample View: New tile buffer for ({position['x']:.3f}, {position['y']:.3f})")
 
-        # Kick the debounced channel-availability check so checkboxes
-        # get enabled once storage reports has_data()==True.
-        # The timer is single-shot, so repeated .start() calls just reset it.
+        # Downsample and buffer (~0.5ms)
+        downsampled = self._downsample_for_storage(image)
+        self._current_tile_buffer.append(downsampled, z_index)
+
+        # Update progress bar (approximate, every 5th frame)
+        frame_count = self._current_tile_buffer.frame_count
+        if frame_count % 5 == 0:
+            estimated_total = self._estimate_frames_per_tile(position, num_channels)
+            total_tiles = max(1, len(self._expected_tiles))
+            tile_idx = len(self._tile_buffers_submitted) + 1
+            tile_pct = min(1.0, frame_count / max(1, estimated_total))
+            overall_pct = min(100, int(((tile_idx - 1 + tile_pct) / total_tiles) * 100))
+            status = f"Tile {tile_idx}/{total_tiles}: {frame_count} frames"
+            self.update_workflow_progress(status, overall_pct, "--:--")
+
+        # Kick channel availability timer (will fire after processing catches up)
         self._channel_availability_timer.start()
 
-        # Trigger a debounced visualization update when a NEW tile starts.
-        # This means the previous tile's data is complete in storage and
-        # can be rendered. The 500ms timer delay ensures we don't interfere
-        # with the initial burst of frames for the new tile, and the async
-        # path runs transforms off the GUI thread.
-        if is_new_tile and len(self._accumulated_zstacks) > 1:
-            if hasattr(self, '_visualization_update_timer'):
-                self._visualization_update_timer.start()
+    def _estimate_frames_per_tile(self, position: dict, num_channels: int) -> int:
+        """Estimate total frames per tile for progress display only.
 
-        self.logger.debug(f"Sample View: Accumulated Z-plane {z_index} for tile "
-                         f"({position['x']:.2f}, {position['y']:.2f})")
+        Uses the same physics formula as before, but ONLY for the progress bar.
+        Actual channel splitting uses exact counts in the background worker.
+        """
+        z_range = position['z_max'] - position['z_min']
+        z_velocity = position.get('z_velocity', 0)
+        camera_fps = getattr(self, '_tile_camera_fps', 40.0)
+
+        if z_velocity > 0 and z_range > 0:
+            sweep_duration = z_range / z_velocity
+            single_sweep_frames = int(sweep_duration * camera_fps)
+            return single_sweep_frames * num_channels
+        return 500  # Rough fallback
+
+    def _start_tile_worker(self):
+        """Create and start the background tile processing thread."""
+        from PyQt5.QtCore import QThread
+
+        if not self.voxel_storage:
+            self.logger.warning("Cannot start tile worker: no voxel_storage")
+            return
+
+        self._tile_worker_thread = QThread()
+        self._tile_worker = TileProcessingWorker(
+            voxel_storage=self.voxel_storage,
+            config=self._config,
+            invert_x=self._invert_x
+        )
+        self._tile_worker.moveToThread(self._tile_worker_thread)
+
+        # Connect signals
+        self._tile_worker_thread.started.connect(self._tile_worker.run)
+        self._tile_worker.tile_processed.connect(self._on_tile_processed)
+        self._tile_worker.error.connect(
+            lambda msg: self.logger.error(f"Tile worker error: {msg}")
+        )
+
+        self._tile_worker_thread.start()
+        self.logger.info("Tile processing worker thread started")
+
+    def _stop_tile_worker(self):
+        """Shut down the background tile processing thread."""
+        if hasattr(self, '_tile_worker') and self._tile_worker:
+            self._tile_worker.shutdown()
+        if hasattr(self, '_tile_worker_thread') and self._tile_worker_thread:
+            self._tile_worker_thread.quit()
+            if not self._tile_worker_thread.wait(5000):
+                self.logger.warning("Tile worker thread did not stop within 5s")
+            self.logger.info("Tile processing worker thread stopped")
+        self._tile_worker = None
+        self._tile_worker_thread = None
+
+    def _on_tile_processed(self, tile_key, stats):
+        """Handle tile processing completion from background worker.
+
+        Called on the GUI thread via Qt signal.
+        """
+        self.logger.info(f"Tile {tile_key} processed: {stats}")
+
+        # Kick visualization and channel availability timers
+        if hasattr(self, '_visualization_update_timer'):
+            self._visualization_update_timer.start()
+        if hasattr(self, '_channel_availability_timer'):
+            self._channel_availability_timer.start()
+
+        # Auto-enable focal move mode now that data is present
+        if hasattr(self, '_move_data_to_focus_cb') and not self._move_data_to_focus_cb.isChecked():
+            self._move_data_to_focus_cb.setChecked(True)
 
