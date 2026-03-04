@@ -265,9 +265,11 @@ class MessageDispatcher:
 
         # No handler found - queue as unsolicited or log
         if message.is_unsolicited:
-            # High-frequency progress messages (0x9004) flood the queue during
-            # acquisition — drop silently when no callback is registered
-            if command_code == 0x9004:
+            # High-frequency unsolicited messages flood the queue during
+            # acquisition — drop silently when no callback is registered.
+            # 0x9004 = progress bar update, 0x9003 = progress bar size,
+            # 0x6010 = MOTION_STOPPED (stage moves between tiles)
+            if command_code in (0x9003, 0x9004, 0x6010):
                 self._stats['messages_dropped'] += 1
                 return
             try:
