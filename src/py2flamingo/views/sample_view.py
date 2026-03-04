@@ -3338,15 +3338,19 @@ class SampleView(QWidget):
             }
 
             # Create new buffer for this tile
+            num_planes = position.get('num_planes')
             self._current_tile_buffer = TileFrameBuffer(
                 tile_key=tile_key,
                 position=position,
                 channels=channels,
                 z_min=z_min,
                 z_max=z_max,
-                reference_position=self._tile_reference_position
+                reference_position=self._tile_reference_position,
+                planes_per_channel=num_planes,
             )
-            self.logger.info(f"Sample View: New tile buffer for ({position['x']:.3f}, {position['y']:.3f})")
+            self.logger.info(f"Sample View: New tile buffer for ({position['x']:.3f}, {position['y']:.3f}), "
+                            f"expected {num_planes} planes/channel x {num_channels} channels"
+                            f" = {num_planes * num_channels if num_planes else '?'} total")
 
         # Downsample and buffer (~0.5ms)
         downsampled = self._downsample_for_storage(image)

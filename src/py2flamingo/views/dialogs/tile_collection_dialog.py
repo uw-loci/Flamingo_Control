@@ -30,7 +30,8 @@ from py2flamingo.services.tiff_size_validator import (
 from py2flamingo.utils.tile_z_range import calculate_tile_z_ranges
 from py2flamingo.utils.tile_workflow_parser import (
     parse_workflow_position, read_z_range_from_workflow,
-    read_laser_channels_from_workflow, read_z_velocity_from_workflow
+    read_laser_channels_from_workflow, read_z_velocity_from_workflow,
+    read_num_planes_from_workflow,
 )
 from py2flamingo.utils.tile_folder_organizer import reorganize_tile_folders
 
@@ -1064,6 +1065,7 @@ class TileCollectionDialog(PersistentDialog):
                     tile_position['z_max'] = z_max
                     tile_position['channels'] = read_laser_channels_from_workflow(wf_file)
                     tile_position['z_velocity'] = read_z_velocity_from_workflow(wf_file)
+                    tile_position['num_planes'] = read_num_planes_from_workflow(wf_file)
                     metadata = tile_position
             metadata_list.append(metadata)
 

@@ -45,6 +45,7 @@ class TileFrameBuffer:
     z_min: float                             # Z sweep minimum (mm)
     z_max: float                             # Z sweep maximum (mm)
     reference_position: Optional[dict]       # Reference position for delta calc
+    planes_per_channel: Optional[int] = None # Expected planes from workflow (authoritative)
     frames: List[Tuple[np.ndarray, int]] = field(default_factory=list)  # (downsampled_image, z_index)
 
     def append(self, downsampled_image: np.ndarray, z_index: int):
@@ -184,13 +185,33 @@ class TileProcessingWorker(QObject):
             logger.warning(f"Tile {tile_key}: empty buffer or no channels")
             return
 
-        # EXACT channel splitting - the core improvement over the old approach
-        frames_per_channel = total_frames // num_channels
-        remainder = total_frames % num_channels
+        # Use authoritative planes_per_channel from workflow if available,
+        # otherwise fall back to dividing total by channels
+        if buffer.planes_per_channel is not None:
+            frames_per_channel = buffer.planes_per_channel
+            expected_total = frames_per_channel * num_channels
+            excess = total_frames - expected_total
+
+            if excess > 0:
+                # Trim excess frames from the START (stale camera frames before scan)
+                logger.info(f"Tile {tile_key}: trimming {excess} excess frames from start "
+                            f"(got {total_frames}, expected {expected_total})")
+                buffer.frames = buffer.frames[excess:]
+                total_frames = expected_total
+            elif excess < 0:
+                # Fewer frames than expected (e.g., last tile cut short)
+                logger.warning(f"Tile {tile_key}: {-excess} fewer frames than expected "
+                               f"(got {total_frames}, expected {expected_total})")
+                frames_per_channel = total_frames // num_channels
+        else:
+            frames_per_channel = total_frames // num_channels
+
+        remainder = total_frames - (frames_per_channel * num_channels)
 
         logger.info(f"Processing tile {tile_key}: {total_frames} frames, "
                     f"{num_channels} channels, {frames_per_channel} frames/channel"
-                    f"{f' (+{remainder} remainder)' if remainder else ''}")
+                    f"{f' (+{remainder} remainder)' if remainder else ''}"
+                    f"{f', planes_per_channel={buffer.planes_per_channel}' if buffer.planes_per_channel else ''}")
 
         # Get coordinate calculation parameters
         sample_center = self._config.get('sample_chamber', {}).get(

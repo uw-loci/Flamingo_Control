@@ -134,6 +134,31 @@ def read_laser_channels_from_workflow(workflow_file: Path) -> List[int]:
         return [0]
 
 
+def read_num_planes_from_workflow(workflow_file: Path) -> Optional[int]:
+    """Read number of Z-planes per channel from workflow file.
+
+    This is the authoritative plane count set by the ZStack panel:
+    num_planes = int(z_range_mm / (z_step_um / 1000)) + 1
+
+    Args:
+        workflow_file: Path to workflow file
+
+    Returns:
+        Number of planes per channel, or None if not found
+    """
+    try:
+        with open(workflow_file, 'r') as f:
+            content = f.read()
+        match = re.search(r'Number of planes\s*=\s*(\d+)', content)
+        if match:
+            num_planes = int(match.group(1))
+            logger.debug(f"Parsed num_planes from {workflow_file.name}: {num_planes}")
+            return num_planes
+    except Exception as e:
+        logger.error(f"Failed to read num_planes from {workflow_file.name}: {e}")
+    return None
+
+
 def read_z_velocity_from_workflow(workflow_file: Path) -> float:
     """Read Z stage velocity from workflow file.
 
