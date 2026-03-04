@@ -395,7 +395,6 @@ class DualResolutionVoxelStorage:
         voxel_coords = (world_coords - np.array(self.config.chamber_origin)) / np.array(self.config.display_voxel_size)
         return np.round(voxel_coords).astype(int)
 
-    @_locked
     def update_storage(self, channel_id: int, world_coords: np.ndarray,
                       pixel_values: np.ndarray, timestamp: float,
                       update_mode: str = 'latest'):
@@ -404,6 +403,9 @@ class DualResolutionVoxelStorage:
 
         Automatically uses vectorized path for large batches (>1000 voxels)
         which provides 10-50x speedup through NumPy 2.x optimizations.
+
+        Uses fine-grained locking to avoid blocking the GUI thread for extended
+        periods when called from the background TileProcessingWorker.
 
         Args:
             channel_id: Channel index (0-3)
@@ -420,7 +422,8 @@ class DualResolutionVoxelStorage:
             logger.debug(f"Using vectorized storage update for {len(world_coords)} voxels")
             return self.update_storage_vectorized(channel_id, world_coords, pixel_values, timestamp, update_mode)
 
-        # Convert to storage voxel coordinates
+        # Non-vectorized path (< 1000 voxels) — fast enough to hold lock for entire operation
+        # Convert to storage voxel coordinates (pure numpy, no shared state)
         storage_voxels = self.world_to_storage_voxel(world_coords)
 
         # Filter valid voxels (within bounds and sample region)
@@ -460,45 +463,39 @@ class DualResolutionVoxelStorage:
         valid_voxels = storage_voxels[valid_mask]
         valid_values = pixel_values[valid_mask]
 
-        # Update storage with appropriate strategy
-        # Using Python dictionaries for sparse storage (faster than sparse.DOK)
-        data_dict = self.storage_data[channel_id]
-        time_dict = self.storage_timestamps[channel_id]
-        conf_dict = self.storage_confidence[channel_id]
+        # Lock for the dict write loop (< 1000 voxels, so < 50ms lock hold)
+        with self._storage_lock:
+            # Update storage with appropriate strategy
+            data_dict = self.storage_data[channel_id]
+            time_dict = self.storage_timestamps[channel_id]
+            conf_dict = self.storage_confidence[channel_id]
 
-        for voxel_idx, value in zip(valid_voxels, valid_values):
-            key = tuple(voxel_idx)  # (x, y, z) tuple as dictionary key
+            for voxel_idx, value in zip(valid_voxels, valid_values):
+                key = tuple(voxel_idx)
 
-            # Get existing data (dictionary .get() is fast)
-            old_value = data_dict.get(key, 0)
-            old_time = time_dict.get(key, 0)
-            old_conf = conf_dict.get(key, 0)
+                old_value = data_dict.get(key, 0)
+                old_time = time_dict.get(key, 0)
+                old_conf = conf_dict.get(key, 0)
 
-            # Apply update strategy
-            new_value = self._apply_update_strategy(
-                old_value, value, old_time, timestamp, update_mode
-            )
+                new_value = self._apply_update_strategy(
+                    old_value, value, old_time, timestamp, update_mode
+                )
 
-            # Store updated values
-            data_dict[key] = new_value
-            time_dict[key] = timestamp
-            conf_dict[key] = min(255, old_conf + 1)
+                data_dict[key] = new_value
+                time_dict[key] = timestamp
+                conf_dict[key] = min(255, old_conf + 1)
 
-        # Update data bounds
-        self._update_bounds(world_coords[valid_mask])
+            # Update data bounds
+            self._update_bounds(world_coords[valid_mask])
 
-        # Mark display as needing update
-        # (max value tracking now happens in downsample_to_display based on display data)
-        self.display_dirty[channel_id] = True
+            # Mark display as needing update
+            self.display_dirty[channel_id] = True
 
-        # CRITICAL: Invalidate transform cache when new data is added
-        # Otherwise get_display_volume_transformed returns stale cached data
-        # that doesn't include newly captured frames
-        # Cache key format is f"{channel_id}_rotated" since we cache rotated base volumes
-        cache_key = f"{channel_id}_rotated"
-        if cache_key in self.transform_cache:
-            del self.transform_cache[cache_key]
-            logger.debug(f"Transform cache invalidated for channel {channel_id} (new data added)")
+            # Invalidate transform cache
+            cache_key = f"{channel_id}_rotated"
+            if cache_key in self.transform_cache:
+                del self.transform_cache[cache_key]
+                logger.debug(f"Transform cache invalidated for channel {channel_id} (new data added)")
 
     def _apply_update_strategy(self, old_val: float, new_val: float,
                               old_time: float, new_time: float,
@@ -517,7 +514,6 @@ class DualResolutionVoxelStorage:
         else:
             return new_val
 
-    @_locked
     def update_storage_vectorized(self, channel_id: int, world_coords: np.ndarray,
                                    pixel_values: np.ndarray, timestamp: float,
                                    update_mode: str = 'maximum'):
@@ -528,6 +524,12 @@ class DualResolutionVoxelStorage:
         Uses np.ravel_multi_index, np.unique, and np.add.at/np.maximum.at
         for efficient batch accumulation.
 
+        Uses fine-grained locking: numpy computation runs WITHOUT the lock
+        (releases GIL for native code, allowing GUI thread to run), then
+        dict writes happen in small chunks with lock/release between them.
+        This prevents the GUI thread from freezing during background tile
+        processing (which previously held the lock for 30-57 seconds).
+
         Args:
             channel_id: Channel index (0-3)
             world_coords: (N, 3) array of world coordinates in micrometers
@@ -535,10 +537,11 @@ class DualResolutionVoxelStorage:
             timestamp: Acquisition timestamp
             update_mode: 'latest', 'maximum', 'average', 'additive'
         """
-        # Convert to storage voxel coordinates
+        # === Phase 1: Numpy computation WITHOUT lock ===
+        # These operations release the GIL for native code, so the GUI
+        # thread can process camera frames concurrently.
         storage_voxels = self.world_to_storage_voxel(world_coords)
 
-        # Filter valid voxels (within bounds)
         valid_mask = np.all(
             (storage_voxels >= 0) &
             (storage_voxels < np.array(self.storage_dims)),
@@ -554,47 +557,49 @@ class DualResolutionVoxelStorage:
 
         logger.debug(f"Vectorized update: {len(valid_voxels)} valid voxels, mode={update_mode}")
 
-        # Use vectorized accumulation (10-50x faster than Python loops)
         unique_flat, accumulated_values = _vectorized_accumulate(
             valid_voxels, valid_values, self.storage_dims, update_mode
         )
 
-        # Convert flat indices back to 3D coordinates
         z_coords, y_coords, x_coords = np.unravel_index(unique_flat, self.storage_dims)
 
-        # Update dictionaries with vectorized results
-        # (Dictionary updates still require loop, but now over unique voxels only)
-        data_dict = self.storage_data[channel_id]
-        time_dict = self.storage_timestamps[channel_id]
-        conf_dict = self.storage_confidence[channel_id]
+        # === Phase 2: Dict writes in chunks WITH lock ===
+        # Each chunk holds the lock for ~25-50ms, then releases it so the
+        # GUI thread can read storage (for visualization) or process frames.
+        DICT_CHUNK_SIZE = 5000
+        n_unique = len(z_coords)
+        is_maximum = (update_mode == 'maximum')
 
-        for i, (z, y, x) in enumerate(zip(z_coords, y_coords, x_coords)):
-            key = (z, y, x)
-            new_value = int(accumulated_values[i])
+        for chunk_start in range(0, n_unique, DICT_CHUNK_SIZE):
+            chunk_end = min(chunk_start + DICT_CHUNK_SIZE, n_unique)
+            with self._storage_lock:
+                data_dict = self.storage_data[channel_id]
+                time_dict = self.storage_timestamps[channel_id]
+                conf_dict = self.storage_confidence[channel_id]
 
-            # For maximum mode, compare with existing value
-            if update_mode == 'maximum':
-                old_value = data_dict.get(key, 0)
-                if new_value > old_value:
-                    data_dict[key] = new_value
-                    time_dict[key] = timestamp
-                    conf_dict[key] = min(255, conf_dict.get(key, 0) + 1)
-            else:
-                data_dict[key] = new_value
-                time_dict[key] = timestamp
-                conf_dict[key] = min(255, conf_dict.get(key, 0) + 1)
+                for i in range(chunk_start, chunk_end):
+                    key = (int(z_coords[i]), int(y_coords[i]), int(x_coords[i]))
+                    new_value = int(accumulated_values[i])
 
-        # Update data bounds
-        self._update_bounds(world_coords[valid_mask])
+                    if is_maximum:
+                        old_value = data_dict.get(key, 0)
+                        if new_value > old_value:
+                            data_dict[key] = new_value
+                            time_dict[key] = timestamp
+                            conf_dict[key] = min(255, conf_dict.get(key, 0) + 1)
+                    else:
+                        data_dict[key] = new_value
+                        time_dict[key] = timestamp
+                        conf_dict[key] = min(255, conf_dict.get(key, 0) + 1)
 
-        # Mark display as needing update
-        self.display_dirty[channel_id] = True
-
-        # Invalidate transform cache
-        cache_key = f"{channel_id}_rotated"
-        if cache_key in self.transform_cache:
-            del self.transform_cache[cache_key]
-            logger.debug(f"Transform cache invalidated for channel {channel_id}")
+        # === Phase 3: Metadata updates (brief lock) ===
+        with self._storage_lock:
+            self._update_bounds(world_coords[valid_mask])
+            self.display_dirty[channel_id] = True
+            cache_key = f"{channel_id}_rotated"
+            if cache_key in self.transform_cache:
+                del self.transform_cache[cache_key]
+                logger.debug(f"Transform cache invalidated for channel {channel_id}")
 
     def _update_bounds(self, world_coords: np.ndarray):
         """Update the data bounds for optimization."""

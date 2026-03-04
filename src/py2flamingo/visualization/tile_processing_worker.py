@@ -170,8 +170,10 @@ class TileProcessingWorker(QObject):
     def _process_tile(self, buffer: TileFrameBuffer):
         """Process a single tile's buffered frames.
 
-        Splits frames into channels by exact count, computes world
-        coordinates in batch, and updates voxel storage once per channel.
+        Splits frames into channels by exact count, then processes each
+        frame individually through update_storage. This avoids super-linear
+        np.unique on millions of elements (which was taking 30-57s per tile)
+        and keeps storage lock holds short (~50ms per frame).
         """
         t0 = time.time()
         total_frames = buffer.frame_count
@@ -200,14 +202,57 @@ class TileProcessingWorker(QObject):
         z_range = z_max - z_min
         ref = buffer.reference_position
 
+        # Pre-compute camera grid (same for all frames since all downsampled
+        # to the same resolution). This avoids redundant meshgrid per frame.
+        first_frame = buffer.frames[0][0]
+        H, W = first_frame.shape
+        y_indices, x_indices = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
+
+        FOV_mm = 0.5182
+        FOV_um = FOV_mm * 1000
+        pixel_size_um = FOV_um / W
+
+        camera_x = (x_indices - W / 2) * pixel_size_um
+        camera_y = (y_indices - H / 2) * pixel_size_um
+        camera_coords_2d = np.column_stack([camera_x.ravel(), camera_y.ravel()])
+
+        slice_thickness_um = 100
+        num_pixels = len(camera_coords_2d)
+        z_offsets = np.linspace(-slice_thickness_um / 2, slice_thickness_um / 2, num_pixels)
+
+        camera_x_offset = -camera_coords_2d[:, 0] if self._invert_x else camera_coords_2d[:, 0]
+        camera_offsets_3d = np.column_stack([
+            z_offsets,
+            camera_coords_2d[:, 1],
+            camera_x_offset
+        ])
+
+        # Pre-compute tile position deltas (constant for all frames in this tile)
+        pos_x = buffer.position['x']
+        pos_y = buffer.position['y']
+        if ref is not None:
+            delta_x = pos_x - ref['x']
+            delta_y = pos_y - ref['y']
+        else:
+            delta_x = delta_y = 0.0
+        delta_x_storage = delta_x if self._invert_x else -delta_x
+
+        base_z_um = sample_center[2]
+        base_y_um = sample_center[1]
+        base_x_um = sample_center[0]
+        base_world_yx = np.array([
+            base_y_um + delta_y * 1000,
+            base_x_um + delta_x_storage * 1000
+        ])
+
+        total_voxels = 0
+
         # Process each channel's frames
         for ch_idx, channel_id in enumerate(buffer.channels):
-            # Determine frame range for this channel
             start_frame = ch_idx * frames_per_channel
             if ch_idx < num_channels - 1:
                 end_frame = start_frame + frames_per_channel
             else:
-                # Last channel gets remainder frames (trailing edge)
                 end_frame = total_frames
 
             channel_frames = buffer.frames[start_frame:end_frame]
@@ -216,99 +261,47 @@ class TileProcessingWorker(QObject):
             if n_frames == 0:
                 continue
 
-            # Track per-channel frame counts
             self._channel_frame_counts[(tile_key, channel_id)] = n_frames
 
-            # Batch-compute world coordinates for all frames in this channel
-            all_world_coords = []
-            all_values = []
+            # Process frames individually — each update_storage call handles
+            # ~10K voxels with lock hold of ~50ms (vs 30-57s for batched approach)
+            timestamp = time.time() * 1000
 
             for frame_idx, (downsampled, z_index) in enumerate(channel_frames):
-                H, W = downsampled.shape
-
                 # Z position: linear interpolation within this channel's sweep
                 z_fraction = frame_idx / max(1, n_frames - 1) if n_frames > 1 else 0.5
                 z_position = z_min + z_fraction * z_range
 
-                # Calculate stage delta from reference
-                pos_x = buffer.position['x']
-                pos_y = buffer.position['y']
-                pos_z = z_position
+                # Only Z delta varies per frame
+                delta_z = (z_position - ref['z']) if ref is not None else 0.0
+                world_center_z = base_z_um - delta_z * 1000
 
-                if ref is not None:
-                    delta_x = pos_x - ref['x']
-                    delta_y = pos_y - ref['y']
-                    delta_z = pos_z - ref['z']
-                else:
-                    delta_x = delta_y = delta_z = 0.0
+                # Build world coords (reuse pre-computed camera offsets)
+                world_coords_3d = camera_offsets_3d.copy()
+                world_coords_3d[:, 0] += world_center_z
+                world_coords_3d[:, 1] += base_world_yx[0]
+                world_coords_3d[:, 2] += base_world_yx[1]
 
-                # Storage position (ZYX order) - same logic as add_frame_to_volume
-                base_z_um = sample_center[2]
-                base_y_um = sample_center[1]
-                base_x_um = sample_center[0]
+                values = downsampled.ravel()
+                total_voxels += len(values)
 
-                # Storage signs are OPPOSITE to display transform signs
-                delta_x_storage = delta_x if self._invert_x else -delta_x
-
-                world_center_um = np.array([
-                    base_z_um - delta_z * 1000,
-                    base_y_um + delta_y * 1000,
-                    base_x_um + delta_x_storage * 1000
-                ])
-
-                # Generate pixel coordinate grid
-                y_indices, x_indices = np.meshgrid(
-                    np.arange(H), np.arange(W), indexing='ij'
-                )
-
-                FOV_mm = 0.5182
-                FOV_um = FOV_mm * 1000
-                pixel_size_um = FOV_um / W
-
-                camera_x = (x_indices - W / 2) * pixel_size_um
-                camera_y = (y_indices - H / 2) * pixel_size_um
-
-                camera_coords_2d = np.column_stack([camera_x.ravel(), camera_y.ravel()])
-
-                # Create 3D coords
-                slice_thickness_um = 100
-                num_pixels = len(camera_coords_2d)
-                z_offsets = np.linspace(-slice_thickness_um / 2, slice_thickness_um / 2, num_pixels)
-
-                camera_x_offset = -camera_coords_2d[:, 0] if self._invert_x else camera_coords_2d[:, 0]
-                camera_offsets_3d = np.column_stack([
-                    z_offsets,
-                    camera_coords_2d[:, 1],
-                    camera_x_offset
-                ])
-
-                world_coords_3d = camera_offsets_3d + world_center_um
-                all_world_coords.append(world_coords_3d)
-                all_values.append(downsampled.ravel())
-
-            # Single vectorized storage update for entire channel
-            if all_world_coords:
-                combined_coords = np.vstack(all_world_coords)
-                combined_values = np.concatenate(all_values)
-                timestamp = time.time() * 1000
-
-                self._voxel_storage.update_storage_vectorized(
+                self._voxel_storage.update_storage(
                     channel_id=channel_id,
-                    world_coords=combined_coords,
-                    pixel_values=combined_values,
+                    world_coords=world_coords_3d,
+                    pixel_values=values,
                     timestamp=timestamp,
                     update_mode='maximum'
                 )
 
-                logger.info(f"  Channel {channel_id}: {n_frames} frames, "
-                           f"{len(combined_coords)} voxels stored")
+            logger.info(f"  Channel {channel_id}: {n_frames} frames processed")
 
         elapsed = time.time() - t0
         stats = {
             'total_frames': total_frames,
             'num_channels': num_channels,
             'frames_per_channel': frames_per_channel,
+            'total_voxels': total_voxels,
             'processing_time_s': elapsed,
         }
-        logger.info(f"Tile {tile_key} processed in {elapsed:.2f}s")
+        logger.info(f"Tile {tile_key} processed in {elapsed:.2f}s ({total_voxels} voxels)")
         self.tile_processed.emit(tile_key, stats)
