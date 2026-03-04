@@ -3455,12 +3455,18 @@ class SampleView(QWidget):
                                 "Voxel storage not initialised. Open 3D view first.")
             return
 
-        # Start from last MIP browse path (same acquisition folder structure)
+        # Start from last MIP browse path, or fall back to mapped data drive
         default_path = ""
         if self._configuration_service:
             saved = self._configuration_service.get_mip_browse_path()
             if saved and Path(saved).exists():
                 default_path = saved
+            else:
+                # Fall back to first mapped local drive (e.g. G:/CTLSM1)
+                for local_path in self._configuration_service.get_drive_mappings().values():
+                    if Path(local_path).exists():
+                        default_path = local_path
+                        break
 
         date_dir = QFileDialog.getExistingDirectory(
             self, "Select Date Folder with Tile Data",
