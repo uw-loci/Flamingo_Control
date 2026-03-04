@@ -6,25 +6,29 @@ Controller for microscope position management.
 This controller handles all position-related operations including
 movement, validation, and position tracking.
 """
+
 import logging
 import socket
 import threading
-from typing import List, Optional, Callable, Dict
 from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional
 
-from py2flamingo.models.microscope import Position, MicroscopeState
-from py2flamingo.services.connection_service import ConnectionService
-from py2flamingo.core.queue_manager import QueueManager
 from py2flamingo.core.events import EventManager
+from py2flamingo.core.queue_manager import QueueManager
 from py2flamingo.core.tcp_protocol import CommandDataBits
+from py2flamingo.models.microscope import MicroscopeState, Position
+from py2flamingo.services.connection_service import ConnectionService
+
 
 @dataclass
 class AxisCode:
     """Axis codes for stage movement commands."""
+
     X = 1
     Y = 2
     Z = 3
     R = 4
+
 
 class PositionController:
     """
@@ -62,17 +66,19 @@ class PositionController:
         self._movement_lock = threading.Lock()
 
         # Motion tracking for waiting for movement completion
-        self._motion_tracker: Optional['MotionTracker'] = None
+        self._motion_tracker: Optional["MotionTracker"] = None
 
         # Callback for motion complete notifications
         self._motion_complete_callback: Optional[Callable] = None
 
         # Cache configuration service for stage limits
         from py2flamingo.services.configuration_service import ConfigurationService
+
         self._config_service = ConfigurationService()
 
         # Position preset service for saved locations
         from py2flamingo.services.position_preset_service import PositionPresetService
+
         self.preset_service = PositionPresetService()
 
         # Position history for undo functionality
@@ -103,7 +109,7 @@ class PositionController:
 
                 # Get the underlying TCPConnection which has the async reader
                 # MVCConnectionService wraps TCPConnection as tcp_connection attribute
-                tcp_conn = getattr(self.connection, 'tcp_connection', None)
+                tcp_conn = getattr(self.connection, "tcp_connection", None)
                 command_socket = self.connection._command_socket
 
                 if command_socket:
@@ -111,7 +117,7 @@ class PositionController:
                     # MotionTracker will use async mode if TCPConnection has async reader
                     self._motion_tracker = MotionTracker(
                         command_socket=command_socket,
-                        connection=tcp_conn  # Pass TCPConnection, not MVCConnectionService
+                        connection=tcp_conn,  # Pass TCPConnection, not MVCConnectionService
                     )
                     # Log which mode is active
                     if self._motion_tracker._use_async_mode():
@@ -119,11 +125,17 @@ class PositionController:
                     else:
                         self.logger.info("Motion tracker initialized (sync mode)")
                 else:
-                    self.logger.warning("Command socket not available - motion tracker cannot be initialized")
+                    self.logger.warning(
+                        "Command socket not available - motion tracker cannot be initialized"
+                    )
             else:
-                self.logger.debug("Not connected - motion tracker will be initialized when connection is established")
+                self.logger.debug(
+                    "Not connected - motion tracker will be initialized when connection is established"
+                )
         except Exception as e:
-            self.logger.error(f"Failed to initialize motion tracker: {e}", exc_info=True)
+            self.logger.error(
+                f"Failed to initialize motion tracker: {e}", exc_info=True
+            )
 
     def reinitialize_motion_tracker(self) -> None:
         """
@@ -148,38 +160,48 @@ class PositionController:
             if self.connection.is_connected():
                 # Try to get settings - this may fail if not yet initialized
                 try:
-                    from py2flamingo.utils.file_handlers import text_to_dict
                     from pathlib import Path
 
-                    settings_path = Path('microscope_settings') / 'ScopeSettings.txt'
+                    from py2flamingo.utils.file_handlers import text_to_dict
+
+                    settings_path = Path("microscope_settings") / "ScopeSettings.txt"
                     if settings_path.exists():
                         settings = text_to_dict(str(settings_path))
 
                         # Extract home position from Stage limits section
-                        if 'Stage limits' in settings:
-                            stage_limits = settings['Stage limits']
-                            x = float(stage_limits.get('Home x-axis', 0))
-                            y = float(stage_limits.get('Home y-axis', 0))
-                            z = float(stage_limits.get('Home z-axis', 0))
-                            r = float(stage_limits.get('Home r-axis', 0))
+                        if "Stage limits" in settings:
+                            stage_limits = settings["Stage limits"]
+                            x = float(stage_limits.get("Home x-axis", 0))
+                            y = float(stage_limits.get("Home y-axis", 0))
+                            z = float(stage_limits.get("Home z-axis", 0))
+                            r = float(stage_limits.get("Home r-axis", 0))
 
                             self._current_position = Position(x=x, y=y, z=z, r=r)
-                            self.logger.info(f"Initialized position from home: X={x:.3f}, Y={y:.3f}, Z={z:.3f}, R={r:.1f}°")
+                            self.logger.info(
+                                f"Initialized position from home: X={x:.3f}, Y={y:.3f}, Z={z:.3f}, R={r:.1f}°"
+                            )
                             return
                 except Exception as e:
-                    self.logger.debug(f"Could not load home position from settings: {e}")
+                    self.logger.debug(
+                        f"Could not load home position from settings: {e}"
+                    )
 
             # Fallback to origin if settings unavailable
             self._current_position = Position(x=0.0, y=0.0, z=0.0, r=0.0)
-            self.logger.warning("Position initialized to origin (0, 0, 0, 0) - settings unavailable")
+            self.logger.warning(
+                "Position initialized to origin (0, 0, 0, 0) - settings unavailable"
+            )
 
         except Exception as e:
             self.logger.error(f"Error initializing position: {e}")
             self._current_position = Position(x=0.0, y=0.0, z=0.0, r=0.0)
 
-    def go_to_position(self, position: Position,
-                      validate: bool = True,
-                      callback: Optional[Callable[[str], None]] = None) -> None:
+    def go_to_position(
+        self,
+        position: Position,
+        validate: bool = True,
+        callback: Optional[Callable[[str], None]] = None,
+    ) -> None:
         """
         Move microscope to specified position.
 
@@ -238,16 +260,18 @@ class PositionController:
             moved_axes = []
             try:
                 self._move_axis(self.axis.X, position.x, "X-axis")
-                moved_axes.append('X')
+                moved_axes.append("X")
 
                 self._move_axis(self.axis.Z, position.z, "Z-axis")
-                moved_axes.append('Z')
+                moved_axes.append("Z")
 
                 self._move_axis(self.axis.R, position.r, "Rotation")
-                moved_axes.append('R')
+                moved_axes.append("R")
 
-                self._move_axis(self.axis.Y, position.y, "Y-axis")  # Y-axis last as in original
-                moved_axes.append('Y')
+                self._move_axis(
+                    self.axis.Y, position.y, "Y-axis"
+                )  # Y-axis last as in original
+                moved_axes.append("Y")
 
             except Exception as e:
                 self.logger.error(
@@ -262,6 +286,7 @@ class PositionController:
             # Wait for movement to complete
             # TODO: Replace with actual position confirmation from hardware
             import time
+
             time.sleep(0.5)
 
             # Only update position if all movements succeeded
@@ -282,8 +307,7 @@ class PositionController:
             # Log the error with context
             if movement_started:
                 self.logger.error(
-                    f"Movement error - position may be inconsistent: {e}",
-                    exc_info=True
+                    f"Movement error - position may be inconsistent: {e}", exc_info=True
                 )
             else:
                 self.logger.error(f"Movement failed before starting: {e}")
@@ -292,7 +316,7 @@ class PositionController:
         finally:
             # Always release the lock
             self._movement_lock.release()
-    
+
     def go_to_xyzr(self, xyzr: List[float], **kwargs) -> None:
         """
         Move to position specified as list (backward compatibility).
@@ -341,13 +365,15 @@ class PositionController:
         """
         # Check emergency stop
         if self._emergency_stop_active:
-            error_msg = "Movement blocked - emergency stop active. Clear emergency stop first."
+            error_msg = (
+                "Movement blocked - emergency stop active. Clear emergency stop first."
+            )
             self.logger.error(error_msg)
             raise RuntimeError(error_msg)
 
         # Validate rotation bounds using stage limits
         limits = self.get_stage_limits()
-        r_min, r_max = limits['r']['min'], limits['r']['max']
+        r_min, r_max = limits["r"]["min"], limits["r"]["max"]
         if not (r_min <= rotation_degrees <= r_max):
             error_msg = f"Rotation {rotation_degrees}° is outside valid range [{r_min}, {r_max}]"
             self.logger.error(error_msg)
@@ -376,12 +402,15 @@ class PositionController:
                 x=self._current_position.x if self._current_position else 0.0,
                 y=self._current_position.y if self._current_position else 0.0,
                 z=self._current_position.z if self._current_position else 0.0,
-                r=rotation_degrees
+                r=rotation_degrees,
             )
 
             # Wait for motion complete in background thread
             from py2flamingo.services.stage_service import AxisCode
-            self._wait_for_motion_complete_async(target_position, moved_axes=[AxisCode.ROTATION])
+
+            self._wait_for_motion_complete_async(
+                target_position, moved_axes=[AxisCode.ROTATION]
+            )
 
         except Exception as e:
             # Release lock on error
@@ -405,13 +434,15 @@ class PositionController:
         """
         # Check emergency stop
         if self._emergency_stop_active:
-            error_msg = "Movement blocked - emergency stop active. Clear emergency stop first."
+            error_msg = (
+                "Movement blocked - emergency stop active. Clear emergency stop first."
+            )
             self.logger.error(error_msg)
             raise RuntimeError(error_msg)
 
         # Get stage limits
         limits = self.get_stage_limits()
-        x_min, x_max = limits['x']['min'], limits['x']['max']
+        x_min, x_max = limits["x"]["min"], limits["x"]["max"]
 
         # Validate X bounds
         if not (x_min <= x_mm <= x_max):
@@ -442,12 +473,15 @@ class PositionController:
                 x=x_mm,
                 y=self._current_position.y if self._current_position else 0.0,
                 z=self._current_position.z if self._current_position else 0.0,
-                r=self._current_position.r if self._current_position else 0.0
+                r=self._current_position.r if self._current_position else 0.0,
             )
 
             # Wait for motion complete in background thread
             from py2flamingo.services.stage_service import AxisCode
-            self._wait_for_motion_complete_async(target_position, moved_axes=[AxisCode.X_AXIS])
+
+            self._wait_for_motion_complete_async(
+                target_position, moved_axes=[AxisCode.X_AXIS]
+            )
 
         except Exception as e:
             # Release lock on error
@@ -471,13 +505,15 @@ class PositionController:
         """
         # Check emergency stop
         if self._emergency_stop_active:
-            error_msg = "Movement blocked - emergency stop active. Clear emergency stop first."
+            error_msg = (
+                "Movement blocked - emergency stop active. Clear emergency stop first."
+            )
             self.logger.error(error_msg)
             raise RuntimeError(error_msg)
 
         # Get stage limits
         limits = self.get_stage_limits()
-        y_min, y_max = limits['y']['min'], limits['y']['max']
+        y_min, y_max = limits["y"]["min"], limits["y"]["max"]
 
         # Validate Y bounds
         if not (y_min <= y_mm <= y_max):
@@ -508,12 +544,15 @@ class PositionController:
                 x=self._current_position.x if self._current_position else 0.0,
                 y=y_mm,
                 z=self._current_position.z if self._current_position else 0.0,
-                r=self._current_position.r if self._current_position else 0.0
+                r=self._current_position.r if self._current_position else 0.0,
             )
 
             # Wait for motion complete in background thread
             from py2flamingo.services.stage_service import AxisCode
-            self._wait_for_motion_complete_async(target_position, moved_axes=[AxisCode.Y_AXIS])
+
+            self._wait_for_motion_complete_async(
+                target_position, moved_axes=[AxisCode.Y_AXIS]
+            )
 
         except Exception as e:
             # Release lock on error
@@ -540,13 +579,15 @@ class PositionController:
         """
         # Check emergency stop
         if self._emergency_stop_active:
-            error_msg = "Movement blocked - emergency stop active. Clear emergency stop first."
+            error_msg = (
+                "Movement blocked - emergency stop active. Clear emergency stop first."
+            )
             self.logger.error(error_msg)
             raise RuntimeError(error_msg)
 
         # Get stage limits
         limits = self.get_stage_limits()
-        z_min, z_max = limits['z']['min'], limits['z']['max']
+        z_min, z_max = limits["z"]["min"], limits["z"]["max"]
 
         # Validate Z bounds
         if not (z_min <= z_mm <= z_max):
@@ -577,12 +618,15 @@ class PositionController:
                 x=self._current_position.x if self._current_position else 0.0,
                 y=self._current_position.y if self._current_position else 0.0,
                 z=z_mm,
-                r=self._current_position.r if self._current_position else 0.0
+                r=self._current_position.r if self._current_position else 0.0,
             )
 
             # Wait for motion complete in background thread
             from py2flamingo.services.stage_service import AxisCode
-            self._wait_for_motion_complete_async(target_position, moved_axes=[AxisCode.Z_AXIS])
+
+            self._wait_for_motion_complete_async(
+                target_position, moved_axes=[AxisCode.Z_AXIS]
+            )
 
         except Exception as e:
             # Release lock on error
@@ -603,7 +647,9 @@ class PositionController:
         if self._current_position is None:
             raise RuntimeError("Cannot jog - current position unknown")
 
-        self.logger.info(f"Jogging X by {delta_mm:+.3f} mm (current position: {self._current_position.x:.3f} mm)")
+        self.logger.info(
+            f"Jogging X by {delta_mm:+.3f} mm (current position: {self._current_position.x:.3f} mm)"
+        )
         new_x = self._current_position.x + delta_mm
         self.logger.info(f"Target X position: {new_x:.3f} mm")
         self.move_x(new_x)
@@ -683,7 +729,9 @@ class PositionController:
         """
         # Check emergency stop
         if self._emergency_stop_active:
-            error_msg = "Movement blocked - emergency stop active. Clear emergency stop first."
+            error_msg = (
+                "Movement blocked - emergency stop active. Clear emergency stop first."
+            )
             self.logger.error(error_msg)
             raise RuntimeError(error_msg)
 
@@ -691,21 +739,29 @@ class PositionController:
         if validate:
             limits = self.get_stage_limits()
 
-            x_min, x_max = limits['x']['min'], limits['x']['max']
+            x_min, x_max = limits["x"]["min"], limits["x"]["max"]
             if not (x_min <= position.x <= x_max):
-                raise ValueError(f"X position {position.x:.3f}mm is outside valid range [{x_min:.3f}, {x_max:.3f}]")
+                raise ValueError(
+                    f"X position {position.x:.3f}mm is outside valid range [{x_min:.3f}, {x_max:.3f}]"
+                )
 
-            y_min, y_max = limits['y']['min'], limits['y']['max']
+            y_min, y_max = limits["y"]["min"], limits["y"]["max"]
             if not (y_min <= position.y <= y_max):
-                raise ValueError(f"Y position {position.y:.3f}mm is outside valid range [{y_min:.3f}, {y_max:.3f}]")
+                raise ValueError(
+                    f"Y position {position.y:.3f}mm is outside valid range [{y_min:.3f}, {y_max:.3f}]"
+                )
 
-            z_min, z_max = limits['z']['min'], limits['z']['max']
+            z_min, z_max = limits["z"]["min"], limits["z"]["max"]
             if not (z_min <= position.z <= z_max):
-                raise ValueError(f"Z position {position.z:.3f}mm is outside valid range [{z_min:.3f}, {z_max:.3f}]")
+                raise ValueError(
+                    f"Z position {position.z:.3f}mm is outside valid range [{z_min:.3f}, {z_max:.3f}]"
+                )
 
-            r_min, r_max = limits['r']['min'], limits['r']['max']
+            r_min, r_max = limits["r"]["min"], limits["r"]["max"]
             if not (r_min <= position.r <= r_max):
-                raise ValueError(f"Rotation {position.r:.2f}° is outside valid range [{r_min}, {r_max}]")
+                raise ValueError(
+                    f"Rotation {position.r:.2f}° is outside valid range [{r_min}, {r_max}]"
+                )
 
         # Try to acquire movement lock (non-blocking)
         if not self._movement_lock.acquire(blocking=False):
@@ -730,34 +786,46 @@ class PositionController:
             tolerance = 0.001  # 1 micron for linear, will use 0.01 degree for rotation
 
             if abs(position.x - self._current_position.x) > tolerance:
-                self.logger.info(f"Moving X axis: {self._current_position.x:.3f} -> {position.x:.3f} mm")
+                self.logger.info(
+                    f"Moving X axis: {self._current_position.x:.3f} -> {position.x:.3f} mm"
+                )
                 self._move_axis(self.axis.X, position.x, "X-axis")
                 from py2flamingo.services.stage_service import AxisCode
+
                 moved_axes.append(AxisCode.X_AXIS)
             else:
                 self.logger.debug(f"X axis unchanged: {position.x:.3f} mm")
 
             if abs(position.y - self._current_position.y) > tolerance:
-                self.logger.info(f"Moving Y axis: {self._current_position.y:.3f} -> {position.y:.3f} mm")
+                self.logger.info(
+                    f"Moving Y axis: {self._current_position.y:.3f} -> {position.y:.3f} mm"
+                )
                 self._move_axis(self.axis.Y, position.y, "Y-axis")
                 from py2flamingo.services.stage_service import AxisCode
+
                 moved_axes.append(AxisCode.Y_AXIS)
             else:
                 self.logger.debug(f"Y axis unchanged: {position.y:.3f} mm")
 
             if abs(position.z - self._current_position.z) > tolerance:
-                self.logger.info(f"Moving Z axis: {self._current_position.z:.3f} -> {position.z:.3f} mm")
+                self.logger.info(
+                    f"Moving Z axis: {self._current_position.z:.3f} -> {position.z:.3f} mm"
+                )
                 self._move_axis(self.axis.Z, position.z, "Z-axis")
                 from py2flamingo.services.stage_service import AxisCode
+
                 moved_axes.append(AxisCode.Z_AXIS)
             else:
                 self.logger.debug(f"Z axis unchanged: {position.z:.3f} mm")
 
             # Rotation uses larger tolerance (0.01 degrees)
             if abs(position.r - self._current_position.r) > 0.01:
-                self.logger.info(f"Moving R axis: {self._current_position.r:.2f} -> {position.r:.2f}°")
+                self.logger.info(
+                    f"Moving R axis: {self._current_position.r:.2f} -> {position.r:.2f}°"
+                )
                 self._move_axis(self.axis.R, position.r, "Rotation")
                 from py2flamingo.services.stage_service import AxisCode
+
                 moved_axes.append(AxisCode.ROTATION)
             else:
                 self.logger.debug(f"Rotation unchanged: {position.r:.2f}°")
@@ -767,25 +835,32 @@ class PositionController:
                 self.logger.info("No axes needed to move - already at target position")
                 self._current_position = position
                 self._movement_lock.release()
-                self.logger.info("move_to_position returning (no movement, lock released)")
+                self.logger.info(
+                    "move_to_position returning (no movement, lock released)"
+                )
                 return
 
             # Create axis name mapping for logging (AxisCode values are integers, not objects)
             from py2flamingo.services.stage_service import AxisCode
+
             axis_names = {
                 AxisCode.X_AXIS: "X",
                 AxisCode.Y_AXIS: "Y",
                 AxisCode.Z_AXIS: "Z",
-                AxisCode.ROTATION: "R"
+                AxisCode.ROTATION: "R",
             }
-            self.logger.info(f"Moving {len(moved_axes)} axes: {[axis_names[ax] for ax in moved_axes]}")
+            self.logger.info(
+                f"Moving {len(moved_axes)} axes: {[axis_names[ax] for ax in moved_axes]}"
+            )
 
             # Wait for motion complete in background thread
             # Only query the axes that actually moved
             self._wait_for_motion_complete_async(position, moved_axes=moved_axes)
 
             # NOTE: Lock is still held - will be released by background thread when motion completes
-            self.logger.info(f"move_to_position returning (lock held={self._movement_lock.locked()}, will be released by wait thread)")
+            self.logger.info(
+                f"move_to_position returning (lock held={self._movement_lock.locked()}, will be released by wait thread)"
+            )
 
         except Exception as e:
             # Release lock on error
@@ -810,9 +885,11 @@ class PositionController:
 
         # Trim history if it exceeds max size
         if len(self._position_history) > self._max_history_size:
-            self._position_history = self._position_history[-self._max_history_size:]
+            self._position_history = self._position_history[-self._max_history_size :]
 
-        self.logger.debug(f"Added position to history (total: {len(self._position_history)})")
+        self.logger.debug(
+            f"Added position to history (total: {len(self._position_history)})"
+        )
 
     def undo_position(self) -> Optional[Position]:
         """
@@ -873,19 +950,20 @@ class PositionController:
             Home position from ScopeSettings.txt, or None if unavailable
         """
         try:
-            from py2flamingo.utils.file_handlers import text_to_dict
             from pathlib import Path
 
-            settings_path = Path('microscope_settings') / 'ScopeSettings.txt'
+            from py2flamingo.utils.file_handlers import text_to_dict
+
+            settings_path = Path("microscope_settings") / "ScopeSettings.txt"
             if settings_path.exists():
                 settings = text_to_dict(str(settings_path))
 
-                if 'Stage limits' in settings:
-                    stage_limits = settings['Stage limits']
-                    x = float(stage_limits.get('Home x-axis', 0))
-                    y = float(stage_limits.get('Home y-axis', 0))
-                    z = float(stage_limits.get('Home z-axis', 0))
-                    r = float(stage_limits.get('Home r-axis', 0))
+                if "Stage limits" in settings:
+                    stage_limits = settings["Stage limits"]
+                    x = float(stage_limits.get("Home x-axis", 0))
+                    y = float(stage_limits.get("Home y-axis", 0))
+                    z = float(stage_limits.get("Home z-axis", 0))
+                    r = float(stage_limits.get("Home r-axis", 0))
 
                     return Position(x=x, y=y, z=z, r=r)
         except Exception as e:
@@ -907,14 +985,17 @@ class PositionController:
         # Validate position is within bounds
         is_valid, errors = self.is_position_within_bounds(position)
         if not is_valid:
-            error_msg = "Cannot set home position outside stage limits:\n" + "\n".join(errors)
+            error_msg = "Cannot set home position outside stage limits:\n" + "\n".join(
+                errors
+            )
             raise ValueError(error_msg)
 
         try:
-            from py2flamingo.utils.file_handlers import text_to_dict, dict_to_text
             from pathlib import Path
 
-            settings_path = Path('microscope_settings') / 'ScopeSettings.txt'
+            from py2flamingo.utils.file_handlers import dict_to_text, text_to_dict
+
+            settings_path = Path("microscope_settings") / "ScopeSettings.txt"
 
             if not settings_path.exists():
                 raise RuntimeError(f"Settings file not found: {settings_path}")
@@ -923,13 +1004,13 @@ class PositionController:
             settings = text_to_dict(str(settings_path))
 
             # Update home position values
-            if 'Stage limits' not in settings:
-                settings['Stage limits'] = {}
+            if "Stage limits" not in settings:
+                settings["Stage limits"] = {}
 
-            settings['Stage limits']['Home x-axis'] = f"{position.x:.6f}"
-            settings['Stage limits']['Home y-axis'] = f"{position.y:.6f}"
-            settings['Stage limits']['Home z-axis'] = f"{position.z:.6f}"
-            settings['Stage limits']['Home r-axis'] = f"{position.r:.2f}"
+            settings["Stage limits"]["Home x-axis"] = f"{position.x:.6f}"
+            settings["Stage limits"]["Home y-axis"] = f"{position.y:.6f}"
+            settings["Stage limits"]["Home z-axis"] = f"{position.z:.6f}"
+            settings["Stage limits"]["Home r-axis"] = f"{position.r:.2f}"
 
             # Write back to file
             dict_to_text(settings, str(settings_path))
@@ -976,7 +1057,9 @@ class PositionController:
 
         WARNING: This may leave the stage in an unknown position.
         """
-        self.logger.warning("EMERGENCY STOP ACTIVATED - Sending HALT command to hardware")
+        self.logger.warning(
+            "EMERGENCY STOP ACTIVATED - Sending HALT command to hardware"
+        )
 
         # CRITICAL: Send HALT command to hardware FIRST to stop physical motion
         try:
@@ -986,18 +1069,19 @@ class PositionController:
             # Send HALT command (0x6002) to stop stage motion immediately
             halt_cmd = Command(
                 code=StageCommands.HALT,
-                parameters={
-                    'params': [0, 0, 0, 0, 0, 0, 0],
-                    'value': 0.0
-                }
+                parameters={"params": [0, 0, 0, 0, 0, 0, 0], "value": 0.0},
             )
 
             if self.connection.is_connected():
                 self.logger.info("Sending HALT (0x6002) command to stop stage motion")
                 self.connection.send_command(halt_cmd)
-                self.logger.info("HALT command sent - stage motion should stop immediately")
+                self.logger.info(
+                    "HALT command sent - stage motion should stop immediately"
+                )
             else:
-                self.logger.warning("Not connected - cannot send HALT command to hardware")
+                self.logger.warning(
+                    "Not connected - cannot send HALT command to hardware"
+                )
 
         except Exception as e:
             self.logger.error(f"Error sending HALT command: {e}", exc_info=True)
@@ -1010,7 +1094,9 @@ class PositionController:
         # The motion tracker will timeout/complete and release the lock properly
         # Manually releasing it here causes "release unlocked lock" errors
         self.logger.info("Emergency stop flag set - no new movements will be accepted")
-        self.logger.info("Waiting for background motion tracker to timeout and release lock...")
+        self.logger.info(
+            "Waiting for background motion tracker to timeout and release lock..."
+        )
 
     def clear_emergency_stop(self) -> None:
         """
@@ -1048,6 +1134,7 @@ class PositionController:
             True if movement completed, False if timed out
         """
         import time
+
         start_time = time.time()
 
         self.logger.info(f"wait_for_movement_complete called (timeout={timeout}s)")
@@ -1055,20 +1142,28 @@ class PositionController:
         # If lock is not held, movement is already complete
         if self._movement_lock.acquire(blocking=False):
             self._movement_lock.release()
-            self.logger.info("wait_for_movement_complete: Lock was available, returning immediately")
+            self.logger.info(
+                "wait_for_movement_complete: Lock was available, returning immediately"
+            )
             return True
 
         # Wait for lock to become available
-        self.logger.info(f"wait_for_movement_complete: Lock is held, waiting up to {timeout}s...")
+        self.logger.info(
+            f"wait_for_movement_complete: Lock is held, waiting up to {timeout}s..."
+        )
 
         while time.time() - start_time < timeout:
             if self._movement_lock.acquire(blocking=True, timeout=0.5):
                 self._movement_lock.release()
                 elapsed = time.time() - start_time
-                self.logger.info(f"wait_for_movement_complete: Lock acquired after {elapsed:.2f}s - movement complete")
+                self.logger.info(
+                    f"wait_for_movement_complete: Lock acquired after {elapsed:.2f}s - movement complete"
+                )
                 return True
 
-        self.logger.warning(f"wait_for_movement_complete: Timeout after {timeout}s - movement may still be in progress")
+        self.logger.warning(
+            f"wait_for_movement_complete: Timeout after {timeout}s - movement may still be in progress"
+        )
         return False
 
     def is_movement_in_progress(self) -> bool:
@@ -1083,7 +1178,9 @@ class PositionController:
             return False
         return True
 
-    def _query_position_after_move(self, moved_axes: Optional[List[int]], target_position: Position) -> Position:
+    def _query_position_after_move(
+        self, moved_axes: Optional[List[int]], target_position: Position
+    ) -> Position:
         """
         Query actual position from hardware after a movement completes.
 
@@ -1096,11 +1193,14 @@ class PositionController:
         """
         try:
             # Get the stage service to query positions
-            from py2flamingo.services.stage_service import StageService, AxisCode
+            from py2flamingo.services.stage_service import AxisCode, StageService
+
             stage_service = StageService(self.connection)
 
             # Start with current position (or target if no current)
-            base_position = self._current_position if self._current_position else target_position
+            base_position = (
+                self._current_position if self._current_position else target_position
+            )
 
             # If no axes specified, query all axes
             if moved_axes is None or len(moved_axes) == 4:
@@ -1109,7 +1209,9 @@ class PositionController:
                 if hardware_position:
                     return hardware_position
                 else:
-                    self.logger.warning("Failed to query all axes - using target position as fallback")
+                    self.logger.warning(
+                        "Failed to query all axes - using target position as fallback"
+                    )
                     return target_position
 
             # Query only the moved axes
@@ -1154,10 +1256,15 @@ class PositionController:
             return Position(x=x, y=y, z=z, r=r)
 
         except Exception as e:
-            self.logger.error(f"Error querying position from hardware: {e} - using target position", exc_info=True)
+            self.logger.error(
+                f"Error querying position from hardware: {e} - using target position",
+                exc_info=True,
+            )
             return target_position
 
-    def _wait_for_motion_complete_async(self, target_position: Position, moved_axes: Optional[List[int]] = None) -> None:
+    def _wait_for_motion_complete_async(
+        self, target_position: Position, moved_axes: Optional[List[int]] = None
+    ) -> None:
         """
         Wait for motion complete in a background thread and query actual position from hardware.
 
@@ -1180,15 +1287,25 @@ class PositionController:
                 # This is the proper way - wait for hardware confirmation, not polling
                 motion_complete = False
                 if self._motion_tracker is not None:
-                    self.logger.info("Waiting for STAGE_MOTION_STOPPED callback from hardware...")
+                    self.logger.info(
+                        "Waiting for STAGE_MOTION_STOPPED callback from hardware..."
+                    )
                     try:
-                        motion_complete = self._motion_tracker.wait_for_motion_complete(timeout=10.0)
+                        motion_complete = self._motion_tracker.wait_for_motion_complete(
+                            timeout=10.0
+                        )
                         if motion_complete:
-                            self.logger.info("Motion stopped callback received - stage is idle")
+                            self.logger.info(
+                                "Motion stopped callback received - stage is idle"
+                            )
                         else:
-                            self.logger.warning("Motion tracker timed out - stage may still be moving")
+                            self.logger.warning(
+                                "Motion tracker timed out - stage may still be moving"
+                            )
                     except Exception as e:
-                        self.logger.warning(f"Motion tracker error: {e} - falling back to delay")
+                        self.logger.warning(
+                            f"Motion tracker error: {e} - falling back to delay"
+                        )
                         motion_complete = False
 
                 # If motion tracker failed or unavailable, use conservative delay
@@ -1196,14 +1313,19 @@ class PositionController:
                     # Calculate delay based on expected movement distance
                     # Z axis moves slower, so use longer delay for Z movements
                     from py2flamingo.services.stage_service import AxisCode
+
                     has_z_movement = moved_axes and AxisCode.Z_AXIS in moved_axes
 
                     if has_z_movement:
                         delay = 3.0  # 3 seconds for Z axis movements
-                        self.logger.info(f"Z-axis movement detected - waiting {delay}s for completion...")
+                        self.logger.info(
+                            f"Z-axis movement detected - waiting {delay}s for completion..."
+                        )
                     else:
                         delay = 1.5  # 1.5 seconds for X/Y/R movements
-                        self.logger.info(f"Waiting {delay}s for movement completion (fallback delay)...")
+                        self.logger.info(
+                            f"Waiting {delay}s for movement completion (fallback delay)..."
+                        )
 
                     time.sleep(delay)
 
@@ -1217,7 +1339,9 @@ class PositionController:
                     self._add_to_history(self._current_position)
 
                 # Query actual position from hardware
-                actual_position = self._query_position_after_move(moved_axes, target_position)
+                actual_position = self._query_position_after_move(
+                    moved_axes, target_position
+                )
 
                 # Update current position with hardware-verified values
                 self._current_position = actual_position
@@ -1235,7 +1359,9 @@ class PositionController:
                         self.logger.error(f"Error in motion complete callback: {e}")
 
             except Exception as e:
-                self.logger.error(f"Error waiting for motion complete: {e}", exc_info=True)
+                self.logger.error(
+                    f"Error waiting for motion complete: {e}", exc_info=True
+                )
 
             finally:
                 # Always release movement lock (check if locked first to avoid double-release)
@@ -1244,9 +1370,13 @@ class PositionController:
                         self._movement_lock.release()
                         self.logger.debug("Movement lock released")
                     else:
-                        self.logger.warning("Movement lock was already released (possibly by emergency stop)")
+                        self.logger.warning(
+                            "Movement lock was already released (possibly by emergency stop)"
+                        )
                 except RuntimeError as e:
-                    self.logger.warning(f"Could not release movement lock: {e} (may have been released by emergency stop)")
+                    self.logger.warning(
+                        f"Could not release movement lock: {e} (may have been released by emergency stop)"
+                    )
 
         # Start background thread
         thread = threading.Thread(target=wait_thread, daemon=True, name="MotionWaiter")
@@ -1292,17 +1422,17 @@ class PositionController:
             cmd = Command(
                 code=self.COMMAND_CODES_STAGE_POSITION_SET,
                 parameters={
-                    'params': [
-                        0,          # Param[0] (hardwareID) - not used
-                        0,          # Param[1] (subsystemID) - not used
-                        0,          # Param[2] (clientID) - not used
+                    "params": [
+                        0,  # Param[0] (hardwareID) - not used
+                        0,  # Param[1] (subsystemID) - not used
+                        0,  # Param[2] (clientID) - not used
                         axis_code,  # Param[3] (int32Data0) = axis (1=X, 2=Y, 3=Z, 4=R)
-                        0,          # Param[4] (int32Data1) - unused
-                        0,          # Param[5] (int32Data2) - unused
-                        CommandDataBits.TRIGGER_CALL_BACK  # Param[6] = 0x80000000 flag
+                        0,  # Param[4] (int32Data1) - unused
+                        0,  # Param[5] (int32Data2) - unused
+                        CommandDataBits.TRIGGER_CALL_BACK,  # Param[6] = 0x80000000 flag
                     ],
-                    'value': value_float  # Position value in mm or degrees (doubleData field)
-                }
+                    "value": value_float,  # Position value in mm or degrees (doubleData field)
+                },
             )
 
             response_bytes = self.connection.send_command(cmd)
@@ -1338,7 +1468,6 @@ class PositionController:
             self.logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
 
-    
     def get_stage_limits(self) -> Dict[str, Dict[str, float]]:
         """
         Get stage movement limits for all axes.
@@ -1368,22 +1497,22 @@ class PositionController:
         errors = []
 
         # Check each axis
-        if not (limits['x']['min'] <= position.x <= limits['x']['max']):
+        if not (limits["x"]["min"] <= position.x <= limits["x"]["max"]):
             errors.append(
                 f"X={position.x:.3f} outside limits [{limits['x']['min']:.3f}, {limits['x']['max']:.3f}]"
             )
 
-        if not (limits['y']['min'] <= position.y <= limits['y']['max']):
+        if not (limits["y"]["min"] <= position.y <= limits["y"]["max"]):
             errors.append(
                 f"Y={position.y:.3f} outside limits [{limits['y']['min']:.3f}, {limits['y']['max']:.3f}]"
             )
 
-        if not (limits['z']['min'] <= position.z <= limits['z']['max']):
+        if not (limits["z"]["min"] <= position.z <= limits["z"]["max"]):
             errors.append(
                 f"Z={position.z:.3f} outside limits [{limits['z']['min']:.3f}, {limits['z']['max']:.3f}]"
             )
 
-        if not (limits['r']['min'] <= position.r <= limits['r']['max']):
+        if not (limits["r"]["min"] <= position.r <= limits["r"]["max"]):
             errors.append(
                 f"R={position.r:.1f}° outside limits [{limits['r']['min']:.1f}°, {limits['r']['max']:.1f}°]"
             )
@@ -1405,7 +1534,7 @@ class PositionController:
         if not is_valid:
             error_msg = "Position out of bounds:\n" + "\n".join(errors)
             raise ValueError(error_msg)
-    
+
     def get_current_position(self) -> Optional[Position]:
         """
         Get current tracked position.
@@ -1436,8 +1565,9 @@ class PositionController:
     @property
     def _debug_helper(self):
         """Lazy-initialized debug helper for diagnostic commands."""
-        if not hasattr(self, '_debug_helper_instance'):
+        if not hasattr(self, "_debug_helper_instance"):
             from py2flamingo.controllers.position_debug import PositionDebugHelper
+
             self._debug_helper_instance = PositionDebugHelper(self.connection)
         return self._debug_helper_instance
 

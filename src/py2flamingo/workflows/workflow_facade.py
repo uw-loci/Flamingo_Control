@@ -5,34 +5,42 @@ consolidating all workflow operations into a single, clean API.
 """
 
 import logging
-from typing import Optional, List, Dict, Any, Union
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
+from ..core.errors import FlamingoError
 from ..models.data.workflow import (
-    Workflow, WorkflowType, WorkflowState, WorkflowStep,
-    IlluminationSettings, StackSettings, TileSettings,
-    TimeLapseSettings, ExperimentSettings
+    ExperimentSettings,
+    IlluminationSettings,
+    StackSettings,
+    TileSettings,
+    TimeLapseSettings,
+    Workflow,
+    WorkflowState,
+    WorkflowStep,
+    WorkflowType,
 )
 from ..models.hardware.stage import Position
-from ..core.errors import FlamingoError
-
 
 logger = logging.getLogger(__name__)
 
 
 class WorkflowError(FlamingoError):
     """Base exception for workflow-related errors."""
+
     pass
 
 
 class WorkflowValidationError(WorkflowError):
     """Raised when workflow validation fails."""
+
     pass
 
 
 class WorkflowExecutionError(WorkflowError):
     """Raised when workflow execution fails."""
+
     pass
 
 
@@ -62,26 +70,33 @@ class WorkflowFacade:
         """Lazily initialize components."""
         if self._orchestrator is None:
             from .workflow_orchestrator import WorkflowOrchestrator
+
             self._orchestrator = WorkflowOrchestrator()
 
         if self._repository is None:
             from .workflow_repository import WorkflowRepository
+
             self._repository = WorkflowRepository()
 
         if self._validator is None:
             from .workflow_validator import WorkflowValidator
+
             self._validator = WorkflowValidator()
 
         if self._executor is None:
             from .workflow_executor import WorkflowExecutor
+
             self._executor = WorkflowExecutor()
 
     # ==================== Workflow Creation ====================
 
-    def create_snapshot(self, position: Position,
-                       laser_channel: Optional[str] = None,
-                       laser_power: float = 5.0,
-                       save_data: bool = False) -> Workflow:
+    def create_snapshot(
+        self,
+        position: Position,
+        laser_channel: Optional[str] = None,
+        laser_power: float = 5.0,
+        save_data: bool = False,
+    ) -> Workflow:
         """Create a simple snapshot workflow.
 
         Args:
@@ -103,7 +118,7 @@ class WorkflowFacade:
         workflow = Workflow.create_snapshot(
             position=position,
             laser_channel=laser_channel or "Laser 3 488 nm",
-            laser_power=laser_power
+            laser_power=laser_power,
         )
 
         workflow.experiment_settings.save_data = save_data
@@ -111,11 +126,14 @@ class WorkflowFacade:
         logger.info(f"Created snapshot workflow at position {position}")
         return workflow
 
-    def create_zstack(self, position: Position,
-                     num_planes: int,
-                     z_step_um: float,
-                     laser_channel: Optional[str] = None,
-                     laser_power: float = 5.0) -> Workflow:
+    def create_zstack(
+        self,
+        position: Position,
+        num_planes: int,
+        z_step_um: float,
+        laser_channel: Optional[str] = None,
+        laser_power: float = 5.0,
+    ) -> Workflow:
         """Create a z-stack workflow.
 
         Args:
@@ -137,23 +155,25 @@ class WorkflowFacade:
             illumination=IlluminationSettings(
                 laser_channel=laser_channel or "Laser 3 488 nm",
                 laser_power_mw=laser_power,
-                laser_enabled=True
+                laser_enabled=True,
             ),
-            stack_settings=StackSettings(
-                num_planes=num_planes,
-                z_step_um=z_step_um
-            ),
-            experiment_settings=ExperimentSettings()
+            stack_settings=StackSettings(num_planes=num_planes, z_step_um=z_step_um),
+            experiment_settings=ExperimentSettings(),
         )
 
-        logger.info(f"Created z-stack workflow: {num_planes} planes, {z_step_um}μm step")
+        logger.info(
+            f"Created z-stack workflow: {num_planes} planes, {z_step_um}μm step"
+        )
         return workflow
 
-    def create_tile_scan(self, start_position: Position,
-                        num_tiles_x: int,
-                        num_tiles_y: int,
-                        tile_size_mm: float,
-                        overlap_percent: float = 10.0) -> Workflow:
+    def create_tile_scan(
+        self,
+        start_position: Position,
+        num_tiles_x: int,
+        num_tiles_y: int,
+        tile_size_mm: float,
+        overlap_percent: float = 10.0,
+    ) -> Workflow:
         """Create a tile scan workflow.
 
         Args:
@@ -177,17 +197,17 @@ class WorkflowFacade:
                 num_tiles_y=num_tiles_y,
                 tile_size_x_mm=tile_size_mm,
                 tile_size_y_mm=tile_size_mm,
-                overlap_percent=overlap_percent
+                overlap_percent=overlap_percent,
             ),
-            experiment_settings=ExperimentSettings()
+            experiment_settings=ExperimentSettings(),
         )
 
         logger.info(f"Created tile scan: {num_tiles_x}x{num_tiles_y} tiles")
         return workflow
 
-    def create_time_lapse(self, position: Position,
-                         num_timepoints: int,
-                         interval_seconds: float) -> Workflow:
+    def create_time_lapse(
+        self, position: Position, num_timepoints: int, interval_seconds: float
+    ) -> Workflow:
         """Create a time-lapse workflow.
 
         Args:
@@ -205,13 +225,14 @@ class WorkflowFacade:
             name="Time Lapse",
             start_position=position,
             time_lapse_settings=TimeLapseSettings(
-                num_timepoints=num_timepoints,
-                interval_seconds=interval_seconds
+                num_timepoints=num_timepoints, interval_seconds=interval_seconds
             ),
-            experiment_settings=ExperimentSettings()
+            experiment_settings=ExperimentSettings(),
         )
 
-        logger.info(f"Created time-lapse: {num_timepoints} points, {interval_seconds}s interval")
+        logger.info(
+            f"Created time-lapse: {num_timepoints} points, {interval_seconds}s interval"
+        )
         return workflow
 
     def create_from_dict(self, workflow_dict: Dict[str, Any]) -> Workflow:
@@ -258,8 +279,9 @@ class WorkflowFacade:
         except Exception as e:
             raise WorkflowValidationError(f"Failed to load workflow: {e}")
 
-    def save_workflow(self, workflow: Workflow,
-                     file_path: Optional[Union[str, Path]] = None) -> Path:
+    def save_workflow(
+        self, workflow: Workflow, file_path: Optional[Union[str, Path]] = None
+    ) -> Path:
         """Save a workflow to a file.
 
         Args:
@@ -282,7 +304,9 @@ class WorkflowFacade:
         logger.info(f"Saved workflow to {saved_path}")
         return saved_path
 
-    def list_saved_workflows(self, directory: Optional[Union[str, Path]] = None) -> List[Path]:
+    def list_saved_workflows(
+        self, directory: Optional[Union[str, Path]] = None
+    ) -> List[Path]:
         """List all saved workflow files.
 
         Args:
@@ -334,8 +358,7 @@ class WorkflowFacade:
 
     # ==================== Execution ====================
 
-    def start_workflow(self, workflow: Workflow,
-                      dry_run: bool = False) -> bool:
+    def start_workflow(self, workflow: Workflow, dry_run: bool = False) -> bool:
         """Start executing a workflow.
 
         Args:
@@ -354,7 +377,10 @@ class WorkflowFacade:
         self.validate_workflow(workflow)
 
         # Check if another workflow is running
-        if self._current_workflow and self._current_workflow.state == WorkflowState.EXECUTING:
+        if (
+            self._current_workflow
+            and self._current_workflow.state == WorkflowState.EXECUTING
+        ):
             raise WorkflowExecutionError("Another workflow is already running")
 
         # Start execution
@@ -516,8 +542,9 @@ class WorkflowFacade:
         """
         return workflow.estimate_duration()
 
-    def estimate_data_size(self, workflow: Workflow,
-                          bytes_per_image: int = 4_000_000) -> float:
+    def estimate_data_size(
+        self, workflow: Workflow, bytes_per_image: int = 4_000_000
+    ) -> float:
         """Estimate data size for a workflow.
 
         Args:
@@ -529,7 +556,7 @@ class WorkflowFacade:
         """
         total_images = workflow.calculate_total_images()
         total_bytes = total_images * bytes_per_image
-        return total_bytes / (1024 ** 3)
+        return total_bytes / (1024**3)
 
     def clear_history(self) -> None:
         """Clear workflow history."""
@@ -553,6 +580,9 @@ class WorkflowFacade:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit - ensure cleanup."""
-        if self._current_workflow and self._current_workflow.state == WorkflowState.EXECUTING:
+        if (
+            self._current_workflow
+            and self._current_workflow.state == WorkflowState.EXECUTING
+        ):
             self.stop_workflow()
         return False

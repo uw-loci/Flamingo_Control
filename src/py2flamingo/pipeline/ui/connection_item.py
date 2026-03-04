@@ -6,12 +6,13 @@ by the source port's type.
 """
 
 import logging
-from PyQt5.QtWidgets import QGraphicsPathItem
-from PyQt5.QtCore import QPointF
-from PyQt5.QtGui import QPen, QColor, QPainterPath
 
-from py2flamingo.pipeline.models.port_types import PORT_COLORS
+from PyQt5.QtCore import QPointF
+from PyQt5.QtGui import QColor, QPainterPath, QPen
+from PyQt5.QtWidgets import QGraphicsPathItem
+
 from py2flamingo.pipeline.models.pipeline import Connection
+from py2flamingo.pipeline.models.port_types import PORT_COLORS
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +28,16 @@ class ConnectionItem(QGraphicsPathItem):
         target_port_item: PortItem at the end of the wire
     """
 
-    def __init__(self, connection: Connection, source_port_item, target_port_item,
-                 parent=None):
+    def __init__(
+        self, connection: Connection, source_port_item, target_port_item, parent=None
+    ):
         super().__init__(parent)
         self.connection = connection
         self.source_port_item = source_port_item
         self.target_port_item = target_port_item
 
         # Color matches source port type
-        color = QColor(PORT_COLORS.get(source_port_item.port.port_type, '#ffffff'))
+        color = QColor(PORT_COLORS.get(source_port_item.port.port_type, "#ffffff"))
         self.setPen(QPen(color, WIRE_WIDTH))
         self.setZValue(-1)  # Behind nodes
 
@@ -76,7 +78,7 @@ class DragWireItem(QGraphicsPathItem):
         self.source_port_item = source_port_item
         self._end_pos = source_port_item.center_scene_pos()
 
-        color = QColor(PORT_COLORS.get(source_port_item.port.port_type, '#ffffff'))
+        color = QColor(PORT_COLORS.get(source_port_item.port.port_type, "#ffffff"))
         pen = QPen(color, WIRE_WIDTH)
         pen.setStyle(2)  # Dash line
         self.setPen(pen)
@@ -89,9 +91,11 @@ class DragWireItem(QGraphicsPathItem):
 
     def set_valid(self, valid: bool):
         """Change wire color to indicate whether the hover target is valid."""
-        base_color = QColor(PORT_COLORS.get(self.source_port_item.port.port_type, '#ffffff'))
+        base_color = QColor(
+            PORT_COLORS.get(self.source_port_item.port.port_type, "#ffffff")
+        )
         if valid:
-            color = QColor('#66bb6a')  # Green
+            color = QColor("#66bb6a")  # Green
         else:
             color = base_color
         pen = self.pen()

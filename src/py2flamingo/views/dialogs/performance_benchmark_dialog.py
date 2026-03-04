@@ -4,22 +4,34 @@ Dialog for running and displaying performance benchmarks on the 3D visualization
 Tests Gaussian smoothing, rotation transforms, translation shifts, and full pipeline timing.
 """
 
+import csv
+import json
 import logging
 import time
-import json
-import csv
-from typing import Optional, Dict, Any, List
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import numpy as np
-from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
-    QGroupBox, QGridLayout, QProgressBar, QTableWidget, QTableWidgetItem,
-    QSpinBox, QCheckBox, QFileDialog, QMessageBox, QHeaderView
-)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+)
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
 
@@ -29,6 +41,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class BenchmarkResult:
     """Result from a single benchmark test."""
+
     test_name: str
     volume_size: str
     iterations: int
@@ -50,8 +63,15 @@ class BenchmarkWorker(QThread):
     finished_all = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, tests: List[str], volume_size: int, iterations: int,
-                 voxel_storage=None, quality: int = 0, parent=None):
+    def __init__(
+        self,
+        tests: List[str],
+        volume_size: int,
+        iterations: int,
+        voxel_storage=None,
+        quality: int = 0,
+        parent=None,
+    ):
         """Initialize benchmark worker.
 
         Args:
@@ -104,7 +124,7 @@ class BenchmarkWorker(QThread):
         # Create test volume
         size = self.volume_size
         volume = np.random.randint(0, 65535, (size, size, size), dtype=np.uint16)
-        total_voxels = size ** 3
+        total_voxels = size**3
 
         times = []
 
@@ -157,7 +177,7 @@ class BenchmarkWorker(QThread):
             std_time_ms=np.std(times_array),
             min_time_ms=np.min(times_array),
             max_time_ms=np.max(times_array),
-            throughput_voxels_per_sec=throughput
+            throughput_voxels_per_sec=throughput,
         )
 
     def _run_rotation(self, volume: np.ndarray, angle: float, ndimage) -> np.ndarray:
@@ -165,7 +185,7 @@ class BenchmarkWorker(QThread):
         from scipy.spatial.transform import Rotation
 
         # Create rotation matrix around Y axis
-        rot = Rotation.from_euler('y', angle, degrees=True)
+        rot = Rotation.from_euler("y", angle, degrees=True)
         rot_matrix = rot.as_matrix()
 
         # Calculate center
@@ -177,10 +197,17 @@ class BenchmarkWorker(QThread):
         # Apply affine transform with quality-appropriate interpolation
         # order=0: nearest-neighbor (fast), order=1: linear (quality)
         return ndimage.affine_transform(
-            volume, rot_matrix, offset=offset, order=self.quality, mode='constant', cval=0
+            volume,
+            rot_matrix,
+            offset=offset,
+            order=self.quality,
+            mode="constant",
+            cval=0,
         )
 
-    def _run_translation(self, volume: np.ndarray, offset: tuple, ndimage) -> np.ndarray:
+    def _run_translation(
+        self, volume: np.ndarray, offset: tuple, ndimage
+    ) -> np.ndarray:
         """Run translation with quality-appropriate method.
 
         For fast mode (order=0), uses numpy.roll which is ~10x faster.
@@ -207,7 +234,7 @@ class BenchmarkWorker(QThread):
             return result
         else:
             # Quality mode: use scipy.ndimage.shift with linear interpolation
-            return ndimage.shift(volume, offset, order=1, mode='constant', cval=0)
+            return ndimage.shift(volume, offset, order=1, mode="constant", cval=0)
 
     def _run_downsample(self, volume: np.ndarray, factor: int) -> np.ndarray:
         """Downsample volume by block averaging."""
@@ -215,13 +242,13 @@ class BenchmarkWorker(QThread):
         new_shape = tuple(s // factor for s in shape)
 
         # Trim to exact multiple
-        trimmed = volume[:new_shape[0]*factor, :new_shape[1]*factor, :new_shape[2]*factor]
+        trimmed = volume[
+            : new_shape[0] * factor, : new_shape[1] * factor, : new_shape[2] * factor
+        ]
 
         # Reshape and average
         reshaped = trimmed.reshape(
-            new_shape[0], factor,
-            new_shape[1], factor,
-            new_shape[2], factor
+            new_shape[0], factor, new_shape[1], factor, new_shape[2], factor
         )
         return reshaped.mean(axis=(1, 3, 5)).astype(volume.dtype)
 
@@ -245,7 +272,7 @@ class PerformanceBenchmarkDialog(PersistentDialog):
         "Rotation 90°",
         "Translation Shift",
         "Downsample 3x",
-        "Full Pipeline"
+        "Full Pipeline",
     ]
 
     # Volume size presets
@@ -297,7 +324,9 @@ class PerformanceBenchmarkDialog(PersistentDialog):
         self._iterations_spin = QSpinBox()
         self._iterations_spin.setRange(1, 100)
         self._iterations_spin.setValue(5)
-        self._iterations_spin.setToolTip("Number of times to run each test for averaging")
+        self._iterations_spin.setToolTip(
+            "Number of times to run each test for averaging"
+        )
         config_layout.addWidget(self._iterations_spin, 0, 3)
 
         # Quality mode selection (Row 1)
@@ -306,12 +335,16 @@ class PerformanceBenchmarkDialog(PersistentDialog):
         self._quality_combo.addItem("Fast (Nearest-Neighbor)", 0)
         self._quality_combo.addItem("Quality (Linear)", 1)
         self._quality_combo.setCurrentIndex(0)  # Default to Fast
-        self._quality_combo.setToolTip("FAST: ~3-5x faster, blocky appearance\nQUALITY: smoother results, slower")
+        self._quality_combo.setToolTip(
+            "FAST: ~3-5x faster, blocky appearance\nQUALITY: smoother results, slower"
+        )
         config_layout.addWidget(self._quality_combo, 1, 1)
 
         # Compare both checkbox
         self._compare_both_cb = QCheckBox("Compare Both Modes")
-        self._compare_both_cb.setToolTip("Run benchmarks in both FAST and QUALITY modes for comparison")
+        self._compare_both_cb.setToolTip(
+            "Run benchmarks in both FAST and QUALITY modes for comparison"
+        )
         config_layout.addWidget(self._compare_both_cb, 1, 2, 1, 2)
 
         config_group.setLayout(config_layout)
@@ -367,10 +400,17 @@ class PerformanceBenchmarkDialog(PersistentDialog):
 
         self._results_table = QTableWidget()
         self._results_table.setColumnCount(7)
-        self._results_table.setHorizontalHeaderLabels([
-            "Test", "Volume", "Mean (ms)", "Std (ms)",
-            "Min (ms)", "Max (ms)", "Throughput (Mvox/s)"
-        ])
+        self._results_table.setHorizontalHeaderLabels(
+            [
+                "Test",
+                "Volume",
+                "Mean (ms)",
+                "Std (ms)",
+                "Min (ms)",
+                "Max (ms)",
+                "Throughput (Mvox/s)",
+            ]
+        )
         self._results_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self._results_table.setAlternatingRowColors(True)
         results_layout.addWidget(self._results_table)
@@ -431,13 +471,13 @@ class PerformanceBenchmarkDialog(PersistentDialog):
         """Start running benchmarks."""
         # Get selected tests
         selected_tests = [
-            name for name, cb in self._test_checkboxes.items()
-            if cb.isChecked()
+            name for name, cb in self._test_checkboxes.items() if cb.isChecked()
         ]
 
         if not selected_tests:
-            QMessageBox.warning(self, "No Tests Selected",
-                              "Please select at least one test to run.")
+            QMessageBox.warning(
+                self, "No Tests Selected", "Please select at least one test to run."
+            )
             return
 
         # Get volume size
@@ -480,7 +520,7 @@ class PerformanceBenchmarkDialog(PersistentDialog):
                 iterations=iterations,
                 voxel_storage=self.voxel_storage,
                 quality=quality,
-                parent=self
+                parent=self,
             )
             self.worker.progress.connect(self._on_progress)
             self.worker.result_ready.connect(self._on_result_ready)
@@ -488,13 +528,17 @@ class PerformanceBenchmarkDialog(PersistentDialog):
             self.worker.error.connect(self._on_error)
             self.worker.start()
 
-    def _run_next_quality_benchmark(self, tests: List[str], volume_size: int, iterations: int):
+    def _run_next_quality_benchmark(
+        self, tests: List[str], volume_size: int, iterations: int
+    ):
         """Run the next quality benchmark when comparing both modes."""
         if self._current_quality_run_idx >= len(self._pending_quality_runs):
             self._on_finished()
             return
 
-        quality, labeled_tests = self._pending_quality_runs[self._current_quality_run_idx]
+        quality, labeled_tests = self._pending_quality_runs[
+            self._current_quality_run_idx
+        ]
         quality_name = "FAST" if quality == 0 else "QUALITY"
 
         self._status_label.setText(f"Running {quality_name} mode benchmarks...")
@@ -505,20 +549,22 @@ class PerformanceBenchmarkDialog(PersistentDialog):
             iterations=iterations,
             voxel_storage=self.voxel_storage,
             quality=quality,
-            parent=self
+            parent=self,
         )
         # Store info for labeling results
         self.worker._quality_suffix = f" [{quality_name}]"
 
         self.worker.progress.connect(self._on_progress)
         self.worker.result_ready.connect(self._on_result_ready_with_suffix)
-        self.worker.finished_all.connect(lambda: self._on_quality_run_finished(tests, volume_size, iterations))
+        self.worker.finished_all.connect(
+            lambda: self._on_quality_run_finished(tests, volume_size, iterations)
+        )
         self.worker.error.connect(self._on_error)
         self.worker.start()
 
     def _on_result_ready_with_suffix(self, result: BenchmarkResult):
         """Handle result with quality suffix added to test name."""
-        if hasattr(self.worker, '_quality_suffix'):
+        if hasattr(self.worker, "_quality_suffix"):
             # Create new result with suffixed name
             result = BenchmarkResult(
                 test_name=result.test_name + self.worker._quality_suffix,
@@ -528,12 +574,14 @@ class PerformanceBenchmarkDialog(PersistentDialog):
                 std_time_ms=result.std_time_ms,
                 min_time_ms=result.min_time_ms,
                 max_time_ms=result.max_time_ms,
-                throughput_voxels_per_sec=result.throughput_voxels_per_sec
+                throughput_voxels_per_sec=result.throughput_voxels_per_sec,
             )
         self.results.append(result)
         self._add_result_to_table(result)
 
-    def _on_quality_run_finished(self, tests: List[str], volume_size: int, iterations: int):
+    def _on_quality_run_finished(
+        self, tests: List[str], volume_size: int, iterations: int
+    ):
         """Handle completion of one quality run when comparing both."""
         self._current_quality_run_idx += 1
         self._run_next_quality_benchmark(tests, volume_size, iterations)
@@ -569,7 +617,7 @@ class PerformanceBenchmarkDialog(PersistentDialog):
             f"{result.std_time_ms:.1f}",
             f"{result.min_time_ms:.1f}",
             f"{result.max_time_ms:.1f}",
-            f"{throughput_mvox:.1f}"
+            f"{throughput_mvox:.1f}",
         ]
 
         for col, text in enumerate(items):
@@ -620,22 +668,26 @@ class PerformanceBenchmarkDialog(PersistentDialog):
             return
 
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Export Benchmark Results",
+            self,
+            "Export Benchmark Results",
             "benchmark_results.csv",
-            "CSV Files (*.csv)"
+            "CSV Files (*.csv)",
         )
 
         if file_path:
             try:
-                with open(file_path, 'w', newline='') as f:
-                    writer = csv.DictWriter(f, fieldnames=self.results[0].to_dict().keys())
+                with open(file_path, "w", newline="") as f:
+                    writer = csv.DictWriter(
+                        f, fieldnames=self.results[0].to_dict().keys()
+                    )
                     writer.writeheader()
                     for result in self.results:
                         writer.writerow(result.to_dict())
 
                 self._logger.info(f"Exported benchmark results to {file_path}")
-                QMessageBox.information(self, "Export Complete",
-                                       f"Results exported to {file_path}")
+                QMessageBox.information(
+                    self, "Export Complete", f"Results exported to {file_path}"
+                )
             except Exception as e:
                 self._logger.exception("Export failed")
                 QMessageBox.critical(self, "Export Failed", str(e))
@@ -646,24 +698,26 @@ class PerformanceBenchmarkDialog(PersistentDialog):
             return
 
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Export Benchmark Results",
+            self,
+            "Export Benchmark Results",
             "benchmark_results.json",
-            "JSON Files (*.json)"
+            "JSON Files (*.json)",
         )
 
         if file_path:
             try:
                 data = {
                     "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "results": [result.to_dict() for result in self.results]
+                    "results": [result.to_dict() for result in self.results],
                 }
 
-                with open(file_path, 'w') as f:
+                with open(file_path, "w") as f:
                     json.dump(data, f, indent=2)
 
                 self._logger.info(f"Exported benchmark results to {file_path}")
-                QMessageBox.information(self, "Export Complete",
-                                       f"Results exported to {file_path}")
+                QMessageBox.information(
+                    self, "Export Complete", f"Results exported to {file_path}"
+                )
             except Exception as e:
                 self._logger.exception("Export failed")
                 QMessageBox.critical(self, "Export Failed", str(e))

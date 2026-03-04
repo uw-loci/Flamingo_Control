@@ -13,9 +13,9 @@ Usage:
     python -m py2flamingo --help
 """
 
-import sys
 import argparse
 import logging
+import sys
 from typing import List, Optional
 
 from py2flamingo.application import FlamingoApplication
@@ -44,7 +44,7 @@ Examples:
   %(prog)s --workflow /path/to/workflow.txt
 
 For more information, visit the project documentation.
-        """
+        """,
     )
 
     # Connection arguments (optional - users typically select via GUI)
@@ -52,14 +52,14 @@ For more information, visit the project documentation.
         "--ip",
         type=str,
         default=None,
-        help="Server IP address (optional - select via GUI if not specified)"
+        help="Server IP address (optional - select via GUI if not specified)",
     )
 
     parser.add_argument(
         "--port",
         type=int,
         default=None,
-        help="Server port (optional - select via GUI if not specified)"
+        help="Server port (optional - select via GUI if not specified)",
     )
 
     # Workflow argument
@@ -67,14 +67,14 @@ For more information, visit the project documentation.
         "--workflow",
         type=str,
         default=None,
-        help="Workflow file to auto-load on startup"
+        help="Workflow file to auto-load on startup",
     )
 
     # Future feature: headless mode
     parser.add_argument(
         "--headless",
         action="store_true",
-        help="Run without GUI (future feature, not yet implemented)"
+        help="Run without GUI (future feature, not yet implemented)",
     )
 
     # Logging level
@@ -83,7 +83,7 @@ For more information, visit the project documentation.
         type=str,
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        help="Set logging level (default: INFO)"
+        help="Set logging level (default: INFO)",
     )
 
     return parser.parse_args(args)
@@ -116,6 +116,7 @@ def validate_args(args: argparse.Namespace) -> bool:
     # Validate workflow file if specified
     if args.workflow:
         from pathlib import Path
+
         workflow_path = Path(args.workflow)
         if not workflow_path.exists():
             print(f"Error: Workflow file not found: {args.workflow}")
@@ -157,8 +158,8 @@ def setup_logging(level: str):
 
     # Format for log messages
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
 
     # Console handler (existing behavior)
@@ -168,7 +169,7 @@ def setup_logging(level: str):
     root_logger.addHandler(console_handler)
 
     # File handler (new - saves to logs/)
-    file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+    file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
     file_handler.setLevel(numeric_level)
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
@@ -213,8 +214,7 @@ def main(args: Optional[List[str]] = None) -> int:
     # Create application with CLI parameters
     try:
         app = FlamingoApplication(
-            default_ip=parsed_args.ip,
-            default_port=parsed_args.port
+            default_ip=parsed_args.ip, default_port=parsed_args.port
         )
 
         # Run application

@@ -5,17 +5,18 @@ This module provides a unified interface for all thread management in the
 Flamingo Control application, replacing various ad-hoc threading patterns.
 """
 
-import threading
 import logging
-from typing import Callable, Optional, Dict, List, Any
-from queue import Queue, Empty
+import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
+from queue import Empty, Queue
+from typing import Any, Callable, Dict, List, Optional
 
 
 class ThreadState(Enum):
     """Thread states for monitoring."""
+
     IDLE = "idle"
     STARTING = "starting"
     RUNNING = "running"
@@ -27,6 +28,7 @@ class ThreadState(Enum):
 @dataclass
 class ThreadInfo:
     """Information about a managed thread."""
+
     name: str
     thread: threading.Thread
     state: ThreadState
@@ -82,7 +84,7 @@ class EnhancedThreadManager:
         args: tuple = (),
         kwargs: dict = None,
         daemon: bool = True,
-        use_custom: bool = True
+        use_custom: bool = True,
     ) -> bool:
         """
         Start a new managed thread.
@@ -124,7 +126,7 @@ class EnhancedThreadManager:
                 target=target,
                 args=args,
                 kwargs=kwargs,
-                start_time=time.time()
+                start_time=time.time(),
             )
 
             # Create and start thread
@@ -136,7 +138,7 @@ class EnhancedThreadManager:
                     args=args,
                     kwargs=kwargs,
                     name=name,
-                    daemon=daemon
+                    daemon=daemon,
                 )
                 thread_info.thread = thread
                 thread.start()
@@ -163,6 +165,7 @@ class EnhancedThreadManager:
         Returns:
             Wrapped function
         """
+
         def wrapper(*args, **kwargs):
             try:
                 # Update state
@@ -277,18 +280,17 @@ class EnhancedThreadManager:
                     runtime = time.time() - info.start_time
 
             return {
-                'name': info.name,
-                'state': info.state.value,
-                'alive': info.thread.is_alive(),
-                'daemon': info.thread.daemon,
-                'runtime': runtime,
-                'error': str(info.error) if info.error else None
+                "name": info.name,
+                "state": info.state.value,
+                "alive": info.thread.is_alive(),
+                "daemon": info.thread.daemon,
+                "runtime": runtime,
+                "error": str(info.error) if info.error else None,
             }
 
     def get_all_status(self) -> Dict[str, Dict[str, Any]]:
         """Get status for all threads."""
-        return {name: self.get_thread_status(name)
-                for name in self._threads.keys()}
+        return {name: self.get_thread_status(name) for name in self._threads.keys()}
 
     def is_stopped(self) -> bool:
         """Check if stop event has been set."""
@@ -317,7 +319,7 @@ class EnhancedThreadManager:
         processor: Callable,
         output_queue: Optional[Queue] = None,
         batch_size: int = 1,
-        timeout: float = 0.1
+        timeout: float = 0.1,
     ) -> bool:
         """
         Start a thread that processes items from a queue.
@@ -333,6 +335,7 @@ class EnhancedThreadManager:
         Returns:
             True if started successfully
         """
+
         def queue_worker():
             batch = []
             while not self._stop_event.is_set():
@@ -361,11 +364,7 @@ class EnhancedThreadManager:
         return self.start_thread(name, queue_worker)
 
     def start_periodic_task(
-        self,
-        name: str,
-        task: Callable,
-        interval: float,
-        run_immediately: bool = True
+        self, name: str, task: Callable, interval: float, run_immediately: bool = True
     ) -> bool:
         """
         Start a thread that runs a task periodically.
@@ -379,6 +378,7 @@ class EnhancedThreadManager:
         Returns:
             True if started successfully
         """
+
         def periodic_worker():
             if run_immediately:
                 try:
@@ -405,32 +405,39 @@ class EnhancedThreadManager:
             def receiver_loop():
                 # Implement receiver logic or delegate to legacy
                 pass
+
             return self.start_thread("command-receiver", receiver_loop, args)
         return False
 
     def start_live_receiver(self, *args):
         """Legacy compatibility: start live data receiver thread."""
         if len(args) >= 4:
+
             def live_loop():
                 # Implement live receiver logic or delegate to legacy
                 pass
+
             return self.start_thread("live-receiver", live_loop, args)
         return False
 
     def start_sender(self, *args):
         """Legacy compatibility: start command sender thread."""
         if len(args) >= 4:
+
             def sender_loop():
                 # Implement sender logic or delegate to legacy
                 pass
+
             return self.start_thread("sender", sender_loop, args)
         return False
 
     def start_processing(self, *args):
         """Legacy compatibility: start data processing thread."""
         if len(args) >= 4:
+
             def processing_loop():
                 # Implement processing logic or delegate to legacy
                 pass
+
             return self.start_thread("processor", processing_loop, args)
         return False

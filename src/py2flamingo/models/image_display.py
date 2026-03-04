@@ -4,8 +4,10 @@ Data model for image display settings.
 This module contains the model for tracking image display transformation settings
 used by the live feed viewer.
 """
+
 from dataclasses import dataclass
-from ..utils.image_transforms import Rotation, Colormap
+
+from ..utils.image_transforms import Colormap, Rotation
 
 
 @dataclass
@@ -25,6 +27,7 @@ class ImageDisplayModel:
         percentile_low: Lower percentile for contrast (0-100)
         percentile_high: Upper percentile for contrast (0-100)
     """
+
     rotation: Rotation = Rotation.NONE
     flip_horizontal: bool = False
     flip_vertical: bool = False
@@ -48,14 +51,14 @@ class ImageDisplayModel:
             90
         """
         return {
-            'rotation': self.rotation.value,
-            'flip_horizontal': self.flip_horizontal,
-            'flip_vertical': self.flip_vertical,
-            'downsample_factor': self.downsample_factor,
-            'colormap': self.colormap.value,
-            'auto_contrast': self.auto_contrast,
-            'percentile_low': self.percentile_low,
-            'percentile_high': self.percentile_high,
+            "rotation": self.rotation.value,
+            "flip_horizontal": self.flip_horizontal,
+            "flip_vertical": self.flip_vertical,
+            "downsample_factor": self.downsample_factor,
+            "colormap": self.colormap.value,
+            "auto_contrast": self.auto_contrast,
+            "percentile_low": self.percentile_low,
+            "percentile_high": self.percentile_high,
         }
 
     def set_rotation(self, degrees: int) -> None:

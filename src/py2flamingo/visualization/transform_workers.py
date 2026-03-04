@@ -15,22 +15,33 @@ GPU Acceleration:
 - Fallback to CPU if GPU unavailable or fails
 """
 
+import hashlib
 import logging
 import time
-import hashlib
-from dataclasses import dataclass
-from typing import Dict, Optional, Tuple, Callable, Any
 from collections import OrderedDict
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import numpy as np
-from PyQt5.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal, pyqtSlot, QMutex, QMutexLocker
+from PyQt5.QtCore import (
+    QMutex,
+    QMutexLocker,
+    QObject,
+    QRunnable,
+    QThreadPool,
+    pyqtSignal,
+    pyqtSlot,
+)
 
 # Import GPU-accelerated transforms (lazy initialization)
 try:
     from py2flamingo.visualization.gpu_transforms import (
-        affine_transform_auto, gaussian_filter_auto, shift_auto,
-        combined_transform_gpu
+        affine_transform_auto,
+        combined_transform_gpu,
+        gaussian_filter_auto,
+        shift_auto,
     )
+
     GPU_TRANSFORMS_IMPORTED = True
 except ImportError:
     GPU_TRANSFORMS_IMPORTED = False
@@ -48,6 +59,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TransformRequest:
     """Request for a transform operation."""
+
     request_id: str
     transform_type: str  # 'rotation', 'translation', 'gaussian', 'downsample'
     channel_id: int
@@ -63,6 +75,7 @@ class TransformRequest:
 
 class TransformSignals(QObject):
     """Signals for transform worker communication."""
+
     started = pyqtSignal(str)  # request_id
     progress = pyqtSignal(str, int)  # request_id, percentage
     completed = pyqtSignal(str, object)  # request_id, result array
@@ -109,14 +122,14 @@ class RotationTransformWorker(BaseTransformWorker):
             volume = self.request.volume
             params = self.request.parameters
 
-            rotation_deg = params.get('rotation_deg', 0.0)
-            center_voxels = params.get('center_voxels', None)
+            rotation_deg = params.get("rotation_deg", 0.0)
+            center_voxels = params.get("center_voxels", None)
 
             if center_voxels is None:
                 center_voxels = np.array(volume.shape) / 2
 
             # Create rotation matrix (Y-axis rotation for sample holder)
-            rot = Rotation.from_euler('y', rotation_deg, degrees=True)
+            rot = Rotation.from_euler("y", rotation_deg, degrees=True)
             rot_matrix = rot.as_matrix()
 
             # Calculate offset for rotation around center
@@ -132,23 +145,19 @@ class RotationTransformWorker(BaseTransformWorker):
             # Apply affine transform (GPU-accelerated if available)
             if GPU_TRANSFORMS_IMPORTED and affine_transform_auto is not None:
                 result = affine_transform_auto(
-                    volume,
-                    rot_matrix,
-                    offset=offset,
-                    order=1,
-                    mode='constant',
-                    cval=0
+                    volume, rot_matrix, offset=offset, order=1, mode="constant", cval=0
                 )
             else:
                 # CPU fallback
                 from scipy import ndimage
+
                 result = ndimage.affine_transform(
                     volume.astype(np.float32),
                     rot_matrix,
                     offset=offset,
                     order=1,
-                    mode='constant',
-                    cval=0
+                    mode="constant",
+                    cval=0,
                 )
                 result = result.astype(volume.dtype)
 
@@ -179,7 +188,7 @@ class TranslationWorker(BaseTransformWorker):
             volume = self.request.volume
             params = self.request.parameters
 
-            offset_voxels = params.get('offset_voxels', (0, 0, 0))
+            offset_voxels = params.get("offset_voxels", (0, 0, 0))
 
             self.signals.progress.emit(self.request.request_id, 30)
 
@@ -190,21 +199,18 @@ class TranslationWorker(BaseTransformWorker):
             # Apply shift (GPU-accelerated if available)
             if GPU_TRANSFORMS_IMPORTED and shift_auto is not None:
                 result = shift_auto(
-                    volume,
-                    offset_voxels,
-                    order=1,
-                    mode='constant',
-                    cval=0
+                    volume, offset_voxels, order=1, mode="constant", cval=0
                 )
             else:
                 # CPU fallback
                 from scipy import ndimage
+
                 result = ndimage.shift(
                     volume.astype(np.float32),
                     offset_voxels,
                     order=1,
-                    mode='constant',
-                    cval=0
+                    mode="constant",
+                    cval=0,
                 )
                 result = result.astype(volume.dtype)
 
@@ -235,7 +241,7 @@ class GaussianSmoothWorker(BaseTransformWorker):
             volume = self.request.volume
             params = self.request.parameters
 
-            sigma = params.get('sigma', (1.0, 1.0, 1.0))
+            sigma = params.get("sigma", (1.0, 1.0, 1.0))
 
             self.signals.progress.emit(self.request.request_id, 30)
 
@@ -249,6 +255,7 @@ class GaussianSmoothWorker(BaseTransformWorker):
             else:
                 # CPU fallback
                 from scipy import ndimage
+
                 result = ndimage.gaussian_filter(volume.astype(np.float32), sigma)
                 result = result.astype(volume.dtype)
 
@@ -282,9 +289,9 @@ class CombinedTransformWorker(BaseTransformWorker):
             volume = self.request.volume
             params = self.request.parameters
 
-            rotation_deg = params.get('rotation_deg', 0.0)
-            translation_voxels = params.get('translation_voxels', (0, 0, 0))
-            center_voxels = params.get('center_voxels', None)
+            rotation_deg = params.get("rotation_deg", 0.0)
+            translation_voxels = params.get("translation_voxels", (0, 0, 0))
+            center_voxels = params.get("center_voxels", None)
 
             if center_voxels is None:
                 center_voxels = np.array(volume.shape) / 2
@@ -296,7 +303,7 @@ class CombinedTransformWorker(BaseTransformWorker):
                 return
 
             # Create rotation matrix
-            rot = Rotation.from_euler('y', rotation_deg, degrees=True)
+            rot = Rotation.from_euler("y", rotation_deg, degrees=True)
             rot_matrix = rot.as_matrix()
 
             self.signals.progress.emit(self.request.request_id, 40)
@@ -312,11 +319,12 @@ class CombinedTransformWorker(BaseTransformWorker):
                     rot_matrix,
                     np.array(center_voxels),
                     translation_voxels,
-                    order=1
+                    order=1,
                 )
             else:
                 # CPU fallback
                 from scipy import ndimage
+
                 center = np.array(center_voxels)
                 rotation_offset = center - rot_matrix @ center
                 total_offset = rotation_offset + np.array(translation_voxels)
@@ -326,8 +334,8 @@ class CombinedTransformWorker(BaseTransformWorker):
                     rot_matrix,
                     offset=total_offset,
                     order=1,
-                    mode='constant',
-                    cval=0
+                    mode="constant",
+                    cval=0,
                 )
                 result = result.astype(volume.dtype)
 
@@ -422,15 +430,22 @@ class TransformManager(QObject):
         # Request counter for unique IDs
         self._request_counter = 0
 
-        logger.info(f"TransformManager initialized with {max_workers} workers, cache size {cache_size}")
+        logger.info(
+            f"TransformManager initialized with {max_workers} workers, cache size {cache_size}"
+        )
 
     def _generate_request_id(self) -> str:
         """Generate a unique request ID."""
         self._request_counter += 1
         return f"req_{self._request_counter}_{int(time.time() * 1000)}"
 
-    def _generate_cache_key(self, transform_type: str, channel_id: int,
-                           parameters: Dict[str, Any], volume_hash: str) -> str:
+    def _generate_cache_key(
+        self,
+        transform_type: str,
+        channel_id: int,
+        parameters: Dict[str, Any],
+        volume_hash: str,
+    ) -> str:
         """Generate a cache key for the transform."""
         param_str = json.dumps(parameters, sort_keys=True, default=str)
         key_data = f"{transform_type}_{channel_id}_{param_str}_{volume_hash}"
@@ -442,9 +457,14 @@ class TransformManager(QObject):
         sample = volume[::10, ::10, ::10].tobytes()
         return hashlib.md5(sample).hexdigest()[:8]
 
-    def submit_rotation(self, channel_id: int, volume: np.ndarray,
-                       rotation_deg: float, center_voxels: np.ndarray = None,
-                       use_cache: bool = True) -> str:
+    def submit_rotation(
+        self,
+        channel_id: int,
+        volume: np.ndarray,
+        rotation_deg: float,
+        center_voxels: np.ndarray = None,
+        use_cache: bool = True,
+    ) -> str:
         """Submit a rotation transform request.
 
         Args:
@@ -458,18 +478,28 @@ class TransformManager(QObject):
             Request ID for tracking
         """
         parameters = {
-            'rotation_deg': rotation_deg,
-            'center_voxels': center_voxels.tolist() if center_voxels is not None else None
+            "rotation_deg": rotation_deg,
+            "center_voxels": (
+                center_voxels.tolist() if center_voxels is not None else None
+            ),
         }
 
         return self._submit_transform(
-            'rotation', channel_id, volume, parameters,
-            RotationTransformWorker, use_cache
+            "rotation",
+            channel_id,
+            volume,
+            parameters,
+            RotationTransformWorker,
+            use_cache,
         )
 
-    def submit_translation(self, channel_id: int, volume: np.ndarray,
-                          offset_voxels: Tuple[float, float, float],
-                          use_cache: bool = True) -> str:
+    def submit_translation(
+        self,
+        channel_id: int,
+        volume: np.ndarray,
+        offset_voxels: Tuple[float, float, float],
+        use_cache: bool = True,
+    ) -> str:
         """Submit a translation transform request.
 
         Args:
@@ -481,18 +511,21 @@ class TransformManager(QObject):
         Returns:
             Request ID for tracking
         """
-        parameters = {'offset_voxels': offset_voxels}
+        parameters = {"offset_voxels": offset_voxels}
 
         return self._submit_transform(
-            'translation', channel_id, volume, parameters,
-            TranslationWorker, use_cache
+            "translation", channel_id, volume, parameters, TranslationWorker, use_cache
         )
 
-    def submit_combined_transform(self, channel_id: int, volume: np.ndarray,
-                                  rotation_deg: float,
-                                  translation_voxels: Tuple[float, float, float],
-                                  center_voxels: np.ndarray = None,
-                                  use_cache: bool = True) -> str:
+    def submit_combined_transform(
+        self,
+        channel_id: int,
+        volume: np.ndarray,
+        rotation_deg: float,
+        translation_voxels: Tuple[float, float, float],
+        center_voxels: np.ndarray = None,
+        use_cache: bool = True,
+    ) -> str:
         """Submit a combined rotation + translation transform.
 
         More efficient than separate operations as it does both in one pass.
@@ -509,19 +542,29 @@ class TransformManager(QObject):
             Request ID for tracking
         """
         parameters = {
-            'rotation_deg': rotation_deg,
-            'translation_voxels': translation_voxels,
-            'center_voxels': center_voxels.tolist() if center_voxels is not None else None
+            "rotation_deg": rotation_deg,
+            "translation_voxels": translation_voxels,
+            "center_voxels": (
+                center_voxels.tolist() if center_voxels is not None else None
+            ),
         }
 
         return self._submit_transform(
-            'combined', channel_id, volume, parameters,
-            CombinedTransformWorker, use_cache
+            "combined",
+            channel_id,
+            volume,
+            parameters,
+            CombinedTransformWorker,
+            use_cache,
         )
 
-    def submit_gaussian_smooth(self, channel_id: int, volume: np.ndarray,
-                               sigma: Tuple[float, float, float],
-                               use_cache: bool = True) -> str:
+    def submit_gaussian_smooth(
+        self,
+        channel_id: int,
+        volume: np.ndarray,
+        sigma: Tuple[float, float, float],
+        use_cache: bool = True,
+    ) -> str:
         """Submit a Gaussian smoothing request.
 
         Args:
@@ -533,23 +576,30 @@ class TransformManager(QObject):
         Returns:
             Request ID for tracking
         """
-        parameters = {'sigma': sigma}
+        parameters = {"sigma": sigma}
 
         return self._submit_transform(
-            'gaussian', channel_id, volume, parameters,
-            GaussianSmoothWorker, use_cache
+            "gaussian", channel_id, volume, parameters, GaussianSmoothWorker, use_cache
         )
 
-    def _submit_transform(self, transform_type: str, channel_id: int,
-                         volume: np.ndarray, parameters: Dict[str, Any],
-                         worker_class, use_cache: bool) -> str:
+    def _submit_transform(
+        self,
+        transform_type: str,
+        channel_id: int,
+        volume: np.ndarray,
+        parameters: Dict[str, Any],
+        worker_class,
+        use_cache: bool,
+    ) -> str:
         """Internal method to submit a transform request."""
         request_id = self._generate_request_id()
 
         # Check cache first
         if use_cache:
             volume_hash = self._compute_volume_hash(volume)
-            cache_key = self._generate_cache_key(transform_type, channel_id, parameters, volume_hash)
+            cache_key = self._generate_cache_key(
+                transform_type, channel_id, parameters, volume_hash
+            )
             cached_result = self.cache.get(cache_key)
 
             if cached_result is not None:
@@ -564,7 +614,7 @@ class TransformManager(QObject):
             transform_type=transform_type,
             channel_id=channel_id,
             volume=volume,
-            parameters=parameters
+            parameters=parameters,
         )
 
         # Create worker
@@ -578,14 +628,14 @@ class TransformManager(QObject):
             lambda rid, pct: self.transform_progress.emit(rid, pct)
         )
         worker.signals.completed.connect(
-            lambda rid, result: self._on_worker_completed(rid, channel_id, result, use_cache, parameters, volume)
+            lambda rid, result: self._on_worker_completed(
+                rid, channel_id, result, use_cache, parameters, volume
+            )
         )
         worker.signals.error.connect(
             lambda rid, err: self.transform_error.emit(rid, err)
         )
-        worker.signals.cancelled.connect(
-            lambda rid: self._on_worker_cancelled(rid)
-        )
+        worker.signals.cancelled.connect(lambda rid: self._on_worker_cancelled(rid))
 
         # Track active worker
         with QMutexLocker(self.workers_mutex):
@@ -594,12 +644,20 @@ class TransformManager(QObject):
         # Submit to thread pool
         self.thread_pool.start(worker)
 
-        logger.debug(f"Submitted {transform_type} request {request_id} for channel {channel_id}")
+        logger.debug(
+            f"Submitted {transform_type} request {request_id} for channel {channel_id}"
+        )
         return request_id
 
-    def _on_worker_completed(self, request_id: str, channel_id: int,
-                            result: np.ndarray, use_cache: bool,
-                            parameters: Dict[str, Any], volume: np.ndarray):
+    def _on_worker_completed(
+        self,
+        request_id: str,
+        channel_id: int,
+        result: np.ndarray,
+        use_cache: bool,
+        parameters: Dict[str, Any],
+        volume: np.ndarray,
+    ):
         """Handle worker completion."""
         # Remove from active workers
         with QMutexLocker(self.workers_mutex):
@@ -608,7 +666,9 @@ class TransformManager(QObject):
         # Cache the result
         if use_cache:
             volume_hash = self._compute_volume_hash(volume)
-            cache_key = self._generate_cache_key('', channel_id, parameters, volume_hash)
+            cache_key = self._generate_cache_key(
+                "", channel_id, parameters, volume_hash
+            )
             self.cache.put(cache_key, result)
 
         # Emit completion signal

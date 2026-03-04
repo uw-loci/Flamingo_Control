@@ -16,9 +16,10 @@ Color scheme is designed for red-green colorblind accessibility.
 
 import logging
 from typing import Optional
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel
-from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSlot, pyqtSignal
-from PyQt5.QtGui import QPainter, QPen, QBrush, QColor, QFont, QMouseEvent
+
+from PyQt5.QtCore import QPointF, QRectF, Qt, pyqtSignal, pyqtSlot
+from PyQt5.QtGui import QBrush, QColor, QFont, QMouseEvent, QPainter, QPen
+from PyQt5.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 
 class ChamberViewPanel(QWidget):
@@ -27,9 +28,17 @@ class ChamberViewPanel(QWidget):
     # Signal emitted when user clicks in the chamber (world coordinates in mm)
     click_position = pyqtSignal(float, float)  # (x, other_axis_value)
 
-    def __init__(self, title: str, x_min: float, x_max: float,
-                 other_min: float, other_max: float, other_label: str,
-                 pixels_per_mm: float = None, parent=None):
+    def __init__(
+        self,
+        title: str,
+        x_min: float,
+        x_max: float,
+        other_min: float,
+        other_max: float,
+        other_label: str,
+        pixels_per_mm: float = None,
+        parent=None,
+    ):
         """
         Initialize chamber view panel.
 
@@ -62,7 +71,9 @@ class ChamberViewPanel(QWidget):
         # Target position for click-to-move (mm)
         self.target_x: Optional[float] = None
         self.target_other: Optional[float] = None  # Z or Y
-        self.target_active: bool = True  # True = active (orange), False = stale (purple)
+        self.target_active: bool = (
+            True  # True = active (orange), False = stale (purple)
+        )
 
         # Proportional sizing - 1mm = same pixel size across all views
         # Padding for labels and margins
@@ -87,7 +98,9 @@ class ChamberViewPanel(QWidget):
         widget_height = map_height + self.padding_top + self.padding_bottom
 
         self.setMinimumSize(widget_width, widget_height)
-        self.setMaximumSize(widget_width, widget_height)  # Fixed size for consistent scale
+        self.setMaximumSize(
+            widget_width, widget_height
+        )  # Fixed size for consistent scale
         self.setStyleSheet("background-color: white; border: 1px solid #ccc;")
 
     def set_position(self, x: float, other: float) -> None:
@@ -136,15 +149,19 @@ class ChamberViewPanel(QWidget):
             x_world, other_world = self._screen_to_world(event.x(), event.y())
 
             # Check if click is within chamber bounds
-            if (self.x_min <= x_world <= self.x_max and
-                self.other_min <= other_world <= self.other_max):
+            if (
+                self.x_min <= x_world <= self.x_max
+                and self.other_min <= other_world <= self.other_max
+            ):
 
                 # Set target position for visual feedback
                 self.set_target_position(x_world, other_world)
 
                 # Emit signal with world coordinates
                 self.click_position.emit(x_world, other_world)
-                self.logger.debug(f"Click at: X={x_world:.3f}, {self.other_label}={other_world:.3f}")
+                self.logger.debug(
+                    f"Click at: X={x_world:.3f}, {self.other_label}={other_world:.3f}"
+                )
 
     def _screen_to_world(self, screen_x: int, screen_y: int) -> tuple:
         """
@@ -170,7 +187,9 @@ class ChamberViewPanel(QWidget):
         x_world = self.x_min + ((screen_x - self.padding_left) / map_width) * x_range
 
         # Other axis: bottom to top (inverted Y screen coordinates)
-        other_world = self.other_max - ((screen_y - self.padding_top) / map_height) * other_range
+        other_world = (
+            self.other_max - ((screen_y - self.padding_top) / map_height) * other_range
+        )
 
         return x_world, other_world
 
@@ -198,7 +217,10 @@ class ChamberViewPanel(QWidget):
         screen_x = self.padding_left + ((x_world - self.x_min) / x_range) * map_width
 
         # Other axis: bottom to top (inverted Y screen coordinates)
-        screen_y = self.padding_top + ((self.other_max - other_world) / other_range) * map_height
+        screen_y = (
+            self.padding_top
+            + ((self.other_max - other_world) / other_range) * map_height
+        )
 
         return screen_x, screen_y
 
@@ -255,7 +277,9 @@ class ChamberViewPanel(QWidget):
         painter.save()
         painter.translate(int(x1) - 35, int((y1 + y2) / 2))
         painter.rotate(-90)
-        other_label = f"{self.other_label}: {self.other_min:.1f} - {self.other_max:.1f} mm"
+        other_label = (
+            f"{self.other_label}: {self.other_min:.1f} - {self.other_max:.1f} mm"
+        )
         painter.drawText(-60, 0, other_label)
         painter.restore()
 
@@ -293,11 +317,19 @@ class ChamberViewPanel(QWidget):
 class XZViewPanel(ChamberViewPanel):
     """XZ View Panel - Top-down view showing X and Z axes."""
 
-    def __init__(self, x_min: float, x_max: float, z_min: float, z_max: float,
-                 pixels_per_mm: float = None, parent=None):
+    def __init__(
+        self,
+        x_min: float,
+        x_max: float,
+        z_min: float,
+        z_max: float,
+        pixels_per_mm: float = None,
+        parent=None,
+    ):
         """Initialize XZ view panel."""
-        super().__init__("XZ View (Top-Down)", x_min, x_max, z_min, z_max, "Z",
-                        pixels_per_mm, parent)
+        super().__init__(
+            "XZ View (Top-Down)", x_min, x_max, z_min, z_max, "Z", pixels_per_mm, parent
+        )
         self.z_pos = None
 
     def set_position(self, x: float, z: float) -> None:
@@ -379,12 +411,14 @@ class XZViewPanel(ChamberViewPanel):
         size = 15
 
         # Draw horizontal line
-        painter.drawLine(int(screen_x - size), int(screen_y),
-                        int(screen_x + size), int(screen_y))
+        painter.drawLine(
+            int(screen_x - size), int(screen_y), int(screen_x + size), int(screen_y)
+        )
 
         # Draw vertical line
-        painter.drawLine(int(screen_x), int(screen_y - size),
-                        int(screen_x), int(screen_y + size))
+        painter.drawLine(
+            int(screen_x), int(screen_y - size), int(screen_x), int(screen_y + size)
+        )
 
         # Draw circle around crosshair
         painter.setBrush(Qt.NoBrush)
@@ -412,11 +446,26 @@ class XZViewPanel(ChamberViewPanel):
 class XYViewPanel(ChamberViewPanel):
     """XY View Panel - Side view showing X and Y axes with pole/nub sample holder."""
 
-    def __init__(self, x_min: float, x_max: float, y_min: float, y_max: float,
-                 pixels_per_mm: float = None, parent=None):
+    def __init__(
+        self,
+        x_min: float,
+        x_max: float,
+        y_min: float,
+        y_max: float,
+        pixels_per_mm: float = None,
+        parent=None,
+    ):
         """Initialize XY view panel."""
-        super().__init__("XY View (Side View)", x_min, x_max, y_min, y_max, "Y",
-                        pixels_per_mm, parent)
+        super().__init__(
+            "XY View (Side View)",
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            "Y",
+            pixels_per_mm,
+            parent,
+        )
         self.y_pos = None
 
         # Objective position (rough estimate - inside chamber)
@@ -503,8 +552,8 @@ class XYViewPanel(ChamberViewPanel):
 
         # Sample holder dimensions
         column_width_mm = 1.0  # 1mm thick column
-        nub_width_mm = 0.25    # 0.25mm thick nub
-        nub_length_mm = 1.0    # 1mm extension down
+        nub_width_mm = 0.25  # 0.25mm thick nub
+        nub_length_mm = 1.0  # 1mm extension down
 
         # Convert to pixels
         column_width_px = column_width_mm * scale_factor
@@ -521,7 +570,9 @@ class XYViewPanel(ChamberViewPanel):
         # Get screen coordinates
         screen_x_pos, screen_y_tip = self._world_to_screen(self.x_pos, y_pos)
         screen_x_pos, screen_y_nub_top = self._world_to_screen(self.x_pos, nub_top_y)
-        screen_x_pos, screen_y_column_top = self._world_to_screen(self.x_pos, column_top_y)
+        screen_x_pos, screen_y_column_top = self._world_to_screen(
+            self.x_pos, column_top_y
+        )
 
         # Use vibrant cyan-blue (colorblind-safe)
         sample_color = QColor(0, 150, 200)
@@ -533,7 +584,7 @@ class XYViewPanel(ChamberViewPanel):
                 screen_x_pos - column_width_px / 2,
                 screen_y_column_top,
                 column_width_px,
-                screen_y_nub_top - screen_y_column_top
+                screen_y_nub_top - screen_y_column_top,
             )
             painter.setPen(QPen(sample_color, 1))
             painter.setBrush(QBrush(sample_color))
@@ -546,7 +597,7 @@ class XYViewPanel(ChamberViewPanel):
                 screen_x_pos - nub_width_px / 2,
                 screen_y_nub_top,
                 nub_width_px,
-                screen_y_tip - screen_y_nub_top
+                screen_y_tip - screen_y_nub_top,
             )
             painter.setPen(QPen(sample_color, 1))
             painter.setBrush(QBrush(sample_color))
@@ -583,12 +634,14 @@ class XYViewPanel(ChamberViewPanel):
         size = 15
 
         # Draw horizontal line
-        painter.drawLine(int(screen_x - size), int(screen_y),
-                        int(screen_x + size), int(screen_y))
+        painter.drawLine(
+            int(screen_x - size), int(screen_y), int(screen_x + size), int(screen_y)
+        )
 
         # Draw vertical line
-        painter.drawLine(int(screen_x), int(screen_y - size),
-                        int(screen_x), int(screen_y + size))
+        painter.drawLine(
+            int(screen_x), int(screen_y - size), int(screen_x), int(screen_y + size)
+        )
 
         # Draw circle around crosshair
         painter.setBrush(Qt.NoBrush)
@@ -650,12 +703,12 @@ class StageChamberVisualizationWidget(QWidget):
 
         # Stage limits - use provided or default to hardcoded values
         if stage_limits:
-            self.x_min = stage_limits['x']['min']
-            self.x_max = stage_limits['x']['max']
-            self.z_min = stage_limits['z']['min']
-            self.z_max = stage_limits['z']['max']
-            self.y_min = stage_limits['y']['min']
-            self.y_max = stage_limits['y']['max']
+            self.x_min = stage_limits["x"]["min"]
+            self.x_max = stage_limits["x"]["max"]
+            self.z_min = stage_limits["z"]["min"]
+            self.z_max = stage_limits["z"]["max"]
+            self.y_min = stage_limits["y"]["min"]
+            self.y_max = stage_limits["y"]["max"]
         else:
             # Fallback to hardcoded values if not provided
             self.x_min = 1.0
@@ -685,8 +738,10 @@ class StageChamberVisualizationWidget(QWidget):
         target_pixels = 350
         pixels_per_mm = target_pixels / max_range
 
-        self.logger.info(f"Chamber visualization scale: {pixels_per_mm:.2f} pixels/mm "
-                        f"(based on max range {max_range:.2f} mm)")
+        self.logger.info(
+            f"Chamber visualization scale: {pixels_per_mm:.2f} pixels/mm "
+            f"(based on max range {max_range:.2f} mm)"
+        )
 
         # Main layout - horizontal dual panel
         layout = QHBoxLayout()
@@ -695,17 +750,13 @@ class StageChamberVisualizationWidget(QWidget):
 
         # Create XZ view panel (left) with consistent scale
         self.xz_panel = XZViewPanel(
-            self.x_min, self.x_max,
-            self.z_min, self.z_max,
-            pixels_per_mm
+            self.x_min, self.x_max, self.z_min, self.z_max, pixels_per_mm
         )
         layout.addWidget(self.xz_panel)
 
         # Create XY view panel (right) with same scale
         self.xy_panel = XYViewPanel(
-            self.x_min, self.x_max,
-            self.y_min, self.y_max,
-            pixels_per_mm
+            self.x_min, self.x_max, self.y_min, self.y_max, pixels_per_mm
         )
         layout.addWidget(self.xy_panel)
 
@@ -728,4 +779,6 @@ class StageChamberVisualizationWidget(QWidget):
         # Update XY view (uses X and Y)
         self.xy_panel.set_position(x, y)
 
-        self.logger.debug(f"Chamber visualization updated: X={x:.2f}, Y={y:.2f}, Z={z:.2f}")
+        self.logger.debug(
+            f"Chamber visualization updated: X={x:.2f}, Y={y:.2f}, Z={z:.2f}"
+        )

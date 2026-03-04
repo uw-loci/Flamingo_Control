@@ -9,15 +9,15 @@ analysis to learn overhead correction factors for more accurate predictions.
 
 import json
 import logging
-from pathlib import Path
-from datetime import datetime
-from typing import Dict, Any, List, Optional, Tuple
 import statistics
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from py2flamingo.models.acquisition_timing import (
     AcquisitionTimingRecord,
     LearnedOverheadComponents,
-    TimingHistory
+    TimingHistory,
 )
 
 
@@ -54,7 +54,7 @@ class AcquisitionTimingService:
         """Load timing history from JSON file."""
         try:
             if self.timing_file.exists():
-                with open(self.timing_file, 'r') as f:
+                with open(self.timing_file, "r") as f:
                     data = json.load(f)
                     self._history = TimingHistory.from_dict(data)
                 self.logger.info(
@@ -71,7 +71,7 @@ class AcquisitionTimingService:
     def _save_history(self) -> None:
         """Save timing history to JSON file."""
         try:
-            with open(self.timing_file, 'w') as f:
+            with open(self.timing_file, "w") as f:
                 json.dump(self._history.to_dict(), f, indent=2)
             self.logger.debug(f"Saved timing history to {self.timing_file}")
         except Exception as e:
@@ -87,7 +87,7 @@ class AcquisitionTimingService:
         total_z_travel_mm: float,
         exposure_us: float,
         theoretical_duration_s: float,
-        actual_duration_s: float
+        actual_duration_s: float,
     ) -> AcquisitionTimingRecord:
         """
         Record a completed acquisition's timing data.
@@ -115,7 +115,7 @@ class AcquisitionTimingService:
             total_z_travel_mm=total_z_travel_mm,
             exposure_us=exposure_us,
             theoretical_duration_s=theoretical_duration_s,
-            actual_duration_s=actual_duration_s
+            actual_duration_s=actual_duration_s,
         )
 
         self._history.add_record(record)
@@ -140,7 +140,7 @@ class AcquisitionTimingService:
         theoretical_time: float,
         num_planes: int,
         num_lasers: int,
-        total_z_travel_mm: float
+        total_z_travel_mm: float,
     ) -> Tuple[float, int]:
         """
         Get corrected time estimate using learned factors.
@@ -162,7 +162,7 @@ class AcquisitionTimingService:
             theoretical_time=theoretical_time,
             num_planes=num_planes,
             num_lasers=num_lasers,
-            total_z_travel_mm=total_z_travel_mm
+            total_z_travel_mm=total_z_travel_mm,
         )
 
         return (corrected, self._history.learned_factors.sample_count)
@@ -188,21 +188,21 @@ class AcquisitionTimingService:
 
         if not records:
             return {
-                'sample_count': 0,
-                'mean_overhead_s': 0,
-                'std_overhead_s': 0,
-                'min_overhead_s': 0,
-                'max_overhead_s': 0,
+                "sample_count": 0,
+                "mean_overhead_s": 0,
+                "std_overhead_s": 0,
+                "min_overhead_s": 0,
+                "max_overhead_s": 0,
             }
 
         overheads = [r.overhead_s for r in records]
 
         return {
-            'sample_count': len(records),
-            'mean_overhead_s': statistics.mean(overheads),
-            'std_overhead_s': statistics.stdev(overheads) if len(overheads) > 1 else 0,
-            'min_overhead_s': min(overheads),
-            'max_overhead_s': max(overheads),
+            "sample_count": len(records),
+            "mean_overhead_s": statistics.mean(overheads),
+            "std_overhead_s": statistics.stdev(overheads) if len(overheads) > 1 else 0,
+            "min_overhead_s": min(overheads),
+            "max_overhead_s": max(overheads),
         }
 
     def _update_learned_factors(self) -> None:
@@ -246,7 +246,9 @@ class AcquisitionTimingService:
         if single_laser and multi_laser:
             avg_single = statistics.mean(single_laser)
             avg_multi = statistics.mean(multi_laser)
-            avg_switches = statistics.mean([r.num_lasers - 1 for r in records if r.num_lasers > 1])
+            avg_switches = statistics.mean(
+                [r.num_lasers - 1 for r in records if r.num_lasers > 1]
+            )
             if avg_switches > 0:
                 filter_switch_overhead = (avg_multi - avg_single) / avg_switches
 
@@ -258,10 +260,14 @@ class AcquisitionTimingService:
         self._history.learned_factors = LearnedOverheadComponents(
             base_overhead_s=base_overhead,
             filter_switch_s=max(0, filter_switch_overhead),
-            settle_correction_per_plane_s=statistics.mean(overhead_per_plane) if overhead_per_plane else 0,
-            z_overhead_per_mm_s=statistics.mean(overhead_per_mm) if overhead_per_mm else 0,
+            settle_correction_per_plane_s=(
+                statistics.mean(overhead_per_plane) if overhead_per_plane else 0
+            ),
+            z_overhead_per_mm_s=(
+                statistics.mean(overhead_per_mm) if overhead_per_mm else 0
+            ),
             sample_count=len(records),
-            last_updated=datetime.now().isoformat()
+            last_updated=datetime.now().isoformat(),
         )
 
         self.logger.info(

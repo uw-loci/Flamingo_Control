@@ -12,19 +12,19 @@ import copy
 import logging
 import time
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict, Any
-from queue import Queue, Empty
+from queue import Empty, Queue
 from threading import Event
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from py2flamingo.core.events import EventManager
+from py2flamingo.core.queue_manager import QueueManager
 from py2flamingo.models.microscope import Position
 from py2flamingo.utils.calculations import (
     calculate_rolling_y_intensity,
     find_peak_bounds,
 )
-from py2flamingo.core.queue_manager import QueueManager
-from py2flamingo.core.events import EventManager
 
 
 class SampleSearchService:
@@ -96,12 +96,12 @@ class SampleSearchService:
             RuntimeError: If scan fails
         """
         # Extract required parameters
-        y_max = search_params.get('y_max')
-        y_move = search_params.get('y_move')
-        z_end = search_params.get('z_end')
-        workflow_dict = search_params.get('workflow_dict')
-        workflow_zstack_name = search_params.get('workflow_zstack_name')
-        image_pixel_size_mm = search_params.get('image_pixel_size_mm')
+        y_max = search_params.get("y_max")
+        y_move = search_params.get("y_move")
+        z_end = search_params.get("z_end")
+        workflow_dict = search_params.get("workflow_dict")
+        workflow_zstack_name = search_params.get("workflow_zstack_name")
+        image_pixel_size_mm = search_params.get("image_pixel_size_mm")
 
         if not all([y_max, y_move, z_end, workflow_dict, workflow_zstack_name]):
             raise ValueError("Missing required search parameters")
@@ -117,7 +117,7 @@ class SampleSearchService:
         bounds = None
 
         # Get terminate event
-        terminate_event = self.event_manager.get_event('terminate')
+        terminate_event = self.event_manager.get_event("terminate")
 
         while not terminate_event.is_set() and (start_position.y + y_move * i) < y_max:
             self.logger.info(f"Y-axis scan iteration {i + 1}")
@@ -164,7 +164,9 @@ class SampleSearchService:
                     y_intensity for coord in coords for _, y_intensity in coord[1]
                 ]
 
-                bounds = find_peak_bounds(processing_output_full, num_peaks=sample_count)
+                bounds = find_peak_bounds(
+                    processing_output_full, num_peaks=sample_count
+                )
 
                 # Check if all bounds are found (none are None)
                 if bounds is not None and all(
@@ -220,24 +222,30 @@ class SampleSearchService:
             ValueError: If required parameters are missing
         """
         # Extract parameters
-        z_init = z_params.get('z_init')
-        z_search_depth_mm = z_params.get('z_search_depth_mm')
-        z_step_depth_mm = z_params.get('z_step_depth_mm')
-        workflow_dict = z_params.get('workflow_dict')
-        workflow_zstack_name = z_params.get('workflow_zstack_name')
-        i = z_params.get('iteration', 0)
-        loops = z_params.get('total_loops', 1)
+        z_init = z_params.get("z_init")
+        z_search_depth_mm = z_params.get("z_search_depth_mm")
+        z_step_depth_mm = z_params.get("z_step_depth_mm")
+        workflow_dict = z_params.get("workflow_dict")
+        workflow_zstack_name = z_params.get("workflow_zstack_name")
+        i = z_params.get("iteration", 0)
+        loops = z_params.get("total_loops", 1)
 
-        if not all([z_init is not None, z_search_depth_mm, z_step_depth_mm,
-                   workflow_dict, workflow_zstack_name]):
+        if not all(
+            [
+                z_init is not None,
+                z_search_depth_mm,
+                z_step_depth_mm,
+                workflow_dict,
+                workflow_zstack_name,
+            ]
+        ):
             raise ValueError("Missing required Z-axis search parameters")
 
         self.logger.info(
-            f"Z-axis scan: subset {i} of {loops - 1}, "
-            f"depth={z_step_depth_mm}mm"
+            f"Z-axis scan: subset {i} of {loops - 1}, " f"depth={z_step_depth_mm}mm"
         )
 
-        coords_z = z_params.get('coords_z', [])
+        coords_z = z_params.get("coords_z", [])
 
         # Calculate Z positions for this sub-stack
         z_start = z_init - z_search_depth_mm / 2 + i * z_step_depth_mm
@@ -280,8 +288,7 @@ class SampleSearchService:
             bounds = [[None, None]]
             if len(top25_percentile_means) > 4:
                 bounds_result = find_peak_bounds(
-                    top25_percentile_means,
-                    threshold_pct=30
+                    top25_percentile_means, threshold_pct=30
                 )
                 if bounds_result:
                     bounds = bounds_result
@@ -332,7 +339,7 @@ class SampleSearchService:
             raise ValueError("Failed to find sample boundaries in Y-axis scan")
 
         # Replace None values in bounds if needed
-        y_max = search_config.get('y_max', 100.0)
+        y_max = search_config.get("y_max", 100.0)
         bounds = self._replace_none_in_bounds(bounds, int(y_max))
 
         # Build result list
@@ -345,9 +352,9 @@ class SampleSearchService:
             center_idx = (start_idx + end_idx) // 2
 
             result = {
-                'bounds': (start_idx, end_idx),
-                'center_index': center_idx,
-                'width': end_idx - start_idx,
+                "bounds": (start_idx, end_idx),
+                "center_index": center_idx,
+                "width": end_idx - start_idx,
             }
             results.append(result)
 
@@ -447,7 +454,7 @@ class SampleSearchService:
         Returns:
             True if workflow completed, False if timeout
         """
-        system_idle = self.event_manager.get_event('system_idle')
+        system_idle = self.event_manager.get_event("system_idle")
         start_time = time.time()
 
         while not system_idle.is_set():
@@ -474,8 +481,8 @@ class SampleSearchService:
         Returns:
             Image data as numpy array, or None if timeout
         """
-        image_queue = self.queue_manager.get_queue('image')
-        terminate_event = self.event_manager.get_event('terminate')
+        image_queue = self.queue_manager.get_queue("image")
+        terminate_event = self.event_manager.get_event("terminate")
 
         start_time = time.time()
         while True:
@@ -499,6 +506,7 @@ class SampleSearchService:
 # ============================================================================
 # Legacy Compatibility
 # ============================================================================
+
 
 def create_sample_search_service(
     queue_manager: QueueManager,

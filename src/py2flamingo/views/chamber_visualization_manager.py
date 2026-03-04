@@ -16,6 +16,7 @@ from py2flamingo.services.position_preset_service import PositionPresetService
 # napari imports for 3D visualization
 try:
     import napari
+
     NAPARI_AVAILABLE = True
 except ImportError:
     NAPARI_AVAILABLE = False
@@ -39,7 +40,9 @@ class ChamberVisualizationManager:
         set_objective_calibration(x, y, z, r) - set + save calibration, update focus frame
     """
 
-    def __init__(self, voxel_storage, config, invert_x, position_sliders=None, slider_scale=1000):
+    def __init__(
+        self, voxel_storage, config, invert_x, position_sliders=None, slider_scale=1000
+    ):
         """
         Initialize ChamberVisualizationManager.
 
@@ -60,14 +63,16 @@ class ChamberVisualizationManager:
         self.logger = logging.getLogger(__name__)
 
         # 3D visualization state
-        self.holder_position = {'x': 0, 'y': 0, 'z': 0}
+        self.holder_position = {"x": 0, "y": 0, "z": 0}
         self.rotation_indicator_length = 0
         self.extension_length_mm = 10.0  # Extension extends 10mm upward from tip
         self.extension_diameter_mm = 0.22  # Fine extension (220 micrometers)
         self.STAGE_Y_AT_OBJECTIVE = 7.45  # mm - stage Y at objective focal plane
-        self.OBJECTIVE_CHAMBER_Y_MM = 7.0  # mm - objective focal plane in chamber coords
+        self.OBJECTIVE_CHAMBER_Y_MM = (
+            7.0  # mm - objective focal plane in chamber coords
+        )
         self.objective_xy_calibration = None  # Will be loaded from presets
-        self.current_rotation = {'ry': 0}  # Current rotation angle
+        self.current_rotation = {"ry": 0}  # Current rotation angle
         self._on_setup_complete = None  # Callback after deferred setup finishes
         self._embed_start_time = 0  # For deferred timing
 
@@ -132,6 +137,7 @@ class ChamberVisualizationManager:
         except Exception as e:
             self.logger.error(f"Failed to create 3D viewer: {e}")
             import traceback
+
             traceback.print_exc()
             self.viewer = None
 
@@ -142,6 +148,7 @@ class ChamberVisualizationManager:
         except Exception as e:
             self.logger.error(f"Failed deferred viewer setup: {e}")
             import traceback
+
             traceback.print_exc()
 
     def _finish_viewer_setup(self, t_start: float) -> None:
@@ -151,13 +158,17 @@ class ChamberVisualizationManager:
         # Setup visualization components
         self._setup_chamber()
         t_chamber = time.perf_counter()
-        self.logger.info(f"Chamber visualization setup in {t_chamber - t_before_chamber:.2f}s")
+        self.logger.info(
+            f"Chamber visualization setup in {t_chamber - t_before_chamber:.2f}s"
+        )
 
         self.setup_data_layers()
         t_layers = time.perf_counter()
         self.logger.info(f"Data layers setup in {t_layers - t_chamber:.2f}s")
 
-        self.logger.info(f"Created napari 3D viewer successfully (total: {t_layers - t_start:.2f}s)")
+        self.logger.info(
+            f"Created napari 3D viewer successfully (total: {t_layers - t_start:.2f}s)"
+        )
 
         # Notify listeners that deferred setup is complete
         if self._on_setup_complete:
@@ -175,16 +186,18 @@ class ChamberVisualizationManager:
             dims = self.voxel_storage.display_dims  # (Z, Y, X) order
 
             # Define the 8 corners of the box in napari (Z, Y, X) order
-            corners = np.array([
-                [0, 0, 0],
-                [dims[0]-1, 0, 0],
-                [dims[0]-1, 0, dims[2]-1],
-                [0, 0, dims[2]-1],
-                [0, dims[1]-1, 0],
-                [dims[0]-1, dims[1]-1, 0],
-                [dims[0]-1, dims[1]-1, dims[2]-1],
-                [0, dims[1]-1, dims[2]-1]
-            ])
+            corners = np.array(
+                [
+                    [0, 0, 0],
+                    [dims[0] - 1, 0, 0],
+                    [dims[0] - 1, 0, dims[2] - 1],
+                    [0, 0, dims[2] - 1],
+                    [0, dims[1] - 1, 0],
+                    [dims[0] - 1, dims[1] - 1, 0],
+                    [dims[0] - 1, dims[1] - 1, dims[2] - 1],
+                    [0, dims[1] - 1, dims[2] - 1],
+                ]
+            )
 
             # All 12 chamber edges combined into single layer for performance
             # Z edges (yellow), Y edges (magenta), X edges (cyan)
@@ -203,19 +216,23 @@ class ChamberVisualizationManager:
                 [corners[0], corners[3]],
                 [corners[1], corners[2]],
                 [corners[4], corners[7]],
-                [corners[5], corners[6]]
+                [corners[5], corners[6]],
             ]
 
             # Per-edge colors: 4 yellow (Z), 4 magenta (Y), 4 cyan (X)
             edge_colors = (
-                ['#8B8B00'] * 4 +  # Z edges
-                ['#8B008B'] * 4 +  # Y edges
-                ['#008B8B'] * 4    # X edges
+                ["#8B8B00"] * 4  # Z edges
+                + ["#8B008B"] * 4  # Y edges
+                + ["#008B8B"] * 4  # X edges
             )
 
             self.viewer.add_shapes(
-                data=all_edges, shape_type='line', name='Chamber Wireframe',
-                edge_color=edge_colors, edge_width=2, opacity=0.6
+                data=all_edges,
+                shape_type="line",
+                name="Chamber Wireframe",
+                edge_color=edge_colors,
+                edge_width=2,
+                opacity=0.6,
             )
 
             # Add reference walls (subtle fill for orientation when rotating)
@@ -252,42 +269,50 @@ class ChamberVisualizationManager:
             wall_opacity = 0.04
 
             # --- Back wall (Z=0 plane, where objective is) ---
-            back_verts = np.array([
-                [0, 0, 0],          # top-left
-                [0, 0, x_max],      # top-right
-                [0, y_max, x_max],  # bottom-right
-                [0, y_max, 0],      # bottom-left
-            ], dtype=np.float32)
+            back_verts = np.array(
+                [
+                    [0, 0, 0],  # top-left
+                    [0, 0, x_max],  # top-right
+                    [0, y_max, x_max],  # bottom-right
+                    [0, y_max, 0],  # bottom-left
+                ],
+                dtype=np.float32,
+            )
             back_faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
             back_values = np.ones(len(back_verts), dtype=np.float32)
 
             self.viewer.add_surface(
                 (back_verts, back_faces, back_values),
-                name='Back Wall',
-                colormap='gray',
+                name="Back Wall",
+                colormap="gray",
                 opacity=wall_opacity,
-                shading='none',
+                shading="none",
             )
 
             # --- Bottom wall (Y=max plane, physical bottom of chamber) ---
-            bottom_verts = np.array([
-                [0, y_max, 0],          # back-left
-                [0, y_max, x_max],      # back-right
-                [z_max, y_max, x_max],  # front-right
-                [z_max, y_max, 0],      # front-left
-            ], dtype=np.float32)
+            bottom_verts = np.array(
+                [
+                    [0, y_max, 0],  # back-left
+                    [0, y_max, x_max],  # back-right
+                    [z_max, y_max, x_max],  # front-right
+                    [z_max, y_max, 0],  # front-left
+                ],
+                dtype=np.float32,
+            )
             bottom_faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
             bottom_values = np.ones(len(bottom_verts), dtype=np.float32)
 
             self.viewer.add_surface(
                 (bottom_verts, bottom_faces, bottom_values),
-                name='Bottom Wall',
-                colormap='gray',
+                name="Bottom Wall",
+                colormap="gray",
                 opacity=wall_opacity,
-                shading='none',
+                shading="none",
             )
 
-            self.logger.info(f"Added reference walls (back Z=0, bottom Y={y_max}) at {wall_opacity:.0%} opacity")
+            self.logger.info(
+                f"Added reference walls (back Z=0, bottom Y={y_max}) at {wall_opacity:.0%} opacity"
+            )
 
         except Exception as e:
             self.logger.warning(f"Failed to add reference walls: {e}")
@@ -303,8 +328,12 @@ class ChamberVisualizationManager:
 
         try:
             # Get holder dimensions from config
-            holder_diameter_mm = self._config.get('sample_chamber', {}).get('holder_diameter_mm', 3.0)
-            voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+            holder_diameter_mm = self._config.get("sample_chamber", {}).get(
+                "holder_diameter_mm", 3.0
+            )
+            voxel_size_um = self._config.get("display", {}).get(
+                "voxel_size_um", [50, 50, 50]
+            )[0]
             holder_radius_voxels = int((holder_diameter_mm * 1000 / 2) / voxel_size_um)
             voxel_size_mm = voxel_size_um / 1000.0
 
@@ -314,20 +343,26 @@ class ChamberVisualizationManager:
             x_mm = 0
             stage_y_mm = 0
             z_mm = 0
-            if self._position_sliders and 'x' in self._position_sliders:
-                x_mm = self._position_sliders['x'].value() / self._slider_scale
-            if self._position_sliders and 'y' in self._position_sliders:
-                stage_y_mm = self._position_sliders['y'].value() / self._slider_scale
-            if self._position_sliders and 'z' in self._position_sliders:
-                z_mm = self._position_sliders['z'].value() / self._slider_scale
+            if self._position_sliders and "x" in self._position_sliders:
+                x_mm = self._position_sliders["x"].value() / self._slider_scale
+            if self._position_sliders and "y" in self._position_sliders:
+                stage_y_mm = self._position_sliders["y"].value() / self._slider_scale
+            if self._position_sliders and "z" in self._position_sliders:
+                z_mm = self._position_sliders["z"].value() / self._slider_scale
 
             # Convert stage Y to chamber Y (where extension tip is)
             chamber_y_tip_mm = self._stage_y_to_chamber_y(stage_y_mm)
 
             # Get coordinate ranges from config
-            x_range = self._config.get('stage_control', {}).get('x_range_mm', [1.0, 12.31])
-            y_range = self._config.get('stage_control', {}).get('y_range_mm', [0.0, 14.0])
-            z_range = self._config.get('stage_control', {}).get('z_range_mm', [12.5, 26.0])
+            x_range = self._config.get("stage_control", {}).get(
+                "x_range_mm", [1.0, 12.31]
+            )
+            y_range = self._config.get("stage_control", {}).get(
+                "y_range_mm", [0.0, 14.0]
+            )
+            z_range = self._config.get("stage_control", {}).get(
+                "z_range_mm", [12.5, 26.0]
+            )
 
             # Convert physical mm to napari voxel coordinates
             # X is inverted in napari if configured
@@ -348,7 +383,7 @@ class ChamberVisualizationManager:
             napari_z = max(0, min(dims[0] - 1, napari_z))
 
             # Store holder TIP position (what matters for extension and sample data)
-            self.holder_position = {'x': napari_x, 'y': napari_y_tip, 'z': napari_z}
+            self.holder_position = {"x": napari_x, "y": napari_y_tip, "z": napari_z}
 
             # Create holder indicator at chamber top (Y=0) - the mounting point
             # Note: The holder_position stores the TIP, but we display at Y=0
@@ -356,17 +391,21 @@ class ChamberVisualizationManager:
 
             self.viewer.add_points(
                 holder_point,
-                name='Sample Holder',
+                name="Sample Holder",
                 size=holder_radius_voxels * 2,
-                face_color='gray',
-                border_color='darkgray',
+                face_color="gray",
+                border_color="darkgray",
                 border_width=0.05,
                 opacity=0.6,
-                shading='spherical'
+                shading="spherical",
             )
 
-            self.logger.info(f"Added sample holder at napari coords: Z={napari_z}, Y=0, X={napari_x}")
-            self.logger.info(f"  Holder TIP position: Y_tip={napari_y_tip} (stage_y={stage_y_mm:.2f}mm, chamber_y={chamber_y_tip_mm:.2f}mm)")
+            self.logger.info(
+                f"Added sample holder at napari coords: Z={napari_z}, Y=0, X={napari_x}"
+            )
+            self.logger.info(
+                f"  Holder TIP position: Y_tip={napari_y_tip} (stage_y={stage_y_mm:.2f}mm, chamber_y={chamber_y_tip_mm:.2f}mm)"
+            )
 
         except Exception as e:
             self.logger.warning(f"Failed to add sample holder: {e}")
@@ -385,18 +424,24 @@ class ChamberVisualizationManager:
 
         try:
             dims = self.voxel_storage.display_dims
-            voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+            voxel_size_um = self._config.get("display", {}).get(
+                "voxel_size_um", [50, 50, 50]
+            )[0]
             voxel_size_mm = voxel_size_um / 1000.0
 
             # Get extension TIP position (stored in holder_position)
-            napari_x = self.holder_position['x']
-            napari_y_tip = self.holder_position['y']  # Extension tip (where sample is attached)
-            napari_z = self.holder_position['z']
+            napari_x = self.holder_position["x"]
+            napari_y_tip = self.holder_position[
+                "y"
+            ]  # Extension tip (where sample is attached)
+            napari_z = self.holder_position["z"]
 
             # Extension extends UPWARD from tip by extension_length_mm (10mm)
             # Napari Y is inverted: upward = DECREASING Y values
             extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
-            napari_y_top = napari_y_tip - extension_length_voxels  # Top is ABOVE tip (smaller Y)
+            napari_y_top = (
+                napari_y_tip - extension_length_voxels
+            )  # Top is ABOVE tip (smaller Y)
 
             # Extension from top (smaller Y) to tip (larger Y)
             y_start = max(0, napari_y_top)  # Clamp to chamber top if needed
@@ -408,19 +453,21 @@ class ChamberVisualizationManager:
             for y in range(y_start, y_end + 1, 2):
                 extension_points.append([napari_z, y, napari_x])
 
-            self.logger.info(f"Extension: {len(extension_points)} points from Y={y_start} (top) to Y={y_end} (tip)")
+            self.logger.info(
+                f"Extension: {len(extension_points)} points from Y={y_start} (top) to Y={y_end} (tip)"
+            )
 
             if extension_points:
                 extension_array = np.array(extension_points)
                 self.viewer.add_points(
                     extension_array,
-                    name='Fine Extension',
+                    name="Fine Extension",
                     size=4,
-                    face_color='#FFFF00',  # Bright yellow
-                    border_color='#FFA500',  # Orange border
+                    face_color="#FFFF00",  # Bright yellow
+                    border_color="#FFA500",  # Orange border
                     border_width=0.1,
                     opacity=0.9,
-                    shading='spherical'
+                    shading="spherical",
                 )
 
         except Exception as e:
@@ -438,13 +485,17 @@ class ChamberVisualizationManager:
             z_objective = 0
 
             # Objective focal plane position
-            voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+            voxel_size_um = self._config.get("display", {}).get(
+                "voxel_size_um", [50, 50, 50]
+            )[0]
             voxel_size_mm = voxel_size_um / 1000.0
 
             # Y position at objective focal plane (7mm from top in physical coords)
             # In napari, Y is inverted
-            y_range = self._config.get('stage_control', {}).get('y_range_mm', [0, 14])
-            napari_y_objective = int((y_range[1] - self.OBJECTIVE_CHAMBER_Y_MM) / voxel_size_mm)
+            y_range = self._config.get("stage_control", {}).get("y_range_mm", [0, 14])
+            napari_y_objective = int(
+                (y_range[1] - self.OBJECTIVE_CHAMBER_Y_MM) / voxel_size_mm
+            )
             napari_y_objective = min(max(0, napari_y_objective), dims[1] - 1)
 
             center_y = napari_y_objective
@@ -464,16 +515,18 @@ class ChamberVisualizationManager:
                 circle_points.append([z_objective, y, x])
 
             # Create circle edges
-            circle_edges = [[circle_points[i], circle_points[(i+1) % len(circle_points)]]
-                           for i in range(len(circle_points))]
+            circle_edges = [
+                [circle_points[i], circle_points[(i + 1) % len(circle_points)]]
+                for i in range(len(circle_points))
+            ]
 
             self.viewer.add_shapes(
                 data=circle_edges,
-                shape_type='line',
-                name='Objective',
-                edge_color='#FFCC00',  # Gold/yellow
+                shape_type="line",
+                name="Objective",
+                edge_color="#FFCC00",  # Gold/yellow
                 edge_width=3,
-                opacity=0.3
+                opacity=0.3,
             )
 
         except Exception as e:
@@ -493,29 +546,35 @@ class ChamberVisualizationManager:
 
             # Position at Y=0 (top of chamber)
             y_position = 0
-            holder_z = self.holder_position['z']
-            holder_x = self.holder_position['x']
+            holder_z = self.holder_position["z"]
+            holder_x = self.holder_position["x"]
 
             # At 0 degrees, extends along +X axis
             indicator_start = np.array([holder_z, y_position, holder_x])
-            indicator_end = np.array([holder_z, y_position, holder_x + indicator_length])
+            indicator_end = np.array(
+                [holder_z, y_position, holder_x + indicator_length]
+            )
 
             # Get color based on rotation angle
-            initial_color = self._get_rotation_gradient_color(self.current_rotation.get('ry', 0))
+            initial_color = self._get_rotation_gradient_color(
+                self.current_rotation.get("ry", 0)
+            )
 
             self.viewer.add_shapes(
                 data=[[indicator_start, indicator_end]],
-                shape_type='line',
-                name='Rotation Indicator',
+                shape_type="line",
+                name="Rotation Indicator",
                 edge_color=initial_color,
                 edge_width=3,
-                opacity=0.8
+                opacity=0.8,
             )
 
             # Immediately update indicator to current rotation angle
             # (indicator was created at 0 deg, but actual rotation may differ)
             self._update_rotation_indicator()
-            self.logger.info(f"Rotation indicator initialized at {self.current_rotation.get('ry', 0):.1f} deg")
+            self.logger.info(
+                f"Rotation indicator initialized at {self.current_rotation.get('ry', 0):.1f} deg"
+            )
 
         except Exception as e:
             self.logger.warning(f"Failed to add rotation indicator: {e}")
@@ -527,30 +586,40 @@ class ChamberVisualizationManager:
 
         try:
             dims = self.voxel_storage.display_dims
-            voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+            voxel_size_um = self._config.get("display", {}).get(
+                "voxel_size_um", [50, 50, 50]
+            )[0]
             voxel_size_mm = voxel_size_um / 1000.0
 
             # Focus frame configuration
-            focus_config = self._config.get('focus_frame', {})
-            fov_x_mm = focus_config.get('field_of_view_x_mm', 0.52)
-            fov_y_mm = focus_config.get('field_of_view_y_mm', 0.52)
-            frame_color = focus_config.get('color', '#FFFF00')
-            edge_width = focus_config.get('edge_width', 3)
-            opacity = focus_config.get('opacity', 0.9)
+            focus_config = self._config.get("focus_frame", {})
+            fov_x_mm = focus_config.get("field_of_view_x_mm", 0.52)
+            fov_y_mm = focus_config.get("field_of_view_y_mm", 0.52)
+            frame_color = focus_config.get("color", "#FFFF00")
+            edge_width = focus_config.get("edge_width", 3)
+            opacity = focus_config.get("opacity", 0.9)
 
             # FOV in voxels
             fov_x_voxels = fov_x_mm / voxel_size_mm
             fov_y_voxels = fov_y_mm / voxel_size_mm
 
             # Position at objective focal plane
-            x_range = self._config.get('stage_control', {}).get('x_range_mm', [1.0, 12.31])
-            y_range = self._config.get('stage_control', {}).get('y_range_mm', [0, 14])
-            z_range = self._config.get('stage_control', {}).get('z_range_mm', [12.5, 26])
+            x_range = self._config.get("stage_control", {}).get(
+                "x_range_mm", [1.0, 12.31]
+            )
+            y_range = self._config.get("stage_control", {}).get("y_range_mm", [0, 14])
+            z_range = self._config.get("stage_control", {}).get(
+                "z_range_mm", [12.5, 26]
+            )
 
             # Use calibration if available, otherwise center of ranges
             if self.objective_xy_calibration:
-                focal_x_mm = self.objective_xy_calibration.get('x', (x_range[0] + x_range[1]) / 2)
-                focal_z_mm = self.objective_xy_calibration.get('z', (z_range[0] + z_range[1]) / 2)
+                focal_x_mm = self.objective_xy_calibration.get(
+                    "x", (x_range[0] + x_range[1]) / 2
+                )
+                focal_z_mm = self.objective_xy_calibration.get(
+                    "z", (z_range[0] + z_range[1]) / 2
+                )
             else:
                 focal_x_mm = (x_range[0] + x_range[1]) / 2
                 focal_z_mm = (z_range[0] + z_range[1]) / 2
@@ -591,11 +660,11 @@ class ChamberVisualizationManager:
 
             self.viewer.add_shapes(
                 data=frame_edges,
-                shape_type='line',
-                name='XY Focus Frame',
+                shape_type="line",
+                name="XY Focus Frame",
                 edge_color=frame_color,
                 edge_width=edge_width,
-                opacity=opacity
+                opacity=opacity,
             )
 
         except Exception as e:
@@ -626,7 +695,7 @@ class ChamberVisualizationManager:
             g = int(255 * (360 - angle) / 90)
             b = 255
 
-        return f'#{r:02x}{g:02x}{b:02x}'
+        return f"#{r:02x}{g:02x}{b:02x}"
 
     def _stage_y_to_chamber_y(self, stage_y_mm: float) -> float:
         """Convert stage Y position to chamber Y coordinate."""
@@ -640,7 +709,7 @@ class ChamberVisualizationManager:
         Args:
             x_mm, y_mm, z_mm: Physical stage coordinates in mm (y_mm is stage control value)
         """
-        if not self.viewer or 'Sample Holder' not in self.viewer.layers:
+        if not self.viewer or "Sample Holder" not in self.viewer.layers:
             return
         if not self.voxel_storage:
             return
@@ -649,11 +718,13 @@ class ChamberVisualizationManager:
         chamber_y_tip_mm = self._stage_y_to_chamber_y(y_mm)
 
         # Get coordinate conversion parameters from config
-        voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+        voxel_size_um = self._config.get("display", {}).get(
+            "voxel_size_um", [50, 50, 50]
+        )[0]
         voxel_size_mm = voxel_size_um / 1000.0
-        x_range = self._config.get('stage_control', {}).get('x_range_mm', [1.0, 12.31])
-        y_range = self._config.get('stage_control', {}).get('y_range_mm', [0.0, 14.0])
-        z_range = self._config.get('stage_control', {}).get('z_range_mm', [12.5, 26.0])
+        x_range = self._config.get("stage_control", {}).get("x_range_mm", [1.0, 12.31])
+        y_range = self._config.get("stage_control", {}).get("y_range_mm", [0.0, 14.0])
+        z_range = self._config.get("stage_control", {}).get("z_range_mm", [12.5, 26.0])
         dims = self.voxel_storage.display_dims  # (Z, Y, X)
 
         # Convert physical mm to napari voxel coordinates
@@ -671,14 +742,16 @@ class ChamberVisualizationManager:
         napari_z = max(0, min(dims[0] - 1, napari_z))
 
         # Update holder TIP position
-        self.holder_position = {'x': napari_x, 'y': napari_y_tip, 'z': napari_z}
+        self.holder_position = {"x": napari_x, "y": napari_y_tip, "z": napari_z}
 
         # Holder shown as single ball at chamber top (Y=0) - the mounting point
         holder_point = np.array([[napari_z, 0, napari_x]])
-        self.viewer.layers['Sample Holder'].data = holder_point
+        self.viewer.layers["Sample Holder"].data = holder_point
 
-        self.logger.debug(f"Updated holder: stage ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) -> "
-                         f"napari (Z={napari_z}, Y_tip={napari_y_tip}, X={napari_x})")
+        self.logger.debug(
+            f"Updated holder: stage ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) -> "
+            f"napari (Z={napari_z}, Y_tip={napari_y_tip}, X={napari_x})"
+        )
 
         # Update dependent elements
         self._update_fine_extension()
@@ -693,22 +766,26 @@ class ChamberVisualizationManager:
 
         In napari coordinates, upward = decreasing Y values.
         """
-        if not self.viewer or 'Fine Extension' not in self.viewer.layers:
+        if not self.viewer or "Fine Extension" not in self.viewer.layers:
             return
         if not self.voxel_storage:
             return
 
         # Get current TIP position (where sample is attached)
-        napari_x = self.holder_position['x']
-        napari_y_tip = self.holder_position['y']  # Extension tip (sample position)
-        napari_z = self.holder_position['z']
+        napari_x = self.holder_position["x"]
+        napari_y_tip = self.holder_position["y"]  # Extension tip (sample position)
+        napari_z = self.holder_position["z"]
 
         # Extension extends UPWARD from tip by extension_length_mm (10mm)
         # Napari Y is inverted: upward = DECREASING Y values
-        voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+        voxel_size_um = self._config.get("display", {}).get(
+            "voxel_size_um", [50, 50, 50]
+        )[0]
         voxel_size_mm = voxel_size_um / 1000.0
         extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
-        napari_y_top = napari_y_tip - extension_length_voxels  # Top is ABOVE tip (smaller Y)
+        napari_y_top = (
+            napari_y_tip - extension_length_voxels
+        )  # Top is ABOVE tip (smaller Y)
 
         # Extension from top (smaller Y) to tip (larger Y)
         y_start = max(0, napari_y_top)  # Clamp to chamber top if needed
@@ -720,41 +797,37 @@ class ChamberVisualizationManager:
             extension_points.append([napari_z, y, napari_x])
 
         if extension_points:
-            self.viewer.layers['Fine Extension'].data = np.array(extension_points)
+            self.viewer.layers["Fine Extension"].data = np.array(extension_points)
         else:
             # If no points, show minimal placeholder
-            self.viewer.layers['Fine Extension'].data = np.array([[napari_z, y_start, napari_x]])
+            self.viewer.layers["Fine Extension"].data = np.array(
+                [[napari_z, y_start, napari_x]]
+            )
 
     def _update_rotation_indicator(self) -> None:
         """Update rotation indicator based on current rotation angle and holder position."""
-        if not self.viewer or 'Rotation Indicator' not in self.viewer.layers:
+        if not self.viewer or "Rotation Indicator" not in self.viewer.layers:
             return
 
-        angle_deg = self.current_rotation.get('ry', 0)
+        angle_deg = self.current_rotation.get("ry", 0)
         angle_rad = np.radians(angle_deg)
 
         indicator_color = self._get_rotation_gradient_color(angle_deg)
 
         # Indicator at Y=0 (top of chamber), follows holder X/Z position
         y_position = 0
-        start = np.array([
-            self.holder_position['z'],
-            y_position,
-            self.holder_position['x']
-        ])
+        start = np.array(
+            [self.holder_position["z"], y_position, self.holder_position["x"]]
+        )
 
         # End point rotated in ZX plane
         dx = self.rotation_indicator_length * np.cos(angle_rad)
         dz = self.rotation_indicator_length * np.sin(angle_rad)
 
-        end = np.array([
-            start[0] + dz,
-            y_position,
-            start[2] + dx
-        ])
+        end = np.array([start[0] + dz, y_position, start[2] + dx])
 
-        self.viewer.layers['Rotation Indicator'].data = [[start, end]]
-        self.viewer.layers['Rotation Indicator'].edge_color = [indicator_color]
+        self.viewer.layers["Rotation Indicator"].data = [[start, end]]
+        self.viewer.layers["Rotation Indicator"].edge_color = [indicator_color]
 
     def set_rotation(self, angle_deg: float) -> None:
         """Set the current rotation angle and update the indicator.
@@ -762,7 +835,7 @@ class ChamberVisualizationManager:
         Args:
             angle_deg: Rotation angle in degrees
         """
-        self.current_rotation['ry'] = angle_deg
+        self.current_rotation["ry"] = angle_deg
         self._update_rotation_indicator()
 
     def update_focus_frame(self) -> None:
@@ -771,37 +844,43 @@ class ChamberVisualizationManager:
         The focus frame is at a FIXED position (focal plane) and only needs
         to be updated when the calibration changes, not when the stage moves.
         """
-        if not self.viewer or 'XY Focus Frame' not in self.viewer.layers:
+        if not self.viewer or "XY Focus Frame" not in self.viewer.layers:
             return
         if not self.voxel_storage:
             return
 
         dims = self.voxel_storage.display_dims
-        voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])[0]
+        voxel_size_um = self._config.get("display", {}).get(
+            "voxel_size_um", [50, 50, 50]
+        )[0]
         voxel_size_mm = voxel_size_um / 1000.0
 
-        focus_config = self._config.get('focus_frame', {})
-        fov_x_mm = focus_config.get('field_of_view_x_mm', 0.52)
-        fov_y_mm = focus_config.get('field_of_view_y_mm', 0.52)
+        focus_config = self._config.get("focus_frame", {})
+        fov_x_mm = focus_config.get("field_of_view_x_mm", 0.52)
+        fov_y_mm = focus_config.get("field_of_view_y_mm", 0.52)
 
         # Y position at objective focal plane
-        y_range = self._config.get('stage_control', {}).get('y_range_mm', [0, 14])
+        y_range = self._config.get("stage_control", {}).get("y_range_mm", [0, 14])
         napari_y = int((y_range[1] - self.OBJECTIVE_CHAMBER_Y_MM) / voxel_size_mm)
         napari_y = min(max(0, napari_y), dims[1] - 1)
 
         # X and Z from calibration or use defaults
         if self.objective_xy_calibration:
-            x_mm = self.objective_xy_calibration['x']
-            z_mm = self.objective_xy_calibration['z']
+            x_mm = self.objective_xy_calibration["x"]
+            z_mm = self.objective_xy_calibration["z"]
         else:
-            x_range = self._config.get('stage_control', {}).get('x_range_mm', [1.0, 12.31])
-            z_range = self._config.get('stage_control', {}).get('z_range_mm', [12.5, 26.0])
+            x_range = self._config.get("stage_control", {}).get(
+                "x_range_mm", [1.0, 12.31]
+            )
+            z_range = self._config.get("stage_control", {}).get(
+                "z_range_mm", [12.5, 26.0]
+            )
             x_mm = (x_range[0] + x_range[1]) / 2
             z_mm = (z_range[0] + z_range[1]) / 2
 
         # Convert to napari coordinates
-        x_range = self._config.get('stage_control', {}).get('x_range_mm', [1.0, 12.31])
-        z_range = self._config.get('stage_control', {}).get('z_range_mm', [12.5, 26.0])
+        x_range = self._config.get("stage_control", {}).get("x_range_mm", [1.0, 12.31])
+        z_range = self._config.get("stage_control", {}).get("z_range_mm", [12.5, 26.0])
 
         if self._invert_x:
             napari_x = int((x_range[1] - x_mm) / voxel_size_mm)
@@ -830,26 +909,51 @@ class ChamberVisualizationManager:
             [corners[3], corners[0]],
         ]
 
-        self.viewer.layers['XY Focus Frame'].data = frame_edges
+        self.viewer.layers["XY Focus Frame"].data = frame_edges
 
-        self.logger.info(f"Updated XY focus frame to X={x_mm:.2f}, Z={z_mm:.2f} mm "
-                        f"(napari X={napari_x}, Z={napari_z})")
+        self.logger.info(
+            f"Updated XY focus frame to X={x_mm:.2f}, Z={z_mm:.2f} mm "
+            f"(napari X={napari_x}, Z={napari_z})"
+        )
 
     def setup_data_layers(self) -> None:
         """Setup napari layers for multi-channel data."""
         if not self.viewer or not self.voxel_storage:
             return
 
-        channels_config = self._config.get('channels', [
-            {'id': 0, 'name': '405nm (DAPI)', 'default_colormap': 'cyan', 'default_visible': True},
-            {'id': 1, 'name': '488nm (GFP)', 'default_colormap': 'green', 'default_visible': True},
-            {'id': 2, 'name': '561nm (RFP)', 'default_colormap': 'red', 'default_visible': True},
-            {'id': 3, 'name': '640nm (Far-Red)', 'default_colormap': 'magenta', 'default_visible': False}
-        ])
+        channels_config = self._config.get(
+            "channels",
+            [
+                {
+                    "id": 0,
+                    "name": "405nm (DAPI)",
+                    "default_colormap": "cyan",
+                    "default_visible": True,
+                },
+                {
+                    "id": 1,
+                    "name": "488nm (GFP)",
+                    "default_colormap": "green",
+                    "default_visible": True,
+                },
+                {
+                    "id": 2,
+                    "name": "561nm (RFP)",
+                    "default_colormap": "red",
+                    "default_visible": True,
+                },
+                {
+                    "id": 3,
+                    "name": "640nm (Far-Red)",
+                    "default_colormap": "magenta",
+                    "default_visible": False,
+                },
+            ],
+        )
 
         for ch_config in channels_config:
-            ch_id = ch_config['id']
-            ch_name = ch_config['name']
+            ch_id = ch_config["id"]
+            ch_name = ch_config["name"]
 
             # Create empty volume
             empty_volume = np.zeros(self.voxel_storage.display_dims, dtype=np.uint16)
@@ -858,12 +962,12 @@ class ChamberVisualizationManager:
             layer = self.viewer.add_image(
                 empty_volume,
                 name=ch_name,
-                colormap=ch_config.get('default_colormap', 'gray'),
-                visible=ch_config.get('default_visible', True),
-                blending='additive',
+                colormap=ch_config.get("default_colormap", "gray"),
+                visible=ch_config.get("default_visible", True),
+                blending="additive",
                 opacity=0.8,
-                rendering='mip',
-                contrast_limits=(0, 500)  # Match UI slider default
+                rendering="mip",
+                contrast_limits=(0, 500),  # Match UI slider default
             )
 
             self.channel_layers[ch_id] = layer
@@ -872,7 +976,7 @@ class ChamberVisualizationManager:
 
     def reset_camera(self) -> None:
         """Reset the napari viewer camera zoom (preserves orientation from 3D window)."""
-        if self.viewer and hasattr(self.viewer, 'camera'):
+        if self.viewer and hasattr(self.viewer, "camera"):
             # Only set zoom - don't override camera.angles as 3D window has correct orientation
             self.viewer.camera.zoom = 1.57
             self.logger.info("Reset viewer camera zoom to 1.57")
@@ -890,34 +994,40 @@ class ChamberVisualizationManager:
         cfg = config or self._config
         try:
             preset_service = PositionPresetService()
-            preset_name = cfg.get('focus_frame', {}).get(
-                'calibration_preset_name', 'Tip of sample mount'
+            preset_name = cfg.get("focus_frame", {}).get(
+                "calibration_preset_name", "Tip of sample mount"
             )
 
             if preset_service.preset_exists(preset_name):
                 preset = preset_service.get_preset(preset_name)
                 self.objective_xy_calibration = {
-                    'x': preset.x,
-                    'y': preset.y,
-                    'z': preset.z,
-                    'r': preset.r
+                    "x": preset.x,
+                    "y": preset.y,
+                    "z": preset.z,
+                    "r": preset.r,
                 }
-                self.logger.info(f"Loaded objective calibration from '{preset_name}': "
-                               f"X={preset.x:.3f}, Y={preset.y:.3f}, Z={preset.z:.3f}")
+                self.logger.info(
+                    f"Loaded objective calibration from '{preset_name}': "
+                    f"X={preset.x:.3f}, Y={preset.y:.3f}, Z={preset.z:.3f}"
+                )
             else:
                 # Use default center position if not calibrated
                 self.objective_xy_calibration = {
-                    'x': cfg.get('stage_control', {}).get('x_default_mm', 6.0),
-                    'y': cfg.get('stage_control', {}).get('y_default_mm', 7.0),
-                    'z': cfg.get('stage_control', {}).get('z_default_mm', 19.0),
-                    'r': 0
+                    "x": cfg.get("stage_control", {}).get("x_default_mm", 6.0),
+                    "y": cfg.get("stage_control", {}).get("y_default_mm", 7.0),
+                    "z": cfg.get("stage_control", {}).get("z_default_mm", 19.0),
+                    "r": 0,
                 }
-                self.logger.info(f"No '{preset_name}' calibration found, using defaults")
+                self.logger.info(
+                    f"No '{preset_name}' calibration found, using defaults"
+                )
         except Exception as e:
             self.logger.warning(f"Failed to load objective calibration: {e}")
             self.objective_xy_calibration = None
 
-    def set_objective_calibration(self, x: float, y: float, z: float, r: float = 0) -> None:
+    def set_objective_calibration(
+        self, x: float, y: float, z: float, r: float = 0
+    ) -> None:
         """Set and save the objective XY calibration point.
 
         Args:
@@ -926,24 +1036,27 @@ class ChamberVisualizationManager:
         """
         from py2flamingo.models.microscope import Position
 
-        self.objective_xy_calibration = {'x': x, 'y': y, 'z': z, 'r': r}
+        self.objective_xy_calibration = {"x": x, "y": y, "z": z, "r": r}
 
         # Save to position presets
         try:
             preset_service = PositionPresetService()
-            preset_name = self._config.get('focus_frame', {}).get(
-                'calibration_preset_name', 'Tip of sample mount'
+            preset_name = self._config.get("focus_frame", {}).get(
+                "calibration_preset_name", "Tip of sample mount"
             )
             position = Position(x=x, y=y, z=z, r=r)
             preset_service.save_preset(
-                preset_name, position,
-                "Calibration point: sample holder tip centered in live view"
+                preset_name,
+                position,
+                "Calibration point: sample holder tip centered in live view",
             )
-            self.logger.info(f"Saved objective calibration to '{preset_name}': "
-                           f"X={x:.3f}, Y={y:.3f}, Z={z:.3f}")
+            self.logger.info(
+                f"Saved objective calibration to '{preset_name}': "
+                f"X={x:.3f}, Y={y:.3f}, Z={z:.3f}"
+            )
         except Exception as e:
             self.logger.error(f"Failed to save objective calibration: {e}")
 
         # Update focus frame if it exists
-        if self.viewer and 'XY Focus Frame' in self.viewer.layers:
+        if self.viewer and "XY Focus Frame" in self.viewer.layers:
             self.update_focus_frame()

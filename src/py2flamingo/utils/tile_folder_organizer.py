@@ -16,7 +16,7 @@ def reorganize_tile_folders(
     local_path: str,
     base_save_directory: str,
     tile_folder_mapping: Dict[str, Tuple[str, str]],
-    local_access_enabled: bool = False
+    local_access_enabled: bool = False,
 ) -> bool:
     """Reorganize flattened folders into nested structure for MIP Overview compatibility.
 
@@ -51,7 +51,9 @@ def reorganize_tile_folders(
 
     local_base = Path(local_path)
     if not local_base.exists():
-        logger.warning(f"Local drive path does not exist: {local_base} - skipping reorganization")
+        logger.warning(
+            f"Local drive path does not exist: {local_base} - skipping reorganization"
+        )
         return False
 
     logger.info(f"Starting folder reorganization: {local_base}")
@@ -98,16 +100,22 @@ def reorganize_tile_folders(
                     src_folder.rmdir()
                 except OSError:
                     # Folder not empty (might have hidden files)
-                    logger.warning(f"Could not remove source folder (not empty): {src_folder}")
+                    logger.warning(
+                        f"Could not remove source folder (not empty): {src_folder}"
+                    )
 
-                logger.info(f"Reorganized: {src_folder.name} -> {base_save_directory}/{date_folder}/{tile_folder}/ ({items_moved} items)")
+                logger.info(
+                    f"Reorganized: {src_folder.name} -> {base_save_directory}/{date_folder}/{tile_folder}/ ({items_moved} items)"
+                )
                 reorganized_count += 1
 
             except Exception as e:
                 logger.error(f"Failed to reorganize {src_folder}: {e}")
 
     if reorganized_count > 0:
-        logger.info(f"Tile folder reorganization complete: {reorganized_count} folders moved")
+        logger.info(
+            f"Tile folder reorganization complete: {reorganized_count} folders moved"
+        )
     else:
         logger.info("No folders were reorganized")
 

@@ -17,17 +17,17 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock
 
-from py2flamingo.models.connection import (
-    ConnectionConfig,
-    ConnectionState,
-    ConnectionStatus,
-    ConnectionModel
-)
 from py2flamingo.models.command import (
     Command,
-    WorkflowCommand,
+    PositionCommand,
     StatusCommand,
-    PositionCommand
+    WorkflowCommand,
+)
+from py2flamingo.models.connection import (
+    ConnectionConfig,
+    ConnectionModel,
+    ConnectionState,
+    ConnectionStatus,
 )
 
 
@@ -183,7 +183,7 @@ class TestConnectionStatus(unittest.TestCase):
             state=ConnectionState.CONNECTED,
             ip="192.168.1.100",
             port=53717,
-            connected_at=now
+            connected_at=now,
         )
         self.assertEqual(status.state, ConnectionState.CONNECTED)
         self.assertEqual(status.ip, "192.168.1.100")
@@ -194,8 +194,7 @@ class TestConnectionStatus(unittest.TestCase):
     def test_create_error_status(self):
         """Test creating error status with error message."""
         status = ConnectionStatus(
-            state=ConnectionState.ERROR,
-            last_error="Connection timeout"
+            state=ConnectionState.ERROR, last_error="Connection timeout"
         )
         self.assertEqual(status.state, ConnectionState.ERROR)
         self.assertEqual(status.last_error, "Connection timeout")
@@ -213,9 +212,7 @@ class TestConnectionModel(unittest.TestCase):
         """Test setting status updates model."""
         model = ConnectionModel()
         new_status = ConnectionStatus(
-            state=ConnectionState.CONNECTED,
-            ip="192.168.1.100",
-            port=53717
+            state=ConnectionState.CONNECTED, ip="192.168.1.100", port=53717
         )
         model.status = new_status
         self.assertEqual(model.status.state, ConnectionState.CONNECTED)
@@ -323,20 +320,20 @@ class TestCommand(unittest.TestCase):
 
     def test_create_command_with_parameters(self):
         """Test creating command with parameters."""
-        params = {'timeout': 5.0, 'retry': 3}
+        params = {"timeout": 5.0, "retry": 3}
         cmd = Command(code=12292, parameters=params)
-        self.assertEqual(cmd.parameters['timeout'], 5.0)
-        self.assertEqual(cmd.parameters['retry'], 3)
+        self.assertEqual(cmd.parameters["timeout"], 5.0)
+        self.assertEqual(cmd.parameters["retry"], 3)
 
     def test_command_to_dict(self):
         """Test command serialization to dict."""
-        cmd = Command(code=12292, parameters={'test': 'value'})
+        cmd = Command(code=12292, parameters={"test": "value"})
         result = cmd.to_dict()
 
-        self.assertEqual(result['code'], 12292)
-        self.assertIn('timestamp', result)
-        self.assertEqual(result['parameters']['test'], 'value')
-        self.assertEqual(result['type'], 'Command')
+        self.assertEqual(result["code"], 12292)
+        self.assertIn("timestamp", result)
+        self.assertEqual(result["parameters"]["test"], "value")
+        self.assertEqual(result["type"], "Command")
 
     def test_timestamp_is_set(self):
         """Test that timestamp is automatically set."""
@@ -373,10 +370,10 @@ class TestWorkflowCommand(unittest.TestCase):
         cmd = WorkflowCommand(code=12292, workflow_path=path, workflow_data=data)
         result = cmd.to_dict()
 
-        self.assertEqual(result['code'], 12292)
-        self.assertEqual(result['workflow_path'], str(path))
-        self.assertEqual(result['workflow_size'], len(data))
-        self.assertEqual(result['type'], 'WorkflowCommand')
+        self.assertEqual(result["code"], 12292)
+        self.assertEqual(result["workflow_path"], str(path))
+        self.assertEqual(result["workflow_size"], len(data))
+        self.assertEqual(result["type"], "WorkflowCommand")
 
     def test_workflow_command_inherits_from_command(self):
         """Test that WorkflowCommand is a Command."""
@@ -403,9 +400,9 @@ class TestStatusCommand(unittest.TestCase):
         cmd = StatusCommand(code=40967, query_type="position")
         result = cmd.to_dict()
 
-        self.assertEqual(result['code'], 40967)
-        self.assertEqual(result['query_type'], "position")
-        self.assertEqual(result['type'], 'StatusCommand')
+        self.assertEqual(result["code"], 40967)
+        self.assertEqual(result["query_type"], "position")
+        self.assertEqual(result["type"], "StatusCommand")
 
     def test_status_command_inherits_from_command(self):
         """Test that StatusCommand is a Command."""
@@ -436,11 +433,11 @@ class TestPositionCommand(unittest.TestCase):
         cmd = PositionCommand(code=24580, x=10.0, y=20.0, z=30.0)
         result = cmd.to_dict()
 
-        self.assertEqual(result['code'], 24580)
-        self.assertEqual(result['x'], 10.0)
-        self.assertEqual(result['y'], 20.0)
-        self.assertEqual(result['z'], 30.0)
-        self.assertEqual(result['type'], 'PositionCommand')
+        self.assertEqual(result["code"], 24580)
+        self.assertEqual(result["x"], 10.0)
+        self.assertEqual(result["y"], 20.0)
+        self.assertEqual(result["z"], 30.0)
+        self.assertEqual(result["type"], "PositionCommand")
 
     def test_position_command_inherits_from_command(self):
         """Test that PositionCommand is a Command."""
@@ -487,10 +484,10 @@ class TestCommandInheritance(unittest.TestCase):
 
         for cmd in [cmd1, cmd2, cmd3, cmd4]:
             result = cmd.to_dict()
-            self.assertIn('code', result)
-            self.assertIn('timestamp', result)
-            self.assertIn('type', result)
+            self.assertIn("code", result)
+            self.assertIn("timestamp", result)
+            self.assertIn("type", result)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

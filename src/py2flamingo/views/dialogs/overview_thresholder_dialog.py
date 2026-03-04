@@ -11,22 +11,36 @@ Sample tiles have more texture, edges, and varying intensity.
 """
 
 import logging
-from typing import Optional, List, Tuple, Set
-import numpy as np
+from typing import List, Optional, Set, Tuple
 
-from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QSlider, QComboBox,
-    QCheckBox, QPushButton, QGroupBox, QFormLayout, QSpinBox,
-    QDoubleSpinBox, QFrame, QSizePolicy, QMessageBox
-)
-from py2flamingo.services.window_geometry_manager import PersistentDialog
+import numpy as np
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QIcon
+from PyQt5.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSlider,
+    QSpinBox,
+    QVBoxLayout,
+)
+
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 
 logger = logging.getLogger(__name__)
 
 
-def calculate_tile_variance(image: np.ndarray, tiles_x: int, tiles_y: int) -> np.ndarray:
+def calculate_tile_variance(
+    image: np.ndarray, tiles_x: int, tiles_y: int
+) -> np.ndarray:
     """Calculate variance for each tile in the image.
 
     Args:
@@ -86,9 +100,7 @@ def calculate_tile_edges(image: np.ndarray, tiles_x: int, tiles_y: int) -> np.nd
     tile_w = w // tiles_x
 
     # Laplacian kernel for edge detection
-    kernel = np.array([[0, 1, 0],
-                       [1, -4, 1],
-                       [0, 1, 0]], dtype=np.float64)
+    kernel = np.array([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=np.float64)
 
     edge_scores = np.zeros((tiles_y, tiles_x))
 
@@ -103,12 +115,12 @@ def calculate_tile_edges(image: np.ndarray, tiles_x: int, tiles_y: int) -> np.nd
 
             # Apply Laplacian via convolution (simple version)
             # Pad tile for convolution
-            padded = np.pad(tile, 1, mode='edge')
+            padded = np.pad(tile, 1, mode="edge")
             laplacian = np.zeros_like(tile)
 
             for i in range(tile.shape[0]):
                 for j in range(tile.shape[1]):
-                    region = padded[i:i+3, j:j+3]
+                    region = padded[i : i + 3, j : j + 3]
                     laplacian[i, j] = np.sum(region * kernel)
 
             edge_scores[ty, tx] = np.var(laplacian)
@@ -116,7 +128,9 @@ def calculate_tile_edges(image: np.ndarray, tiles_x: int, tiles_y: int) -> np.nd
     return edge_scores
 
 
-def calculate_tile_intensity(image: np.ndarray, tiles_x: int, tiles_y: int) -> np.ndarray:
+def calculate_tile_intensity(
+    image: np.ndarray, tiles_x: int, tiles_y: int
+) -> np.ndarray:
     """Calculate mean intensity for each tile.
 
     Args:
@@ -164,11 +178,7 @@ class OverviewThresholderDialog(PersistentDialog):
 
     selection_ready = pyqtSignal(set)  # Set of (tile_x, tile_y) tuples
 
-    def __init__(self,
-                 image: np.ndarray,
-                 tiles_x: int,
-                 tiles_y: int,
-                 parent=None):
+    def __init__(self, image: np.ndarray, tiles_x: int, tiles_y: int, parent=None):
         """Initialize the thresholder dialog.
 
         Args:
@@ -349,7 +359,9 @@ class OverviewThresholderDialog(PersistentDialog):
 
     def _calculate_metrics(self):
         """Pre-calculate all metrics for the tiles."""
-        logger.info(f"Calculating tile metrics for {self._tiles_x}x{self._tiles_y} grid...")
+        logger.info(
+            f"Calculating tile metrics for {self._tiles_x}x{self._tiles_y} grid..."
+        )
 
         self._variances = calculate_tile_variance(
             self._image, self._tiles_x, self._tiles_y
@@ -437,14 +449,17 @@ class OverviewThresholderDialog(PersistentDialog):
             # Select tiles that pass EITHER threshold
             for ty in range(self._tiles_y):
                 for tx in range(self._tiles_x):
-                    if (self._variances[ty, tx] >= var_threshold or
-                        self._edge_scores[ty, tx] >= edge_threshold):
+                    if (
+                        self._variances[ty, tx] >= var_threshold
+                        or self._edge_scores[ty, tx] >= edge_threshold
+                    ):
                         selected.add((tx, ty))
 
         # Apply inversion if checked
         if self._invert_check.isChecked():
-            all_tiles = {(tx, ty) for tx in range(self._tiles_x)
-                        for ty in range(self._tiles_y)}
+            all_tiles = {
+                (tx, ty) for tx in range(self._tiles_x) for ty in range(self._tiles_y)
+            }
             selected = all_tiles - selected
 
         return selected
@@ -513,9 +528,7 @@ class OverviewThresholderDialog(PersistentDialog):
 
         # Scale to fit
         scaled = pixmap.scaled(
-            preview_size,
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
+            preview_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
         self._preview_label.setPixmap(scaled)
 
@@ -523,15 +536,18 @@ class OverviewThresholderDialog(PersistentDialog):
         """Apply the current selection."""
         if not self._selected_tiles:
             result = QMessageBox.question(
-                self, "No Selection",
+                self,
+                "No Selection",
                 "No tiles are selected. Apply anyway?",
                 QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
+                QMessageBox.No,
             )
             if result != QMessageBox.Yes:
                 return
 
-        logger.info(f"Applying thresholder selection: {len(self._selected_tiles)} tiles")
+        logger.info(
+            f"Applying thresholder selection: {len(self._selected_tiles)} tiles"
+        )
         self.selection_ready.emit(self._selected_tiles)
         self.accept()
 

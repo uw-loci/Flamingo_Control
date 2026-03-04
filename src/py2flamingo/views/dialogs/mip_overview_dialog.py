@@ -17,34 +17,48 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import tifffile
-
-from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QSplitter, QGroupBox, QFileDialog, QMessageBox,
-    QComboBox, QProgressDialog, QLineEdit, QFrame,
-)
-from py2flamingo.services.window_geometry_manager import PersistentDialog
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon
-
-from py2flamingo.models.mip_overview import (
-    MIPTileResult, MIPOverviewConfig,
-    parse_coords_from_folder, calculate_grid_indices,
-    find_date_folders, find_tile_folders, load_invert_x_setting,
+from PyQt5.QtWidgets import (
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressDialog,
+    QPushButton,
+    QSplitter,
+    QVBoxLayout,
 )
+
 from py2flamingo.models.data.overview_results import TileResult
+from py2flamingo.models.mip_overview import (
+    MIPOverviewConfig,
+    MIPTileResult,
+    calculate_grid_indices,
+    find_date_folders,
+    find_tile_folders,
+    load_invert_x_setting,
+    parse_coords_from_folder,
+)
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.visualization.zarr_2d_session import (
-    ZARR_AVAILABLE, save_2d_zarr_session, load_2d_zarr_session,
-    load_2d_zarr_session_lazy, detect_session_format,
+    ZARR_AVAILABLE,
+    detect_session_format,
+    load_2d_zarr_session,
+    load_2d_zarr_session_lazy,
+    save_2d_zarr_session,
 )
 
 # Import ImagePanel from LED 2D Overview (reuse UI components)
 from .led_2d_overview_result import ImagePanel
-
 
 logger = logging.getLogger(__name__)
 
@@ -94,12 +108,16 @@ class MIPOverviewDialog(PersistentDialog):
 
         folder_layout.addWidget(QLabel("Folder:"))
         self._folder_edit = QLineEdit()
-        self._folder_edit.setPlaceholderText("Select folder containing tile acquisitions (X*_Y*/*_MP.tif)...")
+        self._folder_edit.setPlaceholderText(
+            "Select folder containing tile acquisitions (X*_Y*/*_MP.tif)..."
+        )
         self._folder_edit.setReadOnly(True)
         folder_layout.addWidget(self._folder_edit, stretch=1)
 
         self._browse_btn = QPushButton("Browse...")
-        self._browse_btn.setToolTip("Browse for a folder containing raw tile acquisition data (X*_Y* subfolders with *_MP.tif files)")
+        self._browse_btn.setToolTip(
+            "Browse for a folder containing raw tile acquisition data (X*_Y* subfolders with *_MP.tif files)"
+        )
         self._browse_btn.clicked.connect(self._on_browse)
         folder_layout.addWidget(self._browse_btn)
 
@@ -197,13 +215,17 @@ class MIPOverviewDialog(PersistentDialog):
         button_layout.addStretch()
 
         self._save_btn = QPushButton("Save Session")
-        self._save_btn.setToolTip("Save current overview as a session (can be loaded later without original files)")
+        self._save_btn.setToolTip(
+            "Save current overview as a session (can be loaded later without original files)"
+        )
         self._save_btn.clicked.connect(self._on_save_session)
         self._save_btn.setEnabled(False)
         button_layout.addWidget(self._save_btn)
 
         self._load_session_btn = QPushButton("Load Session")
-        self._load_session_btn.setToolTip("Load a previously saved session (metadata + stitched overview)")
+        self._load_session_btn.setToolTip(
+            "Load a previously saved session (metadata + stitched overview)"
+        )
         self._load_session_btn.clicked.connect(self._on_load_session)
         button_layout.addWidget(self._load_session_btn)
 
@@ -222,24 +244,24 @@ class MIPOverviewDialog(PersistentDialog):
             self._first_show = False
             # Trigger fit after window is visible
             from PyQt5.QtCore import QTimer
+
             QTimer.singleShot(100, self._on_fit)
 
     def _on_browse(self):
         """Browse for folder containing tile acquisitions."""
         # Remember last browse location
         default_path = str(Path.home())
-        if self._app and hasattr(self._app, 'config_service'):
+        if self._app and hasattr(self._app, "config_service"):
             saved = self._app.config_service.get_mip_browse_path()
             if saved and Path(saved).exists():
                 default_path = saved
 
         folder = QFileDialog.getExistingDirectory(
-            self, "Select Folder with Tile Acquisitions",
-            default_path
+            self, "Select Folder with Tile Acquisitions", default_path
         )
         if folder:
             # Save browse location for next time
-            if self._app and hasattr(self._app, 'config_service'):
+            if self._app and hasattr(self._app, "config_service"):
                 self._app.config_service.set_mip_browse_path(folder)
             self._folder_edit.setText(folder)
             self._update_date_combo(Path(folder))
@@ -286,13 +308,16 @@ class MIPOverviewDialog(PersistentDialog):
         tile_folders = find_tile_folders(load_path)
         if not tile_folders:
             QMessageBox.warning(
-                self, "No Tiles Found",
-                f"No tile folders (X*_Y*) found in:\n{load_path}"
+                self,
+                "No Tiles Found",
+                f"No tile folders (X*_Y*) found in:\n{load_path}",
             )
             return
 
         # Load tiles with progress dialog
-        progress = QProgressDialog("Loading MIP files...", "Cancel", 0, len(tile_folders), self)
+        progress = QProgressDialog(
+            "Loading MIP files...", "Cancel", 0, len(tile_folders), self
+        )
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)
 
@@ -325,15 +350,20 @@ class MIPOverviewDialog(PersistentDialog):
             mip_file = mip_files[0]
             try:
                 image = tifffile.imread(str(mip_file))
-                logger.debug(f"Loaded {mip_file.name}: shape={image.shape}, dtype={image.dtype}")
+                logger.debug(
+                    f"Loaded {mip_file.name}: shape={image.shape}, dtype={image.dtype}"
+                )
             except Exception as e:
                 logger.error(f"Failed to load {mip_file}: {e}")
                 skipped += 1
                 continue
 
             tile = MIPTileResult(
-                x=x, y=y, z=0.0,
-                tile_x_idx=0, tile_y_idx=0,  # Will be calculated later
+                x=x,
+                y=y,
+                z=0.0,
+                tile_x_idx=0,
+                tile_y_idx=0,  # Will be calculated later
                 image=image,
                 folder_path=tile_folder,
             )
@@ -343,9 +373,10 @@ class MIPOverviewDialog(PersistentDialog):
 
         if not tiles:
             QMessageBox.warning(
-                self, "No MIPs Loaded",
+                self,
+                "No MIPs Loaded",
                 f"Failed to load any MIP files from:\n{load_path}\n\n"
-                f"Skipped {skipped} folders."
+                f"Skipped {skipped} folders.",
             )
             return
 
@@ -382,9 +413,10 @@ class MIPOverviewDialog(PersistentDialog):
         # Show load summary
         if skipped > 0:
             QMessageBox.information(
-                self, "Load Complete",
+                self,
+                "Load Complete",
                 f"Loaded {len(tiles)} tiles ({tiles_x}x{tiles_y} grid).\n"
-                f"Skipped {skipped} folders (no MIP or invalid name)."
+                f"Skipped {skipped} folders (no MIP or invalid name).",
             )
 
     def _stitch_and_display(self):
@@ -428,7 +460,7 @@ class MIPOverviewDialog(PersistentDialog):
                 new_h = h // downsample
                 new_w = w // downsample
                 # Crop to exact multiple
-                cropped = tile_img[:new_h * downsample, :new_w * downsample]
+                cropped = tile_img[: new_h * downsample, : new_w * downsample]
                 # Reshape and mean
                 reshaped = cropped.reshape(new_h, downsample, new_w, downsample)
                 downsampled = reshaped.mean(axis=(1, 3)).astype(dtype)
@@ -446,7 +478,7 @@ class MIPOverviewDialog(PersistentDialog):
 
             # Place in stitched image
             dh, dw = downsampled.shape[:2]
-            stitched[y_pos:y_pos + dh, x_pos:x_pos + dw] = downsampled
+            stitched[y_pos : y_pos + dh, x_pos : x_pos + dw] = downsampled
 
         self._stitched_image = stitched
 
@@ -461,9 +493,13 @@ class MIPOverviewDialog(PersistentDialog):
         self._left_panel.set_tile_coordinates(coords, invert_x=self._config.invert_x)
         self._left_panel.set_tile_results(tile_results)
 
-        logger.info(f"Stitched {len(self._tiles)} tiles into {stitched_w}x{stitched_h} overview")
+        logger.info(
+            f"Stitched {len(self._tiles)} tiles into {stitched_w}x{stitched_h} overview"
+        )
 
-    def _mip_tiles_to_tile_results(self, mip_tiles: List[MIPTileResult]) -> List[TileResult]:
+    def _mip_tiles_to_tile_results(
+        self, mip_tiles: List[MIPTileResult]
+    ) -> List[TileResult]:
         """Convert MIPTileResult list to TileResult list for ImagePanel compatibility."""
         results = []
         for mip_tile in mip_tiles:
@@ -527,9 +563,14 @@ class MIPOverviewDialog(PersistentDialog):
                 break
 
         if target_tile is None:
-            logger.warning(f"Could not find tile ({tile_x_idx}, {tile_y_idx}) in loaded tiles")
-            QMessageBox.warning(self, "Tile Not Found",
-                              f"Could not find data for tile ({tile_x_idx}, {tile_y_idx}).")
+            logger.warning(
+                f"Could not find tile ({tile_x_idx}, {tile_y_idx}) in loaded tiles"
+            )
+            QMessageBox.warning(
+                self,
+                "Tile Not Found",
+                f"Could not find data for tile ({tile_x_idx}, {tile_y_idx}).",
+            )
             return
 
         # Calculate center Z from z_stack range
@@ -538,27 +579,36 @@ class MIPOverviewDialog(PersistentDialog):
             # No Z range data, use tile's Z position
             z_center = target_tile.z
 
-        logger.info(f"Moving to tile ({tile_x_idx}, {tile_y_idx}): "
-                    f"X={target_tile.x:.3f}, Y={target_tile.y:.3f}, Z={z_center:.3f} mm "
-                    f"(Z range: {target_tile.z_stack_min:.3f} - {target_tile.z_stack_max:.3f})")
+        logger.info(
+            f"Moving to tile ({tile_x_idx}, {tile_y_idx}): "
+            f"X={target_tile.x:.3f}, Y={target_tile.y:.3f}, Z={z_center:.3f} mm "
+            f"(Z range: {target_tile.z_stack_min:.3f} - {target_tile.z_stack_max:.3f})"
+        )
 
         # Move stage to tile position
-        if self._app and hasattr(self._app, 'movement_controller') and self._app.movement_controller:
+        if (
+            self._app
+            and hasattr(self._app, "movement_controller")
+            and self._app.movement_controller
+        ):
             try:
-                self._app.movement_controller.move_absolute('x', target_tile.x)
-                self._app.movement_controller.move_absolute('y', target_tile.y)
-                self._app.movement_controller.move_absolute('z', z_center)
+                self._app.movement_controller.move_absolute("x", target_tile.x)
+                self._app.movement_controller.move_absolute("y", target_tile.y)
+                self._app.movement_controller.move_absolute("z", z_center)
                 self._status_label.setText(
                     f"Moving to X={target_tile.x:.3f}, Y={target_tile.y:.3f}, "
-                    f"Z={z_center:.3f} mm (tile {tile_x_idx},{tile_y_idx})")
+                    f"Z={z_center:.3f} mm (tile {tile_x_idx},{tile_y_idx})"
+                )
             except Exception as e:
                 logger.error(f"Failed to move to tile position: {e}")
-                QMessageBox.warning(self, "Move Failed",
-                                  f"Failed to move stage: {e}")
+                QMessageBox.warning(self, "Move Failed", f"Failed to move stage: {e}")
         else:
             logger.warning("Movement controller not available")
-            QMessageBox.warning(self, "Not Connected",
-                              "Cannot move stage - not connected to microscope.")
+            QMessageBox.warning(
+                self,
+                "Not Connected",
+                "Cannot move stage - not connected to microscope.",
+            )
 
     def _on_select_all(self):
         """Select all tiles."""
@@ -579,8 +629,7 @@ class MIPOverviewDialog(PersistentDialog):
             from .overview_thresholder_dialog import OverviewThresholderDialog
         except ImportError:
             QMessageBox.warning(
-                self, "Not Available",
-                "Auto-select thresholder is not available."
+                self, "Not Available", "Auto-select thresholder is not available."
             )
             return
 
@@ -588,7 +637,7 @@ class MIPOverviewDialog(PersistentDialog):
             image=self._stitched_image,
             tiles_x=self._config.tiles_x,
             tiles_y=self._config.tiles_y,
-            parent=self
+            parent=self,
         )
 
         def apply_selection(selected_tiles: set):
@@ -608,8 +657,7 @@ class MIPOverviewDialog(PersistentDialog):
         selected_tr = self._left_panel.get_selected_tiles()
         if not selected_tr:
             QMessageBox.information(
-                self, "No Selection",
-                "Please select tiles to collect."
+                self, "No Selection", "Please select tiles to collect."
             )
             return
 
@@ -619,8 +667,7 @@ class MIPOverviewDialog(PersistentDialog):
             from .tile_collection_dialog import TileCollectionDialog
         except ImportError as e:
             QMessageBox.warning(
-                self, "Not Available",
-                f"Tile Collection Dialog is not available:\n{e}"
+                self, "Not Available", f"Tile Collection Dialog is not available:\n{e}"
             )
             return
 
@@ -633,7 +680,9 @@ class MIPOverviewDialog(PersistentDialog):
             config=None,  # No ScanConfiguration for MIP overview
             app=self._app,
             parent=self,
-            local_base_folder=str(self._config.base_folder.parent) if self._config else None,
+            local_base_folder=(
+                str(self._config.base_folder.parent) if self._config else None
+            ),
         )
 
         # Connect to completion signal to reload results
@@ -668,7 +717,7 @@ class MIPOverviewDialog(PersistentDialog):
         default_folder = None
 
         # Check for user's saved preference via configuration service
-        if self._app and hasattr(self._app, 'config_service'):
+        if self._app and hasattr(self._app, "config_service"):
             saved_path = self._app.config_service.get_mip_session_path()
             if saved_path and Path(saved_path).exists():
                 default_folder = saved_path
@@ -688,15 +737,16 @@ class MIPOverviewDialog(PersistentDialog):
 
         # Ask for save location
         folder = QFileDialog.getExistingDirectory(
-            self, "Select Folder to Save Session",
+            self,
+            "Select Folder to Save Session",
             default_folder,
-            QFileDialog.ShowDirsOnly
+            QFileDialog.ShowDirsOnly,
         )
         if not folder:
             return
 
         # Remember user's choice for future sessions
-        if self._app and hasattr(self._app, 'config_service'):
+        if self._app and hasattr(self._app, "config_service"):
             self._app.config_service.set_mip_session_path(folder)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -715,15 +765,16 @@ class MIPOverviewDialog(PersistentDialog):
                     images["stitched_overview"] = self._stitched_image
                 save_2d_zarr_session(save_path, metadata, images, "mip_overview")
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to save zarr session:\n{e}")
+                QMessageBox.critical(
+                    self, "Error", f"Failed to save zarr session:\n{e}"
+                )
                 return
         else:
             save_path = Path(folder) / f"mip_overview_{timestamp}"
             self._save_session_tiff(save_path, metadata)
 
         QMessageBox.information(
-            self, "Session Saved",
-            f"Session saved to:\n{save_path}"
+            self, "Session Saved", f"Session saved to:\n{save_path}"
         )
         logger.info(f"MIP overview session saved to {save_path}")
 
@@ -737,7 +788,7 @@ class MIPOverviewDialog(PersistentDialog):
 
         metadata_path = save_path / "metadata.json"
         try:
-            with open(metadata_path, 'w') as f:
+            with open(metadata_path, "w") as f:
                 json.dump(metadata, f, indent=2)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save metadata:\n{e}")
@@ -754,7 +805,7 @@ class MIPOverviewDialog(PersistentDialog):
         """Load a previously saved MIP overview session (Zarr or TIFF)."""
         # Determine default browse location (same as save session path)
         default_folder = str(Path.home())
-        if self._app and hasattr(self._app, 'config_service'):
+        if self._app and hasattr(self._app, "config_service"):
             saved_path = self._app.config_service.get_mip_session_path()
             if saved_path and Path(saved_path).exists():
                 default_folder = saved_path
@@ -766,9 +817,10 @@ class MIPOverviewDialog(PersistentDialog):
                     default_folder = str(default_session_folder)
 
         folder = QFileDialog.getExistingDirectory(
-            self, "Select Saved Session Folder",
+            self,
+            "Select Saved Session Folder",
             default_folder,
-            QFileDialog.ShowDirsOnly
+            QFileDialog.ShowDirsOnly,
         )
         if not folder:
             return
@@ -776,32 +828,36 @@ class MIPOverviewDialog(PersistentDialog):
         folder_path = Path(folder)
         fmt = detect_session_format(folder_path)
 
-        if fmt == 'zarr':
+        if fmt == "zarr":
             try:
                 metadata, zarr_root = load_2d_zarr_session_lazy(folder_path)
                 # Only load the single overview dataset
                 stitched_image = None
-                if 'stitched_overview' in zarr_root:
-                    stitched_image = np.array(zarr_root['stitched_overview'])
+                if "stitched_overview" in zarr_root:
+                    stitched_image = np.array(zarr_root["stitched_overview"])
             except Exception as e:
-                QMessageBox.critical(self, "Load Error", f"Failed to load zarr session:\n{e}")
+                QMessageBox.critical(
+                    self, "Load Error", f"Failed to load zarr session:\n{e}"
+                )
                 return
 
-            config = MIPOverviewConfig.from_dict(metadata['config'])
+            config = MIPOverviewConfig.from_dict(metadata["config"])
             tiles = []
-            for tile_data in metadata.get('tiles', []):
+            for tile_data in metadata.get("tiles", []):
                 tiles.append(MIPTileResult.from_dict(tile_data))
 
-        elif fmt == 'tiff':
+        elif fmt == "tiff":
             metadata_path = folder_path / "metadata.json"
             try:
-                with open(metadata_path, 'r') as f:
+                with open(metadata_path, "r") as f:
                     metadata = json.load(f)
             except Exception as e:
-                QMessageBox.critical(self, "Load Error", f"Failed to read metadata:\n{e}")
+                QMessageBox.critical(
+                    self, "Load Error", f"Failed to read metadata:\n{e}"
+                )
                 return
 
-            config = MIPOverviewConfig.from_dict(metadata['config'])
+            config = MIPOverviewConfig.from_dict(metadata["config"])
 
             overview_path = folder_path / "stitched_overview.tif"
             stitched_image = None
@@ -809,24 +865,28 @@ class MIPOverviewDialog(PersistentDialog):
                 try:
                     stitched_image = tifffile.imread(str(overview_path))
                 except Exception as e:
-                    QMessageBox.critical(self, "Load Error", f"Failed to load overview image:\n{e}")
+                    QMessageBox.critical(
+                        self, "Load Error", f"Failed to load overview image:\n{e}"
+                    )
                     return
             else:
                 QMessageBox.warning(
-                    self, "Incomplete Session",
+                    self,
+                    "Incomplete Session",
                     f"No stitched_overview.tif found in:\n{folder}\n\n"
-                    "The session may be corrupted."
+                    "The session may be corrupted.",
                 )
                 return
 
             tiles = []
-            for tile_data in metadata.get('tiles', []):
+            for tile_data in metadata.get("tiles", []):
                 tiles.append(MIPTileResult.from_dict(tile_data))
         else:
             QMessageBox.warning(
-                self, "Invalid Session Folder",
+                self,
+                "Invalid Session Folder",
                 f"No valid session found in:\n{folder}\n\n"
-                "Please select a folder created by 'Save Session'."
+                "Please select a folder created by 'Save Session'.",
             )
             return
 
@@ -849,13 +909,16 @@ class MIPOverviewDialog(PersistentDialog):
 
         logger.info(f"Loaded MIP overview session from {folder_path}")
         QMessageBox.information(
-            self, "Session Loaded",
+            self,
+            "Session Loaded",
             f"Loaded session with {len(tiles)} tiles "
-            f"({config.tiles_x}x{config.tiles_y} grid)."
+            f"({config.tiles_x}x{config.tiles_y} grid).",
         )
 
     @classmethod
-    def load_from_folder(cls, folder: Path, app=None, parent=None) -> Optional['MIPOverviewDialog']:
+    def load_from_folder(
+        cls, folder: Path, app=None, parent=None
+    ) -> Optional["MIPOverviewDialog"]:
         """Load a saved MIP overview session from folder (Zarr or TIFF).
 
         Args:
@@ -869,32 +932,32 @@ class MIPOverviewDialog(PersistentDialog):
         folder = Path(folder)
         fmt = detect_session_format(folder)
 
-        if fmt == 'zarr':
+        if fmt == "zarr":
             try:
                 metadata, zarr_root = load_2d_zarr_session_lazy(folder)
                 # Only load the single overview dataset
                 stitched_image = None
-                if 'stitched_overview' in zarr_root:
-                    stitched_image = np.array(zarr_root['stitched_overview'])
+                if "stitched_overview" in zarr_root:
+                    stitched_image = np.array(zarr_root["stitched_overview"])
             except Exception as e:
                 logger.error(f"Failed to load zarr session: {e}")
                 return None
 
-            config = MIPOverviewConfig.from_dict(metadata['config'])
+            config = MIPOverviewConfig.from_dict(metadata["config"])
             tiles = []
-            for tile_data in metadata.get('tiles', []):
+            for tile_data in metadata.get("tiles", []):
                 tiles.append(MIPTileResult.from_dict(tile_data))
 
-        elif fmt == 'tiff':
+        elif fmt == "tiff":
             metadata_path = folder / "metadata.json"
             try:
-                with open(metadata_path, 'r') as f:
+                with open(metadata_path, "r") as f:
                     metadata = json.load(f)
             except Exception as e:
                 logger.error(f"Failed to load metadata: {e}")
                 return None
 
-            config = MIPOverviewConfig.from_dict(metadata['config'])
+            config = MIPOverviewConfig.from_dict(metadata["config"])
 
             overview_path = folder / "stitched_overview.tif"
             stitched_image = None
@@ -905,7 +968,7 @@ class MIPOverviewDialog(PersistentDialog):
                     logger.error(f"Failed to load stitched image: {e}")
 
             tiles = []
-            for tile_data in metadata.get('tiles', []):
+            for tile_data in metadata.get("tiles", []):
                 tiles.append(MIPTileResult.from_dict(tile_data))
         else:
             logger.error(f"No valid session found in {folder}")

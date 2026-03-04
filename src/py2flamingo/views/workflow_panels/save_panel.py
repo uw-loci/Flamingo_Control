@@ -7,15 +7,23 @@ Advanced settings (region, subfolders, comments) available via dialog.
 """
 
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QComboBox, QCheckBox, QGroupBox, QGridLayout, QPushButton,
-    QFileDialog, QMessageBox
-)
 from PyQt5.QtCore import pyqtSignal
-
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 # Save format options matching workflow file format
 SAVE_FORMATS = [
@@ -26,7 +34,7 @@ SAVE_FORMATS = [
 ]
 
 # Key for storing last used drive in configuration
-LAST_USED_DRIVE_KEY = 'last_used_save_drive'
+LAST_USED_DRIVE_KEY = "last_used_save_drive"
 
 
 class SavePanel(QWidget):
@@ -47,7 +55,9 @@ class SavePanel(QWidget):
 
     settings_changed = pyqtSignal(dict)
 
-    def __init__(self, parent: Optional[QWidget] = None, app=None, connection_service=None):
+    def __init__(
+        self, parent: Optional[QWidget] = None, app=None, connection_service=None
+    ):
         """
         Initialize save panel.
 
@@ -91,10 +101,10 @@ class SavePanel(QWidget):
             return ""
 
         try:
-            config_service = getattr(self._app, 'config_service', None)
+            config_service = getattr(self._app, "config_service", None)
             if config_service is not None:
                 # Check if config has the last used drive stored
-                last_used = config_service.config.get(LAST_USED_DRIVE_KEY, '')
+                last_used = config_service.config.get(LAST_USED_DRIVE_KEY, "")
                 if last_used:
                     self._logger.info(f"Loaded last used save drive: {last_used}")
                     return last_used
@@ -113,7 +123,7 @@ class SavePanel(QWidget):
             return
 
         try:
-            config_service = getattr(self._app, 'config_service', None)
+            config_service = getattr(self._app, "config_service", None)
             if config_service is not None:
                 config_service.config[LAST_USED_DRIVE_KEY] = drive
                 self._logger.info(f"Saved last used save drive: {drive}")
@@ -129,14 +139,18 @@ class SavePanel(QWidget):
             return ""
 
         try:
-            config_service = getattr(self._app, 'config_service', None)
+            config_service = getattr(self._app, "config_service", None)
             if config_service is not None:
                 location = config_service.get_data_storage_location()
                 if location:
-                    self._logger.info(f"Using data storage location from system: {location}")
+                    self._logger.info(
+                        f"Using data storage location from system: {location}"
+                    )
                     return location
         except Exception as e:
-            self._logger.warning(f"Could not get data storage location from system: {e}")
+            self._logger.warning(
+                f"Could not get data storage location from system: {e}"
+            )
 
         return ""
 
@@ -237,7 +251,9 @@ class SavePanel(QWidget):
         local_path_layout.addWidget(self._local_path_display, 1)
 
         self._browse_local_btn = QPushButton("Browse...")
-        self._browse_local_btn.setToolTip("Select where the server drive is mounted locally")
+        self._browse_local_btn.setToolTip(
+            "Select where the server drive is mounted locally"
+        )
         self._browse_local_btn.clicked.connect(self._browse_local_path)
         local_path_layout.addWidget(self._browse_local_btn)
 
@@ -303,8 +319,12 @@ class SavePanel(QWidget):
         if self._save_drive:
             self._drive_warning.hide()
         else:
-            self._drive_warning.setText("⚠ No save drive selected - workflow cannot save data")
-            self._drive_warning.setStyleSheet("color: #e74c3c; font-size: 9pt; font-weight: bold;")
+            self._drive_warning.setText(
+                "⚠ No save drive selected - workflow cannot save data"
+            )
+            self._drive_warning.setStyleSheet(
+                "color: #e74c3c; font-size: 9pt; font-weight: bold;"
+            )
             self._drive_warning.show()
 
     def _on_drive_changed(self, drive: str) -> None:
@@ -366,7 +386,9 @@ class SavePanel(QWidget):
                     elif drives:
                         # Preferred not available, use first drive
                         self._save_drive_combo.setCurrentIndex(0)
-                        self._logger.info(f"Last used drive not available, using: {drives[0]}")
+                        self._logger.info(
+                            f"Last used drive not available, using: {drives[0]}"
+                        )
                 elif drives:
                     self._save_drive_combo.setCurrentIndex(0)
 
@@ -389,7 +411,10 @@ class SavePanel(QWidget):
 
         # Check if we're connected
         try:
-            if hasattr(self._connection_service, 'is_connected') and self._connection_service.is_connected():
+            if (
+                hasattr(self._connection_service, "is_connected")
+                and self._connection_service.is_connected()
+            ):
                 self._logger.info("Auto-refreshing drives on panel creation")
                 self._refresh_drives()
         except Exception as e:
@@ -425,9 +450,10 @@ class SavePanel(QWidget):
         config_service = self._get_config_service()
         if not config_service:
             QMessageBox.warning(
-                self, "Not Available",
+                self,
+                "Not Available",
                 "Configuration service not available.\n"
-                "Local path mapping requires the application to be fully initialized."
+                "Local path mapping requires the application to be fully initialized.",
             )
             return
 
@@ -436,10 +462,11 @@ class SavePanel(QWidget):
 
         # Open directory selection dialog
         from pathlib import Path
+
         local_path = QFileDialog.getExistingDirectory(
             self,
             f"Select Local Folder for {current_drive}",
-            current_local or str(Path.home())
+            current_local or str(Path.home()),
         )
 
         if local_path:
@@ -493,6 +520,7 @@ class SavePanel(QWidget):
         if local_path:
             # Check if path exists
             from pathlib import Path
+
             if Path(local_path).exists():
                 self._local_path_status.setText(
                     "Configured - folders will be reorganized after tile collection"
@@ -523,7 +551,7 @@ class SavePanel(QWidget):
 
     def _get_config_service(self):
         """Get ConfigurationService from application."""
-        if self._app and hasattr(self._app, 'config_service'):
+        if self._app and hasattr(self._app, "config_service"):
             return self._app.config_service
         return None
 
@@ -549,23 +577,25 @@ class SavePanel(QWidget):
             parent=self,
             default_drive=self._default_save_drive,
             connection_service=self._connection_service,
-            hide_drive_selection=True  # Drive is now in main UI
+            hide_drive_selection=True,  # Drive is now in main UI
         )
-        dialog.set_settings({
-            'save_drive': self._save_drive,  # Pass for reference but hidden
-            'region': self._region,
-            'save_subfolders': self._save_subfolders,
-            'live_view': self._live_view,
-            'comments': self._comments,
-        })
+        dialog.set_settings(
+            {
+                "save_drive": self._save_drive,  # Pass for reference but hidden
+                "region": self._region,
+                "save_subfolders": self._save_subfolders,
+                "live_view": self._live_view,
+                "comments": self._comments,
+            }
+        )
 
         if dialog.exec_() == dialog.Accepted:
             settings = dialog.get_settings()
             # Drive is set in main UI, not here
-            self._region = settings['region']
-            self._save_subfolders = settings['save_subfolders']
-            self._live_view = settings['live_view']
-            self._comments = settings['comments']
+            self._region = settings["region"]
+            self._save_subfolders = settings["save_subfolders"]
+            self._live_view = settings["live_view"]
+            self._comments = settings["comments"]
             self._on_settings_changed()
 
     def get_settings(self) -> Dict[str, Any]:
@@ -585,20 +615,20 @@ class SavePanel(QWidget):
                 local_path = config_service.get_local_path_for_drive(self._save_drive)
 
         return {
-            'save_enabled': self._save_enabled.isChecked(),
-            'save_drive': self._save_drive,
-            'save_directory': self._save_directory.text(),
-            'sample_name': self._sample_name.text(),
-            'region': self._region,
-            'save_format': format_value,
-            'save_mip': self._save_mip.isChecked(),
-            'display_mip': self._display_mip.isChecked(),
-            'save_subfolders': self._save_subfolders,
-            'live_view': self._live_view,
-            'comments': self._comments,
+            "save_enabled": self._save_enabled.isChecked(),
+            "save_drive": self._save_drive,
+            "save_directory": self._save_directory.text(),
+            "sample_name": self._sample_name.text(),
+            "region": self._region,
+            "save_format": format_value,
+            "save_mip": self._save_mip.isChecked(),
+            "display_mip": self._display_mip.isChecked(),
+            "save_subfolders": self._save_subfolders,
+            "live_view": self._live_view,
+            "comments": self._comments,
             # Local access settings for post-processing
-            'local_access_enabled': self._enable_local_access.isChecked(),
-            'local_path': local_path,
+            "local_access_enabled": self._enable_local_access.isChecked(),
+            "local_path": local_path,
         }
 
     def set_settings(self, settings: Dict[str, Any]) -> None:
@@ -613,51 +643,51 @@ class SavePanel(QWidget):
         if not settings:
             return
 
-        if 'save_enabled' in settings:
-            self._save_enabled.setChecked(settings['save_enabled'])
+        if "save_enabled" in settings:
+            self._save_enabled.setChecked(settings["save_enabled"])
 
-        if 'save_drive' in settings:
-            self._save_drive = settings['save_drive']
+        if "save_drive" in settings:
+            self._save_drive = settings["save_drive"]
             # Try to set combo box if the drive is in the list
-            idx = self._save_drive_combo.findText(settings['save_drive'])
+            idx = self._save_drive_combo.findText(settings["save_drive"])
             if idx >= 0:
                 self._save_drive_combo.setCurrentIndex(idx)
             else:
-                self._save_drive_combo.setCurrentText(settings['save_drive'])
+                self._save_drive_combo.setCurrentText(settings["save_drive"])
 
-        if 'save_directory' in settings:
-            self._save_directory.setText(settings['save_directory'])
+        if "save_directory" in settings:
+            self._save_directory.setText(settings["save_directory"])
 
-        if 'sample_name' in settings:
-            self._sample_name.setText(settings['sample_name'])
+        if "sample_name" in settings:
+            self._sample_name.setText(settings["sample_name"])
 
-        if 'region' in settings:
-            self._region = settings['region']
+        if "region" in settings:
+            self._region = settings["region"]
 
-        if 'save_format' in settings:
+        if "save_format" in settings:
             # Find format index by value
             for i, (_, format_value) in enumerate(SAVE_FORMATS):
-                if format_value == settings['save_format']:
+                if format_value == settings["save_format"]:
                     self._format_combo.setCurrentIndex(i)
                     break
 
-        if 'save_mip' in settings:
-            self._save_mip.setChecked(settings['save_mip'])
+        if "save_mip" in settings:
+            self._save_mip.setChecked(settings["save_mip"])
 
-        if 'display_mip' in settings:
-            self._display_mip.setChecked(settings['display_mip'])
+        if "display_mip" in settings:
+            self._display_mip.setChecked(settings["display_mip"])
 
-        if 'save_subfolders' in settings:
-            self._save_subfolders = settings['save_subfolders']
+        if "save_subfolders" in settings:
+            self._save_subfolders = settings["save_subfolders"]
 
-        if 'live_view' in settings:
-            self._live_view = settings['live_view']
+        if "live_view" in settings:
+            self._live_view = settings["live_view"]
 
-        if 'comments' in settings:
-            self._comments = settings['comments']
+        if "comments" in settings:
+            self._comments = settings["comments"]
 
-        if 'local_access_enabled' in settings:
-            self._enable_local_access.setChecked(settings['local_access_enabled'])
+        if "local_access_enabled" in settings:
+            self._enable_local_access.setChecked(settings["local_access_enabled"])
 
         # Update local path display after restoring settings
         self._update_local_path_display()
@@ -673,16 +703,18 @@ class SavePanel(QWidget):
         settings = self.get_settings()
 
         workflow_dict = {
-            'Save image drive': settings['save_drive'],
-            'Save image directory': settings['save_directory'],
-            'Sample': settings['sample_name'],
-            'Region': settings['region'],
-            'Save image data': settings['save_format'] if settings['save_enabled'] else 'NotSaved',
-            'Save max projection': 'true' if settings['save_mip'] else 'false',
-            'Display max projection': 'true' if settings['display_mip'] else 'false',
-            'Save to subfolders': 'true' if settings['save_subfolders'] else 'false',
-            'Work flow live view enabled': 'true' if settings['live_view'] else 'false',
-            'Comments': settings['comments'],
+            "Save image drive": settings["save_drive"],
+            "Save image directory": settings["save_directory"],
+            "Sample": settings["sample_name"],
+            "Region": settings["region"],
+            "Save image data": (
+                settings["save_format"] if settings["save_enabled"] else "NotSaved"
+            ),
+            "Save max projection": "true" if settings["save_mip"] else "false",
+            "Display max projection": "true" if settings["display_mip"] else "false",
+            "Save to subfolders": "true" if settings["save_subfolders"] else "false",
+            "Work flow live view enabled": "true" if settings["live_view"] else "false",
+            "Comments": settings["comments"],
         }
 
         return workflow_dict
@@ -736,25 +768,25 @@ class SavePanel(QWidget):
     def get_advanced_settings(self) -> Dict[str, Any]:
         """Get advanced save settings."""
         return {
-            'save_drive': self._save_drive,
-            'region': self._region,
-            'save_subfolders': self._save_subfolders,
-            'live_view': self._live_view,
-            'comments': self._comments,
+            "save_drive": self._save_drive,
+            "region": self._region,
+            "save_subfolders": self._save_subfolders,
+            "live_view": self._live_view,
+            "comments": self._comments,
         }
 
     def set_advanced_settings(self, settings: Dict[str, Any]) -> None:
         """Set advanced save settings."""
-        if 'save_drive' in settings:
-            self.set_save_drive(settings['save_drive'])
-        if 'region' in settings:
-            self._region = settings['region']
-        if 'save_subfolders' in settings:
-            self._save_subfolders = settings['save_subfolders']
-        if 'live_view' in settings:
-            self._live_view = settings['live_view']
-        if 'comments' in settings:
-            self._comments = settings['comments']
+        if "save_drive" in settings:
+            self.set_save_drive(settings["save_drive"])
+        if "region" in settings:
+            self._region = settings["region"]
+        if "save_subfolders" in settings:
+            self._save_subfolders = settings["save_subfolders"]
+        if "live_view" in settings:
+            self._live_view = settings["live_view"]
+        if "comments" in settings:
+            self._comments = settings["comments"]
 
     def set_app(self, app) -> None:
         """Set application reference for configuration access.

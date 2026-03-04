@@ -12,9 +12,9 @@ throughout the Flamingo Control application.
 
 from .overview_results import (
     VISUALIZATION_TYPES,
-    TileResult,
-    RotationResult,
     EffectiveBoundingBox,
+    RotationResult,
+    TileResult,
 )
 
 __all__ = [

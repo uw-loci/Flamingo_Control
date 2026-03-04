@@ -13,6 +13,7 @@ NumPy 2.x Optimizations:
 
 import os
 import time
+
 import numpy as np
 from PIL import Image
 from PyQt5.QtGui import QImage
@@ -20,6 +21,7 @@ from PyQt5.QtGui import QImage
 # -------------------------
 # Image saving (PNG)
 # -------------------------
+
 
 def save_png(image_data: np.ndarray, image_title: str) -> None:
     """
@@ -67,6 +69,7 @@ def save_png(image_data: np.ndarray, image_title: str) -> None:
 # QImage conversion
 # -------------------------
 
+
 def convert_to_qimage(image_data: np.ndarray) -> QImage:
     """
     Convert a 16-bit (or float) grayscale numpy array to a 512×512 8-bit QImage
@@ -102,7 +105,7 @@ def convert_to_qimage(image_data: np.ndarray) -> QImage:
     bytes_per_line = w  # grayscale
 
     # Important: ensure the array is C-contiguous so QImage can read it
-    if not arr_u8.flags['C_CONTIGUOUS']:
+    if not arr_u8.flags["C_CONTIGUOUS"]:
         arr_u8 = np.ascontiguousarray(arr_u8)
 
     qimg = QImage(arr_u8.data, w, h, bytes_per_line, QImage.Format_Grayscale8).copy()

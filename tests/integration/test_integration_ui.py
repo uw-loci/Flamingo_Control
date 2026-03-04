@@ -4,25 +4,27 @@ These tests verify that the UI components work together correctly with the
 underlying MVC layers, including user interactions and state updates.
 """
 
-import pytest
 import os
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
-from PyQt5.QtWidgets import QApplication
+
+import pytest
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QApplication
 
 # Set offscreen platform for headless testing
-os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
+from py2flamingo.application import FlamingoApplication
+from py2flamingo.controllers import ConnectionController, WorkflowController
+from py2flamingo.core import ProtocolEncoder, TCPConnection
+from py2flamingo.main_window import MainWindow
+from py2flamingo.models import ConnectionModel, ConnectionState
+from py2flamingo.services import MVCConnectionService, MVCWorkflowService
 
 # Import MVC components
 from py2flamingo.views import ConnectionView, WorkflowView
-from py2flamingo.controllers import ConnectionController, WorkflowController
-from py2flamingo.services import MVCConnectionService, MVCWorkflowService
-from py2flamingo.models import ConnectionModel, ConnectionState
-from py2flamingo.core import TCPConnection, ProtocolEncoder
-from py2flamingo.application import FlamingoApplication
-from py2flamingo.main_window import MainWindow
 
 
 @pytest.fixture(scope="module")
@@ -89,7 +91,7 @@ def workflow_view(qtbot, workflow_controller):
 @pytest.fixture
 def test_workflow_file():
     """Create a temporary test workflow file."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
         f.write("[Experiment Settings]\n")
         f.write("Experiment Name=Test UI Integration\n")
         filepath = Path(f.name)
@@ -101,6 +103,7 @@ def test_workflow_file():
 # ============================================================================
 # Connection View Integration Tests
 # ============================================================================
+
 
 def test_connection_view_displays_correctly(connection_view):
     """Test that connection view displays all components."""
@@ -118,7 +121,9 @@ def test_connection_view_initial_state(connection_view):
     assert "Disconnected" in connection_view.status_label.text()
 
 
-def test_connection_view_connect_button_click(qtbot, connection_view, mock_connection_service):
+def test_connection_view_connect_button_click(
+    qtbot, connection_view, mock_connection_service
+):
     """Test clicking connect button triggers connection."""
     mock_connection_service.connect.return_value = (True, "Connected successfully")
 
@@ -133,7 +138,9 @@ def test_connection_view_connect_button_click(qtbot, connection_view, mock_conne
     mock_connection_service.connect.assert_called_once()
 
 
-def test_connection_view_disconnect_button_click(qtbot, connection_view, mock_connection_service):
+def test_connection_view_disconnect_button_click(
+    qtbot, connection_view, mock_connection_service
+):
     """Test clicking disconnect button triggers disconnection."""
     # Simulate connected state
     mock_connection_service.is_connected.return_value = True
@@ -149,9 +156,14 @@ def test_connection_view_disconnect_button_click(qtbot, connection_view, mock_co
     mock_connection_service.disconnect.assert_called_once()
 
 
-def test_connection_view_updates_on_success(qtbot, connection_view, mock_connection_service):
+def test_connection_view_updates_on_success(
+    qtbot, connection_view, mock_connection_service
+):
     """Test view updates correctly on successful connection."""
-    mock_connection_service.connect.return_value = (True, "Connected to 127.0.0.1:53717")
+    mock_connection_service.connect.return_value = (
+        True,
+        "Connected to 127.0.0.1:53717",
+    )
     mock_connection_service.is_connected.return_value = True
 
     connection_view.ip_input.setText("127.0.0.1")
@@ -165,7 +177,9 @@ def test_connection_view_updates_on_success(qtbot, connection_view, mock_connect
     assert connection_view.disconnect_btn.isEnabled() is True
 
 
-def test_connection_view_displays_error(qtbot, connection_view, mock_connection_service):
+def test_connection_view_displays_error(
+    qtbot, connection_view, mock_connection_service
+):
     """Test view displays error message on connection failure."""
     mock_connection_service.connect.return_value = (False, "Connection refused")
 
@@ -208,6 +222,7 @@ def test_connection_view_get_and_set_info(connection_view):
 # Workflow View Integration Tests
 # ============================================================================
 
+
 def test_workflow_view_displays_correctly(workflow_view):
     """Test that workflow view displays all components."""
     assert workflow_view.file_path_input is not None
@@ -226,7 +241,7 @@ def test_workflow_view_initial_state(workflow_view):
 
 def test_workflow_view_browse_button_opens_dialog(qtbot, workflow_view):
     """Test browse button attempts to open file dialog."""
-    with patch('PyQt5.QtWidgets.QFileDialog.getOpenFileName') as mock_dialog:
+    with patch("PyQt5.QtWidgets.QFileDialog.getOpenFileName") as mock_dialog:
         mock_dialog.return_value = ("/path/to/workflow.txt", "")
 
         qtbot.mouseClick(workflow_view.browse_btn, Qt.LeftButton)
@@ -235,8 +250,9 @@ def test_workflow_view_browse_button_opens_dialog(qtbot, workflow_view):
         mock_dialog.assert_called_once()
 
 
-def test_workflow_view_start_button_click(qtbot, workflow_view, mock_workflow_service,
-                                         test_workflow_file):
+def test_workflow_view_start_button_click(
+    qtbot, workflow_view, mock_workflow_service, test_workflow_file
+):
     """Test clicking start button triggers workflow start."""
     mock_workflow_service.connection_service.is_connected.return_value = True
     mock_workflow_service.start_workflow.return_value = (True, "Workflow started")
@@ -307,6 +323,7 @@ def test_workflow_view_get_workflow_path(workflow_view, test_workflow_file):
 # Main Window Integration Tests
 # ============================================================================
 
+
 @pytest.fixture
 def main_window(qtbot, connection_controller, workflow_controller):
     """Create main window with controllers."""
@@ -352,9 +369,10 @@ def test_main_window_closes_cleanly(qtbot, main_window):
 # Application Integration Tests
 # ============================================================================
 
+
 def test_application_creates_all_components(qapp):
     """Test FlamingoApplication creates all MVC components."""
-    with patch.object(FlamingoApplication, 'create_main_window'):
+    with patch.object(FlamingoApplication, "create_main_window"):
         app = FlamingoApplication()
         app.setup_dependencies()
 
@@ -369,7 +387,7 @@ def test_application_creates_all_components(qapp):
 
 def test_application_dependency_injection_wiring(qapp):
     """Test application wires dependencies correctly."""
-    with patch.object(FlamingoApplication, 'create_main_window'):
+    with patch.object(FlamingoApplication, "create_main_window"):
         app = FlamingoApplication()
         app.setup_dependencies()
 
@@ -389,6 +407,7 @@ def test_application_dependency_injection_wiring(qapp):
 # End-to-End UI Workflow Tests
 # ============================================================================
 
+
 def test_ui_complete_workflow_simulation(qtbot, test_workflow_file):
     """Test complete UI workflow: connect -> load -> start -> stop -> disconnect."""
     # Create real stack with mocked TCP
@@ -406,7 +425,7 @@ def test_ui_complete_workflow_simulation(qtbot, test_workflow_file):
     workflow_service.load_workflow.return_value = (True, "Workflow loaded")
     workflow_service.start_workflow.return_value = (True, "Workflow started")
     workflow_service.stop_workflow.return_value = (True, "Workflow stopped")
-    workflow_service.get_workflow_status.return_value = {'workflow_loaded': True}
+    workflow_service.get_workflow_status.return_value = {"workflow_loaded": True}
 
     # Create controllers
     conn_controller = ConnectionController(conn_service, model)

@@ -4,15 +4,17 @@ This module provides models for representing stage positions,
 movement limits, and stage configuration.
 """
 
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, Tuple
-from enum import Enum
 import math
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
+
 from ..base import ValidatedModel, ValidationError, validate_range
 
 
 class StageAxis(Enum):
     """Enumeration of stage axes."""
+
     X = "x"
     Y = "y"
     Z = "z"
@@ -21,9 +23,10 @@ class StageAxis(Enum):
 
 class MovementMode(Enum):
     """Stage movement modes."""
+
     ABSOLUTE = "absolute"  # Move to absolute position
     RELATIVE = "relative"  # Move relative to current position
-    HOME = "home"         # Move to home position
+    HOME = "home"  # Move to home position
 
 
 @dataclass
@@ -33,6 +36,7 @@ class AxisLimits:
     Includes both hard limits (physical boundaries) and
     soft limits (user-defined safety margins).
     """
+
     min: float
     max: float
     soft_min: Optional[float] = None
@@ -96,13 +100,14 @@ class AxisLimits:
 @dataclass
 class StageLimits:
     """Complete stage movement limits for all axes."""
+
     x_axis: AxisLimits
     y_axis: AxisLimits
     z_axis: AxisLimits
     r_axis: AxisLimits  # Rotation axis
 
     @classmethod
-    def from_config(cls, config: Dict[str, Any]) -> 'StageLimits':
+    def from_config(cls, config: Dict[str, Any]) -> "StageLimits":
         """Create StageLimits from configuration dictionary.
 
         Args:
@@ -112,58 +117,65 @@ class StageLimits:
             StageLimits instance
         """
         # Handle both new format and legacy format
-        if 'limits' in config:
-            limits = config['limits']
+        if "limits" in config:
+            limits = config["limits"]
         else:
             limits = config
 
         # Parse X axis
-        x_data = limits.get('x_axis', limits.get('x', {}))
+        x_data = limits.get("x_axis", limits.get("x", {}))
         x_axis = AxisLimits(
-            min=x_data.get('min_mm', x_data.get('min', 0.0)),
-            max=x_data.get('max_mm', x_data.get('max', 26.0)),
-            soft_min=x_data.get('soft_min_mm', x_data.get('soft_min')),
-            soft_max=x_data.get('soft_max_mm', x_data.get('soft_max')),
-            unit="mm"
+            min=x_data.get("min_mm", x_data.get("min", 0.0)),
+            max=x_data.get("max_mm", x_data.get("max", 26.0)),
+            soft_min=x_data.get("soft_min_mm", x_data.get("soft_min")),
+            soft_max=x_data.get("soft_max_mm", x_data.get("soft_max")),
+            unit="mm",
         )
 
         # Parse Y axis
-        y_data = limits.get('y_axis', limits.get('y', {}))
+        y_data = limits.get("y_axis", limits.get("y", {}))
         y_axis = AxisLimits(
-            min=y_data.get('min_mm', y_data.get('min', 0.0)),
-            max=y_data.get('max_mm', y_data.get('max', 26.0)),
-            soft_min=y_data.get('soft_min_mm', y_data.get('soft_min')),
-            soft_max=y_data.get('soft_max_mm', y_data.get('soft_max')),
-            unit="mm"
+            min=y_data.get("min_mm", y_data.get("min", 0.0)),
+            max=y_data.get("max_mm", y_data.get("max", 26.0)),
+            soft_min=y_data.get("soft_min_mm", y_data.get("soft_min")),
+            soft_max=y_data.get("soft_max_mm", y_data.get("soft_max")),
+            unit="mm",
         )
 
         # Parse Z axis
-        z_data = limits.get('z_axis', limits.get('z', {}))
+        z_data = limits.get("z_axis", limits.get("z", {}))
         z_axis = AxisLimits(
-            min=z_data.get('min_mm', z_data.get('min', 0.0)),
-            max=z_data.get('max_mm', z_data.get('max', 26.0)),
-            soft_min=z_data.get('soft_min_mm', z_data.get('soft_min')),
-            soft_max=z_data.get('soft_max_mm', z_data.get('soft_max')),
-            unit="mm"
+            min=z_data.get("min_mm", z_data.get("min", 0.0)),
+            max=z_data.get("max_mm", z_data.get("max", 26.0)),
+            soft_min=z_data.get("soft_min_mm", z_data.get("soft_min")),
+            soft_max=z_data.get("soft_max_mm", z_data.get("soft_max")),
+            unit="mm",
         )
 
         # Parse R (rotation) axis
-        r_data = limits.get('r_axis', limits.get('r', {}))
+        r_data = limits.get("r_axis", limits.get("r", {}))
         r_axis = AxisLimits(
-            min=r_data.get('min_degrees', r_data.get('min', -720.0)),
-            max=r_data.get('max_degrees', r_data.get('max', 720.0)),
-            soft_min=r_data.get('soft_min_degrees', r_data.get('soft_min')),
-            soft_max=r_data.get('soft_max_degrees', r_data.get('soft_max')),
-            unit="degrees"
+            min=r_data.get("min_degrees", r_data.get("min", -720.0)),
+            max=r_data.get("max_degrees", r_data.get("max", 720.0)),
+            soft_min=r_data.get("soft_min_degrees", r_data.get("soft_min")),
+            soft_max=r_data.get("soft_max_degrees", r_data.get("soft_max")),
+            unit="degrees",
         )
 
         return cls(x_axis=x_axis, y_axis=y_axis, z_axis=z_axis, r_axis=r_axis)
 
     @classmethod
-    def from_legacy(cls, x_min: float = 0.0, x_max: float = 26.0,
-                   y_min: float = 0.0, y_max: float = 26.0,
-                   z_min: float = 0.0, z_max: float = 26.0,
-                   r_min: float = -720.0, r_max: float = 720.0) -> 'StageLimits':
+    def from_legacy(
+        cls,
+        x_min: float = 0.0,
+        x_max: float = 26.0,
+        y_min: float = 0.0,
+        y_max: float = 26.0,
+        z_min: float = 0.0,
+        z_max: float = 26.0,
+        r_min: float = -720.0,
+        r_max: float = 720.0,
+    ) -> "StageLimits":
         """Create StageLimits from legacy min/max values.
 
         Provides backward compatibility with old StageLimits class.
@@ -172,7 +184,7 @@ class StageLimits:
             x_axis=AxisLimits(min=x_min, max=x_max, unit="mm"),
             y_axis=AxisLimits(min=y_min, max=y_max, unit="mm"),
             z_axis=AxisLimits(min=z_min, max=z_max, unit="mm"),
-            r_axis=AxisLimits(min=r_min, max=r_max, unit="degrees")
+            r_axis=AxisLimits(min=r_min, max=r_max, unit="degrees"),
         )
 
     def get_axis_limits(self, axis: StageAxis) -> AxisLimits:
@@ -188,11 +200,11 @@ class StageLimits:
             StageAxis.X: self.x_axis,
             StageAxis.Y: self.y_axis,
             StageAxis.Z: self.z_axis,
-            StageAxis.R: self.r_axis
+            StageAxis.R: self.r_axis,
         }
         return axis_map[axis]
 
-    def is_position_valid(self, position: 'Position', use_soft: bool = True) -> bool:
+    def is_position_valid(self, position: "Position", use_soft: bool = True) -> bool:
         """Check if a position is within all stage limits.
 
         Args:
@@ -202,10 +214,12 @@ class StageLimits:
         Returns:
             True if position is within all limits
         """
-        return (self.x_axis.is_within_limits(position.x, use_soft) and
-                self.y_axis.is_within_limits(position.y, use_soft) and
-                self.z_axis.is_within_limits(position.z, use_soft) and
-                self.r_axis.is_within_limits(position.r, use_soft))
+        return (
+            self.x_axis.is_within_limits(position.x, use_soft)
+            and self.y_axis.is_within_limits(position.y, use_soft)
+            and self.z_axis.is_within_limits(position.z, use_soft)
+            and self.r_axis.is_within_limits(position.r, use_soft)
+        )
 
 
 @dataclass
@@ -219,6 +233,7 @@ class Position(ValidatedModel):
     ValidatedModel/BaseModel which have fields with defaults. Python 3.12+
     enforces that non-default fields cannot follow default fields.
     """
+
     x: float = 0.0
     y: float = 0.0
     z: float = 0.0
@@ -229,17 +244,15 @@ class Position(ValidatedModel):
     def validate(self) -> None:
         """Validate position coordinates."""
         # Check for NaN or infinity
-        for axis, value in [('x', self.x), ('y', self.y), ('z', self.z), ('r', self.r)]:
+        for axis, value in [("x", self.x), ("y", self.y), ("z", self.z), ("r", self.r)]:
             if math.isnan(value) or math.isinf(value):
                 raise ValidationError(f"Invalid {axis} coordinate: {value}")
 
         # Validate against stage limits if provided
         if self.stage_limits and not self.stage_limits.is_position_valid(self):
-            raise ValidationError(
-                f"Position {self} is outside stage limits"
-            )
+            raise ValidationError(f"Position {self} is outside stage limits")
 
-    def distance_to(self, other: 'Position', include_rotation: bool = False) -> float:
+    def distance_to(self, other: "Position", include_rotation: bool = False) -> float:
         """Calculate Euclidean distance to another position.
 
         Args:
@@ -260,11 +273,13 @@ class Position(ValidatedModel):
                 dr -= 360
             # Convert rotation to approximate linear distance (arbitrary scale)
             dr_mm = dr * 0.1  # 1 degree ~= 0.1mm for distance purposes
-            return math.sqrt(dx*dx + dy*dy + dz*dz + dr_mm*dr_mm)
+            return math.sqrt(dx * dx + dy * dy + dz * dz + dr_mm * dr_mm)
         else:
-            return math.sqrt(dx*dx + dy*dy + dz*dz)
+            return math.sqrt(dx * dx + dy * dy + dz * dz)
 
-    def offset_by(self, dx: float = 0, dy: float = 0, dz: float = 0, dr: float = 0) -> 'Position':
+    def offset_by(
+        self, dx: float = 0, dy: float = 0, dz: float = 0, dr: float = 0
+    ) -> "Position":
         """Create a new position offset from this one.
 
         Args:
@@ -282,10 +297,10 @@ class Position(ValidatedModel):
             z=self.z + dz,
             r=self.r + dr,
             name=None,  # Don't copy name for offset position
-            stage_limits=self.stage_limits
+            stage_limits=self.stage_limits,
         )
 
-    def clamp_to_limits(self, limits: StageLimits, use_soft: bool = True) -> 'Position':
+    def clamp_to_limits(self, limits: StageLimits, use_soft: bool = True) -> "Position":
         """Create a new position clamped to stage limits.
 
         Args:
@@ -301,7 +316,7 @@ class Position(ValidatedModel):
             z=limits.z_axis.clamp(self.z, use_soft),
             r=limits.r_axis.clamp(self.r, use_soft),
             name=self.name,
-            stage_limits=limits
+            stage_limits=limits,
         )
 
     def to_list(self) -> List[float]:
@@ -313,7 +328,7 @@ class Position(ValidatedModel):
         return [self.x, self.y, self.z, self.r]
 
     @classmethod
-    def from_list(cls, coords: List[float], name: Optional[str] = None) -> 'Position':
+    def from_list(cls, coords: List[float], name: Optional[str] = None) -> "Position":
         """Create Position from list of coordinates.
 
         Args:
@@ -341,6 +356,7 @@ class Position(ValidatedModel):
 @dataclass
 class StageVelocity:
     """Stage movement velocity settings."""
+
     x_velocity: float = 1.0  # mm/s
     y_velocity: float = 1.0  # mm/s
     z_velocity: float = 1.0  # mm/s
@@ -352,7 +368,7 @@ class StageVelocity:
             StageAxis.X: self.x_velocity,
             StageAxis.Y: self.y_velocity,
             StageAxis.Z: self.z_velocity,
-            StageAxis.R: self.r_velocity
+            StageAxis.R: self.r_velocity,
         }
         return velocity_map[axis]
 
@@ -371,6 +387,7 @@ class StageVelocity:
 @dataclass
 class Stage(ValidatedModel):
     """Complete stage model with position, limits, and configuration."""
+
     current_position: Position = field(default_factory=Position)
     home_position: Optional[Position] = None
     limits: Optional[StageLimits] = None
@@ -427,6 +444,6 @@ class Stage(ValidatedModel):
             abs(target.x - self.current_position.x) / self.velocity.x_velocity,
             abs(target.y - self.current_position.y) / self.velocity.y_velocity,
             abs(target.z - self.current_position.z) / self.velocity.z_velocity,
-            abs(target.r - self.current_position.r) / self.velocity.r_velocity
+            abs(target.r - self.current_position.r) / self.velocity.r_velocity,
         ]
         return max(times)

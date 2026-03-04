@@ -5,16 +5,19 @@ and image collections from microscope acquisitions.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, Tuple, Union
 from datetime import datetime
 from enum import Enum
-import numpy as np
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import numpy as np
+
 from ..base import BaseModel, ValidatedModel, ValidationError
 
 
 class ImageType(Enum):
     """Types of microscopy images."""
+
     BRIGHTFIELD = "brightfield"
     FLUORESCENCE = "fluorescence"
     PHASE = "phase_contrast"
@@ -26,23 +29,25 @@ class ImageType(Enum):
 
 class ImageDimension(Enum):
     """Image dimensionality."""
-    GRAYSCALE_2D = "2D"           # Single channel, single plane
-    RGB_2D = "RGB_2D"              # RGB, single plane
-    GRAYSCALE_3D = "3D"           # Single channel, z-stack
-    RGB_3D = "RGB_3D"              # RGB z-stack
-    GRAYSCALE_4D = "4D"           # Single channel, time series of z-stacks
-    MULTICHANNEL_2D = "MC_2D"     # Multi-channel, single plane
-    MULTICHANNEL_3D = "MC_3D"     # Multi-channel z-stack
-    MULTICHANNEL_4D = "MC_4D"     # Multi-channel time series
+
+    GRAYSCALE_2D = "2D"  # Single channel, single plane
+    RGB_2D = "RGB_2D"  # RGB, single plane
+    GRAYSCALE_3D = "3D"  # Single channel, z-stack
+    RGB_3D = "RGB_3D"  # RGB z-stack
+    GRAYSCALE_4D = "4D"  # Single channel, time series of z-stacks
+    MULTICHANNEL_2D = "MC_2D"  # Multi-channel, single plane
+    MULTICHANNEL_3D = "MC_3D"  # Multi-channel z-stack
+    MULTICHANNEL_4D = "MC_4D"  # Multi-channel time series
 
 
 @dataclass
 class PixelCalibration:
     """Pixel size calibration for images."""
-    x_um: float              # Pixel width in micrometers
-    y_um: float              # Pixel height in micrometers
+
+    x_um: float  # Pixel width in micrometers
+    y_um: float  # Pixel height in micrometers
     z_um: Optional[float] = None  # Z-step for stacks
-    unit: str = "um"         # Calibration unit
+    unit: str = "um"  # Calibration unit
 
     def get_voxel_volume(self) -> Optional[float]:
         """Calculate voxel volume for 3D data.
@@ -66,6 +71,7 @@ class PixelCalibration:
 @dataclass
 class ImageMetadata(BaseModel):
     """Comprehensive metadata for microscopy images."""
+
     # Acquisition parameters
     acquisition_time: datetime
     exposure_time_ms: float
@@ -127,6 +133,7 @@ class ImageMetadata(BaseModel):
 @dataclass
 class ImageData(ValidatedModel):
     """Container for actual image data with metadata."""
+
     data: np.ndarray
     metadata: ImageMetadata
     name: Optional[str] = None
@@ -173,7 +180,7 @@ class ImageData(ValidatedModel):
             12: np.uint16,  # Stored in uint16
             14: np.uint16,  # Stored in uint16
             16: np.uint16,
-            32: np.float32
+            32: np.float32,
         }
         return dtype_map.get(bit_depth)
 
@@ -190,7 +197,7 @@ class ImageData(ValidatedModel):
     @property
     def width(self) -> int:
         """Get image width in pixels."""
-        x_idx = self.dimension_order.find('X')
+        x_idx = self.dimension_order.find("X")
         if x_idx >= 0:
             return self.data.shape[x_idx]
         # Assume last dimension if not specified
@@ -199,7 +206,7 @@ class ImageData(ValidatedModel):
     @property
     def height(self) -> int:
         """Get image height in pixels."""
-        y_idx = self.dimension_order.find('Y')
+        y_idx = self.dimension_order.find("Y")
         if y_idx >= 0:
             return self.data.shape[y_idx]
         # Assume second-to-last dimension if not specified
@@ -208,7 +215,7 @@ class ImageData(ValidatedModel):
     @property
     def num_channels(self) -> int:
         """Get number of channels."""
-        c_idx = self.dimension_order.find('C')
+        c_idx = self.dimension_order.find("C")
         if c_idx >= 0:
             return self.data.shape[c_idx]
         return 1
@@ -216,7 +223,7 @@ class ImageData(ValidatedModel):
     @property
     def num_z_planes(self) -> int:
         """Get number of Z planes."""
-        z_idx = self.dimension_order.find('Z')
+        z_idx = self.dimension_order.find("Z")
         if z_idx >= 0:
             return self.data.shape[z_idx]
         return 1
@@ -224,7 +231,7 @@ class ImageData(ValidatedModel):
     @property
     def num_timepoints(self) -> int:
         """Get number of timepoints."""
-        t_idx = self.dimension_order.find('T')
+        t_idx = self.dimension_order.find("T")
         if t_idx >= 0:
             return self.data.shape[t_idx]
         return 1
@@ -238,7 +245,7 @@ class ImageData(ValidatedModel):
         Returns:
             Array with channel dimension removed
         """
-        c_idx = self.dimension_order.find('C')
+        c_idx = self.dimension_order.find("C")
         if c_idx < 0:
             if channel == 0:
                 return self.data
@@ -246,7 +253,9 @@ class ImageData(ValidatedModel):
                 raise ValueError(f"No channel dimension, cannot get channel {channel}")
 
         if channel >= self.data.shape[c_idx]:
-            raise ValueError(f"Channel {channel} out of range (0-{self.data.shape[c_idx]-1})")
+            raise ValueError(
+                f"Channel {channel} out of range (0-{self.data.shape[c_idx]-1})"
+            )
 
         return np.take(self.data, channel, axis=c_idx)
 
@@ -259,7 +268,7 @@ class ImageData(ValidatedModel):
         Returns:
             Array with Z dimension removed
         """
-        z_idx = self.dimension_order.find('Z')
+        z_idx = self.dimension_order.find("Z")
         if z_idx < 0:
             if z == 0:
                 return self.data
@@ -271,7 +280,7 @@ class ImageData(ValidatedModel):
 
         return np.take(self.data, z, axis=z_idx)
 
-    def get_max_projection(self, axis: str = 'Z') -> np.ndarray:
+    def get_max_projection(self, axis: str = "Z") -> np.ndarray:
         """Create maximum intensity projection.
 
         Args:
@@ -293,16 +302,16 @@ class ImageData(ValidatedModel):
             Dictionary with min, max, mean, std, etc.
         """
         return {
-            'min': float(np.min(self.data)),
-            'max': float(np.max(self.data)),
-            'mean': float(np.mean(self.data)),
-            'std': float(np.std(self.data)),
-            'median': float(np.median(self.data)),
-            'sum': float(np.sum(self.data)),
-            'non_zero_pixels': int(np.count_nonzero(self.data))
+            "min": float(np.min(self.data)),
+            "max": float(np.max(self.data)),
+            "mean": float(np.mean(self.data)),
+            "std": float(np.std(self.data)),
+            "median": float(np.median(self.data)),
+            "sum": float(np.sum(self.data)),
+            "non_zero_pixels": int(np.count_nonzero(self.data)),
         }
 
-    def save(self, path: Path, format: str = 'tiff') -> None:
+    def save(self, path: Path, format: str = "tiff") -> None:
         """Save image to file.
 
         Args:
@@ -312,7 +321,7 @@ class ImageData(ValidatedModel):
         path = Path(path)
         self.file_path = path
 
-        if format.lower() == 'npy':
+        if format.lower() == "npy":
             np.save(path, self.data)
         else:
             # Would use appropriate image IO library here
@@ -322,9 +331,12 @@ class ImageData(ValidatedModel):
         self.update()
 
     @classmethod
-    def create_from_array(cls, data: np.ndarray,
-                         metadata: Optional[ImageMetadata] = None,
-                         dimension_order: Optional[str] = None) -> 'ImageData':
+    def create_from_array(
+        cls,
+        data: np.ndarray,
+        metadata: Optional[ImageMetadata] = None,
+        dimension_order: Optional[str] = None,
+    ) -> "ImageData":
         """Create ImageData from numpy array.
 
         Args:
@@ -337,8 +349,7 @@ class ImageData(ValidatedModel):
         """
         if metadata is None:
             metadata = ImageMetadata(
-                acquisition_time=datetime.now(),
-                exposure_time_ms=10.0
+                acquisition_time=datetime.now(), exposure_time_ms=10.0
             )
 
         if dimension_order is None:
@@ -361,6 +372,7 @@ class ImageData(ValidatedModel):
 @dataclass
 class ImageStack(BaseModel):
     """Collection of related images (z-stack, time series, etc.)."""
+
     images: List[ImageData]
     stack_type: str  # 'z-stack', 'time-series', 'multi-channel', etc.
     name: Optional[str] = None

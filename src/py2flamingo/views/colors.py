@@ -88,8 +88,10 @@ CHANNEL_PURPLE = "#a56eff"  # IBM Purple 50
 # Qt Stylesheet Helpers
 # ============================================================================
 
-def get_button_stylesheet(bg_color: str, hover_color: str = None,
-                          text_color: str = "white") -> str:
+
+def get_button_stylesheet(
+    bg_color: str, hover_color: str = None, text_color: str = "white"
+) -> str:
     """
     Generate a Qt stylesheet for a button with the given colors.
 
@@ -125,8 +127,10 @@ def get_button_stylesheet(bg_color: str, hover_color: str = None,
         }}
     """
 
-def get_label_stylesheet(bg_color: str, text_color: str = "white",
-                         border: bool = True) -> str:
+
+def get_label_stylesheet(
+    bg_color: str, text_color: str = "white", border: bool = True
+) -> str:
     """
     Generate a Qt stylesheet for a label/indicator with the given colors.
 
@@ -149,6 +153,7 @@ def get_label_stylesheet(bg_color: str, text_color: str = "white",
             border-radius: 3px;
         }}
     """
+
 
 def get_status_color(status: str) -> str:
     """
@@ -173,6 +178,7 @@ def get_status_color(status: str) -> str:
     else:
         return NEUTRAL_COLOR
 
+
 # ============================================================================
 # Legacy Color Mappings (for gradual migration)
 # ============================================================================
@@ -183,18 +189,16 @@ COLOR_MAP = {
     "#00ff00": SUCCESS_COLOR,
     "#00FF00": SUCCESS_COLOR,
     "lime": SUCCESS_COLOR,
-
     "red": ERROR_COLOR,
     "#ff0000": ERROR_COLOR,
     "#FF0000": ERROR_COLOR,
-
     "yellow": WARNING_COLOR,
     "#ffff00": WARNING_COLOR,
     "#FFFF00": WARNING_COLOR,
-
     "gray": NEUTRAL_COLOR,
     "grey": NEUTRAL_COLOR,
 }
+
 
 def map_legacy_color(color: str) -> str:
     """

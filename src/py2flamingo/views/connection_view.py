@@ -4,18 +4,27 @@ Connection view for managing microscope connection.
 This module provides the ConnectionView widget for handling connection UI.
 """
 
-from typing import Tuple, Optional, List, Dict, Any
 import logging
 import struct
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QSpinBox, QComboBox, QGroupBox, QTextEdit
-)
+from typing import Any, Dict, List, Optional, Tuple
+
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon
+from PyQt5.QtWidgets import (
+    QComboBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
-from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR
 from py2flamingo.resources import get_app_icon
+from py2flamingo.views.colors import ERROR_COLOR, SUCCESS_COLOR
 
 
 class ConnectionView(QWidget):
@@ -32,12 +41,21 @@ class ConnectionView(QWidget):
 
     # Signals
     connection_established = pyqtSignal()  # Emitted when TCP connection succeeds
-    settings_loaded = pyqtSignal()         # Emitted after settings retrieval completes (position queries should wait for this)
-    connection_error = pyqtSignal(str)     # Emitted when communication error occurs (e.g., settings retrieval failed)
+    settings_loaded = (
+        pyqtSignal()
+    )  # Emitted after settings retrieval completes (position queries should wait for this)
+    connection_error = pyqtSignal(
+        str
+    )  # Emitted when communication error occurs (e.g., settings retrieval failed)
     sample_view_requested = pyqtSignal()  # Emitted when user clicks "Open Sample View"
 
-    def __init__(self, controller, config_manager=None, position_controller=None,
-                 workflow_service=None):
+    def __init__(
+        self,
+        controller,
+        config_manager=None,
+        position_controller=None,
+        workflow_service=None,
+    ):
         """Initialize connection view with controller.
 
         Args:
@@ -183,9 +201,15 @@ class ConnectionView(QWidget):
         # Command selector row
         cmd_layout = QHBoxLayout()
         self.debug_command_combo = QComboBox()
-        self.debug_command_combo.addItem("SYSTEM_STATE_GET", (40967, "SYSTEM_STATE_GET"))
-        self.debug_command_combo.addItem("CAMERA_FOV_GET", (12343, "CAMERA_PIXEL_FIELD_OF_VIEW_GET"))
-        self.debug_command_combo.addItem("CAMERA_SIZE_GET", (12327, "CAMERA_IMAGE_SIZE_GET"))
+        self.debug_command_combo.addItem(
+            "SYSTEM_STATE_GET", (40967, "SYSTEM_STATE_GET")
+        )
+        self.debug_command_combo.addItem(
+            "CAMERA_FOV_GET", (12343, "CAMERA_PIXEL_FIELD_OF_VIEW_GET")
+        )
+        self.debug_command_combo.addItem(
+            "CAMERA_SIZE_GET", (12327, "CAMERA_IMAGE_SIZE_GET")
+        )
         self.debug_command_combo.addItem("STAGE_POS_GET", (24584, "STAGE_POSITION_GET"))
         self.debug_command_combo.setToolTip("Select command to send")
         self.debug_command_combo.setEnabled(False)
@@ -265,7 +289,9 @@ class ConnectionView(QWidget):
         # Call controller
         success, message = self._controller.connect(ip, port)
 
-        self._logger.info(f"ConnectionView: Connection result - success={success}, message={message}")
+        self._logger.info(
+            f"ConnectionView: Connection result - success={success}, message={message}"
+        )
 
         # Update UI
         self._show_message(message, is_error=not success)
@@ -280,7 +306,9 @@ class ConnectionView(QWidget):
             self._logger.info("ConnectionView: Calling _load_and_display_settings()")
             settings_ok = self._load_and_display_settings()
             if not settings_ok:
-                self._logger.warning("ConnectionView: Settings retrieval failed - error state active")
+                self._logger.warning(
+                    "ConnectionView: Settings retrieval failed - error state active"
+                )
 
     def _on_disconnect_clicked(self) -> None:
         """Handle disconnect button click.
@@ -304,12 +332,16 @@ class ConnectionView(QWidget):
         if connected:
             # Connected state
             self.status_label.setText("Status: Connected")
-            self.status_label.setStyleSheet(f"color: {SUCCESS_COLOR}; font-weight: bold;")
+            self.status_label.setStyleSheet(
+                f"color: {SUCCESS_COLOR}; font-weight: bold;"
+            )
             self.connect_btn.setEnabled(False)
             self.disconnect_btn.setEnabled(True)
             self.ip_input.setEnabled(False)
             self.port_input.setEnabled(False)
-            self.debug_command_combo.setEnabled(True)  # Enable debug commands when connected
+            self.debug_command_combo.setEnabled(
+                True
+            )  # Enable debug commands when connected
             self.debug_query_btn.setEnabled(True)
             self.save_settings_btn.setEnabled(True)
             self.sample_view_btn.setEnabled(True)
@@ -321,7 +353,9 @@ class ConnectionView(QWidget):
             self.disconnect_btn.setEnabled(False)
             self.ip_input.setEnabled(True)
             self.port_input.setEnabled(True)
-            self.debug_command_combo.setEnabled(False)  # Disable debug commands when disconnected
+            self.debug_command_combo.setEnabled(
+                False
+            )  # Disable debug commands when disconnected
             self.debug_query_btn.setEnabled(False)
             self.save_settings_btn.setEnabled(False)
             self.sample_view_btn.setEnabled(False)
@@ -337,7 +371,9 @@ class ConnectionView(QWidget):
         Args:
             error_message: Error message to display
         """
-        self._logger.info(f"ConnectionView: Updating UI for error state: {error_message}")
+        self._logger.info(
+            f"ConnectionView: Updating UI for error state: {error_message}"
+        )
         self.status_label.setText(f"Status: {error_message}")
         self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-weight: bold;")
 
@@ -362,9 +398,9 @@ class ConnectionView(QWidget):
         self._logger.info("Sample View button clicked")
         self.sample_view_requested.emit()
 
-    def _create_topmost_messagebox(self, icon, title: str, text: str,
-                                     informative_text: str = None,
-                                     buttons=None) -> 'QMessageBox':
+    def _create_topmost_messagebox(
+        self, icon, title: str, text: str, informative_text: str = None, buttons=None
+    ) -> "QMessageBox":
         """Create a QMessageBox that stays on top of all windows.
 
         This ensures the dialog appears above windows with WindowStaysOnTopHint
@@ -436,12 +472,16 @@ class ConnectionView(QWidget):
         ip = self.ip_input.text()
         port = self.port_input.value()
 
-        self._logger.info(f"ConnectionView: Test connection button clicked for {ip}:{port}")
+        self._logger.info(
+            f"ConnectionView: Test connection button clicked for {ip}:{port}"
+        )
 
         # Test connection via controller
         success, message = self._controller.test_connection(ip, port)
 
-        self._logger.info(f"ConnectionView: Test result - success={success}, message={message}")
+        self._logger.info(
+            f"ConnectionView: Test result - success={success}, message={message}"
+        )
 
         # Display result
         self._show_message(message, is_error=not success)
@@ -459,7 +499,13 @@ class ConnectionView(QWidget):
         Sends selected command and displays the parsed response in a dialog.
         Useful for testing which commands are implemented.
         """
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QDialogButtonBox
+        from PyQt5.QtWidgets import (
+            QDialog,
+            QDialogButtonBox,
+            QPushButton,
+            QTextEdit,
+            QVBoxLayout,
+        )
 
         # Get selected command
         selected_data = self.debug_command_combo.currentData()
@@ -468,16 +514,23 @@ class ConnectionView(QWidget):
             return
 
         command_code, command_name = selected_data
-        self._logger.info(f"Debug query button clicked for {command_name} ({command_code})")
+        self._logger.info(
+            f"Debug query button clicked for {command_name} ({command_code})"
+        )
 
         # Check if position controller is available
         if not self._position_controller:
-            self._show_message("Debug feature not available (position controller not provided)", is_error=True)
+            self._show_message(
+                "Debug feature not available (position controller not provided)",
+                is_error=True,
+            )
             return
 
         # Call debug query with selected command
         try:
-            result = self._position_controller.debug_query_command(command_code, command_name)
+            result = self._position_controller.debug_query_command(
+                command_code, command_name
+            )
         except Exception as e:
             self._logger.error(f"Error calling debug query: {e}", exc_info=True)
             self._show_message(f"Debug query failed: {e}", is_error=True)
@@ -492,7 +545,9 @@ class ConnectionView(QWidget):
         layout = QVBoxLayout()
 
         # Add instruction text
-        instruction = QLabel(f"Raw response from {command_name} command (code {command_code}):")
+        instruction = QLabel(
+            f"Raw response from {command_name} command (code {command_code}):"
+        )
         instruction.setWordWrap(True)
         layout.addWidget(instruction)
 
@@ -502,27 +557,29 @@ class ConnectionView(QWidget):
         text_edit.setFont(QFont("Courier", 9))
 
         # Format the results
-        if result.get('success'):
+        if result.get("success"):
             text = "=" * 70 + "\n"
             text += "RESPONSE STRUCTURE\n"
             text += "=" * 70 + "\n\n"
 
-            parsed = result.get('parsed', {})
+            parsed = result.get("parsed", {})
 
             # Show response type
-            response_type = parsed.get('response_type', 'Unknown')
+            response_type = parsed.get("response_type", "Unknown")
             text += f"Response Type:   {response_type}\n"
             text += f"Start Marker:    {parsed.get('start_marker', 'N/A')}\n"
 
             # Only show protocol fields if binary protocol
             if response_type == "Binary Protocol":
-                command_code_val = parsed.get('command_code', 0)
+                command_code_val = parsed.get("command_code", 0)
 
                 # For camera commands with simple value responses, show cleaner output
                 if command_code_val == 12343:  # CAMERA_PIXEL_FIELD_OF_VIEW_GET
-                    pixel_fov = parsed.get('value', 0.0)
+                    pixel_fov = parsed.get("value", 0.0)
                     text += f"RESULT: Pixel Field of View = {pixel_fov} mm\n"
-                    text += f"        ({pixel_fov * 1000:.3f} micrometers per pixel)\n\n"
+                    text += (
+                        f"        ({pixel_fov * 1000:.3f} micrometers per pixel)\n\n"
+                    )
                     text += "This value indicates the physical size represented by each camera pixel.\n"
 
                 # Show complete protocol structure breakdown
@@ -530,7 +587,7 @@ class ConnectionView(QWidget):
                 text += f"PROTOCOL STRUCTURE (128-byte binary format)\n"
                 text += f"{'=' * 70}\n\n"
 
-                params = parsed.get('params', [0]*7)
+                params = parsed.get("params", [0] * 7)
 
                 text += f"[Offset 0-3]   Start Marker:     {parsed.get('start_marker', 'N/A')}\n"
                 text += f"[Offset 4-7]   Command Code:     {parsed.get('command_code', 'N/A')}\n"
@@ -545,29 +602,39 @@ class ConnectionView(QWidget):
                 text += f"[Offset 32-35] cmdBits5/Param[5]: {params[5] if len(params) > 5 else 'N/A'}\n"
                 text += f"[Offset 36-39] cmdBits6/Param[6]: {params[6] if len(params) > 6 else 'N/A'}\n"
                 text += f"\n"
-                text += f"[Offset 40-47] Value (double):   {parsed.get('value', 'N/A')}\n"
+                text += (
+                    f"[Offset 40-47] Value (double):   {parsed.get('value', 'N/A')}\n"
+                )
                 text += f"[Offset 48-51] addDataBytes:     {parsed.get('reserved', 'N/A')} (size of additional data)\n"
                 text += f"[Offset 52-123] Data (72 bytes):  "
 
                 # Show data field content - check for binary data first
-                raw_response = result.get('raw_response', b'')
+                raw_response = result.get("raw_response", b"")
                 if len(raw_response) >= 124:
                     data_field_bytes = raw_response[52:124]
                     # Check if contains non-zero data
                     if any(b != 0 for b in data_field_bytes):
                         # Show first 32 bytes as hex
-                        hex_preview = ' '.join(f'{b:02X}' for b in data_field_bytes[:32])
+                        hex_preview = " ".join(
+                            f"{b:02X}" for b in data_field_bytes[:32]
+                        )
                         text += f"Hex: {hex_preview}...\n"
                         # Try to show as string if printable
-                        data_tail = parsed.get('data_tail_string', '')
-                        if data_tail and data_tail.strip('\x00') and data_tail.isprintable():
-                            text += f"                         String: '{data_tail[:50]}'\n"
+                        data_tail = parsed.get("data_tail_string", "")
+                        if (
+                            data_tail
+                            and data_tail.strip("\x00")
+                            and data_tail.isprintable()
+                        ):
+                            text += (
+                                f"                         String: '{data_tail[:50]}'\n"
+                            )
                     else:
                         text += f"(all zeros/null)\n"
                 else:
                     # Fallback to old behavior
-                    data_tail = parsed.get('data_tail_string', '')
-                    if data_tail and data_tail.strip('\x00'):
+                    data_tail = parsed.get("data_tail_string", "")
+                    if data_tail and data_tail.strip("\x00"):
                         text += f"'{data_tail[:50]}...'\n"
                     else:
                         text += f"(all zeros/null)\n"
@@ -575,32 +642,35 @@ class ConnectionView(QWidget):
                 text += f"[Offset 124-127] End Marker:     0xFEDC4321\n"
 
                 # Show additional data if present (CRITICAL - often contains the key information)
-                add_data_bytes = parsed.get('reserved', 0)
+                add_data_bytes = parsed.get("reserved", 0)
                 if add_data_bytes > 0:
                     text += f"\n{'=' * 70}\n"
                     text += f"ADDITIONAL DATA ({add_data_bytes} bytes)\n"
                     text += f"{'=' * 70}\n\n"
 
-                    additional_data = parsed.get('additional_data', b'')
-                    additional_data_str = parsed.get('additional_data_string', '')
+                    additional_data = parsed.get("additional_data", b"")
+                    additional_data_str = parsed.get("additional_data_string", "")
 
                     if additional_data:
                         # Show as hex
-                        hex_str = ' '.join(f'{b:02X}' for b in additional_data)
+                        hex_str = " ".join(f"{b:02X}" for b in additional_data)
                         text += f"Hex: {hex_str}\n\n"
 
                         # Try to interpret as different types
                         text += "Possible interpretations:\n"
 
                         # As string
-                        if additional_data_str and additional_data_str != '<binary data>':
+                        if (
+                            additional_data_str
+                            and additional_data_str != "<binary data>"
+                        ):
                             text += f"  String: '{additional_data_str}'\n"
 
                         # As integers
                         if len(additional_data) >= 4:
                             try:
-                                int32_val = struct.unpack('<i', additional_data[:4])[0]
-                                uint32_val = struct.unpack('<I', additional_data[:4])[0]
+                                int32_val = struct.unpack("<i", additional_data[:4])[0]
+                                uint32_val = struct.unpack("<I", additional_data[:4])[0]
                                 text += f"  First 4 bytes as int32: {int32_val}\n"
                                 text += f"  First 4 bytes as uint32: {uint32_val}\n"
                             except:
@@ -608,8 +678,8 @@ class ConnectionView(QWidget):
 
                         if len(additional_data) >= 2:
                             try:
-                                int16_val = struct.unpack('<h', additional_data[:2])[0]
-                                uint16_val = struct.unpack('<H', additional_data[:2])[0]
+                                int16_val = struct.unpack("<h", additional_data[:2])[0]
+                                uint16_val = struct.unpack("<H", additional_data[:2])[0]
                                 text += f"  First 2 bytes as int16: {int16_val}\n"
                                 text += f"  First 2 bytes as uint16: {uint16_val}\n"
                             except:
@@ -624,8 +694,12 @@ class ConnectionView(QWidget):
                 text += f"  {repr(parsed.get('data_tail_string', '')[:200])}\n"
 
             # Show full data only if it's substantial text (not binary)
-            full_data = parsed.get('full_data', '')
-            if full_data and len(full_data) > 100 and not full_data.startswith('<Binary'):
+            full_data = parsed.get("full_data", "")
+            if (
+                full_data
+                and len(full_data) > 100
+                and not full_data.startswith("<Binary")
+            ):
                 text += f"\n{'=' * 70}\n"
                 text += f"FULL DATA ({parsed.get('data_length', 0)} characters)\n"
                 text += f"{'=' * 70}\n\n"
@@ -637,18 +711,20 @@ class ConnectionView(QWidget):
                 text += "\n"
 
             text += "\n" + "=" * 70 + "\n"
-            text += result.get('interpretation', '')
+            text += result.get("interpretation", "")
             text += "\n" + "=" * 70 + "\n"
 
         else:
-            error_type = result.get('error', 'Unknown error')
+            error_type = result.get("error", "Unknown error")
 
-            if error_type == 'timeout':
+            if error_type == "timeout":
                 # Special handling for timeout - means command not implemented
                 text = "=" * 70 + "\n"
                 text += "COMMAND TIMEOUT - NO RESPONSE FROM MICROSCOPE\n"
                 text += "=" * 70 + "\n\n"
-                text += result.get('timeout_explanation', 'Timeout waiting for response')
+                text += result.get(
+                    "timeout_explanation", "Timeout waiting for response"
+                )
                 text += "\n\n" + "=" * 70 + "\n"
                 text += "SAFE COMMANDS TO TEST:\n"
                 text += "=" * 70 + "\n"
@@ -681,6 +757,7 @@ class ConnectionView(QWidget):
     def _copy_to_clipboard(self, text: str) -> None:
         """Copy text to clipboard."""
         from PyQt5.QtWidgets import QApplication
+
         clipboard = QApplication.clipboard()
         clipboard.setText(text)
         self._show_message("Copied to clipboard", is_error=False)
@@ -691,8 +768,9 @@ class ConnectionView(QWidget):
         Tests SCOPE_SETTINGS_SAVE command by sending current settings file
         back to microscope. This verifies the command is implemented.
         """
-        from PyQt5.QtWidgets import QMessageBox
         from pathlib import Path
+
+        from PyQt5.QtWidgets import QMessageBox
 
         self._logger.info("Save Settings button clicked")
 
@@ -702,7 +780,7 @@ class ConnectionView(QWidget):
             return
 
         # Check if settings file exists
-        settings_path = Path('microscope_settings') / 'ScopeSettings.txt'
+        settings_path = Path("microscope_settings") / "ScopeSettings.txt"
         if not settings_path.exists():
             msg = QMessageBox(self)
             msg.setIcon(QMessageBox.Warning)
@@ -723,7 +801,7 @@ class ConnectionView(QWidget):
             "This tests the SCOPE_SETTINGS_SAVE command (4104).\n\n"
             "Continue?",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.No,
         )
 
         if confirm != QMessageBox.Yes:
@@ -731,7 +809,7 @@ class ConnectionView(QWidget):
 
         # Read settings file
         try:
-            with open(settings_path, 'rb') as f:
+            with open(settings_path, "rb") as f:
                 settings_data = f.read()
             self._logger.info(f"Read {len(settings_data)} bytes from {settings_path}")
         except Exception as e:
@@ -745,7 +823,7 @@ class ConnectionView(QWidget):
 
             # Show result dialog
             msg = QMessageBox(self)
-            if result.get('success'):
+            if result.get("success"):
                 msg.setIcon(QMessageBox.Information)
                 msg.setWindowTitle("Save Settings Success")
                 msg.setText("SCOPE_SETTINGS_SAVE command succeeded!")
@@ -776,7 +854,7 @@ class ConnectionView(QWidget):
         if config_name == "-- Manual Entry --":
             self.microscope_name_label.setText("Microscope: Manual Entry")
             # Disable delete button for manual entry
-            if hasattr(self, 'delete_btn'):
+            if hasattr(self, "delete_btn"):
                 self.delete_btn.setEnabled(False)
             return
 
@@ -790,7 +868,7 @@ class ConnectionView(QWidget):
             self._show_message(f"Loaded configuration: {config.name}", is_error=False)
 
             # Enable delete button for saved configurations
-            if hasattr(self, 'delete_btn'):
+            if hasattr(self, "delete_btn"):
                 self.delete_btn.setEnabled(True)
 
     def _on_refresh_clicked(self) -> None:
@@ -809,12 +887,13 @@ class ConnectionView(QWidget):
 
         # Confirm deletion
         from PyQt5.QtWidgets import QMessageBox
+
         reply = QMessageBox.question(
             self,
-            'Delete Configuration',
+            "Delete Configuration",
             f"Are you sure you want to delete configuration '{config_name}'?",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.No,
         )
 
         if reply == QMessageBox.No:
@@ -863,7 +942,7 @@ class ConnectionView(QWidget):
             self._load_configurations()
 
             # Select the newly saved configuration in the dropdown
-            if hasattr(self, 'config_combo'):
+            if hasattr(self, "config_combo"):
                 index = self.config_combo.findText(config_name)
                 if index >= 0:
                     self.config_combo.setCurrentIndex(index)
@@ -879,26 +958,28 @@ class ConnectionView(QWidget):
 
             # Clear existing
             self._configurations.clear()
-            if hasattr(self, 'config_combo'):
+            if hasattr(self, "config_combo"):
                 self.config_combo.clear()
                 self.config_combo.addItem("-- Manual Entry --")
 
             # Add to combo box
             for config in configs:
                 self._configurations[config.name] = config
-                if hasattr(self, 'config_combo'):
+                if hasattr(self, "config_combo"):
                     self.config_combo.addItem(config.name)
 
             # Try to select default
             default_config = self._config_manager.get_default_configuration()
-            if default_config and hasattr(self, 'config_combo'):
+            if default_config and hasattr(self, "config_combo"):
                 index = self.config_combo.findText(default_config.name)
                 if index >= 0:
                     self.config_combo.setCurrentIndex(index)
 
         except Exception as e:
-            if hasattr(self, 'message_label'):
-                self._show_message(f"Error loading configurations: {str(e)}", is_error=True)
+            if hasattr(self, "message_label"):
+                self._show_message(
+                    f"Error loading configurations: {str(e)}", is_error=True
+                )
 
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable all interactive components.
@@ -912,7 +993,7 @@ class ConnectionView(QWidget):
             self.port_input.setEnabled(True)
             self.connect_btn.setEnabled(True)
             self.test_btn.setEnabled(True)
-            if hasattr(self, 'config_combo'):
+            if hasattr(self, "config_combo"):
                 self.config_combo.setEnabled(True)
                 self.refresh_btn.setEnabled(True)
                 self.config_name_input.setEnabled(True)
@@ -923,7 +1004,7 @@ class ConnectionView(QWidget):
             self.connect_btn.setEnabled(False)
             self.disconnect_btn.setEnabled(False)
             self.test_btn.setEnabled(False)
-            if hasattr(self, 'config_combo'):
+            if hasattr(self, "config_combo"):
                 self.config_combo.setEnabled(False)
                 self.refresh_btn.setEnabled(False)
                 self.config_name_input.setEnabled(False)
@@ -939,29 +1020,43 @@ class ConnectionView(QWidget):
 
         try:
             # Get settings from controller
-            self._logger.debug("ConnectionView: Calling controller.get_microscope_settings()")
+            self._logger.debug(
+                "ConnectionView: Calling controller.get_microscope_settings()"
+            )
             settings = self._controller.get_microscope_settings()
 
-            self._logger.info(f"ConnectionView: Received settings - type={type(settings)}, is_none={settings is None}")
+            self._logger.info(
+                f"ConnectionView: Received settings - type={type(settings)}, is_none={settings is None}"
+            )
 
             if settings:
-                self._logger.info(f"ConnectionView: Settings has {len(settings)} top-level keys")
+                self._logger.info(
+                    f"ConnectionView: Settings has {len(settings)} top-level keys"
+                )
                 # Format settings for display
                 formatted_text = self._format_settings(settings)
-                self._logger.debug(f"ConnectionView: Formatted text length: {len(formatted_text)} chars")
+                self._logger.debug(
+                    f"ConnectionView: Formatted text length: {len(formatted_text)} chars"
+                )
                 self.settings_display.setPlainText(formatted_text)
                 self.settings_display.setStyleSheet(
                     "QTextEdit { font-family: 'Courier New', monospace; "
                     "font-size: 10pt; background-color: #f0f0f0; }"
                 )
-                self._logger.info("ConnectionView: Settings display updated successfully")
+                self._logger.info(
+                    "ConnectionView: Settings display updated successfully"
+                )
                 # Emit settings_loaded signal - position queries should wait for this
                 self.settings_loaded.emit()
                 self._logger.debug("ConnectionView: Emitted settings_loaded signal")
                 return True
             else:
-                self._logger.warning("ConnectionView: No settings returned from controller")
-                error_msg = "Failed to retrieve microscope settings (timeout or no response)"
+                self._logger.warning(
+                    "ConnectionView: No settings returned from controller"
+                )
+                error_msg = (
+                    "Failed to retrieve microscope settings (timeout or no response)"
+                )
                 self.settings_display.setPlainText(error_msg)
                 self.settings_display.setStyleSheet(
                     f"QTextEdit {{ font-family: 'Courier New', monospace; "
@@ -997,9 +1092,9 @@ class ConnectionView(QWidget):
             Formatted string for display
         """
         lines = []
-        lines.append("="*60)
+        lines.append("=" * 60)
         lines.append("MICROSCOPE SETTINGS")
-        lines.append("="*60)
+        lines.append("=" * 60)
         lines.append("")
 
         # Helper function to format nested dictionaries
@@ -1013,7 +1108,9 @@ class ConnectionView(QWidget):
                         result.append(f"{indent_str}{key}:")
                         result.extend(format_section(value, indent + 1))
                     elif isinstance(value, (list, tuple)):
-                        result.append(f"{indent_str}{key}: {', '.join(map(str, value))}")
+                        result.append(
+                            f"{indent_str}{key}: {', '.join(map(str, value))}"
+                        )
                     else:
                         result.append(f"{indent_str}{key}: {value}")
             else:
@@ -1028,7 +1125,7 @@ class ConnectionView(QWidget):
             lines.extend(format_section(section_data, indent=1))
             lines.append("")
 
-        lines.append("="*60)
+        lines.append("=" * 60)
 
         return "\n".join(lines)
 

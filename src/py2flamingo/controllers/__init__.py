@@ -40,12 +40,12 @@ except Exception:
 
 __all__ = [
     # MVC Controllers (new architecture - always available)
-    'ConnectionController',
-    'WorkflowController',
+    "ConnectionController",
+    "WorkflowController",
     # Legacy controllers (may be None if imports fail)
-    'MicroscopeController',
-    'PositionController',
-    'SettingsController',
-    'SnapshotController',
-    'SampleController',
+    "MicroscopeController",
+    "PositionController",
+    "SettingsController",
+    "SnapshotController",
+    "SampleController",
 ]

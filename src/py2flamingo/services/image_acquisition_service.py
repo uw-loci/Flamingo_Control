@@ -13,19 +13,19 @@ Based on legacy code from:
 """
 
 import logging
-import shutil
 import os
+import shutil
 from pathlib import Path
-from typing import Optional, Any, Dict, Tuple, Union, List
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from py2flamingo.core.events import EventManager
 from py2flamingo.core.queue_manager import QueueManager
 from py2flamingo.models.microscope import Position
 from py2flamingo.utils.file_handlers import (
-    workflow_to_dict,
-    dict_to_workflow,
     dict_comment,
-    dict_save_directory
+    dict_save_directory,
+    dict_to_workflow,
+    workflow_to_dict,
 )
 
 
@@ -52,12 +52,14 @@ class ImageAcquisitionService:
     DEFAULT_LASER_CHANNEL = "Laser 3 488 nm"
     DEFAULT_LASER_SETTING = "5.00 1"
 
-    def __init__(self,
-                 workflow_execution_service: 'WorkflowExecutionService',
-                 connection_service: 'ConnectionService',
-                 queue_manager: QueueManager,
-                 event_manager: EventManager,
-                 position_controller: Optional['PositionController'] = None):
+    def __init__(
+        self,
+        workflow_execution_service: "WorkflowExecutionService",
+        connection_service: "ConnectionService",
+        queue_manager: QueueManager,
+        event_manager: EventManager,
+        position_controller: Optional["PositionController"] = None,
+    ):
         """
         Initialize image acquisition service with dependency injection.
 
@@ -79,13 +81,15 @@ class ImageAcquisitionService:
         self.workflow_dir = Path("workflows")
         self.workflow_dir.mkdir(parents=True, exist_ok=True)
 
-    def acquire_snapshot(self,
-                        position: Union[Position, List[float]],
-                        laser_channel: str = DEFAULT_LASER_CHANNEL,
-                        laser_power: str = DEFAULT_LASER_SETTING,
-                        workflow_name: str = "ZStack.txt",
-                        comment: str = "GUI Snapshot",
-                        save_directory: str = "Snapshots") -> Optional[Any]:
+    def acquire_snapshot(
+        self,
+        position: Union[Position, List[float]],
+        laser_channel: str = DEFAULT_LASER_CHANNEL,
+        laser_power: str = DEFAULT_LASER_SETTING,
+        workflow_name: str = "ZStack.txt",
+        comment: str = "GUI Snapshot",
+        save_directory: str = "Snapshots",
+    ) -> Optional[Any]:
         """
         Acquire a snapshot image at the specified position.
 
@@ -124,7 +128,9 @@ class ImageAcquisitionService:
 
         # Validate position format
         if len(xyzr_init) != 4:
-            raise ValueError(f"Position must have 4 coordinates [x,y,z,r], got {len(xyzr_init)}")
+            raise ValueError(
+                f"Position must have 4 coordinates [x,y,z,r], got {len(xyzr_init)}"
+            )
 
         # Check connection
         if not self.connection_service.is_connected():
@@ -141,7 +147,7 @@ class ImageAcquisitionService:
             laser_setting=laser_power,
             laser_on=True,
             comment=comment,
-            save_directory=save_directory
+            save_directory=save_directory,
         )
 
         # Save workflow to files
@@ -151,8 +157,7 @@ class ImageAcquisitionService:
         # Execute workflow and retrieve image
         try:
             image_data = self.workflow_execution_service.execute_workflow(
-                workflow_dict=workflow_dict,
-                xyzr_init=xyzr_init
+                workflow_dict=workflow_dict, xyzr_init=xyzr_init
             )
 
             self.logger.info("Snapshot acquired successfully")
@@ -162,11 +167,13 @@ class ImageAcquisitionService:
             self.logger.error(f"Failed to acquire snapshot: {e}")
             raise
 
-    def acquire_brightfield(self,
-                           position: Union[Position, List[float]],
-                           laser_channel: str = DEFAULT_LASER_CHANNEL,
-                           laser_setting: str = DEFAULT_LASER_SETTING,
-                           workflow_name: str = "ZStack.txt") -> Optional[Any]:
+    def acquire_brightfield(
+        self,
+        position: Union[Position, List[float]],
+        laser_channel: str = DEFAULT_LASER_CHANNEL,
+        laser_setting: str = DEFAULT_LASER_SETTING,
+        workflow_name: str = "ZStack.txt",
+    ) -> Optional[Any]:
         """
         Acquire a brightfield image at the specified position.
 
@@ -204,7 +211,9 @@ class ImageAcquisitionService:
 
         # Validate position format
         if len(xyzr_init) != 4:
-            raise ValueError(f"Position must have 4 coordinates [x,y,z,r], got {len(xyzr_init)}")
+            raise ValueError(
+                f"Position must have 4 coordinates [x,y,z,r], got {len(xyzr_init)}"
+            )
 
         # Check connection
         if not self.connection_service.is_connected():
@@ -218,7 +227,7 @@ class ImageAcquisitionService:
             laser_setting=laser_setting,
             laser_on=False,  # Key difference: laser off for brightfield
             comment="Brightfield Image",
-            save_directory="Brightfield"
+            save_directory="Brightfield",
         )
 
         # Save workflow to files
@@ -228,8 +237,7 @@ class ImageAcquisitionService:
         # Execute workflow and retrieve image
         try:
             image_data = self.workflow_execution_service.execute_workflow(
-                workflow_dict=workflow_dict,
-                xyzr_init=xyzr_init
+                workflow_dict=workflow_dict, xyzr_init=xyzr_init
             )
 
             self.logger.info("Brightfield image acquired successfully")
@@ -239,15 +247,17 @@ class ImageAcquisitionService:
             self.logger.error(f"Failed to acquire brightfield image: {e}")
             raise
 
-    def acquire_zstack(self,
-                      position: Union[Position, List[float]],
-                      z_range: float,
-                      num_planes: int,
-                      laser_channel: str = DEFAULT_LASER_CHANNEL,
-                      laser_power: str = DEFAULT_LASER_SETTING,
-                      workflow_name: str = "ZStack.txt",
-                      comment: str = "Z-Stack Acquisition",
-                      save_directory: str = "ZStacks") -> Optional[Any]:
+    def acquire_zstack(
+        self,
+        position: Union[Position, List[float]],
+        z_range: float,
+        num_planes: int,
+        laser_channel: str = DEFAULT_LASER_CHANNEL,
+        laser_power: str = DEFAULT_LASER_SETTING,
+        workflow_name: str = "ZStack.txt",
+        comment: str = "Z-Stack Acquisition",
+        save_directory: str = "ZStacks",
+    ) -> Optional[Any]:
         """
         Acquire a z-stack of images at the specified position.
 
@@ -277,7 +287,9 @@ class ImageAcquisitionService:
             >>> position = Position(x=10.0, y=20.0, z=5.0, r=0.0)
             >>> images = service.acquire_zstack(position, z_range=0.5, num_planes=50)
         """
-        self.logger.info(f"Acquiring z-stack at position {position}: {num_planes} planes over {z_range}mm")
+        self.logger.info(
+            f"Acquiring z-stack at position {position}: {num_planes} planes over {z_range}mm"
+        )
 
         # Convert position to list format if needed
         if isinstance(position, Position):
@@ -287,7 +299,9 @@ class ImageAcquisitionService:
 
         # Validate inputs
         if len(xyzr_init) != 4:
-            raise ValueError(f"Position must have 4 coordinates [x,y,z,r], got {len(xyzr_init)}")
+            raise ValueError(
+                f"Position must have 4 coordinates [x,y,z,r], got {len(xyzr_init)}"
+            )
         if num_planes < 2:
             raise ValueError(f"num_planes must be at least 2, got {num_planes}")
         if z_range <= 0:
@@ -309,7 +323,7 @@ class ImageAcquisitionService:
             laser_channel=laser_channel,
             laser_setting=laser_power,
             comment=comment,
-            save_directory=save_directory
+            save_directory=save_directory,
         )
 
         # Save workflow to files
@@ -321,7 +335,7 @@ class ImageAcquisitionService:
             image_data = self.workflow_execution_service.execute_workflow(
                 workflow_dict=workflow_dict,
                 xyzr_init=xyzr_init,
-                wait_timeout=600.0  # Longer timeout for z-stacks (10 minutes)
+                wait_timeout=600.0,  # Longer timeout for z-stacks (10 minutes)
             )
 
             self.logger.info("Z-stack acquired successfully")
@@ -335,14 +349,16 @@ class ImageAcquisitionService:
     # Private helper methods
     # ========================================================================
 
-    def _create_snapshot_workflow(self,
-                                  workflow_name: str,
-                                  xyzr_init: List[float],
-                                  laser_channel: str,
-                                  laser_setting: str,
-                                  laser_on: bool,
-                                  comment: str,
-                                  save_directory: str) -> Dict[str, Any]:
+    def _create_snapshot_workflow(
+        self,
+        workflow_name: str,
+        xyzr_init: List[float],
+        laser_channel: str,
+        laser_setting: str,
+        laser_on: bool,
+        comment: str,
+        save_directory: str,
+    ) -> Dict[str, Any]:
         """
         Create a snapshot workflow dictionary.
 
@@ -372,10 +388,14 @@ class ImageAcquisitionService:
         snap_dict = workflow_to_dict(workflow_path)
 
         # Convert to snapshot (single plane at position)
-        snap_dict = self._dict_to_snap(snap_dict, xyzr_init, self.DEFAULT_FRAMERATE, self.DEFAULT_PLANE_SPACING)
+        snap_dict = self._dict_to_snap(
+            snap_dict, xyzr_init, self.DEFAULT_FRAMERATE, self.DEFAULT_PLANE_SPACING
+        )
 
         # Set illumination (laser or LED)
-        snap_dict = self._laser_or_LED(snap_dict, laser_channel, laser_setting, laser_on)
+        snap_dict = self._laser_or_LED(
+            snap_dict, laser_channel, laser_setting, laser_on
+        )
 
         # Add comment and save directory
         snap_dict = dict_comment(snap_dict, comment)
@@ -383,15 +403,17 @@ class ImageAcquisitionService:
 
         return snap_dict
 
-    def _create_zstack_workflow(self,
-                                workflow_name: str,
-                                xyzr_init: List[float],
-                                num_planes: int,
-                                plane_spacing_mm: float,
-                                laser_channel: str,
-                                laser_setting: str,
-                                comment: str,
-                                save_directory: str) -> Dict[str, Any]:
+    def _create_zstack_workflow(
+        self,
+        workflow_name: str,
+        xyzr_init: List[float],
+        num_planes: int,
+        plane_spacing_mm: float,
+        laser_channel: str,
+        laser_setting: str,
+        comment: str,
+        save_directory: str,
+    ) -> Dict[str, Any]:
         """
         Create a z-stack workflow dictionary.
 
@@ -435,7 +457,9 @@ class ImageAcquisitionService:
         zstack_dict["Stack Settings"]["Change in Z axis (mm)"] = str(plane_spacing_mm)
 
         # Set illumination
-        zstack_dict = self._laser_or_LED(zstack_dict, laser_channel, laser_setting, laser_on=True)
+        zstack_dict = self._laser_or_LED(
+            zstack_dict, laser_channel, laser_setting, laser_on=True
+        )
 
         # Add comment and save directory
         zstack_dict = dict_comment(zstack_dict, comment)
@@ -445,15 +469,19 @@ class ImageAcquisitionService:
         if "Experiment Settings" not in zstack_dict:
             zstack_dict["Experiment Settings"] = {}
 
-        zstack_dict["Experiment Settings"]["Frame rate (f/s)"] = str(self.DEFAULT_FRAMERATE)
+        zstack_dict["Experiment Settings"]["Frame rate (f/s)"] = str(
+            self.DEFAULT_FRAMERATE
+        )
 
         return zstack_dict
 
-    def _dict_to_snap(self,
-                     workflow_dict: Dict[str, Any],
-                     xyzr_init: List[float],
-                     framerate: float,
-                     plane_spacing: float) -> Dict[str, Any]:
+    def _dict_to_snap(
+        self,
+        workflow_dict: Dict[str, Any],
+        xyzr_init: List[float],
+        framerate: float,
+        plane_spacing: float,
+    ) -> Dict[str, Any]:
         """
         Convert a workflow dictionary to snapshot configuration.
 
@@ -492,7 +520,9 @@ class ImageAcquisitionService:
             workflow_dict["Stack Settings"] = {}
 
         workflow_dict["Stack Settings"]["Number of planes"] = "1"
-        workflow_dict["Stack Settings"]["Change in Z axis (mm)"] = str(plane_spacing / 1000.0)  # Convert um to mm
+        workflow_dict["Stack Settings"]["Change in Z axis (mm)"] = str(
+            plane_spacing / 1000.0
+        )  # Convert um to mm
 
         # Set experiment settings
         if "Experiment Settings" not in workflow_dict:
@@ -502,11 +532,13 @@ class ImageAcquisitionService:
 
         return workflow_dict
 
-    def _laser_or_LED(self,
-                     workflow_dict: Dict[str, Any],
-                     laser_channel: str,
-                     laser_setting: str,
-                     laser_on: bool) -> Dict[str, Any]:
+    def _laser_or_LED(
+        self,
+        workflow_dict: Dict[str, Any],
+        laser_channel: str,
+        laser_setting: str,
+        laser_on: bool,
+    ) -> Dict[str, Any]:
         """
         Set laser or LED illumination settings in workflow.
 
@@ -575,14 +607,14 @@ class ImageAcquisitionService:
         stale data from previous operations.
         """
         try:
-            self.queue_manager.clear_queue('image')
-            self.queue_manager.clear_queue('command')
-            self.queue_manager.clear_queue('other_data')
-            self.queue_manager.clear_queue('stage_location')
+            self.queue_manager.clear_queue("image")
+            self.queue_manager.clear_queue("command")
+            self.queue_manager.clear_queue("other_data")
+            self.queue_manager.clear_queue("stage_location")
 
             # Clear relevant events
-            self.event_manager.clear_event('visualize')
-            self.event_manager.clear_event('send')
+            self.event_manager.clear_event("visualize")
+            self.event_manager.clear_event("send")
 
             self.logger.debug("Cleared all queues and events")
         except Exception as e:

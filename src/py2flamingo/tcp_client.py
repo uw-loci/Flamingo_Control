@@ -4,9 +4,9 @@ Minimal TCP client for Flamingo microscope communication.
 Handles basic connection and workflow file sending.
 """
 
+import logging
 import socket
 import struct
-import logging
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -88,8 +88,10 @@ class TCPClient:
             self.logger.info("Connected to live imaging port")
 
             # Initialize MicroscopeCommandService for centralized command handling
-            from py2flamingo.services.microscope_command_service import MicroscopeCommandService
             from py2flamingo.core.protocol_encoder import ProtocolEncoder
+            from py2flamingo.services.microscope_command_service import (
+                MicroscopeCommandService,
+            )
 
             # Create a minimal connection wrapper
             class ConnectionWrapper:
@@ -149,12 +151,14 @@ class TCPClient:
         # Use MicroscopeCommandService if available
         if self._command_service:
             # Delegate to centralized service (fire-and-forget mode for legacy compatibility)
-            self._command_service.send_command_raw(command_code, command_data, wait_response=False)
+            self._command_service.send_command_raw(
+                command_code, command_data, wait_response=False
+            )
         else:
             # Fallback to original implementation if service not initialized
             # Default command data if not provided
             if command_data is None:
-                command_data = [0, 0, 0, 0, 0, 0, 0, 0, 0.0, b'']
+                command_data = [0, 0, 0, 0, 0, 0, 0, 0, 0.0, b""]
 
             # Pad command_data to required length (10 elements)
             while len(command_data) < 10:
@@ -163,15 +167,15 @@ class TCPClient:
             # Extract data string (last element)
             data_string = command_data[9]
             if isinstance(data_string, str):
-                data_string = data_string.encode('utf-8')
+                data_string = data_string.encode("utf-8")
             elif isinstance(data_string, int):
-                data_string = b''
+                data_string = b""
 
             # Pad to 72 bytes
             if isinstance(data_string, bytes):
-                data_string = data_string[:72].ljust(72, b'\x00')
+                data_string = data_string[:72].ljust(72, b"\x00")
             else:
-                data_string = b'\x00' * 72
+                data_string = b"\x00" * 72
 
             # Ensure value is a float
             value = command_data[8]
@@ -180,20 +184,20 @@ class TCPClient:
 
             # Pack command structure
             command_bytes = self.COMMAND_STRUCT.pack(
-                self.START_MARKER,      # Start marker
-                command_code,           # Command
-                int(command_data[0]),   # Status
-                int(command_data[1]),   # cmdBits0
-                int(command_data[2]),   # cmdBits1
-                int(command_data[3]),   # cmdBits2
-                int(command_data[4]),   # cmdBits3
-                int(command_data[5]),   # cmdBits4
-                int(command_data[6]),   # cmdBits5
-                int(command_data[7]),   # cmdBits6
-                value,                  # value (double)
-                0,                      # cmdDataBits0 (reserved)
-                data_string,            # data (72 bytes)
-                self.END_MARKER         # End marker
+                self.START_MARKER,  # Start marker
+                command_code,  # Command
+                int(command_data[0]),  # Status
+                int(command_data[1]),  # cmdBits0
+                int(command_data[2]),  # cmdBits1
+                int(command_data[3]),  # cmdBits2
+                int(command_data[4]),  # cmdBits3
+                int(command_data[5]),  # cmdBits4
+                int(command_data[6]),  # cmdBits5
+                int(command_data[7]),  # cmdBits6
+                value,  # value (double)
+                0,  # cmdDataBits0 (reserved)
+                data_string,  # data (72 bytes)
+                self.END_MARKER,  # End marker
             )
 
             # Send command
@@ -219,30 +223,30 @@ class TCPClient:
         if not workflow_path.exists():
             raise FileNotFoundError(f"Workflow file not found: {workflow_file}")
 
-        with open(workflow_path, 'r', encoding='utf-8') as f:
+        with open(workflow_path, "r", encoding="utf-8") as f:
             workflow_content = f.read()
 
-        workflow_bytes = workflow_content.encode('utf-8')
+        workflow_bytes = workflow_content.encode("utf-8")
         file_size = len(workflow_bytes)
 
         self.logger.info(f"Sending workflow: {workflow_path.name} ({file_size} bytes)")
 
         # Send command header with file size
         # Encode file size in the data field
-        data_string = struct.pack("I", file_size).ljust(72, b'\x00')
+        data_string = struct.pack("I", file_size).ljust(72, b"\x00")
 
         # Build command data list (10 elements + data_string)
         command_data = [
-            0,          # status
-            0,          # cmdBits0
-            0,          # cmdBits1
-            0,          # cmdBits2
-            0,          # cmdBits3
-            0,          # cmdBits4
-            0,          # cmdBits5
-            0,          # cmdBits6
-            0.0,        # value
-            data_string # data (72 bytes)
+            0,  # status
+            0,  # cmdBits0
+            0,  # cmdBits1
+            0,  # cmdBits2
+            0,  # cmdBits3
+            0,  # cmdBits4
+            0,  # cmdBits5
+            0,  # cmdBits6
+            0.0,  # value
+            data_string,  # data (72 bytes)
         ]
 
         # Send header
@@ -292,14 +296,14 @@ def parse_metadata_file(metadata_file: str) -> Tuple[str, int]:
     Returns:
         Tuple of (ip_address, port)
     """
-    with open(metadata_file, 'r', encoding='utf-8') as f:
+    with open(metadata_file, "r", encoding="utf-8") as f:
         content = f.read()
 
     # Look for line like "Microscope address = 10.129.37.22 53717"
-    for line in content.split('\n'):
-        if 'Microscope address' in line:
+    for line in content.split("\n"):
+        if "Microscope address" in line:
             # Extract IP and port
-            parts = line.split('=')[1].strip().split()
+            parts = line.split("=")[1].strip().split()
             if len(parts) >= 2:
                 ip_address = parts[0]
                 port = int(parts[1])

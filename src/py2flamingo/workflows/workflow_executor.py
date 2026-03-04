@@ -5,29 +5,27 @@ the microscope hardware through the MicroscopeCommandService.
 """
 
 import logging
+import queue
 import threading
 import time
-from typing import Optional, Dict, Any, Callable, List
-from enum import Enum
 from dataclasses import dataclass
 from datetime import datetime
-import queue
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
 
-from ..models.data.workflow import (
-    Workflow, WorkflowState, WorkflowStep, WorkflowType
-)
-from ..models.hardware.stage import Position
-from ..services.microscope_command_service import MicroscopeCommandService
-from ..services.connection_manager import ConnectionManager
-from ..core.errors import FlamingoError
 from ..core.command_codes import CommandCode
-
+from ..core.errors import FlamingoError
+from ..models.data.workflow import Workflow, WorkflowState, WorkflowStep, WorkflowType
+from ..models.hardware.stage import Position
+from ..services.connection_manager import ConnectionManager
+from ..services.microscope_command_service import MicroscopeCommandService
 
 logger = logging.getLogger(__name__)
 
 
 class ExecutionState(Enum):
     """Internal execution states."""
+
     IDLE = "idle"
     PREPARING = "preparing"
     EXECUTING = "executing"
@@ -39,6 +37,7 @@ class ExecutionState(Enum):
 @dataclass
 class ExecutionContext:
     """Context for workflow execution."""
+
     workflow: Workflow
     dry_run: bool = False
     skip_hardware_init: bool = False
@@ -53,6 +52,7 @@ class ExecutionContext:
 
 class WorkflowExecutionError(FlamingoError):
     """Raised when workflow execution fails."""
+
     pass
 
 
@@ -64,9 +64,11 @@ class WorkflowExecutor:
     across multiple services.
     """
 
-    def __init__(self,
-                command_service: Optional[MicroscopeCommandService] = None,
-                connection_manager: Optional[ConnectionManager] = None):
+    def __init__(
+        self,
+        command_service: Optional[MicroscopeCommandService] = None,
+        connection_manager: Optional[ConnectionManager] = None,
+    ):
         """Initialize executor.
 
         Args:
@@ -89,12 +91,12 @@ class WorkflowExecutor:
 
         # Statistics
         self._statistics = {
-            'workflows_executed': 0,
-            'workflows_completed': 0,
-            'workflows_failed': 0,
-            'total_steps_executed': 0,
-            'total_execution_time': 0.0,
-            'last_execution_time': None
+            "workflows_executed": 0,
+            "workflows_completed": 0,
+            "workflows_failed": 0,
+            "total_steps_executed": 0,
+            "total_execution_time": 0.0,
+            "last_execution_time": None,
         }
 
         # Ensure services are initialized
@@ -104,11 +106,13 @@ class WorkflowExecutor:
         """Initialize required services if not provided."""
         if not self.command_service:
             from ..services.microscope_command_service import MicroscopeCommandService
+
             self.command_service = MicroscopeCommandService.get_instance()
             logger.info("Initialized MicroscopeCommandService")
 
         if not self.connection_manager:
             from ..services.connection_manager import ConnectionManager
+
             self.connection_manager = ConnectionManager.get_instance()
             logger.info("Initialized ConnectionManager")
 
@@ -137,11 +141,7 @@ class WorkflowExecutor:
             raise WorkflowExecutionError("No microscope connection")
 
         # Create execution context
-        context = ExecutionContext(
-            workflow=workflow,
-            dry_run=dry_run,
-            **kwargs
-        )
+        context = ExecutionContext(workflow=workflow, dry_run=dry_run, **kwargs)
 
         # Start execution thread
         self._current_context = context
@@ -149,14 +149,12 @@ class WorkflowExecutor:
         self._stop_event.clear()
 
         self._execution_thread = threading.Thread(
-            target=self._execution_loop,
-            args=(context,),
-            daemon=True
+            target=self._execution_loop, args=(context,), daemon=True
         )
         self._execution_thread.start()
 
         logger.info(f"Started workflow execution: {workflow.name} (dry_run={dry_run})")
-        self._statistics['workflows_executed'] += 1
+        self._statistics["workflows_executed"] += 1
 
         return True
 
@@ -166,7 +164,11 @@ class WorkflowExecutor:
         Returns:
             True if stop was initiated
         """
-        if self._state not in [ExecutionState.EXECUTING, ExecutionState.PAUSED, ExecutionState.PREPARING]:
+        if self._state not in [
+            ExecutionState.EXECUTING,
+            ExecutionState.PAUSED,
+            ExecutionState.PREPARING,
+        ]:
             logger.warning("No workflow to stop")
             return False
 
@@ -178,9 +180,7 @@ class WorkflowExecutor:
         # Send stop command to hardware if connected
         if not self._current_context.dry_run:
             try:
-                self.command_service.send_command(
-                    CommandCode.CMD_WORKFLOW_STOP
-                )
+                self.command_service.send_command(CommandCode.CMD_WORKFLOW_STOP)
             except Exception as e:
                 logger.error(f"Failed to send stop command: {e}")
 
@@ -242,7 +242,7 @@ class WorkflowExecutor:
             # Mark completion
             if not self._stop_event.is_set():
                 context.workflow.mark_completed()
-                self._statistics['workflows_completed'] += 1
+                self._statistics["workflows_completed"] += 1
                 logger.info(f"Workflow completed: {context.workflow.name}")
 
         except Exception as e:
@@ -250,7 +250,7 @@ class WorkflowExecutor:
             error_msg = f"Workflow execution failed: {e}"
             logger.error(error_msg)
             context.workflow.mark_error(str(e))
-            self._statistics['workflows_failed'] += 1
+            self._statistics["workflows_failed"] += 1
 
             if context.error_callback:
                 context.error_callback(context.workflow, e)
@@ -258,8 +258,8 @@ class WorkflowExecutor:
         finally:
             # Cleanup
             execution_time = time.time() - start_time
-            self._statistics['total_execution_time'] += execution_time
-            self._statistics['last_execution_time'] = execution_time
+            self._statistics["total_execution_time"] += execution_time
+            self._statistics["last_execution_time"] = execution_time
 
             self._state = ExecutionState.IDLE
             self._current_context = None
@@ -326,8 +326,9 @@ class WorkflowExecutor:
         if not context.dry_run and not self._stop_event.is_set():
             self.command_service.send_command(CommandCode.CMD_WORKFLOW_STOP)
 
-    def _execute_step(self, context: ExecutionContext,
-                     step: WorkflowStep, step_index: int):
+    def _execute_step(
+        self, context: ExecutionContext, step: WorkflowStep, step_index: int
+    ):
         """Execute a single workflow step.
 
         Args:
@@ -349,7 +350,7 @@ class WorkflowExecutor:
 
                 # Mark successful completion
                 step.mark_completed()
-                self._statistics['total_steps_executed'] += 1
+                self._statistics["total_steps_executed"] += 1
                 break
 
             except Exception as e:
@@ -360,11 +361,12 @@ class WorkflowExecutor:
                     step.mark_error(error_msg)
                     raise WorkflowExecutionError(error_msg)
                 else:
-                    logger.warning(f"Step {step_index} failed, retrying ({retry_count}/{context.max_retries})")
+                    logger.warning(
+                        f"Step {step_index} failed, retrying ({retry_count}/{context.max_retries})"
+                    )
                     time.sleep(1.0)  # Brief delay before retry
 
-    def _execute_hardware_step(self, context: ExecutionContext,
-                              step: WorkflowStep):
+    def _execute_hardware_step(self, context: ExecutionContext, step: WorkflowStep):
         """Execute step on actual hardware.
 
         Args:
@@ -407,8 +409,7 @@ class WorkflowExecutor:
         """
         # Send Z movement command
         self.command_service.send_command(
-            CommandCode.CMD_Z_STAGE_MOVE_TO,
-            data={'z_mm': z_position}
+            CommandCode.CMD_Z_STAGE_MOVE_TO, data={"z_mm": z_position}
         )
 
         # Wait for movement
@@ -423,8 +424,7 @@ class WorkflowExecutor:
         # This would configure the appropriate laser/filter
         pass
 
-    def _trigger_acquisition(self, context: ExecutionContext,
-                           step: WorkflowStep):
+    def _trigger_acquisition(self, context: ExecutionContext, step: WorkflowStep):
         """Trigger image acquisition.
 
         Args:
@@ -506,12 +506,12 @@ class WorkflowExecutor:
     def reset_statistics(self):
         """Reset execution statistics."""
         self._statistics = {
-            'workflows_executed': 0,
-            'workflows_completed': 0,
-            'workflows_failed': 0,
-            'total_steps_executed': 0,
-            'total_execution_time': 0.0,
-            'last_execution_time': None
+            "workflows_executed": 0,
+            "workflows_completed": 0,
+            "workflows_failed": 0,
+            "total_steps_executed": 0,
+            "total_execution_time": 0.0,
+            "last_execution_time": None,
         }
         logger.info("Reset execution statistics")
 
@@ -538,8 +538,7 @@ class WorkflowExecutor:
 
     # ==================== Advanced Features ====================
 
-    def execute_single_step(self, step: WorkflowStep,
-                           dry_run: bool = False) -> bool:
+    def execute_single_step(self, step: WorkflowStep, dry_run: bool = False) -> bool:
         """Execute a single workflow step.
 
         Args:
@@ -551,8 +550,7 @@ class WorkflowExecutor:
         """
         try:
             context = ExecutionContext(
-                workflow=None,  # No parent workflow
-                dry_run=dry_run
+                workflow=None, dry_run=dry_run  # No parent workflow
             )
 
             self._execute_step(context, step, 0)
@@ -587,7 +585,7 @@ class WorkflowExecutor:
     _instance = None
 
     @classmethod
-    def get_instance(cls) -> 'WorkflowExecutor':
+    def get_instance(cls) -> "WorkflowExecutor":
         """Get singleton instance.
 
         Returns:

@@ -11,10 +11,10 @@ from typing import Dict, Optional
 
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from py2flamingo.pipeline.models.pipeline import Pipeline, NodeType
 from py2flamingo.pipeline.engine.context import ExecutionContext
-from py2flamingo.pipeline.engine.scope_resolver import ScopeResolver
 from py2flamingo.pipeline.engine.node_runners.base_runner import AbstractNodeRunner
+from py2flamingo.pipeline.engine.scope_resolver import ScopeResolver
+from py2flamingo.pipeline.models.pipeline import NodeType, Pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +42,13 @@ class PipelineExecutor(QThread):
     foreach_iteration = pyqtSignal(str, int, int)
     log_message = pyqtSignal(str)
 
-    def __init__(self, pipeline: Pipeline, context: ExecutionContext,
-                 runners: Optional[Dict[NodeType, AbstractNodeRunner]] = None,
-                 parent=None):
+    def __init__(
+        self,
+        pipeline: Pipeline,
+        context: ExecutionContext,
+        runners: Optional[Dict[NodeType, AbstractNodeRunner]] = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self._pipeline = pipeline
         self._context = context
@@ -71,7 +75,9 @@ class PipelineExecutor(QThread):
         # Validate
         errors = self._pipeline.validate()
         if errors:
-            msg = "Pipeline validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+            msg = "Pipeline validation failed:\n" + "\n".join(
+                f"  - {e}" for e in errors
+            )
             self.log_message.emit(msg)
             self.pipeline_error.emit(msg)
             return
@@ -106,9 +112,9 @@ class PipelineExecutor(QThread):
                     )
 
                 # Pass scope resolver to runners that need it
-                if hasattr(runner, 'set_scope_resolver'):
+                if hasattr(runner, "set_scope_resolver"):
                     runner.set_scope_resolver(resolver)
-                if hasattr(runner, 'set_executor'):
+                if hasattr(runner, "set_executor"):
                     runner.set_executor(self)
 
                 runner.run(node, self._pipeline, self._context)
@@ -152,7 +158,7 @@ class PipelineExecutor(QThread):
                     f"No runner registered for node type {node.node_type.name}"
                 )
 
-            if hasattr(runner, 'set_executor'):
+            if hasattr(runner, "set_executor"):
                 runner.set_executor(self)
 
             runner.run(node, self._pipeline, context)

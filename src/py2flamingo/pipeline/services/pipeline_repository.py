@@ -23,7 +23,7 @@ class PipelineRepository:
         if base_dir:
             self._dir = Path(base_dir)
         else:
-            self._dir = Path.home() / '.flamingo' / DEFAULT_PIPELINE_DIR
+            self._dir = Path.home() / ".flamingo" / DEFAULT_PIPELINE_DIR
         self._dir.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -41,13 +41,13 @@ class PipelineRepository:
             Path to the saved file
         """
         if not filename:
-            safe_name = pipeline.name.replace(' ', '_').lower()
+            safe_name = pipeline.name.replace(" ", "_").lower()
             filename = f"{safe_name}.json"
 
         path = self._dir / filename
         data = pipeline.to_dict()
 
-        with open(path, 'w') as f:
+        with open(path, "w") as f:
             json.dump(data, f, indent=2)
 
         logger.info(f"Pipeline saved: {path}")
@@ -84,9 +84,7 @@ class PipelineRepository:
 
     def list_pipelines(self) -> List[str]:
         """List all pipeline files in the directory."""
-        return sorted(
-            f.name for f in self._dir.glob('*.json')
-        )
+        return sorted(f.name for f in self._dir.glob("*.json"))
 
     def delete(self, filename: str) -> bool:
         """Delete a pipeline file."""

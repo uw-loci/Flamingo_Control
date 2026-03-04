@@ -10,14 +10,24 @@ Provides UI controls for:
 import logging
 from typing import Any, Dict
 
+from PyQt5.QtCore import Qt, QTimer, pyqtSlot
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
-    QRadioButton, QCheckBox, QButtonGroup, QGroupBox, QGridLayout, QComboBox, QDoubleSpinBox
+    QButtonGroup,
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QRadioButton,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer
 
 from py2flamingo.controllers.laser_led_controller import LaserLEDController
-from py2flamingo.views.colors import SUCCESS_BG, WARNING_BG, ERROR_BG
+from py2flamingo.views.colors import ERROR_BG, SUCCESS_BG, WARNING_BG
 
 
 class LaserLEDControlPanel(QWidget):
@@ -78,8 +88,12 @@ class LaserLEDControlPanel(QWidget):
         self.laser_led_controller.preview_enabled.connect(self._on_preview_enabled)
         self.laser_led_controller.preview_disabled.connect(self._on_preview_disabled)
         self.laser_led_controller.error_occurred.connect(self._on_error)
-        self.laser_led_controller.laser_power_changed.connect(self._on_laser_power_updated)
-        self.laser_led_controller.led_intensity_changed.connect(self._on_led_intensity_updated)
+        self.laser_led_controller.laser_power_changed.connect(
+            self._on_laser_power_updated
+        )
+        self.laser_led_controller.led_intensity_changed.connect(
+            self._on_led_intensity_updated
+        )
 
         self._setup_ui()
 
@@ -146,7 +160,9 @@ class LaserLEDControlPanel(QWidget):
             # Checkbox (with mutual exclusivity managed manually)
             checkbox = QCheckBox()
             self._laser_radios[laser.index] = checkbox
-            self._source_button_group.addButton(checkbox, laser.index)  # ID is laser index
+            self._source_button_group.addButton(
+                checkbox, laser.index
+            )  # ID is laser index
             layout.addWidget(checkbox, row, 0, Qt.AlignCenter)
 
             # Laser name
@@ -176,7 +192,9 @@ class LaserLEDControlPanel(QWidget):
             slider.setTickPosition(QSlider.TicksBelow)
             slider.setTickInterval(10)
             slider.valueChanged.connect(
-                lambda val, idx=laser.index: self._on_laser_power_slider_changed(idx, val)
+                lambda val, idx=laser.index: self._on_laser_power_slider_changed(
+                    idx, val
+                )
             )
             slider.sliderReleased.connect(
                 lambda idx=laser.index: self._on_laser_slider_released(idx)
@@ -234,7 +252,9 @@ class LaserLEDControlPanel(QWidget):
         self._led_spinbox.setMinimumWidth(70)
         self._led_spinbox.setStyleSheet("font-weight: bold;")
         # Use editingFinished to only update when user presses Enter or clicks away
-        self._led_spinbox.editingFinished.connect(self._on_led_intensity_spinbox_finished)
+        self._led_spinbox.editingFinished.connect(
+            self._on_led_intensity_spinbox_finished
+        )
         layout.addWidget(self._led_spinbox, row, 2)
 
         # Intensity slider
@@ -307,8 +327,12 @@ class LaserLEDControlPanel(QWidget):
             source_id = self._source_button_group.id(checked_button)
             if source_id >= 1:  # Laser (button IDs are laser.index: 1, 2, 3, 4)
                 laser_number = source_id
-                self.logger.info(f"Re-enabling laser {laser_number} with {path_name} path")
-                self.laser_led_controller.enable_laser_for_preview(laser_number, self._laser_path)
+                self.logger.info(
+                    f"Re-enabling laser {laser_number} with {path_name} path"
+                )
+                self.laser_led_controller.enable_laser_for_preview(
+                    laser_number, self._laser_path
+                )
 
     def _on_laser_power_slider_changed(self, laser_index: int, value: int) -> None:
         """Handle laser power slider change (while dragging)."""
@@ -338,7 +362,9 @@ class LaserLEDControlPanel(QWidget):
         requested_power = self._laser_spinboxes[laser_index].value()
 
         # Send to controller and get actual power from hardware
-        success, actual_power = self.laser_led_controller.set_laser_power(laser_index, requested_power)
+        success, actual_power = self.laser_led_controller.set_laser_power(
+            laser_index, requested_power
+        )
 
         if success:
             # Update GUI with actual power from hardware (may differ due to DAC quantization)
@@ -348,8 +374,10 @@ class LaserLEDControlPanel(QWidget):
                 self._laser_spinboxes[laser_index].setValue(actual_power)
                 self._laser_spinboxes[laser_index].blockSignals(False)
 
-                self.logger.info(f"Laser {laser_index}: requested {requested_power:.1f}%, "
-                               f"actual {actual_power:.1f}% (hardware quantization)")
+                self.logger.info(
+                    f"Laser {laser_index}: requested {requested_power:.1f}%, "
+                    f"actual {actual_power:.1f}% (hardware quantization)"
+                )
 
             # Update slider with actual power (block signals to prevent recursion)
             if laser_index in self._laser_sliders:
@@ -372,7 +400,9 @@ class LaserLEDControlPanel(QWidget):
         requested_power = float(self._laser_sliders[laser_index].value())
 
         # Send to controller and get actual power from hardware
-        success, actual_power = self.laser_led_controller.set_laser_power(laser_index, requested_power)
+        success, actual_power = self.laser_led_controller.set_laser_power(
+            laser_index, requested_power
+        )
 
         if success:
             # Update GUI with actual power from hardware (may differ due to DAC quantization)
@@ -386,10 +416,14 @@ class LaserLEDControlPanel(QWidget):
                 self._laser_sliders[laser_index].setValue(int(actual_power))
                 self._laser_sliders[laser_index].blockSignals(False)
 
-                self.logger.info(f"Laser {laser_index}: requested {requested_power:.1f}%, "
-                               f"actual {actual_power:.1f}% (hardware quantization)")
+                self.logger.info(
+                    f"Laser {laser_index}: requested {requested_power:.1f}%, "
+                    f"actual {actual_power:.1f}% (hardware quantization)"
+                )
             else:
-                self.logger.info(f"Laser {laser_index} power set to {actual_power:.1f}%")
+                self.logger.info(
+                    f"Laser {laser_index} power set to {actual_power:.1f}%"
+                )
         else:
             self.logger.error(f"Failed to set laser {laser_index} power")
             self._log_laser_power(laser_index)
@@ -443,7 +477,9 @@ class LaserLEDControlPanel(QWidget):
 
         # Log immediately for spinbox changes (user typed it in)
         color_names = ["Red", "Green", "Blue", "White"]
-        self.logger.info(f"{color_names[led_color]} LED intensity set to {intensity_percent:.1f}%")
+        self.logger.info(
+            f"{color_names[led_color]} LED intensity set to {intensity_percent:.1f}%"
+        )
 
     def _on_led_slider_released(self) -> None:
         """Handle LED slider release - log final value immediately."""
@@ -458,7 +494,9 @@ class LaserLEDControlPanel(QWidget):
             intensity = self._led_spinbox.value()
             led_color = self._led_combobox.currentIndex()
             color_names = ["Red", "Green", "Blue", "White"]
-            self.logger.info(f"{color_names[led_color]} LED intensity set to {intensity:.1f}%")
+            self.logger.info(
+                f"{color_names[led_color]} LED intensity set to {intensity:.1f}%"
+            )
 
     def _on_led_color_changed(self, index: int) -> None:
         """Handle LED color combobox change."""
@@ -491,7 +529,9 @@ class LaserLEDControlPanel(QWidget):
         source_id = self._source_button_group.id(button)
         is_checked = button.isChecked()
 
-        self.logger.debug(f"Light source clicked: button ID = {source_id}, checked = {is_checked}")
+        self.logger.debug(
+            f"Light source clicked: button ID = {source_id}, checked = {is_checked}"
+        )
 
         if is_checked:
             # Checkbox was just checked - uncheck all others (manual mutual exclusivity)
@@ -505,7 +545,9 @@ class LaserLEDControlPanel(QWidget):
                 if self._path_group:
                     self._path_group.setVisible(False)
 
-                led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
+                led_color = (
+                    self._led_combobox.currentIndex() if self._led_combobox else 0
+                )
                 color_names = ["Red", "Green", "Blue", "White"]
                 self.logger.info(f"{color_names[led_color]} LED selected for preview")
                 # Use async method to avoid blocking UI
@@ -519,8 +561,12 @@ class LaserLEDControlPanel(QWidget):
                 # Button ID IS the laser number (1-4) - set from laser.index in _create_lasers_section
                 laser_number = source_id
                 # Enable laser with current path selection (async for responsiveness)
-                self.logger.info(f"Laser {laser_number} selected for preview on {self._laser_path.upper()} path")
-                self.laser_led_controller.enable_laser_for_preview_async(laser_number, self._laser_path)
+                self.logger.info(
+                    f"Laser {laser_number} selected for preview on {self._laser_path.upper()} path"
+                )
+                self.laser_led_controller.enable_laser_for_preview_async(
+                    laser_number, self._laser_path
+                )
 
             else:
                 # This shouldn't happen - all buttons should be LED or lasers (1-4)
@@ -552,7 +598,9 @@ class LaserLEDControlPanel(QWidget):
             self._laser_sliders[laser_index].setValue(int(power_percent))
             self._laser_sliders[laser_index].blockSignals(False)
 
-        self.logger.debug(f"GUI updated: Laser {laser_index} power = {power_percent:.1f}%")
+        self.logger.debug(
+            f"GUI updated: Laser {laser_index} power = {power_percent:.1f}%"
+        )
 
     @pyqtSlot(float)
     def _on_led_intensity_updated(self, intensity_percent: float) -> None:
@@ -610,7 +658,9 @@ class LaserLEDControlPanel(QWidget):
             f"background-color: {WARNING_BG}; color: #856404; padding: 8px; "
             f"border: 1px solid #ffc107; border-radius: 4px; font-weight: bold;"
         )
-        self.logger.info("Preview disabled - checkboxes unchecked to reflect actual state")
+        self.logger.info(
+            "Preview disabled - checkboxes unchecked to reflect actual state"
+        )
 
     @pyqtSlot(str)
     def _on_error(self, error_message: str) -> None:
@@ -672,8 +722,12 @@ class LaserLEDControlPanel(QWidget):
         state["selected_lasers"] = selected_lasers
 
         # LED selection state
-        state["led_selected"] = self._led_radio.isChecked() if self._led_radio else False
-        state["led_color"] = self._led_combobox.currentIndex() if self._led_combobox else 0
+        state["led_selected"] = (
+            self._led_radio.isChecked() if self._led_radio else False
+        )
+        state["led_color"] = (
+            self._led_combobox.currentIndex() if self._led_combobox else 0
+        )
         state["led_intensity"] = self._led_slider.value() if self._led_slider else 50
 
         # Light path selection
@@ -738,8 +792,10 @@ class LaserLEDControlPanel(QWidget):
                 self._left_path_radio.blockSignals(False)
                 self._right_path_radio.blockSignals(False)
 
-        self.logger.info(f"Restored illumination selections: lasers={selected_lasers}, "
-                        f"led={state.get('led_selected')}, path={state.get('light_path')}")
+        self.logger.info(
+            f"Restored illumination selections: lasers={selected_lasers}, "
+            f"led={state.get('led_selected')}, path={state.get('light_path')}"
+        )
 
     def restore_checked_illumination(self) -> None:
         """
@@ -765,7 +821,9 @@ class LaserLEDControlPanel(QWidget):
             intensity = self._led_slider.value() if self._led_slider else 50
             self.laser_led_controller.set_led_intensity(led_color, float(intensity))
 
-            self.logger.info(f"Restoring LED illumination: {color_name} at {intensity}%")
+            self.logger.info(
+                f"Restoring LED illumination: {color_name} at {intensity}%"
+            )
             self.laser_led_controller.enable_led_for_preview(led_color)
 
         elif source_id >= 1:  # Laser (button IDs are laser.index: 1-4)
@@ -777,11 +835,17 @@ class LaserLEDControlPanel(QWidget):
             else:
                 power = 5.0  # Default power
 
-            self.logger.info(f"Restoring laser {laser_number} illumination at {power}% on {self._laser_path} path")
+            self.logger.info(
+                f"Restoring laser {laser_number} illumination at {power}% on {self._laser_path} path"
+            )
             # First ensure power is set in controller's cache, then enable
             self.laser_led_controller.set_laser_power(laser_number, power)
-            self.laser_led_controller.enable_laser_for_preview(laser_number, self._laser_path)
+            self.laser_led_controller.enable_laser_for_preview(
+                laser_number, self._laser_path
+            )
 
         else:
             # Unknown source ID (shouldn't happen with proper button setup)
-            self.logger.warning(f"Cannot restore illumination - unknown source ID: {source_id}")
+            self.logger.warning(
+                f"Cannot restore illumination - unknown source ID: {source_id}"
+            )

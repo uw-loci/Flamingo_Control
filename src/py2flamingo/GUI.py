@@ -14,37 +14,40 @@ from threading import Thread
 # Import utilities with corrected paths
 import py2flamingo.utils.calculations as calc
 import py2flamingo.utils.file_handlers as txt
-from .FlamingoConnect import FlamingoConnect, show_warning_message
 from py2flamingo.utils.image_processing import convert_to_qimage
+
+from .FlamingoConnect import FlamingoConnect, show_warning_message
 
 # Import global objects (needed for connection setup)
 from .global_objects import (
-    image_queue,
     command_queue,
-    z_plane_queue,
+    image_queue,
     intensity_queue,
-    visualize_queue,
-    view_snapshot,
-    system_idle,
     processing_event,
     send_event,
+    system_idle,
     terminate_event,
+    view_snapshot,
+    visualize_queue,
+    z_plane_queue,
 )
 
 # Controller imports with correct relative paths
 try:
+    from .controllers.ellipse_controller import EllipseController
     from .controllers.microscope_controller import MicroscopeController
+    from .controllers.multi_angle_controller import MultiAngleController
     from .controllers.position_controller import PositionController
+    from .controllers.sample_controller import SampleController
     from .controllers.settings_controller import SettingsController
     from .controllers.snapshot_controller import SnapshotController
-    from .controllers.sample_controller import SampleController
-    from .controllers.ellipse_controller import EllipseController
-    from .controllers.multi_angle_controller import MultiAngleController
+
     CONTROLLERS_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: Some controllers not available: {e}")
     CONTROLLERS_AVAILABLE = False
 
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -56,7 +59,6 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt5.QtCore import QTimer, Qt
 
 # Default data storage directory
 DATA_DIR = "output_png"
@@ -128,23 +130,28 @@ class Py2FlamingoGUI(QDialog):
                 ),
             }
         )
-        
+
         # For now, just show a connection status since FlamingoConnect is not a dialog
         try:
             # FlamingoConnect is not a dialog, so we handle it differently
             self.flamingo_connection = connection_dialog
-            
-            if hasattr(connection_dialog, 'connection_data') and connection_dialog.connection_data:
+
+            if (
+                hasattr(connection_dialog, "connection_data")
+                and connection_dialog.connection_data
+            ):
                 # Initialize controllers after successful connection (if available)
                 if CONTROLLERS_AVAILABLE:
                     connection_data = connection_dialog.connection_data
-                    nuc_client, live_client, wf_zstack, LED_on, LED_off = connection_data
-                    
+                    nuc_client, live_client, wf_zstack, LED_on, LED_off = (
+                        connection_data
+                    )
+
                     # Create controllers with appropriate models and services
                     # Note: These will need proper initialization once the full MVC structure is in place
                     self.microscope_controller = MicroscopeController()
                     # Additional controller initialization would go here...
-                
+
                 # Update UI state
                 self.connect_button.setEnabled(False)
                 self.disconnect_button.setEnabled(True)
@@ -153,13 +160,13 @@ class Py2FlamingoGUI(QDialog):
                 self.update_timer.start(1000)  # update every second
             else:
                 show_warning_message("Connection data not available.")
-                
+
         except Exception as e:
             show_warning_message(f"Connection failed: {e}")
 
     def disconnect_from_microscope(self):
         """Disconnect from the microscope."""
-        if hasattr(self, 'flamingo_connection'):
+        if hasattr(self, "flamingo_connection"):
             # Perform necessary cleanup and disconnection
             # Additional cleanup would go here...
             self.connect_button.setEnabled(True)
@@ -178,7 +185,7 @@ class Py2FlamingoGUI(QDialog):
     def closeEvent(self, event):
         """Handle window close event."""
         # Ensure proper disconnection on close
-        if hasattr(self, 'flamingo_connection'):
+        if hasattr(self, "flamingo_connection"):
             self.disconnect_from_microscope()
         event.accept()
 

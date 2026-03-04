@@ -22,10 +22,10 @@ import asyncio
 import json
 import logging
 import time
-from dataclasses import dataclass, asdict
-from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -36,17 +36,19 @@ try:
     import zarr
 
     # Check for Zarr 3.x async support
-    ZARR_VERSION = tuple(int(x) for x in zarr.__version__.split('.')[:2])
+    ZARR_VERSION = tuple(int(x) for x in zarr.__version__.split(".")[:2])
     ZARR_3_AVAILABLE = ZARR_VERSION >= (3, 0)
     ZARR_AVAILABLE = True
 
     if ZARR_3_AVAILABLE:
         # Zarr 3.x uses built-in codecs instead of numcodecs
         from zarr.codecs import BloscCodec
+
         logger.info(f"Zarr {zarr.__version__} with async I/O support detected")
     else:
         # Zarr 2.x uses numcodecs
         from numcodecs import Blosc
+
         BloscCodec = None
         logger.info(f"Zarr {zarr.__version__} detected (async I/O requires 3.x)")
 except ImportError:
@@ -54,7 +56,9 @@ except ImportError:
     ZARR_3_AVAILABLE = False
     zarr = None
     BloscCodec = None
-    logger.warning("zarr not available - session save/load disabled. Install with: pip install zarr")
+    logger.warning(
+        "zarr not available - session save/load disabled. Install with: pip install zarr"
+    )
 
 
 def _create_zarr_store(path: str):
@@ -77,6 +81,7 @@ def _create_zarr_store(path: str):
 @dataclass
 class SessionMetadata:
     """Metadata for a saved session."""
+
     session_name: str
     timestamp: str
     description: str
@@ -126,12 +131,17 @@ class SessionMetadata:
         return obj
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'SessionMetadata':
+    def from_dict(cls, data: Dict[str, Any]) -> "SessionMetadata":
         # Convert lists back to tuples
-        for key in ['storage_voxel_size_um', 'display_voxel_size_um',
-                    'chamber_dimensions_um', 'chamber_origin_um',
-                    'sample_region_center_um', 'data_bounds_min_um',
-                    'data_bounds_max_um']:
+        for key in [
+            "storage_voxel_size_um",
+            "display_voxel_size_um",
+            "chamber_dimensions_um",
+            "chamber_origin_um",
+            "sample_region_center_um",
+            "data_bounds_min_um",
+            "data_bounds_max_um",
+        ]:
             if key in data and isinstance(data[key], list):
                 data[key] = tuple(data[key])
         return cls(**data)
@@ -150,7 +160,7 @@ class SessionManager:
     """
 
     # Default compression settings
-    DEFAULT_COMPRESSOR = 'zstd' if ZARR_AVAILABLE else None
+    DEFAULT_COMPRESSOR = "zstd" if ZARR_AVAILABLE else None
     DEFAULT_COMPRESSION_LEVEL = 3
     DEFAULT_CHUNK_SIZE = (64, 64, 64)  # Optimal for napari 3D viewing
 
@@ -177,9 +187,13 @@ class SessionManager:
         """Check if zarr is available for session management."""
         return ZARR_AVAILABLE
 
-    def save_session(self, voxel_storage, session_name: str,
-                     description: str = "",
-                     channel_names: Optional[List[str]] = None) -> Path:
+    def save_session(
+        self,
+        voxel_storage,
+        session_name: str,
+        description: str = "",
+        channel_names: Optional[List[str]] = None,
+    ) -> Path:
         """Save the current 3D visualization state to an OME-Zarr session.
 
         Args:
@@ -198,7 +212,9 @@ class SessionManager:
             raise RuntimeError("zarr not available. Install with: pip install zarr")
 
         # Create session path
-        safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in session_name)
+        safe_name = "".join(
+            c if c.isalnum() or c in "._-" else "_" for c in session_name
+        )
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         session_path = self.session_dir / f"{safe_name}_{timestamp}.zarr"
 
@@ -211,8 +227,10 @@ class SessionManager:
         # Default channel names
         if channel_names is None:
             channel_names = [
-                "405nm (DAPI)", "488nm (GFP)",
-                "561nm (RFP)", "640nm (Far-Red)"
+                "405nm (DAPI)",
+                "488nm (GFP)",
+                "561nm (RFP)",
+                "640nm (Far-Red)",
             ]
 
         # Save each channel's data
@@ -229,8 +247,11 @@ class SessionManager:
                     shape=display_data.shape,
                     data=display_data,
                     chunks=self.DEFAULT_CHUNK_SIZE,
-                    compressors=BloscCodec(cname=self.DEFAULT_COMPRESSOR, clevel=self.DEFAULT_COMPRESSION_LEVEL),
-                    dtype=display_data.dtype
+                    compressors=BloscCodec(
+                        cname=self.DEFAULT_COMPRESSOR,
+                        clevel=self.DEFAULT_COMPRESSION_LEVEL,
+                    ),
+                    dtype=display_data.dtype,
                 )
             else:
                 root.create_dataset(
@@ -238,13 +259,18 @@ class SessionManager:
                     shape=display_data.shape,
                     data=display_data,
                     chunks=self.DEFAULT_CHUNK_SIZE,
-                    compressor=Blosc(cname=self.DEFAULT_COMPRESSOR, clevel=self.DEFAULT_COMPRESSION_LEVEL),
-                    dtype=display_data.dtype
+                    compressor=Blosc(
+                        cname=self.DEFAULT_COMPRESSOR,
+                        clevel=self.DEFAULT_COMPRESSION_LEVEL,
+                    ),
+                    dtype=display_data.dtype,
                 )
 
             total_voxels += np.count_nonzero(display_data)
-            logger.debug(f"Saved channel {ch}: shape={display_data.shape}, "
-                        f"nonzero={np.count_nonzero(display_data)}")
+            logger.debug(
+                f"Saved channel {ch}: shape={display_data.shape}, "
+                f"nonzero={np.count_nonzero(display_data)}"
+            )
 
         # Create metadata
         memory_usage = voxel_storage.get_memory_usage()
@@ -262,54 +288,65 @@ class SessionManager:
             sample_region_radius_um=config.sample_region_radius,
             reference_stage_position=voxel_storage.reference_stage_position,
             num_channels=voxel_storage.num_channels,
-            channel_names=channel_names[:voxel_storage.num_channels],
-            data_bounds_min_um=tuple(voxel_storage.data_bounds['min'].tolist()),
-            data_bounds_max_um=tuple(voxel_storage.data_bounds['max'].tolist()),
+            channel_names=channel_names[: voxel_storage.num_channels],
+            data_bounds_min_um=tuple(voxel_storage.data_bounds["min"].tolist()),
+            data_bounds_max_um=tuple(voxel_storage.data_bounds["max"].tolist()),
             total_voxels=total_voxels,
-            memory_mb=memory_usage['total_mb']
+            memory_mb=memory_usage["total_mb"],
         )
 
         # Save metadata as zarr attributes (OME-Zarr compatible)
-        root.attrs['session_metadata'] = metadata.to_dict()
+        root.attrs["session_metadata"] = metadata.to_dict()
 
         # Add OME-NGFF compatible metadata
-        root.attrs['multiscales'] = [{
-            "version": "0.4",
-            "name": session_name,
-            "axes": [
-                {"name": "z", "type": "space", "unit": "micrometer"},
-                {"name": "y", "type": "space", "unit": "micrometer"},
-                {"name": "x", "type": "space", "unit": "micrometer"}
-            ],
-            "datasets": [{"path": str(ch)} for ch in range(voxel_storage.num_channels)],
-            "coordinateTransformations": [{
-                "type": "scale",
-                "scale": list(config.display_voxel_size)
-            }]
-        }]
+        root.attrs["multiscales"] = [
+            {
+                "version": "0.4",
+                "name": session_name,
+                "axes": [
+                    {"name": "z", "type": "space", "unit": "micrometer"},
+                    {"name": "y", "type": "space", "unit": "micrometer"},
+                    {"name": "x", "type": "space", "unit": "micrometer"},
+                ],
+                "datasets": [
+                    {"path": str(ch)} for ch in range(voxel_storage.num_channels)
+                ],
+                "coordinateTransformations": [
+                    {"type": "scale", "scale": list(config.display_voxel_size)}
+                ],
+            }
+        ]
 
         # Add omero metadata for channel display
-        root.attrs['omero'] = {
+        root.attrs["omero"] = {
             "name": session_name,
             "channels": [
                 {
-                    "label": channel_names[i] if i < len(channel_names) else f"Channel {i}",
+                    "label": (
+                        channel_names[i] if i < len(channel_names) else f"Channel {i}"
+                    ),
                     "color": ["0000FF", "00FF00", "FF0000", "FF00FF"][i % 4],
-                    "active": True
+                    "active": True,
                 }
                 for i in range(voxel_storage.num_channels)
-            ]
+            ],
         }
 
         logger.info(f"Session saved successfully: {session_path}")
         logger.info(f"  Total voxels: {total_voxels:,}")
-        logger.info(f"  Size on disk: {self._get_dir_size(session_path) / 1024 / 1024:.1f} MB")
+        logger.info(
+            f"  Size on disk: {self._get_dir_size(session_path) / 1024 / 1024:.1f} MB"
+        )
 
         return session_path
 
-    async def save_session_async(self, voxel_storage, session_name: str,
-                                  description: str = "",
-                                  channel_names: Optional[List[str]] = None) -> Path:
+    async def save_session_async(
+        self,
+        voxel_storage,
+        session_name: str,
+        description: str = "",
+        channel_names: Optional[List[str]] = None,
+    ) -> Path:
         """Save session using Zarr 3.x async I/O for 2-5x faster writes.
 
         Leverages concurrent chunk writes and write_empty_chunks=False for
@@ -328,7 +365,9 @@ class SessionManager:
             raise RuntimeError("zarr not available. Install with: pip install zarr")
 
         # Create session path
-        safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in session_name)
+        safe_name = "".join(
+            c if c.isalnum() or c in "._-" else "_" for c in session_name
+        )
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         session_path = self.session_dir / f"{safe_name}_{timestamp}.zarr"
 
@@ -341,8 +380,10 @@ class SessionManager:
         # Default channel names
         if channel_names is None:
             channel_names = [
-                "405nm (DAPI)", "488nm (GFP)",
-                "561nm (RFP)", "640nm (Far-Red)"
+                "405nm (DAPI)",
+                "488nm (GFP)",
+                "561nm (RFP)",
+                "640nm (Far-Red)",
             ]
 
         # Use ThreadPoolExecutor for concurrent channel saves
@@ -354,9 +395,7 @@ class SessionManager:
             # Run the I/O-bound operation in a thread pool
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
-                None,
-                self._save_channel_sync,
-                store, ch, display_data
+                None, self._save_channel_sync, store, ch, display_data
             )
 
             return np.count_nonzero(display_data)
@@ -385,52 +424,59 @@ class SessionManager:
             sample_region_radius_um=config.sample_region_radius,
             reference_stage_position=voxel_storage.reference_stage_position,
             num_channels=voxel_storage.num_channels,
-            channel_names=channel_names[:voxel_storage.num_channels],
-            data_bounds_min_um=tuple(voxel_storage.data_bounds['min'].tolist()),
-            data_bounds_max_um=tuple(voxel_storage.data_bounds['max'].tolist()),
+            channel_names=channel_names[: voxel_storage.num_channels],
+            data_bounds_min_um=tuple(voxel_storage.data_bounds["min"].tolist()),
+            data_bounds_max_um=tuple(voxel_storage.data_bounds["max"].tolist()),
             total_voxels=total_voxels,
-            memory_mb=memory_usage['total_mb']
+            memory_mb=memory_usage["total_mb"],
         )
 
         # Save metadata
-        root.attrs['session_metadata'] = metadata.to_dict()
-        root.attrs['multiscales'] = [{
-            "version": "0.4",
-            "name": session_name,
-            "axes": [
-                {"name": "z", "type": "space", "unit": "micrometer"},
-                {"name": "y", "type": "space", "unit": "micrometer"},
-                {"name": "x", "type": "space", "unit": "micrometer"}
-            ],
-            "datasets": [{"path": str(ch)} for ch in range(voxel_storage.num_channels)],
-            "coordinateTransformations": [{
-                "type": "scale",
-                "scale": list(config.display_voxel_size)
-            }]
-        }]
-        root.attrs['omero'] = {
+        root.attrs["session_metadata"] = metadata.to_dict()
+        root.attrs["multiscales"] = [
+            {
+                "version": "0.4",
+                "name": session_name,
+                "axes": [
+                    {"name": "z", "type": "space", "unit": "micrometer"},
+                    {"name": "y", "type": "space", "unit": "micrometer"},
+                    {"name": "x", "type": "space", "unit": "micrometer"},
+                ],
+                "datasets": [
+                    {"path": str(ch)} for ch in range(voxel_storage.num_channels)
+                ],
+                "coordinateTransformations": [
+                    {"type": "scale", "scale": list(config.display_voxel_size)}
+                ],
+            }
+        ]
+        root.attrs["omero"] = {
             "name": session_name,
             "channels": [
                 {
-                    "label": channel_names[i] if i < len(channel_names) else f"Channel {i}",
+                    "label": (
+                        channel_names[i] if i < len(channel_names) else f"Channel {i}"
+                    ),
                     "color": ["0000FF", "00FF00", "FF0000", "FF00FF"][i % 4],
-                    "active": True
+                    "active": True,
                 }
                 for i in range(voxel_storage.num_channels)
-            ]
+            ],
         }
 
         elapsed = time.time() - start_time
         logger.info(f"Async session saved: {session_path}")
         logger.info(f"  Total voxels: {total_voxels:,}")
         logger.info(f"  Elapsed time: {elapsed:.2f}s")
-        logger.info(f"  Size on disk: {self._get_dir_size(session_path) / 1024 / 1024:.1f} MB")
+        logger.info(
+            f"  Size on disk: {self._get_dir_size(session_path) / 1024 / 1024:.1f} MB"
+        )
 
         return session_path
 
     def _save_channel_sync(self, store, channel_id: int, data: np.ndarray):
         """Synchronous helper to save a single channel to zarr."""
-        root = zarr.open_group(store=store, mode='a')
+        root = zarr.open_group(store=store, mode="a")
 
         # Create dataset with compression
         # zarr v3 uses different codec API than v2
@@ -440,8 +486,10 @@ class SessionManager:
                 shape=data.shape,
                 data=data,
                 chunks=self.DEFAULT_CHUNK_SIZE,
-                compressors=BloscCodec(cname=self.DEFAULT_COMPRESSOR, clevel=self.DEFAULT_COMPRESSION_LEVEL),
-                dtype=data.dtype
+                compressors=BloscCodec(
+                    cname=self.DEFAULT_COMPRESSOR, clevel=self.DEFAULT_COMPRESSION_LEVEL
+                ),
+                dtype=data.dtype,
             )
         else:
             root.create_dataset(
@@ -449,12 +497,16 @@ class SessionManager:
                 shape=data.shape,
                 data=data,
                 chunks=self.DEFAULT_CHUNK_SIZE,
-                compressor=Blosc(cname=self.DEFAULT_COMPRESSOR, clevel=self.DEFAULT_COMPRESSION_LEVEL),
+                compressor=Blosc(
+                    cname=self.DEFAULT_COMPRESSOR, clevel=self.DEFAULT_COMPRESSION_LEVEL
+                ),
                 dtype=data.dtype,
-                write_empty_chunks=False  # Skip empty chunks for sparse voxel data
+                write_empty_chunks=False,  # Skip empty chunks for sparse voxel data
             )
 
-    async def load_session_async(self, session_path: Path) -> Tuple[Dict[int, np.ndarray], SessionMetadata]:
+    async def load_session_async(
+        self, session_path: Path
+    ) -> Tuple[Dict[int, np.ndarray], SessionMetadata]:
         """Load session using Zarr 3.x async I/O for 2-5x faster reads.
 
         Args:
@@ -475,10 +527,10 @@ class SessionManager:
 
         # Open zarr store
         store = _create_zarr_store(str(session_path))
-        root = zarr.open_group(store=store, mode='r')
+        root = zarr.open_group(store=store, mode="r")
 
         # Load metadata
-        metadata_dict = root.attrs.get('session_metadata', {})
+        metadata_dict = root.attrs.get("session_metadata", {})
         if not metadata_dict:
             raise ValueError("Session file missing metadata")
 
@@ -492,10 +544,7 @@ class SessionManager:
                 return ch, None
 
             loop = asyncio.get_event_loop()
-            data = await loop.run_in_executor(
-                None,
-                lambda: np.array(root[ch_key])
-            )
+            data = await loop.run_in_executor(None, lambda: np.array(root[ch_key]))
             return ch, data
 
         # Load all channels concurrently
@@ -515,25 +564,35 @@ class SessionManager:
 
         return channel_data, metadata
 
-    def save_session_fast(self, voxel_storage, session_name: str,
-                          description: str = "",
-                          channel_names: Optional[List[str]] = None) -> Path:
+    def save_session_fast(
+        self,
+        voxel_storage,
+        session_name: str,
+        description: str = "",
+        channel_names: Optional[List[str]] = None,
+    ) -> Path:
         """Convenience method: runs async save in an event loop.
 
         Use this from synchronous code to get async performance benefits.
         """
-        return asyncio.run(self.save_session_async(
-            voxel_storage, session_name, description, channel_names
-        ))
+        return asyncio.run(
+            self.save_session_async(
+                voxel_storage, session_name, description, channel_names
+            )
+        )
 
-    def load_session_fast(self, session_path: Path) -> Tuple[Dict[int, np.ndarray], SessionMetadata]:
+    def load_session_fast(
+        self, session_path: Path
+    ) -> Tuple[Dict[int, np.ndarray], SessionMetadata]:
         """Convenience method: runs async load in an event loop.
 
         Use this from synchronous code to get async performance benefits.
         """
         return asyncio.run(self.load_session_async(session_path))
 
-    def load_session(self, session_path: Path) -> Tuple[Dict[int, np.ndarray], SessionMetadata]:
+    def load_session(
+        self, session_path: Path
+    ) -> Tuple[Dict[int, np.ndarray], SessionMetadata]:
         """Load a session from an OME-Zarr file.
 
         Args:
@@ -558,10 +617,10 @@ class SessionManager:
 
         # Open zarr store
         store = _create_zarr_store(str(session_path))
-        root = zarr.open_group(store=store, mode='r')
+        root = zarr.open_group(store=store, mode="r")
 
         # Load metadata
-        metadata_dict = root.attrs.get('session_metadata', {})
+        metadata_dict = root.attrs.get("session_metadata", {})
         if not metadata_dict:
             raise ValueError("Session file missing metadata")
 
@@ -617,12 +676,14 @@ class SessionManager:
                         voxel_storage.channel_max_values[ch] = max_val
                         voxel_storage._session_loaded_channels.add(ch)
                 else:
-                    logger.warning(f"Channel {ch} shape mismatch: "
-                                 f"session={data.shape}, storage={voxel_storage.display_dims}")
+                    logger.warning(
+                        f"Channel {ch} shape mismatch: "
+                        f"session={data.shape}, storage={voxel_storage.display_dims}"
+                    )
 
         # Restore data bounds
-        voxel_storage.data_bounds['min'] = np.array(metadata.data_bounds_min_um)
-        voxel_storage.data_bounds['max'] = np.array(metadata.data_bounds_max_um)
+        voxel_storage.data_bounds["min"] = np.array(metadata.data_bounds_min_um)
+        voxel_storage.data_bounds["max"] = np.array(metadata.data_bounds_max_um)
 
         logger.info(f"Session restored to storage: {metadata.session_name}")
         return metadata
@@ -636,30 +697,32 @@ class SessionManager:
         sessions = []
 
         for item in self.session_dir.iterdir():
-            if item.is_dir() and item.suffix == '.zarr':
+            if item.is_dir() and item.suffix == ".zarr":
                 session_info = {
-                    'path': item,
-                    'name': item.stem,
-                    'size_mb': self._get_dir_size(item) / 1024 / 1024
+                    "path": item,
+                    "name": item.stem,
+                    "size_mb": self._get_dir_size(item) / 1024 / 1024,
                 }
 
                 # Try to load metadata
                 if ZARR_AVAILABLE:
                     try:
                         store = _create_zarr_store(str(item))
-                        root = zarr.open_group(store=store, mode='r')
-                        metadata = root.attrs.get('session_metadata', {})
-                        session_info['session_name'] = metadata.get('session_name', item.stem)
-                        session_info['timestamp'] = metadata.get('timestamp', '')
-                        session_info['description'] = metadata.get('description', '')
-                        session_info['total_voxels'] = metadata.get('total_voxels', 0)
+                        root = zarr.open_group(store=store, mode="r")
+                        metadata = root.attrs.get("session_metadata", {})
+                        session_info["session_name"] = metadata.get(
+                            "session_name", item.stem
+                        )
+                        session_info["timestamp"] = metadata.get("timestamp", "")
+                        session_info["description"] = metadata.get("description", "")
+                        session_info["total_voxels"] = metadata.get("total_voxels", 0)
                     except Exception as e:
                         logger.debug(f"Could not read metadata from {item}: {e}")
 
                 sessions.append(session_info)
 
         # Sort by modification time (newest first)
-        sessions.sort(key=lambda s: s['path'].stat().st_mtime, reverse=True)
+        sessions.sort(key=lambda s: s["path"].stat().st_mtime, reverse=True)
         return sessions
 
     def delete_session(self, session_path: Path) -> bool:
@@ -674,7 +737,7 @@ class SessionManager:
         import shutil
 
         session_path = Path(session_path)
-        if session_path.exists() and session_path.suffix == '.zarr':
+        if session_path.exists() and session_path.suffix == ".zarr":
             shutil.rmtree(session_path)
             logger.info(f"Deleted session: {session_path}")
             return True
@@ -683,7 +746,7 @@ class SessionManager:
     def _get_dir_size(self, path: Path) -> int:
         """Get total size of a directory in bytes."""
         total = 0
-        for item in path.rglob('*'):
+        for item in path.rglob("*"):
             if item.is_file():
                 total += item.stat().st_size
         return total
@@ -711,7 +774,7 @@ def load_test_data(file_path: Path, voxel_storage) -> bool:
         return False
 
     # Handle different formats
-    if file_path.suffix == '.zarr' or file_path.is_dir():
+    if file_path.suffix == ".zarr" or file_path.is_dir():
         # Load as OME-Zarr session
         if not ZARR_AVAILABLE:
             logger.error("zarr not available for loading .zarr files")
@@ -725,10 +788,11 @@ def load_test_data(file_path: Path, voxel_storage) -> bool:
             logger.exception(f"Failed to load zarr session: {e}")
             return False
 
-    elif file_path.suffix in ['.tif', '.tiff']:
+    elif file_path.suffix in [".tif", ".tiff"]:
         # Load TIFF stack
         try:
             from tifffile import imread
+
             data = imread(str(file_path))
             return _load_array_to_storage(data, voxel_storage)
         except ImportError:
@@ -738,7 +802,7 @@ def load_test_data(file_path: Path, voxel_storage) -> bool:
             logger.exception(f"Failed to load TIFF: {e}")
             return False
 
-    elif file_path.suffix == '.npy':
+    elif file_path.suffix == ".npy":
         # Load NumPy array
         try:
             data = np.load(str(file_path))
@@ -752,7 +816,9 @@ def load_test_data(file_path: Path, voxel_storage) -> bool:
         return False
 
 
-def _load_array_to_storage(data: np.ndarray, voxel_storage, channel_id: int = 0) -> bool:
+def _load_array_to_storage(
+    data: np.ndarray, voxel_storage, channel_id: int = 0
+) -> bool:
     """Load a numpy array into voxel storage.
 
     Args:

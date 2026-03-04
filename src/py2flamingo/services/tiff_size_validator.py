@@ -8,11 +8,10 @@ the standard TIFF 4GB file size limit.
 """
 
 import logging
-from typing import Tuple, Optional, NamedTuple
+import re
 from dataclasses import dataclass
 from pathlib import Path
-import re
-
+from typing import NamedTuple, Optional, Tuple
 
 # Standard TIFF has 32-bit offsets, limiting file size to 4GB
 TIFF_4GB_LIMIT = 4 * 1024 * 1024 * 1024  # 4,294,967,296 bytes
@@ -26,6 +25,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TiffSizeEstimate:
     """Result of TIFF file size estimation."""
+
     num_planes: int
     image_width: int
     image_height: int
@@ -50,7 +50,7 @@ def calculate_tiff_size(
     num_planes: int,
     image_width: int = 2048,
     image_height: int = 2048,
-    bytes_per_pixel: int = 2
+    bytes_per_pixel: int = 2,
 ) -> TiffSizeEstimate:
     """
     Calculate expected TIFF file size and check against 4GB limit.
@@ -104,7 +104,7 @@ def calculate_tiff_size(
         estimated_bytes=estimated_bytes,
         exceeds_limit=exceeds_limit,
         max_safe_planes=max_safe_planes,
-        message=message
+        message=message,
     )
 
 
@@ -113,7 +113,7 @@ def validate_workflow_params(
     z_step_um: float,
     image_width: int = 2048,
     image_height: int = 2048,
-    bytes_per_pixel: int = 2
+    bytes_per_pixel: int = 2,
 ) -> TiffSizeEstimate:
     """
     Validate workflow parameters before execution.
@@ -139,7 +139,7 @@ def validate_workflow_params(
         num_planes=num_planes,
         image_width=image_width,
         image_height=image_height,
-        bytes_per_pixel=bytes_per_pixel
+        bytes_per_pixel=bytes_per_pixel,
     )
 
 
@@ -157,12 +157,12 @@ def parse_workflow_file(workflow_path: Path) -> Optional[TiffSizeEstimate]:
         content = workflow_path.read_text()
 
         # Parse number of planes
-        num_planes_match = re.search(r'Number of planes\s*=\s*(\d+)', content)
+        num_planes_match = re.search(r"Number of planes\s*=\s*(\d+)", content)
         num_planes = int(num_planes_match.group(1)) if num_planes_match else 1
 
         # Parse AOI dimensions
-        aoi_width_match = re.search(r'AOI width\s*=\s*(\d+)', content)
-        aoi_height_match = re.search(r'AOI height\s*=\s*(\d+)', content)
+        aoi_width_match = re.search(r"AOI width\s*=\s*(\d+)", content)
+        aoi_height_match = re.search(r"AOI height\s*=\s*(\d+)", content)
 
         image_width = int(aoi_width_match.group(1)) if aoi_width_match else 2048
         image_height = int(aoi_height_match.group(1)) if aoi_height_match else 2048
@@ -174,7 +174,7 @@ def parse_workflow_file(workflow_path: Path) -> Optional[TiffSizeEstimate]:
             num_planes=num_planes,
             image_width=image_width,
             image_height=image_height,
-            bytes_per_pixel=bytes_per_pixel
+            bytes_per_pixel=bytes_per_pixel,
         )
 
     except Exception as e:
@@ -186,7 +186,7 @@ def get_recommended_planes(
     z_range_mm: float,
     image_width: int = 2048,
     image_height: int = 2048,
-    bytes_per_pixel: int = 2
+    bytes_per_pixel: int = 2,
 ) -> Tuple[int, float]:
     """
     Get recommended number of planes and step size to stay under 4GB limit.

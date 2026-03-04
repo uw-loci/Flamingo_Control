@@ -5,12 +5,14 @@ Uses sparse arrays to store only non-zero voxels, dramatically reducing memory
 usage and improving performance for sparse datasets like fluorescence microscopy.
 """
 
-import numpy as np
-from typing import Tuple, Dict, Optional
 import logging
+from typing import Dict, Optional, Tuple
+
+import numpy as np
 
 try:
     import sparse
+
     SPARSE_AVAILABLE = True
 except ImportError:
     SPARSE_AVAILABLE = False
@@ -30,8 +32,13 @@ class SparseVolumeRenderer:
     - Rotation and translation transforms
     """
 
-    def __init__(self, dims: Tuple[int, int, int], num_channels: int = 4,
-                 block_size: int = 32, use_sparse: bool = True):
+    def __init__(
+        self,
+        dims: Tuple[int, int, int],
+        num_channels: int = 4,
+        block_size: int = 32,
+        use_sparse: bool = True,
+    ):
         """
         Initialize sparse volume renderer.
 
@@ -66,8 +73,12 @@ class SparseVolumeRenderer:
         logger.info(f"  Block size: {block_size}")
         logger.info(f"  Using sparse: {self.use_sparse}")
 
-    def update_region(self, channel_id: int, bounds: Tuple[int, int, int, int, int, int],
-                     data: np.ndarray):
+    def update_region(
+        self,
+        channel_id: int,
+        bounds: Tuple[int, int, int, int, int, int],
+        data: np.ndarray,
+    ):
         """
         Update a specific region with new data.
 
@@ -86,18 +97,26 @@ class SparseVolumeRenderer:
         # Update the data
         if self.use_sparse:
             # Sparse update
-            self.channels[channel_id][z_start:z_end, y_start:y_end, x_start:x_end] = data
+            self.channels[channel_id][
+                z_start:z_end, y_start:y_end, x_start:x_end
+            ] = data
         else:
             # Dense update
-            self.channels[channel_id][z_start:z_end, y_start:y_end, x_start:x_end] = data
+            self.channels[channel_id][
+                z_start:z_end, y_start:y_end, x_start:x_end
+            ] = data
 
         # Mark affected blocks as active
         blocks = self._get_affected_blocks(bounds)
         self.active_blocks[channel_id].update(blocks)
 
-        logger.debug(f"Updated channel {channel_id} region {bounds}, affected {len(blocks)} blocks")
+        logger.debug(
+            f"Updated channel {channel_id} region {bounds}, affected {len(blocks)} blocks"
+        )
 
-    def clear_region(self, channel_id: int, bounds: Tuple[int, int, int, int, int, int]):
+    def clear_region(
+        self, channel_id: int, bounds: Tuple[int, int, int, int, int, int]
+    ):
         """
         Clear a specific region (set to zero).
 
@@ -120,7 +139,9 @@ class SparseVolumeRenderer:
             if self._is_block_empty(channel_id, block):
                 self.active_blocks[channel_id].discard(block)
 
-    def get_dense_volume(self, channel_id: int, bounds: Optional[Tuple] = None) -> np.ndarray:
+    def get_dense_volume(
+        self, channel_id: int, bounds: Optional[Tuple] = None
+    ) -> np.ndarray:
         """
         Get dense numpy array for napari display.
 
@@ -135,14 +156,18 @@ class SparseVolumeRenderer:
         if self.use_sparse:
             if bounds:
                 z_start, z_end, y_start, y_end, x_start, x_end = bounds
-                region = self.channels[channel_id][z_start:z_end, y_start:y_end, x_start:x_end]
+                region = self.channels[channel_id][
+                    z_start:z_end, y_start:y_end, x_start:x_end
+                ]
                 return region.todense()
             else:
                 return self.channels[channel_id].todense()
         else:
             if bounds:
                 z_start, z_end, y_start, y_end, x_start, x_end = bounds
-                return self.channels[channel_id][z_start:z_end, y_start:y_end, x_start:x_end]
+                return self.channels[channel_id][
+                    z_start:z_end, y_start:y_end, x_start:x_end
+                ]
             else:
                 return self.channels[channel_id]
 
@@ -164,7 +189,14 @@ class SparseVolumeRenderer:
             y_min, y_max = coords[1].min(), coords[1].max()
             x_min, x_max = coords[2].min(), coords[2].max()
 
-            return (int(z_min), int(z_max) + 1, int(y_min), int(y_max) + 1, int(x_min), int(x_max) + 1)
+            return (
+                int(z_min),
+                int(z_max) + 1,
+                int(y_min),
+                int(y_max) + 1,
+                int(x_min),
+                int(x_max) + 1,
+            )
         else:
             # For dense, find non-zero region
             nonzero = np.argwhere(self.channels[channel_id] > 0)
@@ -186,9 +218,9 @@ class SparseVolumeRenderer:
             memory_mb = total_voxels * 2 / (1024 * 1024)
 
         return {
-            'total_mb': memory_mb,
-            'total_voxels': total_voxels,
-            'active_blocks': sum(len(blocks) for blocks in self.active_blocks.values())
+            "total_mb": memory_mb,
+            "total_voxels": total_voxels,
+            "active_blocks": sum(len(blocks) for blocks in self.active_blocks.values()),
         }
 
     def clear_all(self):
@@ -204,9 +236,11 @@ class SparseVolumeRenderer:
         """Check if bounds are valid."""
         z_start, z_end, y_start, y_end, x_start, x_end = bounds
 
-        return (0 <= z_start < z_end <= self.dims[0] and
-                0 <= y_start < y_end <= self.dims[1] and
-                0 <= x_start < x_end <= self.dims[2])
+        return (
+            0 <= z_start < z_end <= self.dims[0]
+            and 0 <= y_start < y_end <= self.dims[1]
+            and 0 <= x_start < x_end <= self.dims[2]
+        )
 
     def _get_affected_blocks(self, bounds: Tuple) -> set:
         """Get set of block IDs affected by the given bounds."""
@@ -214,8 +248,12 @@ class SparseVolumeRenderer:
 
         blocks = set()
         for z in range(z_start // self.block_size, (z_end - 1) // self.block_size + 1):
-            for y in range(y_start // self.block_size, (y_end - 1) // self.block_size + 1):
-                for x in range(x_start // self.block_size, (x_end - 1) // self.block_size + 1):
+            for y in range(
+                y_start // self.block_size, (y_end - 1) // self.block_size + 1
+            ):
+                for x in range(
+                    x_start // self.block_size, (x_end - 1) // self.block_size + 1
+                ):
                     blocks.add((z, y, x))
 
         return blocks
@@ -231,7 +269,11 @@ class SparseVolumeRenderer:
         x_end = min((x + 1) * self.block_size, self.dims[2])
 
         if self.use_sparse:
-            block_data = self.channels[channel_id][z_start:z_end, y_start:y_end, x_start:x_end]
+            block_data = self.channels[channel_id][
+                z_start:z_end, y_start:y_end, x_start:x_end
+            ]
             return block_data.nnz == 0
         else:
-            return not np.any(self.channels[channel_id][z_start:z_end, y_start:y_end, x_start:x_end])
+            return not np.any(
+                self.channels[channel_id][z_start:z_end, y_start:y_end, x_start:x_end]
+            )

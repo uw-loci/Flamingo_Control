@@ -6,37 +6,42 @@ Run this directly from the Connection tab Python console.
 This version uses direct API calls rather than GUI simulation.
 """
 
+import logging
 import sys
 import time
-import numpy as np
-import logging
 import traceback
-from PyQt5.QtWidgets import QApplication, QWidget
+
+import numpy as np
 from PyQt5.QtCore import QCoreApplication
+from PyQt5.QtWidgets import QApplication, QWidget
 
 logger = logging.getLogger(__name__)
 
 # Install global exception handler to catch crashes
 _original_excepthook = sys.excepthook
 
+
 def _custom_excepthook(exc_type, exc_value, exc_tb):
     """Custom exception hook to log unhandled exceptions."""
     logger.error("UNHANDLED EXCEPTION in 3D movement test:")
     logger.error("".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("UNHANDLED EXCEPTION:")
     print("".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
     # Call original hook
     _original_excepthook(exc_type, exc_value, exc_tb)
 
+
 sys.excepthook = _custom_excepthook
+
 
 def process_gui_events():
     """Process Qt events to keep GUI responsive during test."""
     app = QApplication.instance()
     if app:
         app.processEvents()
+
 
 def smart_sleep(seconds, message=None):
     """Sleep while processing Qt events to keep GUI responsive."""
@@ -48,6 +53,7 @@ def smart_sleep(seconds, message=None):
     for _ in range(intervals):
         time.sleep(0.1)
         process_gui_events()
+
 
 def wait_for_movement_complete(controller, axis_name, timeout=5.0):
     """
@@ -62,6 +68,7 @@ def wait_for_movement_complete(controller, axis_name, timeout=5.0):
         Final position or None if timeout
     """
     import time
+
     start_time = time.time()
 
     print(f"   Waiting for {axis_name}-axis movement to complete...")
@@ -69,7 +76,7 @@ def wait_for_movement_complete(controller, axis_name, timeout=5.0):
     # Wait for movement lock to be released (indicates motion complete)
     while time.time() - start_time < timeout:
         # Check if movement lock is still held
-        if hasattr(controller, '_movement_lock') and controller._movement_lock.locked():
+        if hasattr(controller, "_movement_lock") and controller._movement_lock.locked():
             # Movement still in progress
             time.sleep(0.1)
             process_gui_events()
@@ -80,13 +87,13 @@ def wait_for_movement_complete(controller, axis_name, timeout=5.0):
 
             # Get final position
             try:
-                if axis_name == 'X':
+                if axis_name == "X":
                     final_pos = controller.stage_service.get_axis_position(1)
-                elif axis_name == 'Y':
+                elif axis_name == "Y":
                     final_pos = controller.stage_service.get_axis_position(2)
-                elif axis_name == 'Z':
+                elif axis_name == "Z":
                     final_pos = controller.stage_service.get_axis_position(3)
-                elif axis_name == 'R':
+                elif axis_name == "R":
                     final_pos = controller.stage_service.get_axis_position(4)
                 else:
                     return None
@@ -95,16 +102,23 @@ def wait_for_movement_complete(controller, axis_name, timeout=5.0):
                     print(f"   {axis_name}-axis movement complete at {final_pos:.3f}mm")
                     return final_pos
                 else:
-                    print(f"   Warning: Could not get valid position for {axis_name}-axis")
+                    print(
+                        f"   Warning: Could not get valid position for {axis_name}-axis"
+                    )
                     return None
             except Exception as e:
                 print(f"   Warning: Error getting final position: {e}")
                 return None
 
-    print(f"   Warning: {axis_name}-axis movement timeout after {timeout}s - lock still held")
+    print(
+        f"   Warning: {axis_name}-axis movement timeout after {timeout}s - lock still held"
+    )
     return None
 
-def move_and_wait(movement_controller, axis: str, target_mm: float, timeout: float = 15.0):
+
+def move_and_wait(
+    movement_controller, axis: str, target_mm: float, timeout: float = 15.0
+):
     """
     Move axis using MovementController and wait for completion.
 
@@ -132,7 +146,7 @@ def move_and_wait(movement_controller, axis: str, target_mm: float, timeout: flo
     start_time = time.time()
     while time.time() - start_time < timeout:
         # Check movement lock if available
-        if hasattr(movement_controller, '_movement_lock'):
+        if hasattr(movement_controller, "_movement_lock"):
             if not movement_controller._movement_lock.locked():
                 break
         time.sleep(0.1)
@@ -152,8 +166,16 @@ def move_and_wait(movement_controller, axis: str, target_mm: float, timeout: flo
     return None
 
 
-def wait_for_position(movement_controller, target_x, target_y, target_z, target_r,
-                      tolerance=0.05, max_retries=5, retry_delay=2.0):
+def wait_for_position(
+    movement_controller,
+    target_x,
+    target_y,
+    target_z,
+    target_r,
+    tolerance=0.05,
+    max_retries=5,
+    retry_delay=2.0,
+):
     """
     Wait for stage to reach target position with retries.
 
@@ -173,7 +195,9 @@ def wait_for_position(movement_controller, target_x, target_y, target_z, target_
         pos = movement_controller.get_position()
 
         if pos is None:
-            print(f"   Attempt {attempt + 1}/{max_retries}: Position unavailable, waiting...")
+            print(
+                f"   Attempt {attempt + 1}/{max_retries}: Position unavailable, waiting..."
+            )
             time.sleep(retry_delay)
             process_gui_events()
             continue
@@ -185,12 +209,18 @@ def wait_for_position(movement_controller, target_x, target_y, target_z, target_
         r_ok = abs(pos.r - target_r) < 1.0  # 1 degree tolerance for rotation
 
         if x_ok and y_ok and z_ok and r_ok:
-            print(f"   Position confirmed: X={pos.x:.3f}, Y={pos.y:.3f}, Z={pos.z:.3f}, R={pos.r:.1f}°")
+            print(
+                f"   Position confirmed: X={pos.x:.3f}, Y={pos.y:.3f}, Z={pos.z:.3f}, R={pos.r:.1f}°"
+            )
             return True
 
         print(f"   Attempt {attempt + 1}/{max_retries}: Position mismatch")
-        print(f"      Current:  X={pos.x:.3f}, Y={pos.y:.3f}, Z={pos.z:.3f}, R={pos.r:.1f}°")
-        print(f"      Expected: X={target_x:.3f}, Y={target_y:.3f}, Z={target_z:.3f}, R={target_r:.1f}°")
+        print(
+            f"      Current:  X={pos.x:.3f}, Y={pos.y:.3f}, Z={pos.z:.3f}, R={pos.r:.1f}°"
+        )
+        print(
+            f"      Expected: X={target_x:.3f}, Y={target_y:.3f}, Z={target_z:.3f}, R={target_r:.1f}°"
+        )
 
         if attempt < max_retries - 1:
             print(f"   Waiting {retry_delay}s before retry...")
@@ -201,7 +231,7 @@ def wait_for_position(movement_controller, target_x, target_y, target_z, target_
     return False
 
 
-def test_voxel_movement(controller, main_window=None, mode='simple'):
+def test_voxel_movement(controller, main_window=None, mode="simple"):
     """
     Test sequence for 3D voxel movement with laser/camera automation.
 
@@ -219,10 +249,12 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
     >>> test_voxel_movement(self.controller)  # Simple mode
     >>> test_voxel_movement(self.controller, mode='volume_scan')  # Full scan
     """
-    mode_desc = "Simple Test" if mode == 'simple' else "Volume Scan (Serpentine Z-Painting)"
-    print("\n" + "="*60)
+    mode_desc = (
+        "Simple Test" if mode == "simple" else "Volume Scan (Serpentine Z-Painting)"
+    )
+    print("\n" + "=" * 60)
     print(f"3D Voxel Movement Test - {mode_desc}")
-    print("="*60)
+    print("=" * 60)
 
     if not controller or not controller.connection.is_connected():
         print("ERROR: No active connection to microscope")
@@ -232,6 +264,7 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
     # The 3D visualization is connected to MovementController.motion_started/motion_stopped signals
     # Using PositionController.move_x() etc. does NOT emit these signals!
     from PyQt5.QtWidgets import QApplication
+
     app = QApplication.instance()
 
     movement_controller = None
@@ -242,30 +275,38 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
         widget_class = widget.__class__.__name__
 
         # Method 1: Find Sample3DVisualizationWindow directly (it has movement_controller)
-        if widget_class == 'Sample3DVisualizationWindow':
+        if widget_class == "Sample3DVisualizationWindow":
             viz_3d_window = widget
-            if hasattr(widget, 'movement_controller') and widget.movement_controller:
+            if hasattr(widget, "movement_controller") and widget.movement_controller:
                 movement_controller = widget.movement_controller
                 print(f"   Found MovementController on Sample3DVisualizationWindow")
                 break
 
         # Method 2: Find MainWindow which may have reference to 3D viz window
-        if widget_class == 'MainWindow':
+        if widget_class == "MainWindow":
             main_window = widget
             # Check if main_window has sample_3d_visualization_window attribute
-            if hasattr(widget, 'sample_3d_visualization_window'):
+            if hasattr(widget, "sample_3d_visualization_window"):
                 viz_3d_window = widget.sample_3d_visualization_window
-                if viz_3d_window and hasattr(viz_3d_window, 'movement_controller'):
+                if viz_3d_window and hasattr(viz_3d_window, "movement_controller"):
                     movement_controller = viz_3d_window.movement_controller
-                    print(f"   Found MovementController via MainWindow.sample_3d_visualization_window")
+                    print(
+                        f"   Found MovementController via MainWindow.sample_3d_visualization_window"
+                    )
                     break
 
     if not movement_controller:
         print("ERROR: Could not find MovementController")
-        print("       Looking for Sample3DVisualizationWindow with movement_controller attribute")
-        print(f"       Top-level widgets: {[w.__class__.__name__ for w in app.topLevelWidgets()]}")
+        print(
+            "       Looking for Sample3DVisualizationWindow with movement_controller attribute"
+        )
+        print(
+            f"       Top-level widgets: {[w.__class__.__name__ for w in app.topLevelWidgets()]}"
+        )
         if viz_3d_window:
-            print(f"       Found 3D viz window but movement_controller is: {getattr(viz_3d_window, 'movement_controller', 'NOT FOUND')}")
+            print(
+                f"       Found 3D viz window but movement_controller is: {getattr(viz_3d_window, 'movement_controller', 'NOT FOUND')}"
+            )
         return False
 
     print(f"   Found MovementController: {movement_controller}")
@@ -275,10 +316,10 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
     print("\n1. Moving to test starting position (X=4, Y=13.9, Z=20.2, R=0)...")
 
     # Move each axis
-    move_and_wait(movement_controller, 'x', 4.0)
-    move_and_wait(movement_controller, 'y', 13.9)
-    move_and_wait(movement_controller, 'z', 20.2)
-    move_and_wait(movement_controller, 'r', 0.0)
+    move_and_wait(movement_controller, "x", 4.0)
+    move_and_wait(movement_controller, "y", 13.9)
+    move_and_wait(movement_controller, "z", 20.2)
+    move_and_wait(movement_controller, "r", 0.0)
 
     # Confirm position with retry logic
     print("\n   Confirming starting position...")
@@ -294,29 +335,30 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
         # Use provided main_window or find it
         if not main_window:
             from PyQt5.QtWidgets import QApplication
+
             app = QApplication.instance()
             for widget in app.topLevelWidgets():
-                if widget.__class__.__name__ == 'MainWindow':
+                if widget.__class__.__name__ == "MainWindow":
                     main_window = widget
                     break
 
         # Get camera_live_viewer and simulate GUI actions
         laser_enabled = False
-        if main_window and hasattr(main_window, 'camera_live_viewer'):
+        if main_window and hasattr(main_window, "camera_live_viewer"):
             camera_viewer = main_window.camera_live_viewer
 
             # Check if we have the laser panel (might be a separate widget)
             laser_panel = None
-            if hasattr(camera_viewer, 'laser_led_panel'):
+            if hasattr(camera_viewer, "laser_led_panel"):
                 laser_panel = camera_viewer.laser_led_panel
                 print("   Found laser control panel")
-            elif hasattr(camera_viewer, 'laser_control_panel'):
+            elif hasattr(camera_viewer, "laser_control_panel"):
                 laser_panel = camera_viewer.laser_control_panel
                 print("   Found laser control panel (alternate name)")
             else:
                 # Try to find it in the layout
                 for child in camera_viewer.findChildren(QWidget):
-                    if child.__class__.__name__ == 'LaserLEDControlPanel':
+                    if child.__class__.__name__ == "LaserLEDControlPanel":
                         laser_panel = child
                         print("   Found laser control panel in children")
                         break
@@ -324,9 +366,11 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
             if laser_panel:
                 # Simulate GUI clicks to test actual user workflow
                 try:
-                    if hasattr(laser_panel, '_source_button_group'):
+                    if hasattr(laser_panel, "_source_button_group"):
                         button_group = laser_panel._source_button_group
-                        print(f"   Button group has {len(button_group.buttons())} buttons")
+                        print(
+                            f"   Button group has {len(button_group.buttons())} buttons"
+                        )
 
                         # Find laser 4 checkbox (ID=4 in button group)
                         laser_4_checkbox = button_group.button(4)  # Laser 4 has ID 4
@@ -335,18 +379,35 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
                         if laser_4_checkbox:
                             # First set power for laser 4 via GUI spinbox
                             # Block signals to prevent any handlers from running during test
-                            if hasattr(laser_panel, '_laser_spinboxes') and 4 in laser_panel._laser_spinboxes:
+                            if (
+                                hasattr(laser_panel, "_laser_spinboxes")
+                                and 4 in laser_panel._laser_spinboxes
+                            ):
                                 power_spinbox = laser_panel._laser_spinboxes[4]
-                                print(f"   Setting power spinbox to 14.4%...", flush=True)
-                                print(f"   Spinbox valid: {power_spinbox is not None}", flush=True)
-                                print(f"   Spinbox range: {power_spinbox.minimum()}-{power_spinbox.maximum()}", flush=True)
-                                print(f"   Spinbox current value: {power_spinbox.value()}", flush=True)
+                                print(
+                                    f"   Setting power spinbox to 14.4%...", flush=True
+                                )
+                                print(
+                                    f"   Spinbox valid: {power_spinbox is not None}",
+                                    flush=True,
+                                )
+                                print(
+                                    f"   Spinbox range: {power_spinbox.minimum()}-{power_spinbox.maximum()}",
+                                    flush=True,
+                                )
+                                print(
+                                    f"   Spinbox current value: {power_spinbox.value()}",
+                                    flush=True,
+                                )
                                 print(f"   About to call setValue(14.4)...", flush=True)
                                 # Block signals to prevent any crash from signal handlers
                                 power_spinbox.blockSignals(True)
                                 try:
                                     power_spinbox.setValue(14.4)
-                                    print(f"   setValue completed successfully", flush=True)
+                                    print(
+                                        f"   setValue completed successfully",
+                                        flush=True,
+                                    )
                                 except Exception as e:
                                     print(f"   ERROR in setValue: {e}", flush=True)
                                     traceback.print_exc()
@@ -354,8 +415,14 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
                                     power_spinbox.blockSignals(False)
                                 print(f"   About to process events...", flush=True)
                                 process_gui_events()
-                                print("   Set Laser 4 power to 14.4% via GUI spinbox", flush=True)
-                            elif hasattr(laser_panel, '_laser_sliders') and 4 in laser_panel._laser_sliders:
+                                print(
+                                    "   Set Laser 4 power to 14.4% via GUI spinbox",
+                                    flush=True,
+                                )
+                            elif (
+                                hasattr(laser_panel, "_laser_sliders")
+                                and 4 in laser_panel._laser_sliders
+                            ):
                                 power_slider = laser_panel._laser_sliders[4]
                                 power_slider.blockSignals(True)
                                 try:
@@ -384,33 +451,49 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
                             print("   Emitting buttonClicked signal...")
                             button_group.buttonClicked.emit(laser_4_checkbox)
                             process_gui_events()
-                            print("   Clicked Laser 4 checkbox - this enables the laser")
+                            print(
+                                "   Clicked Laser 4 checkbox - this enables the laser"
+                            )
 
                             laser_enabled = True
                             smart_sleep(1, "Waiting for laser to enable...")
                         else:
-                            print("   WARNING: Laser 4 checkbox not found in button group")
+                            print(
+                                "   WARNING: Laser 4 checkbox not found in button group"
+                            )
                             # List available button IDs
-                            print(f"   Available button IDs: {[button_group.id(b) for b in button_group.buttons()]}")
+                            print(
+                                f"   Available button IDs: {[button_group.id(b) for b in button_group.buttons()]}"
+                            )
 
                             # Try alternative: look for laser_radios
-                            if hasattr(laser_panel, '_laser_radios') and 4 in laser_panel._laser_radios:
-                                print("   Found _laser_radios dictionary, trying alternative approach...")
+                            if (
+                                hasattr(laser_panel, "_laser_radios")
+                                and 4 in laser_panel._laser_radios
+                            ):
+                                print(
+                                    "   Found _laser_radios dictionary, trying alternative approach..."
+                                )
                                 laser_checkbox = laser_panel._laser_radios[4]
                                 laser_checkbox.setChecked(True)
                                 process_gui_events()
                                 laser_enabled = True
                     else:
-                        print("   WARNING: Could not find _source_button_group in panel")
+                        print(
+                            "   WARNING: Could not find _source_button_group in panel"
+                        )
                 except Exception as e:
                     print(f"   Error during GUI simulation: {e}")
                     import traceback
+
                     traceback.print_exc()
             else:
                 print("   WARNING: Could not find laser control panel in camera viewer")
 
         if not laser_enabled:
-            print("   WARNING: Laser may not be enabled - fluorescence data may not be captured")
+            print(
+                "   WARNING: Laser may not be enabled - fluorescence data may not be captured"
+            )
 
         smart_sleep(1, "Waiting for laser to stabilize...")
     except Exception as e:
@@ -421,19 +504,23 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
     camera_viewer = None
     try:
         # Check if camera viewer is already open
-        if main_window and hasattr(main_window, 'camera_live_viewer'):
+        if main_window and hasattr(main_window, "camera_live_viewer"):
             camera_viewer = main_window.camera_live_viewer
             if camera_viewer and camera_viewer.isVisible():
-                print("   Camera Live Viewer already open - skipping initialization delay")
+                print(
+                    "   Camera Live Viewer already open - skipping initialization delay"
+                )
             elif camera_viewer:
                 camera_viewer.show()
                 print("   Camera Live Viewer window opened")
-                smart_sleep(5, "Waiting 5 seconds for camera initialization and OpenGL...")
+                smart_sleep(
+                    5, "Waiting 5 seconds for camera initialization and OpenGL..."
+                )
 
         # Simulate clicking the Start Live View button in the GUI
-        if main_window and hasattr(main_window, 'camera_live_viewer'):
+        if main_window and hasattr(main_window, "camera_live_viewer"):
             camera_viewer = main_window.camera_live_viewer
-            if camera_viewer and hasattr(camera_viewer, 'start_btn'):
+            if camera_viewer and hasattr(camera_viewer, "start_btn"):
                 # Click the start button - this triggers all the proper GUI updates
                 start_button = camera_viewer.start_btn
                 if start_button.isEnabled():
@@ -441,7 +528,9 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
                     start_button.click()  # This will handle everything including button state changes
                     print("   Live view started via GUI button click")
                 else:
-                    print("   Start button is disabled - live view may already be running")
+                    print(
+                        "   Start button is disabled - live view may already be running"
+                    )
 
                 smart_sleep(3, "Waiting 3 seconds for camera stream to stabilize...")
             else:
@@ -456,7 +545,7 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
     viz_window = None
     try:
         # Check if 3D window already exists and is visible
-        if main_window and hasattr(main_window, 'sample_3d_visualization_window'):
+        if main_window and hasattr(main_window, "sample_3d_visualization_window"):
             viz_window = main_window.sample_3d_visualization_window
             if viz_window and viz_window.isVisible():
                 print("   3D Visualization window already open - ready to use")
@@ -467,22 +556,23 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
         # If not found, try to create it
         if not viz_window and main_window:
             # Check if main window has a method to open the 3D viewer
-            if hasattr(main_window, 'open_3d_visualization'):
+            if hasattr(main_window, "open_3d_visualization"):
                 main_window.open_3d_visualization()
                 print("   Opened 3D Visualization via main window method")
                 time.sleep(2)
                 # Try to get reference again
-                if hasattr(main_window, 'sample_3d_visualization_window'):
+                if hasattr(main_window, "sample_3d_visualization_window"):
                     viz_window = main_window.sample_3d_visualization_window
 
         # If still not found, search all top-level widgets
         if not viz_window:
             from PyQt5.QtWidgets import QApplication
+
             app = QApplication.instance()
             if app:
                 for widget in app.topLevelWidgets():
                     # Check if widget itself is the viz window
-                    if widget.__class__.__name__ == 'Sample3DVisualizationWindow':
+                    if widget.__class__.__name__ == "Sample3DVisualizationWindow":
                         viz_window = widget
                         break
 
@@ -490,14 +580,16 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
             print("   Found 3D visualization window")
         else:
             print("   WARNING: Could not find 3D visualization window")
-            print("   Please ensure it's open and start 'Populate from Live View' manually")
+            print(
+                "   Please ensure it's open and start 'Populate from Live View' manually"
+            )
             time.sleep(3)
     except Exception as e:
         print(f"   Error accessing 3D viewer: {e}")
         time.sleep(3)
 
     # Step 6: Start populating (if we have window reference)
-    if viz_window and hasattr(viz_window, 'populate_button'):
+    if viz_window and hasattr(viz_window, "populate_button"):
         print("\n5. Starting 3D population from live view...")
         viz_window.populate_button.setChecked(True)
         print("   Population started at 2 Hz")
@@ -512,7 +604,7 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
     initial_voxels = capture_voxel_state(viz_window)
 
     # Step 8: Execute movement sequence based on mode
-    if mode == 'volume_scan':
+    if mode == "volume_scan":
         # Full volume scan with serpentine XY and bidirectional Z-painting
         print("\n7. Executing VOLUME SCAN movement sequence...")
         print("   (Serpentine XY with bidirectional Z-painting)")
@@ -520,60 +612,65 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
         scan_results = execute_volume_scan_movements(
             movement_controller=movement_controller,
             position_controller=controller,
-            viz_window=viz_window
+            viz_window=viz_window,
         )
 
         # Extract results for compatibility with rest of function
-        movements = [(m['z_direction'], m['z_start'], m['z_end']) for m in scan_results['movements']]
-        voxel_states = scan_results['voxel_states']
-        voxel_states['initial'] = initial_voxels
+        movements = [
+            (m["z_direction"], m["z_start"], m["z_end"])
+            for m in scan_results["movements"]
+        ]
+        voxel_states = scan_results["voxel_states"]
+        voxel_states["initial"] = initial_voxels
 
     else:
         # Simple test movements: Z=23, X=4.6, Z=19.5, Y=11.5, Z=22
         print("\n7. Executing SIMPLE TEST movement sequence...")
-        print("   (MovementController emits motion_started/motion_stopped signals for frame buffering)")
+        print(
+            "   (MovementController emits motion_started/motion_stopped signals for frame buffering)"
+        )
 
         movements = []
-        voxel_states = {'initial': initial_voxels}
+        voxel_states = {"initial": initial_voxels}
 
         # Movement 1: Z to 23
         print("\n   Movement 1: Z to 23.0mm...")
-        move_and_wait(movement_controller, 'z', 23.0)
+        move_and_wait(movement_controller, "z", 23.0)
         smart_sleep(2, "Capturing voxel data after Z movement...")
-        movements.append(('Z', initial_z, 23.0))
-        voxel_states['after_z1'] = capture_voxel_state(viz_window)
+        movements.append(("Z", initial_z, 23.0))
+        voxel_states["after_z1"] = capture_voxel_state(viz_window)
         print(f"   Voxel state after Z=23: {voxel_states['after_z1']}")
 
         # Movement 2: X to 4.6
         print("\n   Movement 2: X to 4.6mm...")
-        move_and_wait(movement_controller, 'x', 4.6)
+        move_and_wait(movement_controller, "x", 4.6)
         smart_sleep(2, "Capturing voxel data after X movement...")
-        movements.append(('X', 4.0, 4.6))
-        voxel_states['after_x'] = capture_voxel_state(viz_window)
+        movements.append(("X", 4.0, 4.6))
+        voxel_states["after_x"] = capture_voxel_state(viz_window)
         print(f"   Voxel state after X=4.6: {voxel_states['after_x']}")
 
         # Movement 3: Z to 19.5
         print("\n   Movement 3: Z to 19.5mm...")
-        move_and_wait(movement_controller, 'z', 19.5)
+        move_and_wait(movement_controller, "z", 19.5)
         smart_sleep(2, "Capturing voxel data after Z movement...")
-        movements.append(('Z', 23.0, 19.5))
-        voxel_states['after_z2'] = capture_voxel_state(viz_window)
+        movements.append(("Z", 23.0, 19.5))
+        voxel_states["after_z2"] = capture_voxel_state(viz_window)
         print(f"   Voxel state after Z=19.5: {voxel_states['after_z2']}")
 
         # Movement 4: Y to 11.5
         print("\n   Movement 4: Y to 11.5mm...")
-        move_and_wait(movement_controller, 'y', 11.5)
+        move_and_wait(movement_controller, "y", 11.5)
         smart_sleep(2, "Capturing voxel data after Y movement...")
-        movements.append(('Y', 13.9, 11.5))
-        voxel_states['after_y'] = capture_voxel_state(viz_window)
+        movements.append(("Y", 13.9, 11.5))
+        voxel_states["after_y"] = capture_voxel_state(viz_window)
         print(f"   Voxel state after Y=11.5: {voxel_states['after_y']}")
 
         # Movement 5: Z to 22
         print("\n   Movement 5: Z to 22.0mm...")
-        move_and_wait(movement_controller, 'z', 22.0)
+        move_and_wait(movement_controller, "z", 22.0)
         smart_sleep(2, "Capturing voxel data after Z movement...")
-        movements.append(('Z', 19.5, 22.0))
-        voxel_states['after_z3'] = capture_voxel_state(viz_window)
+        movements.append(("Z", 19.5, 22.0))
+        voxel_states["after_z3"] = capture_voxel_state(viz_window)
         print(f"   Voxel state after Z=22: {voxel_states['after_z3']}")
 
     # Step 9: Capture final state at moved position
@@ -581,7 +678,7 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
     final_moved_voxels = capture_voxel_state(viz_window)
 
     # Step 10: Stop population
-    if viz_window and hasattr(viz_window, 'populate_button'):
+    if viz_window and hasattr(viz_window, "populate_button"):
         print("\n9. Stopping 3D population...")
         viz_window.populate_button.setChecked(False)
         smart_sleep(1, "Waiting for population to stop...")
@@ -592,16 +689,18 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
     print("\n10. Stopping live view...")
     try:
         # Simulate clicking the Stop Live View button in the GUI
-        if main_window and hasattr(main_window, 'camera_live_viewer'):
+        if main_window and hasattr(main_window, "camera_live_viewer"):
             camera_viewer = main_window.camera_live_viewer
-            if camera_viewer and hasattr(camera_viewer, 'stop_btn'):
+            if camera_viewer and hasattr(camera_viewer, "stop_btn"):
                 stop_button = camera_viewer.stop_btn
                 if stop_button.isEnabled():
                     print("   Clicking 'Stop Live View' button...")
                     stop_button.click()  # This will handle everything including button state changes
                     print("   Live view stopped via GUI button click")
                 else:
-                    print("   Stop button is disabled - live view may already be stopped")
+                    print(
+                        "   Stop button is disabled - live view may already be stopped"
+                    )
             else:
                 print("   WARNING: Could not find stop button in camera_live_viewer")
         else:
@@ -614,25 +713,25 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
     print("\n11. Disabling laser...")
     try:
         # Find the laser control panel and uncheck laser checkboxes
-        if main_window and hasattr(main_window, 'camera_live_viewer'):
+        if main_window and hasattr(main_window, "camera_live_viewer"):
             camera_viewer = main_window.camera_live_viewer
 
             # Find the laser panel (same logic as enable)
             laser_panel = None
-            if hasattr(camera_viewer, 'laser_led_panel'):
+            if hasattr(camera_viewer, "laser_led_panel"):
                 laser_panel = camera_viewer.laser_led_panel
-            elif hasattr(camera_viewer, 'laser_control_panel'):
+            elif hasattr(camera_viewer, "laser_control_panel"):
                 laser_panel = camera_viewer.laser_control_panel
             else:
                 # Try to find it in the children
                 for child in camera_viewer.findChildren(QWidget):
-                    if child.__class__.__name__ == 'LaserLEDControlPanel':
+                    if child.__class__.__name__ == "LaserLEDControlPanel":
                         laser_panel = child
                         break
 
             if laser_panel:
                 # Uncheck all laser checkboxes using button group
-                if hasattr(laser_panel, '_source_button_group'):
+                if hasattr(laser_panel, "_source_button_group"):
                     button_group = laser_panel._source_button_group
                     unchecked_any = False
                     for button in button_group.buttons():
@@ -640,7 +739,9 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
                             button.setChecked(False)
                             # Trigger the click handler to disable laser
                             button_group.buttonClicked.emit(button)
-                            print(f"   Unchecked light source button ID {button_group.id(button)}")
+                            print(
+                                f"   Unchecked light source button ID {button_group.id(button)}"
+                            )
                             unchecked_any = True
                     if not unchecked_any:
                         print("   All light sources already disabled")
@@ -656,32 +757,38 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
     # Step 13: Return to original position for repeatability
     print("\n12. Returning to original position for test repeatability...")
 
-    print(f"   Commanding return to: X={initial_x:.3f}, Y={initial_y:.3f}, Z={initial_z:.3f}, R={initial_r:.1f}°")
+    print(
+        f"   Commanding return to: X={initial_x:.3f}, Y={initial_y:.3f}, Z={initial_z:.3f}, R={initial_r:.1f}°"
+    )
 
     # Use MovementController for return movements
-    move_and_wait(movement_controller, 'x', initial_x)
-    move_and_wait(movement_controller, 'y', initial_y)
-    move_and_wait(movement_controller, 'z', initial_z)
-    move_and_wait(movement_controller, 'r', initial_r)
+    move_and_wait(movement_controller, "x", initial_x)
+    move_and_wait(movement_controller, "y", initial_y)
+    move_and_wait(movement_controller, "z", initial_z)
+    move_and_wait(movement_controller, "r", initial_r)
 
     # Verify return with retry logic
     print("\n   Verifying return to origin...")
-    if wait_for_position(movement_controller, initial_x, initial_y, initial_z, initial_r):
+    if wait_for_position(
+        movement_controller, initial_x, initial_y, initial_z, initial_r
+    ):
         print("   ✓ Successfully returned to original position")
     else:
         print("   ⚠ Could not fully verify return position")
 
     final_origin_voxels = capture_voxel_state(viz_window)
-    voxel_states['back_at_origin'] = final_origin_voxels
+    voxel_states["back_at_origin"] = final_origin_voxels
 
     # Step 14: Analyze results
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST RESULTS:")
-    print("="*60)
+    print("=" * 60)
 
     print("\nStage Movements (using MovementController for motion signals):")
     for axis, old_pos, new_pos in movements:
-        print(f"  {axis}: {old_pos:.3f} -> {new_pos:.3f} mm (Δ={new_pos-old_pos:.3f} mm)")
+        print(
+            f"  {axis}: {old_pos:.3f} -> {new_pos:.3f} mm (Δ={new_pos-old_pos:.3f} mm)"
+        )
 
     print("\nVoxel Analysis:")
     for state_name, state in voxel_states.items():
@@ -711,54 +818,56 @@ def test_voxel_movement(controller, main_window=None, mode='simple'):
 def capture_voxel_state(viz_window):
     """Capture current voxel counts for all channels."""
     if not viz_window:
-        return {'error': 'No visualization window'}
+        return {"error": "No visualization window"}
 
     # Check for correct attribute name (voxel_storage vs dual_storage)
     storage = None
-    if hasattr(viz_window, 'voxel_storage'):
+    if hasattr(viz_window, "voxel_storage"):
         storage = viz_window.voxel_storage
-    elif hasattr(viz_window, 'dual_storage'):
+    elif hasattr(viz_window, "dual_storage"):
         storage = viz_window.dual_storage
 
     if not storage:
-        return {'error': 'No voxel storage found'}
+        return {"error": "No voxel storage found"}
 
     try:
-        state = {'total_voxels': 0}
+        state = {"total_voxels": 0}
         # Count voxels by checking storage_data dictionary size per channel
         for ch_id in range(4):
             if storage.has_data(ch_id):
                 # Access the storage_data dictionary directly
-                if hasattr(storage, 'storage_data'):
+                if hasattr(storage, "storage_data"):
                     count = len(storage.storage_data.get(ch_id, {}))
                     if count > 0:
-                        state[f'ch{ch_id}'] = count
-                        state['total_voxels'] += count
+                        state[f"ch{ch_id}"] = count
+                        state["total_voxels"] += count
 
         # Also try to get center of mass for active channel
-        if hasattr(storage, 'storage_arrays'):
+        if hasattr(storage, "storage_arrays"):
             for ch_id, array_dict in storage.storage_arrays.items():
-                if f'ch{ch_id}' in state:
+                if f"ch{ch_id}" in state:
                     # Get approximate center of mass
                     try:
                         data = storage.get_display_array(ch_id)
                         if data is not None and np.any(data > 0):
                             coords = np.argwhere(data > 0)
                             com = coords.mean(axis=0)
-                            state[f'ch{ch_id}_com'] = com.tolist()
+                            state[f"ch{ch_id}_com"] = com.tolist()
                     except:
                         pass
 
         # Add frame count estimate (at 2 Hz capture rate)
-        if state['total_voxels'] > 0:
-            state['approx_frames'] = 'Data is flowing'
+        if state["total_voxels"] > 0:
+            state["approx_frames"] = "Data is flowing"
 
         return state
     except Exception as e:
-        return {'error': str(e)}
+        return {"error": str(e)}
 
 
-def export_test_data(movements, initial, x_move, y_move, z_move, final_moved, final_origin):
+def export_test_data(
+    movements, initial, x_move, y_move, z_move, final_moved, final_origin
+):
     """Export test data for further analysis (legacy version)."""
     import json
     import os
@@ -772,20 +881,22 @@ def export_test_data(movements, initial, x_move, y_move, z_move, final_moved, fi
     filename = f"{results_dir}/voxel_movement_test_{timestamp}.json"
 
     data = {
-        'timestamp': timestamp,
-        'movements': [{'axis': m[0], 'from_mm': m[1], 'to_mm': m[2]} for m in movements],
-        'voxel_states': {
-            'initial': initial,
-            'after_x_move': x_move,
-            'after_y_move': y_move,
-            'after_z_move': z_move,
-            'final_at_moved_position': final_moved,
-            'back_at_origin': final_origin
+        "timestamp": timestamp,
+        "movements": [
+            {"axis": m[0], "from_mm": m[1], "to_mm": m[2]} for m in movements
+        ],
+        "voxel_states": {
+            "initial": initial,
+            "after_x_move": x_move,
+            "after_y_move": y_move,
+            "after_z_move": z_move,
+            "final_at_moved_position": final_moved,
+            "back_at_origin": final_origin,
         },
-        'test_repeatable': True  # Indicates stage was returned to origin
+        "test_repeatable": True,  # Indicates stage was returned to origin
     }
 
-    with open(filename, 'w') as f:
+    with open(filename, "w") as f:
         json.dump(data, f, indent=2)
 
     print(f"\nTest data exported to: {filename}")
@@ -809,26 +920,29 @@ def generate_volume_scan_path(config=None):
     # Default volume scan configuration
     if config is None:
         config = {
-            'x_min': 4.0, 'x_max': 4.6,
-            'y_min': 11.5, 'y_max': 13.9,
-            'z_min': 19.5, 'z_max': 23.0,
-            'xy_step': 0.47,  # ~10% overlap with 0.52mm FOV
+            "x_min": 4.0,
+            "x_max": 4.6,
+            "y_min": 11.5,
+            "y_max": 13.9,
+            "z_min": 19.5,
+            "z_max": 23.0,
+            "xy_step": 0.47,  # ~10% overlap with 0.52mm FOV
         }
 
     positions = []
 
     # Calculate grid
     x_positions = []
-    x = config['x_min']
-    while x <= config['x_max']:
+    x = config["x_min"]
+    while x <= config["x_max"]:
         x_positions.append(x)
-        x += config['xy_step']
+        x += config["xy_step"]
 
     y_positions = []
-    y = config['y_min']
-    while y <= config['y_max']:
+    y = config["y_min"]
+    while y <= config["y_max"]:
         y_positions.append(y)
-        y += config['xy_step']
+        y += config["xy_step"]
 
     # Generate serpentine path with alternating Z direction
     z_direction = 1  # Start painting upward
@@ -842,22 +956,30 @@ def generate_volume_scan_path(config=None):
 
         for x_pos in x_range:
             if z_direction == 1:
-                z_start, z_end = config['z_min'], config['z_max']
+                z_start, z_end = config["z_min"], config["z_max"]
             else:
-                z_start, z_end = config['z_max'], config['z_min']
+                z_start, z_end = config["z_max"], config["z_min"]
 
             positions.append((x_pos, y_pos, z_start, z_end))
             z_direction *= -1  # Alternate Z direction
 
     print(f"   Generated scan path: {len(positions)} positions")
-    print(f"   X: {len(x_positions)} steps ({config['x_min']:.1f} to {config['x_max']:.1f} mm)")
-    print(f"   Y: {len(y_positions)} steps ({config['y_min']:.1f} to {config['y_max']:.1f} mm)")
-    print(f"   Z: {config['z_min']:.1f} to {config['z_max']:.1f} mm (bidirectional painting)")
+    print(
+        f"   X: {len(x_positions)} steps ({config['x_min']:.1f} to {config['x_max']:.1f} mm)"
+    )
+    print(
+        f"   Y: {len(y_positions)} steps ({config['y_min']:.1f} to {config['y_max']:.1f} mm)"
+    )
+    print(
+        f"   Z: {config['z_min']:.1f} to {config['z_max']:.1f} mm (bidirectional painting)"
+    )
 
     return positions
 
 
-def execute_volume_scan_movements(movement_controller, position_controller, viz_window=None, config=None):
+def execute_volume_scan_movements(
+    movement_controller, position_controller, viz_window=None, config=None
+):
     """
     Execute volume scan using serpentine XY with bidirectional Z-painting.
 
@@ -873,9 +995,9 @@ def execute_volume_scan_movements(movement_controller, position_controller, viz_
     Returns:
         Dict with scan results including movements and voxel states
     """
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("VOLUME SCAN - Serpentine XY with Bidirectional Z-Painting")
-    print("="*60)
+    print("=" * 60)
 
     # Generate scan path
     positions = generate_volume_scan_path(config)
@@ -896,12 +1018,14 @@ def execute_volume_scan_movements(movement_controller, position_controller, viz_
     print(f"   Z-paint speed: {z_paint_speed} mm/s")
 
     movements = []
-    voxel_states = {'initial': capture_voxel_state(viz_window)}
+    voxel_states = {"initial": capture_voxel_state(viz_window)}
 
     for idx, (x_pos, y_pos, z_start, z_end) in enumerate(positions):
         progress_pct = (idx / total_positions) * 100
-        print(f"\n   Position {idx+1}/{total_positions} ({progress_pct:.0f}%): "
-              f"X={x_pos:.2f}, Y={y_pos:.2f}, Z={z_start:.1f}→{z_end:.1f}")
+        print(
+            f"\n   Position {idx+1}/{total_positions} ({progress_pct:.0f}%): "
+            f"X={x_pos:.2f}, Y={y_pos:.2f}, Z={z_start:.1f}→{z_end:.1f}"
+        )
 
         # Step 1: Move to XY position and Z start
         print(f"      Moving to XY + Z_start...")
@@ -914,20 +1038,20 @@ def execute_volume_scan_movements(movement_controller, position_controller, viz_
 
         # Move X if needed
         if abs(current_x - x_pos) > 0.01:
-            move_and_wait(movement_controller, 'x', x_pos)
+            move_and_wait(movement_controller, "x", x_pos)
 
         # Move Y if needed
         if abs(current_y - y_pos) > 0.01:
-            move_and_wait(movement_controller, 'y', y_pos)
+            move_and_wait(movement_controller, "y", y_pos)
 
         # Move to Z start if needed
         current_pos = movement_controller.get_position()
         current_z = current_pos.z if current_pos else z_start
         if abs(current_z - z_start) > 0.01:
-            move_and_wait(movement_controller, 'z', z_start)
+            move_and_wait(movement_controller, "z", z_start)
 
         # Wait for any pending movements to complete
-        if hasattr(position_controller, 'wait_for_movement_complete'):
+        if hasattr(position_controller, "wait_for_movement_complete"):
             position_controller.wait_for_movement_complete(timeout=15.0)
 
         # Settle time
@@ -935,41 +1059,49 @@ def execute_volume_scan_movements(movement_controller, position_controller, viz_
 
         # Step 2: Z-paint (move to z_end while camera captures)
         print(f"      Z-painting: {z_start:.1f} → {z_end:.1f} mm")
-        move_and_wait(movement_controller, 'z', z_end, timeout=15.0)
+        move_and_wait(movement_controller, "z", z_end, timeout=15.0)
 
         # Record movement
-        movements.append({
-            'position': idx + 1,
-            'x': x_pos, 'y': y_pos,
-            'z_start': z_start, 'z_end': z_end,
-            'z_direction': 'up' if z_end > z_start else 'down'
-        })
+        movements.append(
+            {
+                "position": idx + 1,
+                "x": x_pos,
+                "y": y_pos,
+                "z_start": z_start,
+                "z_end": z_end,
+                "z_direction": "up" if z_end > z_start else "down",
+            }
+        )
 
         # Capture voxel state every few positions
         if idx % 3 == 0 or idx == total_positions - 1:
-            state_key = f'pos_{idx+1}'
+            state_key = f"pos_{idx+1}"
             voxel_states[state_key] = capture_voxel_state(viz_window)
             print(f"      Voxel state: {voxel_states[state_key]}")
 
         # Process GUI events
         process_gui_events()
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("VOLUME SCAN COMPLETE")
-    print("="*60)
+    print("=" * 60)
     print(f"   Completed {total_positions} positions")
     print(f"   Total movements recorded: {len(movements)}")
 
     return {
-        'movements': movements,
-        'voxel_states': voxel_states,
-        'total_positions': total_positions,
-        'config': config or {
-            'x_min': 4.0, 'x_max': 4.6,
-            'y_min': 11.5, 'y_max': 13.9,
-            'z_min': 19.5, 'z_max': 23.0,
-            'xy_step': 0.47
-        }
+        "movements": movements,
+        "voxel_states": voxel_states,
+        "total_positions": total_positions,
+        "config": config
+        or {
+            "x_min": 4.0,
+            "x_max": 4.6,
+            "y_min": 11.5,
+            "y_max": 13.9,
+            "z_min": 19.5,
+            "z_max": 23.0,
+            "xy_step": 0.47,
+        },
     }
 
 
@@ -987,20 +1119,22 @@ def export_test_data_v2(movements, voxel_states, final_moved):
     filename = f"{results_dir}/voxel_movement_test_v2_{timestamp}.json"
 
     data = {
-        'timestamp': timestamp,
-        'test_version': 'v2_motion_signals',
-        'movements': [{'axis': m[0], 'from_mm': m[1], 'to_mm': m[2]} for m in movements],
-        'voxel_states': voxel_states,
-        'final_at_moved_position': final_moved,
-        'test_notes': [
-            'Uses MovementController for motion_started/motion_stopped signals',
-            'Start position: X=4, Y=13.9, Z=20.2, R=0',
-            'Movement sequence: Z=23, X=4.6, Z=19.5, Y=11.5, Z=22',
+        "timestamp": timestamp,
+        "test_version": "v2_motion_signals",
+        "movements": [
+            {"axis": m[0], "from_mm": m[1], "to_mm": m[2]} for m in movements
         ],
-        'test_repeatable': True  # Indicates stage was returned to origin
+        "voxel_states": voxel_states,
+        "final_at_moved_position": final_moved,
+        "test_notes": [
+            "Uses MovementController for motion_started/motion_stopped signals",
+            "Start position: X=4, Y=13.9, Z=20.2, R=0",
+            "Movement sequence: Z=23, X=4.6, Z=19.5, Y=11.5, Z=22",
+        ],
+        "test_repeatable": True,  # Indicates stage was returned to origin
     }
 
-    with open(filename, 'w') as f:
+    with open(filename, "w") as f:
         json.dump(data, f, indent=2)
 
     print(f"\nTest data exported to: {filename}")

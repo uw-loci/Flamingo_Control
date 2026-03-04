@@ -8,16 +8,16 @@ ASYNC SUPPORT: When a connection with async reader is provided,
 uses the callback dispatch queue instead of blocking socket reads.
 """
 
+import logging
 import queue
 import socket
 import struct
-import logging
 import threading
-from typing import Optional, Dict, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
-    from py2flamingo.core.tcp_connection import TCPConnection
     from py2flamingo.core.socket_reader import ParsedMessage
+    from py2flamingo.core.tcp_connection import TCPConnection
 
 
 class MotionTracker:
@@ -41,7 +41,7 @@ class MotionTracker:
     def __init__(
         self,
         command_socket: Optional[socket.socket] = None,
-        connection: Optional["TCPConnection"] = None
+        connection: Optional["TCPConnection"] = None,
     ):
         """
         Initialize motion tracker.
@@ -68,17 +68,20 @@ class MotionTracker:
 
     def _use_async_mode(self) -> bool:
         """Check if async mode should be used."""
-        return (self.connection is not None and
-                hasattr(self.connection, 'has_async_reader') and
-                self.connection.has_async_reader)
+        return (
+            self.connection is not None
+            and hasattr(self.connection, "has_async_reader")
+            and self.connection.has_async_reader
+        )
 
     def _setup_async_callback(self) -> None:
         """Register callback handler for STAGE_MOTION_STOPPED."""
         if not self._callback_registered and self._use_async_mode():
-            self._callback_queue = queue.Queue(maxsize=100)  # Larger for Z-stack operations
+            self._callback_queue = queue.Queue(
+                maxsize=100
+            )  # Larger for Z-stack operations
             self.connection.register_callback(
-                self.STAGE_MOTION_STOPPED,
-                self._on_motion_stopped_callback
+                self.STAGE_MOTION_STOPPED, self._on_motion_stopped_callback
             )
             self._callback_registered = True
             self.logger.info("Registered async callback for STAGE_MOTION_STOPPED")
@@ -88,8 +91,7 @@ class MotionTracker:
         if self._callback_registered and self.connection:
             try:
                 self.connection.unregister_callback(
-                    self.STAGE_MOTION_STOPPED,
-                    self._on_motion_stopped_callback
+                    self.STAGE_MOTION_STOPPED, self._on_motion_stopped_callback
                 )
             except Exception:
                 pass
@@ -105,12 +107,16 @@ class MotionTracker:
         try:
             if self._callback_queue:
                 self._callback_queue.put_nowait(message)
-                self.logger.debug(f"Queued STAGE_MOTION_STOPPED callback (status={message.status_code})")
+                self.logger.debug(
+                    f"Queued STAGE_MOTION_STOPPED callback (status={message.status_code})"
+                )
         except queue.Full:
             self._queue_full_count += 1
             # Only log every 10th occurrence to reduce spam
             if self._queue_full_count % 10 == 1:
-                self.logger.warning(f"Motion callback queue full - dropped {self._queue_full_count} messages (rapid Z-stack?)")
+                self.logger.warning(
+                    f"Motion callback queue full - dropped {self._queue_full_count} messages (rapid Z-stack?)"
+                )
 
     def cancel_wait(self) -> None:
         """
@@ -126,7 +132,9 @@ class MotionTracker:
         if self._wait_thread and self._wait_thread.is_alive():
             self._wait_thread.join(timeout=0.5)
 
-    def wait_for_motion_complete(self, timeout: float = 30.0, allow_cancel: bool = True) -> bool:
+    def wait_for_motion_complete(
+        self, timeout: float = 30.0, allow_cancel: bool = True
+    ) -> bool:
         """
         Wait for motion-stopped callback from microscope.
 
@@ -145,7 +153,9 @@ class MotionTracker:
         Raises:
             RuntimeError: If socket error occurs
         """
-        self.logger.info(f"Waiting for motion complete (timeout={timeout}s, cancellable={allow_cancel})...")
+        self.logger.info(
+            f"Waiting for motion complete (timeout={timeout}s, cancellable={allow_cancel})..."
+        )
 
         # Reset cancel flag
         self._stop_waiting = False
@@ -174,7 +184,9 @@ class MotionTracker:
         while not self._callback_queue.empty():
             try:
                 stale = self._callback_queue.get_nowait()
-                self.logger.debug(f"Discarded stale motion callback (status={stale.status_code})")
+                self.logger.debug(
+                    f"Discarded stale motion callback (status={stale.status_code})"
+                )
             except queue.Empty:
                 break
 
@@ -260,12 +272,14 @@ class MotionTracker:
                     data = self._receive_full_message(128)
 
                     if not data:
-                        self.logger.warning("Socket closed while waiting for motion complete")
+                        self.logger.warning(
+                            "Socket closed while waiting for motion complete"
+                        )
                         return False
 
                     # Parse message
                     parsed = self._parse_response(data)
-                    command_code = parsed['command_code']
+                    command_code = parsed["command_code"]
 
                     self.logger.debug(
                         f"Received message while waiting: 0x{command_code:04X} ({command_code})"
@@ -273,11 +287,15 @@ class MotionTracker:
 
                     # Check if this is the motion-stopped callback
                     if command_code == self.STAGE_MOTION_STOPPED:
-                        status = parsed['status_code']
-                        axis_info = parsed['params'][3] if len(parsed['params']) > 3 else None
+                        status = parsed["status_code"]
+                        axis_info = (
+                            parsed["params"][3] if len(parsed["params"]) > 3 else None
+                        )
 
                         if status == 1:
-                            self.logger.info(f"Motion complete! Status={status} (1=success), axis={axis_info}")
+                            self.logger.info(
+                                f"Motion complete! Status={status} (1=success), axis={axis_info}"
+                            )
                             return True
                         else:
                             self.logger.warning(
@@ -328,7 +346,7 @@ class MotionTracker:
         Returns:
             Bytes received or None if socket closed
         """
-        data = b''
+        data = b""
         while len(data) < size:
             chunk = self.command_socket.recv(size - len(data))
             if not chunk:
@@ -349,22 +367,22 @@ class MotionTracker:
         if len(response) != 128:
             raise ValueError(f"Invalid response size: {len(response)} (expected 128)")
 
-        start_marker = struct.unpack('<I', response[0:4])[0]
-        command_code = struct.unpack('<I', response[4:8])[0]
-        status_code = struct.unpack('<I', response[8:12])[0]
+        start_marker = struct.unpack("<I", response[0:4])[0]
+        command_code = struct.unpack("<I", response[4:8])[0]
+        status_code = struct.unpack("<I", response[8:12])[0]
 
         params = []
         for i in range(7):
             offset = 12 + (i * 4)
-            param = struct.unpack('<i', response[offset:offset+4])[0]
+            param = struct.unpack("<i", response[offset : offset + 4])[0]
             params.append(param)
 
-        value = struct.unpack('<d', response[40:48])[0]
+        value = struct.unpack("<d", response[40:48])[0]
 
         return {
-            'start_marker': start_marker,
-            'command_code': command_code,
-            'status_code': status_code,
-            'params': params,
-            'value': value
+            "start_marker": start_marker,
+            "command_code": command_code,
+            "status_code": status_code,
+            "params": params,
+            "value": value,
         }

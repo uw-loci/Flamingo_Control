@@ -11,17 +11,30 @@ into a cohesive application window. The MainWindow is responsible for:
 """
 
 from typing import Optional
-from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QTabWidget,
-    QAction, QMessageBox, QScrollArea, QApplication
-)
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QShowEvent, QCloseEvent, QIcon
 
-from py2flamingo.views import ConnectionView, WorkflowView, SampleInfoView, ImageControlsWindow, StageControlView
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QCloseEvent, QIcon, QShowEvent
+from PyQt5.QtWidgets import (
+    QAction,
+    QApplication,
+    QMainWindow,
+    QMessageBox,
+    QScrollArea,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
 from py2flamingo.resources import get_app_icon
-from py2flamingo.views.camera_live_viewer import CameraLiveViewer
 from py2flamingo.services.window_geometry_manager import WindowGeometryManager
+from py2flamingo.views import (
+    ConnectionView,
+    ImageControlsWindow,
+    SampleInfoView,
+    StageControlView,
+    WorkflowView,
+)
+from py2flamingo.views.camera_live_viewer import CameraLiveViewer
 
 
 class MainWindow(QMainWindow):
@@ -50,16 +63,18 @@ class MainWindow(QMainWindow):
         main_window.show()
     """
 
-    def __init__(self,
-                 connection_view: ConnectionView,
-                 workflow_view: WorkflowView,
-                 sample_info_view: Optional[SampleInfoView] = None,
-                 status_indicator_widget=None,
-                 stage_control_view=None,
-                 camera_live_viewer=None,
-                 image_controls_window=None,
-                 app=None,
-                 geometry_manager: Optional[WindowGeometryManager] = None):
+    def __init__(
+        self,
+        connection_view: ConnectionView,
+        workflow_view: WorkflowView,
+        sample_info_view: Optional[SampleInfoView] = None,
+        status_indicator_widget=None,
+        stage_control_view=None,
+        camera_live_viewer=None,
+        image_controls_window=None,
+        app=None,
+        geometry_manager: Optional[WindowGeometryManager] = None,
+    ):
         """Initialize main window with view components.
 
         Args:
@@ -75,7 +90,9 @@ class MainWindow(QMainWindow):
         """
         super().__init__()
 
-        self.app = app  # Reference to FlamingoApplication for accessing sample_view etc.
+        self.app = (
+            app  # Reference to FlamingoApplication for accessing sample_view etc.
+        )
         self._geometry_manager = geometry_manager
         self._geometry_restored = False
         self.connection_view = connection_view
@@ -116,11 +133,15 @@ class MainWindow(QMainWindow):
 
         # Add sample info tab if available
         if self.sample_info_view is not None:
-            self.tabs.addTab(self._wrap_in_scroll_area(self.sample_info_view), "Sample Info")
+            self.tabs.addTab(
+                self._wrap_in_scroll_area(self.sample_info_view), "Sample Info"
+            )
 
         # Add stage control tab (enhanced view only)
         if self.stage_control_view is not None:
-            self.tabs.addTab(self._wrap_in_scroll_area(self.stage_control_view), "Stage Control")
+            self.tabs.addTab(
+                self._wrap_in_scroll_area(self.stage_control_view), "Stage Control"
+            )
 
         # Add tabs to layout
         layout.addWidget(self.tabs)
@@ -171,7 +192,9 @@ class MainWindow(QMainWindow):
             screen_height = available_geometry.height()
 
             # Set window to 90% of screen height and compact width
-            target_width = min(600, int(screen_width * 0.4))  # Max 600px or 40% width (compact UI)
+            target_width = min(
+                600, int(screen_width * 0.4)
+            )  # Max 600px or 40% width (compact UI)
             target_height = int(screen_height * 0.9)  # 90% of screen height
 
             self.resize(target_width, target_height)
@@ -253,7 +276,9 @@ class MainWindow(QMainWindow):
 
         tools_menu.addSeparator()
         self.benchmark_action = QAction("&Benchmark 3D Viewer...", self)
-        self.benchmark_action.setStatusTip("Run performance benchmarks on 3D transforms")
+        self.benchmark_action.setStatusTip(
+            "Run performance benchmarks on 3D transforms"
+        )
         self.benchmark_action.triggered.connect(self._on_benchmark_3d)
         self.benchmark_action.setEnabled(False)
         tools_menu.addAction(self.benchmark_action)
@@ -262,27 +287,35 @@ class MainWindow(QMainWindow):
         extensions_menu = menubar.addMenu("&Extensions")
 
         self.led_2d_overview_action = QAction("&LED 2D Overview...", self)
-        self.led_2d_overview_action.setStatusTip("Create 2D focus-stacked overview maps at two rotation angles")
+        self.led_2d_overview_action.setStatusTip(
+            "Create 2D focus-stacked overview maps at two rotation angles"
+        )
         self.led_2d_overview_action.triggered.connect(self._on_led_2d_overview)
         self.led_2d_overview_action.setEnabled(False)
         extensions_menu.addAction(self.led_2d_overview_action)
 
         self.load_2d_overview_action = QAction("&Load 2D Overview Session...", self)
-        self.load_2d_overview_action.setStatusTip("Load a saved 2D Overview session for tile selection and analysis")
+        self.load_2d_overview_action.setStatusTip(
+            "Load a saved 2D Overview session for tile selection and analysis"
+        )
         self.load_2d_overview_action.triggered.connect(self._on_load_2d_overview)
         extensions_menu.addAction(self.load_2d_overview_action)
 
         extensions_menu.addSeparator()
 
         self.mip_overview_action = QAction("&MIP Overview...", self)
-        self.mip_overview_action.setStatusTip("Load MIP files from tile acquisitions to view and select tiles for re-acquisition")
+        self.mip_overview_action.setStatusTip(
+            "Load MIP files from tile acquisitions to view and select tiles for re-acquisition"
+        )
         self.mip_overview_action.triggered.connect(self._on_mip_overview)
         extensions_menu.addAction(self.mip_overview_action)
 
         extensions_menu.addSeparator()
 
         self.union_thresholder_action = QAction("&Union of Thresholders...", self)
-        self.union_thresholder_action.setStatusTip("Threshold 3D volumes and generate variable-depth acquisition profiles")
+        self.union_thresholder_action.setStatusTip(
+            "Threshold 3D volumes and generate variable-depth acquisition profiles"
+        )
         self.union_thresholder_action.triggered.connect(self._on_union_thresholder)
         self.union_thresholder_action.setEnabled(False)
         extensions_menu.addAction(self.union_thresholder_action)
@@ -290,7 +323,9 @@ class MainWindow(QMainWindow):
         extensions_menu.addSeparator()
 
         self.pipeline_editor_action = QAction("&Pipeline Editor...", self)
-        self.pipeline_editor_action.setStatusTip("Visual pipeline editor for composing acquisition and analysis workflows")
+        self.pipeline_editor_action.setStatusTip(
+            "Visual pipeline editor for composing acquisition and analysis workflows"
+        )
         self.pipeline_editor_action.triggered.connect(self._on_pipeline_editor)
         extensions_menu.addAction(self.pipeline_editor_action)
 
@@ -301,12 +336,16 @@ class MainWindow(QMainWindow):
         docs_menu = help_menu.addMenu("&Documentation")
 
         self._doc_links = [
-            ("&Acquisition Workflow Guide",
-             "Step-by-step guide to acquiring data",
-             "https://github.com/uw-loci/Flamingo_Control/blob/main/claude-reports/acquisition-workflow-guide.md"),
-            ("&Pipeline System Reference",
-             "Visual pipeline editor and execution engine reference",
-             "https://github.com/uw-loci/Flamingo_Control/blob/main/claude-reports/pipeline-system.md"),
+            (
+                "&Acquisition Workflow Guide",
+                "Step-by-step guide to acquiring data",
+                "https://github.com/uw-loci/Flamingo_Control/blob/main/claude-reports/acquisition-workflow-guide.md",
+            ),
+            (
+                "&Pipeline System Reference",
+                "Visual pipeline editor and execution engine reference",
+                "https://github.com/uw-loci/Flamingo_Control/blob/main/claude-reports/pipeline-system.md",
+            ),
         ]
         for label, tip, url in self._doc_links:
             action = QAction(label, self)
@@ -332,31 +371,36 @@ class MainWindow(QMainWindow):
     def _on_settings(self):
         """Open the application settings dialog."""
         try:
-            from py2flamingo.views.dialogs.settings_dialog import SettingsDialog
-            from py2flamingo.services.microscope_settings_service import MicroscopeSettingsService
             from pathlib import Path
 
+            from py2flamingo.services.microscope_settings_service import (
+                MicroscopeSettingsService,
+            )
+            from py2flamingo.views.dialogs.settings_dialog import SettingsDialog
+
             # Get or create the settings service
-            if not hasattr(self, '_settings_service') or self._settings_service is None:
+            if not hasattr(self, "_settings_service") or self._settings_service is None:
                 # Try to get microscope name from connection view
                 microscope_name = "n7"  # Default
-                if hasattr(self.connection_view, 'get_current_microscope_name'):
+                if hasattr(self.connection_view, "get_current_microscope_name"):
                     name = self.connection_view.get_current_microscope_name()
                     if name:
                         microscope_name = name
 
                 # Create settings service
                 base_path = Path(__file__).parent.parent  # Go up to project root
-                self._settings_service = MicroscopeSettingsService(microscope_name, base_path)
+                self._settings_service = MicroscopeSettingsService(
+                    microscope_name, base_path
+                )
 
             dialog = SettingsDialog(
-                settings_service=self._settings_service,
-                parent=self
+                settings_service=self._settings_service, parent=self
             )
             dialog.exec_()
 
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).exception(f"Error opening settings dialog: {e}")
             QMessageBox.critical(self, "Error", f"Could not open settings dialog: {e}")
 
@@ -364,6 +408,7 @@ class MainWindow(QMainWindow):
         """Open a URL in the system default browser."""
         from PyQt5.QtCore import QUrl
         from PyQt5.QtGui import QDesktopServices
+
         QDesktopServices.openUrl(QUrl(url))
 
     def _show_about(self):
@@ -378,7 +423,7 @@ class MainWindow(QMainWindow):
             "<hr>"
             "<p><b>Acknowledgments</b></p>"
             "<p>3D visualization powered by <a href='https://napari.org'>napari</a>, "
-            "a fast, interactive, multi-dimensional image viewer for Python.</p>"
+            "a fast, interactive, multi-dimensional image viewer for Python.</p>",
         )
 
     def _show_camera_viewer(self):
@@ -417,6 +462,7 @@ class MainWindow(QMainWindow):
     def _on_voxel_test(self):
         """Handle 3D voxel rotation test menu action."""
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info("3D Voxel Rotation Test menu action triggered")
 
@@ -440,6 +486,7 @@ class MainWindow(QMainWindow):
 
             # Re-enable action after delay (test runs async)
             from PyQt5.QtCore import QTimer
+
             QTimer.singleShot(70000, self._reset_voxel_test_action)
 
         except ImportError as e:
@@ -459,6 +506,7 @@ class MainWindow(QMainWindow):
     def _on_volume_scan(self):
         """Handle volume scan menu action."""
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info("Volume Scan menu action triggered")
 
@@ -474,17 +522,21 @@ class MainWindow(QMainWindow):
             from tests.test_3d_movement_simple import test_voxel_movement
 
             # Get position controller from app
-            position_controller = getattr(self.app, 'position_controller', None)
+            position_controller = getattr(self.app, "position_controller", None)
             if not position_controller:
                 raise RuntimeError("Position controller not available")
 
             # Run the volume scan
-            success = test_voxel_movement(position_controller, self, mode='volume_scan')
+            success = test_voxel_movement(position_controller, self, mode="volume_scan")
 
             if success:
-                QMessageBox.information(self, "Success", "Volume scan completed successfully!")
+                QMessageBox.information(
+                    self, "Success", "Volume scan completed successfully!"
+                )
             else:
-                QMessageBox.warning(self, "Warning", "Volume scan completed with warnings.")
+                QMessageBox.warning(
+                    self, "Warning", "Volume scan completed with warnings."
+                )
 
         except ImportError as e:
             logger.error(f"Could not import test module: {e}")
@@ -507,6 +559,7 @@ class MainWindow(QMainWindow):
         and camera live view while the calibration instructions are visible.
         """
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info("Calibrate Objective menu action triggered")
 
@@ -536,7 +589,7 @@ class MainWindow(QMainWindow):
             if msg.clickedButton() != save_btn:
                 return
             try:
-                movement_controller = getattr(self.app, 'movement_controller', None)
+                movement_controller = getattr(self.app, "movement_controller", None)
                 if not movement_controller:
                     raise RuntimeError("Movement controller not available")
 
@@ -544,18 +597,22 @@ class MainWindow(QMainWindow):
                 if not current_pos:
                     raise RuntimeError("Could not read current position")
 
-                from py2flamingo.services.position_preset_service import PositionPresetService
+                from py2flamingo.services.position_preset_service import (
+                    PositionPresetService,
+                )
+
                 preset_service = PositionPresetService()
                 preset_service.save_preset(
                     name="Tip of sample mount",
                     position=current_pos,
-                    description="Calibrated objective center position"
+                    description="Calibrated objective center position",
                 )
                 logger.info(f"Saved calibration: {current_pos}")
                 QMessageBox.information(
-                    self, "Calibration Saved",
+                    self,
+                    "Calibration Saved",
                     f"Position saved:\nX={current_pos.x:.3f}, Y={current_pos.y:.3f}, "
-                    f"Z={current_pos.z:.3f}, R={current_pos.r:.1f}°"
+                    f"Z={current_pos.z:.3f}, R={current_pos.r:.1f}°",
                 )
 
             except Exception as e:
@@ -570,6 +627,7 @@ class MainWindow(QMainWindow):
     def _on_benchmark_3d(self):
         """Handle Benchmark 3D Viewer menu action."""
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info("Benchmark 3D Viewer menu action triggered")
 
@@ -578,50 +636,54 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            from py2flamingo.views.dialogs.performance_benchmark_dialog import PerformanceBenchmarkDialog
+            from py2flamingo.views.dialogs.performance_benchmark_dialog import (
+                PerformanceBenchmarkDialog,
+            )
 
             dialog = PerformanceBenchmarkDialog(
-                voxel_storage=self.app.voxel_storage,
-                parent=self
+                voxel_storage=self.app.voxel_storage, parent=self
             )
             dialog.exec_()
         except Exception as e:
             logger.error(f"Error opening benchmark dialog: {e}", exc_info=True)
-            QMessageBox.critical(self, "Error",
-                               f"Could not open benchmark dialog: {e}")
+            QMessageBox.critical(self, "Error", f"Could not open benchmark dialog: {e}")
 
     # ========== Extensions Menu Handlers ==========
 
     def _on_led_2d_overview(self):
         """Handle LED 2D Overview menu action."""
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info("LED 2D Overview menu action triggered")
 
         if not self.app or not self.app.sample_view:
             QMessageBox.warning(
-                self, "Sample View Required",
-                "Please open the Sample View before using this extension."
+                self,
+                "Sample View Required",
+                "Please open the Sample View before using this extension.",
             )
             return
 
         try:
-            from py2flamingo.views.dialogs.led_2d_overview_dialog import LED2DOverviewDialog
+            from py2flamingo.views.dialogs.led_2d_overview_dialog import (
+                LED2DOverviewDialog,
+            )
 
             # Create non-modal dialog (use show() not exec_())
             # Keep reference to prevent garbage collection
             self._led_2d_overview_dialog = LED2DOverviewDialog(
-                app=self.app,
-                parent=None  # No parent so it's independent window
+                app=self.app, parent=None  # No parent so it's independent window
             )
             self._led_2d_overview_dialog.show()
 
         except ImportError as e:
             logger.error(f"Could not import LED 2D Overview dialog: {e}")
             QMessageBox.critical(
-                self, "Error",
+                self,
+                "Error",
                 "LED 2D Overview dialog not available.\n"
-                "The extension may not be fully implemented yet."
+                "The extension may not be fully implemented yet.",
             )
         except Exception as e:
             logger.error(f"Error opening LED 2D Overview: {e}", exc_info=True)
@@ -630,14 +692,16 @@ class MainWindow(QMainWindow):
     def _on_load_2d_overview(self):
         """Handle Load 2D Overview Session menu action."""
         import logging
-        from PyQt5.QtWidgets import QFileDialog
         from pathlib import Path
+
+        from PyQt5.QtWidgets import QFileDialog
+
         logger = logging.getLogger(__name__)
         logger.info("Load 2D Overview Session menu action triggered")
 
         # Get last-used path from configuration service (independent of other dialogs)
         start_path = str(Path.home())
-        if self.app and hasattr(self.app, 'config_service') and self.app.config_service:
+        if self.app and hasattr(self.app, "config_service") and self.app.config_service:
             saved_path = self.app.config_service.get_led_2d_session_path()
             if saved_path:
                 start_path = saved_path
@@ -647,39 +711,41 @@ class MainWindow(QMainWindow):
             self,
             "Select 2D Overview Session Folder",
             start_path,
-            QFileDialog.ShowDirsOnly
+            QFileDialog.ShowDirsOnly,
         )
 
         if not folder:
             return  # User cancelled
 
         # Save the selected folder's parent for next time
-        if self.app and hasattr(self.app, 'config_service') and self.app.config_service:
+        if self.app and hasattr(self.app, "config_service") and self.app.config_service:
             self.app.config_service.set_led_2d_session_path(str(Path(folder).parent))
 
         try:
-            from py2flamingo.views.dialogs.led_2d_overview_result import LED2DOverviewResultWindow
+            from py2flamingo.views.dialogs.led_2d_overview_result import (
+                LED2DOverviewResultWindow,
+            )
 
             folder_path = Path(folder)
 
             # Try to load from saved folder
             window = LED2DOverviewResultWindow.load_from_folder(
-                folder_path,
-                app=self.app
+                folder_path, app=self.app
             )
 
             if window:
                 # Keep reference to prevent garbage collection
-                if not hasattr(self, '_loaded_overview_windows'):
+                if not hasattr(self, "_loaded_overview_windows"):
                     self._loaded_overview_windows = []
                 self._loaded_overview_windows.append(window)
                 window.show()
                 logger.info(f"Loaded 2D Overview session from: {folder}")
             else:
                 QMessageBox.warning(
-                    self, "Load Failed",
+                    self,
+                    "Load Failed",
                     f"Could not load 2D Overview session from:\n{folder}\n\n"
-                    "Make sure this is a valid session folder with metadata.json"
+                    "Make sure this is a valid session folder with metadata.json",
                 )
 
         except Exception as e:
@@ -689,6 +755,7 @@ class MainWindow(QMainWindow):
     def _on_mip_overview(self):
         """Handle MIP Overview menu action."""
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info("MIP Overview menu action triggered")
 
@@ -699,7 +766,7 @@ class MainWindow(QMainWindow):
             dialog.show()
 
             # Keep reference to prevent garbage collection
-            if not hasattr(self, '_mip_overview_dialogs'):
+            if not hasattr(self, "_mip_overview_dialogs"):
                 self._mip_overview_dialogs = []
             self._mip_overview_dialogs.append(dialog)
 
@@ -712,31 +779,35 @@ class MainWindow(QMainWindow):
     def _on_union_thresholder(self):
         """Handle Union of Thresholders menu action."""
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info("Union of Thresholders menu action triggered")
 
         if not self.app or not self.app.sample_view:
             QMessageBox.warning(
-                self, "Sample View Required",
-                "Please open the Sample View before using this extension."
+                self,
+                "Sample View Required",
+                "Please open the Sample View before using this extension.",
             )
             return
 
         try:
-            from py2flamingo.views.dialogs.union_thresholder_dialog import UnionThresholderDialog
+            from py2flamingo.views.dialogs.union_thresholder_dialog import (
+                UnionThresholderDialog,
+            )
 
             self._union_thresholder_dialog = UnionThresholderDialog(
-                app=self.app,
-                parent=None
+                app=self.app, parent=None
             )
             self._union_thresholder_dialog.show()
 
         except ImportError as e:
             logger.error(f"Could not import Union of Thresholders dialog: {e}")
             QMessageBox.critical(
-                self, "Error",
+                self,
+                "Error",
                 "Union of Thresholders dialog not available.\n"
-                "The extension may not be fully implemented yet."
+                "The extension may not be fully implemented yet.",
             )
         except Exception as e:
             logger.error(f"Error opening Union of Thresholders: {e}", exc_info=True)
@@ -745,6 +816,7 @@ class MainWindow(QMainWindow):
     def _on_pipeline_editor(self):
         """Handle Pipeline Editor menu action."""
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info("Pipeline Editor menu action triggered")
 
@@ -753,13 +825,18 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            pipeline_controller = getattr(self.app, 'pipeline_controller', None)
+            pipeline_controller = getattr(self.app, "pipeline_controller", None)
             if pipeline_controller:
                 pipeline_controller.open_editor()
             else:
                 # Lazy creation if not yet initialized
-                from py2flamingo.pipeline.controllers.pipeline_controller import PipelineController
-                from py2flamingo.pipeline.services.pipeline_service import PipelineService
+                from py2flamingo.pipeline.controllers.pipeline_controller import (
+                    PipelineController,
+                )
+                from py2flamingo.pipeline.services.pipeline_service import (
+                    PipelineService,
+                )
+
                 self.app.pipeline_service = PipelineService()
                 self.app.pipeline_controller = PipelineController(
                     service=self.app.pipeline_service, app=self.app
@@ -777,6 +854,7 @@ class MainWindow(QMainWindow):
             index: Index of the newly selected tab
         """
         import logging
+
         logger = logging.getLogger(__name__)
         tab_name = self.tabs.tabText(index)
         logger.info(f"User switched to tab: {tab_name}")
@@ -794,7 +872,10 @@ class MainWindow(QMainWindow):
             restored = self._geometry_manager.restore_geometry("MainWindow", self)
             if restored:
                 import logging
-                logging.getLogger(__name__).info("Restored MainWindow geometry from saved state")
+
+                logging.getLogger(__name__).info(
+                    "Restored MainWindow geometry from saved state"
+                )
             self._geometry_restored = True
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -808,12 +889,17 @@ class MainWindow(QMainWindow):
             event: QCloseEvent instance
         """
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info("Main window closing - cleaning up...")
 
         # Close sample_view first so it can save its dialog state
         # (must happen BEFORE save_all() is called)
-        if self.app and hasattr(self.app, 'sample_view') and self.app.sample_view is not None:
+        if (
+            self.app
+            and hasattr(self.app, "sample_view")
+            and self.app.sample_view is not None
+        ):
             try:
                 self.app.sample_view.close()  # Triggers closeEvent which saves state
                 logger.info("Closed sample view (saved dialog state)")
@@ -833,7 +919,7 @@ class MainWindow(QMainWindow):
         if self.camera_live_viewer is not None:
             try:
                 # Stop live view to terminate background acquisition thread
-                if hasattr(self.camera_live_viewer, 'camera_controller'):
+                if hasattr(self.camera_live_viewer, "camera_controller"):
                     self.camera_live_viewer.camera_controller.stop_live_view()
                     logger.info("Stopped camera acquisition")
             except Exception as e:

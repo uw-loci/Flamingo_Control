@@ -9,12 +9,12 @@ Usage:
     python mock_server.py [--ip 127.0.0.1] [--port 53717]
 """
 
+import argparse
+import logging
 import socket
 import struct
 import threading
 import time
-import argparse
-import logging
 from pathlib import Path
 
 
@@ -46,8 +46,7 @@ class MockFlamingoServer:
 
         self.logger = logging.getLogger(__name__)
         logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s'
+            level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
         )
 
     def start(self):
@@ -159,7 +158,9 @@ class MockFlamingoServer:
         except Exception as e:
             self.logger.error(f"Error processing command: {e}")
 
-    def _handle_workflow_start(self, client: socket.socket, data_bits: int, data_field: bytes):
+    def _handle_workflow_start(
+        self, client: socket.socket, data_bits: int, data_field: bytes
+    ):
         """Handle workflow start command."""
         if data_bits == 1:
             # Workflow data follows - read file size
@@ -179,7 +180,7 @@ class MockFlamingoServer:
 
             # Log workflow content
             try:
-                workflow_text = workflow_data.decode('utf-8')
+                workflow_text = workflow_data.decode("utf-8")
                 self.logger.info(f"Received workflow ({len(workflow_data)} bytes):")
                 self.logger.info("─" * 60)
                 # Show first 500 chars
@@ -191,7 +192,7 @@ class MockFlamingoServer:
 
                 # Save to file for inspection
                 save_path = Path("received_workflow.txt")
-                with open(save_path, 'w') as f:
+                with open(save_path, "w") as f:
                     f.write(workflow_text)
                 self.logger.info(f"Saved workflow to: {save_path}")
 
@@ -278,15 +279,13 @@ def main():
         description="Mock Flamingo microscope server for testing"
     )
     parser.add_argument(
-        "--ip",
-        default="127.0.0.1",
-        help="IP address to bind to (default: 127.0.0.1)"
+        "--ip", default="127.0.0.1", help="IP address to bind to (default: 127.0.0.1)"
     )
     parser.add_argument(
         "--port",
         type=int,
         default=53717,
-        help="Command port to listen on (default: 53717)"
+        help="Command port to listen on (default: 53717)",
     )
 
     args = parser.parse_args()

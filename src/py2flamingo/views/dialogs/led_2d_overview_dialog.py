@@ -4,21 +4,30 @@ Configuration dialog for the LED 2D Overview extension that creates
 2D overview maps at two rotation angles.
 """
 
-import logging
 import json
-from pathlib import Path
-from typing import Optional, List, Tuple, Dict, Any
+import logging
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
-    QLabel, QPushButton, QDoubleSpinBox, QComboBox, QCheckBox,
-    QMessageBox, QSizePolicy, QFileDialog
-)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+)
 
-from py2flamingo.views.colors import WARNING_COLOR, ERROR_COLOR
+from py2flamingo.views.colors import ERROR_COLOR, WARNING_COLOR
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +35,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class BoundingBox:
     """Axis-aligned bounding box for scan region."""
+
     x_min: float
     x_max: float
     y_min: float
@@ -49,13 +59,16 @@ class BoundingBox:
 @dataclass
 class ScanConfiguration:
     """Complete scan configuration for LED 2D Overview."""
+
     bounding_box: BoundingBox
     starting_r: float  # Rotation angle in degrees
     led_name: str
     led_intensity: float
     z_step_size: float = 0.050  # mm (50 um default)
     use_focus_stacking: bool = False  # If True, use full focus stacking (TODO)
-    fast_mode: bool = True  # If True, use continuous scanning (no Z-stacks, much faster)
+    fast_mode: bool = (
+        True  # If True, use continuous scanning (no Z-stacks, much faster)
+    )
 
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
@@ -92,10 +105,10 @@ class LED2DOverviewDialog(PersistentDialog):
 
         # Stage limits (will be loaded from settings)
         self._stage_limits = {
-            'x': {'min': 0.0, 'max': 26.0},
-            'y': {'min': 0.0, 'max': 26.0},
-            'z': {'min': 0.0, 'max': 26.0},
-            'r': {'min': -720.0, 'max': 720.0}
+            "x": {"min": 0.0, "max": 26.0},
+            "y": {"min": 0.0, "max": 26.0},
+            "z": {"min": 0.0, "max": 26.0},
+            "r": {"min": -720.0, "max": 720.0},
         }
 
         # Current LED settings (loaded from Sample View or saved settings)
@@ -120,12 +133,14 @@ class LED2DOverviewDialog(PersistentDialog):
     def _load_stage_limits(self):
         """Load stage limits from microscope settings."""
         try:
-            if self._app and hasattr(self._app, 'microscope_settings'):
+            if self._app and hasattr(self._app, "microscope_settings"):
                 limits = self._app.microscope_settings.get_stage_limits()
                 self._stage_limits = limits
-                self._logger.info(f"Loaded stage limits: X[{limits['x']['min']}-{limits['x']['max']}], "
-                                 f"Y[{limits['y']['min']}-{limits['y']['max']}], "
-                                 f"Z[{limits['z']['min']}-{limits['z']['max']}]")
+                self._logger.info(
+                    f"Loaded stage limits: X[{limits['x']['min']}-{limits['x']['max']}], "
+                    f"Y[{limits['y']['min']}-{limits['y']['max']}], "
+                    f"Z[{limits['z']['min']}-{limits['z']['max']}]"
+                )
         except Exception as e:
             self._logger.warning(f"Could not load stage limits: {e}")
 
@@ -210,7 +225,9 @@ class LED2DOverviewDialog(PersistentDialog):
         self.preset_target_combo.addItem("Point A")
         self.preset_target_combo.addItem("Point B")
         self.preset_target_combo.addItem("Point C")
-        self.preset_target_combo.setToolTip("Select which point to load the preset into")
+        self.preset_target_combo.setToolTip(
+            "Select which point to load the preset into"
+        )
         preset_layout.addWidget(self.preset_target_combo)
 
         self.preset_combo = QComboBox()
@@ -244,14 +261,14 @@ class LED2DOverviewDialog(PersistentDialog):
 
         # Point A (required - but defaults to "not set" to remind user)
         self.point_a_label = QLabel("Point A:")
-        self.point_a_x = self._create_coord_spinbox('x', optional=True)
-        self.point_a_y = self._create_coord_spinbox('y', optional=True)
-        self.point_a_z = self._create_coord_spinbox('z', optional=True)
+        self.point_a_x = self._create_coord_spinbox("x", optional=True)
+        self.point_a_y = self._create_coord_spinbox("y", optional=True)
+        self.point_a_z = self._create_coord_spinbox("z", optional=True)
         self.point_a_btn = QPushButton("Get Pos")
         self.point_a_btn.setToolTip("Get current stage position")
         self.point_a_clear = QPushButton("Clear")
         self.point_a_clear.setToolTip("Clear Point A")
-        self.point_a_btn.clicked.connect(lambda: self._get_current_position('A'))
+        self.point_a_btn.clicked.connect(lambda: self._get_current_position("A"))
         self.point_a_clear.clicked.connect(self._clear_point_a)
 
         a_btn_layout = QHBoxLayout()
@@ -267,14 +284,14 @@ class LED2DOverviewDialog(PersistentDialog):
 
         # Point B (required - but defaults to "not set" to remind user)
         self.point_b_label = QLabel("Point B:")
-        self.point_b_x = self._create_coord_spinbox('x', optional=True)
-        self.point_b_y = self._create_coord_spinbox('y', optional=True)
-        self.point_b_z = self._create_coord_spinbox('z', optional=True)
+        self.point_b_x = self._create_coord_spinbox("x", optional=True)
+        self.point_b_y = self._create_coord_spinbox("y", optional=True)
+        self.point_b_z = self._create_coord_spinbox("z", optional=True)
         self.point_b_btn = QPushButton("Get Pos")
         self.point_b_btn.setToolTip("Get current stage position")
         self.point_b_clear = QPushButton("Clear")
         self.point_b_clear.setToolTip("Clear Point B")
-        self.point_b_btn.clicked.connect(lambda: self._get_current_position('B'))
+        self.point_b_btn.clicked.connect(lambda: self._get_current_position("B"))
         self.point_b_clear.clicked.connect(self._clear_point_b)
 
         b_btn_layout = QHBoxLayout()
@@ -290,14 +307,14 @@ class LED2DOverviewDialog(PersistentDialog):
 
         # Point C (optional)
         self.point_c_label = QLabel("Point C:")
-        self.point_c_x = self._create_coord_spinbox('x', optional=True)
-        self.point_c_y = self._create_coord_spinbox('y', optional=True)
-        self.point_c_z = self._create_coord_spinbox('z', optional=True)
+        self.point_c_x = self._create_coord_spinbox("x", optional=True)
+        self.point_c_y = self._create_coord_spinbox("y", optional=True)
+        self.point_c_z = self._create_coord_spinbox("z", optional=True)
         self.point_c_btn = QPushButton("Get Pos")
         self.point_c_btn.setToolTip("Get current stage position")
         self.point_c_clear = QPushButton("Clear")
         self.point_c_clear.setToolTip("Clear Point C")
-        self.point_c_btn.clicked.connect(lambda: self._get_current_position('C'))
+        self.point_c_btn.clicked.connect(lambda: self._get_current_position("C"))
         self.point_c_clear.clicked.connect(self._clear_point_c)
 
         c_btn_layout = QHBoxLayout()
@@ -321,7 +338,9 @@ class LED2DOverviewDialog(PersistentDialog):
         group.setLayout(layout)
         return group
 
-    def _create_coord_spinbox(self, axis: str, optional: bool = False) -> QDoubleSpinBox:
+    def _create_coord_spinbox(
+        self, axis: str, optional: bool = False
+    ) -> QDoubleSpinBox:
         """Create a coordinate spinbox with stage limits.
 
         Args:
@@ -330,9 +349,9 @@ class LED2DOverviewDialog(PersistentDialog):
         """
         spinbox = QDoubleSpinBox()
 
-        limits = self._stage_limits.get(axis, {'min': 0.0, 'max': 26.0})
-        min_val = limits['min']
-        max_val = limits['max']
+        limits = self._stage_limits.get(axis, {"min": 0.0, "max": 26.0})
+        min_val = limits["min"]
+        max_val = limits["max"]
 
         if optional:
             # For optional fields, use a value below min to indicate "not set"
@@ -359,8 +378,8 @@ class LED2DOverviewDialog(PersistentDialog):
         # Starting R
         layout.addWidget(QLabel("Starting R:"), 0, 0)
         self.starting_r = QDoubleSpinBox()
-        r_limits = self._stage_limits.get('r', {'min': -720.0, 'max': 720.0})
-        self.starting_r.setRange(r_limits['min'], r_limits['max'])
+        r_limits = self._stage_limits.get("r", {"min": -720.0, "max": 720.0})
+        self.starting_r.setRange(r_limits["min"], r_limits["max"])
         self.starting_r.setDecimals(1)
         self.starting_r.setSingleStep(1.0)
         self.starting_r.setSuffix("°")
@@ -382,7 +401,9 @@ class LED2DOverviewDialog(PersistentDialog):
         self.z_step_size.setSingleStep(0.050)
         self.z_step_size.setSuffix(" mm")
         self.z_step_size.setValue(0.250)  # 250µm default for fast scan (~6 Z planes)
-        self.z_step_size.setToolTip("Z step size for focus search (250 µm default for speed)")
+        self.z_step_size.setToolTip(
+            "Z step size for focus search (250 µm default for speed)"
+        )
         self.z_step_size.valueChanged.connect(self._update_scan_info)
         layout.addWidget(self.z_step_size, 1, 1)
 
@@ -473,7 +494,10 @@ class LED2DOverviewDialog(PersistentDialog):
         self.preset_combo.addItem("-- Select preset --")
 
         try:
-            from py2flamingo.services.position_preset_service import PositionPresetService
+            from py2flamingo.services.position_preset_service import (
+                PositionPresetService,
+            )
+
             preset_service = PositionPresetService()
             preset_names = preset_service.get_preset_names()
 
@@ -490,10 +514,15 @@ class LED2DOverviewDialog(PersistentDialog):
         if preset_name == "-- Select preset --":
             return
 
-        target = self.preset_target_combo.currentText()  # "Point A", "Point B", or "Point C"
+        target = (
+            self.preset_target_combo.currentText()
+        )  # "Point A", "Point B", or "Point C"
 
         try:
-            from py2flamingo.services.position_preset_service import PositionPresetService
+            from py2flamingo.services.position_preset_service import (
+                PositionPresetService,
+            )
+
             preset_service = PositionPresetService()
             preset = preset_service.get_preset(preset_name)
 
@@ -544,20 +573,22 @@ class LED2DOverviewDialog(PersistentDialog):
                 return
 
             # Fill in the appropriate spinboxes
-            if point == 'A':
+            if point == "A":
                 self.point_a_x.setValue(pos.x)
                 self.point_a_y.setValue(pos.y)
                 self.point_a_z.setValue(pos.z)
-            elif point == 'B':
+            elif point == "B":
                 self.point_b_x.setValue(pos.x)
                 self.point_b_y.setValue(pos.y)
                 self.point_b_z.setValue(pos.z)
-            elif point == 'C':
+            elif point == "C":
                 self.point_c_x.setValue(pos.x)
                 self.point_c_y.setValue(pos.y)
                 self.point_c_z.setValue(pos.z)
 
-            self._logger.info(f"Set Point {point} to ({pos.x:.3f}, {pos.y:.3f}, {pos.z:.3f})")
+            self._logger.info(
+                f"Set Point {point} to ({pos.x:.3f}, {pos.y:.3f}, {pos.z:.3f})"
+            )
             self._update_scan_info()
 
         except Exception as e:
@@ -591,9 +622,9 @@ class LED2DOverviewDialog(PersistentDialog):
     def _clear_point_a(self):
         """Clear Point A values."""
         # Set to special "not set" value (min - 1)
-        x_min = self._stage_limits['x']['min']
-        y_min = self._stage_limits['y']['min']
-        z_min = self._stage_limits['z']['min']
+        x_min = self._stage_limits["x"]["min"]
+        y_min = self._stage_limits["y"]["min"]
+        z_min = self._stage_limits["z"]["min"]
         self.point_a_x.setValue(x_min - 1)
         self.point_a_y.setValue(y_min - 1)
         self.point_a_z.setValue(z_min - 1)
@@ -602,9 +633,9 @@ class LED2DOverviewDialog(PersistentDialog):
     def _clear_point_b(self):
         """Clear Point B values."""
         # Set to special "not set" value (min - 1)
-        x_min = self._stage_limits['x']['min']
-        y_min = self._stage_limits['y']['min']
-        z_min = self._stage_limits['z']['min']
+        x_min = self._stage_limits["x"]["min"]
+        y_min = self._stage_limits["y"]["min"]
+        z_min = self._stage_limits["z"]["min"]
         self.point_b_x.setValue(x_min - 1)
         self.point_b_y.setValue(y_min - 1)
         self.point_b_z.setValue(z_min - 1)
@@ -613,9 +644,9 @@ class LED2DOverviewDialog(PersistentDialog):
     def _clear_point_c(self):
         """Clear Point C values."""
         # Set to special "not set" value (min - 1)
-        x_min = self._stage_limits['x']['min']
-        y_min = self._stage_limits['y']['min']
-        z_min = self._stage_limits['z']['min']
+        x_min = self._stage_limits["x"]["min"]
+        y_min = self._stage_limits["y"]["min"]
+        z_min = self._stage_limits["z"]["min"]
         self.point_c_x.setValue(x_min - 1)
         self.point_c_y.setValue(y_min - 1)
         self.point_c_z.setValue(z_min - 1)
@@ -649,7 +680,9 @@ class LED2DOverviewDialog(PersistentDialog):
                         color_name = source.replace("led_", "").capitalize()
 
                         self.led_info_label.setText(f"LED: {color_name}")
-                        self.intensity_info_label.setText(f"Intensity: {self._current_led_intensity:.1f}%")
+                        self.intensity_info_label.setText(
+                            f"Intensity: {self._current_led_intensity:.1f}%"
+                        )
                     else:
                         self.led_info_label.setText(f"LED: {source}")
                         self.intensity_info_label.setText("Intensity: (unknown)")
@@ -680,13 +713,15 @@ class LED2DOverviewDialog(PersistentDialog):
 
             settings = {
                 "led_name": self._current_led_name,
-                "led_intensity": self._current_led_intensity
+                "led_intensity": self._current_led_intensity,
             }
 
-            with open(settings_file, 'w') as f:
+            with open(settings_file, "w") as f:
                 json.dump(settings, f, indent=2)
 
-            self._logger.info(f"Saved LED settings: {self._current_led_name} at {self._current_led_intensity:.1f}%")
+            self._logger.info(
+                f"Saved LED settings: {self._current_led_name} at {self._current_led_intensity:.1f}%"
+            )
 
         except Exception as e:
             self._logger.error(f"Error saving LED settings: {e}", exc_info=True)
@@ -698,13 +733,15 @@ class LED2DOverviewDialog(PersistentDialog):
             True if settings were loaded successfully, False otherwise
         """
         try:
-            settings_file = Path("microscope_settings") / "led_2d_overview_settings.json"
+            settings_file = (
+                Path("microscope_settings") / "led_2d_overview_settings.json"
+            )
 
             if not settings_file.exists():
                 self._logger.info("No saved LED settings found")
                 return False
 
-            with open(settings_file, 'r') as f:
+            with open(settings_file, "r") as f:
                 settings = json.load(f)
 
             self._current_led_name = settings.get("led_name")
@@ -714,12 +751,16 @@ class LED2DOverviewDialog(PersistentDialog):
             if self._current_led_name and self._current_led_name.startswith("led_"):
                 color_name = self._current_led_name.replace("led_", "").capitalize()
                 self.led_info_label.setText(f"LED: {color_name}")
-                self.intensity_info_label.setText(f"Intensity: {self._current_led_intensity:.1f}%")
+                self.intensity_info_label.setText(
+                    f"Intensity: {self._current_led_intensity:.1f}%"
+                )
             else:
                 self.led_info_label.setText(f"LED: {self._current_led_name}")
                 self.intensity_info_label.setText("Intensity: --")
 
-            self._logger.info(f"Loaded LED settings: {self._current_led_name} at {self._current_led_intensity:.1f}%")
+            self._logger.info(
+                f"Loaded LED settings: {self._current_led_name} at {self._current_led_intensity:.1f}%"
+            )
             return True
 
         except Exception as e:
@@ -731,29 +772,38 @@ class LED2DOverviewDialog(PersistentDialog):
         if self._load_led_settings():
             self._update_start_button_state()
             QMessageBox.information(
-                self, "Settings Loaded",
+                self,
+                "Settings Loaded",
                 f"Loaded LED settings from last scan:\n"
                 f"LED: {self._current_led_name}\n"
-                f"Intensity: {self._current_led_intensity:.1f}%"
+                f"Intensity: {self._current_led_intensity:.1f}%",
             )
         else:
             QMessageBox.warning(
-                self, "No Saved Settings",
+                self,
+                "No Saved Settings",
                 "No saved LED settings found.\n\n"
                 "Complete a scan first to save settings, or use\n"
-                "'Refresh from Sample View' to load current settings."
+                "'Refresh from Sample View' to load current settings.",
             )
 
-    def _is_point_set(self, x_spinbox: QDoubleSpinBox, y_spinbox: QDoubleSpinBox, z_spinbox: QDoubleSpinBox) -> bool:
+    def _is_point_set(
+        self,
+        x_spinbox: QDoubleSpinBox,
+        y_spinbox: QDoubleSpinBox,
+        z_spinbox: QDoubleSpinBox,
+    ) -> bool:
         """Check if a point has valid values (not the "not set" special value)."""
-        x_min = self._stage_limits['x']['min']
-        y_min = self._stage_limits['y']['min']
-        z_min = self._stage_limits['z']['min']
+        x_min = self._stage_limits["x"]["min"]
+        y_min = self._stage_limits["y"]["min"]
+        z_min = self._stage_limits["z"]["min"]
 
         # If any coordinate is at the special "not set" value (min - 1), point is not set
-        return (x_spinbox.value() >= x_min and
-                y_spinbox.value() >= y_min and
-                z_spinbox.value() >= z_min)
+        return (
+            x_spinbox.value() >= x_min
+            and y_spinbox.value() >= y_min
+            and z_spinbox.value() >= z_min
+        )
 
     def _get_bounding_box(self) -> Optional[BoundingBox]:
         """Calculate bounding box from entered points.
@@ -764,26 +814,20 @@ class LED2DOverviewDialog(PersistentDialog):
         points = []
 
         # Point A (required)
-        points.append((
-            self.point_a_x.value(),
-            self.point_a_y.value(),
-            self.point_a_z.value()
-        ))
+        points.append(
+            (self.point_a_x.value(), self.point_a_y.value(), self.point_a_z.value())
+        )
 
         # Point B (required)
-        points.append((
-            self.point_b_x.value(),
-            self.point_b_y.value(),
-            self.point_b_z.value()
-        ))
+        points.append(
+            (self.point_b_x.value(), self.point_b_y.value(), self.point_b_z.value())
+        )
 
         # Point C (optional - only include if set)
         if self._is_point_set(self.point_c_x, self.point_c_y, self.point_c_z):
-            points.append((
-                self.point_c_x.value(),
-                self.point_c_y.value(),
-                self.point_c_z.value()
-            ))
+            points.append(
+                (self.point_c_x.value(), self.point_c_y.value(), self.point_c_z.value())
+            )
 
         if len(points) < 2:
             return None
@@ -793,9 +837,12 @@ class LED2DOverviewDialog(PersistentDialog):
         z_coords = [p[2] for p in points]
 
         return BoundingBox(
-            x_min=min(x_coords), x_max=max(x_coords),
-            y_min=min(y_coords), y_max=max(y_coords),
-            z_min=min(z_coords), z_max=max(z_coords)
+            x_min=min(x_coords),
+            x_max=max(x_coords),
+            y_min=min(y_coords),
+            y_max=max(y_coords),
+            z_min=min(z_coords),
+            z_max=max(z_coords),
         )
 
     def _get_actual_fov(self) -> Optional[float]:
@@ -805,7 +852,11 @@ class LED2DOverviewDialog(PersistentDialog):
             FOV in mm, or None if it cannot be determined
         """
         try:
-            if not self._app or not hasattr(self._app, 'camera_service') or not self._app.camera_service:
+            if (
+                not self._app
+                or not hasattr(self._app, "camera_service")
+                or not self._app.camera_service
+            ):
                 return None
 
             pixel_size_mm = self._app.camera_service.get_pixel_field_of_view()
@@ -849,7 +900,10 @@ class LED2DOverviewDialog(PersistentDialog):
             Tuple of (x, z) or None if not calibrated
         """
         try:
-            from py2flamingo.services.position_preset_service import PositionPresetService
+            from py2flamingo.services.position_preset_service import (
+                PositionPresetService,
+            )
+
             preset_service = PositionPresetService()
             preset = preset_service.get_preset("Tip of sample mount")
             if preset:
@@ -937,7 +991,9 @@ class LED2DOverviewDialog(PersistentDialog):
                 f"R: {tiles_x_r1}×{tiles_y_r1}={tiles_r1} tiles  |  "
                 f"R+90: {tiles_x_r2}×{tiles_y_r2}={tiles_r2} tiles"
             )
-            self.total_tiles_label.setText(f"Total: {total_tiles} tiles, {total_frames} frames (2 rotations)")
+            self.total_tiles_label.setText(
+                f"Total: {total_tiles} tiles, {total_frames} frames (2 rotations)"
+            )
             self.z_planes_label.setText(
                 f"Z planes: R={z_planes_r1} ({z_depth_r1:.2f}mm), R+90={z_planes_r2} ({z_depth_r2:.2f}mm)"
             )
@@ -983,13 +1039,15 @@ class LED2DOverviewDialog(PersistentDialog):
 
         # Check if coordinates are within valid stage bounds
         if not self._are_coordinates_valid():
-            x_limits = self._stage_limits['x']
-            y_limits = self._stage_limits['y']
-            z_limits = self._stage_limits['z']
-            return (f"One or more coordinates are outside valid stage bounds. "
-                   f"Valid ranges: X[{x_limits['min']:.1f}-{x_limits['max']:.1f}], "
-                   f"Y[{y_limits['min']:.1f}-{y_limits['max']:.1f}], "
-                   f"Z[{z_limits['min']:.1f}-{z_limits['max']:.1f}]")
+            x_limits = self._stage_limits["x"]
+            y_limits = self._stage_limits["y"]
+            z_limits = self._stage_limits["z"]
+            return (
+                f"One or more coordinates are outside valid stage bounds. "
+                f"Valid ranges: X[{x_limits['min']:.1f}-{x_limits['max']:.1f}], "
+                f"Y[{y_limits['min']:.1f}-{y_limits['max']:.1f}], "
+                f"Z[{z_limits['min']:.1f}-{z_limits['max']:.1f}]"
+            )
 
         # Check bounding box
         bbox = self._get_bounding_box()
@@ -1029,18 +1087,18 @@ class LED2DOverviewDialog(PersistentDialog):
             False if any coordinate in Point A or Point B is outside the valid range
         """
         # Check Point A
-        x_limits = self._stage_limits['x']
-        y_limits = self._stage_limits['y']
-        z_limits = self._stage_limits['z']
+        x_limits = self._stage_limits["x"]
+        y_limits = self._stage_limits["y"]
+        z_limits = self._stage_limits["z"]
 
-        point_a_x_valid = x_limits['min'] <= self.point_a_x.value() <= x_limits['max']
-        point_a_y_valid = y_limits['min'] <= self.point_a_y.value() <= y_limits['max']
-        point_a_z_valid = z_limits['min'] <= self.point_a_z.value() <= z_limits['max']
+        point_a_x_valid = x_limits["min"] <= self.point_a_x.value() <= x_limits["max"]
+        point_a_y_valid = y_limits["min"] <= self.point_a_y.value() <= y_limits["max"]
+        point_a_z_valid = z_limits["min"] <= self.point_a_z.value() <= z_limits["max"]
         point_a_valid = point_a_x_valid and point_a_y_valid and point_a_z_valid
 
-        point_b_x_valid = x_limits['min'] <= self.point_b_x.value() <= x_limits['max']
-        point_b_y_valid = y_limits['min'] <= self.point_b_y.value() <= y_limits['max']
-        point_b_z_valid = z_limits['min'] <= self.point_b_z.value() <= z_limits['max']
+        point_b_x_valid = x_limits["min"] <= self.point_b_x.value() <= x_limits["max"]
+        point_b_y_valid = y_limits["min"] <= self.point_b_y.value() <= y_limits["max"]
+        point_b_z_valid = z_limits["min"] <= self.point_b_z.value() <= z_limits["max"]
         point_b_valid = point_b_x_valid and point_b_y_valid and point_b_z_valid
 
         # Log invalid coordinates for debugging (only when actually out of range, not just "not set")
@@ -1078,9 +1136,9 @@ class LED2DOverviewDialog(PersistentDialog):
         bbox = self._get_bounding_box()
         coords_valid = self._are_coordinates_valid()
         points_incomplete = (
-            not coords_valid or
-            bbox is None or
-            (bbox.width < 0.001 and bbox.height < 0.001)
+            not coords_valid
+            or bbox is None
+            or (bbox.width < 0.001 and bbox.height < 0.001)
         )
 
         if points_incomplete:
@@ -1094,7 +1152,9 @@ class LED2DOverviewDialog(PersistentDialog):
 
         # Check imaging (LED settings loaded)
         # We no longer require Live View to be active - scan will start it automatically
-        imaging_incomplete = not self._current_led_name or self._current_led_name == "none"
+        imaging_incomplete = (
+            not self._current_led_name or self._current_led_name == "none"
+        )
 
         if imaging_incomplete:
             self.imaging_group.setStyleSheet(
@@ -1134,7 +1194,9 @@ class LED2DOverviewDialog(PersistentDialog):
             self.cancel_btn.setVisible(False)
             self.close_btn.setEnabled(True)
 
-    def _on_tile_completed(self, rotation_idx: int, tile_idx: int, total_tiles: int) -> None:
+    def _on_tile_completed(
+        self, rotation_idx: int, tile_idx: int, total_tiles: int
+    ) -> None:
         """Handle tile completion - update progress display.
 
         Args:
@@ -1144,7 +1206,7 @@ class LED2DOverviewDialog(PersistentDialog):
         """
         # Get actual number of rotations from workflow (1 if tip not calibrated, 2 otherwise)
         num_rotations = 2  # Default assumption
-        if self._workflow and hasattr(self._workflow, '_rotation_angles'):
+        if self._workflow and hasattr(self._workflow, "_rotation_angles"):
             num_rotations = len(self._workflow._rotation_angles)
 
         # Calculate overall progress across all rotations
@@ -1153,18 +1215,21 @@ class LED2DOverviewDialog(PersistentDialog):
         total_all_rotations = total_tiles * num_rotations
         percent = int((tiles_done / total_all_rotations) * 100)
 
-        self._logger.info(f"Tile completed: rotation {rotation_idx}, tile {tile_idx}/{total_tiles}, "
-                         f"progress: {tiles_done}/{total_all_rotations} = {percent}%")
+        self._logger.info(
+            f"Tile completed: rotation {rotation_idx}, tile {tile_idx}/{total_tiles}, "
+            f"progress: {tiles_done}/{total_all_rotations} = {percent}%"
+        )
 
         self._set_scan_in_progress(True, percent)
 
         # Update Sample View's workflow progress display
         self._update_sample_view_progress(
-            f"LED 2D Overview: {tiles_done}/{total_all_rotations} tiles",
-            percent
+            f"LED 2D Overview: {tiles_done}/{total_all_rotations} tiles", percent
         )
 
-    def _update_sample_view_progress(self, status: str, percent: int, time_remaining: str = "--:--") -> None:
+    def _update_sample_view_progress(
+        self, status: str, percent: int, time_remaining: str = "--:--"
+    ) -> None:
         """Update Sample View's workflow progress display.
 
         Args:
@@ -1173,7 +1238,9 @@ class LED2DOverviewDialog(PersistentDialog):
             time_remaining: Time remaining string (default "--:--")
         """
         if self._app and self._app.sample_view:
-            self._app.sample_view.update_workflow_progress(status, percent, time_remaining)
+            self._app.sample_view.update_workflow_progress(
+                status, percent, time_remaining
+            )
 
     def _reset_sample_view_progress(self) -> None:
         """Reset Sample View's workflow progress display to idle state."""
@@ -1200,7 +1267,7 @@ class LED2DOverviewDialog(PersistentDialog):
             led_name=self._current_led_name if self._current_led_name else "none",
             led_intensity=self._current_led_intensity,
             z_step_size=self.z_step_size.value(),
-            use_focus_stacking=self.focus_stacking_checkbox.isChecked()
+            use_focus_stacking=self.focus_stacking_checkbox.isChecked(),
         )
 
     def _load_previous_scan(self):
@@ -1209,29 +1276,26 @@ class LED2DOverviewDialog(PersistentDialog):
 
         # Get last-used path from configuration service (independent of other dialogs)
         start_path = ""
-        if self._app and hasattr(self._app, 'config_service'):
+        if self._app and hasattr(self._app, "config_service"):
             saved_path = self._app.config_service.get_led_2d_session_path()
             if saved_path:
                 start_path = saved_path
 
         folder = QFileDialog.getExistingDirectory(
-            self, "Select Saved Scan Folder",
-            start_path,
-            QFileDialog.ShowDirsOnly
+            self, "Select Saved Scan Folder", start_path, QFileDialog.ShowDirsOnly
         )
         if not folder:
             return
 
         # Save the selected path for next time
-        if self._app and hasattr(self._app, 'config_service'):
+        if self._app and hasattr(self._app, "config_service"):
             self._app.config_service.set_led_2d_session_path(folder)
 
         try:
             from .led_2d_overview_result import LED2DOverviewResultWindow
 
             window = LED2DOverviewResultWindow.load_from_folder(
-                Path(folder),
-                app=self._app
+                Path(folder), app=self._app
             )
             window.show()
             window.raise_()
@@ -1245,9 +1309,10 @@ class LED2DOverviewDialog(PersistentDialog):
         except FileNotFoundError as e:
             logger.warning(f"Failed to load scan: {e}")
             QMessageBox.warning(
-                self, "Invalid Folder",
+                self,
+                "Invalid Folder",
                 f"No valid scan data found in:\n{folder}\n\n"
-                "Please select a folder containing metadata.json"
+                "Please select a folder containing metadata.json",
             )
         except Exception as e:
             logger.error(f"Failed to load scan: {e}", exc_info=True)
@@ -1265,7 +1330,9 @@ class LED2DOverviewDialog(PersistentDialog):
             return
 
         try:
-            from py2flamingo.views.dialogs.led_2d_overview_result import LED2DOverviewResultWindow
+            from py2flamingo.views.dialogs.led_2d_overview_result import (
+                LED2DOverviewResultWindow,
+            )
 
             # Create preview window showing empty tile grid
             # Keep reference to prevent garbage collection
@@ -1273,7 +1340,7 @@ class LED2DOverviewDialog(PersistentDialog):
                 config=config,
                 preview_mode=True,
                 app=self._app,
-                parent=None  # Independent window
+                parent=None,  # Independent window
             )
             self._preview_window.show()
 
@@ -1282,11 +1349,12 @@ class LED2DOverviewDialog(PersistentDialog):
             bbox = config.bounding_box
             tiles_x, tiles_y = self._calculate_tile_count(bbox)
             QMessageBox.information(
-                self, "Preview",
+                self,
+                "Preview",
                 f"Preview not yet implemented.\n\n"
                 f"Configuration:\n"
                 f"- Tiles: {tiles_x} x {tiles_y}\n"
-                f"- Rotations: {config.starting_r}° and {config.starting_r + 90}°"
+                f"- Rotations: {config.starting_r}° and {config.starting_r + 90}°",
             )
 
     def _on_start_clicked(self):
@@ -1309,7 +1377,7 @@ class LED2DOverviewDialog(PersistentDialog):
                 "Cannot Start Scan",
                 "Field of View (FOV) could not be determined from camera.\n\n"
                 "The camera returned invalid image dimensions (0x0).\n"
-                "Please ensure the camera is properly connected and configured."
+                "Please ensure the camera is properly connected and configured.",
             )
             return
         tiles_x, tiles_y = tile_count
@@ -1327,7 +1395,7 @@ class LED2DOverviewDialog(PersistentDialog):
             f"Total: {total_tiles} tiles\n\n"
             "Continue?",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.No,
         )
 
         if reply != QMessageBox.Yes:
@@ -1341,7 +1409,7 @@ class LED2DOverviewDialog(PersistentDialog):
                 self,
                 "Cannot Start Scan",
                 "Failed to start Live View or enable LED.\n\n"
-                "Please ensure Sample View is open and the camera is connected."
+                "Please ensure Sample View is open and the camera is connected.",
             )
             return
 
@@ -1349,13 +1417,15 @@ class LED2DOverviewDialog(PersistentDialog):
         self.scan_requested.emit(config)
 
         try:
-            from py2flamingo.workflows.led_2d_overview_workflow import LED2DOverviewWorkflow
+            from py2flamingo.workflows.led_2d_overview_workflow import (
+                LED2DOverviewWorkflow,
+            )
 
             # Keep reference to prevent garbage collection
             self._workflow = LED2DOverviewWorkflow(
                 app=self._app,
                 config=config,
-                parent=self  # Parent to dialog so it stays alive
+                parent=self,  # Parent to dialog so it stays alive
             )
 
             # Connect workflow completion signals to stop live view
@@ -1363,7 +1433,9 @@ class LED2DOverviewDialog(PersistentDialog):
             self._workflow.scan_cancelled.connect(self._on_workflow_completed)
             self._workflow.scan_error.connect(self._on_workflow_error)
             self._workflow.tile_completed.connect(self._on_tile_completed)
-            self._logger.info("Connected to workflow signals (scan_completed, scan_cancelled, scan_error, tile_completed)")
+            self._logger.info(
+                "Connected to workflow signals (scan_completed, scan_cancelled, scan_error, tile_completed)"
+            )
 
             # Don't close dialog - user might want to run again
             self._workflow.start()
@@ -1374,9 +1446,10 @@ class LED2DOverviewDialog(PersistentDialog):
         except ImportError as e:
             self._logger.error(f"Could not import workflow: {e}")
             QMessageBox.information(
-                self, "Scan",
+                self,
+                "Scan",
                 "Scan workflow not yet implemented.\n\n"
-                "The LED 2D Overview feature is under development."
+                "The LED 2D Overview feature is under development.",
             )
         except Exception as e:
             self._logger.error(f"Error starting scan: {e}", exc_info=True)
@@ -1422,7 +1495,9 @@ class LED2DOverviewDialog(PersistentDialog):
         # Check if Live View is already active
         camera_controller = sample_view.camera_controller
         if not camera_controller:
-            self._logger.error("Cannot start live view - camera controller not available")
+            self._logger.error(
+                "Cannot start live view - camera controller not available"
+            )
             return False
 
         # Start Live View if not already active
@@ -1442,12 +1517,7 @@ class LED2DOverviewDialog(PersistentDialog):
 
         try:
             # Get LED color index from name (e.g., "led_red" -> 0)
-            led_map = {
-                'led_red': 0,
-                'led_green': 1,
-                'led_blue': 2,
-                'led_white': 3
-            }
+            led_map = {"led_red": 0, "led_green": 1, "led_blue": 2, "led_white": 3}
             led_color = led_map.get(self._current_led_name.lower())
             if led_color is None:
                 self._logger.error(f"Invalid LED name: {self._current_led_name}")
@@ -1457,13 +1527,19 @@ class LED2DOverviewDialog(PersistentDialog):
             laser_led_controller = laser_led_panel.laser_led_controller
 
             # Set LED intensity
-            laser_led_controller.set_led_intensity(led_color, self._current_led_intensity)
-            self._logger.info(f"Set LED intensity to {self._current_led_intensity:.1f}%")
+            laser_led_controller.set_led_intensity(
+                led_color, self._current_led_intensity
+            )
+            self._logger.info(
+                f"Set LED intensity to {self._current_led_intensity:.1f}%"
+            )
 
             # Enable LED for preview
             laser_led_controller.enable_led_for_preview(led_color)
             color_names = ["Red", "Green", "Blue", "White"]
-            self._logger.info(f"Enabled {color_names[led_color]} LED for LED 2D Overview scan")
+            self._logger.info(
+                f"Enabled {color_names[led_color]} LED for LED 2D Overview scan"
+            )
 
             return True
 

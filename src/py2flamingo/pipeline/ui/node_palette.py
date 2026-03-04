@@ -6,13 +6,12 @@ the graph canvas to create new nodes.
 """
 
 import logging
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QListWidget, QListWidgetItem, QLabel
-)
-from PyQt5.QtCore import Qt, QMimeData
-from PyQt5.QtGui import QDrag, QColor, QPixmap, QPainter, QFont
 
-from py2flamingo.pipeline.models.pipeline import NodeType, NODE_COLORS
+from PyQt5.QtCore import QMimeData, Qt
+from PyQt5.QtGui import QColor, QDrag, QFont, QPainter, QPixmap
+from PyQt5.QtWidgets import QLabel, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
+
+from py2flamingo.pipeline.models.pipeline import NODE_COLORS, NodeType
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +25,7 @@ _NODE_DESCRIPTIONS = {
     NodeType.SAMPLE_VIEW_DATA: "Read current 3D viewer data (volumes, position)",
 }
 
-MIME_TYPE = 'application/x-pipeline-node-type'
+MIME_TYPE = "application/x-pipeline-node-type"
 
 
 class NodePalette(QWidget):
@@ -65,14 +64,14 @@ class NodePalette(QWidget):
 
         for node_type in NodeType:
             item = QListWidgetItem()
-            display_name = node_type.name.replace('_', ' ').title()
-            description = _NODE_DESCRIPTIONS.get(node_type, '')
+            display_name = node_type.name.replace("_", " ").title()
+            description = _NODE_DESCRIPTIONS.get(node_type, "")
             item.setText(display_name)
             item.setToolTip(f"{description}\n(Drag onto canvas to add)")
             item.setData(Qt.UserRole, node_type.name)
 
             # Color indicator
-            color = QColor(NODE_COLORS.get(node_type, '#607d8b'))
+            color = QColor(NODE_COLORS.get(node_type, "#607d8b"))
             item.setForeground(color)
 
             self._list.addItem(item)
@@ -81,9 +80,7 @@ class NodePalette(QWidget):
         layout.addWidget(self._list)
 
         hint = QLabel("Drag items into the canvas\nto add pipeline nodes")
-        hint.setStyleSheet(
-            "color: #777; font-size: 10px; padding: 6px 4px;"
-        )
+        hint.setStyleSheet("color: #777; font-size: 10px; padding: 6px 4px;")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
@@ -99,15 +96,15 @@ class NodePalette(QWidget):
 
         drag = QDrag(self._list)
         mime = QMimeData()
-        mime.setData(MIME_TYPE, node_type_name.encode('utf-8'))
+        mime.setData(MIME_TYPE, node_type_name.encode("utf-8"))
         drag.setMimeData(mime)
 
         # Create a small drag pixmap
         pixmap = QPixmap(120, 30)
-        pixmap.fill(QColor('#2d2d2d'))
+        pixmap.fill(QColor("#2d2d2d"))
         painter = QPainter(pixmap)
-        painter.setPen(QColor('#ffffff'))
-        painter.setFont(QFont('Sans', 9))
+        painter.setPen(QColor("#ffffff"))
+        painter.setFont(QFont("Sans", 9))
         painter.drawText(pixmap.rect(), Qt.AlignCenter, item.text())
         painter.end()
         drag.setPixmap(pixmap)

@@ -1,10 +1,13 @@
 # tests/test_views_napari_adapter.py
-import types
 import sys
+import types
+
 import pytest
+
 
 def _install_fake_napari(monkeypatch):
     """Install a minimal fake napari module into sys.modules."""
+
     class _Layer:
         def __init__(self, data, name, metadata):
             self.data = data
@@ -24,12 +27,16 @@ def _install_fake_napari(monkeypatch):
     class _Viewer:
         def __init__(self):
             self.layers = _Layers()
+
         def add_image(self, data, name="", metadata=None):
-            self.layers.add_or_replace(_Layer(data, name or "Flamingo Live", metadata or {}))
+            self.layers.add_or_replace(
+                _Layer(data, name or "Flamingo Live", metadata or {})
+            )
 
     fake = types.SimpleNamespace(Viewer=_Viewer, run=lambda: None)
     monkeypatch.setitem(sys.modules, "napari", fake)
     return fake
+
 
 def test_napari_viewer_add_and_update(monkeypatch):
     fake_napari = _install_fake_napari(monkeypatch)
@@ -53,4 +60,3 @@ def test_napari_viewer_add_and_update(monkeypatch):
     assert "Live" in v.layers
     assert v.layers["Live"].data is img2  # data updated
     # name remains "Live"; metadata may or may not be updated by adapter (we don't rely on it)
-

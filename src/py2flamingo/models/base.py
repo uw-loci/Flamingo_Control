@@ -4,15 +4,14 @@ This module provides foundational classes for all domain models in the applicati
 including base functionality for serialization, validation, and metadata tracking.
 """
 
-from dataclasses import dataclass, field, asdict
-from typing import Optional, Dict, Any, TypeVar, Type
-from datetime import datetime
-import uuid
 import json
+import uuid
 from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from typing import Any, Dict, Optional, Type, TypeVar
 
-
-T = TypeVar('T', bound='BaseModel')
+T = TypeVar("T", bound="BaseModel")
 
 
 @dataclass
@@ -44,10 +43,10 @@ class BaseModel:
         result = asdict(self)
 
         # Convert datetime objects to ISO format strings
-        if result.get('created_at'):
-            result['created_at'] = result['created_at'].isoformat()
-        if result.get('updated_at'):
-            result['updated_at'] = result['updated_at'].isoformat()
+        if result.get("created_at"):
+            result["created_at"] = result["created_at"].isoformat()
+        if result.get("updated_at"):
+            result["updated_at"] = result["updated_at"].isoformat()
 
         return result
 
@@ -65,10 +64,10 @@ class BaseModel:
         data = dict(data)
 
         # Convert ISO format strings back to datetime
-        if 'created_at' in data and isinstance(data['created_at'], str):
-            data['created_at'] = datetime.fromisoformat(data['created_at'])
-        if 'updated_at' in data and isinstance(data['updated_at'], str):
-            data['updated_at'] = datetime.fromisoformat(data['updated_at'])
+        if "created_at" in data and isinstance(data["created_at"], str):
+            data["created_at"] = datetime.fromisoformat(data["created_at"])
+        if "updated_at" in data and isinstance(data["updated_at"], str):
+            data["updated_at"] = datetime.fromisoformat(data["updated_at"])
 
         # Remove any extra fields not in the model
         valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
@@ -120,7 +119,7 @@ class ValidatedModel(BaseModel):
 
     def __post_init__(self):
         """Validate model after initialization."""
-        super().__post_init__() if hasattr(super(), '__post_init__') else None
+        super().__post_init__() if hasattr(super(), "__post_init__") else None
         self.validate()
 
     def update(self) -> None:
@@ -148,18 +147,20 @@ class ImmutableModel(BaseModel):
 
     def __setattr__(self, name: str, value: Any) -> None:
         """Prevent modification after initialization."""
-        if hasattr(self, '_initialized') and self._initialized:
+        if hasattr(self, "_initialized") and self._initialized:
             raise AttributeError(f"Cannot modify immutable model field '{name}'")
         super().__setattr__(name, value)
 
     def __post_init__(self):
         """Mark model as initialized to prevent further modifications."""
-        super().__post_init__() if hasattr(super(), '__post_init__') else None
-        object.__setattr__(self, '_initialized', True)
+        super().__post_init__() if hasattr(super(), "__post_init__") else None
+        object.__setattr__(self, "_initialized", True)
 
     def update(self) -> None:
         """Immutable models cannot be updated."""
-        raise NotImplementedError("Immutable models cannot be updated. Use copy() instead.")
+        raise NotImplementedError(
+            "Immutable models cannot be updated. Use copy() instead."
+        )
 
 
 class ValidationError(Exception):
@@ -185,8 +186,12 @@ class ValidationError(Exception):
         return f"Validation failed: {self.message}"
 
 
-def validate_range(value: float, min_val: Optional[float] = None,
-                  max_val: Optional[float] = None, field_name: str = "value") -> None:
+def validate_range(
+    value: float,
+    min_val: Optional[float] = None,
+    max_val: Optional[float] = None,
+    field_name: str = "value",
+) -> None:
     """Utility function to validate numeric ranges.
 
     Args:
@@ -200,16 +205,12 @@ def validate_range(value: float, min_val: Optional[float] = None,
     """
     if min_val is not None and value < min_val:
         raise ValidationError(
-            f"Value {value} is below minimum {min_val}",
-            field=field_name,
-            value=value
+            f"Value {value} is below minimum {min_val}", field=field_name, value=value
         )
 
     if max_val is not None and value > max_val:
         raise ValidationError(
-            f"Value {value} is above maximum {max_val}",
-            field=field_name,
-            value=value
+            f"Value {value} is above maximum {max_val}", field=field_name, value=value
         )
 
 
@@ -226,5 +227,5 @@ def validate_not_empty(value: Any, field_name: str = "value") -> None:
     if value is None:
         raise ValidationError(f"Value cannot be None", field=field_name, value=value)
 
-    if hasattr(value, '__len__') and len(value) == 0:
+    if hasattr(value, "__len__") and len(value) == 0:
         raise ValidationError(f"Value cannot be empty", field=field_name, value=value)

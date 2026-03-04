@@ -14,13 +14,12 @@ import base64
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
-from PyQt5.QtWidgets import QWidget, QMainWindow, QDialog, QSplitter
 from PyQt5.QtCore import QByteArray
+from PyQt5.QtWidgets import QDialog, QMainWindow, QSplitter, QWidget
 
 from py2flamingo.resources import get_app_icon
-
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +29,10 @@ logger = logging.getLogger(__name__)
 # PersistentDialog/PersistentWidget use this automatically when no
 # explicit geometry_manager is passed, so callers don't need to thread
 # the manager through every constructor chain.
-_default_geometry_manager: Optional['WindowGeometryManager'] = None
+_default_geometry_manager: Optional["WindowGeometryManager"] = None
 
 
-def set_default_geometry_manager(manager: 'WindowGeometryManager') -> None:
+def set_default_geometry_manager(manager: "WindowGeometryManager") -> None:
     """Set the application-wide default geometry manager.
 
     Call once during application startup. All PersistentDialog and
@@ -77,10 +76,7 @@ class WindowGeometryManager:
                         Relative paths are resolved from the current working directory.
         """
         self.config_file = Path(config_file)
-        self._data: Dict[str, Any] = {
-            "version": "1.0",
-            "windows": {}
-        }
+        self._data: Dict[str, Any] = {"version": "1.0", "windows": {}}
         self._load_from_json()
 
     def _load_from_json(self) -> None:
@@ -89,13 +85,17 @@ class WindowGeometryManager:
         If file doesn't exist, starts with empty configuration.
         """
         if not self.config_file.exists():
-            logger.debug(f"Geometry file not found: {self.config_file}. Starting fresh.")
+            logger.debug(
+                f"Geometry file not found: {self.config_file}. Starting fresh."
+            )
             return
 
         try:
-            with open(self.config_file, 'r') as f:
+            with open(self.config_file, "r") as f:
                 self._data = json.load(f)
-            logger.info(f"Loaded geometry for {len(self._data.get('windows', {}))} windows")
+            logger.info(
+                f"Loaded geometry for {len(self._data.get('windows', {}))} windows"
+            )
         except json.JSONDecodeError as e:
             logger.warning(f"Invalid JSON in geometry file, starting fresh: {e}")
             self._data = {"version": "1.0", "windows": {}}
@@ -109,9 +109,11 @@ class WindowGeometryManager:
             # Ensure parent directory exists
             self.config_file.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(self.config_file, 'w') as f:
+            with open(self.config_file, "w") as f:
                 json.dump(self._data, f, indent=2)
-            logger.debug(f"Saved geometry for {len(self._data.get('windows', {}))} windows")
+            logger.debug(
+                f"Saved geometry for {len(self._data.get('windows', {}))} windows"
+            )
         except Exception as e:
             logger.error(f"Error saving geometry file: {e}")
 
@@ -130,7 +132,7 @@ class WindowGeometryManager:
                 "geometry": None,
                 "state": None,
                 "splitters": {},
-                "dialog_state": {}
+                "dialog_state": {},
             }
         return windows[window_id]
 
@@ -151,12 +153,16 @@ class WindowGeometryManager:
 
             # Save geometry (position, size, maximized state)
             geometry_bytes = widget.saveGeometry()
-            window_data["geometry"] = base64.b64encode(geometry_bytes.data()).decode('ascii')
+            window_data["geometry"] = base64.b64encode(geometry_bytes.data()).decode(
+                "ascii"
+            )
 
             # For QMainWindow, also save state (toolbar/dock positions)
             if isinstance(widget, QMainWindow):
                 state_bytes = widget.saveState()
-                window_data["state"] = base64.b64encode(state_bytes.data()).decode('ascii')
+                window_data["state"] = base64.b64encode(state_bytes.data()).decode(
+                    "ascii"
+                )
 
             logger.debug(f"Saved geometry for '{window_id}'")
 
@@ -207,8 +213,9 @@ class WindowGeometryManager:
             logger.error(f"Error restoring geometry for '{window_id}': {e}")
             return False
 
-    def save_splitter_state(self, window_id: str, splitter_id: str,
-                            splitter: QSplitter) -> None:
+    def save_splitter_state(
+        self, window_id: str, splitter_id: str, splitter: QSplitter
+    ) -> None:
         """Save a splitter's sizes to storage.
 
         Args:
@@ -229,8 +236,9 @@ class WindowGeometryManager:
         except Exception as e:
             logger.error(f"Error saving splitter state: {e}")
 
-    def restore_splitter_state(self, window_id: str, splitter_id: str,
-                               splitter: QSplitter) -> bool:
+    def restore_splitter_state(
+        self, window_id: str, splitter_id: str, splitter: QSplitter
+    ) -> bool:
         """Restore a splitter's sizes from storage.
 
         Args:
@@ -259,9 +267,11 @@ class WindowGeometryManager:
                 logger.debug(f"Restored splitter '{splitter_id}': {sizes}")
                 return True
             else:
-                logger.warning(f"Splitter size mismatch for '{splitter_id}': "
-                             f"saved {len(sizes) if sizes else 0}, "
-                             f"current {splitter.count()}")
+                logger.warning(
+                    f"Splitter size mismatch for '{splitter_id}': "
+                    f"saved {len(sizes) if sizes else 0}, "
+                    f"current {splitter.count()}"
+                )
                 return False
 
         except Exception as e:
@@ -305,7 +315,9 @@ class WindowGeometryManager:
             state = window_data.get("dialog_state", {})
 
             if state:
-                logger.debug(f"Restored dialog state for '{window_id}': {list(state.keys())}")
+                logger.debug(
+                    f"Restored dialog state for '{window_id}': {list(state.keys())}"
+                )
 
             return state
 
@@ -366,9 +378,12 @@ class GeometryPersistenceMixin:
     _geometry_restored: bool = False
     _splitters: Dict[str, QSplitter] = None
 
-    def _setup_geometry_persistence(self, geometry_manager: WindowGeometryManager,
-                                    window_id: str,
-                                    splitters: Optional[Dict[str, QSplitter]] = None) -> None:
+    def _setup_geometry_persistence(
+        self,
+        geometry_manager: WindowGeometryManager,
+        window_id: str,
+        splitters: Optional[Dict[str, QSplitter]] = None,
+    ) -> None:
         """Set up geometry persistence for this widget.
 
         Args:
@@ -431,8 +446,13 @@ class PersistentDialog(QDialog):
                 # ... build UI ...
     """
 
-    def __init__(self, *args, geometry_manager: Optional['WindowGeometryManager'] = None,
-                 window_id: Optional[str] = None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        geometry_manager: Optional["WindowGeometryManager"] = None,
+        window_id: Optional[str] = None,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.setWindowIcon(get_app_icon())
         self._geometry_manager = geometry_manager or _default_geometry_manager
@@ -472,8 +492,13 @@ class PersistentWidget(QWidget):
                 # ... build UI ...
     """
 
-    def __init__(self, *args, geometry_manager: Optional['WindowGeometryManager'] = None,
-                 window_id: Optional[str] = None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        geometry_manager: Optional["WindowGeometryManager"] = None,
+        window_id: Optional[str] = None,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.setWindowIcon(get_app_icon())
         self._geometry_manager = geometry_manager or _default_geometry_manager

@@ -3,8 +3,11 @@ import shutil
 from queue import Queue
 from threading import Event, Thread
 
+from PyQt5.QtWidgets import QFileDialog, QMessageBox
+
 import py2flamingo.functions.microscope_connect as mc
 from py2flamingo.utils.file_handlers import text_to_dict, workflow_to_dict
+
 from .global_objects import (
     command_data_queue,
     command_queue,
@@ -21,7 +24,6 @@ from .global_objects import (
     visualize_queue,
     z_plane_queue,
 )
-from PyQt5.QtWidgets import QFileDialog, QMessageBox
 
 
 def show_warning_message(warning):
@@ -187,8 +189,8 @@ class FlamingoConnect:
                 self.instrument_name = instrument_name
                 self.instrument_type = instrument_type
                 # Try to connect to microscope
-                nuc_client, live_client, wf_zstack, LED_on, LED_off = mc.start_connection(
-                    self.IP, self.port
+                nuc_client, live_client, wf_zstack, LED_on, LED_off = (
+                    mc.start_connection(self.IP, self.port)
                 )
                 # Create threads for communication and processing
                 threads = mc.create_threads(
@@ -209,11 +211,21 @@ class FlamingoConnect:
                 )
                 self.threads = threads
                 # Prepare connection data tuple for controllers
-                self.connection_data = (nuc_client, live_client, wf_zstack, LED_on, LED_off)
+                self.connection_data = (
+                    nuc_client,
+                    live_client,
+                    wf_zstack,
+                    LED_on,
+                    LED_off,
+                )
             else:
-                show_warning_message("Invalid metadata file format: missing IP or Port.")
+                show_warning_message(
+                    "Invalid metadata file format: missing IP or Port."
+                )
         else:
-            show_warning_message("FlamingoMetaData.txt not found. Connection cannot be established.")
+            show_warning_message(
+                "FlamingoMetaData.txt not found. Connection cannot be established."
+            )
 
     def check_zstack_file(self):
         """
@@ -231,8 +243,14 @@ class FlamingoConnect:
         """
         # The start position file name might depend on instrument or sample
         # For now, just ensure some file exists as a placeholder.
-        files = [f for f in os.listdir("microscope_settings") if f.endswith("_start_position.txt")]
+        files = [
+            f
+            for f in os.listdir("microscope_settings")
+            if f.endswith("_start_position.txt")
+        ]
         if not files:
-            placeholder = os.path.join("microscope_settings", "default_start_position.txt")
+            placeholder = os.path.join(
+                "microscope_settings", "default_start_position.txt"
+            )
             open(placeholder, "a").close()
             print("Created default start position file.")

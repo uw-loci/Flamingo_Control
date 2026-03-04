@@ -11,9 +11,9 @@ Uses MVCWorkflowService for sending workflows to the microscope.
 
 import logging
 import time
-from typing import Tuple, Dict, Any, List, Optional, TYPE_CHECKING, Callable
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 
@@ -21,7 +21,12 @@ from ..models import ConnectionModel, ConnectionState, WorkflowModel
 from ..utils.workflow_parser import WorkflowTextFormatter
 
 if TYPE_CHECKING:
-    from ..services import MVCWorkflowService, WorkflowTemplateService, AcquisitionTimingService, MVCConnectionService
+    from ..services import (
+        AcquisitionTimingService,
+        MVCConnectionService,
+        MVCWorkflowService,
+        WorkflowTemplateService,
+    )
 
 
 class WorkflowController(QObject):
@@ -49,12 +54,16 @@ class WorkflowController(QObject):
     _tile_position_requested = pyqtSignal(dict)
     _tile_position_clear_requested = pyqtSignal()
 
-    def __init__(self, workflow_service: 'MVCWorkflowService', connection_model: ConnectionModel,
-                 workflow_model: Optional[WorkflowModel] = None,
-                 workflows_dir: Optional[Path] = None,
-                 connection_service: Optional['MVCConnectionService'] = None,
-                 template_service: Optional['WorkflowTemplateService'] = None,
-                 timing_service: Optional['AcquisitionTimingService'] = None):
+    def __init__(
+        self,
+        workflow_service: "MVCWorkflowService",
+        connection_model: ConnectionModel,
+        workflow_model: Optional[WorkflowModel] = None,
+        workflows_dir: Optional[Path] = None,
+        connection_service: Optional["MVCConnectionService"] = None,
+        template_service: Optional["WorkflowTemplateService"] = None,
+        timing_service: Optional["AcquisitionTimingService"] = None,
+    ):
         """
         Initialize controller with dependencies.
 
@@ -87,7 +96,9 @@ class WorkflowController(QObject):
         # Tile workflow position tracking for Sample View integration
         self._active_tile_position: Optional[Dict] = None
         self._camera_controller = None  # Will be set via setter
-        self._suppress_tile_clear = False  # When True, tile collection manages lifecycle
+        self._suppress_tile_clear = (
+            False  # When True, tile collection manages lifecycle
+        )
 
         # Connect signals to slots for thread-safe tile position updates
         self._tile_position_requested.connect(self._apply_tile_position)
@@ -121,11 +132,17 @@ class WorkflowController(QObject):
     @pyqtSlot(dict)
     def _apply_tile_position(self, position: dict):
         """Apply tile position on the main thread (invoked via signal)."""
-        if self._camera_controller and hasattr(self._camera_controller, 'set_active_tile_position'):
+        if self._camera_controller and hasattr(
+            self._camera_controller, "set_active_tile_position"
+        ):
             self._camera_controller.set_active_tile_position(position)
-            self._logger.info(f"Set tile position for Sample View: {position.get('filename', 'unknown')}")
+            self._logger.info(
+                f"Set tile position for Sample View: {position.get('filename', 'unknown')}"
+            )
         else:
-            self._logger.warning("Camera controller not available for tile position tracking")
+            self._logger.warning(
+                "Camera controller not available for tile position tracking"
+            )
 
     def _clear_tile_position(self):
         """Clear tile position metadata after workflow completes.
@@ -133,17 +150,23 @@ class WorkflowController(QObject):
         Emits signal to marshal the camera controller call onto the main thread.
         """
         if self._suppress_tile_clear:
-            self._logger.debug("Suppressing tile clear (tile collection manages lifecycle)")
+            self._logger.debug(
+                "Suppressing tile clear (tile collection manages lifecycle)"
+            )
             return
         if self._active_tile_position:
-            self._logger.info(f"Clearing tile position: {self._active_tile_position.get('filename', 'unknown')}")
+            self._logger.info(
+                f"Clearing tile position: {self._active_tile_position.get('filename', 'unknown')}"
+            )
             self._active_tile_position = None
             self._tile_position_clear_requested.emit()
 
     @pyqtSlot()
     def _apply_clear_tile_position(self):
         """Clear tile position on the main thread (invoked via signal)."""
-        if self._camera_controller and hasattr(self._camera_controller, 'clear_tile_mode'):
+        if self._camera_controller and hasattr(
+            self._camera_controller, "clear_tile_mode"
+        ):
             self._camera_controller.clear_tile_mode()
 
     def load_workflow(self, file_path: str) -> Tuple[bool, str]:
@@ -185,7 +208,9 @@ class WorkflowController(QObject):
             self._current_workflow_data = workflow_data
             self._current_workflow_path = path
 
-            self._logger.info(f"Loaded workflow: {path.name} ({len(workflow_data)} bytes)")
+            self._logger.info(
+                f"Loaded workflow: {path.name} ({len(workflow_data)} bytes)"
+            )
             return (True, f"Workflow loaded successfully: {path.name}")
 
         except FileNotFoundError:
@@ -233,7 +258,9 @@ class WorkflowController(QObject):
                 if self._workflow_model:
                     self._workflow_model.mark_started()
 
-                self._logger.info(f"Started workflow: {self._current_workflow_path.name}")
+                self._logger.info(
+                    f"Started workflow: {self._current_workflow_path.name}"
+                )
                 return (True, f"Workflow started: {self._current_workflow_path.name}")
             else:
                 return (False, "Failed to start workflow")
@@ -303,15 +330,27 @@ class WorkflowController(QObject):
                 - 'execution_time': float or None - Execution time in seconds
         """
         # Check workflow model for running state
-        is_running = self._workflow_model.is_running() if self._workflow_model else False
-        execution_time = self._workflow_model.get_execution_time() if self._workflow_model else None
+        is_running = (
+            self._workflow_model.is_running() if self._workflow_model else False
+        )
+        execution_time = (
+            self._workflow_model.get_execution_time() if self._workflow_model else None
+        )
 
         return {
-            'loaded': self._current_workflow_path is not None,
-            'running': is_running,
-            'workflow_name': self._current_workflow_path.name if self._current_workflow_path else None,
-            'workflow_path': str(self._current_workflow_path) if self._current_workflow_path else None,
-            'execution_time': execution_time,
+            "loaded": self._current_workflow_path is not None,
+            "running": is_running,
+            "workflow_name": (
+                self._current_workflow_path.name
+                if self._current_workflow_path
+                else None
+            ),
+            "workflow_path": (
+                str(self._current_workflow_path)
+                if self._current_workflow_path
+                else None
+            ),
+            "execution_time": execution_time,
         }
 
     def is_workflow_running(self) -> bool:
@@ -357,7 +396,7 @@ class WorkflowController(QObject):
             return (False, errors)
 
         # Check file extension
-        if file_path.suffix.lower() != '.txt':
+        if file_path.suffix.lower() != ".txt":
             errors.append(f"Workflow file must be .txt format, got {file_path.suffix}")
 
         # Check file is readable
@@ -369,7 +408,9 @@ class WorkflowController(QObject):
                 file_size = file_path.stat().st_size
                 max_size = 10 * 1024 * 1024  # 10MB
                 if file_size > max_size:
-                    errors.append(f"File too large: {file_size / (1024*1024):.2f}MB (max 10MB)")
+                    errors.append(
+                        f"File too large: {file_size / (1024*1024):.2f}MB (max 10MB)"
+                    )
                 if file_size == 0:
                     errors.append("File is empty")
             except OSError as e:
@@ -381,8 +422,12 @@ class WorkflowController(QObject):
         else:
             return (True, [])
 
-    def start_workflow_from_ui(self, workflow, workflow_dict: Optional[Dict[str, Any]] = None,
-                               save_to_disk: bool = True) -> Tuple[bool, str]:
+    def start_workflow_from_ui(
+        self,
+        workflow,
+        workflow_dict: Optional[Dict[str, Any]] = None,
+        save_to_disk: bool = True,
+    ) -> Tuple[bool, str]:
         """
         Start workflow from UI-built Workflow object.
 
@@ -408,7 +453,7 @@ class WorkflowController(QObject):
             if workflow_dict is not None:
                 # Use the text formatter to convert dict to text
                 workflow_bytes = self._text_formatter.format_to_bytes(workflow_dict)
-            elif hasattr(workflow, 'to_dict'):
+            elif hasattr(workflow, "to_dict"):
                 # Convert Workflow model to dict first
                 workflow_dict = workflow.to_dict()
                 workflow_bytes = self._text_formatter.format_to_bytes(workflow_dict)
@@ -431,13 +476,17 @@ class WorkflowController(QObject):
                 self._is_executing = True
                 # Record start time and params for timing tracking
                 self._current_workflow_start_time = time.time()
-                self._current_workflow_params = self._extract_timing_params(workflow_dict)
+                self._current_workflow_params = self._extract_timing_params(
+                    workflow_dict
+                )
 
                 # Mark workflow as started in model
                 if self._workflow_model:
                     self._workflow_model.mark_started()
 
-                workflow_name = workflow.name if hasattr(workflow, 'name') else "UI Workflow"
+                workflow_name = (
+                    workflow.name if hasattr(workflow, "name") else "UI Workflow"
+                )
                 self._logger.info(f"Started workflow from UI: {workflow_name}")
                 return (True, f"Workflow started: {workflow_name}")
             else:
@@ -480,14 +529,22 @@ class WorkflowController(QObject):
 
         # Check if we have connection service and last known config
         if not self._connection_service:
-            return (False, "Must connect to server before starting workflow (no connection service)")
+            return (
+                False,
+                "Must connect to server before starting workflow (no connection service)",
+            )
 
         status = self._connection_model.status
         if not status.ip or not status.port:
-            return (False, "Must connect to server before starting workflow (no previous connection)")
+            return (
+                False,
+                "Must connect to server before starting workflow (no previous connection)",
+            )
 
         # Attempt to reconnect using last known IP/port
-        self._logger.info(f"Connection lost, attempting reconnect to {status.ip}:{status.port}")
+        self._logger.info(
+            f"Connection lost, attempting reconnect to {status.ip}:{status.port}"
+        )
         try:
             from py2flamingo.models.connection import ConnectionConfig
 
@@ -495,7 +552,7 @@ class WorkflowController(QObject):
                 ip_address=status.ip,
                 port=status.port,
                 live_port=status.port + 1,  # Standard live port offset
-                timeout=5.0
+                timeout=5.0,
             )
 
             self._connection_service.reconnect(config)
@@ -523,7 +580,7 @@ class WorkflowController(QObject):
 
     # Template Management Methods
 
-    def set_template_service(self, template_service: 'WorkflowTemplateService') -> None:
+    def set_template_service(self, template_service: "WorkflowTemplateService") -> None:
         """Set the template service for template management."""
         self._template_service = template_service
 
@@ -538,8 +595,13 @@ class WorkflowController(QObject):
             return []
         return self._template_service.get_template_names()
 
-    def save_template(self, name: str, workflow_type: str, workflow_dict: Dict[str, Any],
-                     description: str = "") -> Tuple[bool, str]:
+    def save_template(
+        self,
+        name: str,
+        workflow_type: str,
+        workflow_dict: Dict[str, Any],
+        description: str = "",
+    ) -> Tuple[bool, str]:
         """
         Save current workflow settings as a template.
 
@@ -556,7 +618,9 @@ class WorkflowController(QObject):
             return (False, "Template service not available")
 
         try:
-            self._template_service.save_template(name, workflow_type, workflow_dict, description)
+            self._template_service.save_template(
+                name, workflow_type, workflow_dict, description
+            )
             self._logger.info(f"Saved template: {name}")
             return (True, f"Template '{name}' saved successfully")
         except ValueError as e:
@@ -585,9 +649,9 @@ class WorkflowController(QObject):
                 return (False, None, f"Template '{name}' not found")
 
             template_data = {
-                'workflow_type': template.workflow_type,
-                'settings': template.settings,
-                'description': template.description,
+                "workflow_type": template.workflow_type,
+                "settings": template.settings,
+                "description": template.description,
             }
             self._logger.info(f"Loaded template: {name}")
             return (True, template_data, f"Template '{name}' loaded")
@@ -650,22 +714,22 @@ class WorkflowController(QObject):
                 - hardware_validation: Dict with valid, message (if connected)
         """
         result = {
-            'valid': True,
-            'errors': [],
-            'warnings': [],
-            'estimates': {},
-            'hardware_validation': None,
+            "valid": True,
+            "errors": [],
+            "warnings": [],
+            "estimates": {},
+            "hardware_validation": None,
         }
 
         # 1. Local validation
         errors, warnings = self._validate_workflow_dict(workflow_dict)
-        result['errors'] = errors
-        result['warnings'] = warnings
+        result["errors"] = errors
+        result["warnings"] = warnings
         if errors:
-            result['valid'] = False
+            result["valid"] = False
 
         # 2. Calculate estimates
-        result['estimates'] = self._calculate_estimates(workflow_dict)
+        result["estimates"] = self._calculate_estimates(workflow_dict)
 
         # 3. Hardware validation (if connected)
         if self._is_connected() and self._check_stack_callback:
@@ -673,26 +737,28 @@ class WorkflowController(QObject):
                 # Convert to bytes for CHECK_STACK
                 workflow_bytes = self._text_formatter.format_to_bytes(workflow_dict)
                 hw_result = self._check_stack_callback(workflow_bytes)
-                result['hardware_validation'] = hw_result
-                if not hw_result.get('valid', True):
-                    result['valid'] = False
-                    if hw_result.get('message'):
-                        result['errors'].append(f"Hardware: {hw_result['message']}")
+                result["hardware_validation"] = hw_result
+                if not hw_result.get("valid", True):
+                    result["valid"] = False
+                    if hw_result.get("message"):
+                        result["errors"].append(f"Hardware: {hw_result['message']}")
             except Exception as e:
                 self._logger.error(f"Hardware validation error: {e}", exc_info=True)
-                result['hardware_validation'] = {
-                    'valid': False,
-                    'message': f"Check failed: {str(e)}"
+                result["hardware_validation"] = {
+                    "valid": False,
+                    "message": f"Check failed: {str(e)}",
                 }
         elif not self._is_connected():
-            result['hardware_validation'] = {
-                'valid': True,
-                'message': "Not connected - hardware validation skipped"
+            result["hardware_validation"] = {
+                "valid": True,
+                "message": "Not connected - hardware validation skipped",
             }
 
         return result
 
-    def _validate_workflow_dict(self, workflow_dict: Dict[str, Any]) -> Tuple[List[str], List[str]]:
+    def _validate_workflow_dict(
+        self, workflow_dict: Dict[str, Any]
+    ) -> Tuple[List[str], List[str]]:
         """
         Validate workflow dictionary structure and parameters.
 
@@ -703,53 +769,59 @@ class WorkflowController(QObject):
         warnings = []
 
         # Check required sections
-        required_sections = ['Experiment Settings', 'Camera Settings', 'Start Position']
+        required_sections = ["Experiment Settings", "Camera Settings", "Start Position"]
         for section in required_sections:
             if section not in workflow_dict:
                 errors.append(f"Missing required section: {section}")
 
         # Validate stack settings
-        if 'Stack Settings' in workflow_dict:
-            stack = workflow_dict['Stack Settings']
+        if "Stack Settings" in workflow_dict:
+            stack = workflow_dict["Stack Settings"]
 
             # Number of planes
-            num_planes = int(stack.get('Number of planes', 1))
+            num_planes = int(stack.get("Number of planes", 1))
             if num_planes < 1:
                 errors.append("Number of planes must be at least 1")
             elif num_planes > 1000:
-                warnings.append(f"Large number of planes ({num_planes}) may take extended time")
+                warnings.append(
+                    f"Large number of planes ({num_planes}) may take extended time"
+                )
 
             # Z step
-            z_step_mm = float(stack.get('Change in Z axis (mm)', 0))
+            z_step_mm = float(stack.get("Change in Z axis (mm)", 0))
             if z_step_mm <= 0 and num_planes > 1:
                 errors.append("Z step must be positive for Z-stacks")
 
             # Z velocity
-            z_velocity = float(stack.get('Z stage velocity (mm/s)', 0.1))
+            z_velocity = float(stack.get("Z stage velocity (mm/s)", 0.1))
             if z_velocity <= 0:
                 errors.append("Z velocity must be positive")
             elif z_velocity < 0.01:
-                errors.append(f"Z velocity ({z_velocity} mm/s) below minimum (0.01 mm/s)")
+                errors.append(
+                    f"Z velocity ({z_velocity} mm/s) below minimum (0.01 mm/s)"
+                )
             elif z_velocity > 2.0:
-                errors.append(f"Z velocity ({z_velocity} mm/s) exceeds maximum (2.0 mm/s)")
+                errors.append(
+                    f"Z velocity ({z_velocity} mm/s) exceeds maximum (2.0 mm/s)"
+                )
             elif z_velocity > 1.5:
                 warnings.append(f"Z velocity ({z_velocity} mm/s) near maximum limit")
 
         # Validate camera settings
-        if 'Camera Settings' in workflow_dict:
-            camera = workflow_dict['Camera Settings']
-            exposure = float(camera.get('Exposure time (us)', 0))
+        if "Camera Settings" in workflow_dict:
+            camera = workflow_dict["Camera Settings"]
+            exposure = float(camera.get("Exposure time (us)", 0))
             if exposure <= 0:
                 errors.append("Exposure time must be positive")
 
         # Validate illumination
-        if 'Illumination Source' in workflow_dict:
-            illum = workflow_dict['Illumination Source']
+        if "Illumination Source" in workflow_dict:
+            illum = workflow_dict["Illumination Source"]
             has_illumination = False
             for key, value in illum.items():
-                if isinstance(value, str) and ' ' in value:
+                if isinstance(value, str) and " " in value:
                     parts = value.split()
-                    if len(parts) >= 2 and parts[1] == '1':
+                    if len(parts) >= 2 and parts[1] == "1":
                         has_illumination = True
                         break
             if not has_illumination:
@@ -767,36 +839,38 @@ class WorkflowController(QObject):
         estimates = {}
 
         # Get parameters
-        stack = workflow_dict.get('Stack Settings', {})
-        camera = workflow_dict.get('Camera Settings', {})
+        stack = workflow_dict.get("Stack Settings", {})
+        camera = workflow_dict.get("Camera Settings", {})
 
-        num_planes = int(stack.get('Number of planes', 1))
-        z_step_mm = float(stack.get('Change in Z axis (mm)', 0))
-        z_velocity = float(stack.get('Z stage velocity (mm/s)', 0.1))
-        exposure_us = float(camera.get('Exposure time (us)', 1000))
-        aoi_width = int(camera.get('AOI width', 2048))
-        aoi_height = int(camera.get('AOI height', 2048))
+        num_planes = int(stack.get("Number of planes", 1))
+        z_step_mm = float(stack.get("Change in Z axis (mm)", 0))
+        z_velocity = float(stack.get("Z stage velocity (mm/s)", 0.1))
+        exposure_us = float(camera.get("Exposure time (us)", 1000))
+        aoi_width = int(camera.get("AOI width", 2048))
+        aoi_height = int(camera.get("AOI height", 2048))
 
         # Z range
         z_range_um = (num_planes - 1) * (z_step_mm * 1000) if num_planes > 1 else 0
-        estimates['z_range_um'] = z_range_um
-        estimates['num_planes'] = num_planes
-        estimates['z_step_um'] = z_step_mm * 1000
+        estimates["z_range_um"] = z_range_um
+        estimates["num_planes"] = num_planes
+        estimates["z_step_um"] = z_step_mm * 1000
 
         # Total images
-        estimates['total_images'] = num_planes
+        estimates["total_images"] = num_planes
 
         # Data size (16-bit grayscale)
         bytes_per_image = aoi_width * aoi_height * 2  # 16-bit = 2 bytes
         total_bytes = bytes_per_image * num_planes
-        estimates['data_size_gb'] = total_bytes / (1024 ** 3)
+        estimates["data_size_gb"] = total_bytes / (1024**3)
 
         # Acquisition time estimate
         z_range_mm = z_range_um / 1000
         z_move_time = z_range_mm / z_velocity if z_velocity > 0 else 0
         exposure_time_total = num_planes * exposure_us / 1_000_000  # Convert to seconds
         settle_time = num_planes * 0.001  # 1ms settle per plane
-        return_time = z_range_mm / z_velocity if z_velocity > 0 else 0  # Return to start
+        return_time = (
+            z_range_mm / z_velocity if z_velocity > 0 else 0
+        )  # Return to start
 
         theoretical_time = z_move_time + exposure_time_total + settle_time + return_time
 
@@ -808,55 +882,57 @@ class WorkflowController(QObject):
                 theoretical_time=theoretical_time,
                 num_planes=num_planes,
                 num_lasers=num_lasers,
-                total_z_travel_mm=z_range_mm * 2  # Round trip
+                total_z_travel_mm=z_range_mm * 2,  # Round trip
             )
-            estimates['acquisition_time'] = corrected_time
-            estimates['sample_count'] = sample_count
+            estimates["acquisition_time"] = corrected_time
+            estimates["sample_count"] = sample_count
         else:
-            estimates['acquisition_time'] = theoretical_time
-            estimates['sample_count'] = 0
+            estimates["acquisition_time"] = theoretical_time
+            estimates["sample_count"] = 0
 
         return estimates
 
     def _count_enabled_lasers(self, workflow_dict: Dict[str, Any]) -> int:
         """Count number of enabled lasers in workflow."""
         count = 0
-        illum = workflow_dict.get('Illumination Source', {})
+        illum = workflow_dict.get("Illumination Source", {})
         for key, value in illum.items():
-            if isinstance(value, str) and ' ' in value:
+            if isinstance(value, str) and " " in value:
                 parts = value.split()
-                if len(parts) >= 2 and parts[1] == '1':
+                if len(parts) >= 2 and parts[1] == "1":
                     # Check if it's a laser (not LED)
-                    if 'Laser' in key or 'nm' in key:
+                    if "Laser" in key or "nm" in key:
                         count += 1
         return max(1, count)  # At least 1
 
     def _extract_timing_params(self, workflow_dict: Dict[str, Any]) -> Dict[str, Any]:
         """Extract parameters needed for timing tracking from workflow dict."""
-        stack = workflow_dict.get('Stack Settings', {})
-        camera = workflow_dict.get('Camera Settings', {})
+        stack = workflow_dict.get("Stack Settings", {})
+        camera = workflow_dict.get("Camera Settings", {})
 
-        num_planes = int(stack.get('Number of planes', 1))
-        z_step_mm = float(stack.get('Change in Z axis (mm)', 0))
-        z_velocity = float(stack.get('Z stage velocity (mm/s)', 0.1))
-        exposure_us = float(camera.get('Exposure time (us)', 1000))
+        num_planes = int(stack.get("Number of planes", 1))
+        z_step_mm = float(stack.get("Change in Z axis (mm)", 0))
+        z_velocity = float(stack.get("Z stage velocity (mm/s)", 0.1))
+        exposure_us = float(camera.get("Exposure time (us)", 1000))
 
         z_range_mm = (num_planes - 1) * z_step_mm if num_planes > 1 else 0
 
         return {
-            'workflow_type': 'ZSTACK' if num_planes > 1 else 'SNAPSHOT',
-            'num_planes': num_planes,
-            'num_lasers': self._count_enabled_lasers(workflow_dict),
-            'z_velocity_mm_s': z_velocity,
-            'z_range_mm': z_range_mm,
-            'total_z_travel_mm': z_range_mm * 2,  # Round trip
-            'exposure_us': exposure_us,
-            'theoretical_duration_s': self._calculate_estimates(workflow_dict).get('acquisition_time', 0),
+            "workflow_type": "ZSTACK" if num_planes > 1 else "SNAPSHOT",
+            "num_planes": num_planes,
+            "num_lasers": self._count_enabled_lasers(workflow_dict),
+            "z_velocity_mm_s": z_velocity,
+            "z_range_mm": z_range_mm,
+            "total_z_travel_mm": z_range_mm * 2,  # Round trip
+            "exposure_us": exposure_us,
+            "theoretical_duration_s": self._calculate_estimates(workflow_dict).get(
+                "acquisition_time", 0
+            ),
         }
 
     # Timing Service Methods
 
-    def set_timing_service(self, timing_service: 'AcquisitionTimingService') -> None:
+    def set_timing_service(self, timing_service: "AcquisitionTimingService") -> None:
         """Set the timing service for adaptive time estimation."""
         self._timing_service = timing_service
 
@@ -878,15 +954,15 @@ class WorkflowController(QObject):
 
         try:
             self._timing_service.record_acquisition(
-                workflow_type=params['workflow_type'],
-                num_planes=params['num_planes'],
-                num_lasers=params['num_lasers'],
-                z_velocity_mm_s=params['z_velocity_mm_s'],
-                z_range_mm=params['z_range_mm'],
-                total_z_travel_mm=params['total_z_travel_mm'],
-                exposure_us=params['exposure_us'],
-                theoretical_duration_s=params['theoretical_duration_s'],
-                actual_duration_s=actual_duration
+                workflow_type=params["workflow_type"],
+                num_planes=params["num_planes"],
+                num_lasers=params["num_lasers"],
+                z_velocity_mm_s=params["z_velocity_mm_s"],
+                z_range_mm=params["z_range_mm"],
+                total_z_travel_mm=params["total_z_travel_mm"],
+                exposure_us=params["exposure_us"],
+                theoretical_duration_s=params["theoretical_duration_s"],
+                actual_duration_s=actual_duration,
             )
             self._logger.info(
                 f"Recorded workflow timing: theoretical={params['theoretical_duration_s']:.2f}s, "

@@ -5,49 +5,54 @@ snapshots, z-stacks, tile scans, and time-lapse acquisitions.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List, Union, Tuple
-from enum import Enum
 from datetime import datetime, timedelta
+from enum import Enum
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 from ..base import ValidatedModel, ValidationError
 from ..hardware.stage import Position
 
 
 class WorkflowType(Enum):
     """Types of acquisition workflows."""
-    SNAPSHOT = "snapshot"          # Single image
-    ZSTACK = "zstack"              # Z-stack acquisition
-    TILE = "tile"                  # Tile scan
-    MULTI_ANGLE = "multi_angle"    # Multi-angle acquisition
-    TIME_LAPSE = "time_lapse"      # Time series
-    MULTI_POSITION = "multi_pos"   # Multiple positions
-    CUSTOM = "custom"              # Custom workflow
+
+    SNAPSHOT = "snapshot"  # Single image
+    ZSTACK = "zstack"  # Z-stack acquisition
+    TILE = "tile"  # Tile scan
+    MULTI_ANGLE = "multi_angle"  # Multi-angle acquisition
+    TIME_LAPSE = "time_lapse"  # Time series
+    MULTI_POSITION = "multi_pos"  # Multiple positions
+    CUSTOM = "custom"  # Custom workflow
 
 
 class WorkflowState(Enum):
     """Workflow execution states."""
-    IDLE = "idle"                  # Not started
-    VALIDATING = "validating"      # Checking parameters
-    PREPARING = "preparing"        # Moving to start position
-    EXECUTING = "executing"        # Acquiring images
-    PAUSED = "paused"             # Temporarily halted
-    COMPLETED = "completed"        # Successfully finished
-    CANCELLED = "cancelled"        # User cancelled
-    ERROR = "error"               # Error occurred
+
+    IDLE = "idle"  # Not started
+    VALIDATING = "validating"  # Checking parameters
+    PREPARING = "preparing"  # Moving to start position
+    EXECUTING = "executing"  # Acquiring images
+    PAUSED = "paused"  # Temporarily halted
+    COMPLETED = "completed"  # Successfully finished
+    CANCELLED = "cancelled"  # User cancelled
+    ERROR = "error"  # Error occurred
 
 
 class TillingPattern(Enum):
     """Patterns for tile acquisition."""
-    RASTER = "raster"             # Left-to-right, top-to-bottom
-    SNAKE = "snake"               # Bidirectional (serpentine)
-    SPIRAL_OUT = "spiral_out"     # Center outward spiral
-    SPIRAL_IN = "spiral_in"       # Outside inward spiral
-    RANDOM = "random"             # Random order
+
+    RASTER = "raster"  # Left-to-right, top-to-bottom
+    SNAKE = "snake"  # Bidirectional (serpentine)
+    SPIRAL_OUT = "spiral_out"  # Center outward spiral
+    SPIRAL_IN = "spiral_in"  # Outside inward spiral
+    RANDOM = "random"  # Random order
 
 
 @dataclass
 class IlluminationSettings(ValidatedModel):
     """Illumination configuration for workflow."""
+
     laser_channel: Optional[str] = None
     laser_power_mw: float = 0.0
     laser_enabled: bool = False
@@ -61,7 +66,9 @@ class IlluminationSettings(ValidatedModel):
     def validate(self) -> None:
         """Validate illumination settings."""
         if self.laser_power_mw < 0:
-            raise ValidationError(f"Laser power cannot be negative: {self.laser_power_mw} mW")
+            raise ValidationError(
+                f"Laser power cannot be negative: {self.laser_power_mw} mW"
+            )
 
         if not (0 <= self.led_intensity_percent <= 100):
             raise ValidationError(
@@ -95,6 +102,7 @@ class IlluminationSettings(ValidatedModel):
 @dataclass
 class StackSettings(ValidatedModel):
     """Settings for z-stack acquisition."""
+
     num_planes: int = 1
     z_step_um: float = 1.0
     z_range_um: Optional[float] = None  # Alternative to num_planes
@@ -113,10 +121,14 @@ class StackSettings(ValidatedModel):
             raise ValidationError(f"Z step must be positive: {self.z_step_um} um")
 
         if self.z_velocity_mm_s <= 0:
-            raise ValidationError(f"Z velocity must be positive: {self.z_velocity_mm_s} mm/s")
+            raise ValidationError(
+                f"Z velocity must be positive: {self.z_velocity_mm_s} mm/s"
+            )
 
         if self.settle_time_ms < 0:
-            raise ValidationError(f"Settle time cannot be negative: {self.settle_time_ms} ms")
+            raise ValidationError(
+                f"Settle time cannot be negative: {self.settle_time_ms} ms"
+            )
 
         # Calculate num_planes from range if needed
         if self.z_range_um is not None:
@@ -158,6 +170,7 @@ class StackSettings(ValidatedModel):
 @dataclass
 class TileSettings(ValidatedModel):
     """Settings for tile scan acquisition."""
+
     num_tiles_x: int = 1
     num_tiles_y: int = 1
     tile_size_x_mm: float = 1.0
@@ -215,7 +228,7 @@ class TileSettings(ValidatedModel):
                         x=start_pos.x + x * step_x,
                         y=start_pos.y + y * step_y,
                         z=start_pos.z,
-                        r=start_pos.r
+                        r=start_pos.r,
                     )
                     row_positions.append(pos)
 
@@ -232,7 +245,7 @@ class TileSettings(ValidatedModel):
                         x=start_pos.x + x * step_x,
                         y=start_pos.y + y * step_y,
                         z=start_pos.z,
-                        r=start_pos.r
+                        r=start_pos.r,
                     )
                     positions.append(pos)
 
@@ -249,6 +262,7 @@ class TileSettings(ValidatedModel):
 @dataclass
 class TimeLapseSettings(ValidatedModel):
     """Settings for time-lapse acquisition."""
+
     num_timepoints: int = 1
     interval_seconds: float = 60.0
     interval_units: str = "seconds"  # "seconds", "minutes", "hours"
@@ -278,11 +292,7 @@ class TimeLapseSettings(ValidatedModel):
         Returns:
             Interval in seconds
         """
-        multipliers = {
-            "seconds": 1.0,
-            "minutes": 60.0,
-            "hours": 3600.0
-        }
+        multipliers = {"seconds": 1.0, "minutes": 60.0, "hours": 3600.0}
         return self.interval_seconds * multipliers.get(self.interval_units, 1.0)
 
     def calculate_total_duration(self) -> float:
@@ -298,6 +308,7 @@ class TimeLapseSettings(ValidatedModel):
 @dataclass
 class ExperimentSettings(ValidatedModel):
     """General experiment and data saving settings."""
+
     save_data: bool = True
     save_format: str = "tiff"  # "tiff", "hdf5", "zarr", "ome-tiff"
     save_directory: Path = field(default_factory=lambda: Path("data"))
@@ -340,6 +351,7 @@ class ExperimentSettings(ValidatedModel):
 @dataclass
 class WorkflowStep:
     """Single step in a workflow execution."""
+
     index: int
     name: str
     position: Optional[Position] = None
@@ -380,6 +392,7 @@ class WorkflowStep:
 @dataclass
 class Workflow(ValidatedModel):
     """Complete workflow model for acquisition sequences."""
+
     workflow_type: WorkflowType = WorkflowType.SNAPSHOT
     name: str = ""
     start_position: Position = field(default_factory=Position)
@@ -418,7 +431,10 @@ class Workflow(ValidatedModel):
         if self.workflow_type == WorkflowType.TILE and not self.tile_settings:
             raise ValidationError("Tile workflow requires tile settings")
 
-        if self.workflow_type == WorkflowType.TIME_LAPSE and not self.time_lapse_settings:
+        if (
+            self.workflow_type == WorkflowType.TIME_LAPSE
+            and not self.time_lapse_settings
+        ):
             raise ValidationError("Time-lapse workflow requires time-lapse settings")
 
         # Validate positions
@@ -473,7 +489,11 @@ class Workflow(ValidatedModel):
 
         if self.tile_settings:
             # Rough estimate for stage movements
-            base_time += self.tile_settings.total_tiles * self.tile_settings.stage_settle_time_ms / 1000.0
+            base_time += (
+                self.tile_settings.total_tiles
+                * self.tile_settings.stage_settle_time_ms
+                / 1000.0
+            )
 
         if self.time_lapse_settings:
             base_time = self.time_lapse_settings.calculate_total_duration()
@@ -513,7 +533,10 @@ class Workflow(ValidatedModel):
                         # Z-stack loop (innermost for speed)
                         if self.stack_settings:
                             for z in range(self.stack_settings.num_planes):
-                                z_pos = tile_pos.z + z * self.stack_settings.z_step_um / 1000.0
+                                z_pos = (
+                                    tile_pos.z
+                                    + z * self.stack_settings.z_step_um / 1000.0
+                                )
                                 step = WorkflowStep(
                                     index=step_index,
                                     name=f"T{t}_P{positions.index(pos)}_Tile{tile_idx}_Z{z}",
@@ -521,7 +544,7 @@ class Workflow(ValidatedModel):
                                     z_position=z_pos,
                                     timepoint=t if self.time_lapse_settings else None,
                                     tile_index=tile_idx if self.tile_settings else None,
-                                    channel=channel
+                                    channel=channel,
                                 )
                                 steps.append(step)
                                 step_index += 1
@@ -532,7 +555,7 @@ class Workflow(ValidatedModel):
                                 position=tile_pos,
                                 timepoint=t if self.time_lapse_settings else None,
                                 tile_index=tile_idx if self.tile_settings else None,
-                                channel=channel
+                                channel=channel,
                             )
                             steps.append(step)
                             step_index += 1
@@ -594,7 +617,7 @@ class Workflow(ValidatedModel):
             "X (mm)": self.start_position.x,
             "Y (mm)": self.start_position.y,
             "Z (mm)": self.start_position.z,
-            "Angle (degrees)": self.start_position.r
+            "Angle (degrees)": self.start_position.r,
         }
 
         end_pos = self.end_position or self.start_position
@@ -602,7 +625,7 @@ class Workflow(ValidatedModel):
             "X (mm)": end_pos.x,
             "Y (mm)": end_pos.y,
             "Z (mm)": end_pos.z,
-            "Angle (degrees)": end_pos.r
+            "Angle (degrees)": end_pos.r,
         }
 
         # Illumination
@@ -614,7 +637,7 @@ class Workflow(ValidatedModel):
                 "Number of planes": self.stack_settings.num_planes,
                 "Change in Z axis (mm)": self.stack_settings.z_step_um / 1000.0,
                 "Z stage velocity (mm/s)": str(self.stack_settings.z_velocity_mm_s),
-                "Bidirectional": str(self.stack_settings.bidirectional).lower()
+                "Bidirectional": str(self.stack_settings.bidirectional).lower(),
             }
         else:
             # Default for compatibility
@@ -622,7 +645,7 @@ class Workflow(ValidatedModel):
                 "Number of planes": 1,
                 "Change in Z axis (mm)": 0.01,
                 "Z stage velocity (mm/s)": "0.4",
-                "Bidirectional": "false"
+                "Bidirectional": "false",
             }
 
         # Tile settings
@@ -643,16 +666,23 @@ class Workflow(ValidatedModel):
             "Comments": self.experiment_settings.comment,
             "Save image directory": str(self.experiment_settings.save_directory),
             "Save image data": save_format,
-            "Display max projection": str(self.experiment_settings.max_projection_display).lower(),
-            "Work flow live view enabled": str(self.experiment_settings.display_during_acquisition).lower()
+            "Display max projection": str(
+                self.experiment_settings.max_projection_display
+            ).lower(),
+            "Work flow live view enabled": str(
+                self.experiment_settings.display_during_acquisition
+            ).lower(),
         }
 
         return workflow
 
     @classmethod
-    def create_snapshot(cls, position: Position,
-                       laser_channel: str = "Laser 3 488 nm",
-                       laser_power: float = 5.0) -> 'Workflow':
+    def create_snapshot(
+        cls,
+        position: Position,
+        laser_channel: str = "Laser 3 488 nm",
+        laser_power: float = 5.0,
+    ) -> "Workflow":
         """Create a simple snapshot workflow.
 
         Args:
@@ -670,10 +700,9 @@ class Workflow(ValidatedModel):
             illumination=IlluminationSettings(
                 laser_channel=laser_channel,
                 laser_power_mw=laser_power,
-                laser_enabled=True
+                laser_enabled=True,
             ),
             experiment_settings=ExperimentSettings(
-                save_data=False,
-                comment="GUI Snapshot"
-            )
+                save_data=False, comment="GUI Snapshot"
+            ),
         )

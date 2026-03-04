@@ -13,21 +13,22 @@ import json
 import logging
 import threading
 import time
-from pathlib import Path
-from typing import Optional, Dict, Callable
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Dict, Optional
 
 from PyQt5.QtCore import QObject, pyqtSignal
 
+from py2flamingo.core.command_codes import CommandDataBits, StageCommands
 from py2flamingo.models.microscope import Position
 from py2flamingo.services.connection_service import ConnectionService
-from py2flamingo.services.stage_service import StageService, AxisCode
-from py2flamingo.core.command_codes import StageCommands, CommandDataBits
+from py2flamingo.services.stage_service import AxisCode, StageService
 
 
 @dataclass
 class PositionTolerance:
     """Position verification tolerance settings."""
+
     linear_mm: float = 0.001  # ±0.001 mm for X, Y, Z
     rotation_deg: float = 0.01  # ±0.01 degrees for rotation
 
@@ -69,7 +70,9 @@ class MovementController(QObject):
         self.stage_service = StageService(connection_service)
 
         # N7 reference position
-        self.n7_reference_file = Path('microscope_settings') / 'n7_reference_position.json'
+        self.n7_reference_file = (
+            Path("microscope_settings") / "n7_reference_position.json"
+        )
         self.n7_reference: Optional[Position] = None
         self._load_n7_reference()
 
@@ -85,7 +88,9 @@ class MovementController(QObject):
         # Workflow position polling (queries hardware directly during workflow execution)
         self._workflow_polling_enabled = False
         self._workflow_polling_thread: Optional[threading.Thread] = None
-        self._workflow_polling_interval = 2.0  # seconds - slower to avoid overwhelming server
+        self._workflow_polling_interval = (
+            2.0  # seconds - slower to avoid overwhelming server
+        )
 
         # Motion tracking
         self._current_motion_axis: Optional[str] = None
@@ -103,18 +108,17 @@ class MovementController(QObject):
         """Load N7 reference position from JSON file."""
         try:
             if self.n7_reference_file.exists():
-                with open(self.n7_reference_file, 'r') as f:
+                with open(self.n7_reference_file, "r") as f:
                     data = json.load(f)
-                    pos = data['position']
+                    pos = data["position"]
                     self.n7_reference = Position(
-                        x=pos['x_mm'],
-                        y=pos['y_mm'],
-                        z=pos['z_mm'],
-                        r=pos['r_degrees']
+                        x=pos["x_mm"], y=pos["y_mm"], z=pos["z_mm"], r=pos["r_degrees"]
                     )
                     self.logger.info(f"Loaded N7 reference: {self.n7_reference}")
             else:
-                self.logger.warning(f"N7 reference file not found: {self.n7_reference_file}")
+                self.logger.warning(
+                    f"N7 reference file not found: {self.n7_reference_file}"
+                )
         except Exception as e:
             self.logger.error(f"Failed to load N7 reference: {e}")
 
@@ -147,12 +151,12 @@ class MovementController(QObject):
                     "x_mm": position.x,
                     "y_mm": position.y,
                     "z_mm": position.z,
-                    "r_degrees": position.r
+                    "r_degrees": position.r,
                 },
-                "notes": "This file stores the current/reference position of the N7 microscope. Update these values to match the actual microscope position when setting a new reference point."
+                "notes": "This file stores the current/reference position of the N7 microscope. Update these values to match the actual microscope position when setting a new reference point.",
             }
 
-            with open(self.n7_reference_file, 'w') as f:
+            with open(self.n7_reference_file, "w") as f:
                 json.dump(data, f, indent=2)
 
             self.n7_reference = position
@@ -188,7 +192,7 @@ class MovementController(QObject):
             RuntimeError: If not connected or movement fails
         """
         axis = axis.lower()
-        axis_map = {'x': 'X', 'y': 'Y', 'z': 'Z', 'r': 'R'}
+        axis_map = {"x": "X", "y": "Y", "z": "Z", "r": "R"}
 
         if axis not in axis_map:
             raise ValueError(f"Invalid axis '{axis}', must be one of: x, y, z, r")
@@ -197,13 +201,13 @@ class MovementController(QObject):
         self.motion_started.emit(axis_map[axis])
 
         try:
-            if axis == 'x':
+            if axis == "x":
                 self.position_controller.move_x(position_mm)
-            elif axis == 'y':
+            elif axis == "y":
                 self.position_controller.move_y(position_mm)
-            elif axis == 'z':
+            elif axis == "z":
                 self.position_controller.move_z(position_mm)
-            elif axis == 'r':
+            elif axis == "r":
                 self.position_controller.move_rotation(position_mm)
 
             return True
@@ -234,7 +238,7 @@ class MovementController(QObject):
             RuntimeError: If not connected or movement fails
         """
         axis = axis.lower()
-        axis_map = {'x': 'X', 'y': 'Y', 'z': 'Z', 'r': 'R'}
+        axis_map = {"x": "X", "y": "Y", "z": "Z", "r": "R"}
 
         if axis not in axis_map:
             raise ValueError(f"Invalid axis '{axis}', must be one of: x, y, z, r")
@@ -243,13 +247,13 @@ class MovementController(QObject):
         self.motion_started.emit(axis_map[axis])
 
         try:
-            if axis == 'x':
+            if axis == "x":
                 self.position_controller.jog_x(delta_mm)
-            elif axis == 'y':
+            elif axis == "y":
                 self.position_controller.jog_y(delta_mm)
-            elif axis == 'z':
+            elif axis == "z":
                 self.position_controller.jog_z(delta_mm)
-            elif axis == 'r':
+            elif axis == "r":
                 self.position_controller.jog_rotation(delta_mm)
 
             return True
@@ -283,7 +287,12 @@ class MovementController(QObject):
             return current_pos
 
         axis = axis.lower()
-        axis_map = {'x': current_pos.x, 'y': current_pos.y, 'z': current_pos.z, 'r': current_pos.r}
+        axis_map = {
+            "x": current_pos.x,
+            "y": current_pos.y,
+            "z": current_pos.z,
+            "r": current_pos.r,
+        }
 
         return axis_map.get(axis)
 
@@ -306,12 +315,7 @@ class MovementController(QObject):
             raise RuntimeError("Home position not available in settings")
 
         axis = axis.lower()
-        axis_map = {
-            'x': home_pos.x,
-            'y': home_pos.y,
-            'z': home_pos.z,
-            'r': home_pos.r
-        }
+        axis_map = {"x": home_pos.x, "y": home_pos.y, "z": home_pos.z, "r": home_pos.r}
 
         if axis not in axis_map:
             raise ValueError(f"Invalid axis '{axis}', must be one of: x, y, z, r")
@@ -351,20 +355,28 @@ class MovementController(QObject):
             errors = []
 
             if abs(actual_pos.x - target_position.x) > self.tolerance.linear_mm:
-                errors.append(f"X: target={target_position.x:.3f}, actual={actual_pos.x:.3f}")
+                errors.append(
+                    f"X: target={target_position.x:.3f}, actual={actual_pos.x:.3f}"
+                )
 
             if abs(actual_pos.y - target_position.y) > self.tolerance.linear_mm:
-                errors.append(f"Y: target={target_position.y:.3f}, actual={actual_pos.y:.3f}")
+                errors.append(
+                    f"Y: target={target_position.y:.3f}, actual={actual_pos.y:.3f}"
+                )
 
             if abs(actual_pos.z - target_position.z) > self.tolerance.linear_mm:
-                errors.append(f"Z: target={target_position.z:.3f}, actual={actual_pos.z:.3f}")
+                errors.append(
+                    f"Z: target={target_position.z:.3f}, actual={actual_pos.z:.3f}"
+                )
 
             # Rotation tolerance (handle wraparound at 0/360)
             r_diff = abs(actual_pos.r - target_position.r)
             if r_diff > 180:
                 r_diff = 360 - r_diff
             if r_diff > self.tolerance.rotation_deg:
-                errors.append(f"R: target={target_position.r:.2f}, actual={actual_pos.r:.2f}")
+                errors.append(
+                    f"R: target={target_position.r:.2f}, actual={actual_pos.r:.2f}"
+                )
 
             if errors:
                 msg = "Position verification failed:\n" + "\n".join(errors)
@@ -402,9 +414,7 @@ class MovementController(QObject):
         self._monitoring_enabled = True
 
         self._monitoring_thread = threading.Thread(
-            target=self._position_monitor_loop,
-            daemon=True,
-            name="PositionMonitor"
+            target=self._position_monitor_loop, daemon=True, name="PositionMonitor"
         )
         self._monitoring_thread.start()
 
@@ -466,9 +476,7 @@ class MovementController(QObject):
         self._workflow_polling_enabled = True
 
         self._workflow_polling_thread = threading.Thread(
-            target=self._workflow_poll_loop,
-            name="WorkflowPositionPoll",
-            daemon=True
+            target=self._workflow_poll_loop, name="WorkflowPositionPoll", daemon=True
         )
         self._workflow_polling_thread.start()
 
@@ -512,8 +520,10 @@ class MovementController(QObject):
 
                         # Emit signal for UI updates
                         self.position_changed.emit(
-                            hardware_pos.x, hardware_pos.y,
-                            hardware_pos.z, hardware_pos.r
+                            hardware_pos.x,
+                            hardware_pos.y,
+                            hardware_pos.z,
+                            hardware_pos.r,
                         )
                         self.logger.debug(
                             f"Workflow position update: X={hardware_pos.x:.3f}, "
@@ -528,13 +538,15 @@ class MovementController(QObject):
 
         self.logger.info("Workflow poll loop ended")
 
-    def _positions_equal(self, pos1: Position, pos2: Position, tolerance: float = 0.001) -> bool:
+    def _positions_equal(
+        self, pos1: Position, pos2: Position, tolerance: float = 0.001
+    ) -> bool:
         """Check if two positions are equal within tolerance."""
         return (
-            abs(pos1.x - pos2.x) < tolerance and
-            abs(pos1.y - pos2.y) < tolerance and
-            abs(pos1.z - pos2.z) < tolerance and
-            abs(pos1.r - pos2.r) < 0.01  # 0.01 degree tolerance for rotation
+            abs(pos1.x - pos2.x) < tolerance
+            and abs(pos1.y - pos2.y) < tolerance
+            and abs(pos1.z - pos2.z) < tolerance
+            and abs(pos1.r - pos2.r) < 0.01  # 0.01 degree tolerance for rotation
         )
 
     # ============================================================================
@@ -549,21 +561,29 @@ class MovementController(QObject):
         Qt signals are thread-safe - they automatically queue to the receiver's thread.
         """
         # Get axis name and position
-        axis_name = self._current_motion_axis if self._current_motion_axis else "Movement"
+        axis_name = (
+            self._current_motion_axis if self._current_motion_axis else "Movement"
+        )
         pos = self.position_controller.get_current_position()
 
-        self.logger.info(f"[MovementController] Motion complete callback triggered for: {axis_name}")
+        self.logger.info(
+            f"[MovementController] Motion complete callback triggered for: {axis_name}"
+        )
 
         # Clear motion tracking
         self._current_motion_axis = None
 
         # Emit motion_stopped signal (Qt handles cross-thread delivery automatically)
-        self.logger.info(f"[MovementController] Emitting motion_stopped signal for: {axis_name}")
+        self.logger.info(
+            f"[MovementController] Emitting motion_stopped signal for: {axis_name}"
+        )
         self.motion_stopped.emit(axis_name)
 
         # Emit position update
         if pos:
-            self.logger.info(f"[MovementController] Emitting position_changed: X={pos.x:.3f}, Y={pos.y:.3f}, Z={pos.z:.3f}, R={pos.r:.2f}")
+            self.logger.info(
+                f"[MovementController] Emitting position_changed: X={pos.x:.3f}, Y={pos.y:.3f}, Z={pos.z:.3f}, R={pos.r:.2f}"
+            )
             self.position_changed.emit(pos.x, pos.y, pos.z, pos.r)
         else:
             self.logger.warning("[MovementController] No position available to emit")

@@ -6,10 +6,9 @@ dependencies between workflows and views.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import List, Optional
 
 import numpy as np
-
 
 # Visualization types available for LED 2D overview
 VISUALIZATION_TYPES = [
@@ -32,6 +31,7 @@ class TileResult:
     - rotation_angle: The rotation angle at which this tile was captured
     - z_stack_min/max: The Z-stack bounds used for this tile (in workflow coordinates)
     """
+
     x: float
     y: float
     z: float
@@ -50,30 +50,30 @@ class TileResult:
     def to_dict(self) -> dict:
         """Serialize tile result to dictionary (images saved separately)."""
         return {
-            'x': self.x,
-            'y': self.y,
-            'z': self.z,
-            'tile_x_idx': self.tile_x_idx,
-            'tile_y_idx': self.tile_y_idx,
-            'rotation_angle': self.rotation_angle,
-            'z_stack_min': self.z_stack_min,
-            'z_stack_max': self.z_stack_max,
-            'image_types': list(self.images.keys())
+            "x": self.x,
+            "y": self.y,
+            "z": self.z,
+            "tile_x_idx": self.tile_x_idx,
+            "tile_y_idx": self.tile_y_idx,
+            "rotation_angle": self.rotation_angle,
+            "z_stack_min": self.z_stack_min,
+            "z_stack_max": self.z_stack_max,
+            "image_types": list(self.images.keys()),
         }
 
     @classmethod
-    def from_dict(cls, data: dict, images: Optional[dict] = None) -> 'TileResult':
+    def from_dict(cls, data: dict, images: Optional[dict] = None) -> "TileResult":
         """Deserialize tile result from dictionary and optional image dict."""
         return cls(
-            x=data['x'],
-            y=data['y'],
-            z=data['z'],
-            tile_x_idx=data['tile_x_idx'],
-            tile_y_idx=data['tile_y_idx'],
+            x=data["x"],
+            y=data["y"],
+            z=data["z"],
+            tile_x_idx=data["tile_x_idx"],
+            tile_y_idx=data["tile_y_idx"],
             images=images or {},
-            rotation_angle=data.get('rotation_angle', 0.0),
-            z_stack_min=data.get('z_stack_min', 0.0),
-            z_stack_max=data.get('z_stack_max', 0.0)
+            rotation_angle=data.get("rotation_angle", 0.0),
+            z_stack_min=data.get("z_stack_min", 0.0),
+            z_stack_max=data.get("z_stack_max", 0.0),
         )
 
 
@@ -83,9 +83,12 @@ class RotationResult:
 
     Stores multiple stitched images, one per visualization type.
     """
+
     rotation_angle: float
     tiles: List[TileResult] = field(default_factory=list)
-    stitched_images: dict = field(default_factory=dict)  # visualization_type -> np.ndarray
+    stitched_images: dict = field(
+        default_factory=dict
+    )  # visualization_type -> np.ndarray
     tiles_x: int = 0
     tiles_y: int = 0
     invert_x: bool = False  # Whether X-axis is inverted for display
@@ -98,25 +101,29 @@ class RotationResult:
     def to_dict(self) -> dict:
         """Serialize rotation result to dictionary (images saved separately)."""
         return {
-            'rotation_angle': self.rotation_angle,
-            'tiles_x': self.tiles_x,
-            'tiles_y': self.tiles_y,
-            'invert_x': self.invert_x,
-            'tiles': [t.to_dict() for t in self.tiles],
-            'stitched_image_types': list(self.stitched_images.keys())
+            "rotation_angle": self.rotation_angle,
+            "tiles_x": self.tiles_x,
+            "tiles_y": self.tiles_y,
+            "invert_x": self.invert_x,
+            "tiles": [t.to_dict() for t in self.tiles],
+            "stitched_image_types": list(self.stitched_images.keys()),
         }
 
     @classmethod
-    def from_dict(cls, data: dict, stitched_images: Optional[dict] = None,
-                  tiles: Optional[List[TileResult]] = None) -> 'RotationResult':
+    def from_dict(
+        cls,
+        data: dict,
+        stitched_images: Optional[dict] = None,
+        tiles: Optional[List[TileResult]] = None,
+    ) -> "RotationResult":
         """Deserialize rotation result from dictionary and image data."""
         return cls(
-            rotation_angle=data['rotation_angle'],
+            rotation_angle=data["rotation_angle"],
             tiles=tiles or [],
             stitched_images=stitched_images or {},
-            tiles_x=data.get('tiles_x', 0),
-            tiles_y=data.get('tiles_y', 0),
-            invert_x=data.get('invert_x', False)
+            tiles_x=data.get("tiles_x", 0),
+            tiles_y=data.get("tiles_y", 0),
+            invert_x=data.get("invert_x", False),
         )
 
 
@@ -127,6 +134,7 @@ class EffectiveBoundingBox:
     For R=0: tile_x/y define the tiling grid, z_min/max define Z-stack
     For R=90: original Z becomes tile_x, original X becomes z depth
     """
+
     tile_x_min: float
     tile_x_max: float
     tile_y_min: float

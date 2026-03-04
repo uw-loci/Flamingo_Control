@@ -8,20 +8,26 @@ and manages the drag-to-connect interaction for creating new wires.
 import logging
 from typing import Dict, Optional
 
+from PyQt5.QtCore import QPointF, QRectF, Qt, pyqtSignal
+from PyQt5.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPolygonF
 from PyQt5.QtWidgets import QGraphicsScene, QGraphicsSimpleTextItem
-from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSignal
-from PyQt5.QtGui import QColor, QPen, QBrush, QPainter, QFont, QPolygonF
 
-from py2flamingo.pipeline.models.pipeline import Pipeline, PipelineNode, Connection, create_node, NodeType
+from py2flamingo.pipeline.models.pipeline import (
+    Connection,
+    NodeType,
+    Pipeline,
+    PipelineNode,
+    create_node,
+)
+from py2flamingo.pipeline.ui.connection_item import ConnectionItem, DragWireItem
 from py2flamingo.pipeline.ui.node_item import NodeItem
 from py2flamingo.pipeline.ui.port_item import PortItem
-from py2flamingo.pipeline.ui.connection_item import ConnectionItem, DragWireItem
 
 logger = logging.getLogger(__name__)
 
 # Grid settings
 GRID_SPACING = 30
-GRID_DOT_COLOR = QColor('#333333')
+GRID_DOT_COLOR = QColor("#333333")
 GRID_DOT_RADIUS = 1.0
 
 
@@ -44,7 +50,7 @@ class PipelineGraphScene(QGraphicsScene):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setBackgroundBrush(QColor('#252525'))
+        self.setBackgroundBrush(QColor("#252525"))
 
         self._pipeline: Optional[Pipeline] = None
         self._node_items: Dict[str, NodeItem] = {}
@@ -66,10 +72,12 @@ class PipelineGraphScene(QGraphicsScene):
     def _create_hint(self):
         """Create the 'drop nodes here' hint shown on empty canvas."""
         self._hint_text = QGraphicsSimpleTextItem()
-        self._hint_text.setText("Drag node types from the palette\nonto this canvas to build a pipeline")
-        font = QFont('Sans', 12)
+        self._hint_text.setText(
+            "Drag node types from the palette\nonto this canvas to build a pipeline"
+        )
+        font = QFont("Sans", 12)
         self._hint_text.setFont(font)
-        self._hint_text.setBrush(QBrush(QColor('#555555')))
+        self._hint_text.setBrush(QBrush(QColor("#555555")))
         self._hint_text.setPos(-140, -20)
         self.addItem(self._hint_text)
 
@@ -135,8 +143,9 @@ class PipelineGraphScene(QGraphicsScene):
 
     # ---- Node management ----
 
-    def add_node(self, node_type: NodeType, x: float = 0, y: float = 0,
-                 name: str = None) -> str:
+    def add_node(
+        self, node_type: NodeType, x: float = 0, y: float = 0, name: str = None
+    ) -> str:
         """Create a new node and add it to both model and scene.
 
         Returns:
@@ -159,7 +168,8 @@ class PipelineGraphScene(QGraphicsScene):
 
         # Remove connection items first
         conns_to_remove = [
-            c for c in self._connection_items.values()
+            c
+            for c in self._connection_items.values()
             if c.connection.source_node_id == node_id
             or c.connection.target_node_id == node_id
         ]
@@ -188,13 +198,17 @@ class PipelineGraphScene(QGraphicsScene):
         src_node_item = self._node_items.get(conn.source_node_id)
         tgt_node_item = self._node_items.get(conn.target_node_id)
         if not src_node_item or not tgt_node_item:
-            logger.warning(f"Cannot create wire: missing node item for connection {conn.id}")
+            logger.warning(
+                f"Cannot create wire: missing node item for connection {conn.id}"
+            )
             return
 
         src_port = src_node_item.get_port_item(conn.source_port_id)
         tgt_port = tgt_node_item.get_port_item(conn.target_port_id)
         if not src_port or not tgt_port:
-            logger.warning(f"Cannot create wire: missing port item for connection {conn.id}")
+            logger.warning(
+                f"Cannot create wire: missing port item for connection {conn.id}"
+            )
             return
 
         wire = ConnectionItem(conn, src_port, tgt_port)
@@ -316,7 +330,7 @@ class PipelineGraphScene(QGraphicsScene):
     def reset_all_status(self):
         """Reset all nodes to idle status."""
         for item in self._node_items.values():
-            item.set_status('idle')
+            item.set_status("idle")
 
     def get_node_item(self, node_id: str) -> Optional[NodeItem]:
         return self._node_items.get(node_id)

@@ -4,38 +4,46 @@ This module manages loading, saving, and organizing workflow files,
 keeping file operations separate from business logic.
 """
 
-import logging
 import json
-import yaml
-from typing import Optional, List, Dict, Any, Union
-from pathlib import Path
-from datetime import datetime
+import logging
 import shutil
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
+import yaml
+
+from ..core.errors import FlamingoError
 from ..models.data.workflow import (
-    Workflow, WorkflowType, IlluminationSettings,
-    StackSettings, TileSettings, TimeLapseSettings, ExperimentSettings
+    ExperimentSettings,
+    IlluminationSettings,
+    StackSettings,
+    TileSettings,
+    TimeLapseSettings,
+    Workflow,
+    WorkflowType,
 )
 from ..models.hardware.stage import Position
 from ..utils.workflow_parser import WorkflowParser
-from ..core.errors import FlamingoError
-
 
 logger = logging.getLogger(__name__)
 
 
 class RepositoryError(FlamingoError):
     """Base exception for repository operations."""
+
     pass
 
 
 class WorkflowNotFoundError(RepositoryError):
     """Raised when a workflow file is not found."""
+
     pass
 
 
 class WorkflowFormatError(RepositoryError):
     """Raised when workflow file format is invalid."""
+
     pass
 
 
@@ -50,8 +58,8 @@ class WorkflowRepository:
     - Backup and versioning
     """
 
-    SUPPORTED_FORMATS = {'.txt', '.json', '.yaml', '.yml'}
-    DEFAULT_FORMAT = '.json'
+    SUPPORTED_FORMATS = {".txt", ".json", ".yaml", ".yml"}
+    DEFAULT_FORMAT = ".json"
 
     def __init__(self, base_directory: Optional[Path] = None):
         """Initialize repository.
@@ -72,7 +80,7 @@ class WorkflowRepository:
             self.base_directory / "saved",
             self.base_directory / "completed",
             self.base_directory / "backups",
-            self.base_directory / "exports"
+            self.base_directory / "exports",
         ]
 
         for directory in directories:
@@ -112,11 +120,11 @@ class WorkflowRepository:
 
         try:
             # Load based on format
-            if suffix == '.txt':
+            if suffix == ".txt":
                 return self._load_txt(file_path)
-            elif suffix == '.json':
+            elif suffix == ".json":
                 return self._load_json(file_path)
-            elif suffix in {'.yaml', '.yml'}:
+            elif suffix in {".yaml", ".yml"}:
                 return self._load_yaml(file_path)
             else:
                 raise WorkflowFormatError(f"Unknown format: {suffix}")
@@ -127,7 +135,7 @@ class WorkflowRepository:
 
     def _load_txt(self, file_path: Path) -> Workflow:
         """Load workflow from legacy text format."""
-        with open(file_path, 'r') as f:
+        with open(file_path, "r") as f:
             content = f.read()
 
         # Use parser to convert text to dictionary
@@ -136,19 +144,21 @@ class WorkflowRepository:
 
     def _load_json(self, file_path: Path) -> Workflow:
         """Load workflow from JSON format."""
-        with open(file_path, 'r') as f:
+        with open(file_path, "r") as f:
             workflow_dict = json.load(f)
 
         return self._dict_to_workflow(workflow_dict, name=file_path.stem)
 
     def _load_yaml(self, file_path: Path) -> Workflow:
         """Load workflow from YAML format."""
-        with open(file_path, 'r') as f:
+        with open(file_path, "r") as f:
             workflow_dict = yaml.safe_load(f)
 
         return self._dict_to_workflow(workflow_dict, name=file_path.stem)
 
-    def _dict_to_workflow(self, data: Dict[str, Any], name: str = "Workflow") -> Workflow:
+    def _dict_to_workflow(
+        self, data: Dict[str, Any], name: str = "Workflow"
+    ) -> Workflow:
         """Convert dictionary to Workflow object."""
         # Handle both new format and legacy format
         if "workflow_type" in data:
@@ -163,8 +173,14 @@ class WorkflowRepository:
         workflow = Workflow(
             workflow_type=WorkflowType(data["workflow_type"]),
             name=data.get("name", "Workflow"),
-            start_position=Position(**data["start_position"]) if "start_position" in data else Position(0, 0, 0, 0),
-            end_position=Position(**data["end_position"]) if "end_position" in data else None
+            start_position=(
+                Position(**data["start_position"])
+                if "start_position" in data
+                else Position(0, 0, 0, 0)
+            ),
+            end_position=(
+                Position(**data["end_position"]) if "end_position" in data else None
+            ),
         )
 
         # Deserialize settings
@@ -178,10 +194,14 @@ class WorkflowRepository:
             workflow.tile_settings = TileSettings(**data["tile_settings"])
 
         if "time_lapse_settings" in data:
-            workflow.time_lapse_settings = TimeLapseSettings(**data["time_lapse_settings"])
+            workflow.time_lapse_settings = TimeLapseSettings(
+                **data["time_lapse_settings"]
+            )
 
         if "experiment_settings" in data:
-            workflow.experiment_settings = ExperimentSettings(**data["experiment_settings"])
+            workflow.experiment_settings = ExperimentSettings(
+                **data["experiment_settings"]
+            )
 
         # Deserialize positions and channels
         if "positions" in data:
@@ -202,7 +222,7 @@ class WorkflowRepository:
                 x=float(pos_data.get("X (mm)", 0)),
                 y=float(pos_data.get("Y (mm)", 0)),
                 z=float(pos_data.get("Z (mm)", 0)),
-                r=float(pos_data.get("Angle (degrees)", 0))
+                r=float(pos_data.get("Angle (degrees)", 0)),
             )
 
         # Determine workflow type
@@ -214,14 +234,14 @@ class WorkflowRepository:
 
         # Create workflow
         workflow = Workflow(
-            workflow_type=workflow_type,
-            name=name,
-            start_position=start_pos
+            workflow_type=workflow_type, name=name, start_position=start_pos
         )
 
         # Parse illumination
         if "Illumination Source" in data:
-            workflow.illumination = self._parse_legacy_illumination(data["Illumination Source"])
+            workflow.illumination = self._parse_legacy_illumination(
+                data["Illumination Source"]
+            )
 
         # Parse stack settings
         if "Stack Settings" in data:
@@ -229,11 +249,15 @@ class WorkflowRepository:
 
         # Parse experiment settings
         if "Experiment Settings" in data:
-            workflow.experiment_settings = self._parse_legacy_experiment(data["Experiment Settings"])
+            workflow.experiment_settings = self._parse_legacy_experiment(
+                data["Experiment Settings"]
+            )
 
         return workflow
 
-    def _parse_legacy_illumination(self, illum_data: Dict[str, str]) -> IlluminationSettings:
+    def _parse_legacy_illumination(
+        self, illum_data: Dict[str, str]
+    ) -> IlluminationSettings:
         """Parse legacy illumination format."""
         settings = IlluminationSettings()
 
@@ -256,8 +280,11 @@ class WorkflowRepository:
         return StackSettings(
             num_planes=int(stack_data.get("Number of planes", 1)),
             z_step_um=float(stack_data.get("Change in Z axis (mm)", 0.01)) * 1000,
-            z_velocity_mm_s=float(str(stack_data.get("Z stage velocity (mm/s)", "0.4"))),
-            bidirectional=str(stack_data.get("Bidirectional", "false")).lower() == "true"
+            z_velocity_mm_s=float(
+                str(stack_data.get("Z stage velocity (mm/s)", "0.4"))
+            ),
+            bidirectional=str(stack_data.get("Bidirectional", "false")).lower()
+            == "true",
         )
 
     def _parse_legacy_experiment(self, exp_data: Dict[str, Any]) -> ExperimentSettings:
@@ -269,14 +296,20 @@ class WorkflowRepository:
             save_format="tiff" if save_format == "Tiff" else "tiff",
             save_directory=Path(exp_data.get("Save image directory", "data")),
             comment=exp_data.get("Comments", ""),
-            max_projection_display=str(exp_data.get("Display max projection", "true")).lower() == "true"
+            max_projection_display=str(
+                exp_data.get("Display max projection", "true")
+            ).lower()
+            == "true",
         )
 
     # ==================== Saving ====================
 
-    def save(self, workflow: Workflow,
-            file_path: Optional[Union[str, Path]] = None,
-            format: Optional[str] = None) -> Path:
+    def save(
+        self,
+        workflow: Workflow,
+        file_path: Optional[Union[str, Path]] = None,
+        format: Optional[str] = None,
+    ) -> Path:
         """Save a workflow to a file.
 
         Args:
@@ -298,8 +331,8 @@ class WorkflowRepository:
 
         # Determine format from extension
         suffix = file_path.suffix.lower() or format or self.DEFAULT_FORMAT
-        if not suffix.startswith('.'):
-            suffix = f'.{suffix}'
+        if not suffix.startswith("."):
+            suffix = f".{suffix}"
 
         # Add suffix if missing
         if not file_path.suffix:
@@ -307,11 +340,11 @@ class WorkflowRepository:
 
         # Save based on format
         try:
-            if suffix == '.txt':
+            if suffix == ".txt":
                 self._save_txt(workflow, file_path)
-            elif suffix == '.json':
+            elif suffix == ".json":
                 self._save_json(workflow, file_path)
-            elif suffix in {'.yaml', '.yml'}:
+            elif suffix in {".yaml", ".yml"}:
                 self._save_yaml(workflow, file_path)
             else:
                 raise WorkflowFormatError(f"Unsupported save format: {suffix}")
@@ -323,15 +356,17 @@ class WorkflowRepository:
             logger.error(f"Failed to save workflow: {e}")
             raise RepositoryError(f"Failed to save workflow: {e}")
 
-    def _generate_file_path(self, workflow: Workflow, format: Optional[str] = None) -> Path:
+    def _generate_file_path(
+        self, workflow: Workflow, format: Optional[str] = None
+    ) -> Path:
         """Generate automatic file path for workflow."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_name = workflow.name.replace(' ', '_').replace('/', '_')
+        safe_name = workflow.name.replace(" ", "_").replace("/", "_")
         filename = f"{safe_name}_{timestamp}"
 
         suffix = format or self.DEFAULT_FORMAT
-        if not suffix.startswith('.'):
-            suffix = f'.{suffix}'
+        if not suffix.startswith("."):
+            suffix = f".{suffix}"
 
         return self.base_directory / "saved" / f"{filename}{suffix}"
 
@@ -353,21 +388,21 @@ class WorkflowRepository:
 
             lines.append("")  # Empty line between sections
 
-        with open(file_path, 'w') as f:
-            f.write('\n'.join(lines))
+        with open(file_path, "w") as f:
+            f.write("\n".join(lines))
 
     def _save_json(self, workflow: Workflow, file_path: Path):
         """Save workflow in JSON format."""
         data = self._workflow_to_dict(workflow)
 
-        with open(file_path, 'w') as f:
+        with open(file_path, "w") as f:
             json.dump(data, f, indent=2, default=str)
 
     def _save_yaml(self, workflow: Workflow, file_path: Path):
         """Save workflow in YAML format."""
         data = self._workflow_to_dict(workflow)
 
-        with open(file_path, 'w') as f:
+        with open(file_path, "w") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
     def _workflow_to_dict(self, workflow: Workflow) -> Dict[str, Any]:
@@ -375,8 +410,12 @@ class WorkflowRepository:
         data = {
             "workflow_type": workflow.workflow_type.value,
             "name": workflow.name,
-            "start_position": workflow.start_position.to_dict() if workflow.start_position else None,
-            "end_position": workflow.end_position.to_dict() if workflow.end_position else None,
+            "start_position": (
+                workflow.start_position.to_dict() if workflow.start_position else None
+            ),
+            "end_position": (
+                workflow.end_position.to_dict() if workflow.end_position else None
+            ),
         }
 
         # Add settings if present
@@ -387,7 +426,7 @@ class WorkflowRepository:
                 "laser_enabled": workflow.illumination.laser_enabled,
                 "led_channel": workflow.illumination.led_channel,
                 "led_intensity_percent": workflow.illumination.led_intensity_percent,
-                "led_enabled": workflow.illumination.led_enabled
+                "led_enabled": workflow.illumination.led_enabled,
             }
 
         if workflow.stack_settings:
@@ -395,7 +434,7 @@ class WorkflowRepository:
                 "num_planes": workflow.stack_settings.num_planes,
                 "z_step_um": workflow.stack_settings.z_step_um,
                 "z_velocity_mm_s": workflow.stack_settings.z_velocity_mm_s,
-                "bidirectional": workflow.stack_settings.bidirectional
+                "bidirectional": workflow.stack_settings.bidirectional,
             }
 
         if workflow.experiment_settings:
@@ -403,7 +442,7 @@ class WorkflowRepository:
                 "save_data": workflow.experiment_settings.save_data,
                 "save_format": workflow.experiment_settings.save_format,
                 "save_directory": str(workflow.experiment_settings.save_directory),
-                "comment": workflow.experiment_settings.comment
+                "comment": workflow.experiment_settings.comment,
             }
 
         # Add positions and channels if present
@@ -486,7 +525,9 @@ class WorkflowRepository:
 
     # ==================== Directory Management ====================
 
-    def list_workflows(self, directory: Optional[Union[str, Path]] = None) -> List[Path]:
+    def list_workflows(
+        self, directory: Optional[Union[str, Path]] = None
+    ) -> List[Path]:
         """List all workflow files in a directory.
 
         Args:
@@ -534,7 +575,9 @@ class WorkflowRepository:
             Path to exported file
         """
         export_path = self.base_directory / "exports"
-        return self.save(workflow, file_path=export_path / workflow.name, format=export_format)
+        return self.save(
+            workflow, file_path=export_path / workflow.name, format=export_format
+        )
 
     def clean_old_files(self, days: int = 30):
         """Clean up old workflow files.

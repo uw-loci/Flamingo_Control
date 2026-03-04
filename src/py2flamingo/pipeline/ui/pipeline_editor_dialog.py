@@ -14,19 +14,27 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QSplitter, QToolBar, QAction,
-    QFileDialog, QMessageBox, QLabel, QTextEdit, QWidget
-)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import (
+    QAction,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QSplitter,
+    QTextEdit,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
+)
 
-from py2flamingo.services.window_geometry_manager import PersistentDialog
-from py2flamingo.pipeline.models.pipeline import Pipeline, NodeType
+from py2flamingo.pipeline.models.pipeline import NodeType, Pipeline
 from py2flamingo.pipeline.ui.graph_scene import PipelineGraphScene
 from py2flamingo.pipeline.ui.graph_view import PipelineGraphView
-from py2flamingo.pipeline.ui.node_palette import NodePalette, MIME_TYPE
+from py2flamingo.pipeline.ui.node_palette import MIME_TYPE, NodePalette
 from py2flamingo.pipeline.ui.property_panel import PropertyPanel
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +53,7 @@ class PipelineEditorDialog(PersistentDialog):
     def __init__(self, app=None, parent=None):
         super().__init__(
             parent=parent,
-            geometry_manager=getattr(app, 'geometry_manager', None),
+            geometry_manager=getattr(app, "geometry_manager", None),
             window_id="PipelineEditor",
         )
         self.app = app
@@ -179,8 +187,14 @@ class PipelineEditorDialog(PersistentDialog):
             "color: #8abf8a; font-weight: bold; padding-left: 12px;"
         )
 
-        for btn in [self._new_btn, self._open_btn, self._save_btn,
-                    self._validate_btn, self._run_btn, self._stop_btn]:
+        for btn in [
+            self._new_btn,
+            self._open_btn,
+            self._save_btn,
+            self._validate_btn,
+            self._run_btn,
+            self._stop_btn,
+        ]:
             btn.setAutoDefault(False)
             btn.setDefault(False)
             self._toolbar_layout.addWidget(btn)
@@ -209,7 +223,7 @@ class PipelineEditorDialog(PersistentDialog):
         if not event.mimeData().hasFormat(MIME_TYPE):
             return
 
-        node_type_name = bytes(event.mimeData().data(MIME_TYPE)).decode('utf-8')
+        node_type_name = bytes(event.mimeData().data(MIME_TYPE)).decode("utf-8")
         try:
             node_type = NodeType[node_type_name]
         except KeyError:
@@ -236,8 +250,7 @@ class PipelineEditorDialog(PersistentDialog):
 
     def _on_open(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open Pipeline", "",
-            "Pipeline files (*.json);;All files (*)"
+            self, "Open Pipeline", "", "Pipeline files (*.json);;All files (*)"
         )
         if not path:
             return
@@ -257,15 +270,14 @@ class PipelineEditorDialog(PersistentDialog):
             path = str(self._current_file)
         else:
             path, _ = QFileDialog.getSaveFileName(
-                self, "Save Pipeline", "",
-                "Pipeline files (*.json);;All files (*)"
+                self, "Save Pipeline", "", "Pipeline files (*.json);;All files (*)"
             )
             if not path:
                 return
 
         try:
             data = self._pipeline.to_dict()
-            with open(path, 'w') as f:
+            with open(path, "w") as f:
                 json.dump(data, f, indent=2)
             self._current_file = Path(path)
             self._log(f"Saved: {path}")
@@ -279,19 +291,23 @@ class PipelineEditorDialog(PersistentDialog):
             for err in errors:
                 self._log(f"  - {err}")
             QMessageBox.warning(
-                self, "Validation Failed",
-                "Pipeline has errors:\n\n" + "\n".join(f"- {e}" for e in errors)
+                self,
+                "Validation Failed",
+                "Pipeline has errors:\n\n" + "\n".join(f"- {e}" for e in errors),
             )
         else:
             self._log("Pipeline is valid")
-            QMessageBox.information(self, "Valid", "Pipeline is valid and ready to run.")
+            QMessageBox.information(
+                self, "Valid", "Pipeline is valid and ready to run."
+            )
 
     def _on_run(self):
         errors = self._pipeline.validate()
         if errors:
             QMessageBox.warning(
-                self, "Cannot Run",
-                "Pipeline has errors:\n\n" + "\n".join(f"- {e}" for e in errors)
+                self,
+                "Cannot Run",
+                "Pipeline has errors:\n\n" + "\n".join(f"- {e}" for e in errors),
             )
             return
 
@@ -322,16 +338,16 @@ class PipelineEditorDialog(PersistentDialog):
     # ---- Execution feedback (called by controller) ----
 
     def on_node_started(self, node_id: str):
-        self._scene.set_node_status(node_id, 'running')
+        self._scene.set_node_status(node_id, "running")
         node = self._pipeline.get_node(node_id)
         name = node.name if node else node_id
         self._log(f"Running: {name}")
 
     def on_node_completed(self, node_id: str):
-        self._scene.set_node_status(node_id, 'completed')
+        self._scene.set_node_status(node_id, "completed")
 
     def on_node_error(self, node_id: str, error: str):
-        self._scene.set_node_status(node_id, 'error')
+        self._scene.set_node_status(node_id, "error")
         node = self._pipeline.get_node(node_id)
         name = node.name if node else node_id
         self._log(f"ERROR in {name}: {error}")

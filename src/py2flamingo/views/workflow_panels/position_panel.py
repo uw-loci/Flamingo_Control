@@ -5,13 +5,19 @@ Provides UI for setting start position with "Use Current" button.
 """
 
 import logging
-from typing import Optional, Callable
+from typing import Callable, Optional
 
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QDoubleSpinBox, QPushButton, QGroupBox, QGridLayout
-)
 from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtWidgets import (
+    QDoubleSpinBox,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from py2flamingo.models.microscope import Position
 
@@ -30,9 +36,13 @@ class PositionPanel(QWidget):
 
     position_changed = pyqtSignal(object)  # Emits Position
 
-    def __init__(self,
-                 get_current_position_callback: Optional[Callable[[], Optional[Position]]] = None,
-                 parent: Optional[QWidget] = None):
+    def __init__(
+        self,
+        get_current_position_callback: Optional[
+            Callable[[], Optional[Position]]
+        ] = None,
+        parent: Optional[QWidget] = None,
+    ):
         """
         Initialize position panel.
 
@@ -120,8 +130,10 @@ class PositionPanel(QWidget):
             return
 
         self.set_position(position)
-        self._logger.info(f"Captured current position: X={position.x:.3f}, Y={position.y:.3f}, "
-                         f"Z={position.z:.3f}, R={position.r:.1f}")
+        self._logger.info(
+            f"Captured current position: X={position.x:.3f}, Y={position.y:.3f}, "
+            f"Z={position.z:.3f}, R={position.r:.1f}"
+        )
 
     def _on_position_changed(self) -> None:
         """Handle position value changes."""
@@ -139,7 +151,7 @@ class PositionPanel(QWidget):
             x=self.x_spinbox.value(),
             y=self.y_spinbox.value(),
             z=self.z_spinbox.value(),
-            r=self.r_spinbox.value()
+            r=self.r_spinbox.value(),
         )
 
     def set_position(self, position: Position) -> None:

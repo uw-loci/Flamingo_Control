@@ -133,7 +133,7 @@ Usage Example:
 """
 
 import struct
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
 
 class ProtocolEncoder:
@@ -164,8 +164,8 @@ class ProtocolEncoder:
         status: int = 0,
         params: Optional[List[int]] = None,
         value: float = 0.0,
-        data: bytes = b'',
-        additional_data_size: int = 0
+        data: bytes = b"",
+        additional_data_size: int = 0,
     ) -> bytes:
         """
         Encode a command into the binary protocol format.
@@ -223,7 +223,7 @@ class ProtocolEncoder:
 
         # Prepare data field (must be exactly 72 bytes)
         if isinstance(data, str):
-            data = data.encode('utf-8')
+            data = data.encode("utf-8")
 
         if not isinstance(data, bytes):
             raise ValueError(f"Data must be bytes or str, got {type(data)}")
@@ -232,25 +232,25 @@ class ProtocolEncoder:
         if len(data) > 72:
             data = data[:72]
         else:
-            data = data.ljust(72, b'\x00')
+            data = data.ljust(72, b"\x00")
 
         # Pack command structure
         try:
             command_bytes = self.COMMAND_STRUCT.pack(
-                self.START_MARKER,      # Start marker
-                code,                   # Command code
-                status,                 # Status
-                params[0],              # int32Data0 / cmdBits0
-                params[1],              # int32Data1 / cmdBits1
-                params[2],              # int32Data2 / cmdBits2
-                params[3],              # hardwareID / cmdBits3
-                params[4],              # subsystemID / cmdBits4
-                params[5],              # clientID / cmdBits5
-                params[6],              # cmdDataBits0 / cmdBits6
-                value,                  # doubleData
-                additional_data_size,   # addDataBytes
-                data,                   # buffer (72 bytes)
-                self.END_MARKER         # End marker
+                self.START_MARKER,  # Start marker
+                code,  # Command code
+                status,  # Status
+                params[0],  # int32Data0 / cmdBits0
+                params[1],  # int32Data1 / cmdBits1
+                params[2],  # int32Data2 / cmdBits2
+                params[3],  # hardwareID / cmdBits3
+                params[4],  # subsystemID / cmdBits4
+                params[5],  # clientID / cmdBits5
+                params[6],  # cmdDataBits0 / cmdBits6
+                value,  # doubleData
+                additional_data_size,  # addDataBytes
+                data,  # buffer (72 bytes)
+                self.END_MARKER,  # End marker
             )
         except struct.error as e:
             raise ValueError(f"Failed to pack command structure: {e}")
@@ -345,27 +345,24 @@ class ProtocolDecoder:
         end_marker = unpacked[13]
 
         # Validate markers
-        valid = (
-            start_marker == self.START_MARKER and
-            end_marker == self.END_MARKER
-        )
+        valid = start_marker == self.START_MARKER and end_marker == self.END_MARKER
 
         return {
-            'start_marker': start_marker,
-            'code': code,
-            'status': status,
-            'int32Data0': int32Data0,
-            'int32Data1': int32Data1,
-            'int32Data2': int32Data2,
-            'hardwareID': hardwareID,
-            'subsystemID': subsystemID,
-            'clientID': clientID,
-            'cmdDataBits0': cmdDataBits0,
-            'doubleData': doubleData,
-            'addDataBytes': addDataBytes,
-            'buffer': buffer,
-            'end_marker': end_marker,
-            'valid': valid
+            "start_marker": start_marker,
+            "code": code,
+            "status": status,
+            "int32Data0": int32Data0,
+            "int32Data1": int32Data1,
+            "int32Data2": int32Data2,
+            "hardwareID": hardwareID,
+            "subsystemID": subsystemID,
+            "clientID": clientID,
+            "cmdDataBits0": cmdDataBits0,
+            "doubleData": doubleData,
+            "addDataBytes": addDataBytes,
+            "buffer": buffer,
+            "end_marker": end_marker,
+            "valid": valid,
         }
 
     def extract_string_from_buffer(self, buffer: bytes) -> str:
@@ -384,12 +381,12 @@ class ProtocolDecoder:
             >>> print(laser_power)  # "11.49"
         """
         # Find first null byte
-        null_index = buffer.find(b'\x00')
+        null_index = buffer.find(b"\x00")
         if null_index >= 0:
             buffer = buffer[:null_index]
 
         # Decode to string
-        return buffer.decode('utf-8', errors='replace').strip()
+        return buffer.decode("utf-8", errors="replace").strip()
 
     def extract_multi_axis_positions(self, buffer: bytes) -> Dict[int, float]:
         """
@@ -411,11 +408,11 @@ class ProtocolDecoder:
         positions = {}
         text = self.extract_string_from_buffer(buffer)
 
-        for line in text.split('\n'):
+        for line in text.split("\n"):
             line = line.strip()
-            if '=' in line:
+            if "=" in line:
                 try:
-                    axis_str, pos_str = line.split('=', 1)
+                    axis_str, pos_str = line.split("=", 1)
                     axis = int(axis_str.strip())
                     position = float(pos_str.strip())
                     positions[axis] = position

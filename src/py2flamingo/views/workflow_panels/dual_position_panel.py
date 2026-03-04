@@ -12,13 +12,20 @@ PositionPresetService to load from saved presets.
 """
 
 import logging
-from typing import Optional, Callable, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QDoubleSpinBox, QPushButton, QGroupBox, QGridLayout, QComboBox
-)
 from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtWidgets import (
+    QComboBox,
+    QDoubleSpinBox,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from py2flamingo.models.microscope import Position
 
@@ -48,10 +55,14 @@ class DualPositionPanel(QWidget):
     position_a_changed = pyqtSignal(object)  # Emits Position
     position_b_changed = pyqtSignal(object)  # Emits Position
 
-    def __init__(self,
-                 get_current_position_callback: Optional[Callable[[], Optional[Position]]] = None,
-                 preset_service: Optional['PositionPresetService'] = None,
-                 parent: Optional[QWidget] = None):
+    def __init__(
+        self,
+        get_current_position_callback: Optional[
+            Callable[[], Optional[Position]]
+        ] = None,
+        preset_service: Optional["PositionPresetService"] = None,
+        parent: Optional[QWidget] = None,
+    ):
         """
         Initialize dual position panel.
 
@@ -168,7 +179,9 @@ class DualPositionPanel(QWidget):
         preset_combo.setMinimumWidth(120)
         preset_combo.addItem("(Select)")
         preset_combo.setToolTip("Load a saved position preset")
-        preset_combo.currentIndexChanged.connect(lambda idx: self._on_preset_selected(suffix, idx))
+        preset_combo.currentIndexChanged.connect(
+            lambda idx: self._on_preset_selected(suffix, idx)
+        )
         setattr(self, f"_preset_combo_{suffix}", preset_combo)
         btn_layout.addWidget(preset_combo)
 
@@ -192,12 +205,16 @@ class DualPositionPanel(QWidget):
 
         if suffix == "a":
             self.set_position_a(position)
-            self._logger.info(f"Captured Position A: X={position.x:.3f}, Y={position.y:.3f}, "
-                             f"Z={position.z:.3f}, R={position.r:.1f}")
+            self._logger.info(
+                f"Captured Position A: X={position.x:.3f}, Y={position.y:.3f}, "
+                f"Z={position.z:.3f}, R={position.r:.1f}"
+            )
         else:
             self.set_position_b(position)
-            self._logger.info(f"Captured Position B: X={position.x:.3f}, Y={position.y:.3f}, "
-                             f"Z={position.z:.3f}, R={position.r:.1f}")
+            self._logger.info(
+                f"Captured Position B: X={position.x:.3f}, Y={position.y:.3f}, "
+                f"Z={position.z:.3f}, R={position.r:.1f}"
+            )
 
         # Reset the preset combo to "(Select)" since user manually set position
         preset_combo = getattr(self, f"_preset_combo_{suffix}")
@@ -226,14 +243,18 @@ class DualPositionPanel(QWidget):
 
         if suffix == "a":
             self.set_position_a(position)
-            self._logger.info(f"Loaded Position A from preset '{preset_name}': "
-                             f"X={position.x:.3f}, Y={position.y:.3f}, "
-                             f"Z={position.z:.3f}, R={position.r:.1f}")
+            self._logger.info(
+                f"Loaded Position A from preset '{preset_name}': "
+                f"X={position.x:.3f}, Y={position.y:.3f}, "
+                f"Z={position.z:.3f}, R={position.r:.1f}"
+            )
         else:
             self.set_position_b(position)
-            self._logger.info(f"Loaded Position B from preset '{preset_name}': "
-                             f"X={position.x:.3f}, Y={position.y:.3f}, "
-                             f"Z={position.z:.3f}, R={position.r:.1f}")
+            self._logger.info(
+                f"Loaded Position B from preset '{preset_name}': "
+                f"X={position.x:.3f}, Y={position.y:.3f}, "
+                f"Z={position.z:.3f}, R={position.r:.1f}"
+            )
 
     def _on_position_changed(self, suffix: str) -> None:
         """Handle position value changes."""
@@ -300,7 +321,7 @@ class DualPositionPanel(QWidget):
             x=self._x_a.value(),
             y=self._y_a.value(),
             z=self._z_a.value(),
-            r=self._r_a.value()
+            r=self._r_a.value(),
         )
 
     def get_position_b(self) -> Position:
@@ -314,7 +335,7 @@ class DualPositionPanel(QWidget):
             x=self._x_b.value(),
             y=self._y_b.value(),
             z=self._z_b.value(),
-            r=self._r_b.value()
+            r=self._r_b.value(),
         )
 
     def set_position_a(self, position: Position) -> None:
@@ -402,7 +423,7 @@ class DualPositionPanel(QWidget):
             min(self._x_a.value(), self._x_b.value()),
             max(self._x_a.value(), self._x_b.value()),
             min(self._y_a.value(), self._y_b.value()),
-            max(self._y_a.value(), self._y_b.value())
+            max(self._y_a.value(), self._y_b.value()),
         )
 
     def set_position_callback(self, callback: Callable[[], Optional[Position]]) -> None:
@@ -447,7 +468,7 @@ class DualPositionPanel(QWidget):
     # Preset Service Integration
     # =========================================================================
 
-    def set_preset_service(self, preset_service: 'PositionPresetService') -> None:
+    def set_preset_service(self, preset_service: "PositionPresetService") -> None:
         """
         Set the preset service for loading saved positions.
 
@@ -468,7 +489,7 @@ class DualPositionPanel(QWidget):
 
         preset_names = self._preset_service.get_preset_names()
 
-        for suffix in ['a', 'b']:
+        for suffix in ["a", "b"]:
             preset_combo = getattr(self, f"_preset_combo_{suffix}")
             current_text = preset_combo.currentText()
 

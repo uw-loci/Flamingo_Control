@@ -10,18 +10,28 @@ stored in JSON format. Settings include:
 
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QSpinBox, QDoubleSpinBox, QComboBox, QGroupBox, QGridLayout,
-    QPushButton, QDialogButtonBox, QFileDialog, QTabWidget, QWidget,
-    QMessageBox
-)
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QComboBox,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
-
 
 # Downsample factor presets (storage to display ratio)
 DOWNSAMPLE_PRESETS = {
@@ -215,7 +225,9 @@ class SettingsDialog(PersistentDialog):
         for preset_name in DOWNSAMPLE_PRESETS.keys():
             self._downsample_preset.addItem(preset_name)
         self._downsample_preset.setCurrentIndex(1)  # Default to "Balanced (3x)"
-        self._downsample_preset.currentIndexChanged.connect(self._on_downsample_preset_changed)
+        self._downsample_preset.currentIndexChanged.connect(
+            self._on_downsample_preset_changed
+        )
         grid.addWidget(self._downsample_preset, 0, 1)
 
         # Custom downsample value
@@ -307,7 +319,9 @@ class SettingsDialog(PersistentDialog):
         grid.addWidget(self._workflows_dir, 1, 1)
 
         browse_workflows = QPushButton("Browse...")
-        browse_workflows.clicked.connect(lambda: self._browse_directory(self._workflows_dir))
+        browse_workflows.clicked.connect(
+            lambda: self._browse_directory(self._workflows_dir)
+        )
         grid.addWidget(browse_workflows, 1, 2)
 
         # Sessions directory
@@ -317,7 +331,9 @@ class SettingsDialog(PersistentDialog):
         grid.addWidget(self._sessions_dir, 2, 1)
 
         browse_sessions = QPushButton("Browse...")
-        browse_sessions.clicked.connect(lambda: self._browse_directory(self._sessions_dir))
+        browse_sessions.clicked.connect(
+            lambda: self._browse_directory(self._sessions_dir)
+        )
         grid.addWidget(browse_sessions, 2, 2)
 
         # Info
@@ -394,9 +410,7 @@ class SettingsDialog(PersistentDialog):
     def _browse_directory(self, line_edit: QLineEdit) -> None:
         """Open directory browser and set result to line edit."""
         current = line_edit.text() or str(Path.home())
-        directory = QFileDialog.getExistingDirectory(
-            self, "Select Directory", current
-        )
+        directory = QFileDialog.getExistingDirectory(self, "Select Directory", current)
         if directory:
             line_edit.setText(directory)
 
@@ -442,20 +456,18 @@ class SettingsDialog(PersistentDialog):
             self._microscope_name_label.setText(
                 self._settings_service.microscope_name or "--"
             )
-            self._settings_file_label.setText(
-                str(self._settings_service.settings_file)
-            )
+            self._settings_file_label.setText(str(self._settings_service.settings_file))
 
             # Stage limits
             limits = self._settings_service.get_stage_limits()
-            self._x_min.setValue(limits['x']['min'])
-            self._x_max.setValue(limits['x']['max'])
-            self._y_min.setValue(limits['y']['min'])
-            self._y_max.setValue(limits['y']['max'])
-            self._z_min.setValue(limits['z']['min'])
-            self._z_max.setValue(limits['z']['max'])
-            self._r_min.setValue(limits['r']['min'])
-            self._r_max.setValue(limits['r']['max'])
+            self._x_min.setValue(limits["x"]["min"])
+            self._x_max.setValue(limits["x"]["max"])
+            self._y_min.setValue(limits["y"]["min"])
+            self._y_max.setValue(limits["y"]["max"])
+            self._z_min.setValue(limits["z"]["min"])
+            self._z_max.setValue(limits["z"]["max"])
+            self._r_min.setValue(limits["r"]["min"])
+            self._r_max.setValue(limits["r"]["max"])
 
             # Position history
             self._history_max.setValue(
@@ -489,57 +501,89 @@ class SettingsDialog(PersistentDialog):
         """Apply current settings without closing dialog."""
         if not self._settings_service:
             QMessageBox.warning(
-                self, "Warning",
-                "No settings service available. Settings cannot be saved."
+                self,
+                "Warning",
+                "No settings service available. Settings cannot be saved.",
             )
             return
 
         try:
             # Stage limits
-            self._settings_service.update_setting("stage_limits.x.min", self._x_min.value())
-            self._settings_service.update_setting("stage_limits.x.max", self._x_max.value())
-            self._settings_service.update_setting("stage_limits.y.min", self._y_min.value())
-            self._settings_service.update_setting("stage_limits.y.max", self._y_max.value())
-            self._settings_service.update_setting("stage_limits.z.min", self._z_min.value())
-            self._settings_service.update_setting("stage_limits.z.max", self._z_max.value())
-            self._settings_service.update_setting("stage_limits.r.min", self._r_min.value())
-            self._settings_service.update_setting("stage_limits.r.max", self._r_max.value())
+            self._settings_service.update_setting(
+                "stage_limits.x.min", self._x_min.value()
+            )
+            self._settings_service.update_setting(
+                "stage_limits.x.max", self._x_max.value()
+            )
+            self._settings_service.update_setting(
+                "stage_limits.y.min", self._y_min.value()
+            )
+            self._settings_service.update_setting(
+                "stage_limits.y.max", self._y_max.value()
+            )
+            self._settings_service.update_setting(
+                "stage_limits.z.min", self._z_min.value()
+            )
+            self._settings_service.update_setting(
+                "stage_limits.z.max", self._z_max.value()
+            )
+            self._settings_service.update_setting(
+                "stage_limits.r.min", self._r_min.value()
+            )
+            self._settings_service.update_setting(
+                "stage_limits.r.max", self._r_max.value()
+            )
 
             # Position history
-            self._settings_service.update_setting("position_history.max_size", self._history_max.value())
-            self._settings_service.update_setting("position_history.display_count", self._history_display.value())
+            self._settings_service.update_setting(
+                "position_history.max_size", self._history_max.value()
+            )
+            self._settings_service.update_setting(
+                "position_history.display_count", self._history_display.value()
+            )
 
             # Display settings
-            self._settings_service.update_setting("display.downsample_factor", self._downsample_factor.value())
-            self._settings_service.update_setting("display.storage_voxel_size_um", self._storage_voxel_size.value())
+            self._settings_service.update_setting(
+                "display.downsample_factor", self._downsample_factor.value()
+            )
+            self._settings_service.update_setting(
+                "display.storage_voxel_size_um", self._storage_voxel_size.value()
+            )
 
             # Paths
             if self._output_dir.text():
-                self._settings_service.update_setting("paths.output_dir", self._output_dir.text())
+                self._settings_service.update_setting(
+                    "paths.output_dir", self._output_dir.text()
+                )
             if self._workflows_dir.text():
-                self._settings_service.update_setting("paths.workflows_dir", self._workflows_dir.text())
+                self._settings_service.update_setting(
+                    "paths.workflows_dir", self._workflows_dir.text()
+                )
             if self._sessions_dir.text():
-                self._settings_service.update_setting("paths.sessions_dir", self._sessions_dir.text())
+                self._settings_service.update_setting(
+                    "paths.sessions_dir", self._sessions_dir.text()
+                )
 
             # Update timestamp
             import time
-            self._settings_service.update_setting("last_updated", time.strftime("%Y-%m-%d"))
+
+            self._settings_service.update_setting(
+                "last_updated", time.strftime("%Y-%m-%d")
+            )
 
             # Save to file
             self._settings_service.save_settings()
 
             self._logger.info("Settings applied and saved")
             QMessageBox.information(
-                self, "Settings Saved",
-                "Settings have been saved. Some changes may require restart to take effect."
+                self,
+                "Settings Saved",
+                "Settings have been saved. Some changes may require restart to take effect.",
             )
 
         except Exception as e:
             self._logger.error(f"Error applying settings: {e}")
-            QMessageBox.critical(
-                self, "Error",
-                f"Failed to save settings: {e}"
-            )
+            QMessageBox.critical(self, "Error", f"Failed to save settings: {e}")
 
     def _on_accept(self) -> None:
         """Handle OK button - apply settings and close."""
@@ -549,11 +593,12 @@ class SettingsDialog(PersistentDialog):
     def _reset_defaults(self) -> None:
         """Reset all settings to defaults."""
         reply = QMessageBox.question(
-            self, "Reset Settings",
+            self,
+            "Reset Settings",
             "Reset all settings to defaults?\n\n"
             "This will restore factory defaults for the current microscope.",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.No,
         )
 
         if reply == QMessageBox.Yes:
@@ -590,24 +635,24 @@ class SettingsDialog(PersistentDialog):
             Dictionary with all settings
         """
         return {
-            'stage_limits': {
-                'x': {'min': self._x_min.value(), 'max': self._x_max.value()},
-                'y': {'min': self._y_min.value(), 'max': self._y_max.value()},
-                'z': {'min': self._z_min.value(), 'max': self._z_max.value()},
-                'r': {'min': self._r_min.value(), 'max': self._r_max.value()},
+            "stage_limits": {
+                "x": {"min": self._x_min.value(), "max": self._x_max.value()},
+                "y": {"min": self._y_min.value(), "max": self._y_max.value()},
+                "z": {"min": self._z_min.value(), "max": self._z_max.value()},
+                "r": {"min": self._r_min.value(), "max": self._r_max.value()},
             },
-            'display': {
-                'downsample_factor': self._downsample_factor.value(),
-                'storage_voxel_size_um': self._storage_voxel_size.value(),
+            "display": {
+                "downsample_factor": self._downsample_factor.value(),
+                "storage_voxel_size_um": self._storage_voxel_size.value(),
             },
-            'position_history': {
-                'max_size': self._history_max.value(),
-                'display_count': self._history_display.value(),
+            "position_history": {
+                "max_size": self._history_max.value(),
+                "display_count": self._history_display.value(),
             },
-            'paths': {
-                'output_dir': self._output_dir.text(),
-                'workflows_dir': self._workflows_dir.text(),
-                'sessions_dir': self._sessions_dir.text(),
+            "paths": {
+                "output_dir": self._output_dir.text(),
+                "workflows_dir": self._workflows_dir.text(),
+                "sessions_dir": self._sessions_dir.text(),
             },
         }
 
@@ -617,42 +662,42 @@ class SettingsDialog(PersistentDialog):
         Args:
             settings: Dictionary with settings to apply
         """
-        if 'stage_limits' in settings:
-            limits = settings['stage_limits']
-            if 'x' in limits:
-                self._x_min.setValue(limits['x'].get('min', 0))
-                self._x_max.setValue(limits['x'].get('max', 26))
-            if 'y' in limits:
-                self._y_min.setValue(limits['y'].get('min', 0))
-                self._y_max.setValue(limits['y'].get('max', 26))
-            if 'z' in limits:
-                self._z_min.setValue(limits['z'].get('min', 0))
-                self._z_max.setValue(limits['z'].get('max', 26))
-            if 'r' in limits:
-                self._r_min.setValue(limits['r'].get('min', -720))
-                self._r_max.setValue(limits['r'].get('max', 720))
+        if "stage_limits" in settings:
+            limits = settings["stage_limits"]
+            if "x" in limits:
+                self._x_min.setValue(limits["x"].get("min", 0))
+                self._x_max.setValue(limits["x"].get("max", 26))
+            if "y" in limits:
+                self._y_min.setValue(limits["y"].get("min", 0))
+                self._y_max.setValue(limits["y"].get("max", 26))
+            if "z" in limits:
+                self._z_min.setValue(limits["z"].get("min", 0))
+                self._z_max.setValue(limits["z"].get("max", 26))
+            if "r" in limits:
+                self._r_min.setValue(limits["r"].get("min", -720))
+                self._r_max.setValue(limits["r"].get("max", 720))
 
-        if 'display' in settings:
-            display = settings['display']
-            if 'downsample_factor' in display:
-                self._downsample_factor.setValue(display['downsample_factor'])
-            if 'storage_voxel_size_um' in display:
-                self._storage_voxel_size.setValue(display['storage_voxel_size_um'])
+        if "display" in settings:
+            display = settings["display"]
+            if "downsample_factor" in display:
+                self._downsample_factor.setValue(display["downsample_factor"])
+            if "storage_voxel_size_um" in display:
+                self._storage_voxel_size.setValue(display["storage_voxel_size_um"])
 
-        if 'position_history' in settings:
-            history = settings['position_history']
-            if 'max_size' in history:
-                self._history_max.setValue(history['max_size'])
-            if 'display_count' in history:
-                self._history_display.setValue(history['display_count'])
+        if "position_history" in settings:
+            history = settings["position_history"]
+            if "max_size" in history:
+                self._history_max.setValue(history["max_size"])
+            if "display_count" in history:
+                self._history_display.setValue(history["display_count"])
 
-        if 'paths' in settings:
-            paths = settings['paths']
-            if 'output_dir' in paths:
-                self._output_dir.setText(paths['output_dir'])
-            if 'workflows_dir' in paths:
-                self._workflows_dir.setText(paths['workflows_dir'])
-            if 'sessions_dir' in paths:
-                self._sessions_dir.setText(paths['sessions_dir'])
+        if "paths" in settings:
+            paths = settings["paths"]
+            if "output_dir" in paths:
+                self._output_dir.setText(paths["output_dir"])
+            if "workflows_dir" in paths:
+                self._workflows_dir.setText(paths["workflows_dir"])
+            if "sessions_dir" in paths:
+                self._sessions_dir.setText(paths["sessions_dir"])
 
         self._update_voxel_info()

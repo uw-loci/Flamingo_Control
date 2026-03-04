@@ -5,11 +5,11 @@ Provides consistent error formatting across the application for both
 user display and technical logging.
 """
 
-import logging
 import json
-from typing import Optional, Dict, Any, Union
+import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, Optional, Union
 
 from py2flamingo.core.errors import FlamingoError
 
@@ -23,11 +23,11 @@ class ErrorFormatter:
 
     # ANSI color codes for terminal output (optional)
     COLORS = {
-        'RED': '\033[91m',
-        'YELLOW': '\033[93m',
-        'BLUE': '\033[94m',
-        'GREEN': '\033[92m',
-        'RESET': '\033[0m'
+        "RED": "\033[91m",
+        "YELLOW": "\033[93m",
+        "BLUE": "\033[94m",
+        "GREEN": "\033[92m",
+        "RESET": "\033[0m",
     }
 
     def __init__(self, use_colors: bool = False):
@@ -75,6 +75,7 @@ class ErrorFormatter:
         else:
             # Format standard exception
             import traceback
+
             msg = f"{error.__class__.__name__}: {str(error)}"
             if include_trace:
                 msg += f"\nStack trace:\n{traceback.format_exc()}"
@@ -94,21 +95,21 @@ class ErrorFormatter:
         """
         if isinstance(error, FlamingoError):
             return {
-                'title': error.__class__.__name__.replace('Error', ' Error'),
-                'message': error.message,
-                'code': error.error_code,
-                'suggestions': error.suggestions,
-                'details': error.context if error.context else None,
-                'severity': self._get_severity(error.error_code)
+                "title": error.__class__.__name__.replace("Error", " Error"),
+                "message": error.message,
+                "code": error.error_code,
+                "suggestions": error.suggestions,
+                "details": error.context if error.context else None,
+                "severity": self._get_severity(error.error_code),
             }
         else:
             return {
-                'title': 'Error',
-                'message': str(error),
-                'code': 9000,
-                'suggestions': [],
-                'details': {'type': error.__class__.__name__},
-                'severity': 'error'
+                "title": "Error",
+                "message": str(error),
+                "code": 9000,
+                "suggestions": [],
+                "details": {"type": error.__class__.__name__},
+                "severity": "error",
             }
 
     def format_for_json(self, error: Exception) -> str:
@@ -125,9 +126,9 @@ class ErrorFormatter:
             data = error.to_dict()
         else:
             data = {
-                'error_type': error.__class__.__name__,
-                'message': str(error),
-                'timestamp': datetime.now().isoformat()
+                "error_type": error.__class__.__name__,
+                "message": str(error),
+                "timestamp": datetime.now().isoformat(),
             }
         return json.dumps(data, indent=2, default=str)
 
@@ -142,13 +143,13 @@ class ErrorFormatter:
             Severity level: 'critical', 'error', 'warning', or 'info'
         """
         if error_code < 2000:  # Connection errors
-            return 'critical'
+            return "critical"
         elif error_code < 4000:  # Command/Hardware errors
-            return 'error'
+            return "error"
         elif error_code < 7000:  # Data/Workflow/Config errors
-            return 'warning'
+            return "warning"
         else:  # Validation/Timeout/System errors
-            return 'error'
+            return "error"
 
     def colorize(self, text: str, color: str) -> str:
         """
@@ -175,10 +176,10 @@ class ErrorLogger:
 
     def __init__(
         self,
-        logger_name: str = 'flamingo.errors',
+        logger_name: str = "flamingo.errors",
         log_file: Optional[Path] = None,
         console_level: int = logging.WARNING,
-        file_level: int = logging.DEBUG
+        file_level: int = logging.DEBUG,
     ):
         """
         Initialize error logger.
@@ -196,9 +197,7 @@ class ErrorLogger:
         # Console handler - user-friendly messages
         console_handler = logging.StreamHandler()
         console_handler.setLevel(console_level)
-        console_formatter = logging.Formatter(
-            '%(levelname)s - %(message)s'
-        )
+        console_formatter = logging.Formatter("%(levelname)s - %(message)s")
         console_handler.setFormatter(console_formatter)
         self.logger.addHandler(console_handler)
 
@@ -207,7 +206,7 @@ class ErrorLogger:
             file_handler = logging.FileHandler(log_file)
             file_handler.setLevel(file_level)
             file_formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+                "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
             )
             file_handler.setFormatter(file_formatter)
             self.logger.addHandler(file_handler)
@@ -217,7 +216,7 @@ class ErrorLogger:
         error: Exception,
         level: int = logging.ERROR,
         include_trace: bool = True,
-        extra_context: Optional[Dict[str, Any]] = None
+        extra_context: Optional[Dict[str, Any]] = None,
     ):
         """
         Log an error with appropriate formatting.
@@ -245,20 +244,18 @@ class ErrorLogger:
 
             # Log context if available
             if context:
-                self.logger.debug(f"Error context: {json.dumps(context, indent=2, default=str)}")
+                self.logger.debug(
+                    f"Error context: {json.dumps(context, indent=2, default=str)}"
+                )
         else:
             # For non-Flamingo errors, log full details
             self.logger.log(
                 level,
                 self.formatter.format_for_log(error, include_trace),
-                extra={'context': context} if context else None
+                extra={"context": context} if context else None,
             )
 
-    def log_and_raise(
-        self,
-        error: FlamingoError,
-        level: int = logging.ERROR
-    ):
+    def log_and_raise(self, error: FlamingoError, level: int = logging.ERROR):
         """
         Log an error and then raise it.
 
@@ -292,9 +289,10 @@ def get_error_logger() -> ErrorLogger:
     if _error_logger is None:
         # Default to logging errors to a file in the logs directory
         from pathlib import Path
-        log_dir = Path.home() / 'LSControl' / 'Flamingo_Control' / 'logs'
+
+        log_dir = Path.home() / "LSControl" / "Flamingo_Control" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = log_dir / 'errors.log'
+        log_file = log_dir / "errors.log"
         _error_logger = ErrorLogger(log_file=log_file)
     return _error_logger
 
@@ -310,7 +308,7 @@ def log_error(error: Exception, **kwargs):
     get_error_logger().log_error(error, **kwargs)
 
 
-def format_error(error: Exception, format_type: str = 'user') -> Union[str, Dict]:
+def format_error(error: Exception, format_type: str = "user") -> Union[str, Dict]:
     """
     Convenience function to format an error.
 
@@ -323,13 +321,13 @@ def format_error(error: Exception, format_type: str = 'user') -> Union[str, Dict
     """
     formatter = ErrorFormatter()
 
-    if format_type == 'user':
+    if format_type == "user":
         return formatter.format_for_user(error)
-    elif format_type == 'log':
+    elif format_type == "log":
         return formatter.format_for_log(error)
-    elif format_type == 'gui':
+    elif format_type == "gui":
         return formatter.format_for_gui(error)
-    elif format_type == 'json':
+    elif format_type == "json":
         return formatter.format_for_json(error)
     else:
         raise ValueError(f"Unknown format type: {format_type}")

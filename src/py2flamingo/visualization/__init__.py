@@ -10,10 +10,14 @@ Performance optimizations (Zarr 3.x, NumPy 2.x, SciPy 1.14+):
 - Optional GPU acceleration via CuPy
 """
 
-from .dual_resolution_storage import DualResolutionVoxelStorage, DualResolutionConfig
-from .coordinate_transforms import CoordinateTransformer, PhysicalToNapariMapper, TransformQuality
-from .sparse_volume_renderer import SparseVolumeRenderer
+from .coordinate_transforms import (
+    CoordinateTransformer,
+    PhysicalToNapariMapper,
+    TransformQuality,
+)
+from .dual_resolution_storage import DualResolutionConfig, DualResolutionVoxelStorage
 from .session_manager import SessionManager, SessionMetadata
+from .sparse_volume_renderer import SparseVolumeRenderer
 from .transform_workers import TransformManager
 
 # Optional GPU transforms (lazy initialization - no slow CUDA startup at import)
@@ -21,35 +25,36 @@ try:
     from .gpu_transforms import (
         affine_transform_auto,
         gaussian_filter_auto,
+        get_gpu_info,
         shift_auto,
-        get_gpu_info
     )
+
     GPU_TRANSFORMS_AVAILABLE = True
 except ImportError:
     GPU_TRANSFORMS_AVAILABLE = False
     affine_transform_auto = None
     gaussian_filter_auto = None
     shift_auto = None
-    get_gpu_info = lambda: {'available': False}
+    get_gpu_info = lambda: {"available": False}
 
 # GPU_AVAILABLE is determined lazily when first used, not at import time
 # Use get_gpu_info()['available'] to check actual GPU availability
 GPU_AVAILABLE = GPU_TRANSFORMS_AVAILABLE  # Indicates module imported, not GPU present
 
 __all__ = [
-    'DualResolutionVoxelStorage',
-    'DualResolutionConfig',
-    'CoordinateTransformer',
-    'PhysicalToNapariMapper',
-    'TransformQuality',
-    'SparseVolumeRenderer',
-    'SessionManager',
-    'SessionMetadata',
-    'TransformManager',
+    "DualResolutionVoxelStorage",
+    "DualResolutionConfig",
+    "CoordinateTransformer",
+    "PhysicalToNapariMapper",
+    "TransformQuality",
+    "SparseVolumeRenderer",
+    "SessionManager",
+    "SessionMetadata",
+    "TransformManager",
     # GPU functions
-    'GPU_AVAILABLE',
-    'affine_transform_auto',
-    'gaussian_filter_auto',
-    'shift_auto',
-    'get_gpu_info'
+    "GPU_AVAILABLE",
+    "affine_transform_auto",
+    "gaussian_filter_auto",
+    "shift_auto",
+    "get_gpu_info",
 ]

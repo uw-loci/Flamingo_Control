@@ -14,6 +14,7 @@ global status that can be displayed in the UI.
 import logging
 from enum import Enum
 from typing import Optional
+
 from PyQt5.QtCore import QObject, pyqtSignal
 
 
@@ -28,6 +29,7 @@ class GlobalStatus(Enum):
     - WORKFLOW_RUNNING: Magenta (acquisition workflow active)
     - ERROR: Orange (connected but communication error)
     """
+
     DISCONNECTED = "disconnected"
     IDLE = "idle"
     MOVING = "moving"
@@ -52,7 +54,7 @@ class StatusIndicatorService(QObject):
     # Signal emitted when status changes
     status_changed = pyqtSignal(object, str)  # (GlobalStatus, description_text)
 
-    def __init__(self, connection_service: Optional['MVCConnectionService'] = None):
+    def __init__(self, connection_service: Optional["MVCConnectionService"] = None):
         """
         Initialize status indicator service.
 
@@ -98,12 +100,12 @@ class StatusIndicatorService(QObject):
     def _setup_connection_monitoring(self):
         """Set up monitoring of connection service."""
         # Monitor connection model changes
-        if hasattr(self.connection_service, 'model'):
+        if hasattr(self.connection_service, "model"):
             # Connection state changes are monitored via explicit calls
             # since the ConnectionModel doesn't have Qt signals
             pass
 
-    def set_connection_service(self, connection_service: 'MVCConnectionService'):
+    def set_connection_service(self, connection_service: "MVCConnectionService"):
         """
         Set or update the connection service to monitor.
 
@@ -199,7 +201,9 @@ class StatusIndicatorService(QObject):
         self._update_status()
 
         # Start position polling so Sample View updates during workflow
-        if self._movement_controller and hasattr(self._movement_controller, 'start_workflow_polling'):
+        if self._movement_controller and hasattr(
+            self._movement_controller, "start_workflow_polling"
+        ):
             self._movement_controller.start_workflow_polling(interval=2.0)
             self.logger.info("Started workflow position polling")
 
@@ -215,7 +219,9 @@ class StatusIndicatorService(QObject):
         self._update_status()
 
         # Stop position polling
-        if self._movement_controller and hasattr(self._movement_controller, 'stop_workflow_polling'):
+        if self._movement_controller and hasattr(
+            self._movement_controller, "stop_workflow_polling"
+        ):
             self._movement_controller.stop_workflow_polling()
             self.logger.info("Stopped workflow position polling")
 
@@ -283,7 +289,7 @@ class StatusIndicatorService(QObject):
             GlobalStatus.IDLE: "Ready",
             GlobalStatus.MOVING: "Moving",
             GlobalStatus.WORKFLOW_RUNNING: "Workflow Running",
-            GlobalStatus.ERROR: "Communication Error"
+            GlobalStatus.ERROR: "Communication Error",
         }
         return descriptions.get(status, "Unknown")
 
@@ -314,5 +320,5 @@ class StatusIndicatorService(QObject):
         """
         return self._current_status in (
             GlobalStatus.MOVING,
-            GlobalStatus.WORKFLOW_RUNNING
+            GlobalStatus.WORKFLOW_RUNNING,
         )

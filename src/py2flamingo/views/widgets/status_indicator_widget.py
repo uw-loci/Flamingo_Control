@@ -5,12 +5,17 @@ This widget provides a visual indicator of the microscope system status
 with color-coded states and smooth transitions.
 """
 
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel
-from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtProperty
+from PyQt5.QtCore import QEasingCurve, QPropertyAnimation, Qt, pyqtProperty
 from PyQt5.QtGui import QColor, QPalette
+from PyQt5.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from py2flamingo.services.status_indicator_service import GlobalStatus
-from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR, WARNING_COLOR, NEUTRAL_COLOR
+from py2flamingo.views.colors import (
+    ERROR_COLOR,
+    NEUTRAL_COLOR,
+    SUCCESS_COLOR,
+    WARNING_COLOR,
+)
 
 
 class StatusIndicatorWidget(QWidget):
@@ -29,11 +34,11 @@ class StatusIndicatorWidget(QWidget):
 
     # Color mapping for each status (colorblind-friendly)
     STATUS_COLORS = {
-        GlobalStatus.DISCONNECTED: QColor(NEUTRAL_COLOR),      # Grey
-        GlobalStatus.IDLE: QColor(SUCCESS_COLOR),              # Blue
-        GlobalStatus.MOVING: QColor(WARNING_COLOR),            # Amber/Gold
-        GlobalStatus.WORKFLOW_RUNNING: QColor("#a56eff"),      # Purple
-        GlobalStatus.ERROR: QColor(ERROR_COLOR)                # Red-Orange (communication error)
+        GlobalStatus.DISCONNECTED: QColor(NEUTRAL_COLOR),  # Grey
+        GlobalStatus.IDLE: QColor(SUCCESS_COLOR),  # Blue
+        GlobalStatus.MOVING: QColor(WARNING_COLOR),  # Amber/Gold
+        GlobalStatus.WORKFLOW_RUNNING: QColor("#a56eff"),  # Purple
+        GlobalStatus.ERROR: QColor(ERROR_COLOR),  # Red-Orange (communication error)
     }
 
     def __init__(self, parent=None):
@@ -84,8 +89,7 @@ class StatusIndicatorWidget(QWidget):
         """
         # Update color with animation
         target_color = self.STATUS_COLORS.get(
-            status,
-            self.STATUS_COLORS[GlobalStatus.DISCONNECTED]
+            status, self.STATUS_COLORS[GlobalStatus.DISCONNECTED]
         )
         self._animate_color_change(target_color)
 
@@ -134,7 +138,9 @@ class StatusIndicatorWidget(QWidget):
         self._current_color = color
         self._update_indicator_color(color)
 
-    indicatorColor = pyqtProperty(QColor, fget=_get_indicator_color, fset=_set_indicator_color)
+    indicatorColor = pyqtProperty(
+        QColor, fget=_get_indicator_color, fset=_set_indicator_color
+    )
 
 
 class StatusIndicatorBar(QWidget):
@@ -195,8 +201,7 @@ class StatusIndicatorBar(QWidget):
         """
         # Update color with animation
         target_color = self.STATUS_COLORS.get(
-            status,
-            self.STATUS_COLORS[GlobalStatus.DISCONNECTED]
+            status, self.STATUS_COLORS[GlobalStatus.DISCONNECTED]
         )
         self._animate_color_change(target_color)
 

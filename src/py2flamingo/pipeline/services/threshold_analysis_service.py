@@ -8,7 +8,7 @@ can be used both by the interactive dialog and by pipeline ThresholdRunner nodes
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Callable
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 from scipy import ndimage
@@ -29,6 +29,7 @@ class ThresholdSettings:
         opening_radius: Radius for opening structuring element
         min_object_size: Minimum connected-component size in voxels (0 = no filter)
     """
+
     channel_thresholds: Dict[int, float] = field(default_factory=dict)
     gauss_sigma: float = 0.0
     opening_enabled: bool = False
@@ -46,6 +47,7 @@ class ThresholdResult:
         objects: List of detected connected components
         object_count: Number of detected objects
     """
+
     combined_mask: Optional[np.ndarray] = None
     labels: Optional[np.ndarray] = None
     objects: List[DetectedObject] = field(default_factory=list)
@@ -175,7 +177,9 @@ class ThresholdAnalysisService:
             return []
 
         slices = ndimage.find_objects(labeled_arr)
-        centroids = ndimage.center_of_mass(mask, labeled_arr, range(1, num_features + 1))
+        centroids = ndimage.center_of_mass(
+            mask, labeled_arr, range(1, num_features + 1)
+        )
 
         # Voxel volume in mm³
         vz, vy, vx = voxel_size_um

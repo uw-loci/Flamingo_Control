@@ -5,17 +5,24 @@ such as AOI (Area of Interest) and dual camera capture settings.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel,
-    QSpinBox, QDoubleSpinBox, QComboBox, QGroupBox, QGridLayout,
-    QPushButton, QDialogButtonBox
-)
-from py2flamingo.services.window_geometry_manager import PersistentDialog
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import (
+    QComboBox,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
+)
 
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 
 # AOI preset configurations
 AOI_PRESETS = {
@@ -202,9 +209,7 @@ class AdvancedCameraDialog(PersistentDialog):
         layout.addStretch()
 
         # Dialog buttons
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
-        )
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
@@ -243,7 +248,10 @@ class AdvancedCameraDialog(PersistentDialog):
         current_height = self._aoi_height.value()
 
         for preset_name, preset_size in AOI_PRESETS.items():
-            if preset_size is not None and preset_size == (current_width, current_height):
+            if preset_size is not None and preset_size == (
+                current_width,
+                current_height,
+            ):
                 self._updating_preset = True
                 self._aoi_preset.setCurrentText(preset_name)
                 self._updating_preset = False
@@ -275,13 +283,13 @@ class AdvancedCameraDialog(PersistentDialog):
         _, cam2_mode_value = CAPTURE_MODES[self._cam2_mode.currentIndex()]
 
         return {
-            'exposure_us': self._exposure_spinbox.value(),
-            'aoi_width': self._aoi_width.value(),
-            'aoi_height': self._aoi_height.value(),
-            'cam1_capture_percentage': self._cam1_percentage.value(),
-            'cam1_capture_mode': cam1_mode_value,
-            'cam2_capture_percentage': self._cam2_percentage.value(),
-            'cam2_capture_mode': cam2_mode_value,
+            "exposure_us": self._exposure_spinbox.value(),
+            "aoi_width": self._aoi_width.value(),
+            "aoi_height": self._aoi_height.value(),
+            "cam1_capture_percentage": self._cam1_percentage.value(),
+            "cam1_capture_mode": cam1_mode_value,
+            "cam2_capture_percentage": self._cam2_percentage.value(),
+            "cam2_capture_mode": cam2_mode_value,
         }
 
     def set_settings(self, settings: Dict[str, Any]) -> None:
@@ -290,25 +298,25 @@ class AdvancedCameraDialog(PersistentDialog):
         Args:
             settings: Dictionary with settings to apply
         """
-        if 'exposure_us' in settings:
-            self._exposure_spinbox.setValue(settings['exposure_us'])
-        if 'aoi_width' in settings:
-            self._aoi_width.setValue(settings['aoi_width'])
-        if 'aoi_height' in settings:
-            self._aoi_height.setValue(settings['aoi_height'])
-        if 'cam1_capture_percentage' in settings:
-            self._cam1_percentage.setValue(settings['cam1_capture_percentage'])
-        if 'cam1_capture_mode' in settings:
+        if "exposure_us" in settings:
+            self._exposure_spinbox.setValue(settings["exposure_us"])
+        if "aoi_width" in settings:
+            self._aoi_width.setValue(settings["aoi_width"])
+        if "aoi_height" in settings:
+            self._aoi_height.setValue(settings["aoi_height"])
+        if "cam1_capture_percentage" in settings:
+            self._cam1_percentage.setValue(settings["cam1_capture_percentage"])
+        if "cam1_capture_mode" in settings:
             # Find index for mode value
             for i, (_, value) in enumerate(CAPTURE_MODES):
-                if value == settings['cam1_capture_mode']:
+                if value == settings["cam1_capture_mode"]:
                     self._cam1_mode.setCurrentIndex(i)
                     break
-        if 'cam2_capture_percentage' in settings:
-            self._cam2_percentage.setValue(settings['cam2_capture_percentage'])
-        if 'cam2_capture_mode' in settings:
+        if "cam2_capture_percentage" in settings:
+            self._cam2_percentage.setValue(settings["cam2_capture_percentage"])
+        if "cam2_capture_mode" in settings:
             for i, (_, value) in enumerate(CAPTURE_MODES):
-                if value == settings['cam2_capture_mode']:
+                if value == settings["cam2_capture_mode"]:
                     self._cam2_mode.setCurrentIndex(i)
                     break
 

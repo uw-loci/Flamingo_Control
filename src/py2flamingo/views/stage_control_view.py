@@ -15,21 +15,42 @@ This view provides stage control including:
 import logging
 import os
 from typing import Optional
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QGroupBox, QFormLayout, QDoubleSpinBox,
-    QGridLayout, QFrame, QMessageBox, QComboBox, QListWidget,
-    QLineEdit, QInputDialog, QDialog, QDialogButtonBox, QSizePolicy
-)
+
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QFont, QIcon
+from PyQt5.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
-from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.controllers.movement_controller import MovementController
 from py2flamingo.models.microscope import Position
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.views.colors import (
-    SUCCESS_COLOR, SUCCESS_BG, WARNING_COLOR, WARNING_BG,
-    ERROR_COLOR, ERROR_BG, POSITIVE_JOG_COLOR, NEGATIVE_JOG_COLOR
+    ERROR_BG,
+    ERROR_COLOR,
+    NEGATIVE_JOG_COLOR,
+    POSITIVE_JOG_COLOR,
+    SUCCESS_BG,
+    SUCCESS_COLOR,
+    WARNING_BG,
+    WARNING_COLOR,
 )
 
 
@@ -72,8 +93,7 @@ class SetHomePositionDialog(PersistentDialog):
         # X axis
         self.x_spinbox = QDoubleSpinBox()
         self.x_spinbox.setRange(
-            self.stage_limits['x']['min'],
-            self.stage_limits['x']['max']
+            self.stage_limits["x"]["min"], self.stage_limits["x"]["max"]
         )
         self.x_spinbox.setDecimals(3)
         self.x_spinbox.setSuffix(" mm")
@@ -81,14 +101,13 @@ class SetHomePositionDialog(PersistentDialog):
         self.x_spinbox.setSingleStep(0.1)
         form_layout.addRow(
             f"X ({self.stage_limits['x']['min']:.2f} to {self.stage_limits['x']['max']:.2f} mm):",
-            self.x_spinbox
+            self.x_spinbox,
         )
 
         # Y axis
         self.y_spinbox = QDoubleSpinBox()
         self.y_spinbox.setRange(
-            self.stage_limits['y']['min'],
-            self.stage_limits['y']['max']
+            self.stage_limits["y"]["min"], self.stage_limits["y"]["max"]
         )
         self.y_spinbox.setDecimals(3)
         self.y_spinbox.setSuffix(" mm")
@@ -96,14 +115,13 @@ class SetHomePositionDialog(PersistentDialog):
         self.y_spinbox.setSingleStep(0.1)
         form_layout.addRow(
             f"Y ({self.stage_limits['y']['min']:.2f} to {self.stage_limits['y']['max']:.2f} mm):",
-            self.y_spinbox
+            self.y_spinbox,
         )
 
         # Z axis
         self.z_spinbox = QDoubleSpinBox()
         self.z_spinbox.setRange(
-            self.stage_limits['z']['min'],
-            self.stage_limits['z']['max']
+            self.stage_limits["z"]["min"], self.stage_limits["z"]["max"]
         )
         self.z_spinbox.setDecimals(3)
         self.z_spinbox.setSuffix(" mm")
@@ -111,14 +129,13 @@ class SetHomePositionDialog(PersistentDialog):
         self.z_spinbox.setSingleStep(0.1)
         form_layout.addRow(
             f"Z ({self.stage_limits['z']['min']:.2f} to {self.stage_limits['z']['max']:.2f} mm):",
-            self.z_spinbox
+            self.z_spinbox,
         )
 
         # R axis
         self.r_spinbox = QDoubleSpinBox()
         self.r_spinbox.setRange(
-            self.stage_limits['r']['min'],
-            self.stage_limits['r']['max']
+            self.stage_limits["r"]["min"], self.stage_limits["r"]["max"]
         )
         self.r_spinbox.setDecimals(2)
         self.r_spinbox.setSuffix("°")
@@ -126,15 +143,13 @@ class SetHomePositionDialog(PersistentDialog):
         self.r_spinbox.setSingleStep(1.0)
         form_layout.addRow(
             f"R ({self.stage_limits['r']['min']:.1f} to {self.stage_limits['r']['max']:.1f}°):",
-            self.r_spinbox
+            self.r_spinbox,
         )
 
         layout.addLayout(form_layout)
 
         # Buttons
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
-        )
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
@@ -153,7 +168,7 @@ class SetHomePositionDialog(PersistentDialog):
             x=self.x_spinbox.value(),
             y=self.y_spinbox.value(),
             z=self.z_spinbox.value(),
-            r=self.r_spinbox.value()
+            r=self.r_spinbox.value(),
         )
 
 
@@ -188,7 +203,7 @@ class StageControlView(QWidget):
         # Load camera and magnification parameters
         self.magnification = self._load_magnification()
         self.sensor_pixels = 2048  # Default sensor size
-        self.pixel_size_um = 6.5   # Default pixel size in micrometers
+        self.pixel_size_um = 6.5  # Default pixel size in micrometers
         self.fov_mm = self._calculate_fov()
 
         # Track jog button references for dynamic updates
@@ -254,24 +269,34 @@ class StageControlView(QWidget):
         try:
             # Try to find ScopeSettings.txt relative to this file
             current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
-            settings_path = os.path.join(project_root, 'microscope_settings', 'ScopeSettings.txt')
+            project_root = os.path.dirname(
+                os.path.dirname(os.path.dirname(current_dir))
+            )
+            settings_path = os.path.join(
+                project_root, "microscope_settings", "ScopeSettings.txt"
+            )
 
             if not os.path.exists(settings_path):
-                self.logger.warning(f"ScopeSettings.txt not found at {settings_path}, using default magnification")
+                self.logger.warning(
+                    f"ScopeSettings.txt not found at {settings_path}, using default magnification"
+                )
                 return 25.0
 
-            with open(settings_path, 'r') as f:
+            with open(settings_path, "r") as f:
                 for line in f:
-                    if 'Objective lens magnification' in line:
+                    if "Objective lens magnification" in line:
                         # Parse line like: "Objective lens magnification = 25.69"
-                        parts = line.split('=')
+                        parts = line.split("=")
                         if len(parts) == 2:
                             mag = float(parts[1].strip())
-                            self.logger.info(f"Loaded magnification: {mag}x from {settings_path}")
+                            self.logger.info(
+                                f"Loaded magnification: {mag}x from {settings_path}"
+                            )
                             return mag
 
-            self.logger.warning("Magnification not found in ScopeSettings.txt, using default")
+            self.logger.warning(
+                "Magnification not found in ScopeSettings.txt, using default"
+            )
             return 25.0
 
         except Exception as e:
@@ -357,23 +382,29 @@ class StageControlView(QWidget):
         grid.addWidget(x_label, row, 0)
 
         self.x_target_spin = QDoubleSpinBox()
-        self.x_target_spin.setRange(limits['x']['min'], limits['x']['max'])
+        self.x_target_spin.setRange(limits["x"]["min"], limits["x"]["max"])
         self.x_target_spin.setDecimals(3)
         self.x_target_spin.setSingleStep(0.1)
         self.x_target_spin.setSuffix(" mm")
         self.x_target_spin.setMaximumWidth(110)
-        self.x_target_spin.valueChanged.connect(lambda: self._update_position_label_colors())
+        self.x_target_spin.valueChanged.connect(
+            lambda: self._update_position_label_colors()
+        )
         grid.addWidget(self.x_target_spin, row, 1)
 
         self.x_goto_btn = QPushButton("Go X")
-        self.x_goto_btn.clicked.connect(lambda: self._on_goto_clicked('x'))
-        self.x_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 5px; font-weight: bold; font-size: 9pt;")
+        self.x_goto_btn.clicked.connect(lambda: self._on_goto_clicked("x"))
+        self.x_goto_btn.setStyleSheet(
+            "background-color: #2196f3; color: white; padding: 5px; font-weight: bold; font-size: 9pt;"
+        )
         self.x_goto_btn.setMaximumWidth(60)
         grid.addWidget(self.x_goto_btn, row, 2)
 
         self.x_home_btn = QPushButton("Go to X Home")
-        self.x_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('x'))
-        self.x_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;")
+        self.x_home_btn.clicked.connect(lambda: self._on_home_axis_clicked("x"))
+        self.x_home_btn.setStyleSheet(
+            "background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;"
+        )
         grid.addWidget(self.x_home_btn, row, 3)
 
         # Y-axis row
@@ -383,23 +414,29 @@ class StageControlView(QWidget):
         grid.addWidget(y_label, row, 0)
 
         self.y_target_spin = QDoubleSpinBox()
-        self.y_target_spin.setRange(limits['y']['min'], limits['y']['max'])
+        self.y_target_spin.setRange(limits["y"]["min"], limits["y"]["max"])
         self.y_target_spin.setDecimals(3)
         self.y_target_spin.setSingleStep(0.1)
         self.y_target_spin.setSuffix(" mm")
         self.y_target_spin.setMaximumWidth(110)
-        self.y_target_spin.valueChanged.connect(lambda: self._update_position_label_colors())
+        self.y_target_spin.valueChanged.connect(
+            lambda: self._update_position_label_colors()
+        )
         grid.addWidget(self.y_target_spin, row, 1)
 
         self.y_goto_btn = QPushButton("Go Y")
-        self.y_goto_btn.clicked.connect(lambda: self._on_goto_clicked('y'))
-        self.y_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 5px; font-weight: bold; font-size: 9pt;")
+        self.y_goto_btn.clicked.connect(lambda: self._on_goto_clicked("y"))
+        self.y_goto_btn.setStyleSheet(
+            "background-color: #2196f3; color: white; padding: 5px; font-weight: bold; font-size: 9pt;"
+        )
         self.y_goto_btn.setMaximumWidth(60)
         grid.addWidget(self.y_goto_btn, row, 2)
 
         self.y_home_btn = QPushButton("Go to Y Home")
-        self.y_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('y'))
-        self.y_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;")
+        self.y_home_btn.clicked.connect(lambda: self._on_home_axis_clicked("y"))
+        self.y_home_btn.setStyleSheet(
+            "background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;"
+        )
         grid.addWidget(self.y_home_btn, row, 3)
 
         # Z-axis row
@@ -409,23 +446,29 @@ class StageControlView(QWidget):
         grid.addWidget(z_label, row, 0)
 
         self.z_target_spin = QDoubleSpinBox()
-        self.z_target_spin.setRange(limits['z']['min'], limits['z']['max'])
+        self.z_target_spin.setRange(limits["z"]["min"], limits["z"]["max"])
         self.z_target_spin.setDecimals(3)
         self.z_target_spin.setSingleStep(0.1)
         self.z_target_spin.setSuffix(" mm")
         self.z_target_spin.setMaximumWidth(110)
-        self.z_target_spin.valueChanged.connect(lambda: self._update_position_label_colors())
+        self.z_target_spin.valueChanged.connect(
+            lambda: self._update_position_label_colors()
+        )
         grid.addWidget(self.z_target_spin, row, 1)
 
         self.z_goto_btn = QPushButton("Go Z")
-        self.z_goto_btn.clicked.connect(lambda: self._on_goto_clicked('z'))
-        self.z_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 5px; font-weight: bold; font-size: 9pt;")
+        self.z_goto_btn.clicked.connect(lambda: self._on_goto_clicked("z"))
+        self.z_goto_btn.setStyleSheet(
+            "background-color: #2196f3; color: white; padding: 5px; font-weight: bold; font-size: 9pt;"
+        )
         self.z_goto_btn.setMaximumWidth(60)
         grid.addWidget(self.z_goto_btn, row, 2)
 
         self.z_home_btn = QPushButton("Go to Z Home")
-        self.z_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('z'))
-        self.z_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;")
+        self.z_home_btn.clicked.connect(lambda: self._on_home_axis_clicked("z"))
+        self.z_home_btn.setStyleSheet(
+            "background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;"
+        )
         grid.addWidget(self.z_home_btn, row, 3)
 
         # R-axis row
@@ -435,23 +478,29 @@ class StageControlView(QWidget):
         grid.addWidget(r_label, row, 0)
 
         self.r_target_spin = QDoubleSpinBox()
-        self.r_target_spin.setRange(limits['r']['min'], limits['r']['max'])
+        self.r_target_spin.setRange(limits["r"]["min"], limits["r"]["max"])
         self.r_target_spin.setDecimals(2)
         self.r_target_spin.setSingleStep(1.0)
         self.r_target_spin.setSuffix("°")
         self.r_target_spin.setMaximumWidth(110)
-        self.r_target_spin.valueChanged.connect(lambda: self._update_position_label_colors())
+        self.r_target_spin.valueChanged.connect(
+            lambda: self._update_position_label_colors()
+        )
         grid.addWidget(self.r_target_spin, row, 1)
 
         self.r_goto_btn = QPushButton("Go R")
-        self.r_goto_btn.clicked.connect(lambda: self._on_goto_clicked('r'))
-        self.r_goto_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 5px; font-weight: bold; font-size: 9pt;")
+        self.r_goto_btn.clicked.connect(lambda: self._on_goto_clicked("r"))
+        self.r_goto_btn.setStyleSheet(
+            "background-color: #2196f3; color: white; padding: 5px; font-weight: bold; font-size: 9pt;"
+        )
         self.r_goto_btn.setMaximumWidth(60)
         grid.addWidget(self.r_goto_btn, row, 2)
 
         self.r_home_btn = QPushButton("Go to R Home")
-        self.r_home_btn.clicked.connect(lambda: self._on_home_axis_clicked('r'))
-        self.r_home_btn.setStyleSheet("background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;")
+        self.r_home_btn.clicked.connect(lambda: self._on_home_axis_clicked("r"))
+        self.r_home_btn.setStyleSheet(
+            "background-color: #ff9800; color: white; padding: 5px; font-size: 9pt;"
+        )
         grid.addWidget(self.r_home_btn, row, 3)
 
         layout.addLayout(grid)
@@ -504,7 +553,9 @@ class StageControlView(QWidget):
         self._update_xy_increment_options()
         self.jog_increment_combo.setCurrentIndex(1)  # Default to 0.5 FOV or 1.0 mm
         self.jog_increment_combo.setStyleSheet("padding: 4px; font-weight: bold;")
-        self.jog_increment_combo.currentIndexChanged.connect(self._update_jog_button_labels)
+        self.jog_increment_combo.currentIndexChanged.connect(
+            self._update_jog_button_labels
+        )
         xy_increment_layout.addWidget(self.jog_increment_combo)
         xy_increment_layout.addStretch()
         layout.addLayout(xy_increment_layout)
@@ -517,7 +568,9 @@ class StageControlView(QWidget):
         self.z_increment_combo.addItems(["0.01 mm", "0.1 mm", "0.5 mm", "1.0 mm"])
         self.z_increment_combo.setCurrentIndex(2)  # Default to 0.5 mm
         self.z_increment_combo.setStyleSheet("padding: 4px; font-weight: bold;")
-        self.z_increment_combo.currentIndexChanged.connect(self._update_jog_button_labels)
+        self.z_increment_combo.currentIndexChanged.connect(
+            self._update_jog_button_labels
+        )
         z_increment_layout.addWidget(self.z_increment_combo)
         z_increment_layout.addStretch()
         layout.addLayout(z_increment_layout)
@@ -527,7 +580,9 @@ class StageControlView(QWidget):
         rotation_layout.addWidget(QLabel("Rotation:"))
 
         self.rotation_increment_combo = QComboBox()
-        self.rotation_increment_combo.addItems(["1 deg", "10 deg", "45 deg", "90 deg", "180 deg"])
+        self.rotation_increment_combo.addItems(
+            ["1 deg", "10 deg", "45 deg", "90 deg", "180 deg"]
+        )
         self.rotation_increment_combo.setCurrentIndex(1)  # Default to 10 deg
         self.rotation_increment_combo.setStyleSheet("padding: 4px; font-weight: bold;")
         rotation_layout.addWidget(self.rotation_increment_combo)
@@ -542,8 +597,12 @@ class StageControlView(QWidget):
         row = 0  # Start at row 0 since no header
         self.x_axis_label = QLabel("X:")
         grid.addWidget(self.x_axis_label, row, 0)
-        self.x_minus_btn = self._create_jog_button("−", lambda: self._jog_with_increment('x', -1))
-        self.x_plus_btn = self._create_jog_button("+", lambda: self._jog_with_increment('x', 1))
+        self.x_minus_btn = self._create_jog_button(
+            "−", lambda: self._jog_with_increment("x", -1)
+        )
+        self.x_plus_btn = self._create_jog_button(
+            "+", lambda: self._jog_with_increment("x", 1)
+        )
         grid.addWidget(self.x_minus_btn, row, 1)
         grid.addWidget(self.x_plus_btn, row, 2)
 
@@ -551,8 +610,12 @@ class StageControlView(QWidget):
         row = 1
         self.y_axis_label = QLabel("Y:")
         grid.addWidget(self.y_axis_label, row, 0)
-        self.y_minus_btn = self._create_jog_button("−", lambda: self._jog_with_increment('y', -1))
-        self.y_plus_btn = self._create_jog_button("+", lambda: self._jog_with_increment('y', 1))
+        self.y_minus_btn = self._create_jog_button(
+            "−", lambda: self._jog_with_increment("y", -1)
+        )
+        self.y_plus_btn = self._create_jog_button(
+            "+", lambda: self._jog_with_increment("y", 1)
+        )
         grid.addWidget(self.y_minus_btn, row, 1)
         grid.addWidget(self.y_plus_btn, row, 2)
 
@@ -560,16 +623,28 @@ class StageControlView(QWidget):
         row = 2
         self.z_axis_label = QLabel("Z:")
         grid.addWidget(self.z_axis_label, row, 0)
-        self.z_minus_btn = self._create_jog_button("−", lambda: self._jog_with_z_increment(-1))
-        self.z_plus_btn = self._create_jog_button("+", lambda: self._jog_with_z_increment(1))
+        self.z_minus_btn = self._create_jog_button(
+            "−", lambda: self._jog_with_z_increment(-1)
+        )
+        self.z_plus_btn = self._create_jog_button(
+            "+", lambda: self._jog_with_z_increment(1)
+        )
         grid.addWidget(self.z_minus_btn, row, 1)
         grid.addWidget(self.z_plus_btn, row, 2)
 
         # R-axis jog buttons (uses different increments: 1°, 10°, 45°)
         row = 3
         grid.addWidget(QLabel("R (°):"), row, 0)
-        grid.addWidget(self._create_jog_button("−", lambda: self._jog_with_rotation_increment(-1)), row, 1)
-        grid.addWidget(self._create_jog_button("+", lambda: self._jog_with_rotation_increment(1)), row, 2)
+        grid.addWidget(
+            self._create_jog_button("−", lambda: self._jog_with_rotation_increment(-1)),
+            row,
+            1,
+        )
+        grid.addWidget(
+            self._create_jog_button("+", lambda: self._jog_with_rotation_increment(1)),
+            row,
+            2,
+        )
 
         layout.addLayout(grid)
 
@@ -599,10 +674,14 @@ class StageControlView(QWidget):
         btn.clicked.connect(callback)
 
         # Style based on direction (negative = purple, positive = teal)
-        if text.startswith('−') or text.startswith('-') or text == '−':
-            btn.setStyleSheet(f"background-color: {NEGATIVE_JOG_COLOR}; padding: 3px; font-weight: bold; font-size: 10pt;")
+        if text.startswith("−") or text.startswith("-") or text == "−":
+            btn.setStyleSheet(
+                f"background-color: {NEGATIVE_JOG_COLOR}; padding: 3px; font-weight: bold; font-size: 10pt;"
+            )
         else:
-            btn.setStyleSheet(f"background-color: {POSITIVE_JOG_COLOR}; padding: 3px; font-weight: bold; font-size: 10pt;")
+            btn.setStyleSheet(
+                f"background-color: {POSITIVE_JOG_COLOR}; padding: 3px; font-weight: bold; font-size: 10pt;"
+            )
 
         return btn
 
@@ -659,24 +738,32 @@ class StageControlView(QWidget):
 
         self.save_preset_btn = QPushButton("Save Current")
         self.save_preset_btn.clicked.connect(self._on_save_preset_clicked)
-        self.save_preset_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 6px; font-size: 9pt;")
+        self.save_preset_btn.setStyleSheet(
+            "background-color: #2196f3; color: white; padding: 6px; font-size: 9pt;"
+        )
         preset_button_layout.addWidget(self.save_preset_btn)
 
         self.goto_preset_btn = QPushButton("Go To")
         self.goto_preset_btn.clicked.connect(self._on_goto_preset_clicked)
-        self.goto_preset_btn.setStyleSheet(f"background-color: {SUCCESS_COLOR}; color: white; padding: 6px; font-size: 9pt;")
+        self.goto_preset_btn.setStyleSheet(
+            f"background-color: {SUCCESS_COLOR}; color: white; padding: 6px; font-size: 9pt;"
+        )
         self.goto_preset_btn.setEnabled(False)
         preset_button_layout.addWidget(self.goto_preset_btn)
 
         self.delete_preset_btn = QPushButton("Delete")
         self.delete_preset_btn.clicked.connect(self._on_delete_preset_clicked)
-        self.delete_preset_btn.setStyleSheet(f"background-color: {ERROR_COLOR}; color: white; padding: 6px; font-size: 9pt;")
+        self.delete_preset_btn.setStyleSheet(
+            f"background-color: {ERROR_COLOR}; color: white; padding: 6px; font-size: 9pt;"
+        )
         self.delete_preset_btn.setEnabled(False)
         preset_button_layout.addWidget(self.delete_preset_btn)
 
         self.clear_presets_btn = QPushButton("Clear Presets")
         self.clear_presets_btn.clicked.connect(self._on_clear_presets_clicked)
-        self.clear_presets_btn.setStyleSheet(f"background-color: {WARNING_COLOR}; color: white; padding: 6px; font-size: 9pt;")
+        self.clear_presets_btn.setStyleSheet(
+            f"background-color: {WARNING_COLOR}; color: white; padding: 6px; font-size: 9pt;"
+        )
         preset_button_layout.addWidget(self.clear_presets_btn)
 
         layout.addLayout(preset_button_layout)
@@ -727,10 +814,10 @@ class StageControlView(QWidget):
         try:
             # Get target value from spin box
             spin_boxes = {
-                'x': self.x_target_spin,
-                'y': self.y_target_spin,
-                'z': self.z_target_spin,
-                'r': self.r_target_spin
+                "x": self.x_target_spin,
+                "y": self.y_target_spin,
+                "z": self.z_target_spin,
+                "r": self.r_target_spin,
             }
 
             target = spin_boxes[axis].value()
@@ -747,6 +834,7 @@ class StageControlView(QWidget):
     def _on_goto_position_clicked(self) -> None:
         """Handle Go To Position button click - moves all 4 axes at once."""
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info("Go To Position button clicked")
 
@@ -757,7 +845,9 @@ class StageControlView(QWidget):
             target_z = self.z_target_spin.value()
             target_r = self.r_target_spin.value()
 
-            logger.info(f"Target position: X={target_x:.3f}, Y={target_y:.3f}, Z={target_z:.3f}, R={target_r:.2f}")
+            logger.info(
+                f"Target position: X={target_x:.3f}, Y={target_y:.3f}, Z={target_z:.3f}, R={target_r:.2f}"
+            )
 
             # Show confirmation dialog
             reply = QMessageBox.question(
@@ -769,7 +859,7 @@ class StageControlView(QWidget):
                 f"Z: {target_z:.3f} mm\n"
                 f"R: {target_r:.2f}°",
                 QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
+                QMessageBox.No,
             )
 
             if reply == QMessageBox.Yes:
@@ -777,17 +867,13 @@ class StageControlView(QWidget):
 
                 # Create Position object
                 target_position = Position(
-                    x=target_x,
-                    y=target_y,
-                    z=target_z,
-                    r=target_r
+                    x=target_x, y=target_y, z=target_z, r=target_r
                 )
 
                 # Move to position with validation
                 logger.info("Calling move_to_position...")
                 self.movement_controller.position_controller.move_to_position(
-                    target_position,
-                    validate=True
+                    target_position, validate=True
                 )
                 logger.info("move_to_position call completed")
 
@@ -818,7 +904,7 @@ class StageControlView(QWidget):
             "Home All Axes",
             "Move all axes to home position?",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.No,
         )
 
         if reply == QMessageBox.Yes:
@@ -853,6 +939,7 @@ class StageControlView(QWidget):
         # Automatically clear emergency stop after 2 seconds
         # This allows the user to resume normal operation without manual intervention
         from PyQt5.QtCore import QTimer
+
         QTimer.singleShot(2000, self._clear_emergency_stop)
 
     def _clear_emergency_stop(self) -> None:
@@ -875,7 +962,9 @@ class StageControlView(QWidget):
         try:
             self.movement_controller.move_relative(axis, delta, verify=False)
             sign = "+" if delta > 0 else ""
-            self.message_label.setText(f"Jogging {axis.upper()} by {sign}{delta:.3f}...")
+            self.message_label.setText(
+                f"Jogging {axis.upper()} by {sign}{delta:.3f}..."
+            )
             self.message_label.setStyleSheet("color: blue; padding: 6px;")
 
         except Exception as e:
@@ -904,7 +993,7 @@ class StageControlView(QWidget):
         increment_text = self.z_increment_combo.currentText()
         increment = float(increment_text.split()[0])  # Extract number from "0.5 mm"
         delta = increment * direction
-        self._jog('z', delta)
+        self._jog("z", delta)
 
     def _jog_with_rotation_increment(self, direction: int) -> None:
         """Handle rotation jog using the rotation increment dropdown."""
@@ -912,7 +1001,7 @@ class StageControlView(QWidget):
         increment_text = self.rotation_increment_combo.currentText()
         increment = float(increment_text.split()[0])  # Extract number from "10 deg"
         delta = increment * direction
-        self._jog('r', delta)
+        self._jog("r", delta)
 
     def _on_jog_mode_changed(self, index: int) -> None:
         """Handle jog mode change between FOV-based and mm-based."""
@@ -931,22 +1020,16 @@ class StageControlView(QWidget):
 
         if current_mode == "FOV-based":
             # FOV-based options
-            self.jog_increment_combo.addItems([
-                "1.0 FOV",
-                "0.5 FOV",
-                "0.25 FOV",
-                "0.05 FOV"
-            ])
+            self.jog_increment_combo.addItems(
+                ["1.0 FOV", "0.5 FOV", "0.25 FOV", "0.05 FOV"]
+            )
             # Default to 0.5 FOV (index 1)
             self.jog_increment_combo.setCurrentIndex(min(current_index, 1))
         else:
             # mm-based options
-            self.jog_increment_combo.addItems([
-                "10.0 mm",
-                "1.0 mm",
-                "0.1 mm",
-                "0.01 mm"
-            ])
+            self.jog_increment_combo.addItems(
+                ["10.0 mm", "1.0 mm", "0.1 mm", "0.01 mm"]
+            )
             # Default to 1.0 mm (index 1)
             self.jog_increment_combo.setCurrentIndex(min(current_index, 1))
 
@@ -990,10 +1073,14 @@ class StageControlView(QWidget):
         """Handle save preset button click."""
         try:
             # Get current position
-            position = self.movement_controller.position_controller.get_current_position()
+            position = (
+                self.movement_controller.position_controller.get_current_position()
+            )
             if position is None:
                 self.logger.warning("Cannot save preset: no current position available")
-                QMessageBox.warning(self, "No Position", "No current position available to save")
+                QMessageBox.warning(
+                    self, "No Position", "No current position available to save"
+                )
                 return
 
             # Ask user for preset name
@@ -1002,36 +1089,47 @@ class StageControlView(QWidget):
                 "Save Position Preset",
                 "Enter name for this position:",
                 QLineEdit.Normal,
-                ""
+                "",
             )
 
             if ok and name:
                 name = name.strip()
                 if not name:
                     self.logger.warning("User attempted to save preset with empty name")
-                    QMessageBox.warning(self, "Invalid Name", "Preset name cannot be empty")
+                    QMessageBox.warning(
+                        self, "Invalid Name", "Preset name cannot be empty"
+                    )
                     return
 
                 # Check if preset already exists
-                if self.movement_controller.position_controller.preset_service.preset_exists(name):
+                if self.movement_controller.position_controller.preset_service.preset_exists(
+                    name
+                ):
                     reply = QMessageBox.question(
                         self,
                         "Overwrite Preset",
                         f"Preset '{name}' already exists. Overwrite?",
                         QMessageBox.Yes | QMessageBox.No,
-                        QMessageBox.No
+                        QMessageBox.No,
                     )
                     if reply != QMessageBox.Yes:
                         return
 
                 # Save preset
-                self.movement_controller.position_controller.preset_service.save_preset(name, position)
+                self.movement_controller.position_controller.preset_service.save_preset(
+                    name, position
+                )
                 self.message_label.setText(f"Saved preset '{name}'")
-                self.message_label.setStyleSheet(f"color: {SUCCESS_COLOR}; padding: 6px;")
+                self.message_label.setStyleSheet(
+                    f"color: {SUCCESS_COLOR}; padding: 6px;"
+                )
                 self._refresh_preset_list()
 
         except Exception as e:
-            self.logger.error(f"Failed to save preset '{name if 'name' in locals() else 'unknown'}': {e}", exc_info=True)
+            self.logger.error(
+                f"Failed to save preset '{name if 'name' in locals() else 'unknown'}': {e}",
+                exc_info=True,
+            )
             QMessageBox.critical(self, "Save Error", f"Failed to save preset: {str(e)}")
 
     def _on_goto_preset_clicked(self) -> None:
@@ -1045,23 +1143,39 @@ class StageControlView(QWidget):
                 return
 
             preset_name = selected_items[0].text()
-            preset = self.movement_controller.position_controller.preset_service.get_preset(preset_name)
+            preset = (
+                self.movement_controller.position_controller.preset_service.get_preset(
+                    preset_name
+                )
+            )
 
             if preset is None:
-                self.logger.warning(f"Preset '{preset_name}' not found in preset service")
-                QMessageBox.warning(self, "Not Found", f"Preset '{preset_name}' not found")
+                self.logger.warning(
+                    f"Preset '{preset_name}' not found in preset service"
+                )
+                QMessageBox.warning(
+                    self, "Not Found", f"Preset '{preset_name}' not found"
+                )
                 return
 
             # Move to preset position
             position = preset.to_position()
-            self.movement_controller.position_controller.move_to_position(position, validate=True)
+            self.movement_controller.position_controller.move_to_position(
+                position, validate=True
+            )
             self.message_label.setText(f"Moving to preset '{preset_name}'...")
             self.message_label.setStyleSheet("color: blue; padding: 6px;")
 
         except Exception as e:
-            preset_name_for_log = preset_name if 'preset_name' in locals() else 'unknown'
-            self.logger.error(f"Failed to move to preset '{preset_name_for_log}': {e}", exc_info=True)
-            QMessageBox.critical(self, "Movement Error", f"Failed to move to preset: {str(e)}")
+            preset_name_for_log = (
+                preset_name if "preset_name" in locals() else "unknown"
+            )
+            self.logger.error(
+                f"Failed to move to preset '{preset_name_for_log}': {e}", exc_info=True
+            )
+            QMessageBox.critical(
+                self, "Movement Error", f"Failed to move to preset: {str(e)}"
+            )
 
     def _on_delete_preset_clicked(self) -> None:
         """Handle delete preset button click."""
@@ -1081,31 +1195,39 @@ class StageControlView(QWidget):
                 "Delete Preset",
                 f"Delete preset '{preset_name}'?",
                 QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
+                QMessageBox.No,
             )
 
             if reply == QMessageBox.Yes:
-                self.movement_controller.position_controller.preset_service.delete_preset(preset_name)
+                self.movement_controller.position_controller.preset_service.delete_preset(
+                    preset_name
+                )
                 self.message_label.setText(f"Deleted preset '{preset_name}'")
                 self.message_label.setStyleSheet("color: gray; padding: 6px;")
                 self._refresh_preset_list()
 
         except Exception as e:
-            preset_name_for_log = preset_name if 'preset_name' in locals() else 'unknown'
-            self.logger.error(f"Failed to delete preset '{preset_name_for_log}': {e}", exc_info=True)
-            QMessageBox.critical(self, "Delete Error", f"Failed to delete preset: {str(e)}")
+            preset_name_for_log = (
+                preset_name if "preset_name" in locals() else "unknown"
+            )
+            self.logger.error(
+                f"Failed to delete preset '{preset_name_for_log}': {e}", exc_info=True
+            )
+            QMessageBox.critical(
+                self, "Delete Error", f"Failed to delete preset: {str(e)}"
+            )
 
     def _on_clear_presets_clicked(self) -> None:
         """Handle clear all presets button click."""
         try:
             # Check if there are any presets to clear
-            presets = self.movement_controller.position_controller.preset_service.list_presets()
+            presets = (
+                self.movement_controller.position_controller.preset_service.list_presets()
+            )
             if not presets:
                 self.logger.info("Clear presets attempted but no presets exist")
                 QMessageBox.information(
-                    self,
-                    "No Presets",
-                    "There are no presets to clear."
+                    self, "No Presets", "There are no presets to clear."
                 )
                 return
 
@@ -1115,7 +1237,7 @@ class StageControlView(QWidget):
                 "Clear All Presets",
                 f"Delete all {len(presets)} saved position presets?\n\nThis action cannot be undone.",
                 QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
+                QMessageBox.No,
             )
 
             if reply == QMessageBox.Yes:
@@ -1127,7 +1249,9 @@ class StageControlView(QWidget):
 
         except Exception as e:
             self.logger.error(f"Failed to clear presets: {e}", exc_info=True)
-            QMessageBox.critical(self, "Clear Error", f"Failed to clear presets: {str(e)}")
+            QMessageBox.critical(
+                self, "Clear Error", f"Failed to clear presets: {str(e)}"
+            )
 
     def _on_preset_selection_changed(self) -> None:
         """Handle preset list selection change."""
@@ -1138,7 +1262,9 @@ class StageControlView(QWidget):
     def _refresh_preset_list(self) -> None:
         """Refresh the preset list display."""
         self.preset_list.clear()
-        presets = self.movement_controller.position_controller.preset_service.list_presets()
+        presets = (
+            self.movement_controller.position_controller.preset_service.list_presets()
+        )
         for preset in presets:
             self.preset_list.addItem(preset.name)
 
@@ -1146,9 +1272,13 @@ class StageControlView(QWidget):
         """Handle Set Home Position button click."""
         try:
             # Get current position
-            current_pos = self.movement_controller.position_controller.get_current_position()
+            current_pos = (
+                self.movement_controller.position_controller.get_current_position()
+            )
             if current_pos is None:
-                self.logger.warning("Cannot set home position: cannot get current position")
+                self.logger.warning(
+                    "Cannot set home position: cannot get current position"
+                )
                 QMessageBox.warning(self, "No Position", "Cannot get current position")
                 return
 
@@ -1161,17 +1291,23 @@ class StageControlView(QWidget):
                 new_home = dialog.get_position()
 
                 # Save home position
-                if self.movement_controller.position_controller.set_home_position(new_home):
+                if self.movement_controller.position_controller.set_home_position(
+                    new_home
+                ):
                     QMessageBox.information(self, "Success", "Home position updated")
                     self.message_label.setText("Home position updated")
-                    self.message_label.setStyleSheet(f"color: {SUCCESS_COLOR}; padding: 6px;")
+                    self.message_label.setStyleSheet(
+                        f"color: {SUCCESS_COLOR}; padding: 6px;"
+                    )
                 else:
                     self.logger.error("Failed to save home position")
                     QMessageBox.critical(self, "Error", "Failed to save home position")
 
         except Exception as e:
             self.logger.error(f"Failed to set home position: {e}", exc_info=True)
-            QMessageBox.critical(self, "Error", f"Failed to set home position: {str(e)}")
+            QMessageBox.critical(
+                self, "Error", f"Failed to set home position: {str(e)}"
+            )
 
     def _on_show_history_clicked(self) -> None:
         """Handle Show Position History button click."""
@@ -1266,8 +1402,11 @@ class StageControlView(QWidget):
     def _on_motion_stopped(self, axis_name: str) -> None:
         """Update status when motion completes."""
         import logging
+
         logger = logging.getLogger(__name__)
-        logger.info(f"[StageControlView] Received motion_stopped signal for: {axis_name}")
+        logger.info(
+            f"[StageControlView] Received motion_stopped signal for: {axis_name}"
+        )
 
         self.motion_status_label.setText(f"{axis_name} motion complete - Ready")
         self.motion_status_label.setStyleSheet(
@@ -1346,7 +1485,9 @@ class StageControlView(QWidget):
             position = self.movement_controller.get_position()
             if position:
                 # Update the display with the current position
-                self._on_position_changed(position.x, position.y, position.z, position.r)
+                self._on_position_changed(
+                    position.x, position.y, position.z, position.r
+                )
                 self.logger.info(f"Initial position loaded: {position}")
             else:
                 self.logger.warning("No initial position available")

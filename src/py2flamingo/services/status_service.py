@@ -8,8 +8,8 @@ following the MVC pattern.
 """
 
 import logging
-from typing import Dict, Any, Tuple, Optional
 from datetime import datetime, timedelta
+from typing import Any, Dict, Optional, Tuple
 
 
 class StatusService:
@@ -26,7 +26,7 @@ class StatusService:
         cache_ttl: Cache time-to-live in seconds
     """
 
-    def __init__(self, connection_service: 'MVCConnectionService'):
+    def __init__(self, connection_service: "MVCConnectionService"):
         """
         Initialize status service with dependency injection.
 
@@ -52,11 +52,11 @@ class StatusService:
             ConnectionError: If query fails
             TimeoutError: If query times out
         """
-        from py2flamingo.models.command import StatusCommand
         from py2flamingo.core.tcp_protocol import CommandCode
+        from py2flamingo.models.command import StatusCommand
 
         # Check cache
-        cached = self._get_from_cache('server_status')
+        cached = self._get_from_cache("server_status")
         if cached is not None:
             return cached
 
@@ -66,8 +66,7 @@ class StatusService:
         try:
             # Create status command
             cmd = StatusCommand(
-                code=CommandCode.CMD_SYSTEM_STATE_GET,
-                query_type="server_status"
+                code=CommandCode.CMD_SYSTEM_STATE_GET, query_type="server_status"
             )
 
             # Send command
@@ -75,13 +74,13 @@ class StatusService:
 
             # Parse response (simplified - actual parsing depends on protocol)
             status = {
-                'state': 'unknown',
-                'response_size': len(response) if response else 0,
-                'timestamp': datetime.now().isoformat()
+                "state": "unknown",
+                "response_size": len(response) if response else 0,
+                "timestamp": datetime.now().isoformat(),
             }
 
             # Cache result
-            self._put_in_cache('server_status', status)
+            self._put_in_cache("server_status", status)
 
             self.logger.info(f"Server status: {status}")
             return status
@@ -114,7 +113,7 @@ class StatusService:
             status = self.get_server_status()
 
             # If we got a response, server is responding
-            return status.get('response_size', 0) > 0
+            return status.get("response_size", 0) > 0
 
         except (ConnectionError, TimeoutError) as e:
             self.logger.warning(f"Ping failed: {e}")
@@ -135,11 +134,11 @@ class StatusService:
             ConnectionError: If query fails
             ValueError: If position data is invalid
         """
-        from py2flamingo.models.command import Command
         from py2flamingo.core.tcp_protocol import CommandCode
+        from py2flamingo.models.command import Command
 
         # Check cache
-        cached = self._get_from_cache('position')
+        cached = self._get_from_cache("position")
         if cached is not None:
             return cached
 
@@ -162,7 +161,7 @@ class StatusService:
             position = (0.0, 0.0, 0.0)  # Mock position
 
             # Cache result
-            self._put_in_cache('position', position)
+            self._put_in_cache("position", position)
 
             self.logger.debug(f"Position: {position}")
             return position

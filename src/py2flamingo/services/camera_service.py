@@ -5,13 +5,14 @@ Handles all camera-related commands including image size queries,
 field of view, snapshots, and live view control with live data streaming.
 """
 
-import struct
 import socket
+import struct
 import threading
-import numpy as np
 from collections import deque
-from typing import Tuple, Optional, Callable
 from dataclasses import dataclass
+from typing import Callable, Optional, Tuple
+
+import numpy as np
 
 from py2flamingo.services.microscope_command_service import MicroscopeCommandService
 
@@ -24,19 +25,20 @@ class ImageHeader:
     Received before each image frame with metadata about the image.
     Structure: 10 x uint32 (4 bytes each) = 40 bytes
     """
-    image_size: int       # Total size of image data in bytes
-    image_width: int      # Width in pixels
-    image_height: int     # Height in pixels
+
+    image_size: int  # Total size of image data in bytes
+    image_width: int  # Width in pixels
+    image_height: int  # Height in pixels
     image_scale_min: int  # Minimum intensity value in image (for display scaling)
     image_scale_max: int  # Maximum intensity value in image (for display scaling)
-    timestamp_ms: int     # Timestamp in milliseconds
-    frame_number: int     # Sequential frame number
-    exposure_us: int      # Exposure time in microseconds
-    reserved1: int        # Reserved field
-    reserved2: int        # Reserved field
+    timestamp_ms: int  # Timestamp in milliseconds
+    frame_number: int  # Sequential frame number
+    exposure_us: int  # Exposure time in microseconds
+    reserved1: int  # Reserved field
+    reserved2: int  # Reserved field
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> 'ImageHeader':
+    def from_bytes(cls, data: bytes) -> "ImageHeader":
         """
         Parse 40-byte header from binary data.
 
@@ -53,7 +55,7 @@ class ImageHeader:
             raise ValueError(f"Header must be 40 bytes, got {len(data)}")
 
         # Unpack 10 uint32 values (little-endian)
-        values = struct.unpack('<10I', data)
+        values = struct.unpack("<10I", data)
 
         return cls(
             image_size=values[0],
@@ -65,7 +67,7 @@ class ImageHeader:
             frame_number=values[6],
             exposure_us=values[7],
             reserved1=values[8],
-            reserved2=values[9]
+            reserved2=values[9],
         )
 
 
@@ -75,7 +77,9 @@ class CameraCommandCode:
     # Query commands
     IMAGE_SIZE_GET = 12327  # 0x3027
     PIXEL_FIELD_OF_VIEW_GET = 12343  # 0x3037
-    EXPOSURE_GET = 12298  # 0x300A - get exposure time (returns int32Data0 in microseconds)
+    EXPOSURE_GET = (
+        12298  # 0x300A - get exposure time (returns int32Data0 in microseconds)
+    )
 
     # Action commands
     SNAPSHOT = 12294  # 0x3006 - take single image
@@ -162,22 +166,25 @@ class CameraService(MicroscopeCommandService):
         self.logger.info("Getting camera image size...")
 
         result = self._query_command(
-            CameraCommandCode.IMAGE_SIZE_GET,
-            "CAMERA_IMAGE_SIZE_GET"
+            CameraCommandCode.IMAGE_SIZE_GET, "CAMERA_IMAGE_SIZE_GET"
         )
 
-        if not result['success']:
-            raise RuntimeError(f"Failed to get image size: {result.get('error', 'Unknown error')}")
+        if not result["success"]:
+            raise RuntimeError(
+                f"Failed to get image size: {result.get('error', 'Unknown error')}"
+            )
 
-        params = result['parsed']['params']
-        width = params[3]   # X dimension in Param[3]
+        params = result["parsed"]["params"]
+        width = params[3]  # X dimension in Param[3]
         height = params[4]  # Y dimension in Param[4]
 
         # If camera returns 0x0, try cached value from live streaming
         if width == 0 or height == 0:
             if self._cached_image_size:
                 width, height = self._cached_image_size
-                self.logger.info(f"Camera returned 0x0, using cached size: {width}x{height} pixels")
+                self.logger.info(
+                    f"Camera returned 0x0, using cached size: {width}x{height} pixels"
+                )
             else:
                 self.logger.warning("Camera returned 0x0 and no cached size available")
         else:
@@ -205,17 +212,20 @@ class CameraService(MicroscopeCommandService):
         self.logger.info("Getting pixel field of view...")
 
         result = self._query_command(
-            CameraCommandCode.PIXEL_FIELD_OF_VIEW_GET,
-            "CAMERA_PIXEL_FIELD_OF_VIEW_GET"
+            CameraCommandCode.PIXEL_FIELD_OF_VIEW_GET, "CAMERA_PIXEL_FIELD_OF_VIEW_GET"
         )
 
-        if not result['success']:
-            raise RuntimeError(f"Failed to get pixel FOV: {result.get('error', 'Unknown error')}")
+        if not result["success"]:
+            raise RuntimeError(
+                f"Failed to get pixel FOV: {result.get('error', 'Unknown error')}"
+            )
 
         # Pixel FOV returned in Value field (double)
-        pixel_fov = result['parsed']['value']
+        pixel_fov = result["parsed"]["value"]
 
-        self.logger.info(f"Pixel field of view: {pixel_fov} mm/pixel ({pixel_fov * 1000:.3f} µm/pixel)")
+        self.logger.info(
+            f"Pixel field of view: {pixel_fov} mm/pixel ({pixel_fov * 1000:.3f} µm/pixel)"
+        )
         return pixel_fov
 
     def get_exposure(self) -> float:
@@ -238,21 +248,24 @@ class CameraService(MicroscopeCommandService):
         self.logger.info("Getting camera exposure time...")
 
         result = self._query_command(
-            CameraCommandCode.EXPOSURE_GET,
-            "CAMERA_EXPOSURE_GET"
+            CameraCommandCode.EXPOSURE_GET, "CAMERA_EXPOSURE_GET"
         )
 
-        if not result['success']:
-            raise RuntimeError(f"Failed to get exposure: {result.get('error', 'Unknown error')}")
+        if not result["success"]:
+            raise RuntimeError(
+                f"Failed to get exposure: {result.get('error', 'Unknown error')}"
+            )
 
-        parsed = result['parsed']
+        parsed = result["parsed"]
 
         # Exposure is returned in int32Data0 (params[3]) in microseconds
         # Reference: PCOBase.cpp getExposureTime() sets pscmd->int32Data0 = exposure
-        params = parsed['params']
+        params = parsed["params"]
         exposure_us = float(params[3]) if len(params) > 3 else 0.0
 
-        self.logger.info(f"Camera exposure: {exposure_us} us ({exposure_us/1000:.2f} ms)")
+        self.logger.info(
+            f"Camera exposure: {exposure_us} us ({exposure_us/1000:.2f} ms)"
+        )
         return exposure_us
 
     def take_snapshot(self) -> None:
@@ -271,13 +284,12 @@ class CameraService(MicroscopeCommandService):
         """
         self.logger.info("Taking snapshot...")
 
-        result = self._send_command(
-            CameraCommandCode.SNAPSHOT,
-            "CAMERA_SNAPSHOT"
-        )
+        result = self._send_command(CameraCommandCode.SNAPSHOT, "CAMERA_SNAPSHOT")
 
-        if not result['success']:
-            raise RuntimeError(f"Failed to take snapshot: {result.get('error', 'Unknown error')}")
+        if not result["success"]:
+            raise RuntimeError(
+                f"Failed to take snapshot: {result.get('error', 'Unknown error')}"
+            )
 
         self.logger.info("Snapshot command sent successfully")
 
@@ -299,12 +311,13 @@ class CameraService(MicroscopeCommandService):
         self.logger.info("Starting live view...")
 
         result = self._send_command(
-            CameraCommandCode.LIVE_VIEW_START,
-            "CAMERA_LIVE_VIEW_START"
+            CameraCommandCode.LIVE_VIEW_START, "CAMERA_LIVE_VIEW_START"
         )
 
-        if not result['success']:
-            raise RuntimeError(f"Failed to start live view: {result.get('error', 'Unknown error')}")
+        if not result["success"]:
+            raise RuntimeError(
+                f"Failed to start live view: {result.get('error', 'Unknown error')}"
+            )
 
         self.logger.info("Live view started successfully")
 
@@ -323,12 +336,13 @@ class CameraService(MicroscopeCommandService):
         self.logger.info("Stopping live view...")
 
         result = self._send_command(
-            CameraCommandCode.LIVE_VIEW_STOP,
-            "CAMERA_LIVE_VIEW_STOP"
+            CameraCommandCode.LIVE_VIEW_STOP, "CAMERA_LIVE_VIEW_STOP"
         )
 
-        if not result['success']:
-            raise RuntimeError(f"Failed to stop live view: {result.get('error', 'Unknown error')}")
+        if not result["success"]:
+            raise RuntimeError(
+                f"Failed to stop live view: {result.get('error', 'Unknown error')}"
+            )
 
         self.logger.info("Live view stopped successfully")
 
@@ -336,7 +350,9 @@ class CameraService(MicroscopeCommandService):
     # Live Data Streaming Methods
     # ========================================================================
 
-    def set_image_callback(self, callback: Optional[Callable[[np.ndarray, ImageHeader], None]]) -> None:
+    def set_image_callback(
+        self, callback: Optional[Callable[[np.ndarray, ImageHeader], None]]
+    ) -> None:
         """
         Set callback function for received images.
 
@@ -391,24 +407,30 @@ class CameraService(MicroscopeCommandService):
             # Use the EXISTING live socket (already connected during initial connection)
             try:
                 # Get the live socket from the connection service
-                if hasattr(self.connection, 'tcp_connection') and hasattr(self.connection.tcp_connection, '_live_socket'):
+                if hasattr(self.connection, "tcp_connection") and hasattr(
+                    self.connection.tcp_connection, "_live_socket"
+                ):
                     # MVCConnectionService
                     self._data_socket = self.connection.tcp_connection._live_socket
                     ip = self.connection.tcp_connection._ip
                     port = 53718
-                elif hasattr(self.connection, 'live_client'):
+                elif hasattr(self.connection, "live_client"):
                     # ConnectionService
                     self._data_socket = self.connection.live_client
                     ip = self.connection.ip
                     port = 53718
                 else:
-                    raise RuntimeError("Cannot access live socket from connection service")
+                    raise RuntimeError(
+                        "Cannot access live socket from connection service"
+                    )
 
                 if self._data_socket is None:
                     raise RuntimeError("Live socket is not connected")
 
                 self._data_socket.settimeout(5.0)
-                self.logger.info(f"Using existing live socket for image data ({ip}:{port})")
+                self.logger.info(
+                    f"Using existing live socket for image data ({ip}:{port})"
+                )
 
             except Exception as e:
                 self.logger.error(f"Failed to access live socket: {e}")
@@ -423,9 +445,7 @@ class CameraService(MicroscopeCommandService):
             # Start streaming thread
             self._streaming = True
             self._data_thread = threading.Thread(
-                target=self._data_receiver_loop,
-                daemon=True,
-                name="CameraDataReceiver"
+                target=self._data_receiver_loop, daemon=True, name="CameraDataReceiver"
             )
             self._data_thread.start()
 
@@ -482,34 +502,40 @@ class CameraService(MicroscopeCommandService):
 
             # Use the EXISTING live socket (already connected during initial connection)
             try:
-                if hasattr(self.connection, 'tcp_connection') and hasattr(self.connection.tcp_connection, '_live_socket'):
+                if hasattr(self.connection, "tcp_connection") and hasattr(
+                    self.connection.tcp_connection, "_live_socket"
+                ):
                     self._data_socket = self.connection.tcp_connection._live_socket
                     ip = self.connection.tcp_connection._ip
                     port = 53718
-                elif hasattr(self.connection, 'live_client'):
+                elif hasattr(self.connection, "live_client"):
                     self._data_socket = self.connection.live_client
                     ip = self.connection.ip
                     port = 53718
                 else:
-                    raise RuntimeError("Cannot access live socket from connection service")
+                    raise RuntimeError(
+                        "Cannot access live socket from connection service"
+                    )
 
                 if self._data_socket is None:
                     raise RuntimeError("Live socket is not connected")
 
                 self._data_socket.settimeout(5.0)
-                self.logger.info(f"Data receiver using existing live socket ({ip}:{port})")
+                self.logger.info(
+                    f"Data receiver using existing live socket ({ip}:{port})"
+                )
 
             except Exception as e:
-                self.logger.error(f"Failed to access live socket for data receiver: {e}")
+                self.logger.error(
+                    f"Failed to access live socket for data receiver: {e}"
+                )
                 self._data_socket = None
                 raise RuntimeError(f"Failed to access live socket: {e}")
 
             # Start streaming thread
             self._streaming = True
             self._data_thread = threading.Thread(
-                target=self._data_receiver_loop,
-                daemon=True,
-                name="CameraDataReceiver"
+                target=self._data_receiver_loop, daemon=True, name="CameraDataReceiver"
             )
             self._data_thread.start()
 
@@ -534,7 +560,9 @@ class CameraService(MicroscopeCommandService):
         if self._data_thread and self._data_thread.is_alive():
             self._data_thread.join(timeout=2.0)
             if self._data_thread.is_alive():
-                self.logger.warning("Data receiver thread did not stop within 2s timeout")
+                self.logger.warning(
+                    "Data receiver thread did not stop within 2s timeout"
+                )
 
         # Clear socket reference (but don't close it - tcp_connection owns it)
         self._data_socket = None
@@ -565,8 +593,10 @@ class CameraService(MicroscopeCommandService):
             return 0.0
 
         # Calculate average from recent frame times
-        time_diffs = [self._frame_times[i] - self._frame_times[i-1]
-                     for i in range(1, len(self._frame_times))]
+        time_diffs = [
+            self._frame_times[i] - self._frame_times[i - 1]
+            for i in range(1, len(self._frame_times))
+        ]
         avg_diff = sum(time_diffs) / len(time_diffs)
 
         if avg_diff > 0:
@@ -685,9 +715,11 @@ class CameraService(MicroscopeCommandService):
             self._frame_buffer = deque(frames, maxlen=new_maxlen)
             if enabled:
                 self._dropped_frame_count = 0
-            self.logger.info(f"Frame buffer resized to maxlen={new_maxlen} "
-                           f"(tile_mode={'ON' if enabled else 'OFF'}, "
-                           f"preserved {len(frames)} frames)")
+            self.logger.info(
+                f"Frame buffer resized to maxlen={new_maxlen} "
+                f"(tile_mode={'ON' if enabled else 'OFF'}, "
+                f"preserved {len(frames)} frames)"
+            )
 
     def _data_receiver_loop(self) -> None:
         """
@@ -702,7 +734,9 @@ class CameraService(MicroscopeCommandService):
         import time
 
         self.logger.info("Data receiver thread started")
-        self.logger.info(f"Waiting for image data on socket (timeout={self._data_socket.gettimeout()}s)...")
+        self.logger.info(
+            f"Waiting for image data on socket (timeout={self._data_socket.gettimeout()}s)..."
+        )
         frames_received = 0
         last_log_time = time.time()
 
@@ -711,7 +745,9 @@ class CameraService(MicroscopeCommandService):
                 # Log every 2 seconds while waiting
                 current_time = time.time()
                 if current_time - last_log_time > 2.0:
-                    self.logger.debug(f"Still waiting for frames... (received {frames_received} so far)")
+                    self.logger.debug(
+                        f"Still waiting for frames... (received {frames_received} so far)"
+                    )
                     last_log_time = current_time
 
                 # Read 40-byte header
@@ -724,21 +760,32 @@ class CameraService(MicroscopeCommandService):
                 header = ImageHeader.from_bytes(header_bytes)
 
                 if frames_received == 0:
-                    self.logger.info(f"First frame received! Size: {header.image_width}x{header.image_height}, {header.image_size} bytes")
+                    self.logger.info(
+                        f"First frame received! Size: {header.image_width}x{header.image_height}, {header.image_size} bytes"
+                    )
                     # Cache the image size for later use when query returns 0x0
                     if header.image_width > 0 and header.image_height > 0:
-                        self._cached_image_size = (header.image_width, header.image_height)
-                        self.logger.debug(f"Cached image size: {header.image_width}x{header.image_height}")
+                        self._cached_image_size = (
+                            header.image_width,
+                            header.image_height,
+                        )
+                        self.logger.debug(
+                            f"Cached image size: {header.image_width}x{header.image_height}"
+                        )
 
                 # Read image data (16-bit pixels)
-                image_data_bytes = self._receive_exact(self._data_socket, header.image_size)
+                image_data_bytes = self._receive_exact(
+                    self._data_socket, header.image_size
+                )
                 if not image_data_bytes:
                     self.logger.warning("Connection closed while reading image data")
                     break
 
                 # Convert to numpy array (16-bit unsigned)
                 image_array = np.frombuffer(image_data_bytes, dtype=np.uint16)
-                image_array = image_array.reshape((header.image_height, header.image_width))
+                image_array = image_array.reshape(
+                    (header.image_height, header.image_width)
+                )
 
                 # Update frame rate tracking
                 current_time = time.time()
@@ -751,7 +798,6 @@ class CameraService(MicroscopeCommandService):
                 if frames_received % 10 == 0:
                     self.logger.debug(f"Received {frames_received} frames")
 
-
                 # Fast buffering: Just add to queue (deque handles overflow by dropping oldest)
                 with self._frame_buffer_lock:
                     buf_len = len(self._frame_buffer)
@@ -761,7 +807,8 @@ class CameraService(MicroscopeCommandService):
                         if self._dropped_frame_count % 50 == 1:
                             self.logger.warning(
                                 f"Frame buffer full (maxlen={buf_max}), "
-                                f"dropping oldest frame ({self._dropped_frame_count} total dropped)")
+                                f"dropping oldest frame ({self._dropped_frame_count} total dropped)"
+                            )
                     elif buf_max > 20 and buf_len >= int(buf_max * 0.8):
                         # High-water-mark warning: buffer is 80%+ full in tile mode
                         # This gives early visibility before frames are actually dropped
@@ -769,7 +816,8 @@ class CameraService(MicroscopeCommandService):
                             self.logger.warning(
                                 f"Frame buffer high-water: {buf_len}/{buf_max} "
                                 f"({100 * buf_len // buf_max}% full) - "
-                                f"GUI thread may be falling behind")
+                                f"GUI thread may be falling behind"
+                            )
                     self._frame_buffer.append((image_array, header))
 
                 # Optional: Trigger callback for notification (but don't do work in it!)
@@ -785,17 +833,22 @@ class CameraService(MicroscopeCommandService):
             except socket.timeout:
                 # Socket timeout - no data received within timeout period
                 # This is normal if server isn't sending data yet
-                self.logger.debug(f"Socket timeout while waiting for data (received {frames_received} frames so far)")
+                self.logger.debug(
+                    f"Socket timeout while waiting for data (received {frames_received} frames so far)"
+                )
                 continue
 
             except Exception as e:
                 if self._streaming:  # Only log if we're supposed to be streaming
                     self.logger.error(f"Error in data receiver: {e}")
                     import traceback
+
                     self.logger.error(f"Traceback: {traceback.format_exc()}")
                 break
 
-        self.logger.info(f"Data receiver thread stopped (received {frames_received} frames)")
+        self.logger.info(
+            f"Data receiver thread stopped (received {frames_received} frames)"
+        )
 
     def _receive_exact(self, sock: socket.socket, num_bytes: int) -> Optional[bytes]:
         """

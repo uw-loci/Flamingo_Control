@@ -5,27 +5,29 @@ Service for managing microscope connections.
 This service replaces the connection logic from FlamingoConnect and
 provides a cleaner interface for connection management.
 """
-import socket
+
 import logging
-import time
+import socket
 import threading
-from typing import Optional, Tuple, List, Dict, Any, Callable
-from threading import Thread
+import time
 from pathlib import Path
+from threading import Thread
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from py2flamingo.core.events import EventManager
 from py2flamingo.core.queue_manager import QueueManager
+from py2flamingo.utils import file_handlers as fh
+
 from .communication.thread_manager import ThreadManager
 
-from py2flamingo.utils import file_handlers as fh
 
 class ConnectionService:
     """
     Service for managing connections to the microscope.
-    
+
     This service handles establishing connections, managing communication
     threads, and coordinating data flow between the application and microscope.
-    
+
     Attributes:
         ip: IP address of microscope
         port: Port number for connection
@@ -36,13 +38,17 @@ class ConnectionService:
         thread_manager: Manager for communication threads
         logger: Logger instance
     """
-    
-    def __init__(self, ip: str = "127.0.0.1", port: int = 0,
-                 event_manager: EventManager | None = None,
-                 queue_manager: QueueManager | None = None):
+
+    def __init__(
+        self,
+        ip: str = "127.0.0.1",
+        port: int = 0,
+        event_manager: EventManager | None = None,
+        queue_manager: QueueManager | None = None,
+    ):
         """
         Initialize the connection service.
-        
+
         Args:
             ip: IP address of microscope
             port: Port number for connection
@@ -54,7 +60,7 @@ class ConnectionService:
         self.event_manager = event_manager or EventManager()
         self.queue_manager = queue_manager or QueueManager()
         self.logger = logging.getLogger(__name__)
-        
+
         # Connection state
         self.nuc_client = None
         self.live_client = None
@@ -73,11 +79,11 @@ class ConnectionService:
         # MicroscopeCommandService for centralized command handling
         # Will be initialized when connected
         self._command_service = None
-    
+
     def connect(self, ip: str | None = None, port: int | None = None) -> bool:
         """
         Establish connection to the microscope.
-        
+
         Returns:
             bool: True if connection successful
         """
@@ -103,20 +109,22 @@ class ConnectionService:
                 self.logger.error(f"Failed to connect: {e}")
                 self._cleanup_sockets()
                 return False
-            
+
             # Store connection data for backward compatibility
             self.connection_data = [
                 self.nuc_client,
                 self.live_client,
                 self.wf_zstack,
                 self.LED_on,
-                self.LED_off
+                self.LED_off,
             ]
 
             # Initialize MicroscopeCommandService with connection
             # Create a minimal connection wrapper that provides required interfaces
-            from py2flamingo.services.microscope_command_service import MicroscopeCommandService
             from py2flamingo.core.protocol_encoder import ProtocolEncoder
+            from py2flamingo.services.microscope_command_service import (
+                MicroscopeCommandService,
+            )
 
             # Create a connection wrapper for MicroscopeCommandService
             class ConnectionWrapper:
@@ -145,7 +153,7 @@ class ConnectionService:
             self._connected = True
             self.logger.info("Connection established successfully")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Connection failed: {e}")
             self._cleanup_sockets()
@@ -167,7 +175,7 @@ class ConnectionService:
         """
         import struct
 
-        SYSTEM_STATE_GET = 0xa007  # 40967
+        SYSTEM_STATE_GET = 0xA007  # 40967
         START_MARKER = 0xF321E654
         END_MARKER = 0xFEDC4321
 
@@ -178,22 +186,32 @@ class ConnectionService:
             # Protocol format: start marker, code, status, 7 params, double, count, 72-byte data, end marker
             cmd_bytes = struct.pack(
                 "I I I I I I I I I I d I 72s I",
-                START_MARKER,     # Start marker
-                SYSTEM_STATE_GET, # Command code
-                0,                # Status
-                0, 0, 0, 0, 0, 0, 0,  # 7 parameter fields
-                0.0,              # Double value
-                0,                # Count
-                b'\x00' * 72,     # Data bytes
-                END_MARKER        # End marker
+                START_MARKER,  # Start marker
+                SYSTEM_STATE_GET,  # Command code
+                0,  # Status
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,  # 7 parameter fields
+                0.0,  # Double value
+                0,  # Count
+                b"\x00" * 72,  # Data bytes
+                END_MARKER,  # End marker
             )
 
             # Send command
             self.nuc_client.sendall(cmd_bytes)
-            self.logger.debug(f"Sent SYSTEM_STATE_GET validation command ({len(cmd_bytes)} bytes)")
+            self.logger.debug(
+                f"Sent SYSTEM_STATE_GET validation command ({len(cmd_bytes)} bytes)"
+            )
 
             # Wait for 128-byte response with timeout
-            response = self._receive_full_response(self.nuc_client, 128, timeout=timeout)
+            response = self._receive_full_response(
+                self.nuc_client, 128, timeout=timeout
+            )
 
             # Verify we got a valid response (check start/end markers)
             if len(response) >= 128:
@@ -201,7 +219,9 @@ class ConnectionService:
                 resp_end = struct.unpack_from("I", response, 124)[0]
 
                 if resp_start == START_MARKER and resp_end == END_MARKER:
-                    self.logger.info(f"Server validated - received response to command 0x{resp_code:04x}")
+                    self.logger.info(
+                        f"Server validated - received response to command 0x{resp_code:04x}"
+                    )
                     return True
                 else:
                     self.logger.warning(
@@ -213,7 +233,9 @@ class ConnectionService:
                 return False
 
         except socket.timeout:
-            self.logger.error(f"Server validation timed out after {timeout}s - server not responding")
+            self.logger.error(
+                f"Server validation timed out after {timeout}s - server not responding"
+            )
             return False
         except ConnectionError as e:
             self.logger.error(f"Server validation failed - connection error: {e}")
@@ -226,44 +248,44 @@ class ConnectionService:
         """Disconnect from the microscope and cleanup."""
         if self._connected:
             self.logger.info("Disconnecting from microscope")
-            
+
             # Stop threads
             if self.thread_manager:
                 self.thread_manager.stop_all()
-            
+
             # Close sockets
             self._cleanup_sockets()
-            
+
             self._connected = False
             self.logger.info("Disconnected successfully")
-    
+
     def is_connected(self) -> bool:
         """
         Check if connected to microscope.
-        
+
         Returns:
             bool: True if connected
         """
         return self._connected
-    
+
     def get_connection_data(self) -> Optional[List]:
         """
         Get connection data for backward compatibility.
-        
+
         Returns:
             Optional[List]: Connection data or None
         """
         return self.connection_data if self._connected else None
-    
+
     def get_threads(self) -> Optional[Tuple]:
         """
         Get thread references for backward compatibility.
-        
+
         Returns:
             Optional[Tuple]: Thread references or None
         """
         return self.threads if self._connected else None
-    
+
     def send_command(self, command: int, data: Optional[List] = None) -> None:
         """
         Send a command to the microscope.
@@ -283,59 +305,60 @@ class ConnectionService:
             self._command_service.send_command_queued(command, data)
         else:
             # Fallback to direct queue operation if service not initialized
-            self.queue_manager.put_nowait('command', command)
+            self.queue_manager.put_nowait("command", command)
             if data:
-                self.queue_manager.put_nowait('command_data', data)
-            self.event_manager.set_event('send')
-    
+                self.queue_manager.put_nowait("command_data", data)
+            self.event_manager.set_event("send")
+
     # NOTE: send_workflow method removed - use WorkflowOrchestrator instead
 
     def get_microscope_settings(self) -> Tuple[float, Dict[str, Any]]:
         """
         Retrieve microscope settings and image pixel size.
-        
+
         This method replaces the function from microscope_connect.py
-        
+
         Returns:
             Tuple[float, Dict]: Image pixel size and settings dictionary
         """
         # Send command to load settings
         COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = 4105
         self.send_command(COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD)
-        
+
         # Wait for settings to be saved
         time.sleep(0.5)
-        
+
         # Load settings from file
         from py2flamingo.utils.file_handlers import text_to_dict
-        settings_path = Path('microscope_settings') / 'ScopeSettings.txt'
-        
+
+        settings_path = Path("microscope_settings") / "ScopeSettings.txt"
+
         if not settings_path.exists():
             raise FileNotFoundError("Microscope settings not found")
-        
+
         scope_settings = text_to_dict(str(settings_path))
-        
+
         # Get pixel size
         COMMAND_CODES_CAMERA_PIXEL_FIELD_OF_VIEW_GET = 12343  # Fixed: was 12347
         self.send_command(COMMAND_CODES_CAMERA_PIXEL_FIELD_OF_VIEW_GET)
-        
+
         # Wait for response and get from queue
         time.sleep(0.2)
-        image_pixel_size = self.queue_manager.get_nowait('other_data')
+        image_pixel_size = self.queue_manager.get_nowait("other_data")
         if not image_pixel_size:
             # Use settings (mocked in the test)
-            settings_path = Path('microscope_settings') / 'ScopeSettings.txt'
+            settings_path = Path("microscope_settings") / "ScopeSettings.txt"
             scope_settings = fh.text_to_dict(str(settings_path))
-            tube = float(scope_settings['Type']['Tube lens design focal length (mm)'])
-            obj  = float(scope_settings['Type']['Objective lens magnification'])
+            tube = float(scope_settings["Type"]["Tube lens design focal length (mm)"])
+            obj = float(scope_settings["Type"]["Objective lens magnification"])
             cam_um = 6.5
-            image_pixel_size = (cam_um / (obj * (tube/200))) / 1000.0  # mm
+            image_pixel_size = (cam_um / (obj * (tube / 200))) / 1000.0  # mm
         return image_pixel_size, scope_settings
-    
+
     def _create_socket(self) -> socket.socket:
         """Create a TCP socket."""
         return socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    
+
     def _cleanup_sockets(self) -> None:
         """Close and cleanup sockets."""
         if self.nuc_client:
@@ -344,21 +367,27 @@ class ConnectionService:
             except:
                 pass
             self.nuc_client = None
-            
+
         if self.live_client:
             try:
                 self.live_client.close()
             except:
                 pass
             self.live_client = None
-    
+
     def _start_threads(self) -> None:
         """Start communication threads."""
         # Import thread functions
         self.thread_manager = ThreadManager()
-        self.thread_manager.start_receivers(self.nuc_client, self.event_manager, self.queue_manager)
-        self.thread_manager.start_live_receiver(self.live_client, self.event_manager, self.queue_manager)
-        self.thread_manager.start_sender(self.nuc_client, self.event_manager, self.queue_manager)
+        self.thread_manager.start_receivers(
+            self.nuc_client, self.event_manager, self.queue_manager
+        )
+        self.thread_manager.start_live_receiver(
+            self.live_client, self.event_manager, self.queue_manager
+        )
+        self.thread_manager.start_sender(
+            self.nuc_client, self.event_manager, self.queue_manager
+        )
         self.thread_manager.start_processing(self.event_manager, self.queue_manager)
         self.threads = ()
         self.logger.info("Communication threads started")
@@ -367,6 +396,7 @@ class ConnectionService:
 # ============================================================================
 # MVC Refactoring - New Connection Service
 # ============================================================================
+
 
 class MVCConnectionService:
     """
@@ -384,11 +414,13 @@ class MVCConnectionService:
         logger: Logger instance
     """
 
-    def __init__(self,
-                 tcp_connection: 'TCPConnection',
-                 encoder: 'ProtocolEncoder',
-                 queue_manager: Optional[QueueManager] = None,
-                 connection_model: Optional['ConnectionModel'] = None):
+    def __init__(
+        self,
+        tcp_connection: "TCPConnection",
+        encoder: "ProtocolEncoder",
+        queue_manager: Optional[QueueManager] = None,
+        connection_model: Optional["ConnectionModel"] = None,
+    ):
         """
         Initialize MVC connection service with dependency injection.
 
@@ -400,7 +432,9 @@ class MVCConnectionService:
                               If not provided, a new one is created.
         """
         from py2flamingo.models.connection import ConnectionModel
-        from py2flamingo.services.microscope_command_service import MicroscopeCommandService
+        from py2flamingo.services.microscope_command_service import (
+            MicroscopeCommandService,
+        )
 
         self.tcp_connection = tcp_connection
         self.encoder = encoder
@@ -412,14 +446,16 @@ class MVCConnectionService:
         self._live_socket: Optional[socket.socket] = None
 
         # Callback listener for unsolicited messages (motion-stopped, etc.)
-        self._callback_listener: Optional['CallbackListener'] = None
-        self._socket_lock = threading.Lock()  # Coordinate send_command and callback listener
+        self._callback_listener: Optional["CallbackListener"] = None
+        self._socket_lock = (
+            threading.Lock()
+        )  # Coordinate send_command and callback listener
 
         # Create MicroscopeCommandService for centralized command handling
         # Note: We pass 'self' as the connection to provide access to encoder and sockets
         self._command_service = MicroscopeCommandService(self)
 
-    def connect(self, config: 'ConnectionConfig') -> None:
+    def connect(self, config: "ConnectionConfig") -> None:
         """
         Establish TCP connection to microscope.
 
@@ -431,8 +467,9 @@ class MVCConnectionService:
             ConnectionError: If connection fails
             TimeoutError: If connection times out
         """
-        from py2flamingo.models.connection import ConnectionStatus, ConnectionState
         from datetime import datetime
+
+        from py2flamingo.models.connection import ConnectionState, ConnectionStatus
 
         # Validate config
         valid, errors = config.validate()
@@ -449,15 +486,13 @@ class MVCConnectionService:
             ip=config.ip_address,
             port=config.port,
             connected_at=None,
-            last_error=None
+            last_error=None,
         )
 
         try:
             # Use TCPConnection to establish dual sockets
             self._command_socket, self._live_socket = self.tcp_connection.connect(
-                config.ip_address,
-                config.port,
-                timeout=config.timeout
+                config.ip_address, config.port, timeout=config.timeout
             )
 
             # Update model to CONNECTED
@@ -466,7 +501,7 @@ class MVCConnectionService:
                 ip=config.ip_address,
                 port=config.port,
                 connected_at=datetime.now(),
-                last_error=None
+                last_error=None,
             )
 
             self.logger.info(f"Connected to {config.ip_address}:{config.port}")
@@ -479,7 +514,7 @@ class MVCConnectionService:
                 ip=config.ip_address,
                 port=config.port,
                 connected_at=None,
-                last_error=error_msg
+                last_error=error_msg,
             )
             raise TimeoutError(error_msg) from e
 
@@ -491,7 +526,7 @@ class MVCConnectionService:
                 ip=config.ip_address,
                 port=config.port,
                 connected_at=None,
-                last_error=error_msg
+                last_error=error_msg,
             )
             raise ConnectionError(error_msg) from e
 
@@ -502,7 +537,7 @@ class MVCConnectionService:
         Raises:
             RuntimeError: If not currently connected
         """
-        from py2flamingo.models.connection import ConnectionStatus, ConnectionState
+        from py2flamingo.models.connection import ConnectionState, ConnectionStatus
 
         if not self.is_connected():
             raise RuntimeError("Not connected to microscope")
@@ -520,7 +555,7 @@ class MVCConnectionService:
                 ip=None,
                 port=None,
                 connected_at=None,
-                last_error=None
+                last_error=None,
             )
 
             self.logger.info("Disconnected successfully")
@@ -533,11 +568,11 @@ class MVCConnectionService:
                 ip=None,
                 port=None,
                 connected_at=None,
-                last_error=error_msg
+                last_error=error_msg,
             )
             raise
 
-    def reconnect(self, config: 'ConnectionConfig') -> None:
+    def reconnect(self, config: "ConnectionConfig") -> None:
         """
         Reconnect to microscope (disconnect if needed, then connect).
 
@@ -567,6 +602,7 @@ class MVCConnectionService:
             True if connected, False otherwise
         """
         from py2flamingo.models.connection import ConnectionState
+
         return self.model.status.state == ConnectionState.CONNECTED
 
     def query_available_drives(self, timeout: float = 3.0) -> List[str]:
@@ -589,23 +625,29 @@ class MVCConnectionService:
             raise RuntimeError("Not connected to microscope")
 
         try:
-            from py2flamingo.core.command_codes import SystemCommands, CommandDataBits
+            from py2flamingo.core.command_codes import CommandDataBits, SystemCommands
             from py2flamingo.models.command import Command
 
             # Create STORAGE_PATH_GET command with int32Data0=0 (query mode, not selection)
             # Note: Command code 0x1013 is named "SET" on server but handles queries when int32Data0=0
             cmd = Command(
                 code=SystemCommands.STORAGE_PATH_GET,
-                parameters={'params': [0, 0, 0, 0, 0, 0, CommandDataBits.TRIGGER_CALL_BACK]}
+                parameters={
+                    "params": [0, 0, 0, 0, 0, 0, CommandDataBits.TRIGGER_CALL_BACK]
+                },
             )
 
-            self.logger.info(f"Querying storage drives: cmd=0x{SystemCommands.STORAGE_PATH_GET:04X}, "
-                           f"callback_flag=0x{CommandDataBits.TRIGGER_CALL_BACK:08X}")
+            self.logger.info(
+                f"Querying storage drives: cmd=0x{SystemCommands.STORAGE_PATH_GET:04X}, "
+                f"callback_flag=0x{CommandDataBits.TRIGGER_CALL_BACK:08X}"
+            )
 
             # Send command and get response
             response_bytes = self.send_command(cmd, timeout=timeout)
 
-            self.logger.debug(f"Received {len(response_bytes)} bytes response for STORAGE_PATH_GET")
+            self.logger.debug(
+                f"Received {len(response_bytes)} bytes response for STORAGE_PATH_GET"
+            )
 
             # Parse response - drive list is in ADDITIONAL DATA that follows the 128-byte message
             # Protocol: SCommand (128 bytes) + additionalData (variable length string)
@@ -616,18 +658,28 @@ class MVCConnectionService:
                 # Get the additionalDataBytes field to know how many extra bytes follow
                 additional_data_size = struct.unpack_from("I", response_bytes, 48)[0]
 
-                self.logger.debug(f"STORAGE_PATH_GET: additionalDataBytes={additional_data_size}, "
-                                 f"total response={len(response_bytes)} bytes")
+                self.logger.debug(
+                    f"STORAGE_PATH_GET: additionalDataBytes={additional_data_size}, "
+                    f"total response={len(response_bytes)} bytes"
+                )
 
                 if additional_data_size > 0 and len(response_bytes) > 128:
                     # Additional data follows the 128-byte message
-                    additional_data = response_bytes[128:128+additional_data_size]
-                    drives_str = additional_data.decode('utf-8', errors='ignore').strip('\x00').strip()
+                    additional_data = response_bytes[128 : 128 + additional_data_size]
+                    drives_str = (
+                        additional_data.decode("utf-8", errors="ignore")
+                        .strip("\x00")
+                        .strip()
+                    )
 
                     if drives_str:
                         # Split by newlines and filter empty strings
-                        drives = [d.strip() for d in drives_str.split('\n') if d.strip()]
-                        self.logger.info(f"Found {len(drives)} available storage drives: {drives}")
+                        drives = [
+                            d.strip() for d in drives_str.split("\n") if d.strip()
+                        ]
+                        self.logger.info(
+                            f"Found {len(drives)} available storage drives: {drives}"
+                        )
                         return drives
                     else:
                         self.logger.warning("Additional data was empty")
@@ -635,15 +687,25 @@ class MVCConnectionService:
                 else:
                     # No additional data - check the 72-byte buffer field as fallback
                     data_bytes = response_bytes[52:124]
-                    drives_str = data_bytes.decode('utf-8', errors='ignore').strip('\x00').strip()
+                    drives_str = (
+                        data_bytes.decode("utf-8", errors="ignore")
+                        .strip("\x00")
+                        .strip()
+                    )
 
                     if drives_str:
-                        drives = [d.strip() for d in drives_str.split('\n') if d.strip()]
-                        self.logger.info(f"Found {len(drives)} available storage drives (from buffer field): {drives}")
+                        drives = [
+                            d.strip() for d in drives_str.split("\n") if d.strip()
+                        ]
+                        self.logger.info(
+                            f"Found {len(drives)} available storage drives (from buffer field): {drives}"
+                        )
                         return drives
                     else:
-                        self.logger.warning(f"No storage drives reported by server "
-                                          f"(additionalDataBytes={additional_data_size})")
+                        self.logger.warning(
+                            f"No storage drives reported by server "
+                            f"(additionalDataBytes={additional_data_size})"
+                        )
                         return []
             else:
                 self.logger.error(f"Invalid response size: {len(response_bytes)} bytes")
@@ -683,10 +745,12 @@ class MVCConnectionService:
             # Create SYSTEM_STATE_GET command (no callback flag - matches connection validation)
             cmd = Command(
                 code=SystemCommands.STATE_GET,
-                parameters={'params': [0, 0, 0, 0, 0, 0, 0]}
+                parameters={"params": [0, 0, 0, 0, 0, 0, 0]},
             )
 
-            self.logger.debug(f"Querying system state: cmd=0x{SystemCommands.STATE_GET:04X}")
+            self.logger.debug(
+                f"Querying system state: cmd=0x{SystemCommands.STATE_GET:04X}"
+            )
 
             # Send command and get response
             response_bytes = self.send_command(cmd, timeout=timeout)
@@ -706,15 +770,14 @@ class MVCConnectionService:
 
                 # Server returns SYSTEM_STATE_IDLE (0xa002 = 40962) when idle
                 # Also accept 0 for backwards compatibility
-                SYSTEM_STATE_IDLE_CODE = 0xa002  # 40962
+                SYSTEM_STATE_IDLE_CODE = 0xA002  # 40962
                 is_idle = state_value == 0 or state_value == SYSTEM_STATE_IDLE_CODE
 
-                result = {
-                    'state': state_value,
-                    'is_idle': is_idle
-                }
+                result = {"state": state_value, "is_idle": is_idle}
 
-                self.logger.info(f"System state query: state={state_value} (bytes[24:28]={raw_bytes_24_28}, status_field={status_field}, idle={result['is_idle']})")
+                self.logger.info(
+                    f"System state query: state={state_value} (bytes[24:28]={raw_bytes_24_28}, status_field={status_field}, idle={result['is_idle']})"
+                )
                 return result
             else:
                 self.logger.error(f"Invalid response size: {len(response_bytes)} bytes")
@@ -727,19 +790,21 @@ class MVCConnectionService:
     @property
     def has_async_reader(self) -> bool:
         """Check if async socket reader is active (delegates to tcp_connection)."""
-        return (self.tcp_connection is not None and
-                hasattr(self.tcp_connection, 'has_async_reader') and
-                self.tcp_connection.has_async_reader)
+        return (
+            self.tcp_connection is not None
+            and hasattr(self.tcp_connection, "has_async_reader")
+            and self.tcp_connection.has_async_reader
+        )
 
     def pause_async_reader(self) -> bool:
         """Pause async reader for synchronous operations."""
-        if self.tcp_connection and hasattr(self.tcp_connection, 'pause_async_reader'):
+        if self.tcp_connection and hasattr(self.tcp_connection, "pause_async_reader"):
             return self.tcp_connection.pause_async_reader()
         return False
 
     def resume_async_reader(self) -> bool:
         """Resume async reader after synchronous operations."""
-        if self.tcp_connection and hasattr(self.tcp_connection, 'resume_async_reader'):
+        if self.tcp_connection and hasattr(self.tcp_connection, "resume_async_reader"):
             return self.tcp_connection.resume_async_reader()
         return False
 
@@ -751,7 +816,7 @@ class MVCConnectionService:
             command_code: Command code to handle (e.g., 0x3011 for STACK_COMPLETE)
             handler: Callable that receives ParsedMessage
         """
-        if self.tcp_connection and hasattr(self.tcp_connection, 'register_callback'):
+        if self.tcp_connection and hasattr(self.tcp_connection, "register_callback"):
             self.tcp_connection.register_callback(command_code, handler)
             self.logger.info(f"Registered callback for 0x{command_code:04X}")
         else:
@@ -765,20 +830,21 @@ class MVCConnectionService:
             command_code: Command code to unregister
             handler: Handler to remove
         """
-        if self.tcp_connection and hasattr(self.tcp_connection, 'unregister_callback'):
+        if self.tcp_connection and hasattr(self.tcp_connection, "unregister_callback"):
             self.tcp_connection.unregister_callback(command_code, handler)
             self.logger.info(f"Unregistered callback for 0x{command_code:04X}")
 
-    def send_command_async(self, command_bytes: bytes, expected_response_code: int,
-                          timeout: float = 3.0):
+    def send_command_async(
+        self, command_bytes: bytes, expected_response_code: int, timeout: float = 3.0
+    ):
         """Send command via async reader (delegates to tcp_connection)."""
-        if self.tcp_connection and hasattr(self.tcp_connection, 'send_command_async'):
+        if self.tcp_connection and hasattr(self.tcp_connection, "send_command_async"):
             return self.tcp_connection.send_command_async(
                 command_bytes, expected_response_code, timeout
             )
         return None
 
-    def send_command(self, cmd: 'Command', timeout: float = 5.0) -> bytes:
+    def send_command(self, cmd: "Command", timeout: float = 5.0) -> bytes:
         """
         Send encoded command and get response.
 
@@ -809,10 +875,7 @@ class MVCConnectionService:
             raise
 
     def _receive_full_response(
-        self,
-        sock: socket.socket,
-        expected_size: int,
-        timeout: float
+        self, sock: socket.socket, expected_size: int, timeout: float
     ) -> bytes:
         """
         Receive full response, handling partial receives.
@@ -831,7 +894,7 @@ class MVCConnectionService:
         """
         import time
 
-        data = b''
+        data = b""
         start_time = time.time()
         original_timeout = sock.gettimeout()
 
@@ -876,18 +939,19 @@ class MVCConnectionService:
     def _update_error_state(self, error_msg: str) -> None:
         """Update model to ERROR state."""
         try:
-            from py2flamingo.models.connection import ConnectionStatus, ConnectionState
+            from py2flamingo.models.connection import ConnectionState, ConnectionStatus
+
             self.model.status = ConnectionStatus(
                 state=ConnectionState.ERROR,
                 ip=self.model.status.ip,
                 port=self.model.status.port,
                 connected_at=self.model.status.connected_at,
-                last_error=error_msg
+                last_error=error_msg,
             )
         except Exception as e:
             self.logger.error(f"Failed to update error state: {e}")
 
-    def get_status(self) -> 'ConnectionStatus':
+    def get_status(self) -> "ConnectionStatus":
         """
         Get current connection status.
 
@@ -896,7 +960,9 @@ class MVCConnectionService:
         """
         return self.model.status
 
-    def _send_command_with_text_response(self, cmd: 'Command', expected_min_size: int = 1000) -> str:
+    def _send_command_with_text_response(
+        self, cmd: "Command", expected_min_size: int = 1000
+    ) -> str:
         """
         Send command and read complete text response from socket.
 
@@ -925,7 +991,7 @@ class MVCConnectionService:
 
         # Pause async reader to allow synchronous socket reading
         reader_was_paused = False
-        if hasattr(self.tcp_connection, 'pause_async_reader'):
+        if hasattr(self.tcp_connection, "pause_async_reader"):
             reader_was_paused = self.tcp_connection.pause_async_reader()
             if reader_was_paused:
                 self.logger.debug("Paused async reader for text response")
@@ -935,23 +1001,34 @@ class MVCConnectionService:
             cmd_bytes = self.encoder.encode_command(
                 code=cmd.code,
                 status=0,
-                params=cmd.parameters.get('params', None) if hasattr(cmd, 'parameters') else None,
-                value=cmd.parameters.get('value', 0.0) if hasattr(cmd, 'parameters') else 0.0,
-                data=b''
+                params=(
+                    cmd.parameters.get("params", None)
+                    if hasattr(cmd, "parameters")
+                    else None
+                ),
+                value=(
+                    cmd.parameters.get("value", 0.0)
+                    if hasattr(cmd, "parameters")
+                    else 0.0
+                ),
+                data=b"",
             )
 
             self._command_socket.sendall(cmd_bytes)
             self.logger.debug(f"Sent command {cmd.code}, reading text response...")
 
             # Read 128-byte acknowledgment first
-            ack_data = self._receive_full_response(self._command_socket, 128, timeout=2.0)
+            ack_data = self._receive_full_response(
+                self._command_socket, 128, timeout=2.0
+            )
             self.logger.debug("Received 128-byte ack")
 
             # Check for additional data using select (like old code's bytes_waiting)
             import time
+
             time.sleep(0.1)  # Brief wait for additional data
 
-            additional_data = b''
+            additional_data = b""
             self._command_socket.settimeout(0.5)
 
             try:
@@ -964,7 +1041,9 @@ class MVCConnectionService:
                     if not chunk:
                         break
                     additional_data += chunk
-                    self.logger.debug(f"Received {len(chunk)} bytes (total: {len(additional_data)})")
+                    self.logger.debug(
+                        f"Received {len(chunk)} bytes (total: {len(additional_data)})"
+                    )
 
             except socket.timeout:
                 pass
@@ -973,7 +1052,9 @@ class MVCConnectionService:
 
             # Log total data received
             total_bytes = len(ack_data) + len(additional_data)
-            self.logger.info(f"Received total: {total_bytes} bytes (128 ack + {len(additional_data)} text)")
+            self.logger.info(
+                f"Received total: {total_bytes} bytes (128 ack + {len(additional_data)} text)"
+            )
 
             # Check if we got enough text data (don't count the 128-byte ack)
             if len(additional_data) < expected_min_size:
@@ -984,13 +1065,13 @@ class MVCConnectionService:
 
             # Decode ONLY the text data, not the binary ack
             # The 128-byte ack is binary protocol structure, not text
-            text_response = additional_data.decode('utf-8', errors='replace')
-            text_response = text_response.rstrip('\x00\r\n')
+            text_response = additional_data.decode("utf-8", errors="replace")
+            text_response = text_response.rstrip("\x00\r\n")
 
             # Remove any binary garbage after last '>'
-            last_bracket = text_response.rfind('>')
+            last_bracket = text_response.rfind(">")
             if last_bracket != -1 and last_bracket > len(text_response) - 50:
-                text_response = text_response[:last_bracket + 1]
+                text_response = text_response[: last_bracket + 1]
 
             return text_response
 
@@ -1000,7 +1081,9 @@ class MVCConnectionService:
 
         finally:
             # Resume async reader if we paused it
-            if reader_was_paused and hasattr(self.tcp_connection, 'resume_async_reader'):
+            if reader_was_paused and hasattr(
+                self.tcp_connection, "resume_async_reader"
+            ):
                 self.tcp_connection.resume_async_reader()
                 self.logger.debug("Resumed async reader after text response")
 
@@ -1033,8 +1116,9 @@ class MVCConnectionService:
         """
         import time
         from pathlib import Path
-        from py2flamingo.utils.file_handlers import text_to_dict
+
         from py2flamingo.models.command import Command
+        from py2flamingo.utils.file_handlers import text_to_dict
 
         if not self.is_connected():
             raise RuntimeError("Not connected to microscope")
@@ -1052,20 +1136,21 @@ class MVCConnectionService:
             # We must read ALL data from socket and write to file
             # Otherwise it stays on socket and interferes with next command
             settings_data = self._send_command_with_text_response(
-                cmd_load,
-                expected_min_size=2000  # Settings are usually 2-3KB
+                cmd_load, expected_min_size=2000  # Settings are usually 2-3KB
             )
 
             # Step 2: Write settings data to file
-            settings_path = Path('microscope_settings') / 'ScopeSettings.txt'
+            settings_path = Path("microscope_settings") / "ScopeSettings.txt"
             settings_path.parent.mkdir(parents=True, exist_ok=True)
 
             self.logger.debug(f"Writing {len(settings_data)} bytes to {settings_path}")
-            settings_path.write_text(settings_data, encoding='utf-8')
+            settings_path.write_text(settings_data, encoding="utf-8")
 
             if not settings_path.exists():
                 self.logger.error(f"Settings file not found: {settings_path}")
-                raise FileNotFoundError(f"Microscope settings file not found: {settings_path}")
+                raise FileNotFoundError(
+                    f"Microscope settings file not found: {settings_path}"
+                )
 
             self.logger.debug(f"Reading settings from {settings_path}")
             scope_settings = text_to_dict(str(settings_path))
@@ -1085,7 +1170,7 @@ class MVCConnectionService:
             image_pixel_size = None
             if self.queue_manager:
                 try:
-                    image_pixel_size = self.queue_manager.get_nowait('other_data')
+                    image_pixel_size = self.queue_manager.get_nowait("other_data")
                     self.logger.debug(f"Got pixel size from queue: {image_pixel_size}")
                 except:
                     pass
@@ -1094,13 +1179,23 @@ class MVCConnectionService:
             if not image_pixel_size:
                 self.logger.debug("Calculating pixel size from optical parameters")
                 try:
-                    tube = float(scope_settings['Type']['Tube lens design focal length (mm)'])
-                    obj = float(scope_settings['Type']['Objective lens magnification'])
+                    tube = float(
+                        scope_settings["Type"]["Tube lens design focal length (mm)"]
+                    )
+                    obj = float(scope_settings["Type"]["Objective lens magnification"])
                     # Get camera pixel size from settings, or use common sensor value
-                    cam_um = float(scope_settings.get('Camera', {}).get('Physical pixel size (µm)', 6.5))
-                    image_pixel_size = (cam_um / (obj * (tube / 200))) / 1000.0  # Convert to mm
-                    self.logger.info(f"Calculated pixel size: {image_pixel_size:.6f} mm "
-                                    f"(cam={cam_um}µm, obj={obj}x, tube={tube}mm)")
+                    cam_um = float(
+                        scope_settings.get("Camera", {}).get(
+                            "Physical pixel size (µm)", 6.5
+                        )
+                    )
+                    image_pixel_size = (
+                        cam_um / (obj * (tube / 200))
+                    ) / 1000.0  # Convert to mm
+                    self.logger.info(
+                        f"Calculated pixel size: {image_pixel_size:.6f} mm "
+                        f"(cam={cam_um}µm, obj={obj}x, tube={tube}mm)"
+                    )
                 except (KeyError, ValueError, TypeError) as e:
                     self.logger.error(f"Could not calculate pixel size: {e}")
                     # Do not use fallback - return None to indicate unknown

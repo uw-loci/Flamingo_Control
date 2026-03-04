@@ -3,14 +3,15 @@ Dual-resolution storage system for 3D visualization.
 Maintains high-resolution data storage separate from display resolution.
 """
 
+import logging
+import threading
+import time
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
 import sparse
-import threading
-from typing import Dict, Tuple, Optional, List
-from dataclasses import dataclass
-import logging
 from scipy import ndimage
-import time
 
 from py2flamingo.visualization.coordinate_transforms import TransformQuality
 
@@ -30,11 +31,16 @@ def _locked(method):
     def wrapper(self, *args, **kwargs):
         with self._storage_lock:
             return method(self, *args, **kwargs)
+
     return wrapper
 
 
-def _vectorized_accumulate(valid_voxels: np.ndarray, valid_values: np.ndarray,
-                           storage_dims: tuple, update_mode: str = 'maximum') -> tuple:
+def _vectorized_accumulate(
+    valid_voxels: np.ndarray,
+    valid_values: np.ndarray,
+    storage_dims: tuple,
+    update_mode: str = "maximum",
+) -> tuple:
     """
     Vectorized voxel accumulation using NumPy 2.x optimizations.
 
@@ -52,12 +58,11 @@ def _vectorized_accumulate(valid_voxels: np.ndarray, valid_values: np.ndarray,
     # Convert 3D indices to 1D flat indices (much faster than tuple keys)
     # NumPy 2.x np.ravel_multi_index is highly optimized
     flat_indices = np.ravel_multi_index(
-        (valid_voxels[:, 0], valid_voxels[:, 1], valid_voxels[:, 2]),
-        storage_dims
+        (valid_voxels[:, 0], valid_voxels[:, 1], valid_voxels[:, 2]), storage_dims
     )
 
     # Use NumPy 2.x optimized unique (15x faster with hash-based method)
-    if update_mode == 'maximum':
+    if update_mode == "maximum":
         # For maximum mode: find unique indices and take max value for each
         unique_indices, inverse = np.unique(flat_indices, return_inverse=True)
 
@@ -67,7 +72,7 @@ def _vectorized_accumulate(valid_voxels: np.ndarray, valid_values: np.ndarray,
 
         return unique_indices, accumulated
 
-    elif update_mode == 'additive':
+    elif update_mode == "additive":
         # For additive mode: sum all values at each voxel
         unique_indices, inverse = np.unique(flat_indices, return_inverse=True)
 
@@ -79,7 +84,7 @@ def _vectorized_accumulate(valid_voxels: np.ndarray, valid_values: np.ndarray,
         accumulated = np.clip(accumulated, 0, 65535).astype(valid_values.dtype)
         return unique_indices, accumulated
 
-    elif update_mode == 'average':
+    elif update_mode == "average":
         # For average mode: sum values and count, then divide
         unique_indices, inverse, counts = np.unique(
             flat_indices, return_inverse=True, return_counts=True
@@ -96,7 +101,9 @@ def _vectorized_accumulate(valid_voxels: np.ndarray, valid_values: np.ndarray,
     else:  # 'latest' - just take last value for each voxel
         # Get unique indices, keeping last occurrence
         # Reverse, unique, reverse back
-        unique_indices, first_occurrence = np.unique(flat_indices[::-1], return_index=True)
+        unique_indices, first_occurrence = np.unique(
+            flat_indices[::-1], return_index=True
+        )
         last_occurrence = len(flat_indices) - 1 - first_occurrence
 
         accumulated = valid_values[last_occurrence]
@@ -106,6 +113,7 @@ def _vectorized_accumulate(valid_voxels: np.ndarray, valid_values: np.ndarray,
 @dataclass
 class DualResolutionConfig:
     """Configuration for dual-resolution storage."""
+
     # Storage resolution (high-res)
     storage_voxel_size: Tuple[float, float, float] = (5, 5, 5)  # micrometers
 
@@ -113,7 +121,7 @@ class DualResolutionConfig:
     display_voxel_size: Tuple[float, float, float] = (15, 15, 15)  # micrometers
 
     @classmethod
-    def from_settings(cls, settings_service=None, **kwargs) -> 'DualResolutionConfig':
+    def from_settings(cls, settings_service=None, **kwargs) -> "DualResolutionConfig":
         """Create config from settings service with optional overrides.
 
         Args:
@@ -130,15 +138,25 @@ class DualResolutionConfig:
 
             # Get storage voxel size from settings
             storage_size = display_settings.get("storage_voxel_size_um", 5)
-            config_kwargs['storage_voxel_size'] = (storage_size, storage_size, storage_size)
+            config_kwargs["storage_voxel_size"] = (
+                storage_size,
+                storage_size,
+                storage_size,
+            )
 
             # Get downsample factor and compute display voxel size
             downsample = display_settings.get("downsample_factor", 3)
             display_size = storage_size * downsample
-            config_kwargs['display_voxel_size'] = (display_size, display_size, display_size)
+            config_kwargs["display_voxel_size"] = (
+                display_size,
+                display_size,
+                display_size,
+            )
 
-            logger.info(f"Config from settings: storage={storage_size}µm, "
-                       f"downsample={downsample}x, display={display_size}µm")
+            logger.info(
+                f"Config from settings: storage={storage_size}µm, "
+                f"downsample={downsample}x, display={display_size}µm"
+            )
 
         # Apply any direct overrides
         config_kwargs.update(kwargs)
@@ -147,14 +165,22 @@ class DualResolutionConfig:
 
     # Chamber dimensions and origin in micrometers
     chamber_dimensions: Tuple[float, float, float] = (10000, 10000, 43000)
-    chamber_origin: Tuple[float, float, float] = (0, 0, 0)  # World coordinate where chamber starts
+    chamber_origin: Tuple[float, float, float] = (
+        0,
+        0,
+        0,
+    )  # World coordinate where chamber starts
 
     # Sample region for high-res storage
     sample_region_center: Tuple[float, float, float] = (5000, 5000, 21500)
-    sample_region_radius: float = 3000  # micrometers - used if half_widths not specified
+    sample_region_radius: float = (
+        3000  # micrometers - used if half_widths not specified
+    )
 
     # Asymmetric storage bounds (optional, overrides radius if specified)
-    sample_region_half_widths: Optional[Tuple[float, float, float]] = None  # (X, Y, Z) half-widths
+    sample_region_half_widths: Optional[Tuple[float, float, float]] = (
+        None  # (X, Y, Z) half-widths
+    )
 
     # Whether to invert X axis (stage X direction is mirrored in display)
     invert_x: bool = False
@@ -173,7 +199,9 @@ class DualResolutionConfig:
             # Use asymmetric bounds if specified
             return tuple(
                 int(2 * hw / vs)
-                for hw, vs in zip(self.sample_region_half_widths, self.storage_voxel_size)
+                for hw, vs in zip(
+                    self.sample_region_half_widths, self.storage_voxel_size
+                )
             )
         else:
             # Fall back to symmetric radius
@@ -202,8 +230,12 @@ class DualResolutionVoxelStorage:
     during acquisition and efficient chunked access.
     """
 
-    def __init__(self, config: Optional[DualResolutionConfig] = None, max_history_blocks: int = 500,
-                 zarr_path: Optional[str] = None):
+    def __init__(
+        self,
+        config: Optional[DualResolutionConfig] = None,
+        max_history_blocks: int = 500,
+        zarr_path: Optional[str] = None,
+    ):
         """Initialize dual-resolution voxel storage.
 
         Args:
@@ -221,8 +253,12 @@ class DualResolutionVoxelStorage:
         # High-resolution storage (sparse for memory efficiency using dictionaries)
         self.storage_dims = self.config.storage_dimensions
         self.storage_data: Dict[int, Dict] = {}  # Channel -> dict of (x,y,z) -> value
-        self.storage_timestamps: Dict[int, Dict] = {}  # Channel -> dict of (x,y,z) -> timestamp
-        self.storage_confidence: Dict[int, Dict] = {}  # Channel -> dict of (x,y,z) -> confidence
+        self.storage_timestamps: Dict[int, Dict] = (
+            {}
+        )  # Channel -> dict of (x,y,z) -> timestamp
+        self.storage_confidence: Dict[int, Dict] = (
+            {}
+        )  # Channel -> dict of (x,y,z) -> confidence
 
         # Low-resolution display cache
         self.display_dims = self.config.display_dimensions
@@ -230,9 +266,18 @@ class DualResolutionVoxelStorage:
         self.display_dirty: Dict[int, bool] = {}  # Track which channels need update
 
         # Transform caching and stage position tracking
-        self.transform_cache: Dict[int, np.ndarray] = {}  # Channel -> cached transformed volume
-        self.last_rotation_per_channel: Dict[int, float] = {}  # Per-channel rotation tracking
-        self.last_stage_position = {'x': 0, 'y': 0, 'z': 0, 'r': 0}  # Last stage position
+        self.transform_cache: Dict[int, np.ndarray] = (
+            {}
+        )  # Channel -> cached transformed volume
+        self.last_rotation_per_channel: Dict[int, float] = (
+            {}
+        )  # Per-channel rotation tracking
+        self.last_stage_position = {
+            "x": 0,
+            "y": 0,
+            "z": 0,
+            "r": 0,
+        }  # Last stage position
         self.data_collection_positions = []  # Track where data was collected
         self.max_history_blocks = max_history_blocks  # Limit memory growth
 
@@ -249,33 +294,43 @@ class DualResolutionVoxelStorage:
 
         # Track data bounds for optimization
         self.data_bounds = {
-            'min': np.array([np.inf, np.inf, np.inf]),
-            'max': np.array([-np.inf, -np.inf, -np.inf])
+            "min": np.array([np.inf, np.inf, np.inf]),
+            "max": np.array([-np.inf, -np.inf, -np.inf]),
         }
 
         # Optional Zarr backend for persistent storage
         self.zarr_path = zarr_path
         self.zarr_store = None
-        self.zarr_arrays: Dict[int, 'zarr.Array'] = {}
+        self.zarr_arrays: Dict[int, "zarr.Array"] = {}
         self._zarr_write_buffer: Dict[int, List] = {}  # Buffer writes for efficiency
         self._zarr_buffer_size = 1000  # Flush after this many voxels
 
         # Transform quality setting - FAST uses nearest-neighbor (~3-5x faster)
         # QUALITY uses linear interpolation (smoother but slower)
-        self._transform_quality = TransformQuality.FAST  # Default to fast for interactive use
+        self._transform_quality = (
+            TransformQuality.FAST
+        )  # Default to fast for interactive use
 
         if zarr_path:
             self._init_zarr_backend(zarr_path)
 
         logger.info(f"Initialized dual-resolution storage:")
-        logger.info(f"  Storage: {self.storage_dims} voxels at {self.config.storage_voxel_size} µm")
-        logger.info(f"  Display: {self.display_dims} voxels at {self.config.display_voxel_size} µm")
+        logger.info(
+            f"  Storage: {self.storage_dims} voxels at {self.config.storage_voxel_size} µm"
+        )
+        logger.info(
+            f"  Display: {self.display_dims} voxels at {self.config.display_voxel_size} µm"
+        )
         logger.info(f"  Resolution ratio: {self.config.resolution_ratio}")
         if self.config.sample_region_half_widths:
-            logger.info(f"  Asymmetric storage bounds (µm): X=±{self.config.sample_region_half_widths[0]}, "
-                       f"Y=±{self.config.sample_region_half_widths[1]}, Z=±{self.config.sample_region_half_widths[2]}")
+            logger.info(
+                f"  Asymmetric storage bounds (µm): X=±{self.config.sample_region_half_widths[0]}, "
+                f"Y=±{self.config.sample_region_half_widths[1]}, Z=±{self.config.sample_region_half_widths[2]}"
+            )
         else:
-            logger.info(f"  Symmetric storage radius: {self.config.sample_region_radius} µm")
+            logger.info(
+                f"  Symmetric storage radius: {self.config.sample_region_radius} µm"
+            )
         logger.info(f"  Max history blocks: {self.max_history_blocks}")
         if zarr_path:
             logger.info(f"  Zarr backend: {zarr_path}")
@@ -318,7 +373,10 @@ class DualResolutionVoxelStorage:
         frac_offset = offset_voxels - int_offset
 
         # If shift is purely integer (or we're in fast mode), use roll
-        if np.max(np.abs(frac_offset)) < 0.01 or self._transform_quality == TransformQuality.FAST:
+        if (
+            np.max(np.abs(frac_offset)) < 0.01
+            or self._transform_quality == TransformQuality.FAST
+        ):
             # Use numpy.roll for each axis - much faster than scipy.shift
             result = volume
             for axis, shift_val in enumerate(int_offset):
@@ -338,7 +396,8 @@ class DualResolutionVoxelStorage:
         else:
             # Quality mode with fractional shift - use scipy
             from scipy.ndimage import shift
-            return shift(volume, offset_voxels, order=1, mode='constant', cval=0)
+
+            return shift(volume, offset_voxels, order=1, mode="constant", cval=0)
 
     @_locked
     def _initialize_storage(self):
@@ -378,13 +437,16 @@ class DualResolutionVoxelStorage:
         # Calculate storage origin in world coordinates
         # Storage array is centered at sample_region_center
         storage_origin_world = (
-            np.array(self.config.sample_region_center, dtype=np.float64) -
-            np.array(self.storage_dims, dtype=np.float64) * np.array(self.config.storage_voxel_size, dtype=np.float64) / 2
+            np.array(self.config.sample_region_center, dtype=np.float64)
+            - np.array(self.storage_dims, dtype=np.float64)
+            * np.array(self.config.storage_voxel_size, dtype=np.float64)
+            / 2
         )
 
         # Convert world coords to voxel indices relative to storage origin
         voxel_indices = np.round(
-            (world_coords - storage_origin_world) / np.array(self.config.storage_voxel_size, dtype=np.float64)
+            (world_coords - storage_origin_world)
+            / np.array(self.config.storage_voxel_size, dtype=np.float64)
         ).astype(int)
 
         return voxel_indices
@@ -392,12 +454,19 @@ class DualResolutionVoxelStorage:
     def world_to_display_voxel(self, world_coords: np.ndarray) -> np.ndarray:
         """Convert world coordinates (µm) to display voxel indices."""
         # Display starts at chamber_origin in world coordinates
-        voxel_coords = (world_coords - np.array(self.config.chamber_origin)) / np.array(self.config.display_voxel_size)
+        voxel_coords = (world_coords - np.array(self.config.chamber_origin)) / np.array(
+            self.config.display_voxel_size
+        )
         return np.round(voxel_coords).astype(int)
 
-    def update_storage(self, channel_id: int, world_coords: np.ndarray,
-                      pixel_values: np.ndarray, timestamp: float,
-                      update_mode: str = 'latest'):
+    def update_storage(
+        self,
+        channel_id: int,
+        world_coords: np.ndarray,
+        pixel_values: np.ndarray,
+        timestamp: float,
+        update_mode: str = "latest",
+    ):
         """
         Update high-resolution storage with new data.
 
@@ -418,9 +487,17 @@ class DualResolutionVoxelStorage:
         # Threshold of 1000 voxels balances overhead vs speedup
         VECTORIZED_THRESHOLD = 1000
 
-        if len(world_coords) >= VECTORIZED_THRESHOLD and update_mode in ('maximum', 'additive', 'average'):
-            logger.debug(f"Using vectorized storage update for {len(world_coords)} voxels")
-            return self.update_storage_vectorized(channel_id, world_coords, pixel_values, timestamp, update_mode)
+        if len(world_coords) >= VECTORIZED_THRESHOLD and update_mode in (
+            "maximum",
+            "additive",
+            "average",
+        ):
+            logger.debug(
+                f"Using vectorized storage update for {len(world_coords)} voxels"
+            )
+            return self.update_storage_vectorized(
+                channel_id, world_coords, pixel_values, timestamp, update_mode
+            )
 
         # Non-vectorized path (< 1000 voxels) — fast enough to hold lock for entire operation
         # Convert to storage voxel coordinates (pure numpy, no shared state)
@@ -428,9 +505,8 @@ class DualResolutionVoxelStorage:
 
         # Filter valid voxels (within bounds and sample region)
         valid_mask = np.all(
-            (storage_voxels >= 0) &
-            (storage_voxels < np.array(self.storage_dims)),
-            axis=1
+            (storage_voxels >= 0) & (storage_voxels < np.array(self.storage_dims)),
+            axis=1,
         )
 
         logger.info(
@@ -445,19 +521,29 @@ class DualResolutionVoxelStorage:
 
         if not np.any(valid_mask):
             # Log warning - voxels outside storage array bounds (should be rare)
-            logger.warning(f"Channel {channel_id}: All {len(storage_voxels)} voxels rejected - outside storage bounds")
+            logger.warning(
+                f"Channel {channel_id}: All {len(storage_voxels)} voxels rejected - outside storage bounds"
+            )
             logger.warning(f"  Storage dims: {self.storage_dims}")
-            logger.warning(f"  Sample region center: {self.config.sample_region_center} µm")
-            logger.warning(f"  Sample region radius: {self.config.sample_region_radius} µm")
+            logger.warning(
+                f"  Sample region center: {self.config.sample_region_center} µm"
+            )
+            logger.warning(
+                f"  Sample region radius: {self.config.sample_region_radius} µm"
+            )
             if len(world_coords) > 0:
                 # World coords are in Z,Y,X order per napari convention
-                logger.warning(f"  Rejected world coords range (ZYX order): Z=[{world_coords[:, 0].min():.1f}, {world_coords[:, 0].max():.1f}], "
-                              f"Y=[{world_coords[:, 1].min():.1f}, {world_coords[:, 1].max():.1f}], "
-                              f"X=[{world_coords[:, 2].min():.1f}, {world_coords[:, 2].max():.1f}] µm")
+                logger.warning(
+                    f"  Rejected world coords range (ZYX order): Z=[{world_coords[:, 0].min():.1f}, {world_coords[:, 0].max():.1f}], "
+                    f"Y=[{world_coords[:, 1].min():.1f}, {world_coords[:, 1].max():.1f}], "
+                    f"X=[{world_coords[:, 2].min():.1f}, {world_coords[:, 2].max():.1f}] µm"
+                )
                 # Storage voxels should also be in Z,Y,X order
-                logger.warning(f"  Rejected storage voxel range (ZYX): Z=[{storage_voxels[:, 0].min()}, {storage_voxels[:, 0].max()}], "
-                              f"Y=[{storage_voxels[:, 1].min()}, {storage_voxels[:, 1].max()}], "
-                              f"X=[{storage_voxels[:, 2].min()}, {storage_voxels[:, 2].max()}]")
+                logger.warning(
+                    f"  Rejected storage voxel range (ZYX): Z=[{storage_voxels[:, 0].min()}, {storage_voxels[:, 0].max()}], "
+                    f"Y=[{storage_voxels[:, 1].min()}, {storage_voxels[:, 1].max()}], "
+                    f"X=[{storage_voxels[:, 2].min()}, {storage_voxels[:, 2].max()}]"
+                )
             return  # No valid voxels to update
 
         valid_voxels = storage_voxels[valid_mask]
@@ -495,28 +581,40 @@ class DualResolutionVoxelStorage:
             cache_key = f"{channel_id}_rotated"
             if cache_key in self.transform_cache:
                 del self.transform_cache[cache_key]
-                logger.debug(f"Transform cache invalidated for channel {channel_id} (new data added)")
+                logger.debug(
+                    f"Transform cache invalidated for channel {channel_id} (new data added)"
+                )
 
-    def _apply_update_strategy(self, old_val: float, new_val: float,
-                              old_time: float, new_time: float,
-                              mode: str) -> float:
+    def _apply_update_strategy(
+        self,
+        old_val: float,
+        new_val: float,
+        old_time: float,
+        new_time: float,
+        mode: str,
+    ) -> float:
         """Apply the specified update strategy."""
-        if mode == 'latest':
+        if mode == "latest":
             return new_val if new_time >= old_time else old_val
-        elif mode == 'maximum':
+        elif mode == "maximum":
             return max(old_val, new_val)
-        elif mode == 'average':
+        elif mode == "average":
             if old_time == 0:
                 return new_val
             return int((old_val + new_val) / 2)
-        elif mode == 'additive':
+        elif mode == "additive":
             return min(65535, old_val + new_val)
         else:
             return new_val
 
-    def update_storage_vectorized(self, channel_id: int, world_coords: np.ndarray,
-                                   pixel_values: np.ndarray, timestamp: float,
-                                   update_mode: str = 'maximum'):
+    def update_storage_vectorized(
+        self,
+        channel_id: int,
+        world_coords: np.ndarray,
+        pixel_values: np.ndarray,
+        timestamp: float,
+        update_mode: str = "maximum",
+    ):
         """
         Vectorized storage update using NumPy 2.x optimizations.
 
@@ -543,19 +641,22 @@ class DualResolutionVoxelStorage:
         storage_voxels = self.world_to_storage_voxel(world_coords)
 
         valid_mask = np.all(
-            (storage_voxels >= 0) &
-            (storage_voxels < np.array(self.storage_dims)),
-            axis=1
+            (storage_voxels >= 0) & (storage_voxels < np.array(self.storage_dims)),
+            axis=1,
         )
 
         if not np.any(valid_mask):
-            logger.warning(f"Channel {channel_id}: All voxels rejected - outside storage bounds")
+            logger.warning(
+                f"Channel {channel_id}: All voxels rejected - outside storage bounds"
+            )
             return
 
         valid_voxels = storage_voxels[valid_mask]
         valid_values = pixel_values[valid_mask]
 
-        logger.debug(f"Vectorized update: {len(valid_voxels)} valid voxels, mode={update_mode}")
+        logger.debug(
+            f"Vectorized update: {len(valid_voxels)} valid voxels, mode={update_mode}"
+        )
 
         unique_flat, accumulated_values = _vectorized_accumulate(
             valid_voxels, valid_values, self.storage_dims, update_mode
@@ -568,7 +669,7 @@ class DualResolutionVoxelStorage:
         # GUI thread can read storage (for visualization) or process frames.
         DICT_CHUNK_SIZE = 5000
         n_unique = len(z_coords)
-        is_maximum = (update_mode == 'maximum')
+        is_maximum = update_mode == "maximum"
 
         for chunk_start in range(0, n_unique, DICT_CHUNK_SIZE):
             chunk_end = min(chunk_start + DICT_CHUNK_SIZE, n_unique)
@@ -604,13 +705,11 @@ class DualResolutionVoxelStorage:
     def _update_bounds(self, world_coords: np.ndarray):
         """Update the data bounds for optimization."""
         if world_coords.size > 0:
-            self.data_bounds['min'] = np.minimum(
-                self.data_bounds['min'],
-                np.min(world_coords, axis=0)
+            self.data_bounds["min"] = np.minimum(
+                self.data_bounds["min"], np.min(world_coords, axis=0)
             )
-            self.data_bounds['max'] = np.maximum(
-                self.data_bounds['max'],
-                np.max(world_coords, axis=0)
+            self.data_bounds["max"] = np.maximum(
+                self.data_bounds["max"], np.max(world_coords, axis=0)
             )
 
     def downsample_to_display(self, channel_id: int, force: bool = False) -> np.ndarray:
@@ -648,7 +747,9 @@ class DualResolutionVoxelStorage:
             self.display_cache[channel_id].fill(0)
             return self.display_cache[channel_id]
 
-        logger.debug(f"Downsampling channel {channel_id}: {len(storage_snapshot)} voxels in storage")
+        logger.debug(
+            f"Downsampling channel {channel_id}: {len(storage_snapshot)} voxels in storage"
+        )
 
         # Create temporary dense storage array (only for occupied region)
         # This is more memory efficient than densifying the entire storage
@@ -666,8 +767,10 @@ class DualResolutionVoxelStorage:
             dense_region[local_coords] = value
 
         # Apply smoothing to reduce aliasing during downsampling (only in QUALITY mode)
-        if (self._transform_quality == TransformQuality.QUALITY and
-                self.config.resolution_ratio[0] > 1):
+        if (
+            self._transform_quality == TransformQuality.QUALITY
+            and self.config.resolution_ratio[0] > 1
+        ):
             # Gaussian filter with sigma proportional to downsampling factor
             sigma = tuple(r / 3.0 for r in self.config.resolution_ratio)
             dense_region = ndimage.gaussian_filter(dense_region, sigma)
@@ -679,16 +782,22 @@ class DualResolutionVoxelStorage:
         # Map to display coordinates
         # Convert storage region coords to world coords
         storage_origin_world = (
-            np.array(self.config.sample_region_center) -
-            np.array(self.storage_dims) * np.array(self.config.storage_voxel_size) / 2
+            np.array(self.config.sample_region_center)
+            - np.array(self.storage_dims) * np.array(self.config.storage_voxel_size) / 2
         )
-        region_origin_world = storage_origin_world + min_coords * np.array(self.config.storage_voxel_size)
+        region_origin_world = storage_origin_world + min_coords * np.array(
+            self.config.storage_voxel_size
+        )
 
         # Convert to display voxel coords
         display_origin = self.world_to_display_voxel(region_origin_world)
 
-        logger.info(f"DISPLAY: Ch {channel_id}: region_origin_world (Z,Y,X)={region_origin_world} µm")
-        logger.info(f"DISPLAY: display_origin_voxel (Z,Y,X)={display_origin} | display_dims={self.display_dims}")
+        logger.info(
+            f"DISPLAY: Ch {channel_id}: region_origin_world (Z,Y,X)={region_origin_world} µm"
+        )
+        logger.info(
+            f"DISPLAY: display_origin_voxel (Z,Y,X)={display_origin} | display_dims={self.display_dims}"
+        )
         logger.debug(f"  Downsampled shape: {downsampled.shape}")
 
         # Clear display cache
@@ -706,20 +815,38 @@ class DualResolutionVoxelStorage:
 
         # Check if valid region has positive size in all dimensions
         if np.any(valid_end <= valid_start):
-            logger.warning(f"Channel {channel_id}: Downsampled region outside display bounds, skipping copy")
+            logger.warning(
+                f"Channel {channel_id}: Downsampled region outside display bounds, skipping copy"
+            )
             logger.warning(f"  Attempted to place data at:")
-            logger.warning(f"    Display voxel origin: {display_origin} (Z={display_origin[0]}, Y={display_origin[1]}, X={display_origin[2]})")
-            logger.warning(f"    Display voxel end: {display_end} (Z={display_end[0]}, Y={display_end[1]}, X={display_end[2]})")
-            logger.warning(f"  But display dimensions are: {self.display_dims} (Z={self.display_dims[0]}, Y={self.display_dims[1]}, X={self.display_dims[2]})")
+            logger.warning(
+                f"    Display voxel origin: {display_origin} (Z={display_origin[0]}, Y={display_origin[1]}, X={display_origin[2]})"
+            )
+            logger.warning(
+                f"    Display voxel end: {display_end} (Z={display_end[0]}, Y={display_end[1]}, X={display_end[2]})"
+            )
+            logger.warning(
+                f"  But display dimensions are: {self.display_dims} (Z={self.display_dims[0]}, Y={self.display_dims[1]}, X={self.display_dims[2]})"
+            )
             logger.warning(f"  World coordinates of region:")
             # Convert display voxels back to world coords for debugging
-            world_origin = np.array(display_origin) * np.array(self.config.display_voxel_size) + np.array(self.config.chamber_origin)
-            world_end = np.array(display_end) * np.array(self.config.display_voxel_size) + np.array(self.config.chamber_origin)
-            logger.warning(f"    World origin: {world_origin/1000} mm (Z={world_origin[0]/1000:.2f}, Y={world_origin[1]/1000:.2f}, X={world_origin[2]/1000:.2f})")
-            logger.warning(f"    World end: {world_end/1000} mm (Z={world_end[0]/1000:.2f}, Y={world_end[1]/1000:.2f}, X={world_end[2]/1000:.2f})")
-            logger.warning(f"  Chamber bounds (mm): Z=[{self.config.chamber_origin[0]/1000:.1f}, {(self.config.chamber_origin[0] + self.config.chamber_dimensions[0])/1000:.1f}], "
-                          f"Y=[{self.config.chamber_origin[1]/1000:.1f}, {(self.config.chamber_origin[1] + self.config.chamber_dimensions[1])/1000:.1f}], "
-                          f"X=[{self.config.chamber_origin[2]/1000:.1f}, {(self.config.chamber_origin[2] + self.config.chamber_dimensions[2])/1000:.1f}]")
+            world_origin = np.array(display_origin) * np.array(
+                self.config.display_voxel_size
+            ) + np.array(self.config.chamber_origin)
+            world_end = np.array(display_end) * np.array(
+                self.config.display_voxel_size
+            ) + np.array(self.config.chamber_origin)
+            logger.warning(
+                f"    World origin: {world_origin/1000} mm (Z={world_origin[0]/1000:.2f}, Y={world_origin[1]/1000:.2f}, X={world_origin[2]/1000:.2f})"
+            )
+            logger.warning(
+                f"    World end: {world_end/1000} mm (Z={world_end[0]/1000:.2f}, Y={world_end[1]/1000:.2f}, X={world_end[2]/1000:.2f})"
+            )
+            logger.warning(
+                f"  Chamber bounds (mm): Z=[{self.config.chamber_origin[0]/1000:.1f}, {(self.config.chamber_origin[0] + self.config.chamber_dimensions[0])/1000:.1f}], "
+                f"Y=[{self.config.chamber_origin[1]/1000:.1f}, {(self.config.chamber_origin[1] + self.config.chamber_dimensions[1])/1000:.1f}], "
+                f"X=[{self.config.chamber_origin[2]/1000:.1f}, {(self.config.chamber_origin[2] + self.config.chamber_dimensions[2])/1000:.1f}]"
+            )
             self.display_dirty[channel_id] = False
             return self.display_cache[channel_id]
 
@@ -737,13 +864,13 @@ class DualResolutionVoxelStorage:
 
         # Copy to display cache
         self.display_cache[channel_id][
-            valid_start[0]:valid_end[0],
-            valid_start[1]:valid_end[1],
-            valid_start[2]:valid_end[2]
+            valid_start[0] : valid_end[0],
+            valid_start[1] : valid_end[1],
+            valid_start[2] : valid_end[2],
         ] = downsampled[
-            src_start[0]:src_end[0],
-            src_start[1]:src_end[1],
-            src_start[2]:src_end[2]
+            src_start[0] : src_end[0],
+            src_start[1] : src_end[1],
+            src_start[2] : src_end[2],
         ]
 
         # Track max value from DISPLAY data (what user sees in napari)
@@ -754,12 +881,16 @@ class DualResolutionVoxelStorage:
             self.channel_max_values[channel_id] = display_max
             # Only log if this is a significant increase (>20%) or first non-zero value
             if old_max == 0 or display_max > old_max * 1.2:
-                logger.debug(f"Channel {channel_id} display max updated to {display_max}")
+                logger.debug(
+                    f"Channel {channel_id} display max updated to {display_max}"
+                )
 
         self.display_dirty[channel_id] = False
         return self.display_cache[channel_id]
 
-    def _block_average(self, data: np.ndarray, block_size: Tuple[int, int, int]) -> np.ndarray:
+    def _block_average(
+        self, data: np.ndarray, block_size: Tuple[int, int, int]
+    ) -> np.ndarray:
         """Downsample by averaging blocks of voxels using vectorized NumPy operations.
 
         Much faster than triple-nested Python loops - uses reshape + mean for
@@ -774,13 +905,16 @@ class DualResolutionVoxelStorage:
         pad_x = (bx - dx % bx) % bx
 
         if pad_z or pad_y or pad_x:
-            data = np.pad(data, ((0, pad_z), (0, pad_y), (0, pad_x)), mode='edge')
+            data = np.pad(data, ((0, pad_z), (0, pad_y), (0, pad_x)), mode="edge")
 
         # Reshape to group blocks, then average
         new_shape = (
-            data.shape[0] // bz, bz,
-            data.shape[1] // by, by,
-            data.shape[2] // bx, bx
+            data.shape[0] // bz,
+            bz,
+            data.shape[1] // by,
+            by,
+            data.shape[2] // bx,
+            bx,
         )
 
         # Reshape and compute mean over block axes (1, 3, 5)
@@ -816,8 +950,8 @@ class DualResolutionVoxelStorage:
         """Clear all stored data."""
         self._initialize_storage()
         self.data_bounds = {
-            'min': np.array([np.inf, np.inf, np.inf]),
-            'max': np.array([-np.inf, -np.inf, -np.inf])
+            "min": np.array([np.inf, np.inf, np.inf]),
+            "max": np.array([-np.inf, -np.inf, -np.inf]),
         }
         # Reset reference position so next data capture sets a new reference
         self.reference_stage_position = None
@@ -827,7 +961,9 @@ class DualResolutionVoxelStorage:
 
     def _count_voxels(self) -> int:
         """Count total voxels across all channels, including session-loaded data."""
-        storage_voxels = sum(len(self.storage_data[ch]) for ch in range(self.num_channels))
+        storage_voxels = sum(
+            len(self.storage_data[ch]) for ch in range(self.num_channels)
+        )
         if storage_voxels == 0 and self._session_loaded_channels:
             storage_voxels = sum(
                 int(np.count_nonzero(self.display_cache[ch]))
@@ -839,27 +975,31 @@ class DualResolutionVoxelStorage:
         """Report memory usage statistics."""
         # Calculate storage bytes from dictionary sizes
         storage_bytes = sum(
-            len(self.storage_data[ch]) * 2 +  # uint16, number of occupied voxels
-            len(self.storage_timestamps[ch]) * 4 +  # float32
-            len(self.storage_confidence[ch])  # uint8
+            len(self.storage_data[ch]) * 2  # uint16, number of occupied voxels
+            + len(self.storage_timestamps[ch]) * 4  # float32
+            + len(self.storage_confidence[ch])  # uint8
             for ch in range(self.num_channels)
         )
 
         display_bytes = sum(
-            self.display_cache[ch].nbytes
-            for ch in range(self.num_channels)
+            self.display_cache[ch].nbytes for ch in range(self.num_channels)
         )
 
         return {
-            'storage_mb': storage_bytes / (1024 * 1024),
-            'display_mb': display_bytes / (1024 * 1024),
-            'total_mb': (storage_bytes + display_bytes) / (1024 * 1024),
-            'storage_voxels': self._count_voxels(),
-            'display_voxels': np.prod(self.display_dims) * self.num_channels
+            "storage_mb": storage_bytes / (1024 * 1024),
+            "display_mb": display_bytes / (1024 * 1024),
+            "total_mb": (storage_bytes + display_bytes) / (1024 * 1024),
+            "storage_voxels": self._count_voxels(),
+            "display_voxels": np.prod(self.display_dims) * self.num_channels,
         }
 
-    def add_data_with_position(self, data: np.ndarray, world_origin_um: np.ndarray,
-                              stage_position: dict, channel_id: int):
+    def add_data_with_position(
+        self,
+        data: np.ndarray,
+        world_origin_um: np.ndarray,
+        stage_position: dict,
+        channel_id: int,
+    ):
         """
         Store data with its collection stage position.
 
@@ -877,7 +1017,9 @@ class DualResolutionVoxelStorage:
             values = data[nonzero]
 
             # Convert voxel indices to world coordinates
-            world_coords = world_origin_um + coords * np.array(self.config.storage_voxel_size)
+            world_coords = world_origin_um + coords * np.array(
+                self.config.storage_voxel_size
+            )
 
             # Update storage
             timestamp = time.time()
@@ -885,10 +1027,10 @@ class DualResolutionVoxelStorage:
 
         # Track collection position
         block_info = {
-            'stage_pos': stage_position.copy(),
-            'world_origin': world_origin_um.copy(),
-            'channel': channel_id,
-            'timestamp': time.time()
+            "stage_pos": stage_position.copy(),
+            "world_origin": world_origin_um.copy(),
+            "channel": channel_id,
+            "timestamp": time.time(),
         }
         self.data_collection_positions.append(block_info)
 
@@ -897,9 +1039,12 @@ class DualResolutionVoxelStorage:
             # Remove oldest blocks
             self.data_collection_positions.pop(0)
 
-    def get_display_volume_transformed(self, channel_id: int,
-                                      current_stage_pos: dict,
-                                      holder_position_voxels: np.ndarray = None) -> np.ndarray:
+    def get_display_volume_transformed(
+        self,
+        channel_id: int,
+        current_stage_pos: dict,
+        holder_position_voxels: np.ndarray = None,
+    ) -> np.ndarray:
         """
         Get display volume with all voxels transformed to current stage position.
 
@@ -931,7 +1076,9 @@ class DualResolutionVoxelStorage:
 
         # Validate stage position is a dict
         if not isinstance(current_stage_pos, dict):
-            logger.error(f"Expected dict for stage position, got {type(current_stage_pos)}: {current_stage_pos}")
+            logger.error(
+                f"Expected dict for stage position, got {type(current_stage_pos)}: {current_stage_pos}"
+            )
             # Fall back to regular display volume
             return self.get_display_volume(channel_id)
 
@@ -941,7 +1088,9 @@ class DualResolutionVoxelStorage:
         with self._storage_lock:
             ref = self.reference_stage_position
             if ref is None:
-                logger.debug("Transform: Reference position not set yet, returning untransformed volume")
+                logger.debug(
+                    "Transform: Reference position not set yet, returning untransformed volume"
+                )
                 return self.get_display_volume(channel_id)
             ref = ref.copy()  # Snapshot under lock
 
@@ -949,31 +1098,42 @@ class DualResolutionVoxelStorage:
         # Voxels are stored at a fixed "objective" location, but when the stage moves,
         # the data should move in the SAME direction as the stage.
         # +Z = away from objective, -Z = toward objective
-        dx = current_stage_pos.get('x', 0) - ref['x']
-        dy = current_stage_pos.get('y', 0) - ref['y']
-        dz = current_stage_pos.get('z', 0) - ref['z']
-        dr = current_stage_pos.get('r', 0) - ref['r']
+        dx = current_stage_pos.get("x", 0) - ref["x"]
+        dy = current_stage_pos.get("y", 0) - ref["y"]
+        dz = current_stage_pos.get("z", 0) - ref["z"]
+        dr = current_stage_pos.get("r", 0) - ref["r"]
 
         # Log detailed info on first transform or significant movements
-        if not hasattr(self, '_first_transform_logged') or not self._first_transform_logged:
+        if (
+            not hasattr(self, "_first_transform_logged")
+            or not self._first_transform_logged
+        ):
             logger.info(f"Transform: FIRST TRANSFORM after data acquisition")
-            logger.info(f"  Reference position: X={ref['x']:.3f}, "
-                       f"Y={ref['y']:.3f}, "
-                       f"Z={ref['z']:.3f}, "
-                       f"R={ref['r']:.1f}°")
-            logger.info(f"  Current position:   X={current_stage_pos.get('x', 0):.3f}, "
-                       f"Y={current_stage_pos.get('y', 0):.3f}, "
-                       f"Z={current_stage_pos.get('z', 0):.3f}, "
-                       f"R={current_stage_pos.get('r', 0):.1f}°")
-            logger.info(f"  Delta:              dX={dx:.3f}, dY={dy:.3f}, dZ={dz:.3f}, dR={dr:.1f}°")
+            logger.info(
+                f"  Reference position: X={ref['x']:.3f}, "
+                f"Y={ref['y']:.3f}, "
+                f"Z={ref['z']:.3f}, "
+                f"R={ref['r']:.1f}°"
+            )
+            logger.info(
+                f"  Current position:   X={current_stage_pos.get('x', 0):.3f}, "
+                f"Y={current_stage_pos.get('y', 0):.3f}, "
+                f"Z={current_stage_pos.get('z', 0):.3f}, "
+                f"R={current_stage_pos.get('r', 0):.1f}°"
+            )
+            logger.info(
+                f"  Delta:              dX={dx:.3f}, dY={dy:.3f}, dZ={dz:.3f}, dR={dr:.1f}°"
+            )
             self._first_transform_logged = True
 
-        logger.debug(f"Transform: Delta from reference: dx={dx:.3f}, dy={dy:.3f}, dz={dz:.3f}, dr={dr:.1f}°")
+        logger.debug(
+            f"Transform: Delta from reference: dx={dx:.3f}, dy={dy:.3f}, dz={dz:.3f}, dr={dr:.1f}°"
+        )
 
         # Check if rotation changed FOR THIS CHANNEL - if so, need to recalculate rotated base volume
         # Track rotation per-channel to avoid stale cache when processing multiple channels
         # in sequence (otherwise channel N+1 would see rotation_changed=False after channel N)
-        current_r = current_stage_pos.get('r', 0)
+        current_r = current_stage_pos.get("r", 0)
         last_rotation_for_channel = self.last_rotation_per_channel.get(channel_id, 0.0)
         rotation_changed = abs(current_r - last_rotation_for_channel) > 0.01
 
@@ -984,8 +1144,10 @@ class DualResolutionVoxelStorage:
 
         if rotation_changed or cache_key not in self.transform_cache:
             # Need to recalculate rotated base volume
-            logger.info(f"Transform: Calculating rotated base volume for channel {channel_id} "
-                       f"(rotation delta={dr:.1f}°, channel last_r={last_rotation_for_channel:.1f}°)")
+            logger.info(
+                f"Transform: Calculating rotated base volume for channel {channel_id} "
+                f"(rotation delta={dr:.1f}°, channel last_r={last_rotation_for_channel:.1f}°)"
+            )
             volume = self.get_display_volume(channel_id)
             # Use holder position as rotation center if provided (rotation axis is the holder)
             center_voxels = self._get_rotation_center_voxels(holder_position_voxels)
@@ -998,7 +1160,7 @@ class DualResolutionVoxelStorage:
                     rotation_deg=dr,
                     center_voxels=center_voxels,
                     voxel_size_um=self.config.display_voxel_size[0],
-                    quality=self._transform_quality
+                    quality=self._transform_quality,
                 )
             else:
                 rotated = volume
@@ -1006,7 +1168,9 @@ class DualResolutionVoxelStorage:
             # Cache the rotated base volume and update per-channel rotation tracking
             self.transform_cache[cache_key] = rotated
             self.last_rotation_per_channel[channel_id] = current_r
-            logger.info(f"Transform: Cached rotated base volume for channel {channel_id}")
+            logger.info(
+                f"Transform: Cached rotated base volume for channel {channel_id}"
+            )
         else:
             rotated = self.transform_cache[cache_key]
 
@@ -1028,19 +1192,25 @@ class DualResolutionVoxelStorage:
         # Storage uses opposite signs so storage + display = 0 at capture position
         # (tile appears centered at focal plane when viewed from capture position).
         dx_display = -dx if self.config.invert_x else dx
-        offset_voxels = np.array([dz, -dy, dx_display]) * 1000 / self.config.display_voxel_size[0]
+        offset_voxels = (
+            np.array([dz, -dy, dx_display]) * 1000 / self.config.display_voxel_size[0]
+        )
 
         # Check if translation is significant
         max_offset = np.max(np.abs(offset_voxels))
         if max_offset < 0.5:
             # Less than half a voxel - no shift needed
-            logger.info(f"Transform: Offset {max_offset:.2f} voxels < 0.5, skipping shift")
+            logger.info(
+                f"Transform: Offset {max_offset:.2f} voxels < 0.5, skipping shift"
+            )
             self.last_stage_position = current_stage_pos.copy()
             return rotated
 
         # Log offset being applied (INFO for visibility during debugging)
-        logger.info(f"Transform: Applying offset {offset_voxels.astype(int)} voxels (ZYX) "
-                   f"= ({dz*1000:.0f}, {-dy*1000:.0f}, {dx_display*1000:.0f}) µm")
+        logger.info(
+            f"Transform: Applying offset {offset_voxels.astype(int)} voxels (ZYX) "
+            f"= ({dz*1000:.0f}, {-dy*1000:.0f}, {dx_display*1000:.0f}) µm"
+        )
 
         # Apply translation using optimized shift (numpy.roll for integer, scipy for fractional)
         translated = self._fast_shift(rotated, offset_voxels)
@@ -1050,7 +1220,9 @@ class DualResolutionVoxelStorage:
 
         return translated
 
-    def _get_rotation_center_voxels(self, holder_position_voxels: np.ndarray = None) -> np.ndarray:
+    def _get_rotation_center_voxels(
+        self, holder_position_voxels: np.ndarray = None
+    ) -> np.ndarray:
         """
         Get rotation center in display voxel coordinates.
 
@@ -1081,7 +1253,9 @@ class DualResolutionVoxelStorage:
             # Update center to use holder's X,Z position (rotation axis)
             center_voxels[0] = holder_z  # Z position of rotation axis
             center_voxels[2] = holder_x  # X position of rotation axis
-            logger.debug(f"Rotation center set to holder position: Z={holder_z:.1f}, X={holder_x:.1f} voxels")
+            logger.debug(
+                f"Rotation center set to holder position: Z={holder_z:.1f}, X={holder_x:.1f} voxels"
+            )
 
         return center_voxels
 
@@ -1107,22 +1281,24 @@ class DualResolutionVoxelStorage:
             stage_pos: Dictionary with 'x', 'y', 'z', 'r' keys in mm/degrees
         """
         self.reference_stage_position = {
-            'x': stage_pos.get('x', 0),
-            'y': stage_pos.get('y', 0),
-            'z': stage_pos.get('z', 0),
-            'r': stage_pos.get('r', 0)
+            "x": stage_pos.get("x", 0),
+            "y": stage_pos.get("y", 0),
+            "z": stage_pos.get("z", 0),
+            "r": stage_pos.get("r", 0),
         }
         # Initialize per-channel rotation tracking to match reference, so first stage update
         # doesn't incorrectly detect a rotation change. Initialize all channels.
-        ref_r = stage_pos.get('r', 0)
+        ref_r = stage_pos.get("r", 0)
         for ch_id in range(self.num_channels):
             self.last_rotation_per_channel[ch_id] = ref_r
         # Reset first transform logging flag so we log details on next transform
         self._first_transform_logged = False
-        logger.info(f"Reference position set to X={self.reference_stage_position['x']:.3f}mm, "
-                   f"Y={self.reference_stage_position['y']:.3f}mm, "
-                   f"Z={self.reference_stage_position['z']:.3f}mm, "
-                   f"R={self.reference_stage_position['r']:.1f}°")
+        logger.info(
+            f"Reference position set to X={self.reference_stage_position['x']:.3f}mm, "
+            f"Y={self.reference_stage_position['y']:.3f}mm, "
+            f"Z={self.reference_stage_position['z']:.3f}mm, "
+            f"R={self.reference_stage_position['r']:.1f}°"
+        )
 
     def invalidate_transform_cache(self):
         """Invalidate the transform cache, forcing recalculation."""
@@ -1138,8 +1314,9 @@ class DualResolutionVoxelStorage:
 
     # ========== Pyramid Generation for napari ==========
 
-    def generate_pyramid(self, channel_id: int, levels: int = 4,
-                         method: str = 'mean') -> List[np.ndarray]:
+    def generate_pyramid(
+        self, channel_id: int, levels: int = 4, method: str = "mean"
+    ) -> List[np.ndarray]:
         """
         Generate multi-resolution pyramid for napari visualization.
 
@@ -1162,14 +1339,16 @@ class DualResolutionVoxelStorage:
 
             # Stop if dimensions become too small
             if any(d < 8 for d in prev.shape):
-                logger.debug(f"Pyramid generation stopped at level {level} (dims too small)")
+                logger.debug(
+                    f"Pyramid generation stopped at level {level} (dims too small)"
+                )
                 break
 
             # Downsample 2x in each dimension
-            if method == 'mean':
+            if method == "mean":
                 # Average pooling - best for visualization smoothness
                 downsampled = self._downsample_mean_2x(prev)
-            elif method == 'max':
+            elif method == "max":
                 # Max pooling - preserves bright features
                 downsampled = self._downsample_max_2x(prev)
             else:  # 'nearest'
@@ -1193,10 +1372,14 @@ class DualResolutionVoxelStorage:
         pad_x = x % 2
 
         if pad_z or pad_y or pad_x:
-            volume = np.pad(volume, ((0, pad_z), (0, pad_y), (0, pad_x)), mode='edge')
+            volume = np.pad(volume, ((0, pad_z), (0, pad_y), (0, pad_x)), mode="edge")
 
         # Reshape to group 2x2x2 blocks, then average
-        new_z, new_y, new_x = volume.shape[0] // 2, volume.shape[1] // 2, volume.shape[2] // 2
+        new_z, new_y, new_x = (
+            volume.shape[0] // 2,
+            volume.shape[1] // 2,
+            volume.shape[2] // 2,
+        )
         reshaped = volume.reshape(new_z, 2, new_y, 2, new_x, 2)
 
         # Mean over block dimensions (axes 1, 3, 5)
@@ -1211,15 +1394,21 @@ class DualResolutionVoxelStorage:
         pad_x = x % 2
 
         if pad_z or pad_y or pad_x:
-            volume = np.pad(volume, ((0, pad_z), (0, pad_y), (0, pad_x)), mode='edge')
+            volume = np.pad(volume, ((0, pad_z), (0, pad_y), (0, pad_x)), mode="edge")
 
-        new_z, new_y, new_x = volume.shape[0] // 2, volume.shape[1] // 2, volume.shape[2] // 2
+        new_z, new_y, new_x = (
+            volume.shape[0] // 2,
+            volume.shape[1] // 2,
+            volume.shape[2] // 2,
+        )
         reshaped = volume.reshape(new_z, 2, new_y, 2, new_x, 2)
 
         # Max over block dimensions
         return reshaped.max(axis=(1, 3, 5))
 
-    def get_pyramid_for_napari(self, channel_id: int, levels: int = 4) -> List[np.ndarray]:
+    def get_pyramid_for_napari(
+        self, channel_id: int, levels: int = 4
+    ) -> List[np.ndarray]:
         """
         Get pyramid data formatted for napari Image layer.
 
@@ -1237,7 +1426,7 @@ class DualResolutionVoxelStorage:
         Returns:
             List of arrays suitable for napari multiscale display
         """
-        return self.generate_pyramid(channel_id, levels, method='mean')
+        return self.generate_pyramid(channel_id, levels, method="mean")
 
     def get_all_pyramids(self, levels: int = 4) -> Dict[int, List[np.ndarray]]:
         """
@@ -1278,15 +1467,16 @@ class DualResolutionVoxelStorage:
             zarr_path: Path to the Zarr store directory
         """
         try:
+            from pathlib import Path
+
             import zarr
             from numcodecs import Blosc
-            from pathlib import Path
 
             path = Path(zarr_path)
             path.mkdir(parents=True, exist_ok=True)
 
             # Create zarr store with zstd compression
-            compressor = Blosc(cname='zstd', clevel=3)
+            compressor = Blosc(cname="zstd", clevel=3)
             self.zarr_store = zarr.DirectoryStore(str(path))
             self.zarr_root = zarr.group(store=self.zarr_store, overwrite=True)
 
@@ -1299,15 +1489,21 @@ class DualResolutionVoxelStorage:
                     shape=self.display_dims,
                     chunks=chunk_size,
                     dtype=np.uint16,
-                    compressor=compressor
+                    compressor=compressor,
                 )
                 self._zarr_write_buffer[ch] = []
 
             # Store metadata
-            self.zarr_root.attrs['storage_voxel_size_um'] = list(self.config.storage_voxel_size)
-            self.zarr_root.attrs['display_voxel_size_um'] = list(self.config.display_voxel_size)
-            self.zarr_root.attrs['chamber_dimensions_um'] = list(self.config.chamber_dimensions)
-            self.zarr_root.attrs['num_channels'] = self.num_channels
+            self.zarr_root.attrs["storage_voxel_size_um"] = list(
+                self.config.storage_voxel_size
+            )
+            self.zarr_root.attrs["display_voxel_size_um"] = list(
+                self.config.display_voxel_size
+            )
+            self.zarr_root.attrs["chamber_dimensions_um"] = list(
+                self.config.chamber_dimensions
+            )
+            self.zarr_root.attrs["num_channels"] = self.num_channels
 
             logger.info(f"Zarr backend initialized at {zarr_path}")
             logger.info(f"  Chunk size: {chunk_size}")
@@ -1322,7 +1518,9 @@ class DualResolutionVoxelStorage:
             self.zarr_path = None
             self.zarr_store = None
 
-    def _write_to_zarr(self, channel_id: int, voxel_indices: np.ndarray, values: np.ndarray):
+    def _write_to_zarr(
+        self, channel_id: int, voxel_indices: np.ndarray, values: np.ndarray
+    ):
         """Write voxel data to Zarr backend (buffered for efficiency).
 
         Args:
@@ -1357,9 +1555,11 @@ class DualResolutionVoxelStorage:
             for idx, val in buffer:
                 z, y, x = idx
                 # Bounds check
-                if (0 <= z < self.display_dims[0] and
-                    0 <= y < self.display_dims[1] and
-                    0 <= x < self.display_dims[2]):
+                if (
+                    0 <= z < self.display_dims[0]
+                    and 0 <= y < self.display_dims[1]
+                    and 0 <= x < self.display_dims[2]
+                ):
                     arr[z, y, x] = val
 
             self._zarr_write_buffer[channel_id] = []
@@ -1393,7 +1593,9 @@ class DualResolutionVoxelStorage:
             self.zarr_arrays[channel_id][:] = self.display_cache[channel_id]
             logger.debug(f"Synced display cache to Zarr for channel {channel_id}")
         except Exception as e:
-            logger.error(f"Failed to sync display to Zarr for channel {channel_id}: {e}")
+            logger.error(
+                f"Failed to sync display to Zarr for channel {channel_id}: {e}"
+            )
 
     def load_from_zarr(self, zarr_path: str) -> bool:
         """Load data from an existing Zarr store.
@@ -1405,8 +1607,9 @@ class DualResolutionVoxelStorage:
             True if loaded successfully
         """
         try:
-            import zarr
             from pathlib import Path
+
+            import zarr
 
             path = Path(zarr_path)
             if not path.exists():
@@ -1414,7 +1617,7 @@ class DualResolutionVoxelStorage:
                 return False
 
             store = zarr.DirectoryStore(str(path))
-            root = zarr.open_group(store=store, mode='r')
+            root = zarr.open_group(store=store, mode="r")
 
             # Load each channel
             for ch in range(self.num_channels):
@@ -1427,10 +1630,14 @@ class DualResolutionVoxelStorage:
                         self.display_cache[ch] = data.astype(np.uint16)
                         self.display_dirty[ch] = False
                         self.channel_max_values[ch] = int(np.max(data))
-                        logger.debug(f"Loaded channel {ch} from Zarr: max={self.channel_max_values[ch]}")
+                        logger.debug(
+                            f"Loaded channel {ch} from Zarr: max={self.channel_max_values[ch]}"
+                        )
                     else:
-                        logger.warning(f"Channel {ch} dimensions mismatch: "
-                                     f"zarr={data.shape}, expected={self.display_dims}")
+                        logger.warning(
+                            f"Channel {ch} dimensions mismatch: "
+                            f"zarr={data.shape}, expected={self.display_dims}"
+                        )
 
             logger.info(f"Loaded data from Zarr store: {zarr_path}")
             return True

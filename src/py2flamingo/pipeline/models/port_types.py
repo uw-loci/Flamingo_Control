@@ -6,23 +6,24 @@ carries. The compatibility matrix controls which output types can connect
 to which input types.
 """
 
-from enum import Enum, auto
 from dataclasses import dataclass
+from enum import Enum, auto
 from typing import Any
 
 
 class PortType(Enum):
     """Data types that can flow through pipeline connections."""
-    VOLUME = auto()        # 3D numpy array
-    OBJECT_LIST = auto()   # List[DetectedObject]
-    OBJECT = auto()        # Single DetectedObject (from ForEach iteration)
-    POSITION = auto()      # Stage coordinates (x, y, z, r)
-    SCALAR = auto()        # Numeric value
-    BOOLEAN = auto()       # True/False
-    STRING = auto()        # Text value
-    FILE_PATH = auto()     # Path to a file
-    TRIGGER = auto()       # Execution-order-only, no data
-    ANY = auto()           # Accepts any type (used for pass-through)
+
+    VOLUME = auto()  # 3D numpy array
+    OBJECT_LIST = auto()  # List[DetectedObject]
+    OBJECT = auto()  # Single DetectedObject (from ForEach iteration)
+    POSITION = auto()  # Stage coordinates (x, y, z, r)
+    SCALAR = auto()  # Numeric value
+    BOOLEAN = auto()  # True/False
+    STRING = auto()  # Text value
+    FILE_PATH = auto()  # Path to a file
+    TRIGGER = auto()  # Execution-order-only, no data
+    ANY = auto()  # Accepts any type (used for pass-through)
 
 
 # Compatibility matrix: (source_type, target_type) -> allowed
@@ -73,16 +74,16 @@ def can_connect(source_type: PortType, target_type: PortType) -> bool:
 
 # Port-type display colors (hex strings for UI)
 PORT_COLORS: dict[PortType, str] = {
-    PortType.VOLUME: '#4fc3f7',      # Light blue
-    PortType.OBJECT_LIST: '#ff8a65',  # Orange
-    PortType.OBJECT: '#ffb74d',       # Light orange
-    PortType.POSITION: '#81c784',     # Green
-    PortType.SCALAR: '#ce93d8',       # Purple
-    PortType.BOOLEAN: '#fff176',      # Yellow
-    PortType.STRING: '#a5d6a7',       # Light green
-    PortType.FILE_PATH: '#90a4ae',    # Blue grey
-    PortType.TRIGGER: '#e0e0e0',      # Light grey
-    PortType.ANY: '#ffffff',          # White
+    PortType.VOLUME: "#4fc3f7",  # Light blue
+    PortType.OBJECT_LIST: "#ff8a65",  # Orange
+    PortType.OBJECT: "#ffb74d",  # Light orange
+    PortType.POSITION: "#81c784",  # Green
+    PortType.SCALAR: "#ce93d8",  # Purple
+    PortType.BOOLEAN: "#fff176",  # Yellow
+    PortType.STRING: "#a5d6a7",  # Light green
+    PortType.FILE_PATH: "#90a4ae",  # Blue grey
+    PortType.TRIGGER: "#e0e0e0",  # Light grey
+    PortType.ANY: "#ffffff",  # White
 }
 
 
@@ -94,6 +95,7 @@ class PortValue:
         port_type: The PortType of this value
         data: The actual data (numpy array, list, float, etc.)
     """
+
     port_type: PortType
     data: Any
 

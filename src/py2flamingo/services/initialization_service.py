@@ -11,7 +11,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from py2flamingo.core.events import EventManager
 from py2flamingo.core.queue_manager import QueueManager
@@ -34,6 +34,7 @@ class InitializationData:
         fov_parameters: Dictionary of field-of-view parameters (y_move, frame_size, FOV)
         pixel_size_mm: Image pixel size in mm (not camera pixel size)
     """
+
     command_codes: Dict[str, Any]  # Changed from Dict[str, int] to include the list
     stage_limits: Dict[str, float]
     fov_parameters: Dict[str, Any]
@@ -61,9 +62,9 @@ class MicroscopeInitializationService:
 
     def __init__(
         self,
-        connection_service: 'ConnectionService',
+        connection_service: "ConnectionService",
         event_manager: EventManager,
-        queue_manager: QueueManager
+        queue_manager: QueueManager,
     ):
         """
         Initialize the microscope initialization service.
@@ -114,7 +115,9 @@ class MicroscopeInitializationService:
         command_codes = self.load_command_codes()
 
         # Step 3: Get microscope settings and pixel size
-        pixel_size_mm, scope_settings = self.connection_service.get_microscope_settings()
+        pixel_size_mm, scope_settings = (
+            self.connection_service.get_microscope_settings()
+        )
 
         # Step 4: Get frame size and calculate FOV parameters
         fov_parameters = self.calculate_fov_parameters(pixel_size_mm, command_codes)
@@ -137,7 +140,7 @@ class MicroscopeInitializationService:
             command_codes=command_codes,
             stage_limits=stage_limits,
             fov_parameters=fov_parameters,
-            pixel_size_mm=pixel_size_mm
+            pixel_size_mm=pixel_size_mm,
         )
 
     def load_command_codes(self) -> Dict[str, int]:
@@ -169,12 +172,12 @@ class MicroscopeInitializationService:
         """
         try:
             # Get path to command_list.txt (in functions directory)
-            command_file = Path(__file__).parent.parent / "functions" / "command_list.txt"
+            command_file = (
+                Path(__file__).parent.parent / "functions" / "command_list.txt"
+            )
 
             if not command_file.exists():
-                raise FileNotFoundError(
-                    f"Command list file not found: {command_file}"
-                )
+                raise FileNotFoundError(f"Command list file not found: {command_file}")
 
             # Parse the command file
             commands = text_to_dict(command_file)
@@ -204,14 +207,14 @@ class MicroscopeInitializationService:
 
             # Create both dictionary (for named access) and list (for compatibility)
             command_codes = {
-                'COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD': COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD,
-                'COMMAND_CODES_CAMERA_WORK_FLOW_START': COMMAND_CODES_CAMERA_WORK_FLOW_START,
-                'COMMAND_CODES_STAGE_POSITION_SET': COMMAND_CODES_STAGE_POSITION_SET,
-                'COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET': COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET,
-                'COMMAND_CODES_CAMERA_IMAGE_SIZE_GET': COMMAND_CODES_CAMERA_IMAGE_SIZE_GET,
-                'COMMAND_CODES_CAMERA_CHECK_STACK': COMMAND_CODES_CAMERA_CHECK_STACK,
+                "COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD": COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD,
+                "COMMAND_CODES_CAMERA_WORK_FLOW_START": COMMAND_CODES_CAMERA_WORK_FLOW_START,
+                "COMMAND_CODES_STAGE_POSITION_SET": COMMAND_CODES_STAGE_POSITION_SET,
+                "COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET": COMMAND_CODES_CAMERA_PIXEL_FIELD_Of_VIEW_GET,
+                "COMMAND_CODES_CAMERA_IMAGE_SIZE_GET": COMMAND_CODES_CAMERA_IMAGE_SIZE_GET,
+                "COMMAND_CODES_CAMERA_CHECK_STACK": COMMAND_CODES_CAMERA_CHECK_STACK,
                 # Also include the list version for backward compatibility (unpacking)
-                'command_labels': [
+                "command_labels": [
                     COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD,
                     COMMAND_CODES_CAMERA_WORK_FLOW_START,
                     COMMAND_CODES_STAGE_POSITION_SET,
@@ -221,7 +224,9 @@ class MicroscopeInitializationService:
                 ],
             }
 
-            self.logger.debug(f"Loaded {len(command_codes) - 1} command codes")  # -1 for the list
+            self.logger.debug(
+                f"Loaded {len(command_codes) - 1} command codes"
+            )  # -1 for the list
             return command_codes
 
         except KeyError as e:
@@ -232,9 +237,7 @@ class MicroscopeInitializationService:
             raise
 
     def calculate_fov_parameters(
-        self,
-        pixel_size_mm: float,
-        command_codes: Dict[str, int]
+        self, pixel_size_mm: float, command_codes: Dict[str, int]
     ) -> Dict[str, Any]:
         """
         Calculate field of view and movement parameters.
@@ -266,22 +269,22 @@ class MicroscopeInitializationService:
         try:
             # Send command to get image size
             COMMAND_CODES_CAMERA_IMAGE_SIZE_GET = command_codes[
-                'COMMAND_CODES_CAMERA_IMAGE_SIZE_GET'
+                "COMMAND_CODES_CAMERA_IMAGE_SIZE_GET"
             ]
 
-            self.queue_manager.put_nowait('command', COMMAND_CODES_CAMERA_IMAGE_SIZE_GET)
-            self.event_manager.set_event('send')
+            self.queue_manager.put_nowait(
+                "command", COMMAND_CODES_CAMERA_IMAGE_SIZE_GET
+            )
+            self.event_manager.set_event("send")
 
             # Wait for response (same timing as original code)
             time.sleep(0.1)
 
             # Get frame size from queue
-            frame_size = self.queue_manager.get_nowait('other_data')
+            frame_size = self.queue_manager.get_nowait("other_data")
 
             if not frame_size or not isinstance(frame_size, (int, float)):
-                raise ValueError(
-                    f"Invalid frame_size received: {frame_size}"
-                )
+                raise ValueError(f"Invalid frame_size received: {frame_size}")
 
             frame_size = int(frame_size)
 
@@ -295,16 +298,14 @@ class MicroscopeInitializationService:
             self.logger.info(f"y_move search step size is currently {y_move}mm")
 
             return {
-                'frame_size': frame_size,
-                'FOV': FOV,
-                'y_move': y_move,
+                "frame_size": frame_size,
+                "FOV": FOV,
+                "y_move": y_move,
             }
 
         except Exception as e:
             self.logger.error(f"Failed to calculate FOV parameters: {e}")
-            raise RuntimeError(
-                f"Could not calculate FOV parameters: {e}"
-            )
+            raise RuntimeError(f"Could not calculate FOV parameters: {e}")
 
     def get_stage_limits(self, scope_settings: Dict[str, Any]) -> Dict[str, float]:
         """
@@ -330,14 +331,12 @@ class MicroscopeInitializationService:
         """
         try:
             # Extract ymax from settings
-            ymax = float(
-                scope_settings["Stage limits"]["Soft limit max y-axis"]
-            )
+            ymax = float(scope_settings["Stage limits"]["Soft limit max y-axis"])
 
             self.logger.info(f"ymax is {ymax}mm")
 
             return {
-                'ymax': ymax,
+                "ymax": ymax,
             }
 
         except KeyError as e:

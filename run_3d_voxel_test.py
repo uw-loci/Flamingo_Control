@@ -14,43 +14,45 @@ Usage:
     exec(open('run_3d_voxel_test.py').read())
 """
 
-import sys
 import os
+import sys
 
 # Add src directory to path if needed
-src_path = os.path.join(os.path.dirname(__file__), 'src')
+src_path = os.path.join(os.path.dirname(__file__), "src")
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
 # Add tests directory to path
-tests_path = os.path.join(os.path.dirname(__file__), 'tests')
+tests_path = os.path.join(os.path.dirname(__file__), "tests")
 if tests_path not in sys.path:
     sys.path.insert(0, tests_path)
+
 
 def run_test():
     """Run the 3D voxel movement test."""
     try:
         # Try to find the main window and controller
         from PyQt5.QtWidgets import QApplication
+
         app = QApplication.instance()
 
         if app:
             # Find the main window
             main_window = None
             for widget in app.topLevelWidgets():
-                if hasattr(widget, 'connection_controller'):
+                if hasattr(widget, "connection_controller"):
                     main_window = widget
                     break
 
-            if main_window and hasattr(main_window, 'connection_controller'):
+            if main_window and hasattr(main_window, "connection_controller"):
                 controller = main_window.connection_controller
 
                 # Import and run the test
                 from tests.test_3d_movement_simple import test_voxel_movement
 
-                print("\n" + "="*60)
+                print("\n" + "=" * 60)
                 print("Starting 3D Voxel Movement Test")
-                print("="*60)
+                print("=" * 60)
                 print("\nIMPORTANT: Before running this test:")
                 print("1. Ensure you are connected to the microscope")
                 print("2. Open the Camera Live Viewer window")
@@ -64,14 +66,16 @@ def run_test():
                 print("- Capture voxel data at each position")
                 print("- Return to original position")
                 print("- Export results to JSON file")
-                print("\n" + "="*60)
+                print("\n" + "=" * 60)
 
                 # Run the test
                 success = test_voxel_movement(controller, main_window)
 
                 if success:
                     print("\n✓ Test completed successfully!")
-                    print("Check the tests/voxel_test_results/ directory for exported data.")
+                    print(
+                        "Check the tests/voxel_test_results/ directory for exported data."
+                    )
                 else:
                     print("\n✗ Test failed or was interrupted.")
 
@@ -89,12 +93,15 @@ def run_test():
     except Exception as e:
         print(f"ERROR: Failed to run test: {e}")
         import traceback
+
         traceback.print_exc()
         return False
+
 
 if __name__ == "__main__":
     # Check if we're running inside Flamingo Control
     from PyQt5.QtWidgets import QApplication
+
     app = QApplication.instance()
 
     if app:

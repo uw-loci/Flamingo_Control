@@ -6,16 +6,28 @@ and current config dict. Changes are applied immediately to the node model.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit,
-    QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox, QGroupBox,
-    QScrollArea, QFrame, QPushButton, QFileDialog
-)
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
-from py2flamingo.pipeline.models.pipeline import Pipeline, PipelineNode, NodeType
+from py2flamingo.pipeline.models.pipeline import NodeType, Pipeline, PipelineNode
 
 logger = logging.getLogger(__name__)
 
@@ -23,39 +35,47 @@ logger = logging.getLogger(__name__)
 # Per-node-type config schema: list of (key, label, widget_type, default, options)
 _CONFIG_SCHEMAS: Dict[NodeType, list] = {
     NodeType.WORKFLOW: [
-        ('template_file', 'Workflow Template', 'file', '',
-         {'filter': 'Workflow files (*.txt);;All files (*)'}),
-        ('use_input_position', 'Override Position from Input', 'bool', True),
-        ('auto_z_range', 'Auto Z-Range from Object', 'bool', False),
-        ('auto_tiling', 'Auto Tiling from Object', 'bool', False),
-        ('buffer_percent', 'BBox Buffer (%)', 'float', 25.0),
+        (
+            "template_file",
+            "Workflow Template",
+            "file",
+            "",
+            {"filter": "Workflow files (*.txt);;All files (*)"},
+        ),
+        ("use_input_position", "Override Position from Input", "bool", True),
+        ("auto_z_range", "Auto Z-Range from Object", "bool", False),
+        ("auto_tiling", "Auto Tiling from Object", "bool", False),
+        ("buffer_percent", "BBox Buffer (%)", "float", 25.0),
     ],
     NodeType.THRESHOLD: [
-        ('gauss_sigma', 'Gaussian Sigma', 'float', 0.0),
-        ('opening_enabled', 'Opening Enabled', 'bool', False),
-        ('opening_radius', 'Opening Radius', 'int', 1),
-        ('min_object_size', 'Min Object Size (voxels)', 'int', 0),
-        ('default_threshold', 'Default Threshold', 'int', 100),
+        ("gauss_sigma", "Gaussian Sigma", "float", 0.0),
+        ("opening_enabled", "Opening Enabled", "bool", False),
+        ("opening_radius", "Opening Radius", "int", 1),
+        ("min_object_size", "Min Object Size (voxels)", "int", 0),
+        ("default_threshold", "Default Threshold", "int", 100),
     ],
     NodeType.FOR_EACH: [],
     NodeType.CONDITIONAL: [
-        ('comparison_op', 'Comparison', 'combo', '>',
-         ['>', '<', '==', '!=', '>=', '<=']),
-        ('threshold_value', 'Threshold Value', 'float', 0.0),
+        (
+            "comparison_op",
+            "Comparison",
+            "combo",
+            ">",
+            [">", "<", "==", "!=", ">=", "<="],
+        ),
+        ("threshold_value", "Threshold Value", "float", 0.0),
     ],
     NodeType.EXTERNAL_COMMAND: [
-        ('command_template', 'Command Template', 'str', ''),
-        ('input_format', 'Input Format', 'combo', 'numpy',
-         ['numpy', 'tiff', 'json']),
-        ('output_format', 'Output Format', 'combo', 'json',
-         ['json', 'csv', 'numpy']),
-        ('timeout_seconds', 'Timeout (s)', 'int', 300),
+        ("command_template", "Command Template", "str", ""),
+        ("input_format", "Input Format", "combo", "numpy", ["numpy", "tiff", "json"]),
+        ("output_format", "Output Format", "combo", "json", ["json", "csv", "numpy"]),
+        ("timeout_seconds", "Timeout (s)", "int", 300),
     ],
     NodeType.SAMPLE_VIEW_DATA: [
-        ('channel_0', 'Channel 0 (405nm)', 'bool', True),
-        ('channel_1', 'Channel 1 (488nm)', 'bool', True),
-        ('channel_2', 'Channel 2 (561nm)', 'bool', True),
-        ('channel_3', 'Channel 3 (640nm)', 'bool', True),
+        ("channel_0", "Channel 0 (405nm)", "bool", True),
+        ("channel_1", "Channel 1 (488nm)", "bool", True),
+        ("channel_2", "Channel 2 (561nm)", "bool", True),
+        ("channel_3", "Channel 3 (640nm)", "bool", True),
     ],
 }
 
@@ -85,9 +105,7 @@ class PropertyPanel(QWidget):
         outer_layout.addWidget(self._header)
 
         # Empty state hint
-        self._empty_hint = QLabel(
-            "Select a node on the canvas\nto edit its properties"
-        )
+        self._empty_hint = QLabel("Select a node on the canvas\nto edit its properties")
         self._empty_hint.setStyleSheet(
             "color: #777; font-size: 10px; padding: 12px 4px;"
         )
@@ -139,7 +157,7 @@ class PropertyPanel(QWidget):
 
         self._current_node = node
         self._empty_hint.hide()
-        type_label = node.node_type.name.replace('_', ' ').title()
+        type_label = node.node_type.name.replace("_", " ").title()
         self._header.setText(f"{type_label} Node")
 
         # Name
@@ -159,7 +177,7 @@ class PropertyPanel(QWidget):
 
             current_val = node.config.get(key, default)
             widget = self._create_widget(widget_type, current_val, options, key)
-            if widget_type == 'header':
+            if widget_type == "header":
                 self._config_layout.addRow(widget)
             else:
                 self._config_layout.addRow(label, widget)
@@ -175,19 +193,19 @@ class PropertyPanel(QWidget):
 
     def _create_widget(self, widget_type: str, value, options, key: str) -> QWidget:
         """Create an appropriate input widget."""
-        if widget_type == 'str':
+        if widget_type == "str":
             w = QLineEdit(str(value))
             w.textChanged.connect(lambda v, k=key: self._on_config_changed(k, v))
             return w
 
-        elif widget_type == 'int':
+        elif widget_type == "int":
             w = QSpinBox()
             w.setRange(0, 999999)
             w.setValue(int(value))
             w.valueChanged.connect(lambda v, k=key: self._on_config_changed(k, v))
             return w
 
-        elif widget_type == 'float':
+        elif widget_type == "float":
             w = QDoubleSpinBox()
             w.setRange(0.0, 99999.0)
             w.setDecimals(2)
@@ -195,7 +213,7 @@ class PropertyPanel(QWidget):
             w.valueChanged.connect(lambda v, k=key: self._on_config_changed(k, v))
             return w
 
-        elif widget_type == 'bool':
+        elif widget_type == "bool":
             w = QCheckBox()
             w.setChecked(bool(value))
             w.stateChanged.connect(
@@ -203,7 +221,7 @@ class PropertyPanel(QWidget):
             )
             return w
 
-        elif widget_type == 'combo':
+        elif widget_type == "combo":
             w = QComboBox()
             if options:
                 w.addItems([str(o) for o in options])
@@ -213,26 +231,36 @@ class PropertyPanel(QWidget):
             w.currentTextChanged.connect(lambda v, k=key: self._on_config_changed(k, v))
             return w
 
-        elif widget_type == 'file':
+        elif widget_type == "file":
             container = QWidget()
             layout = QHBoxLayout(container)
             layout.setContentsMargins(0, 0, 0, 0)
             line_edit = QLineEdit(str(value))
-            line_edit.textChanged.connect(lambda v, k=key: self._on_config_changed(k, v))
+            line_edit.textChanged.connect(
+                lambda v, k=key: self._on_config_changed(k, v)
+            )
             layout.addWidget(line_edit)
             btn = QPushButton("...")
             btn.setFixedWidth(30)
-            file_filter = options.get('filter', 'All files (*)') if isinstance(options, dict) else 'All files (*)'
-            btn.clicked.connect(lambda _, le=line_edit, ff=file_filter: self._browse_file(le, ff))
+            file_filter = (
+                options.get("filter", "All files (*)")
+                if isinstance(options, dict)
+                else "All files (*)"
+            )
+            btn.clicked.connect(
+                lambda _, le=line_edit, ff=file_filter: self._browse_file(le, ff)
+            )
             layout.addWidget(btn)
             return container
 
-        elif widget_type == 'folder':
+        elif widget_type == "folder":
             container = QWidget()
             layout = QHBoxLayout(container)
             layout.setContentsMargins(0, 0, 0, 0)
             line_edit = QLineEdit(str(value))
-            line_edit.textChanged.connect(lambda v, k=key: self._on_config_changed(k, v))
+            line_edit.textChanged.connect(
+                lambda v, k=key: self._on_config_changed(k, v)
+            )
             layout.addWidget(line_edit)
             btn = QPushButton("...")
             btn.setFixedWidth(30)
@@ -240,9 +268,11 @@ class PropertyPanel(QWidget):
             layout.addWidget(btn)
             return container
 
-        elif widget_type == 'header':
+        elif widget_type == "header":
             w = QLabel(str(value))
-            w.setStyleSheet("font-weight: bold; border-bottom: 1px solid #555; padding: 6px 0 2px 0;")
+            w.setStyleSheet(
+                "font-weight: bold; border-bottom: 1px solid #555; padding: 6px 0 2px 0;"
+            )
             return w
 
         # Fallback
@@ -252,13 +282,17 @@ class PropertyPanel(QWidget):
 
     def _browse_file(self, line_edit: QLineEdit, file_filter: str):
         """Open a file dialog and set the line edit text."""
-        path, _ = QFileDialog.getOpenFileName(self, "Select File", line_edit.text(), file_filter)
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select File", line_edit.text(), file_filter
+        )
         if path:
             line_edit.setText(path)
 
     def _browse_folder(self, line_edit: QLineEdit):
         """Open a directory dialog and set the line edit text."""
-        path = QFileDialog.getExistingDirectory(self, "Select Directory", line_edit.text())
+        path = QFileDialog.getExistingDirectory(
+            self, "Select Directory", line_edit.text()
+        )
         if path:
             line_edit.setText(path)
 
@@ -267,10 +301,15 @@ class PropertyPanel(QWidget):
         group = QGroupBox("Channel Thresholds")
         group_layout = QFormLayout(group)
 
-        thresholds = node.config.get('channel_thresholds', {})
-        enabled = node.config.get('enabled_channels', [0, 1, 2, 3])
+        thresholds = node.config.get("channel_thresholds", {})
+        enabled = node.config.get("enabled_channels", [0, 1, 2, 3])
 
-        channel_names = ['405nm (DAPI)', '488nm (GFP)', '561nm (RFP)', '640nm (Far-Red)']
+        channel_names = [
+            "405nm (DAPI)",
+            "488nm (GFP)",
+            "561nm (RFP)",
+            "640nm (Far-Red)",
+        ]
         for ch_id in range(4):
             row = QWidget()
             row_layout = QHBoxLayout(row)
@@ -279,7 +318,9 @@ class PropertyPanel(QWidget):
             cb = QCheckBox()
             cb.setChecked(ch_id in enabled)
             cb.stateChanged.connect(
-                lambda state, c=ch_id: self._on_channel_enabled_changed(c, state == Qt.Checked)
+                lambda state, c=ch_id: self._on_channel_enabled_changed(
+                    c, state == Qt.Checked
+                )
             )
             row_layout.addWidget(cb)
 
@@ -298,40 +339,42 @@ class PropertyPanel(QWidget):
     def _on_channel_enabled_changed(self, ch_id: int, enabled: bool):
         """Update enabled channels list in config."""
         if self._current_node:
-            ch_list = list(self._current_node.config.get('enabled_channels', [0, 1, 2, 3]))
+            ch_list = list(
+                self._current_node.config.get("enabled_channels", [0, 1, 2, 3])
+            )
             if enabled and ch_id not in ch_list:
                 ch_list.append(ch_id)
                 ch_list.sort()
             elif not enabled and ch_id in ch_list:
                 ch_list.remove(ch_id)
-            self._current_node.config['enabled_channels'] = ch_list
+            self._current_node.config["enabled_channels"] = ch_list
 
     def _on_threshold_changed(self, ch_id: int, value: int):
         """Update channel threshold in config."""
         if self._current_node:
-            if 'channel_thresholds' not in self._current_node.config:
-                self._current_node.config['channel_thresholds'] = {}
-            self._current_node.config['channel_thresholds'][ch_id] = value
+            if "channel_thresholds" not in self._current_node.config:
+                self._current_node.config["channel_thresholds"] = {}
+            self._current_node.config["channel_thresholds"][ch_id] = value
 
     def _add_workflow_configure_button(self, node: PipelineNode):
         """Add a 'Configure Workflow...' button above the template file field."""
         btn = QPushButton("Configure Workflow...")
         btn.setToolTip("Open full workflow configuration dialog")
-        btn.setStyleSheet(
-            "QPushButton { padding: 6px 12px; font-weight: bold; }"
-        )
+        btn.setStyleSheet("QPushButton { padding: 6px 12px; font-weight: bold; }")
         btn.clicked.connect(self._on_configure_workflow)
         self._config_layout.insertRow(0, btn)
-        self._widgets['_configure_btn'] = btn
+        self._widgets["_configure_btn"] = btn
 
     def _on_configure_workflow(self):
         """Open the workflow config dialog and update node on accept."""
         if not self._current_node:
             return
 
-        from py2flamingo.pipeline.ui.workflow_config_dialog import PipelineWorkflowConfigDialog
+        from py2flamingo.pipeline.ui.workflow_config_dialog import (
+            PipelineWorkflowConfigDialog,
+        )
 
-        current_template = self._current_node.config.get('template_file', '')
+        current_template = self._current_node.config.get("template_file", "")
         dialog = PipelineWorkflowConfigDialog(
             app=self._app,
             template_file=current_template,
@@ -340,9 +383,9 @@ class PropertyPanel(QWidget):
         if dialog.exec_() == dialog.Accepted:
             result_path = dialog.get_result_path()
             if result_path:
-                self._current_node.config['template_file'] = result_path
+                self._current_node.config["template_file"] = result_path
                 # Update the file path widget display
-                template_widget = self._widgets.get('template_file')
+                template_widget = self._widgets.get("template_file")
                 if template_widget:
                     line_edit = template_widget.findChild(QLineEdit)
                     if line_edit:

@@ -5,12 +5,12 @@ The Pipeline is a directed acyclic graph (DAG) where nodes represent
 processing steps and connections carry typed data between ports.
 """
 
-import uuid
 import logging
-from enum import Enum, auto
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any, Set, Tuple
+import uuid
 from collections import deque
+from dataclasses import dataclass, field
+from enum import Enum, auto
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from py2flamingo.pipeline.models.port_types import PortType, can_connect
 
@@ -21,6 +21,7 @@ PIPELINE_FORMAT_VERSION = "1.0"
 
 class NodeType(Enum):
     """Built-in pipeline node types."""
+
     WORKFLOW = auto()
     THRESHOLD = auto()
     FOR_EACH = auto()
@@ -36,12 +37,12 @@ class PortDirection(Enum):
 
 # Node type display colors (hex strings for UI header)
 NODE_COLORS: Dict[NodeType, str] = {
-    NodeType.WORKFLOW: '#42a5f5',          # Blue
-    NodeType.THRESHOLD: '#ff7043',         # Orange
-    NodeType.FOR_EACH: '#ab47bc',          # Purple
-    NodeType.CONDITIONAL: '#ffee58',       # Yellow
-    NodeType.EXTERNAL_COMMAND: '#66bb6a',  # Green
-    NodeType.SAMPLE_VIEW_DATA: '#26c6da',  # Teal
+    NodeType.WORKFLOW: "#42a5f5",  # Blue
+    NodeType.THRESHOLD: "#ff7043",  # Orange
+    NodeType.FOR_EACH: "#ab47bc",  # Purple
+    NodeType.CONDITIONAL: "#ffee58",  # Yellow
+    NodeType.EXTERNAL_COMMAND: "#66bb6a",  # Green
+    NodeType.SAMPLE_VIEW_DATA: "#26c6da",  # Teal
 }
 
 
@@ -56,6 +57,7 @@ class Port:
         direction: INPUT or OUTPUT
         required: Whether this input must be connected for execution
     """
+
     id: str
     name: str
     port_type: PortType
@@ -64,21 +66,21 @@ class Port:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            'id': self.id,
-            'name': self.name,
-            'port_type': self.port_type.name,
-            'direction': self.direction.name,
-            'required': self.required,
+            "id": self.id,
+            "name": self.name,
+            "port_type": self.port_type.name,
+            "direction": self.direction.name,
+            "required": self.required,
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> 'Port':
+    def from_dict(cls, d: Dict[str, Any]) -> "Port":
         return cls(
-            id=d['id'],
-            name=d['name'],
-            port_type=PortType[d['port_type']],
-            direction=PortDirection[d['direction']],
-            required=d.get('required', False),
+            id=d["id"],
+            name=d["name"],
+            port_type=PortType[d["port_type"]],
+            direction=PortDirection[d["direction"]],
+            required=d.get("required", False),
         )
 
 
@@ -93,6 +95,7 @@ class Connection:
         target_node_id: Node owning the input port
         target_port_id: Input port ID
     """
+
     id: str
     source_node_id: str
     source_port_id: str
@@ -101,26 +104,27 @@ class Connection:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            'id': self.id,
-            'source_node_id': self.source_node_id,
-            'source_port_id': self.source_port_id,
-            'target_node_id': self.target_node_id,
-            'target_port_id': self.target_port_id,
+            "id": self.id,
+            "source_node_id": self.source_node_id,
+            "source_port_id": self.source_port_id,
+            "target_node_id": self.target_node_id,
+            "target_port_id": self.target_port_id,
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> 'Connection':
+    def from_dict(cls, d: Dict[str, Any]) -> "Connection":
         return cls(
-            id=d['id'],
-            source_node_id=d['source_node_id'],
-            source_port_id=d['source_port_id'],
-            target_node_id=d['target_node_id'],
-            target_port_id=d['target_port_id'],
+            id=d["id"],
+            source_node_id=d["source_node_id"],
+            source_port_id=d["source_port_id"],
+            target_node_id=d["target_node_id"],
+            target_port_id=d["target_port_id"],
         )
 
 
-def _make_port(name: str, port_type: PortType, direction: PortDirection,
-               required: bool = False) -> Port:
+def _make_port(
+    name: str, port_type: PortType, direction: PortDirection, required: bool = False
+) -> Port:
     """Helper to create a port with a generated UUID."""
     return Port(
         id=str(uuid.uuid4()),
@@ -142,64 +146,64 @@ def create_default_ports(node_type: NodeType) -> Tuple[List[Port], List[Port]]:
 
     if node_type == NodeType.WORKFLOW:
         inputs = [
-            _make_port('trigger', PortType.TRIGGER, inp),
-            _make_port('position', PortType.POSITION, inp),
-            _make_port('z_range', PortType.OBJECT, inp),
+            _make_port("trigger", PortType.TRIGGER, inp),
+            _make_port("position", PortType.POSITION, inp),
+            _make_port("z_range", PortType.OBJECT, inp),
         ]
         outputs = [
-            _make_port('volume', PortType.VOLUME, out),
-            _make_port('file_path', PortType.FILE_PATH, out),
-            _make_port('completed', PortType.TRIGGER, out),
+            _make_port("volume", PortType.VOLUME, out),
+            _make_port("file_path", PortType.FILE_PATH, out),
+            _make_port("completed", PortType.TRIGGER, out),
         ]
 
     elif node_type == NodeType.THRESHOLD:
         inputs = [
-            _make_port('volume', PortType.VOLUME, inp),
+            _make_port("volume", PortType.VOLUME, inp),
         ]
         outputs = [
-            _make_port('objects', PortType.OBJECT_LIST, out),
-            _make_port('mask', PortType.VOLUME, out),
-            _make_port('count', PortType.SCALAR, out),
+            _make_port("objects", PortType.OBJECT_LIST, out),
+            _make_port("mask", PortType.VOLUME, out),
+            _make_port("count", PortType.SCALAR, out),
         ]
 
     elif node_type == NodeType.FOR_EACH:
         inputs = [
-            _make_port('collection', PortType.OBJECT_LIST, inp, required=True),
+            _make_port("collection", PortType.OBJECT_LIST, inp, required=True),
         ]
         outputs = [
-            _make_port('current_item', PortType.OBJECT, out),
-            _make_port('index', PortType.SCALAR, out),
-            _make_port('completed', PortType.TRIGGER, out),
+            _make_port("current_item", PortType.OBJECT, out),
+            _make_port("index", PortType.SCALAR, out),
+            _make_port("completed", PortType.TRIGGER, out),
         ]
 
     elif node_type == NodeType.CONDITIONAL:
         inputs = [
-            _make_port('value', PortType.ANY, inp, required=True),
-            _make_port('threshold', PortType.SCALAR, inp),
+            _make_port("value", PortType.ANY, inp, required=True),
+            _make_port("threshold", PortType.SCALAR, inp),
         ]
         outputs = [
-            _make_port('true_branch', PortType.TRIGGER, out),
-            _make_port('false_branch', PortType.TRIGGER, out),
-            _make_port('pass_through', PortType.ANY, out),
+            _make_port("true_branch", PortType.TRIGGER, out),
+            _make_port("false_branch", PortType.TRIGGER, out),
+            _make_port("pass_through", PortType.ANY, out),
         ]
 
     elif node_type == NodeType.EXTERNAL_COMMAND:
         inputs = [
-            _make_port('input_data', PortType.ANY, inp),
-            _make_port('trigger', PortType.TRIGGER, inp),
+            _make_port("input_data", PortType.ANY, inp),
+            _make_port("trigger", PortType.TRIGGER, inp),
         ]
         outputs = [
-            _make_port('output_data', PortType.ANY, out),
-            _make_port('file_path', PortType.FILE_PATH, out),
-            _make_port('completed', PortType.TRIGGER, out),
+            _make_port("output_data", PortType.ANY, out),
+            _make_port("file_path", PortType.FILE_PATH, out),
+            _make_port("completed", PortType.TRIGGER, out),
         ]
 
     elif node_type == NodeType.SAMPLE_VIEW_DATA:
         inputs = []
         outputs = [
-            _make_port('volume', PortType.VOLUME, out),
-            _make_port('position', PortType.POSITION, out),
-            _make_port('config', PortType.ANY, out),
+            _make_port("volume", PortType.VOLUME, out),
+            _make_port("position", PortType.POSITION, out),
+            _make_port("config", PortType.ANY, out),
         ]
 
     else:
@@ -222,6 +226,7 @@ class PipelineNode:
         x: X position in the editor canvas
         y: Y position in the editor canvas
     """
+
     id: str
     node_type: NodeType
     name: str
@@ -254,33 +259,37 @@ class PipelineNode:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            'id': self.id,
-            'node_type': self.node_type.name,
-            'name': self.name,
-            'inputs': [p.to_dict() for p in self.inputs],
-            'outputs': [p.to_dict() for p in self.outputs],
-            'config': self.config,
-            'x': self.x,
-            'y': self.y,
+            "id": self.id,
+            "node_type": self.node_type.name,
+            "name": self.name,
+            "inputs": [p.to_dict() for p in self.inputs],
+            "outputs": [p.to_dict() for p in self.outputs],
+            "config": self.config,
+            "x": self.x,
+            "y": self.y,
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> 'PipelineNode':
+    def from_dict(cls, d: Dict[str, Any]) -> "PipelineNode":
         return cls(
-            id=d['id'],
-            node_type=NodeType[d['node_type']],
-            name=d['name'],
-            inputs=[Port.from_dict(p) for p in d.get('inputs', [])],
-            outputs=[Port.from_dict(p) for p in d.get('outputs', [])],
-            config=d.get('config', {}),
-            x=d.get('x', 0.0),
-            y=d.get('y', 0.0),
+            id=d["id"],
+            node_type=NodeType[d["node_type"]],
+            name=d["name"],
+            inputs=[Port.from_dict(p) for p in d.get("inputs", [])],
+            outputs=[Port.from_dict(p) for p in d.get("outputs", [])],
+            config=d.get("config", {}),
+            x=d.get("x", 0.0),
+            y=d.get("y", 0.0),
         )
 
 
-def create_node(node_type: NodeType, name: Optional[str] = None,
-                config: Optional[Dict[str, Any]] = None,
-                x: float = 0.0, y: float = 0.0) -> PipelineNode:
+def create_node(
+    node_type: NodeType,
+    name: Optional[str] = None,
+    config: Optional[Dict[str, Any]] = None,
+    x: float = 0.0,
+    y: float = 0.0,
+) -> PipelineNode:
     """Factory to create a PipelineNode with default ports.
 
     Args:
@@ -291,7 +300,7 @@ def create_node(node_type: NodeType, name: Optional[str] = None,
         y: Editor Y position
     """
     if name is None:
-        name = node_type.name.replace('_', ' ').title()
+        name = node_type.name.replace("_", " ").title()
     inputs, outputs = create_default_ports(node_type)
     return PipelineNode(
         id=str(uuid.uuid4()),
@@ -331,7 +340,8 @@ class Pipeline:
             return
         # Remove connections touching this node
         to_remove = [
-            c.id for c in self.connections.values()
+            c.id
+            for c in self.connections.values()
             if c.source_node_id == node_id or c.target_node_id == node_id
         ]
         for cid in to_remove:
@@ -343,8 +353,13 @@ class Pipeline:
 
     # ---- Connection management ----
 
-    def add_connection(self, source_node_id: str, source_port_id: str,
-                       target_node_id: str, target_port_id: str) -> Connection:
+    def add_connection(
+        self,
+        source_node_id: str,
+        source_port_id: str,
+        target_node_id: str,
+        target_port_id: str,
+    ) -> Connection:
         """Create a connection between two ports after validation.
 
         Raises:
@@ -374,7 +389,10 @@ class Pipeline:
 
         # Input port can only have one incoming connection
         for c in self.connections.values():
-            if c.target_node_id == target_node_id and c.target_port_id == target_port_id:
+            if (
+                c.target_node_id == target_node_id
+                and c.target_port_id == target_port_id
+            ):
                 raise ValueError(
                     f"Input port {tgt_port.name} on {tgt_node.name} already connected"
                 )
@@ -406,23 +424,18 @@ class Pipeline:
     def get_connections_for_node(self, node_id: str) -> List[Connection]:
         """Get all connections involving a node."""
         return [
-            c for c in self.connections.values()
+            c
+            for c in self.connections.values()
             if c.source_node_id == node_id or c.target_node_id == node_id
         ]
 
     def get_incoming_connections(self, node_id: str) -> List[Connection]:
         """Get connections where this node is the target."""
-        return [
-            c for c in self.connections.values()
-            if c.target_node_id == node_id
-        ]
+        return [c for c in self.connections.values() if c.target_node_id == node_id]
 
     def get_outgoing_connections(self, node_id: str) -> List[Connection]:
         """Get connections where this node is the source."""
-        return [
-            c for c in self.connections.values()
-            if c.source_node_id == node_id
-        ]
+        return [c for c in self.connections.values() if c.source_node_id == node_id]
 
     # ---- Graph algorithms ----
 
@@ -466,9 +479,7 @@ class Pipeline:
         """
         adj = self._build_adjacency()
         in_deg = self._build_in_degree()
-        queue = deque(
-            sorted(nid for nid, d in in_deg.items() if d == 0)
-        )
+        queue = deque(sorted(nid for nid, d in in_deg.items() if d == 0))
         result: List[str] = []
         while queue:
             nid = queue.popleft()
@@ -576,24 +587,24 @@ class Pipeline:
     def to_dict(self) -> Dict[str, Any]:
         """Serialize the entire pipeline to a JSON-compatible dict."""
         return {
-            'format_version': PIPELINE_FORMAT_VERSION,
-            'name': self.name,
-            'nodes': [n.to_dict() for n in self.nodes.values()],
-            'connections': [c.to_dict() for c in self.connections.values()],
+            "format_version": PIPELINE_FORMAT_VERSION,
+            "name": self.name,
+            "nodes": [n.to_dict() for n in self.nodes.values()],
+            "connections": [c.to_dict() for c in self.connections.values()],
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> 'Pipeline':
+    def from_dict(cls, d: Dict[str, Any]) -> "Pipeline":
         """Deserialize a pipeline from a dict.
 
         Tolerates missing format_version for backward compatibility
         with pipelines saved before versioning was added.
         """
-        version = d.get('format_version', '1.0')
+        version = d.get("format_version", "1.0")
         logger.debug("Loading pipeline format_version=%s", version)
-        pipeline = cls(name=d.get('name', 'Untitled Pipeline'))
-        for nd in d.get('nodes', []):
-            pipeline.nodes[nd['id']] = PipelineNode.from_dict(nd)
-        for cd in d.get('connections', []):
-            pipeline.connections[cd['id']] = Connection.from_dict(cd)
+        pipeline = cls(name=d.get("name", "Untitled Pipeline"))
+        for nd in d.get("nodes", []):
+            pipeline.nodes[nd["id"]] = PipelineNode.from_dict(nd)
+        for cd in d.get("connections", []):
+            pipeline.connections[cd["id"]] = Connection.from_dict(cd)
         return pipeline

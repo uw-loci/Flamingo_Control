@@ -5,13 +5,19 @@ Provides UI for time-lapse acquisition parameters.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QSpinBox, QGroupBox, QGridLayout, QFrame
-)
 from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 from py2flamingo.models.data.workflow import TimeLapseSettings
 
@@ -137,8 +143,10 @@ class TimeLapsePanel(QWidget):
         grid.addWidget(self._total_time_label, 4, 1)
 
         # Info text
-        info_label = QLabel("Acquisition will run for the specified duration, "
-                           "capturing at each interval.")
+        info_label = QLabel(
+            "Acquisition will run for the specified duration, "
+            "capturing at each interval."
+        )
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: gray; font-size: 9pt;")
         grid.addWidget(info_label, 5, 0, 1, 2)
@@ -171,17 +179,21 @@ class TimeLapsePanel(QWidget):
 
     def _get_duration_seconds(self) -> int:
         """Get total duration in seconds."""
-        return (self._duration_days.value() * 86400 +
-                self._duration_hours.value() * 3600 +
-                self._duration_mins.value() * 60 +
-                self._duration_secs.value())
+        return (
+            self._duration_days.value() * 86400
+            + self._duration_hours.value() * 3600
+            + self._duration_mins.value() * 60
+            + self._duration_secs.value()
+        )
 
     def _get_interval_seconds(self) -> int:
         """Get interval in seconds."""
-        return (self._interval_days.value() * 86400 +
-                self._interval_hours.value() * 3600 +
-                self._interval_mins.value() * 60 +
-                self._interval_secs.value())
+        return (
+            self._interval_days.value() * 86400
+            + self._interval_hours.value() * 3600
+            + self._interval_mins.value() * 60
+            + self._interval_secs.value()
+        )
 
     def _format_time(self, total_seconds: int) -> str:
         """Format seconds as dd:hh:mm:ss string."""
@@ -200,7 +212,9 @@ class TimeLapsePanel(QWidget):
         """
         duration_secs = self._get_duration_seconds()
         interval_secs = self._get_interval_seconds()
-        timepoints = max(1, duration_secs // interval_secs + 1) if interval_secs > 0 else 1
+        timepoints = (
+            max(1, duration_secs // interval_secs + 1) if interval_secs > 0 else 1
+        )
 
         return TimeLapseSettings(
             duration_seconds=duration_secs,
@@ -219,8 +233,8 @@ class TimeLapsePanel(QWidget):
         interval_str = self._format_time(self._get_interval_seconds())
 
         return {
-            'Duration (dd:hh:mm:ss)': duration_str,
-            'Interval (dd:hh:mm:ss)': interval_str,
+            "Duration (dd:hh:mm:ss)": duration_str,
+            "Interval (dd:hh:mm:ss)": interval_str,
         }
 
     def set_settings(self, settings: TimeLapseSettings) -> None:

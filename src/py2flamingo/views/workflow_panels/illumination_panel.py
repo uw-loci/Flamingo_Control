@@ -6,17 +6,24 @@ Compact layout with Advanced settings dialog for rarely-used options.
 """
 
 import logging
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QDoubleSpinBox, QSpinBox, QCheckBox, QGroupBox, QGridLayout,
-    QPushButton, QSlider
+    QCheckBox,
+    QDoubleSpinBox,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSlider,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt5.QtCore import pyqtSignal, Qt
 
 from py2flamingo.models.data.workflow import IlluminationSettings
-
 
 # Default laser channels - used when no instrument configuration is provided
 # Format: (Display Name, Workflow Key, Default Power)
@@ -123,9 +130,12 @@ class IlluminationPanel(QWidget):
 
     settings_changed = pyqtSignal(object)  # Emits dict of settings
 
-    def __init__(self, parent: Optional[QWidget] = None,
-                 laser_channels: Optional[List[Tuple[str, str, float]]] = None,
-                 app=None):
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        laser_channels: Optional[List[Tuple[str, str, float]]] = None,
+        app=None,
+    ):
         """
         Initialize illumination panel.
 
@@ -152,15 +162,19 @@ class IlluminationPanel(QWidget):
 
         self._setup_ui()
 
-    def _resolve_laser_channels(self, laser_channels: Optional[List], app) -> List[Tuple[str, str, float]]:
+    def _resolve_laser_channels(
+        self, laser_channels: Optional[List], app
+    ) -> List[Tuple[str, str, float]]:
         """Resolve laser channels from provided list, app, or defaults."""
         if laser_channels is not None:
-            self._logger.info(f"Using provided laser channels: {len(laser_channels)} lasers")
+            self._logger.info(
+                f"Using provided laser channels: {len(laser_channels)} lasers"
+            )
             return laser_channels
 
         if app is not None:
             try:
-                laser_led_service = getattr(app, 'laser_led_service', None)
+                laser_led_service = getattr(app, "laser_led_service", None)
                 if laser_led_service is not None:
                     lasers = laser_led_service.get_available_lasers()
                     if lasers:
@@ -169,7 +183,9 @@ class IlluminationPanel(QWidget):
                             display_name = f"{laser.wavelength} nm"
                             workflow_key = f"Laser {laser.index} {laser.wavelength} nm"
                             channels.append((display_name, workflow_key, 5.0))
-                        self._logger.info(f"Loaded {len(channels)} lasers from instrument")
+                        self._logger.info(
+                            f"Loaded {len(channels)} lasers from instrument"
+                        )
                         return channels
             except Exception as e:
                 self._logger.warning(f"Could not get lasers from app: {e}")
@@ -281,17 +297,19 @@ class IlluminationPanel(QWidget):
         from py2flamingo.views.dialogs import AdvancedIlluminationDialog
 
         dialog = AdvancedIlluminationDialog(self)
-        dialog.set_settings({
-            'multi_laser_mode': self._multi_laser_mode,
-            'led_color_index': self._led_color_index,
-            'led_dac_percent': self._led_dac_percent,
-        })
+        dialog.set_settings(
+            {
+                "multi_laser_mode": self._multi_laser_mode,
+                "led_color_index": self._led_color_index,
+                "led_dac_percent": self._led_dac_percent,
+            }
+        )
 
         if dialog.exec_() == dialog.Accepted:
             settings = dialog.get_settings()
-            self._multi_laser_mode = settings['multi_laser_mode']
-            self._led_color_index = settings['led_color_index']
-            self._led_dac_percent = settings['led_dac_percent']
+            self._multi_laser_mode = settings["multi_laser_mode"]
+            self._led_color_index = settings["led_color_index"]
+            self._led_dac_percent = settings["led_dac_percent"]
             self._on_settings_changed()
 
     def _on_settings_changed(self) -> None:
@@ -312,25 +330,29 @@ class IlluminationPanel(QWidget):
         for i, (display_name, workflow_key, _) in enumerate(self._laser_channels):
             if self._laser_rows[i].is_enabled():
                 power = self._laser_rows[i].get_power()
-                settings_list.append(IlluminationSettings(
-                    laser_channel=workflow_key,
-                    laser_power_mw=power,
-                    laser_enabled=True,
-                    led_channel=None,
-                    led_intensity_percent=0.0,
-                    led_enabled=False,
-                ))
+                settings_list.append(
+                    IlluminationSettings(
+                        laser_channel=workflow_key,
+                        laser_power_mw=power,
+                        laser_enabled=True,
+                        led_channel=None,
+                        led_intensity_percent=0.0,
+                        led_enabled=False,
+                    )
+                )
 
         # Add LED if enabled
         if self._led_enable.isChecked():
-            settings_list.append(IlluminationSettings(
-                laser_channel=None,
-                laser_power_mw=0.0,
-                laser_enabled=False,
-                led_channel="LED_RGB_Board",
-                led_intensity_percent=self._led_intensity.value(),
-                led_enabled=True,
-            ))
+            settings_list.append(
+                IlluminationSettings(
+                    laser_channel=None,
+                    laser_power_mw=0.0,
+                    laser_enabled=False,
+                    led_channel="LED_RGB_Board",
+                    led_intensity_percent=self._led_intensity.value(),
+                    led_enabled=True,
+                )
+            )
 
         return settings_list
 
@@ -378,7 +400,9 @@ class IlluminationPanel(QWidget):
             Dictionary for Illumination Options section
         """
         return {
-            "Run stack with multiple lasers on": "true" if self._multi_laser_mode else "false"
+            "Run stack with multiple lasers on": (
+                "true" if self._multi_laser_mode else "false"
+            )
         }
 
     def set_settings(self, settings: List[IlluminationSettings]) -> None:
@@ -406,8 +430,11 @@ class IlluminationPanel(QWidget):
                 self._led_enable.setChecked(True)
                 self._led_intensity.setValue(setting.led_intensity_percent)
 
-    def set_settings_from_workflow_dict(self, illumination_dict: Dict[str, str],
-                                        options_dict: Optional[Dict[str, str]] = None) -> None:
+    def set_settings_from_workflow_dict(
+        self,
+        illumination_dict: Dict[str, str],
+        options_dict: Optional[Dict[str, str]] = None,
+    ) -> None:
         """
         Set illumination settings from workflow dictionary format.
 
@@ -464,11 +491,15 @@ class IlluminationPanel(QWidget):
             self._left_path.setChecked(illumination_dict["Left path"].startswith("ON"))
 
         if "Right path" in illumination_dict:
-            self._right_path.setChecked(illumination_dict["Right path"].startswith("ON"))
+            self._right_path.setChecked(
+                illumination_dict["Right path"].startswith("ON")
+            )
 
         # Parse illumination options
         if options_dict and "Run stack with multiple lasers on" in options_dict:
-            self._multi_laser_mode = options_dict["Run stack with multiple lasers on"].lower() == "true"
+            self._multi_laser_mode = (
+                options_dict["Run stack with multiple lasers on"].lower() == "true"
+            )
 
     def get_enabled_laser_count(self) -> int:
         """Get the number of enabled lasers."""
@@ -485,19 +516,19 @@ class IlluminationPanel(QWidget):
     def get_advanced_settings(self) -> Dict[str, Any]:
         """Get advanced illumination settings."""
         return {
-            'multi_laser_mode': self._multi_laser_mode,
-            'led_color_index': self._led_color_index,
-            'led_dac_percent': self._led_dac_percent,
+            "multi_laser_mode": self._multi_laser_mode,
+            "led_color_index": self._led_color_index,
+            "led_dac_percent": self._led_dac_percent,
         }
 
     def set_advanced_settings(self, settings: Dict[str, Any]) -> None:
         """Set advanced illumination settings."""
-        if 'multi_laser_mode' in settings:
-            self._multi_laser_mode = settings['multi_laser_mode']
-        if 'led_color_index' in settings:
-            self._led_color_index = settings['led_color_index']
-        if 'led_dac_percent' in settings:
-            self._led_dac_percent = settings['led_dac_percent']
+        if "multi_laser_mode" in settings:
+            self._multi_laser_mode = settings["multi_laser_mode"]
+        if "led_color_index" in settings:
+            self._led_color_index = settings["led_color_index"]
+        if "led_dac_percent" in settings:
+            self._led_dac_percent = settings["led_dac_percent"]
 
     def get_ui_state(self) -> Dict[str, Any]:
         """
@@ -511,21 +542,23 @@ class IlluminationPanel(QWidget):
         # Collect laser states
         lasers = []
         for i, (display_name, workflow_key, _) in enumerate(self._laser_channels):
-            lasers.append({
-                'workflow_key': workflow_key,
-                'enabled': self._laser_rows[i].is_enabled(),
-                'power': self._laser_rows[i].get_power(),
-            })
+            lasers.append(
+                {
+                    "workflow_key": workflow_key,
+                    "enabled": self._laser_rows[i].is_enabled(),
+                    "power": self._laser_rows[i].get_power(),
+                }
+            )
 
         return {
-            'lasers': lasers,
-            'led_enabled': self._led_enable.isChecked(),
-            'led_intensity': self._led_intensity.value(),
-            'left_path': self._left_path.isChecked(),
-            'right_path': self._right_path.isChecked(),
-            'multi_laser_mode': self._multi_laser_mode,
-            'led_color_index': self._led_color_index,
-            'led_dac_percent': self._led_dac_percent,
+            "lasers": lasers,
+            "led_enabled": self._led_enable.isChecked(),
+            "led_intensity": self._led_intensity.value(),
+            "left_path": self._left_path.isChecked(),
+            "right_path": self._right_path.isChecked(),
+            "multi_laser_mode": self._multi_laser_mode,
+            "led_color_index": self._led_color_index,
+            "led_dac_percent": self._led_dac_percent,
         }
 
     def set_ui_state(self, state: Dict[str, Any]) -> None:
@@ -539,32 +572,34 @@ class IlluminationPanel(QWidget):
             return
 
         # Restore laser states
-        if 'lasers' in state:
-            for laser_state in state['lasers']:
-                workflow_key = laser_state.get('workflow_key', '')
+        if "lasers" in state:
+            for laser_state in state["lasers"]:
+                workflow_key = laser_state.get("workflow_key", "")
                 for i, (_, key, _) in enumerate(self._laser_channels):
                     if key == workflow_key:
-                        self._laser_rows[i].set_enabled(laser_state.get('enabled', False))
-                        self._laser_rows[i].set_power(laser_state.get('power', 5.0))
+                        self._laser_rows[i].set_enabled(
+                            laser_state.get("enabled", False)
+                        )
+                        self._laser_rows[i].set_power(laser_state.get("power", 5.0))
                         break
 
-        if 'led_enabled' in state:
-            self._led_enable.setChecked(state['led_enabled'])
+        if "led_enabled" in state:
+            self._led_enable.setChecked(state["led_enabled"])
 
-        if 'led_intensity' in state:
-            self._led_intensity.setValue(state['led_intensity'])
+        if "led_intensity" in state:
+            self._led_intensity.setValue(state["led_intensity"])
 
-        if 'left_path' in state:
-            self._left_path.setChecked(state['left_path'])
+        if "left_path" in state:
+            self._left_path.setChecked(state["left_path"])
 
-        if 'right_path' in state:
-            self._right_path.setChecked(state['right_path'])
+        if "right_path" in state:
+            self._right_path.setChecked(state["right_path"])
 
-        if 'multi_laser_mode' in state:
-            self._multi_laser_mode = state['multi_laser_mode']
+        if "multi_laser_mode" in state:
+            self._multi_laser_mode = state["multi_laser_mode"]
 
-        if 'led_color_index' in state:
-            self._led_color_index = state['led_color_index']
+        if "led_color_index" in state:
+            self._led_color_index = state["led_color_index"]
 
-        if 'led_dac_percent' in state:
-            self._led_dac_percent = state['led_dac_percent']
+        if "led_dac_percent" in state:
+            self._led_dac_percent = state["led_dac_percent"]

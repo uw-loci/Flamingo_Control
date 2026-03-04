@@ -9,23 +9,24 @@ Usage:
     python test_status_indicator.py
 """
 
-import sys
 import logging
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QPushButton
+import sys
+
 from PyQt5.QtCore import QTimer
+from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget
 
 from py2flamingo.services.status_indicator_service import (
-    StatusIndicatorService, GlobalStatus
+    GlobalStatus,
+    StatusIndicatorService,
 )
 from py2flamingo.views.widgets.status_indicator_widget import (
-    StatusIndicatorWidget, StatusIndicatorBar
+    StatusIndicatorBar,
+    StatusIndicatorWidget,
 )
-
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 
@@ -115,10 +116,13 @@ class StatusIndicatorTestWindow(QMainWindow):
         self.status_service.on_motion_started()
 
         # Auto stop after 2 seconds
-        QTimer.singleShot(2000, lambda: (
-            logging.info("Testing: Motion Stop"),
-            self.status_service.on_motion_stopped()
-        ))
+        QTimer.singleShot(
+            2000,
+            lambda: (
+                logging.info("Testing: Motion Stop"),
+                self.status_service.on_motion_stopped(),
+            ),
+        )
 
     def _test_workflow(self):
         """Test workflow start/stop."""
@@ -126,10 +130,13 @@ class StatusIndicatorTestWindow(QMainWindow):
         self.status_service.on_workflow_started()
 
         # Auto stop after 3 seconds
-        QTimer.singleShot(3000, lambda: (
-            logging.info("Testing: Workflow Stop"),
-            self.status_service.on_workflow_stopped()
-        ))
+        QTimer.singleShot(
+            3000,
+            lambda: (
+                logging.info("Testing: Workflow Stop"),
+                self.status_service.on_workflow_stopped(),
+            ),
+        )
 
     def _start_auto_test(self):
         """Run automatic test sequence."""
@@ -145,17 +152,25 @@ class StatusIndicatorTestWindow(QMainWindow):
             (6000, "Workflow stop", self.status_service.on_workflow_stopped),
             (7000, "Motion during idle", self.status_service.on_motion_started),
             (8000, "Workflow during motion", self.status_service.on_workflow_started),
-            (9000, "Motion stop (workflow still running)", self.status_service.on_motion_stopped),
+            (
+                9000,
+                "Motion stop (workflow still running)",
+                self.status_service.on_motion_stopped,
+            ),
             (10000, "Workflow stop", self.status_service.on_workflow_stopped),
             (11000, "Disconnect", self.status_service.on_connection_closed),
-            (12000, "Test complete", lambda: logging.info("=== Auto Test Complete ==="))
+            (
+                12000,
+                "Test complete",
+                lambda: logging.info("=== Auto Test Complete ==="),
+            ),
         ]
 
         for delay_ms, description, action in test_sequence:
-            QTimer.singleShot(delay_ms, lambda d=description, a=action: (
-                logging.info(f"Auto test: {d}"),
-                a()
-            ))
+            QTimer.singleShot(
+                delay_ms,
+                lambda d=description, a=action: (logging.info(f"Auto test: {d}"), a()),
+            )
 
 
 def test_service_only():
@@ -175,7 +190,9 @@ def test_service_only():
 
     # Test sequence
     print("1. Initial state:")
-    print(f"   Current: {service.get_current_status().value} - {service.get_status_description()}")
+    print(
+        f"   Current: {service.get_current_status().value} - {service.get_status_description()}"
+    )
     print(f"   Is busy: {service.is_busy()}")
 
     print("\n2. Connect:")
@@ -201,12 +218,12 @@ def test_service_only():
 
     # Verify expected changes
     expected_statuses = [
-        GlobalStatus.IDLE,           # Connect
-        GlobalStatus.MOVING,         # Motion start
+        GlobalStatus.IDLE,  # Connect
+        GlobalStatus.MOVING,  # Motion start
         GlobalStatus.WORKFLOW_RUNNING,  # Workflow start (overrides motion)
         GlobalStatus.WORKFLOW_RUNNING,  # Motion stop (workflow still active)
-        GlobalStatus.IDLE,           # Workflow stop
-        GlobalStatus.DISCONNECTED    # Disconnect
+        GlobalStatus.IDLE,  # Workflow stop
+        GlobalStatus.DISCONNECTED,  # Disconnect
     ]
 
     actual_statuses = [status for status, _ in changes]
@@ -244,5 +261,5 @@ def main():
     return app.exec_()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

@@ -12,22 +12,22 @@ These panels provide UI components for building workflows:
 - MultiAnglePanel: Multi-angle/OPT acquisition settings
 """
 
-from .position_panel import PositionPanel
-from .illumination_panel import IlluminationPanel
 from .camera_panel import CameraPanel
-from .save_panel import SavePanel
-from .zstack_panel import ZStackPanel
-from .timelapse_panel import TimeLapsePanel
-from .tiling_panel import TilingPanel
+from .illumination_panel import IlluminationPanel
 from .multiangle_panel import MultiAnglePanel
+from .position_panel import PositionPanel
+from .save_panel import SavePanel
+from .tiling_panel import TilingPanel
+from .timelapse_panel import TimeLapsePanel
+from .zstack_panel import ZStackPanel
 
 __all__ = [
-    'PositionPanel',
-    'IlluminationPanel',
-    'CameraPanel',
-    'SavePanel',
-    'ZStackPanel',
-    'TimeLapsePanel',
-    'TilingPanel',
-    'MultiAnglePanel',
+    "PositionPanel",
+    "IlluminationPanel",
+    "CameraPanel",
+    "SavePanel",
+    "ZStackPanel",
+    "TimeLapsePanel",
+    "TilingPanel",
+    "MultiAnglePanel",
 ]

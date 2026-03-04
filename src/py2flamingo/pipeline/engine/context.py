@@ -6,7 +6,7 @@ to application services needed by node runners.
 """
 
 import logging
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 
 from py2flamingo.pipeline.models.port_types import PortValue
 
@@ -38,7 +38,9 @@ class ExecutionContext:
         """Retrieve the value that was written to a port."""
         return self.port_values.get(port_id)
 
-    def get_input_value(self, pipeline, node_id: str, port_name: str) -> Optional[PortValue]:
+    def get_input_value(
+        self, pipeline, node_id: str, port_name: str
+    ) -> Optional[PortValue]:
         """Resolve the value feeding into a named input port of a node.
 
         Follows the connection from the source output port to find the value.
@@ -80,7 +82,7 @@ class ExecutionContext:
 
     # ---- Scoped copy for ForEach iterations ----
 
-    def create_scoped_copy(self) -> 'ExecutionContext':
+    def create_scoped_copy(self) -> "ExecutionContext":
         """Create a child context that inherits port values and services.
 
         The child shares the services dict and cancellation state reference,
@@ -99,7 +101,7 @@ class ExecutionContext:
         """Check cancellation including parent context."""
         if self._cancelled:
             return True
-        parent = getattr(self, '_parent', None)
+        parent = getattr(self, "_parent", None)
         if parent and parent.is_cancelled:
             self._cancelled = True
             return True

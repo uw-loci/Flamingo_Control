@@ -5,10 +5,10 @@ Handles all stage-related commands including position queries,
 movement control, and motion monitoring.
 """
 
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from py2flamingo.services.microscope_command_service import MicroscopeCommandService
 from py2flamingo.models.microscope import Position
+from py2flamingo.services.microscope_command_service import MicroscopeCommandService
 
 
 class StageCommandCode:
@@ -34,6 +34,7 @@ class AxisCode:
     - move_axis(..., 3, z)  # Z-axis
     - move_axis(..., 4, r)  # Rotation
     """
+
     X_AXIS = 1
     Y_AXIS = 2
     Z_AXIS = 3
@@ -78,8 +79,8 @@ class StageService(MicroscopeCommandService):
             >>> if x_pos is not None:
             >>>     print(f"X position: {x_pos}")
         """
-        axis_names = {1: 'X', 2: 'Y', 3: 'Z', 4: 'R'}
-        axis_name = axis_names.get(axis, f'Unknown({axis})')
+        axis_names = {1: "X", 2: "Y", 3: "Z", 4: "R"}
+        axis_name = axis_names.get(axis, f"Unknown({axis})")
 
         self.logger.info(f"Querying {axis_name}-axis position from hardware...")
 
@@ -88,43 +89,48 @@ class StageService(MicroscopeCommandService):
             StageCommandCode.POSITION_GET,
             f"STAGE_POSITION_GET_{axis_name}",
             params=[
-                0,     # params[0] (hardwareID) - not used
-                0,     # params[1] (subsystemID) - not used
-                0,     # params[2] (clientID) - not used
+                0,  # params[0] (hardwareID) - not used
+                0,  # params[1] (subsystemID) - not used
+                0,  # params[2] (clientID) - not used
                 axis,  # params[3] (int32Data0) = axis code (1=X, 2=Y, 3=Z, 4=R)
-                0,     # params[4] (int32Data1)
-                0,     # params[5] (int32Data2)
-                0      # params[6] will be set to TRIGGER_CALL_BACK by _query_command
-            ]
+                0,  # params[4] (int32Data1)
+                0,  # params[5] (int32Data2)
+                0,  # params[6] will be set to TRIGGER_CALL_BACK by _query_command
+            ],
         )
 
-        if not result['success']:
-            if result.get('error') == 'timeout':
+        if not result["success"]:
+            if result.get("error") == "timeout":
                 self.logger.warning(f"{axis_name}-axis POSITION_GET timed out")
                 return None
-            raise RuntimeError(f"Failed to get {axis_name} position: {result.get('error', 'Unknown error')}")
+            raise RuntimeError(
+                f"Failed to get {axis_name} position: {result.get('error', 'Unknown error')}"
+            )
 
         # Parse the full response to check all fields
-        parsed = result.get('parsed', {})
-        raw_response = result.get('raw_response', b'')
+        parsed = result.get("parsed", {})
+        raw_response = result.get("raw_response", b"")
 
         # Log the complete response for debugging
         if parsed:
-            status_code = parsed.get('status_code', 0)
-            params = parsed.get('params', [])
+            status_code = parsed.get("status_code", 0)
+            params = parsed.get("params", [])
 
             # Log status and params to understand motion state indicators
-            self.logger.debug(f"{axis_name}-axis response - Status: 0x{status_code:08X}, "
-                            f"Params: {[f'0x{p:08X}' for p in params]}")
+            self.logger.debug(
+                f"{axis_name}-axis response - Status: 0x{status_code:08X}, "
+                f"Params: {[f'0x{p:08X}' for p in params]}"
+            )
 
         # Position is returned in the doubleData field (bytes 40-47 of SCommand)
         # NOT in the data buffer - that's a common mistake!
         import struct
+
         if len(raw_response) >= 48:  # Need at least 48 bytes to read doubleData field
             try:
                 # Position in doubleData field (bytes 40-47)
                 # SCommand structure: [start(4) + cmd(4) + status(4) + params(28) + doubleData(8) + ...]
-                position = struct.unpack('<d', raw_response[40:48])[0]
+                position = struct.unpack("<d", raw_response[40:48])[0]
 
                 # Check if stage is still moving based on response
                 # We need to examine multiple indicators:
@@ -136,13 +142,17 @@ class StageService(MicroscopeCommandService):
                 motion_reason = ""
 
                 # Check 1: Position is exactly 0.000 for axes that shouldn't be at origin
-                if position == 0.0 and axis in [1, 2, 3]:  # X, Y, Z should never be exactly 0.0
+                if position == 0.0 and axis in [
+                    1,
+                    2,
+                    3,
+                ]:  # X, Y, Z should never be exactly 0.0
                     is_likely_moving = True
                     motion_reason = "position=0.000"
 
                 # Check 2: Examine status code (if non-zero might indicate busy/moving)
                 if parsed and not is_likely_moving:
-                    status_code = parsed.get('status_code', 0)
+                    status_code = parsed.get("status_code", 0)
                     if status_code != 0:
                         # Log at DEBUG level - status 0x00000001 is common and usually means "ready"
                         # Only status 0x00000000 means "idle" - non-zero doesn't imply motion
@@ -154,14 +164,16 @@ class StageService(MicroscopeCommandService):
 
                 # Check 3: Examine parameters for motion flags
                 if parsed and not is_likely_moving:
-                    params = parsed.get('params', [])
+                    params = parsed.get("params", [])
                     # Check if any param has specific motion-indicating bits
                     # params[6] often contains flags (cmdDataBits0)
                     if len(params) > 6:
                         flags = params[6]
                         # Check for specific flag patterns that might indicate motion
                         # This needs more investigation of the protocol
-                        if flags != 0 and flags != 0x80000000:  # 0x80000000 is TRIGGER_CALL_BACK
+                        if (
+                            flags != 0 and flags != 0x80000000
+                        ):  # 0x80000000 is TRIGGER_CALL_BACK
                             self.logger.debug(
                                 f"{axis_name}-axis params[6] flags: 0x{flags:08X} - checking for motion indicators"
                             )
@@ -173,9 +185,14 @@ class StageService(MicroscopeCommandService):
 
                     # Keep retrying until we get a valid position or timeout
                     import time
-                    max_retries = 6   # Up to 6 retries (reduced from 20 - movements take <1s)
+
+                    max_retries = (
+                        6  # Up to 6 retries (reduced from 20 - movements take <1s)
+                    )
                     retry_delay = 0.5  # 500ms between retries
-                    total_timeout = 3.0  # Total max wait time of 3 seconds (reduced from 10)
+                    total_timeout = (
+                        3.0  # Total max wait time of 3 seconds (reduced from 10)
+                    )
 
                     for retry_count in range(1, max_retries + 1):
                         time.sleep(retry_delay)
@@ -184,24 +201,26 @@ class StageService(MicroscopeCommandService):
                             StageCommandCode.POSITION_GET,
                             f"STAGE_POSITION_GET_{axis_name}_RETRY_{retry_count}",
                             params=[
-                                0,     # params[0] (hardwareID) - not used
-                                0,     # params[1] (subsystemID) - not used
-                                0,     # params[2] (clientID) - not used
+                                0,  # params[0] (hardwareID) - not used
+                                0,  # params[1] (subsystemID) - not used
+                                0,  # params[2] (clientID) - not used
                                 axis,  # params[3] (int32Data0) = axis code (1=X, 2=Y, 3=Z, 4=R)
-                                0,     # params[4] (int32Data1)
-                                0      # params[5] (int32Data2)
+                                0,  # params[4] (int32Data1)
+                                0,  # params[5] (int32Data2)
                                 # params[6] will be set to TRIGGER_CALL_BACK by _query_command
-                            ]
+                            ],
                         )
 
-                        if retry_result and retry_result.get('success'):
-                            retry_parsed = retry_result.get('parsed', {})
-                            raw_response = retry_result.get('raw_response', b'')
+                        if retry_result and retry_result.get("success"):
+                            retry_parsed = retry_result.get("parsed", {})
+                            raw_response = retry_result.get("raw_response", b"")
 
                             # Log retry response details for investigation
-                            if retry_parsed and retry_count == 1:  # Log details on first retry
-                                retry_status = retry_parsed.get('status_code', 0)
-                                retry_params = retry_parsed.get('params', [])
+                            if (
+                                retry_parsed and retry_count == 1
+                            ):  # Log details on first retry
+                                retry_status = retry_parsed.get("status_code", 0)
+                                retry_params = retry_parsed.get("params", [])
                                 self.logger.debug(
                                     f"{axis_name}-axis retry response - Status: 0x{retry_status:08X}, "
                                     f"Params[6]: 0x{retry_params[6] if len(retry_params) > 6 else 0:08X}"
@@ -209,17 +228,24 @@ class StageService(MicroscopeCommandService):
 
                             if len(raw_response) >= 48:
                                 try:
-                                    position = struct.unpack('<d', raw_response[40:48])[0]
+                                    position = struct.unpack("<d", raw_response[40:48])[
+                                        0
+                                    ]
 
                                     # For non-rotation axes, 0.000 likely means still moving
-                                    if position != 0.0 or axis == 4:  # Accept 0.0 for rotation
+                                    if (
+                                        position != 0.0 or axis == 4
+                                    ):  # Accept 0.0 for rotation
                                         # CRITICAL: Apply safety check to retry results too!
                                         # Without this, garbage values during movement could pass through
                                         retry_valid_ranges = {
-                                            1: (1.0, 12.31),    # X-axis limits (mm)
-                                            2: (5.0, 25.0),     # Y-axis limits (mm)
-                                            3: (12.5, 26.0),    # Z-axis limits (mm)
-                                            4: (-720.0, 720.0)  # R-axis limits (degrees)
+                                            1: (1.0, 12.31),  # X-axis limits (mm)
+                                            2: (5.0, 25.0),  # Y-axis limits (mm)
+                                            3: (12.5, 26.0),  # Z-axis limits (mm)
+                                            4: (
+                                                -720.0,
+                                                720.0,
+                                            ),  # R-axis limits (degrees)
                                         }
                                         if axis in retry_valid_ranges:
                                             min_val, max_val = retry_valid_ranges[axis]
@@ -240,7 +266,9 @@ class StageService(MicroscopeCommandService):
                                             f"{axis_name}-axis retry {retry_count}: still moving (0.000)"
                                         )
                                 except Exception as e:
-                                    self.logger.warning(f"Error parsing retry {retry_count}: {e}")
+                                    self.logger.warning(
+                                        f"Error parsing retry {retry_count}: {e}"
+                                    )
 
                         # Check if we've exceeded total timeout
                         if retry_count * retry_delay >= total_timeout:
@@ -262,10 +290,14 @@ class StageService(MicroscopeCommandService):
                 self.logger.info(f"{axis_name}-axis position: {position:.3f} mm")
                 return float(position)
             except Exception as e:
-                self.logger.error(f"Failed to parse position from doubleData field: {e}")
+                self.logger.error(
+                    f"Failed to parse position from doubleData field: {e}"
+                )
                 return None
         else:
-            self.logger.error(f"Response too short ({len(raw_response)} bytes) to contain doubleData field")
+            self.logger.error(
+                f"Response too short ({len(raw_response)} bytes) to contain doubleData field"
+            )
             return None
 
     def get_position(self) -> Optional[Position]:
@@ -335,14 +367,20 @@ class StageService(MicroscopeCommandService):
             StageCommandCode.POSITION_SET_SLIDER,  # Use slider variant from logs
             "STAGE_POSITION_SET",
             axis=axis,
-            position_mm=position_mm
+            position_mm=position_mm,
         )
 
-        if not result['success']:
-            raise RuntimeError(f"Failed to move stage: {result.get('error', 'Unknown error')}")
+        if not result["success"]:
+            raise RuntimeError(
+                f"Failed to move stage: {result.get('error', 'Unknown error')}"
+            )
 
-        self.logger.info(f"Stage movement command sent (axis {axis} → {position_mm} mm)")
-        self.logger.info("Motion is asynchronous - use motion monitoring to detect completion")
+        self.logger.info(
+            f"Stage movement command sent (axis {axis} → {position_mm} mm)"
+        )
+        self.logger.info(
+            "Motion is asynchronous - use motion monitoring to detect completion"
+        )
 
     def is_motion_stopped(self) -> Optional[bool]:
         """
@@ -364,22 +402,24 @@ class StageService(MicroscopeCommandService):
         self.logger.info("Querying motion stopped status...")
 
         result = self._query_command(
-            StageCommandCode.MOTION_STOPPED,
-            "STAGE_MOTION_STOPPED"
+            StageCommandCode.MOTION_STOPPED, "STAGE_MOTION_STOPPED"
         )
 
-        if not result['success']:
-            if result.get('error') == 'timeout':
+        if not result["success"]:
+            if result.get("error") == "timeout":
                 self.logger.warning("STAGE_MOTION_STOPPED timed out")
                 return None
-            raise RuntimeError(f"Failed to query motion: {result.get('error', 'Unknown error')}")
+            raise RuntimeError(
+                f"Failed to query motion: {result.get('error', 'Unknown error')}"
+            )
 
         # Parse motion status from response
         # TODO: Determine response format
         return None
 
-    def _send_movement_command(self, command_code: int, command_name: str,
-                               axis: int, position_mm: float) -> Dict[str, Any]:
+    def _send_movement_command(
+        self, command_code: int, command_name: str, axis: int, position_mm: float
+    ) -> Dict[str, Any]:
         """
         Send stage movement command.
 
@@ -401,13 +441,13 @@ class StageService(MicroscopeCommandService):
             command_code=command_code,
             command_name=command_name,
             params=[
-                0,     # params[0] (hardwareID) - not used
-                0,     # params[1] (subsystemID) - not used
-                0,     # params[2] (clientID) - not used
+                0,  # params[0] (hardwareID) - not used
+                0,  # params[1] (subsystemID) - not used
+                0,  # params[2] (clientID) - not used
                 axis,  # params[3] (int32Data0) = axis code (1=X, 2=Y, 3=Z, 4=R)
-                0,     # params[4] (int32Data1)
-                0,     # params[5] (int32Data2)
-                0      # params[6] will be set to TRIGGER_CALL_BACK by _send_command
+                0,  # params[4] (int32Data1)
+                0,  # params[5] (int32Data2)
+                0,  # params[6] will be set to TRIGGER_CALL_BACK by _send_command
             ],
-            value=position_mm  # doubleData = position in mm
+            value=position_mm,  # doubleData = position in mm
         )

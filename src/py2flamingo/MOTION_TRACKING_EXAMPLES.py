@@ -24,13 +24,14 @@ Cons:
   - Only tracks moves made through the adapter
 """
 
+
 def approach_1_adapter_in_application():
     """Example: Add adapter to application.py"""
 
     # In application.py, modify setup_dependencies():
 
     from py2flamingo.controllers.position_controller_adapter import (
-        create_motion_tracking_adapter
+        create_motion_tracking_adapter,
     )
 
     # After creating position_controller:
@@ -38,8 +39,7 @@ def approach_1_adapter_in_application():
 
     # Create motion tracking adapter and connect to status indicator
     self.position_motion_adapter = create_motion_tracking_adapter(
-        self.position_controller,
-        self.status_indicator_service
+        self.position_controller, self.status_indicator_service
     )
 
     # Use the adapter instead of position_controller for motion tracking
@@ -69,6 +69,7 @@ Cons:
   - Requires modifying position_controller.py
   - Adds PyQt5 dependency to controller
 """
+
 
 def approach_2_modify_position_controller():
     """Example: Modify position_controller.py to add signals"""
@@ -105,7 +106,7 @@ def approach_2_modify_position_controller():
                 # Send move command
                 command = Command(
                     code=self.COMMAND_CODES_STAGE_POSITION_SET,
-                    parameters={'params': params, 'value': position_mm}
+                    parameters={"params": params, "value": position_mm},
                 )
                 response = self.connection.send_command(command, timeout=10.0)
 
@@ -149,6 +150,7 @@ Cons:
   - Misses moves from other sources (workflows, etc.)
 """
 
+
 def approach_3_view_level_tracking():
     """Example: Add signals to StageControlView"""
 
@@ -178,7 +180,7 @@ def approach_3_view_level_tracking():
                 target_x = float(self.x_input.text())
 
                 # Execute move
-                self.controller.move_absolute('x', target_x, wait=False)
+                self.controller.move_absolute("x", target_x, wait=False)
 
                 # Start a timer to detect when motion completes
                 # (check position periodically)
@@ -201,11 +203,11 @@ def approach_3_view_level_tracking():
     # Then in application.py setup_dependencies():
 
     # Connect stage control view signals to status indicator
-    if hasattr(self.stage_control_view, 'motion_started'):
+    if hasattr(self.stage_control_view, "motion_started"):
         self.stage_control_view.motion_started.connect(
             self.status_indicator_service.on_motion_started
         )
-    if hasattr(self.stage_control_view, 'motion_stopped'):
+    if hasattr(self.stage_control_view, "motion_stopped"):
         self.stage_control_view.motion_stopped.connect(
             self.status_indicator_service.on_motion_stopped
         )
@@ -230,6 +232,7 @@ Cons:
   - Depends on callback listener being active
 """
 
+
 def approach_4_callback_listener():
     """Example: Use callback listener for motion tracking"""
 
@@ -239,17 +242,12 @@ def approach_4_callback_listener():
         """Set up motion tracking via callback listener."""
 
         # Get callback listener from connection service
-        callback_listener = getattr(
-            self.connection_service,
-            '_callback_listener',
-            None
-        )
+        callback_listener = getattr(self.connection_service, "_callback_listener", None)
 
         if callback_listener:
             # Register handler for STAGE_MOTION_STOPPED (0x6010 / 24592)
             callback_listener.register_handler(
-                24592,  # STAGE_MOTION_STOPPED
-                self._on_stage_motion_stopped_callback
+                24592, self._on_stage_motion_stopped_callback  # STAGE_MOTION_STOPPED
             )
             self.logger.info("Registered motion stopped callback handler")
 
@@ -322,6 +320,7 @@ A HYBRID approach combining 1 and 4 would be ideal:
 - This gives you the best of both worlds
 """
 
+
 def recommended_hybrid_approach():
     """Example: Hybrid approach using adapter + callback listener"""
 
@@ -335,8 +334,9 @@ def recommended_hybrid_approach():
 
         # Create motion tracking adapter (Approach 1)
         from py2flamingo.controllers.position_controller_adapter import (
-            PositionControllerMotionAdapter
+            PositionControllerMotionAdapter,
         )
+
         self.position_motion_adapter = PositionControllerMotionAdapter(
             self.position_controller
         )
@@ -348,10 +348,10 @@ def recommended_hybrid_approach():
 
         # Also set up callback listener for motion stopped (Approach 4)
         # This provides microscope feedback for more accurate stopped detection
-        if hasattr(self.connection_service, '_callback_listener'):
+        if hasattr(self.connection_service, "_callback_listener"):
             self.connection_service._callback_listener.register_handler(
                 24592,  # STAGE_MOTION_STOPPED
-                lambda response: self.status_indicator_service.on_motion_stopped()
+                lambda response: self.status_indicator_service.on_motion_stopped(),
             )
 
         # Use adapter for views
@@ -364,10 +364,11 @@ def recommended_hybrid_approach():
 # TESTING MOTION TRACKING
 # ==============================================================================
 
+
 def test_motion_tracking():
     """Example test code for motion tracking"""
 
-    from py2flamingo.services import StatusIndicatorService, GlobalStatus
+    from py2flamingo.services import GlobalStatus, StatusIndicatorService
 
     # Create service
     status_service = StatusIndicatorService()
@@ -396,6 +397,6 @@ def test_motion_tracking():
     print("All tests passed!")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Run tests
     test_motion_tracking()

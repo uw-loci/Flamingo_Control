@@ -15,8 +15,9 @@ Based on timing analysis:
 import logging
 import time
 from dataclasses import dataclass
-from typing import Optional, Callable, List, Tuple
-from PyQt5.QtCore import QObject, pyqtSignal, QTimer
+from typing import Callable, List, Optional, Tuple
+
+from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class VolumeScanConfig:
     """Configuration for volume scan."""
+
     # Volume bounds (mm)
     x_min: float = 4.0
     x_max: float = 4.6
@@ -68,11 +70,13 @@ class VolumeScanWorkflow(QObject):
     scan_cancelled = pyqtSignal()
     scan_error = pyqtSignal(str)
 
-    def __init__(self,
-                 movement_controller,
-                 position_controller,
-                 config: Optional[VolumeScanConfig] = None,
-                 parent=None):
+    def __init__(
+        self,
+        movement_controller,
+        position_controller,
+        config: Optional[VolumeScanConfig] = None,
+        parent=None,
+    ):
         super().__init__(parent)
 
         self.movement_controller = movement_controller
@@ -120,8 +124,10 @@ class VolumeScanWorkflow(QObject):
                 positions.append((x_pos, y_pos, z_direction))
                 z_direction *= -1  # Alternate Z direction
 
-        logger.info(f"Generated scan path: {len(positions)} positions, "
-                   f"X: {len(x_positions)} steps, Y: {len(y_positions)} steps")
+        logger.info(
+            f"Generated scan path: {len(positions)} positions, "
+            f"X: {len(x_positions)} steps, Y: {len(y_positions)} steps"
+        )
 
         return positions
 
@@ -164,8 +170,10 @@ class VolumeScanWorkflow(QObject):
 
         # Estimate time
         est_time = self.estimate_scan_time()
-        logger.info(f"Starting volume scan: {len(self._positions)} positions, "
-                   f"estimated time: {est_time/60:.1f} minutes")
+        logger.info(
+            f"Starting volume scan: {len(self._positions)} positions, "
+            f"estimated time: {est_time/60:.1f} minutes"
+        )
 
         self.scan_started.emit()
 
@@ -203,13 +211,13 @@ class VolumeScanWorkflow(QObject):
         # Emit progress
         progress_pct = (self._current_position_idx / len(self._positions)) * 100
         self.scan_progress.emit(
-            self._current_position_idx + 1,
-            len(self._positions),
-            progress_pct
+            self._current_position_idx + 1, len(self._positions), progress_pct
         )
 
-        logger.info(f"Scan position {self._current_position_idx + 1}/{len(self._positions)}: "
-                   f"X={x_pos:.2f}, Y={y_pos:.2f}, Z={z_start:.1f}→{z_end:.1f}")
+        logger.info(
+            f"Scan position {self._current_position_idx + 1}/{len(self._positions)}: "
+            f"X={x_pos:.2f}, Y={y_pos:.2f}, Z={z_start:.1f}→{z_end:.1f}"
+        )
 
         # Execute the position scan
         try:
@@ -253,11 +261,15 @@ class VolumeScanWorkflow(QObject):
 
         # Move to XY position and Z start together using move_to_position
         # This handles the movement lock properly for multi-axis moves
-        logger.info(f"[Workflow] Step 1: Moving to XY=({x:.2f}, {y:.2f}), Z_start={z_start:.1f}")
+        logger.info(
+            f"[Workflow] Step 1: Moving to XY=({x:.2f}, {y:.2f}), Z_start={z_start:.1f}"
+        )
 
         target_position = Position(x=x, y=y, z=z_start, r=current_r)
         self.position_controller.move_to_position(target_position, validate=True)
-        logger.info("[Workflow] Step 2: move_to_position returned, calling wait_for_movement_complete...")
+        logger.info(
+            "[Workflow] Step 2: move_to_position returned, calling wait_for_movement_complete..."
+        )
 
         # CRITICAL: Wait for movement to complete before starting Z-paint
         # move_to_position returns immediately (async), so we must wait
@@ -273,8 +285,10 @@ class VolumeScanWorkflow(QObject):
         self.scan_position.emit(x, y, z_start, z_end)
 
         # Execute Z-paint (move to z_end while capturing)
-        logger.info(f"[Workflow] Step 5: Starting Z-paint from {z_start:.1f} to {z_end:.1f}")
-        self.movement_controller.move_absolute('z', z_end)
+        logger.info(
+            f"[Workflow] Step 5: Starting Z-paint from {z_start:.1f} to {z_end:.1f}"
+        )
+        self.movement_controller.move_absolute("z", z_end)
         logger.info("[Workflow] Step 6: Z-paint move_absolute returned")
 
         # The Z movement will take time - during this time,
@@ -284,7 +298,7 @@ class VolumeScanWorkflow(QObject):
     def _get_current_z(self) -> Optional[float]:
         """Get current Z position."""
         try:
-            if hasattr(self.position_controller, 'stage_service'):
+            if hasattr(self.position_controller, "stage_service"):
                 return self.position_controller.stage_service.get_axis_position(3)
         except Exception as e:
             logger.warning(f"Could not get Z position: {e}")
@@ -301,10 +315,13 @@ class VolumeScanWorkflow(QObject):
         return (self._current_position_idx, len(self._positions))
 
 
-def run_volume_scan(movement_controller, position_controller,
-                    config: Optional[VolumeScanConfig] = None,
-                    on_complete: Optional[Callable] = None,
-                    on_error: Optional[Callable[[str], None]] = None) -> VolumeScanWorkflow:
+def run_volume_scan(
+    movement_controller,
+    position_controller,
+    config: Optional[VolumeScanConfig] = None,
+    on_complete: Optional[Callable] = None,
+    on_error: Optional[Callable[[str], None]] = None,
+) -> VolumeScanWorkflow:
     """
     Convenience function to start a volume scan.
 
@@ -321,7 +338,7 @@ def run_volume_scan(movement_controller, position_controller,
     workflow = VolumeScanWorkflow(
         movement_controller=movement_controller,
         position_controller=position_controller,
-        config=config
+        config=config,
     )
 
     if on_complete:

@@ -5,17 +5,26 @@ such as storage drive, region, subfolder options, and extended comments.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QCheckBox, QGroupBox, QGridLayout,
-    QPushButton, QDialogButtonBox, QPlainTextEdit, QFileDialog,
-    QComboBox
-)
-from py2flamingo.services.window_geometry_manager import PersistentDialog
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialogButtonBox,
+    QFileDialog,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
+)
+
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 
 
 class AdvancedSaveDialog(PersistentDialog):
@@ -29,10 +38,13 @@ class AdvancedSaveDialog(PersistentDialog):
     - Extended comments field
     """
 
-    def __init__(self, parent=None,
-                 default_drive: str = "",
-                 connection_service = None,
-                 hide_drive_selection: bool = False):
+    def __init__(
+        self,
+        parent=None,
+        default_drive: str = "",
+        connection_service=None,
+        hide_drive_selection: bool = False,
+    ):
         """Initialize the dialog.
 
         Args:
@@ -78,7 +90,9 @@ class AdvancedSaveDialog(PersistentDialog):
                 self._save_drive.setCurrentText(self._default_drive)
             else:
                 # No default - show placeholder
-                self._save_drive.setPlaceholderText("Click Refresh to query available drives...")
+                self._save_drive.setPlaceholderText(
+                    "Click Refresh to query available drives..."
+                )
             self._save_drive.setToolTip(
                 "Base path for data storage.\n"
                 "This is typically a network share or local disk.\n\n"
@@ -87,7 +101,9 @@ class AdvancedSaveDialog(PersistentDialog):
             drive_layout.addWidget(self._save_drive, 1)
 
             self._refresh_btn = QPushButton("Refresh")
-            self._refresh_btn.setToolTip("Query available storage drives from microscope")
+            self._refresh_btn.setToolTip(
+                "Query available storage drives from microscope"
+            )
             self._refresh_btn.clicked.connect(self._refresh_drives)
             # Disable refresh button if no connection service
             self._refresh_btn.setEnabled(self._connection_service is not None)
@@ -190,9 +206,7 @@ class AdvancedSaveDialog(PersistentDialog):
         layout.addLayout(reset_layout)
 
         # Dialog buttons
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
-        )
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
@@ -200,7 +214,9 @@ class AdvancedSaveDialog(PersistentDialog):
     def _refresh_drives(self) -> None:
         """Query available drives from microscope server."""
         if not self._connection_service or self._save_drive is None:
-            self._logger.warning("No connection service available or drive selection hidden")
+            self._logger.warning(
+                "No connection service available or drive selection hidden"
+            )
             return
 
         try:
@@ -249,10 +265,7 @@ class AdvancedSaveDialog(PersistentDialog):
 
         current = self._save_drive.currentText() or self._default_drive or ""
         directory = QFileDialog.getExistingDirectory(
-            self,
-            "Select Save Drive",
-            current,
-            QFileDialog.ShowDirsOnly
+            self, "Select Save Drive", current, QFileDialog.ShowDirsOnly
         )
         if directory:
             self._save_drive.setCurrentText(directory)
@@ -282,11 +295,11 @@ class AdvancedSaveDialog(PersistentDialog):
             save_drive = self._hidden_save_drive
 
         return {
-            'save_drive': save_drive,
-            'region': self._region.text(),
-            'save_subfolders': self._save_subfolders.isChecked(),
-            'live_view': self._live_view.isChecked(),
-            'comments': self._comments.toPlainText(),
+            "save_drive": save_drive,
+            "region": self._region.text(),
+            "save_subfolders": self._save_subfolders.isChecked(),
+            "live_view": self._live_view.isChecked(),
+            "comments": self._comments.toPlainText(),
         }
 
     def set_settings(self, settings: Dict[str, Any]) -> None:
@@ -295,19 +308,19 @@ class AdvancedSaveDialog(PersistentDialog):
         Args:
             settings: Dictionary with settings to apply
         """
-        if 'save_drive' in settings:
+        if "save_drive" in settings:
             if self._save_drive is not None:
-                self._save_drive.setCurrentText(settings['save_drive'])
+                self._save_drive.setCurrentText(settings["save_drive"])
             else:
-                self._hidden_save_drive = settings['save_drive']
-        if 'region' in settings:
-            self._region.setText(settings['region'])
-        if 'save_subfolders' in settings:
-            self._save_subfolders.setChecked(settings['save_subfolders'])
-        if 'live_view' in settings:
-            self._live_view.setChecked(settings['live_view'])
-        if 'comments' in settings:
-            self._comments.setPlainText(settings['comments'])
+                self._hidden_save_drive = settings["save_drive"]
+        if "region" in settings:
+            self._region.setText(settings["region"])
+        if "save_subfolders" in settings:
+            self._save_subfolders.setChecked(settings["save_subfolders"])
+        if "live_view" in settings:
+            self._live_view.setChecked(settings["live_view"])
+        if "comments" in settings:
+            self._comments.setPlainText(settings["comments"])
 
     # Individual property accessors
     @property

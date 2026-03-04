@@ -8,27 +8,25 @@ Run with:
     python -m examples.stage_control_example
 """
 
-import sys
 import logging
+import sys
 from pathlib import Path
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from PyQt5.QtWidgets import QApplication, QMainWindow, QTabWidget, QSplitter
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QApplication, QMainWindow, QSplitter, QTabWidget
 
-from py2flamingo.services.connection_service import ConnectionService
-from py2flamingo.controllers.position_controller import PositionController
 from py2flamingo.controllers.movement_controller import MovementController
+from py2flamingo.controllers.position_controller import PositionController
+from py2flamingo.services.connection_service import ConnectionService
 from py2flamingo.views.enhanced_stage_control_view import EnhancedStageControlView
 from py2flamingo.views.widgets.stage_map_widget import StageMapWidget
 
-
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 
@@ -57,16 +55,16 @@ class StageControlDemo(QMainWindow):
         # NOTE: Replace this with your actual connection setup
         # For demo purposes, we'll create a mock connection
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("DEMO MODE - Connection Setup")
-        print("="*60)
+        print("=" * 60)
         print("\nTo use with real microscope:")
         print("1. Update this method with actual connection code")
         print("2. Connect to microscope before creating controllers")
         print("\nExample:")
         print("    self.connection_service = ConnectionService()")
         print("    self.connection_service.connect('192.168.1.100', 5000)")
-        print("="*60 + "\n")
+        print("=" * 60 + "\n")
 
         # For demo, create connection service
         # (will work in offline mode for UI testing)
@@ -84,7 +82,7 @@ class StageControlDemo(QMainWindow):
         # Enhanced movement controller
         self.movement_controller = MovementController(
             connection_service=self.connection_service,
-            position_controller=self.position_controller
+            position_controller=self.position_controller,
         )
 
         print("✓ Controllers initialized")
@@ -136,9 +134,7 @@ class StageControlDemo(QMainWindow):
         map_widget = StageMapWidget(stage_limits=limits)
 
         # Connect to position updates
-        self.movement_controller.position_changed.connect(
-            map_widget.update_position
-        )
+        self.movement_controller.position_changed.connect(map_widget.update_position)
 
         # Connect to motion events for visual feedback
         self.movement_controller.motion_started.connect(
@@ -163,9 +159,7 @@ class StageControlDemo(QMainWindow):
         map_widget = StageMapWidget(stage_limits=limits)
 
         # Connect to position updates
-        self.movement_controller.position_changed.connect(
-            map_widget.update_position
-        )
+        self.movement_controller.position_changed.connect(map_widget.update_position)
 
         # Add to tabs
         self.tab_widget.addTab(map_widget, "Position Map")
@@ -173,9 +167,9 @@ class StageControlDemo(QMainWindow):
 
 def print_usage_examples():
     """Print example code snippets."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("PROGRAMMATIC USAGE EXAMPLES")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     print("1. ABSOLUTE MOVEMENT")
     print("-" * 40)
@@ -264,14 +258,14 @@ def print_usage_examples():
     print("movement_controller.position_controller.clear_emergency_stop()")
     print()
 
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
 
 def main():
     """Main entry point."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Flamingo Stage Control - Demo Application")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     # Print usage examples
     print_usage_examples()
@@ -290,5 +284,5 @@ def main():
     sys.exit(app.exec_())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

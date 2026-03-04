@@ -45,7 +45,7 @@ class WorkflowTemplateService:
         """Load templates from JSON file."""
         try:
             if self.templates_file.exists():
-                with open(self.templates_file, 'r') as f:
+                with open(self.templates_file, "r") as f:
                     data = json.load(f)
                     self._templates = {
                         name: WorkflowTemplate.from_dict(template_data)
@@ -67,22 +67,19 @@ class WorkflowTemplateService:
         """Save templates to JSON file."""
         try:
             data = {
-                name: template.to_dict()
-                for name, template in self._templates.items()
+                name: template.to_dict() for name, template in self._templates.items()
             }
-            with open(self.templates_file, 'w') as f:
+            with open(self.templates_file, "w") as f:
                 json.dump(data, f, indent=2)
-            self.logger.info(f"Saved {len(self._templates)} templates to {self.templates_file}")
+            self.logger.info(
+                f"Saved {len(self._templates)} templates to {self.templates_file}"
+            )
         except Exception as e:
             self.logger.error(f"Error saving templates: {e}", exc_info=True)
             raise
 
     def save_template(
-        self,
-        name: str,
-        workflow_type: str,
-        settings: Dict,
-        description: str = ""
+        self, name: str, workflow_type: str, settings: Dict, description: str = ""
     ) -> WorkflowTemplate:
         """
         Save a workflow template.
@@ -108,7 +105,7 @@ class WorkflowTemplateService:
             name=name,
             workflow_type=workflow_type,
             settings=settings,
-            description=description
+            description=description,
         )
         self._templates[name] = template
         self._save_templates()
@@ -173,10 +170,7 @@ class WorkflowTemplateService:
         Returns:
             List of templates matching the workflow type
         """
-        return [
-            t for t in self._templates.values()
-            if t.workflow_type == workflow_type
-        ]
+        return [t for t in self._templates.values() if t.workflow_type == workflow_type]
 
     def template_exists(self, name: str) -> bool:
         """

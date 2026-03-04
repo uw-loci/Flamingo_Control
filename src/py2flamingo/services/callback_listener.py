@@ -6,12 +6,12 @@ command socket for unsolicited messages (callbacks) from the microscope,
 such as motion-stopped notifications, system state changes, etc.
 """
 
+import logging
 import socket
 import struct
 import threading
-import logging
-from typing import Optional, Callable, Dict
-from queue import Queue, Empty
+from queue import Empty, Queue
+from typing import Callable, Dict, Optional
 
 
 class CallbackListener:
@@ -59,7 +59,9 @@ class CallbackListener:
             handler: Callable that takes parsed response dict
         """
         self._handlers[command_code] = handler
-        self.logger.info(f"Registered handler for command 0x{command_code:04X} ({command_code})")
+        self.logger.info(
+            f"Registered handler for command 0x{command_code:04X} ({command_code})"
+        )
 
     def unregister_handler(self, command_code: int) -> None:
         """
@@ -80,9 +82,7 @@ class CallbackListener:
 
         self._stop_event.clear()
         self._listener_thread = threading.Thread(
-            target=self._listen_loop,
-            name="CallbackListener",
-            daemon=True
+            target=self._listen_loop, name="CallbackListener", daemon=True
         )
         self._listener_thread.start()
         self.logger.info("Callback listener thread started")
@@ -129,7 +129,7 @@ class CallbackListener:
                     parsed = self._parse_response(data)
 
                     # Dispatch to handler if registered
-                    command_code = parsed['command_code']
+                    command_code = parsed["command_code"]
                     self.logger.debug(
                         f"Received unsolicited message: 0x{command_code:04X} ({command_code})"
                     )
@@ -144,10 +144,12 @@ class CallbackListener:
                         except Exception as e:
                             self.logger.error(
                                 f"Error in callback handler for {command_code}: {e}",
-                                exc_info=True
+                                exc_info=True,
                             )
                     else:
-                        self.logger.debug(f"No handler registered for command {command_code}")
+                        self.logger.debug(
+                            f"No handler registered for command {command_code}"
+                        )
 
             except socket.timeout:
                 # Timeout is expected - allows us to check stop_event
@@ -155,7 +157,9 @@ class CallbackListener:
 
             except Exception as e:
                 if not self._stop_event.is_set():
-                    self.logger.error(f"Error in callback listener loop: {e}", exc_info=True)
+                    self.logger.error(
+                        f"Error in callback listener loop: {e}", exc_info=True
+                    )
                 # Brief sleep before retry to avoid tight loop on persistent errors
                 self._stop_event.wait(0.1)
 
@@ -172,7 +176,7 @@ class CallbackListener:
             Bytes received or None if timeout/error
         """
         try:
-            data = b''
+            data = b""
             while len(data) < size:
                 chunk = self.command_socket.recv(size - len(data))
                 if not chunk:
@@ -203,37 +207,37 @@ class CallbackListener:
         if len(response) != 128:
             raise ValueError(f"Invalid response size: {len(response)} (expected 128)")
 
-        start_marker = struct.unpack('<I', response[0:4])[0]
-        command_code = struct.unpack('<I', response[4:8])[0]
-        status_code = struct.unpack('<I', response[8:12])[0]
+        start_marker = struct.unpack("<I", response[0:4])[0]
+        command_code = struct.unpack("<I", response[4:8])[0]
+        status_code = struct.unpack("<I", response[8:12])[0]
 
         # Unpack 7 parameters
         params = []
         for i in range(7):
             offset = 12 + (i * 4)
-            param = struct.unpack('<i', response[offset:offset+4])[0]
+            param = struct.unpack("<i", response[offset : offset + 4])[0]
             params.append(param)
 
         # Unpack value (double)
-        value = struct.unpack('<d', response[40:48])[0]
+        value = struct.unpack("<d", response[40:48])[0]
 
         # Get addDataBytes field
-        add_data_bytes = struct.unpack('<I', response[48:52])[0]
+        add_data_bytes = struct.unpack("<I", response[48:52])[0]
 
         # Get data buffer (72 bytes)
         data_buffer = response[52:124]
 
         # Get end marker
-        end_marker = struct.unpack('<I', response[124:128])[0]
+        end_marker = struct.unpack("<I", response[124:128])[0]
 
         return {
-            'start_marker': start_marker,
-            'command_code': command_code,
-            'status_code': status_code,
-            'params': params,
-            'value': value,
-            'add_data_bytes': add_data_bytes,
-            'data_buffer': data_buffer,
-            'end_marker': end_marker,
-            'raw': response
+            "start_marker": start_marker,
+            "command_code": command_code,
+            "status_code": status_code,
+            "params": params,
+            "value": value,
+            "add_data_bytes": add_data_bytes,
+            "data_buffer": data_buffer,
+            "end_marker": end_marker,
+            "raw": response,
         }

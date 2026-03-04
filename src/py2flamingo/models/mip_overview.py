@@ -5,10 +5,12 @@ Data models for MIP Overview functionality.
 This module defines data structures for loading and displaying
 Maximum Intensity Projection (MIP) tile overviews from saved acquisitions.
 """
-from dataclasses import dataclass, field
-from typing import List, Dict, Tuple, Optional, Any
-from pathlib import Path
+
 import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 
 
@@ -31,12 +33,15 @@ class MIPTileResult:
         z_stack_min: Minimum Z of original Z-stack (if known)
         z_stack_max: Maximum Z of original Z-stack (if known)
     """
+
     x: float
     y: float
     z: float
     tile_x_idx: int
     tile_y_idx: int
-    image: np.ndarray = field(default_factory=lambda: np.zeros((100, 100), dtype=np.uint16))
+    image: np.ndarray = field(
+        default_factory=lambda: np.zeros((100, 100), dtype=np.uint16)
+    )
     folder_path: Optional[Path] = None
     rotation_angle: float = 0.0
     z_stack_min: float = 0.0
@@ -49,19 +54,21 @@ class MIPTileResult:
             Dictionary with tile metadata (excludes image data)
         """
         return {
-            'x': self.x,
-            'y': self.y,
-            'z': self.z,
-            'tile_x_idx': self.tile_x_idx,
-            'tile_y_idx': self.tile_y_idx,
-            'folder_path': str(self.folder_path) if self.folder_path else None,
-            'rotation_angle': self.rotation_angle,
-            'z_stack_min': self.z_stack_min,
-            'z_stack_max': self.z_stack_max,
+            "x": self.x,
+            "y": self.y,
+            "z": self.z,
+            "tile_x_idx": self.tile_x_idx,
+            "tile_y_idx": self.tile_y_idx,
+            "folder_path": str(self.folder_path) if self.folder_path else None,
+            "rotation_angle": self.rotation_angle,
+            "z_stack_min": self.z_stack_min,
+            "z_stack_max": self.z_stack_max,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], image: Optional[np.ndarray] = None) -> 'MIPTileResult':
+    def from_dict(
+        cls, data: Dict[str, Any], image: Optional[np.ndarray] = None
+    ) -> "MIPTileResult":
         """Create MIPTileResult from dictionary.
 
         Args:
@@ -72,16 +79,16 @@ class MIPTileResult:
             New MIPTileResult instance
         """
         return cls(
-            x=data['x'],
-            y=data['y'],
-            z=data.get('z', 0.0),
-            tile_x_idx=data['tile_x_idx'],
-            tile_y_idx=data['tile_y_idx'],
+            x=data["x"],
+            y=data["y"],
+            z=data.get("z", 0.0),
+            tile_x_idx=data["tile_x_idx"],
+            tile_y_idx=data["tile_y_idx"],
             image=image if image is not None else np.zeros((100, 100), dtype=np.uint16),
-            folder_path=Path(data['folder_path']) if data.get('folder_path') else None,
-            rotation_angle=data.get('rotation_angle', 0.0),
-            z_stack_min=data.get('z_stack_min', 0.0),
-            z_stack_max=data.get('z_stack_max', 0.0),
+            folder_path=Path(data["folder_path"]) if data.get("folder_path") else None,
+            rotation_angle=data.get("rotation_angle", 0.0),
+            z_stack_min=data.get("z_stack_min", 0.0),
+            z_stack_max=data.get("z_stack_max", 0.0),
         )
 
 
@@ -102,6 +109,7 @@ class MIPOverviewConfig:
         rotation_angle: Rotation angle of the tiles (default 0.0)
         invert_x: Whether X-axis is inverted for display (low X on right)
     """
+
     base_folder: Path
     date_folder: str
     tiles_x: int
@@ -118,18 +126,18 @@ class MIPOverviewConfig:
             Dictionary with config metadata
         """
         return {
-            'base_folder': str(self.base_folder),
-            'date_folder': self.date_folder,
-            'tiles_x': self.tiles_x,
-            'tiles_y': self.tiles_y,
-            'tile_size_pixels': self.tile_size_pixels,
-            'downsample_factor': self.downsample_factor,
-            'rotation_angle': self.rotation_angle,
-            'invert_x': self.invert_x,
+            "base_folder": str(self.base_folder),
+            "date_folder": self.date_folder,
+            "tiles_x": self.tiles_x,
+            "tiles_y": self.tiles_y,
+            "tile_size_pixels": self.tile_size_pixels,
+            "downsample_factor": self.downsample_factor,
+            "rotation_angle": self.rotation_angle,
+            "invert_x": self.invert_x,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'MIPOverviewConfig':
+    def from_dict(cls, data: Dict[str, Any]) -> "MIPOverviewConfig":
         """Create MIPOverviewConfig from dictionary.
 
         Args:
@@ -139,14 +147,14 @@ class MIPOverviewConfig:
             New MIPOverviewConfig instance
         """
         return cls(
-            base_folder=Path(data['base_folder']),
-            date_folder=data['date_folder'],
-            tiles_x=data['tiles_x'],
-            tiles_y=data['tiles_y'],
-            tile_size_pixels=data.get('tile_size_pixels', 2048),
-            downsample_factor=data.get('downsample_factor', 4),
-            rotation_angle=data.get('rotation_angle', 0.0),
-            invert_x=data.get('invert_x', False),
+            base_folder=Path(data["base_folder"]),
+            date_folder=data["date_folder"],
+            tiles_x=data["tiles_x"],
+            tiles_y=data["tiles_y"],
+            tile_size_pixels=data.get("tile_size_pixels", 2048),
+            downsample_factor=data.get("downsample_factor", 4),
+            rotation_angle=data.get("rotation_angle", 0.0),
+            invert_x=data.get("invert_x", False),
         )
 
 
@@ -165,10 +173,12 @@ def parse_coords_from_folder(folder_name: str) -> Tuple[float, float]:
     Raises:
         ValueError: If folder name doesn't match expected pattern
     """
-    match = re.match(r'X([-\d.]+)_Y([-\d.]+)', folder_name)
+    match = re.match(r"X([-\d.]+)_Y([-\d.]+)", folder_name)
     if match:
         return float(match.group(1)), float(match.group(2))
-    raise ValueError(f"Invalid folder name format: {folder_name}. Expected 'X{{x}}_Y{{y}}'")
+    raise ValueError(
+        f"Invalid folder name format: {folder_name}. Expected 'X{{x}}_Y{{y}}'"
+    )
 
 
 def calculate_grid_indices(tiles: List[MIPTileResult]) -> None:
@@ -208,7 +218,7 @@ def find_date_folders(base_path: Path) -> List[str]:
     Returns:
         List of date folder names, sorted newest first
     """
-    date_pattern = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+    date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
     date_folders = []
 
     if base_path.is_dir():
@@ -231,7 +241,7 @@ def find_tile_folders(date_path: Path) -> List[Path]:
     Returns:
         List of tile folder paths
     """
-    tile_pattern = re.compile(r'^X[-\d.]+_Y[-\d.]+$')
+    tile_pattern = re.compile(r"^X[-\d.]+_Y[-\d.]+$")
     tile_folders = []
 
     if date_path.is_dir():
@@ -253,8 +263,9 @@ def load_invert_x_setting() -> bool:
         True if X-axis should be inverted for display
     """
     try:
-        import yaml
         import logging
+
+        import yaml
 
         logger = logging.getLogger(__name__)
 
@@ -266,11 +277,15 @@ def load_invert_x_setting() -> bool:
 
         for config_path in config_paths:
             if config_path.exists():
-                with open(config_path, 'r') as f:
+                with open(config_path, "r") as f:
                     config = yaml.safe_load(f)
 
-                invert_x = config.get('stage_control', {}).get('invert_x_default', False)
-                logger.info(f"MIP Overview: loaded invert_x={invert_x} from {config_path.name}")
+                invert_x = config.get("stage_control", {}).get(
+                    "invert_x_default", False
+                )
+                logger.info(
+                    f"MIP Overview: loaded invert_x={invert_x} from {config_path.name}"
+                )
                 return invert_x
 
         logger.warning("Visualization config not found, using invert_x=False")
@@ -278,5 +293,8 @@ def load_invert_x_setting() -> bool:
 
     except Exception as e:
         import logging
-        logging.getLogger(__name__).warning(f"Failed to load invert_x setting: {e}, using False")
+
+        logging.getLogger(__name__).warning(
+            f"Failed to load invert_x setting: {e}, using False"
+        )
         return False

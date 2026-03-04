@@ -9,16 +9,17 @@ This controller handles:
 """
 
 import logging
-from typing import Optional, List
-from PyQt5.QtCore import QObject, pyqtSignal, QTimer, QRunnable, QThreadPool, pyqtSlot
+from typing import List, Optional
 
-from py2flamingo.services.laser_led_service import LaserLEDService, LaserInfo
+from PyQt5.QtCore import QObject, QRunnable, QThreadPool, QTimer, pyqtSignal, pyqtSlot
+
+from py2flamingo.services.laser_led_service import LaserInfo, LaserLEDService
 
 
 class LaserEnableWorker(QRunnable):
     """Background worker for async laser enabling operations."""
 
-    def __init__(self, controller: 'LaserLEDController', laser_index: int, path: str):
+    def __init__(self, controller: "LaserLEDController", laser_index: int, path: str):
         super().__init__()
         self.controller = controller
         self.laser_index = laser_index
@@ -41,20 +42,30 @@ class LaserEnableWorker(QRunnable):
 
             # Step 2: Set laser power
             power = controller._laser_powers.get(self.laser_index, 5.0)
-            controller.logger.info(f"[ASYNC] Step 2: Setting laser {self.laser_index} power to {power:.1f}%")
-            success, actual_power = laser_led_service.set_laser_power(self.laser_index, power)
+            controller.logger.info(
+                f"[ASYNC] Step 2: Setting laser {self.laser_index} power to {power:.1f}%"
+            )
+            success, actual_power = laser_led_service.set_laser_power(
+                self.laser_index, power
+            )
             if success:
                 controller._laser_powers[self.laser_index] = actual_power
 
             # Step 3: Enable laser preview
-            controller.logger.info(f"[ASYNC] Step 3: Enabling laser {self.laser_index} preview")
+            controller.logger.info(
+                f"[ASYNC] Step 3: Enabling laser {self.laser_index} preview"
+            )
             laser_led_service.enable_laser_preview(self.laser_index)
 
             # Step 4: Enable illumination
-            left_enabled = (self.path == "left")
-            right_enabled = (self.path == "right")
-            controller.logger.info(f"[ASYNC] Step 4: Enabling {self.path.upper()} illumination")
-            laser_led_service.enable_illumination(left=left_enabled, right=right_enabled)
+            left_enabled = self.path == "left"
+            right_enabled = self.path == "right"
+            controller.logger.info(
+                f"[ASYNC] Step 4: Enabling {self.path.upper()} illumination"
+            )
+            laser_led_service.enable_illumination(
+                left=left_enabled, right=right_enabled
+            )
 
             # Update state and emit success signal
             controller._active_source = f"laser_{self.laser_index}"
@@ -69,7 +80,9 @@ class LaserEnableWorker(QRunnable):
 
             # Emit signal on main thread
             controller.preview_enabled.emit(f"{laser_name} ({self.path.upper()} path)")
-            controller.logger.info(f"[ASYNC] Laser {self.laser_index} enabled successfully")
+            controller.logger.info(
+                f"[ASYNC] Laser {self.laser_index} enabled successfully"
+            )
 
         except Exception as e:
             error_msg = f"Error enabling laser {self.laser_index}: {e}"
@@ -80,7 +93,7 @@ class LaserEnableWorker(QRunnable):
 class LEDEnableWorker(QRunnable):
     """Background worker for async LED enabling operations."""
 
-    def __init__(self, controller: 'LaserLEDController', led_color: int):
+    def __init__(self, controller: "LaserLEDController", led_color: int):
         super().__init__()
         self.controller = controller
         self.led_color = led_color
@@ -105,7 +118,9 @@ class LEDEnableWorker(QRunnable):
 
             # Step 2: Set LED intensity
             intensity = controller._led_intensities.get(self.led_color, 50.0)
-            controller.logger.info(f"[ASYNC] Step 2: Setting {color_name} LED intensity to {intensity:.1f}%")
+            controller.logger.info(
+                f"[ASYNC] Step 2: Setting {color_name} LED intensity to {intensity:.1f}%"
+            )
             laser_led_service.set_led_intensity(self.led_color, intensity)
 
             # Step 3: Enable LED preview
@@ -213,10 +228,14 @@ class LaserLEDController(QObject):
                 old_power = self._laser_powers.get(laser.index, 5.0)
                 self._laser_powers[laser.index] = actual_power
                 self.laser_power_changed.emit(laser.index, actual_power)
-                self.logger.info(f"Laser {laser.index} ({laser.wavelength}nm): {actual_power:.2f}% "
-                               f"(was {old_power:.2f}%)")
+                self.logger.info(
+                    f"Laser {laser.index} ({laser.wavelength}nm): {actual_power:.2f}% "
+                    f"(was {old_power:.2f}%)"
+                )
             else:
-                self.logger.warning(f"Laser {laser.index} ({laser.wavelength}nm): failed to query power")
+                self.logger.warning(
+                    f"Laser {laser.index} ({laser.wavelength}nm): failed to query power"
+                )
 
     def get_led_color(self) -> int:
         """Get current LED color selection (0=Red, 1=Green, 2=Blue, 3=White)."""
@@ -240,7 +259,9 @@ class LaserLEDController(QObject):
         """Get currently active light source ("laser_N" or "led" or None)."""
         return self._active_source
 
-    def set_laser_power(self, laser_index: int, power_percent: float) -> tuple[bool, float]:
+    def set_laser_power(
+        self, laser_index: int, power_percent: float
+    ) -> tuple[bool, float]:
         """
         Set laser power level with async verification of actual power.
 
@@ -261,17 +282,23 @@ class LaserLEDController(QObject):
         """
         try:
             # Send SET command (returns immediately)
-            success, requested_power = self.laser_led_service.set_laser_power(laser_index, power_percent)
+            success, requested_power = self.laser_led_service.set_laser_power(
+                laser_index, power_percent
+            )
 
             if success:
                 # Update GUI immediately with requested power (responsive, no lag)
                 self._laser_powers[laser_index] = requested_power
                 self.laser_power_changed.emit(laser_index, requested_power)
-                self.logger.debug(f"Laser {laser_index} power set to {requested_power:.1f}% (verifying...)")
+                self.logger.debug(
+                    f"Laser {laser_index} power set to {requested_power:.1f}% (verifying...)"
+                )
 
                 # Schedule async verification to get actual power from hardware
                 # Uses QTimer to avoid blocking GUI
-                QTimer.singleShot(200, lambda: self._verify_laser_power(laser_index, requested_power))
+                QTimer.singleShot(
+                    200, lambda: self._verify_laser_power(laser_index, requested_power)
+                )
             else:
                 error_msg = f"Failed to set laser {laser_index} power"
                 self.logger.error(error_msg)
@@ -309,11 +336,15 @@ class LaserLEDController(QObject):
                 if abs(actual_power - requested_power) > 0.01:
                     # Hardware quantized to different value - update GUI with exact 2-decimal precision
                     self.laser_power_changed.emit(laser_index, actual_power)
-                    self.logger.info(f"Laser {laser_index}: requested {requested_power:.2f}%, "
-                                   f"actual {actual_power:.2f}% (hardware quantization)")
+                    self.logger.info(
+                        f"Laser {laser_index}: requested {requested_power:.2f}%, "
+                        f"actual {actual_power:.2f}% (hardware quantization)"
+                    )
                 else:
                     # Actual matches requested - no GUI update needed
-                    self.logger.debug(f"Laser {laser_index} verified at {actual_power:.2f}%")
+                    self.logger.debug(
+                        f"Laser {laser_index} verified at {actual_power:.2f}%"
+                    )
             else:
                 self.logger.warning(f"Failed to verify laser {laser_index} power")
 
@@ -343,13 +374,17 @@ class LaserLEDController(QObject):
             True if successful
         """
         try:
-            success = self.laser_led_service.set_led_intensity(led_color, intensity_percent)
+            success = self.laser_led_service.set_led_intensity(
+                led_color, intensity_percent
+            )
 
             if success:
                 self._led_intensities[led_color] = intensity_percent
                 self.led_intensity_changed.emit(intensity_percent)
                 color_names = ["Red", "Green", "Blue", "White"]
-                self.logger.debug(f"{color_names[led_color]} LED intensity set to {intensity_percent:.1f}%")
+                self.logger.debug(
+                    f"{color_names[led_color]} LED intensity set to {intensity_percent:.1f}%"
+                )
             else:
                 error_msg = f"Failed to set LED intensity for color {led_color}"
                 self.logger.error(error_msg)
@@ -383,16 +418,26 @@ class LaserLEDController(QObject):
         """
         try:
             path_display = path.upper()
-            self.logger.info(f"Enabling laser {laser_index} for preview on {path_display} path (full sequence)")
+            self.logger.info(
+                f"Enabling laser {laser_index} for preview on {path_display} path (full sequence)"
+            )
 
             # Step 1: Disable ALL light sources first (LED + all lasers)
-            self.logger.info("Step 1: Disabling all light sources (ensures clean state)")
-            self.disable_all_light_sources(emit_signal=False)  # Don't emit - this is internal cleanup
+            self.logger.info(
+                "Step 1: Disabling all light sources (ensures clean state)"
+            )
+            self.disable_all_light_sources(
+                emit_signal=False
+            )  # Don't emit - this is internal cleanup
 
             # Step 2: Set laser power
             power = self._laser_powers.get(laser_index, 5.0)
-            self.logger.info(f"Step 2: Setting laser {laser_index} power to {power:.1f}%")
-            success, actual_power = self.laser_led_service.set_laser_power(laser_index, power)
+            self.logger.info(
+                f"Step 2: Setting laser {laser_index} power to {power:.1f}%"
+            )
+            success, actual_power = self.laser_led_service.set_laser_power(
+                laser_index, power
+            )
             if not success:
                 raise RuntimeError(f"Failed to set laser {laser_index} power")
             # Update cached power with actual value from hardware
@@ -404,10 +449,14 @@ class LaserLEDController(QObject):
                 raise RuntimeError(f"Failed to enable laser {laser_index} preview")
 
             # Step 4: Enable illumination on selected path (CRITICAL - coordinates exposure timing)
-            left_enabled = (path == "left")
-            right_enabled = (path == "right")
-            self.logger.info(f"Step 4: Enabling {path_display} illumination path for synchronized imaging")
-            if not self.laser_led_service.enable_illumination(left=left_enabled, right=right_enabled):
+            left_enabled = path == "left"
+            right_enabled = path == "right"
+            self.logger.info(
+                f"Step 4: Enabling {path_display} illumination path for synchronized imaging"
+            )
+            if not self.laser_led_service.enable_illumination(
+                left=left_enabled, right=right_enabled
+            ):
                 raise RuntimeError(f"Failed to enable {path_display} illumination")
 
             # Update state
@@ -421,7 +470,9 @@ class LaserLEDController(QObject):
                     break
 
             self.preview_enabled.emit(f"{laser_name} ({path_display} path)")
-            self.logger.info(f"Laser {laser_index} enabled on {path_display} path - ready for imaging")
+            self.logger.info(
+                f"Laser {laser_index} enabled on {path_display} path - ready for imaging"
+            )
             return True
 
         except Exception as e:
@@ -459,12 +510,18 @@ class LaserLEDController(QObject):
             self.logger.info(f"Enabling {color_name} LED for preview (full sequence)")
 
             # Step 1: Disable ALL light sources first (all lasers + LED)
-            self.logger.info("Step 1: Disabling all light sources (ensures clean state)")
-            self.disable_all_light_sources(emit_signal=False)  # Don't emit - this is internal cleanup
+            self.logger.info(
+                "Step 1: Disabling all light sources (ensures clean state)"
+            )
+            self.disable_all_light_sources(
+                emit_signal=False
+            )  # Don't emit - this is internal cleanup
 
             # Step 2: Set intensity for selected color
             intensity = self._led_intensities.get(self._led_color, 50.0)
-            self.logger.info(f"Step 2: Setting {color_name} LED intensity to {intensity:.1f}%")
+            self.logger.info(
+                f"Step 2: Setting {color_name} LED intensity to {intensity:.1f}%"
+            )
             if not self.laser_led_service.set_led_intensity(self._led_color, intensity):
                 raise RuntimeError(f"Failed to set {color_name} LED intensity")
 
@@ -479,11 +536,15 @@ class LaserLEDController(QObject):
                 raise RuntimeError("Failed to enable illumination")
 
             # Update state
-            self._active_source = f"led_{color_name[0]}"  # "led_R", "led_G", "led_B", or "led_W"
+            self._active_source = (
+                f"led_{color_name[0]}"  # "led_R", "led_G", "led_B", or "led_W"
+            )
             self._active_laser_index = None
 
             self.preview_enabled.emit(f"{color_name} LED")
-            self.logger.info(f"{color_name} LED enabled for preview - ready for imaging")
+            self.logger.info(
+                f"{color_name} LED enabled for preview - ready for imaging"
+            )
             return True
 
         except Exception as e:
@@ -492,7 +553,9 @@ class LaserLEDController(QObject):
             self.error_occurred.emit(error_msg)
             return False
 
-    def enable_laser_for_preview_async(self, laser_index: int, path: str = "left") -> None:
+    def enable_laser_for_preview_async(
+        self, laser_index: int, path: str = "left"
+    ) -> None:
         """
         Enable laser for preview asynchronously (non-blocking).
 
@@ -504,7 +567,9 @@ class LaserLEDController(QObject):
             laser_index: Laser index (1-7)
             path: Light path ("left" or "right")
         """
-        self.logger.info(f"Queuing async laser {laser_index} enable on {path.upper()} path")
+        self.logger.info(
+            f"Queuing async laser {laser_index} enable on {path.upper()} path"
+        )
 
         # Create and queue worker
         worker = LaserEnableWorker(self, laser_index, path)

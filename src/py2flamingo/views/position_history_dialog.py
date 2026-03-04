@@ -9,16 +9,23 @@ allowing users to:
 """
 
 import logging
-from typing import Optional, List
-from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QPushButton, QLabel, QGroupBox, QMessageBox
-)
+from typing import List, Optional
+
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import (
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+)
 
-from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.models.microscope import Position
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.views.colors import SUCCESS_COLOR
 
 
@@ -104,8 +111,12 @@ class PositionHistoryDialog(PersistentDialog):
         self.z_extent_label = QLabel("Z: —")
         self.extent_count_label = QLabel("Positions: 0")
 
-        for label in [self.x_extent_label, self.y_extent_label,
-                      self.z_extent_label, self.extent_count_label]:
+        for label in [
+            self.x_extent_label,
+            self.y_extent_label,
+            self.z_extent_label,
+            self.extent_count_label,
+        ]:
             label.setStyleSheet("padding: 5px; font-family: monospace;")
             extent_layout.addWidget(label)
 
@@ -179,15 +190,14 @@ class PositionHistoryDialog(PersistentDialog):
             f"R: {position.r:.2f}°\n\n"
             f"Move all 4 axes to this position?",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.No,
         )
 
         if reply == QMessageBox.Yes:
             try:
                 # Move to the selected position
                 self.movement_controller.position_controller.move_to_position(
-                    position,
-                    validate=True
+                    position, validate=True
                 )
                 self.logger.info(f"Moving to historical position: {position}")
                 QMessageBox.information(
@@ -195,13 +205,11 @@ class PositionHistoryDialog(PersistentDialog):
                     "Moving",
                     "Moving to selected position...\n\n"
                     "The dialog will remain open so you can\n"
-                    "select another position if needed."
+                    "select another position if needed.",
                 )
             except Exception as e:
                 QMessageBox.critical(
-                    self,
-                    "Movement Error",
-                    f"Failed to move to position:\n{str(e)}"
+                    self, "Movement Error", f"Failed to move to position:\n{str(e)}"
                 )
                 self.logger.error(f"Failed to move to historical position: {e}")
 
@@ -228,12 +236,15 @@ class PositionHistoryDialog(PersistentDialog):
         # Filter positions that match current rotation (±1°)
         rotation_tolerance = 1.0  # degrees
         matching_positions = [
-            pos for pos in history
+            pos
+            for pos in history
             if abs(pos.r - current_rotation) <= rotation_tolerance
         ]
 
         if not matching_positions:
-            self.x_extent_label.setText(f"X: — (no positions at R≈{current_rotation:.2f}°)")
+            self.x_extent_label.setText(
+                f"X: — (no positions at R≈{current_rotation:.2f}°)"
+            )
             self.y_extent_label.setText("Y: —")
             self.z_extent_label.setText("Z: —")
             self.extent_count_label.setText("Positions: 0")

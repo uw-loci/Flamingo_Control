@@ -13,15 +13,20 @@ Signal wiring is handled by services.signal_wiring.
 Voxel storage creation is handled by visualization.voxel_storage_factory.
 """
 
-import sys
 import logging
+import sys
 from typing import Optional
-from PyQt5.QtWidgets import QApplication
+
 from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtWidgets import QApplication
 
 from py2flamingo.services.component_factory import (
-    create_core_layer, create_models_layer, create_services_layer,
-    create_controllers_layer, create_views_layer, create_pipeline_layer
+    create_controllers_layer,
+    create_core_layer,
+    create_models_layer,
+    create_pipeline_layer,
+    create_services_layer,
+    create_views_layer,
 )
 from py2flamingo.services.signal_wiring import wire_all_signals
 from py2flamingo.visualization.voxel_storage_factory import create_voxel_storage
@@ -59,7 +64,9 @@ class FlamingoApplication(QObject):
     acquisition_started = pyqtSignal()
     acquisition_stopped = pyqtSignal()
 
-    def __init__(self, default_ip: Optional[str] = None, default_port: Optional[int] = None):
+    def __init__(
+        self, default_ip: Optional[str] = None, default_port: Optional[int] = None
+    ):
         """Initialize application with optional default connection settings.
 
         Args:
@@ -130,60 +137,70 @@ class FlamingoApplication(QObject):
 
         # --- Core layer ---
         core = create_core_layer()
-        self.tcp_connection = core['tcp_connection']
-        self.protocol_encoder = core['protocol_encoder']
-        self.queue_manager = core['queue_manager']
-        self.event_manager = core['event_manager']
+        self.tcp_connection = core["tcp_connection"]
+        self.protocol_encoder = core["protocol_encoder"]
+        self.queue_manager = core["queue_manager"]
+        self.event_manager = core["event_manager"]
 
         # --- Models layer ---
         models = create_models_layer()
-        self.connection_model = models['connection_model']
-        self.workflow_model = models['workflow_model']
-        self.display_model = models['display_model']
+        self.connection_model = models["connection_model"]
+        self.workflow_model = models["workflow_model"]
+        self.display_model = models["display_model"]
 
         # --- Services layer ---
         services = create_services_layer(
-            self.tcp_connection, self.protocol_encoder, self.queue_manager,
-            self.connection_model, self.event_manager
+            self.tcp_connection,
+            self.protocol_encoder,
+            self.queue_manager,
+            self.connection_model,
+            self.event_manager,
         )
-        self.connection_service = services['connection_service']
-        self.workflow_service = services['workflow_service']
-        self.status_service = services['status_service']
-        self.status_indicator_service = services['status_indicator_service']
-        self.config_manager = services['config_manager']
-        self.geometry_manager = services['geometry_manager']
+        self.connection_service = services["connection_service"]
+        self.workflow_service = services["workflow_service"]
+        self.status_service = services["status_service"]
+        self.status_indicator_service = services["status_indicator_service"]
+        self.config_manager = services["config_manager"]
+        self.geometry_manager = services["geometry_manager"]
 
         # --- Controllers layer ---
         controllers = create_controllers_layer(
-            self.connection_service, self.connection_model, self.config_manager,
-            self.workflow_service, self.workflow_model,
-            self.status_indicator_service
+            self.connection_service,
+            self.connection_model,
+            self.config_manager,
+            self.workflow_service,
+            self.workflow_model,
+            self.status_indicator_service,
         )
-        self.connection_controller = controllers['connection_controller']
-        self.workflow_controller = controllers['workflow_controller']
-        self.workflow_queue_service = controllers['workflow_queue_service']
-        self.position_controller = controllers['position_controller']
-        self.movement_controller = controllers['movement_controller']
-        self.config_service = controllers['config_service']
-        self.laser_led_service = controllers['laser_led_service']
-        self.laser_led_controller = controllers['laser_led_controller']
-        self.camera_service = controllers['camera_service']
-        self.camera_controller = controllers['camera_controller']
+        self.connection_controller = controllers["connection_controller"]
+        self.workflow_controller = controllers["workflow_controller"]
+        self.workflow_queue_service = controllers["workflow_queue_service"]
+        self.position_controller = controllers["position_controller"]
+        self.movement_controller = controllers["movement_controller"]
+        self.config_service = controllers["config_service"]
+        self.laser_led_service = controllers["laser_led_service"]
+        self.laser_led_controller = controllers["laser_led_controller"]
+        self.camera_service = controllers["camera_service"]
+        self.camera_controller = controllers["camera_controller"]
 
         # --- Views layer ---
         views = create_views_layer(
-            self.connection_controller, self.config_manager,
-            self.position_controller, self.workflow_service,
-            self.workflow_controller, self.movement_controller,
-            self.camera_controller, self.laser_led_controller,
-            self.geometry_manager
+            self.connection_controller,
+            self.config_manager,
+            self.position_controller,
+            self.workflow_service,
+            self.workflow_controller,
+            self.movement_controller,
+            self.camera_controller,
+            self.laser_led_controller,
+            self.geometry_manager,
         )
-        self.connection_view = views['connection_view']
-        self.workflow_view = views['workflow_view']
-        self.sample_info_view = views['sample_info_view']
-        self.stage_control_view = views['stage_control_view']
-        self.image_controls_window = views['image_controls_window']
-        self.camera_live_viewer = views['camera_live_viewer']
+        self.connection_view = views["connection_view"]
+        self.workflow_view = views["workflow_view"]
+        self.sample_info_view = views["sample_info_view"]
+        self.stage_control_view = views["stage_control_view"]
+        self.image_controls_window = views["image_controls_window"]
+        self.camera_live_viewer = views["camera_live_viewer"]
         # Set app reference for save drive persistence
         self.workflow_view.set_app(self)
 
@@ -203,8 +220,8 @@ class FlamingoApplication(QObject):
 
         # --- Pipeline layer ---
         pipeline = create_pipeline_layer(app=self)
-        self.pipeline_service = pipeline['pipeline_service']
-        self.pipeline_controller = pipeline['pipeline_controller']
+        self.pipeline_service = pipeline["pipeline_service"]
+        self.pipeline_controller = pipeline["pipeline_controller"]
 
         self.logger.info("Application dependencies setup complete")
 
@@ -244,6 +261,7 @@ class FlamingoApplication(QObject):
             """Query position from hardware and update views (runs in background thread)."""
             try:
                 from py2flamingo.services.stage_service import StageService
+
                 stage_service = StageService(self.connection_service)
 
                 # Query position from hardware (blocking call - queries all 4 axes)
@@ -262,17 +280,20 @@ class FlamingoApplication(QObject):
                             position.x, position.y, position.z, position.r
                         )
                 else:
-                    self.logger.warning("Failed to query position from hardware - no response")
+                    self.logger.warning(
+                        "Failed to query position from hardware - no response"
+                    )
 
             except Exception as e:
-                self.logger.error(f"Error querying position from hardware: {e}", exc_info=True)
+                self.logger.error(
+                    f"Error querying position from hardware: {e}", exc_info=True
+                )
 
         # Run query in background thread to avoid blocking GUI during socket I/O
         import threading
+
         query_thread = threading.Thread(
-            target=query_and_update_position,
-            daemon=True,
-            name="PositionQuery"
+            target=query_and_update_position, daemon=True, name="PositionQuery"
         )
         query_thread.start()
 
@@ -343,7 +364,9 @@ class FlamingoApplication(QObject):
         - Managing window lifecycle
         """
         from py2flamingo.main_window import MainWindow
-        from py2flamingo.views.widgets.status_indicator_widget import StatusIndicatorWidget
+        from py2flamingo.views.widgets.status_indicator_widget import (
+            StatusIndicatorWidget,
+        )
 
         self.logger.info("Creating main window...")
 
@@ -367,7 +390,7 @@ class FlamingoApplication(QObject):
             camera_live_viewer=self.camera_live_viewer,
             image_controls_window=self.image_controls_window,
             app=self,  # Pass FlamingoApplication reference for accessing sample_view etc.
-            geometry_manager=self.geometry_manager
+            geometry_manager=self.geometry_manager,
         )
         self.main_window.setWindowTitle("Flamingo Microscope Control")
         # Window size is automatically set based on screen dimensions
@@ -461,7 +484,7 @@ class FlamingoApplication(QObject):
         Returns:
             MicroscopeSettingsService instance, or None if config_service not available
         """
-        if hasattr(self, 'config_service') and self.config_service:
+        if hasattr(self, "config_service") and self.config_service:
             return self.config_service.microscope_settings
         return None
 
@@ -495,7 +518,9 @@ class FlamingoApplication(QObject):
             True if acquisition started, False if already in progress
         """
         if self._acquisition_in_progress:
-            self.logger.warning(f"Acquisition already in progress, cannot start '{source}'")
+            self.logger.warning(
+                f"Acquisition already in progress, cannot start '{source}'"
+            )
             return False
 
         self._acquisition_in_progress = True

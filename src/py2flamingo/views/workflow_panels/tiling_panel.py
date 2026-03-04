@@ -5,13 +5,21 @@ Provides UI for tile/mosaic acquisition parameters.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QSpinBox, QDoubleSpinBox, QComboBox, QGroupBox, QGridLayout, QFrame
-)
 from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtWidgets import (
+    QComboBox,
+    QDoubleSpinBox,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 from py2flamingo.models.data.workflow import TileSettings
 
@@ -120,8 +128,10 @@ class TilingPanel(QWidget):
         grid.addWidget(self._end_y_label, 5, 3)
 
         # Info text
-        info_label = QLabel("Tile scan will acquire a mosaic of images. "
-                           "End position is calculated from start position + scan area.")
+        info_label = QLabel(
+            "Tile scan will acquire a mosaic of images. "
+            "End position is calculated from start position + scan area."
+        )
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: gray; font-size: 9pt;")
         grid.addWidget(info_label, 6, 0, 1, 4)
@@ -187,9 +197,9 @@ class TilingPanel(QWidget):
             Dictionary for workflow file Stack Settings section
         """
         return {
-            'Stack option': 'Tile',
-            'Stack option settings 1': self._tiles_x.value(),
-            'Stack option settings 2': self._tiles_y.value(),
+            "Stack option": "Tile",
+            "Stack option settings 1": self._tiles_x.value(),
+            "Stack option settings 2": self._tiles_y.value(),
         }
 
     def set_settings(self, settings: TileSettings) -> None:
@@ -277,8 +287,9 @@ class TilingPanel(QWidget):
             self._tiles_x.setToolTip("")
             self._tiles_y.setToolTip("")
 
-    def set_from_positions(self, x_min: float, x_max: float,
-                           y_min: float, y_max: float) -> None:
+    def set_from_positions(
+        self, x_min: float, x_max: float, y_min: float, y_max: float
+    ) -> None:
         """
         Calculate tile grid from DualPositionPanel positions.
 
@@ -319,6 +330,8 @@ class TilingPanel(QWidget):
 
         self._update_calculations()
 
-        self._logger.debug(f"Tiles from positions: X range={x_range_mm:.2f}mm -> {tiles_x} tiles, "
-                          f"Y range={y_range_mm:.2f}mm -> {tiles_y} tiles "
-                          f"(FOV={fov_mm:.2f}mm, overlap={self._overlap.value():.1f}%)")
+        self._logger.debug(
+            f"Tiles from positions: X range={x_range_mm:.2f}mm -> {tiles_x} tiles, "
+            f"Y range={y_range_mm:.2f}mm -> {tiles_y} tiles "
+            f"(FOV={fov_mm:.2f}mm, overlap={self._overlap.value():.1f}%)"
+        )

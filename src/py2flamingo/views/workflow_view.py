@@ -8,33 +8,59 @@ tiling, and multi-angle acquisitions.
 
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QGroupBox, QScrollArea,
-    QFrame, QMessageBox, QProgressBar, QStackedWidget,
-    QTabWidget, QSplitter, QInputDialog, QDialog,
-    QDialogButtonBox, QTextEdit, QFormLayout
-)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon
-
-from py2flamingo.services.window_geometry_manager import PersistentDialog, _default_geometry_manager
-from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR, SUCCESS_BG, WARNING_BG
-from py2flamingo.views.workflow_panels import (
-    IlluminationPanel, CameraPanel, SavePanel, ZStackPanel,
-    TimeLapsePanel, TilingPanel, MultiAnglePanel
+from PyQt5.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSplitter,
+    QStackedWidget,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-from py2flamingo.views.workflow_panels.dual_position_panel import DualPositionPanel
+
 from py2flamingo.models.data.workflow import (
-    WorkflowType, Workflow, IlluminationSettings, StackSettings
+    IlluminationSettings,
+    StackSettings,
+    Workflow,
+    WorkflowType,
 )
 from py2flamingo.models.microscope import Position
 from py2flamingo.services.tiff_size_validator import (
-    validate_workflow_params, calculate_tiff_size, TiffSizeEstimate
+    TiffSizeEstimate,
+    calculate_tiff_size,
+    validate_workflow_params,
 )
-
+from py2flamingo.services.window_geometry_manager import (
+    PersistentDialog,
+    _default_geometry_manager,
+)
+from py2flamingo.views.colors import ERROR_COLOR, SUCCESS_BG, SUCCESS_COLOR, WARNING_BG
+from py2flamingo.views.workflow_panels import (
+    CameraPanel,
+    IlluminationPanel,
+    MultiAnglePanel,
+    SavePanel,
+    TilingPanel,
+    TimeLapsePanel,
+    ZStackPanel,
+)
+from py2flamingo.views.workflow_panels.dual_position_panel import DualPositionPanel
 
 # Workflow type definitions with descriptions
 WORKFLOW_TYPES = [
@@ -42,7 +68,11 @@ WORKFLOW_TYPES = [
     ("Z-Stack", WorkflowType.ZSTACK, "Acquire multiple images through Z axis"),
     ("Time-Lapse", WorkflowType.TIME_LAPSE, "Acquire images over time"),
     ("Tile Scan", WorkflowType.TILE, "Mosaic acquisition across XY area"),
-    ("Multi-Angle", WorkflowType.MULTI_ANGLE, "Acquire at multiple rotation angles (OPT)"),
+    (
+        "Multi-Angle",
+        WorkflowType.MULTI_ANGLE,
+        "Acquire at multiple rotation angles (OPT)",
+    ),
 ]
 
 
@@ -95,7 +125,9 @@ class WorkflowView(QWidget):
         # Restore persisted workflow type (default: Tile Scan = index 3)
         self._restore_workflow_type()
 
-        self._logger.info("WorkflowView initialized with comprehensive workflow builder")
+        self._logger.info(
+            "WorkflowView initialized with comprehensive workflow builder"
+        )
 
     def _setup_ui(self) -> None:
         """Create and layout all UI components."""
@@ -130,7 +162,7 @@ class WorkflowView(QWidget):
         self._settings_tabs.addTab(acquisition_widget, "Acquisition")
 
         # Tab 3: Save/Output (pass connection service for drive querying)
-        connection_service = getattr(self._controller, '_connection_service', None)
+        connection_service = getattr(self._controller, "_connection_service", None)
         self._save_panel = SavePanel(connection_service=connection_service)
         save_scroll = QScrollArea()
         save_scroll.setWidgetResizable(True)
@@ -190,8 +222,10 @@ class WorkflowView(QWidget):
         # Index 0: Snapshot (minimal info)
         snapshot_panel = QWidget()
         snapshot_layout = QVBoxLayout(snapshot_panel)
-        snapshot_info = QLabel("Snapshot mode: Single image at current position.\n"
-                              "No additional acquisition settings needed.")
+        snapshot_info = QLabel(
+            "Snapshot mode: Single image at current position.\n"
+            "No additional acquisition settings needed."
+        )
         snapshot_info.setStyleSheet("color: gray; font-style: italic; padding: 10px;")
         snapshot_layout.addWidget(snapshot_info)
         snapshot_layout.addStretch()
@@ -221,7 +255,7 @@ class WorkflowView(QWidget):
 
         # Initialize ZStackPanel with current camera frame rate
         camera_settings = self._camera_panel.get_settings()
-        self._zstack_panel.set_frame_rate(camera_settings['frame_rate'])
+        self._zstack_panel.set_frame_rate(camera_settings["frame_rate"])
 
         # Apply initial visibility matrix (Snapshot mode by default)
         self._apply_visibility_matrix(WorkflowType.SNAPSHOT)
@@ -329,7 +363,9 @@ class WorkflowView(QWidget):
 
         # Status display
         self._status_label = QLabel("Ready to configure workflow")
-        self._status_label.setStyleSheet(f"color: {SUCCESS_COLOR}; font-weight: bold; padding: 5px;")
+        self._status_label.setStyleSheet(
+            f"color: {SUCCESS_COLOR}; font-weight: bold; padding: 5px;"
+        )
         layout.addWidget(self._status_label)
 
         # Message display
@@ -367,15 +403,15 @@ class WorkflowView(QWidget):
         """Persist workflow type selection."""
         gm = _default_geometry_manager
         if gm:
-            gm.save_dialog_state('WorkflowView', {'workflow_type_index': index})
+            gm.save_dialog_state("WorkflowView", {"workflow_type_index": index})
 
     def _restore_workflow_type(self) -> None:
         """Restore persisted workflow type selection, defaulting to Tile Scan."""
         gm = _default_geometry_manager
         default_index = 3  # Tile Scan
         if gm:
-            state = gm.restore_dialog_state('WorkflowView')
-            idx = state.get('workflow_type_index', default_index)
+            state = gm.restore_dialog_state("WorkflowView")
+            idx = state.get("workflow_type_index", default_index)
         else:
             idx = default_index
         if 0 <= idx < len(WORKFLOW_TYPES):
@@ -490,7 +526,7 @@ class WorkflowView(QWidget):
 
     def _on_camera_settings_changed(self, settings: dict) -> None:
         """Handle camera settings change - update Z velocity calculation."""
-        frame_rate = settings.get('frame_rate', 100.0)
+        frame_rate = settings.get("frame_rate", 100.0)
         self._zstack_panel.set_frame_rate(frame_rate)
 
     def _on_start_clicked(self) -> None:
@@ -509,7 +545,9 @@ class WorkflowView(QWidget):
             workflow_dict = self.get_workflow_dict()
 
             # Call controller to start workflow with full dict
-            success, message = self._controller.start_workflow_from_ui(workflow, workflow_dict)
+            success, message = self._controller.start_workflow_from_ui(
+                workflow, workflow_dict
+            )
 
             if success:
                 self._set_running_state(True)
@@ -573,8 +611,7 @@ class WorkflowView(QWidget):
             stack_settings = self._zstack_panel.get_settings()
             # End position uses Z from Position B, but X/Y/R from Position A
             end_position = Position(
-                x=position_a.x, y=position_a.y,
-                z=position_b.z, r=position_a.r
+                x=position_a.x, y=position_a.y, z=position_b.z, r=position_a.r
             )
 
         elif self._current_type == WorkflowType.TIME_LAPSE:
@@ -585,16 +622,14 @@ class WorkflowView(QWidget):
             stack_settings = self._zstack_panel.get_settings()  # Z-stack at each tile
             # End position uses X/Y/Z from Position B
             end_position = Position(
-                x=position_b.x, y=position_b.y,
-                z=position_b.z, r=position_a.r
+                x=position_b.x, y=position_b.y, z=position_b.z, r=position_a.r
             )
 
         elif self._current_type == WorkflowType.MULTI_ANGLE:
             stack_settings = self._zstack_panel.get_settings()
             # End position uses Z from Position B (for Z range in multi-angle)
             end_position = Position(
-                x=position_a.x, y=position_a.y,
-                z=position_b.z, r=position_a.r
+                x=position_a.x, y=position_a.y, z=position_b.z, r=position_a.r
             )
 
         # Create workflow with all required settings at once (validation in __post_init__)
@@ -661,18 +696,18 @@ class WorkflowView(QWidget):
 
         # Check save settings
         save_settings = self._save_panel.get_settings()
-        if save_settings['save_enabled']:
-            if not save_settings['save_drive']:
+        if save_settings["save_enabled"]:
+            if not save_settings["save_drive"]:
                 errors.append("Save drive not specified")
-            if not save_settings['save_directory']:
+            if not save_settings["save_directory"]:
                 errors.append("Save directory not specified")
             else:
                 # Check for path separators in save directory
                 # Server can only create single-level directories
-                save_dir = save_settings['save_directory']
-                if '/' in save_dir or '\\' in save_dir:
+                save_dir = save_settings["save_directory"]
+                if "/" in save_dir or "\\" in save_dir:
                     # Sanitize by replacing path separators with underscores
-                    sanitized = save_dir.replace('/', '_').replace('\\', '_')
+                    sanitized = save_dir.replace("/", "_").replace("\\", "_")
                     self._logger.warning(
                         f"Save directory contains path separators, sanitizing: "
                         f"'{save_dir}' -> '{sanitized}'"
@@ -708,22 +743,22 @@ class WorkflowView(QWidget):
 
         # Check save format - only standard TIFF has 4GB limit
         save_settings = self._save_panel.get_settings()
-        save_format = save_settings.get('save_format', 'Tiff')
-        if save_format != 'Tiff':
+        save_format = save_settings.get("save_format", "Tiff")
+        if save_format != "Tiff":
             # BigTiff, Raw, and NotSaved don't have the 4GB limit
             return None
 
         # Get camera settings for image dimensions
         camera_settings = self._camera_panel.get_settings()
-        image_width = camera_settings.get('aoi_width', 2048)
-        image_height = camera_settings.get('aoi_height', 2048)
+        image_width = camera_settings.get("aoi_width", 2048)
+        image_height = camera_settings.get("aoi_height", 2048)
 
         # Calculate expected TIFF size
         estimate = calculate_tiff_size(
             num_planes=workflow.stack_settings.num_planes,
             image_width=image_width,
             image_height=image_height,
-            bytes_per_pixel=2  # 16-bit images
+            bytes_per_pixel=2,  # 16-bit images
         )
 
         if estimate.exceeds_limit:
@@ -756,7 +791,9 @@ class WorkflowView(QWidget):
             self._progress_bar.setValue(0)
         else:
             self._status_label.setText("Ready to configure workflow")
-            self._status_label.setStyleSheet(f"color: {SUCCESS_COLOR}; font-weight: bold;")
+            self._status_label.setStyleSheet(
+                f"color: {SUCCESS_COLOR}; font-weight: bold;"
+            )
             self._progress_bar.setVisible(False)
 
     def _show_message(self, message: str, is_error: bool = False) -> None:
@@ -797,7 +834,7 @@ class WorkflowView(QWidget):
                 "Delete Template",
                 f"Are you sure you want to delete template '{template_name}'?",
                 QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
+                QMessageBox.No,
             )
             if reply == QMessageBox.Yes:
                 self.template_delete_requested.emit(template_name)
@@ -853,16 +890,23 @@ class WorkflowView(QWidget):
         position_a = self._position_panel.get_position_a()  # Start position
         position_b = self._position_panel.get_position_b()  # End position
         illumination = self._illumination_panel.get_workflow_illumination_dict()
-        illumination_options = self._illumination_panel.get_workflow_illumination_options_dict()
+        illumination_options = (
+            self._illumination_panel.get_workflow_illumination_options_dict()
+        )
         camera = self._camera_panel.get_settings()
         save = self._save_panel.get_workflow_save_dict()
 
         # Build experiment settings
         experiment_settings = {
             **save,
-            'Plane spacing (um)': self._zstack_panel._z_step.value() if self._current_type in (WorkflowType.ZSTACK, WorkflowType.TILE, WorkflowType.MULTI_ANGLE) else 1.0,
-            'Frame rate (f/s)': camera['frame_rate'],
-            'Exposure time (us)': camera['exposure_us'],
+            "Plane spacing (um)": (
+                self._zstack_panel._z_step.value()
+                if self._current_type
+                in (WorkflowType.ZSTACK, WorkflowType.TILE, WorkflowType.MULTI_ANGLE)
+                else 1.0
+            ),
+            "Frame rate (f/s)": camera["frame_rate"],
+            "Exposure time (us)": camera["exposure_us"],
         }
 
         # Add time-lapse settings
@@ -876,21 +920,21 @@ class WorkflowView(QWidget):
             experiment_settings.update(multiangle)
 
         workflow_dict = {
-            'Experiment Settings': experiment_settings,
-            'Camera Settings': {
-                'Exposure time (us)': camera['exposure_us'],
-                'Frame rate (f/s)': camera['frame_rate'],
-                'AOI width': camera['aoi_width'],
-                'AOI height': camera['aoi_height'],
+            "Experiment Settings": experiment_settings,
+            "Camera Settings": {
+                "Exposure time (us)": camera["exposure_us"],
+                "Frame rate (f/s)": camera["frame_rate"],
+                "AOI width": camera["aoi_width"],
+                "AOI height": camera["aoi_height"],
             },
-            'Start Position': {
-                'X (mm)': position_a.x,
-                'Y (mm)': position_a.y,
-                'Z (mm)': position_a.z,
-                'Angle (degrees)': position_a.r,
+            "Start Position": {
+                "X (mm)": position_a.x,
+                "Y (mm)": position_a.y,
+                "Z (mm)": position_a.z,
+                "Angle (degrees)": position_a.r,
             },
-            'Illumination Source': illumination,
-            'Illumination Options': illumination_options,
+            "Illumination Source": illumination,
+            "Illumination Options": illumination_options,
         }
 
         # Add stack settings
@@ -902,41 +946,41 @@ class WorkflowView(QWidget):
             stack_dict.update(tiling)
 
         # Add camera capture settings from camera panel
-        stack_dict['Camera 1 capture percentage'] = camera['cam1_capture_percentage']
-        stack_dict['Camera 1 capture mode'] = camera['cam1_capture_mode']
-        stack_dict['Camera 2 capture percentage'] = camera['cam2_capture_percentage']
-        stack_dict['Camera 2 capture mode'] = camera['cam2_capture_mode']
+        stack_dict["Camera 1 capture percentage"] = camera["cam1_capture_percentage"]
+        stack_dict["Camera 1 capture mode"] = camera["cam1_capture_mode"]
+        stack_dict["Camera 2 capture percentage"] = camera["cam2_capture_percentage"]
+        stack_dict["Camera 2 capture mode"] = camera["cam2_capture_mode"]
 
-        workflow_dict['Stack Settings'] = stack_dict
+        workflow_dict["Stack Settings"] = stack_dict
 
         # Calculate end position based on workflow type using DualPositionPanel values
         if self._current_type == WorkflowType.ZSTACK:
             # Z-Stack: X/Y/R from A, Z from B
-            workflow_dict['End Position'] = {
-                'X (mm)': position_a.x,
-                'Y (mm)': position_a.y,
-                'Z (mm)': position_b.z,
-                'Angle (degrees)': position_a.r,
+            workflow_dict["End Position"] = {
+                "X (mm)": position_a.x,
+                "Y (mm)": position_a.y,
+                "Z (mm)": position_b.z,
+                "Angle (degrees)": position_a.r,
             }
         elif self._current_type == WorkflowType.TILE:
             # Tiling: X/Y/Z from B, R from A
-            workflow_dict['End Position'] = {
-                'X (mm)': position_b.x,
-                'Y (mm)': position_b.y,
-                'Z (mm)': position_b.z,
-                'Angle (degrees)': position_a.r,
+            workflow_dict["End Position"] = {
+                "X (mm)": position_b.x,
+                "Y (mm)": position_b.y,
+                "Z (mm)": position_b.z,
+                "Angle (degrees)": position_a.r,
             }
         elif self._current_type == WorkflowType.MULTI_ANGLE:
             # Multi-Angle: X/Y/R from A, Z from B
-            workflow_dict['End Position'] = {
-                'X (mm)': position_a.x,
-                'Y (mm)': position_a.y,
-                'Z (mm)': position_b.z,
-                'Angle (degrees)': position_a.r,
+            workflow_dict["End Position"] = {
+                "X (mm)": position_a.x,
+                "Y (mm)": position_a.y,
+                "Z (mm)": position_b.z,
+                "Angle (degrees)": position_a.r,
             }
         else:
             # Snapshot, Time-Lapse: same as start
-            workflow_dict['End Position'] = workflow_dict['Start Position'].copy()
+            workflow_dict["End Position"] = workflow_dict["Start Position"].copy()
 
         return workflow_dict
 
@@ -969,7 +1013,7 @@ class WorkflowView(QWidget):
         Args:
             app: FlamingoApplication instance
         """
-        if hasattr(self._save_panel, 'set_app'):
+        if hasattr(self._save_panel, "set_app"):
             self._save_panel.set_app(app)
 
     @property
@@ -1020,7 +1064,9 @@ class WorkflowView(QWidget):
         self._template_combo.blockSignals(False)
         self._delete_template_btn.setEnabled(self._template_combo.currentIndex() > 0)
 
-    def set_workflow_dict(self, workflow_dict: Dict[str, Any], workflow_type: str) -> None:
+    def set_workflow_dict(
+        self, workflow_dict: Dict[str, Any], workflow_type: str
+    ) -> None:
         """
         Apply a workflow dictionary to all panels (for loading templates).
 
@@ -1039,49 +1085,55 @@ class WorkflowView(QWidget):
                 self._type_combo.setCurrentIndex(type_index)
 
             # Apply settings to each panel
-            if 'Start Position' in workflow_dict:
-                pos = workflow_dict['Start Position']
-                self._position_panel.set_position_a(Position(
-                    x=float(pos.get('X (mm)', 0)),
-                    y=float(pos.get('Y (mm)', 0)),
-                    z=float(pos.get('Z (mm)', 0)),
-                    r=float(pos.get('Angle (degrees)', 0))
-                ))
+            if "Start Position" in workflow_dict:
+                pos = workflow_dict["Start Position"]
+                self._position_panel.set_position_a(
+                    Position(
+                        x=float(pos.get("X (mm)", 0)),
+                        y=float(pos.get("Y (mm)", 0)),
+                        z=float(pos.get("Z (mm)", 0)),
+                        r=float(pos.get("Angle (degrees)", 0)),
+                    )
+                )
 
-            if 'End Position' in workflow_dict:
-                pos = workflow_dict['End Position']
-                self._position_panel.set_position_b(Position(
-                    x=float(pos.get('X (mm)', 0)),
-                    y=float(pos.get('Y (mm)', 0)),
-                    z=float(pos.get('Z (mm)', 0)),
-                    r=float(pos.get('Angle (degrees)', 0))
-                ))
+            if "End Position" in workflow_dict:
+                pos = workflow_dict["End Position"]
+                self._position_panel.set_position_b(
+                    Position(
+                        x=float(pos.get("X (mm)", 0)),
+                        y=float(pos.get("Y (mm)", 0)),
+                        z=float(pos.get("Z (mm)", 0)),
+                        r=float(pos.get("Angle (degrees)", 0)),
+                    )
+                )
 
-            if 'Camera Settings' in workflow_dict:
-                cam = workflow_dict['Camera Settings']
+            if "Camera Settings" in workflow_dict:
+                cam = workflow_dict["Camera Settings"]
                 self._camera_panel.set_settings(cam)
 
-            if 'Stack Settings' in workflow_dict:
-                stack = workflow_dict['Stack Settings']
+            if "Stack Settings" in workflow_dict:
+                stack = workflow_dict["Stack Settings"]
                 self._zstack_panel.set_settings(stack)
 
-            if 'Illumination Source' in workflow_dict:
-                illum = workflow_dict['Illumination Source']
+            if "Illumination Source" in workflow_dict:
+                illum = workflow_dict["Illumination Source"]
                 self._illumination_panel.set_settings(illum)
 
-            if 'Experiment Settings' in workflow_dict:
-                exp = workflow_dict['Experiment Settings']
+            if "Experiment Settings" in workflow_dict:
+                exp = workflow_dict["Experiment Settings"]
                 self._save_panel.set_settings(exp)
 
                 # Time-lapse settings
-                if 'Duration (dd:hh:mm:ss)' in exp:
+                if "Duration (dd:hh:mm:ss)" in exp:
                     self._timelapse_panel.set_settings(exp)
 
                 # Multi-angle settings
-                if 'Number of angles' in exp:
+                if "Number of angles" in exp:
                     self._multiangle_panel.set_settings(exp)
 
-            self._logger.info(f"Applied workflow template settings (type: {workflow_type})")
+            self._logger.info(
+                f"Applied workflow template settings (type: {workflow_type})"
+            )
 
         except Exception as e:
             self._logger.error(f"Error applying workflow dict: {e}", exc_info=True)
@@ -1141,7 +1193,7 @@ class SaveTemplateDialog(PersistentDialog):
         """Get the entered name and description."""
         return (
             self._name_edit.currentText().strip(),
-            self._description_edit.toPlainText().strip()
+            self._description_edit.toPlainText().strip(),
         )
 
     def set_existing_templates(self, names: List[str]) -> None:
@@ -1163,13 +1215,15 @@ class ValidationResultDialog(PersistentDialog):
         layout = QVBoxLayout(self)
 
         # Status header
-        is_valid = result.get('valid', False)
-        errors = result.get('errors', [])
-        warnings = result.get('warnings', [])
+        is_valid = result.get("valid", False)
+        errors = result.get("errors", [])
+        warnings = result.get("warnings", [])
 
         status_text = "Valid" if is_valid else "Invalid"
         if warnings:
-            status_text += f" ({len(warnings)} warning{'s' if len(warnings) > 1 else ''})"
+            status_text += (
+                f" ({len(warnings)} warning{'s' if len(warnings) > 1 else ''})"
+            )
 
         status_label = QLabel(f"Status: {'✓' if is_valid else '✗'} {status_text}")
         status_label.setStyleSheet(
@@ -1178,32 +1232,36 @@ class ValidationResultDialog(PersistentDialog):
         layout.addWidget(status_label)
 
         # Estimates section
-        estimates = result.get('estimates', {})
+        estimates = result.get("estimates", {})
         if estimates:
             est_group = QGroupBox("Estimates")
             est_layout = QVBoxLayout(est_group)
 
             est_text = []
-            if 'acquisition_time' in estimates:
-                time_str = self._format_duration(estimates['acquisition_time'])
-                sample_count = estimates.get('sample_count', 0)
+            if "acquisition_time" in estimates:
+                time_str = self._format_duration(estimates["acquisition_time"])
+                sample_count = estimates.get("sample_count", 0)
                 if sample_count > 0:
-                    est_text.append(f"• Acquisition Time: ~{time_str} (based on {sample_count} similar acquisitions)")
+                    est_text.append(
+                        f"• Acquisition Time: ~{time_str} (based on {sample_count} similar acquisitions)"
+                    )
                 else:
                     est_text.append(f"• Acquisition Time: ~{time_str} (theoretical)")
 
-            if 'data_size_gb' in estimates:
+            if "data_size_gb" in estimates:
                 est_text.append(f"• Data Size: ~{estimates['data_size_gb']:.1f} GB")
 
-            if 'total_images' in estimates:
+            if "total_images" in estimates:
                 est_text.append(f"• Total Images: {estimates['total_images']}")
 
-            if 'z_range_um' in estimates:
-                z_um = estimates['z_range_um']
-                planes = estimates.get('num_planes', 0)
-                step = estimates.get('z_step_um', 0)
+            if "z_range_um" in estimates:
+                z_um = estimates["z_range_um"]
+                planes = estimates.get("num_planes", 0)
+                step = estimates.get("z_step_um", 0)
                 if planes and step:
-                    est_text.append(f"• Z Range: {z_um:.1f} µm ({planes} planes × {step:.1f} µm)")
+                    est_text.append(
+                        f"• Z Range: {z_um:.1f} µm ({planes} planes × {step:.1f} µm)"
+                    )
                 else:
                     est_text.append(f"• Z Range: {z_um:.1f} µm")
 
@@ -1233,14 +1291,16 @@ class ValidationResultDialog(PersistentDialog):
             layout.addWidget(warn_group)
 
         # Hardware validation
-        hw_result = result.get('hardware_validation')
+        hw_result = result.get("hardware_validation")
         if hw_result:
             hw_group = QGroupBox("Hardware Validation")
             hw_layout = QVBoxLayout(hw_group)
-            hw_valid = hw_result.get('valid', True)
-            hw_message = hw_result.get('message', 'No response')
+            hw_valid = hw_result.get("valid", True)
+            hw_message = hw_result.get("message", "No response")
             hw_label = QLabel(f"{'✓' if hw_valid else '✗'} {hw_message}")
-            hw_label.setStyleSheet(f"color: {'#27ae60' if hw_valid else '#e74c3c'}; padding: 5px;")
+            hw_label.setStyleSheet(
+                f"color: {'#27ae60' if hw_valid else '#e74c3c'}; padding: 5px;"
+            )
             hw_layout.addWidget(hw_label)
             layout.addWidget(hw_group)
 

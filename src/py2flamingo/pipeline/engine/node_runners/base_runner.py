@@ -10,8 +10,8 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict
 
-from py2flamingo.pipeline.models.pipeline import Pipeline, PipelineNode
 from py2flamingo.pipeline.engine.context import ExecutionContext
+from py2flamingo.pipeline.models.pipeline import Pipeline, PipelineNode
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +25,9 @@ class AbstractNodeRunner(ABC):
     """
 
     @abstractmethod
-    def run(self, node: PipelineNode, pipeline: Pipeline,
-            context: ExecutionContext) -> None:
+    def run(
+        self, node: PipelineNode, pipeline: Pipeline, context: ExecutionContext
+    ) -> None:
         """Execute the node.
 
         Args:
@@ -39,8 +40,13 @@ class AbstractNodeRunner(ABC):
         """
         ...
 
-    def _get_input(self, node: PipelineNode, pipeline: Pipeline,
-                   context: ExecutionContext, port_name: str):
+    def _get_input(
+        self,
+        node: PipelineNode,
+        pipeline: Pipeline,
+        context: ExecutionContext,
+        port_name: str,
+    ):
         """Helper to get the data value feeding a named input port.
 
         Returns None if the port is unconnected or has no value.
@@ -50,8 +56,14 @@ class AbstractNodeRunner(ABC):
             return None
         return value.data
 
-    def _set_output(self, node: PipelineNode, context: ExecutionContext,
-                    port_name: str, port_type, data) -> None:
+    def _set_output(
+        self,
+        node: PipelineNode,
+        context: ExecutionContext,
+        port_name: str,
+        port_type,
+        data,
+    ) -> None:
         """Helper to write a value to a named output port.
 
         Args:
@@ -62,6 +74,7 @@ class AbstractNodeRunner(ABC):
             data: The actual data to store
         """
         from py2flamingo.pipeline.models.port_types import PortValue
+
         port = node.get_output(port_name)
         if port:
             context.set_port_value(port.id, PortValue(port_type=port_type, data=data))

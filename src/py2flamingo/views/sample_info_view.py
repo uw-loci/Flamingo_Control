@@ -12,13 +12,20 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QGroupBox, QFileDialog, QFormLayout
-)
 from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtWidgets import (
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
-from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR
+from py2flamingo.views.colors import ERROR_COLOR, SUCCESS_COLOR
 
 
 class SampleInfoView(QWidget):
@@ -94,7 +101,9 @@ class SampleInfoView(QWidget):
 
         # Sample name input
         self.sample_name_input = QLineEdit()
-        self.sample_name_input.setPlaceholderText("Enter sample name (e.g., Sample_001)")
+        self.sample_name_input.setPlaceholderText(
+            "Enter sample name (e.g., Sample_001)"
+        )
         self.sample_name_input.textChanged.connect(self._on_sample_name_changed)
         layout.addRow("Sample Name:", self.sample_name_input)
 
@@ -138,7 +147,9 @@ class SampleInfoView(QWidget):
         mount_layout.addWidget(QLabel("Local Mount Point (optional):"))
 
         self.local_mount_input = QLineEdit()
-        self.local_mount_input.setPlaceholderText(r"Z:\ or D:\microscope_data (must be the network share)")
+        self.local_mount_input.setPlaceholderText(
+            r"Z:\ or D:\microscope_data (must be the network share)"
+        )
         self.local_mount_input.textChanged.connect(self._on_local_mount_changed)
         mount_layout.addWidget(self.local_mount_input)
 
@@ -172,7 +183,9 @@ class SampleInfoView(QWidget):
 
         self.save_path_input = QLineEdit()
         self.save_path_input.setText(self._save_path)
-        self.save_path_input.setPlaceholderText("data/experiment1 (relative to network share)")
+        self.save_path_input.setPlaceholderText(
+            "data/experiment1 (relative to network share)"
+        )
         self.save_path_input.textChanged.connect(self._on_save_path_changed)
         path_layout.addWidget(self.save_path_input)
 
@@ -259,7 +272,9 @@ class SampleInfoView(QWidget):
         self._sample_name = name
         if name:
             self.sample_name_display.setText(f"Current: {name}")
-            self.sample_name_display.setStyleSheet(f"color: {SUCCESS_COLOR}; font-weight: bold;")
+            self.sample_name_display.setStyleSheet(
+                f"color: {SUCCESS_COLOR}; font-weight: bold;"
+            )
         else:
             self.sample_name_display.setText("Current: <not set>")
             self.sample_name_display.setStyleSheet("color: gray; font-style: italic;")
@@ -321,14 +336,22 @@ class SampleInfoView(QWidget):
                 self.local_path_display.setText(
                     f"Local equivalent: {local_path} ({status})"
                 )
-                self.local_path_display.setStyleSheet(f"color: {color}; font-size: 10pt;")
+                self.local_path_display.setStyleSheet(
+                    f"color: {color}; font-size: 10pt;"
+                )
                 self.create_dir_btn.setEnabled(True)
             else:
-                self.local_path_display.setText("Local equivalent: <invalid configuration>")
-                self.local_path_display.setStyleSheet(f"color: {ERROR_COLOR}; font-size: 10pt;")
+                self.local_path_display.setText(
+                    "Local equivalent: <invalid configuration>"
+                )
+                self.local_path_display.setStyleSheet(
+                    f"color: {ERROR_COLOR}; font-size: 10pt;"
+                )
                 self.create_dir_btn.setEnabled(False)
         else:
-            self.local_path_display.setText("Local equivalent: <no mount point configured>")
+            self.local_path_display.setText(
+                "Local equivalent: <no mount point configured>"
+            )
             self.local_path_display.setStyleSheet("color: gray; font-size: 10pt;")
             self.create_dir_btn.setEnabled(False)
 
@@ -340,7 +363,7 @@ class SampleInfoView(QWidget):
             self,
             "Select Local Mount Point (where network share is mounted)",
             current_path,
-            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks,
         )
 
         if directory:
@@ -351,11 +374,12 @@ class SampleInfoView(QWidget):
         """Open file dialog to browse for subdirectory (only if local mount configured)."""
         if not self._local_mount_point:
             from PyQt5.QtWidgets import QMessageBox
+
             QMessageBox.information(
                 self,
                 "Mount Point Required",
                 "Configure the 'Local Mount Point' first to enable browsing.\n\n"
-                "Alternatively, type the subdirectory path directly."
+                "Alternatively, type the subdirectory path directly.",
             )
             return
 
@@ -368,7 +392,7 @@ class SampleInfoView(QWidget):
             self,
             "Select Data Subdirectory",
             str(start_path),
-            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks,
         )
 
         if directory:
@@ -376,42 +400,46 @@ class SampleInfoView(QWidget):
             try:
                 rel_path = Path(directory).relative_to(Path(self._local_mount_point))
                 # Use forward slashes for consistency
-                self.save_path_input.setText(str(rel_path).replace('\\', '/'))
+                self.save_path_input.setText(str(rel_path).replace("\\", "/"))
                 self._logger.info(f"Subdirectory selected: {rel_path}")
             except ValueError:
                 # Selected directory is not under mount point
                 from PyQt5.QtWidgets import QMessageBox
+
                 QMessageBox.warning(
                     self,
                     "Invalid Selection",
-                    f"Selected directory must be under the mount point:\n{self._local_mount_point}"
+                    f"Selected directory must be under the mount point:\n{self._local_mount_point}",
                 )
 
     def _create_directory(self):
         """Create the save directory locally (if mount point configured)."""
         if not self._local_mount_point:
             from PyQt5.QtWidgets import QMessageBox
+
             QMessageBox.warning(
                 self,
                 "Cannot Create Directory",
                 "No local mount point configured.\n\n"
                 "Configure the 'Local Mount Point' first, ensuring it points to "
-                "where the network share is mounted on your PC."
+                "where the network share is mounted on your PC.",
             )
             return
 
         local_path = self.get_local_path()
         if not local_path:
             from PyQt5.QtWidgets import QMessageBox
+
             QMessageBox.warning(
                 self,
                 "Invalid Configuration",
-                "Cannot determine local path. Check your configuration."
+                "Cannot determine local path. Check your configuration.",
             )
             return
 
         # Confirmation dialog with warning
         from PyQt5.QtWidgets import QMessageBox
+
         reply = QMessageBox.question(
             self,
             "Create Directory",
@@ -421,7 +449,7 @@ class SampleInfoView(QWidget):
             f"The microscope will access it via:\n{self.get_network_path()}\n\n"
             f"Continue?",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.No,
         )
 
         if reply != QMessageBox.Yes:
@@ -435,6 +463,7 @@ class SampleInfoView(QWidget):
 
             # Show success message with reminder
             from PyQt5.QtWidgets import QMessageBox
+
             QMessageBox.information(
                 self,
                 "Directory Created",
@@ -443,16 +472,15 @@ class SampleInfoView(QWidget):
                 f"✓ If your mount point is configured correctly, the microscope "
                 f"can now access this directory.\n\n"
                 f"⚠ If microscope cannot access it, verify that your Local Mount Point "
-                f"is actually the network share location."
+                f"is actually the network share location.",
             )
 
         except Exception as e:
             self._logger.error(f"Failed to create directory: {e}")
             from PyQt5.QtWidgets import QMessageBox
+
             QMessageBox.critical(
-                self,
-                "Error",
-                f"Failed to create directory:\n{str(e)}"
+                self, "Error", f"Failed to create directory:\n{str(e)}"
             )
 
     # Public methods for accessing current values
@@ -488,11 +516,11 @@ class SampleInfoView(QWidget):
             return ""
 
         # Ensure we're using backslashes for UNC paths
-        base = self._network_share_base.rstrip('\\/')
+        base = self._network_share_base.rstrip("\\/")
 
         if self._save_path:
             # Convert forward slashes to backslashes for Windows UNC paths
-            subdir = self._save_path.strip('/\\').replace('/', '\\')
+            subdir = self._save_path.strip("/\\").replace("/", "\\")
             return f"{base}\\{subdir}"
         else:
             return base

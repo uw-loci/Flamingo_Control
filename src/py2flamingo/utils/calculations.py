@@ -188,11 +188,11 @@ def check_maxima(lst: Sequence[int], window_size: int = 5, threshold_factor: int
     This function takes a list of numbers and returns the position of the maximum value of any maxima
     in the list that are above a certain dynamically calculated threshold.
 
-    The threshold is calculated using a rolling window (default size 5) to determine the mean and standard 
-    deviation of the list. The threshold at each position is then determined to be the mean plus a multiple 
+    The threshold is calculated using a rolling window (default size 5) to determine the mean and standard
+    deviation of the list. The threshold at each position is then determined to be the mean plus a multiple
     (default factor 5) of the standard deviation.
 
-    A maxima is defined as a value in the list that is greater than both its neighboring values and 
+    A maxima is defined as a value in the list that is greater than both its neighboring values and
     the threshold. If there are no such maxima, the function returns False.
 
     Parameters:
@@ -256,10 +256,10 @@ def check_maxima(lst: Sequence[int], window_size: int = 5, threshold_factor: int
 def fit_ellipse(points):
     """
     Fit an ellipse to a given set of float points [[x,y,z,r]] in a plane using a least squares approach.
-    
-    The ellipse is defined by the equation ((x-h)**2/a**2) + ((z-k)**2/b**2) = 1, where (h, k) is the center 
+
+    The ellipse is defined by the equation ((x-h)**2/a**2) + ((z-k)**2/b**2) = 1, where (h, k) is the center
     of the ellipse, and a and b are the semi-major and semi-minor axes respectively.
-    
+
     Parameters
     ----------
     points : list of tuples
@@ -276,7 +276,7 @@ def fit_ellipse(points):
 
     # Define the equation of an ellipse in 2D space
     def ellipse(h, k, a, b, x, z):
-        return ((x - h) ** 2 / a ** 2) + ((z - k) ** 2 / b ** 2) - 1
+        return ((x - h) ** 2 / a**2) + ((z - k) ** 2 / b**2) - 1
 
     # Define the objective function for least squares minimization
     # This is the function we want to minimize.
@@ -328,9 +328,9 @@ def fit_ellipse_with_ransac(points):
 
 def point_on_ellipse(params, angle):
     """
-    Given the parameters of an ellipse and an angle, compute the x, z coordinates of the point on the ellipse 
+    Given the parameters of an ellipse and an angle, compute the x, z coordinates of the point on the ellipse
     corresponding to the provided angle.
-    
+
     Parameters
     ----------
     params : tuple
@@ -358,7 +358,7 @@ def point_on_ellipse(params, angle):
 
 def calculate_rolling_x_intensity(image_data, n_lines: int):
     """
-    Calculates the rolling average of line intensities in a single channel image 
+    Calculates the rolling average of line intensities in a single channel image
     and also computes the mean of the largest quarter of the pixel intensities.
 
     Parameters:
@@ -367,8 +367,8 @@ def calculate_rolling_x_intensity(image_data, n_lines: int):
 
     Returns:
     mean_largest_quarter (float): The mean of the largest quarter of the pixel intensities.
-    x_intensity_map (list of tuples): A list of tuples where each tuple consists of the line 
-                                      position along the X axis and the corresponding rolling 
+    x_intensity_map (list of tuples): A list of tuples where each tuple consists of the line
+                                      position along the X axis and the corresponding rolling
                                       average intensity.
     """
     # Flatten the image data to a 1D array
@@ -408,9 +408,8 @@ def calculate_rolling_x_intensity(image_data, n_lines: int):
 
 
 def calculate_rolling_y_intensity(image_data, n_lines: int):
-
     """
-    Calculates the rolling average of the brightest quarter of line intensities in a single channel image 
+    Calculates the rolling average of the brightest quarter of line intensities in a single channel image
     and also computes the mean of the largest quarter of the pixel intensities.
 
     Parameters:
@@ -419,8 +418,8 @@ def calculate_rolling_y_intensity(image_data, n_lines: int):
 
     Returns:
     mean_largest_quarter (float): The mean of the largest quarter of the pixel intensities.
-    y_intensity_map (list of tuples): A list of tuples where each tuple consists of the line 
-                                      position along the Y axis and the corresponding rolling 
+    y_intensity_map (list of tuples): A list of tuples where each tuple consists of the line
+                                      position along the Y axis and the corresponding rolling
                                       average intensity.
     """
     # Flatten the image data to a 1D array
@@ -518,8 +517,8 @@ def shift_frame(point, frameshift):
 
 def bounding_point_from_angle(points_list, angle):
     """
-    Interpolate a point at a given angle from a list of bounding points. The function handles 
-    the cyclic nature of angles, ensuring interpolation is always between two closest points 
+    Interpolate a point at a given angle from a list of bounding points. The function handles
+    the cyclic nature of angles, ensuring interpolation is always between two closest points
     even if they wrap around the 0°/360° boundary.
 
     Parameters

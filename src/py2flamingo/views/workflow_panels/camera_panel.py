@@ -6,14 +6,20 @@ Advanced settings (exposure, AOI, dual camera capture) available via dialog.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QDoubleSpinBox, QGroupBox, QGridLayout, QPushButton, QMessageBox
-)
 from PyQt5.QtCore import pyqtSignal
-
+from PyQt5.QtWidgets import (
+    QDoubleSpinBox,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 # AOI preset configurations (used by dialog)
 AOI_PRESETS = {
@@ -112,7 +118,9 @@ class CameraPanel(QWidget):
         # Detected settings display
         self._detected_label = QLabel("Detected: -- fps @ -- us")
         self._detected_label.setStyleSheet("font-weight: bold; color: #27ae60;")
-        self._detected_label.setToolTip("Auto-detected from camera. Click 'Camera' to refresh.")
+        self._detected_label.setToolTip(
+            "Auto-detected from camera. Click 'Camera' to refresh."
+        )
         settings_layout.addWidget(self._detected_label)
 
         settings_layout.addStretch()
@@ -158,7 +166,7 @@ class CameraPanel(QWidget):
                 "Camera Detection",
                 f"Could not detect camera settings.\n\n"
                 f"Reason: {self._detection_warning}\n\n"
-                "You can set exposure manually in Advanced settings."
+                "You can set exposure manually in Advanced settings.",
             )
 
     def detect_camera_settings(self) -> bool:
@@ -177,7 +185,7 @@ class CameraPanel(QWidget):
             self._update_detected_display()
             return False
 
-        camera_service = getattr(self._app, 'camera_service', None)
+        camera_service = getattr(self._app, "camera_service", None)
         if not camera_service:
             self._detection_warning = "Camera service not available"
             self._auto_detected = False
@@ -199,7 +207,9 @@ class CameraPanel(QWidget):
             self._warning_indicator.setVisible(False)
             self._update_detected_display()
 
-            self._logger.info(f"Camera settings detected: {self._exposure_us} us, {self._frame_rate:.1f} fps")
+            self._logger.info(
+                f"Camera settings detected: {self._exposure_us} us, {self._frame_rate:.1f} fps"
+            )
             self._on_settings_changed()
             return True
 
@@ -217,34 +227,36 @@ class CameraPanel(QWidget):
         from py2flamingo.views.dialogs import AdvancedCameraDialog
 
         dialog = AdvancedCameraDialog(self)
-        dialog.set_settings({
-            'exposure_us': self._exposure_us,
-            'aoi_width': self._aoi_width,
-            'aoi_height': self._aoi_height,
-            'cam1_capture_percentage': self._cam1_percentage,
-            'cam1_capture_mode': self._cam1_mode,
-            'cam2_capture_percentage': self._cam2_percentage,
-            'cam2_capture_mode': self._cam2_mode,
-        })
+        dialog.set_settings(
+            {
+                "exposure_us": self._exposure_us,
+                "aoi_width": self._aoi_width,
+                "aoi_height": self._aoi_height,
+                "cam1_capture_percentage": self._cam1_percentage,
+                "cam1_capture_mode": self._cam1_mode,
+                "cam2_capture_percentage": self._cam2_percentage,
+                "cam2_capture_mode": self._cam2_mode,
+            }
+        )
 
         if dialog.exec_() == dialog.Accepted:
             settings = dialog.get_settings()
 
             # Update exposure if changed
-            if 'exposure_us' in settings:
-                self._exposure_us = settings['exposure_us']
+            if "exposure_us" in settings:
+                self._exposure_us = settings["exposure_us"]
                 # Recalculate frame rate
                 if self._exposure_us > 0:
                     exposure_s = self._exposure_us / 1_000_000.0
                     self._frame_rate = min(1.0 / exposure_s, 40.0)
                 self._update_detected_display()
 
-            self._aoi_width = settings['aoi_width']
-            self._aoi_height = settings['aoi_height']
-            self._cam1_percentage = settings['cam1_capture_percentage']
-            self._cam1_mode = settings['cam1_capture_mode']
-            self._cam2_percentage = settings['cam2_capture_percentage']
-            self._cam2_mode = settings['cam2_capture_mode']
+            self._aoi_width = settings["aoi_width"]
+            self._aoi_height = settings["aoi_height"]
+            self._cam1_percentage = settings["cam1_capture_percentage"]
+            self._cam1_mode = settings["cam1_capture_mode"]
+            self._cam2_percentage = settings["cam2_capture_percentage"]
+            self._cam2_mode = settings["cam2_capture_mode"]
 
             # Update AOI info display
             self._aoi_info.setText(f"AOI: {self._aoi_width}x{self._aoi_height}")
@@ -263,14 +275,14 @@ class CameraPanel(QWidget):
             Dictionary with camera settings
         """
         return {
-            'exposure_us': self._exposure_us,
-            'frame_rate': self._frame_rate,
-            'aoi_width': self._aoi_width,
-            'aoi_height': self._aoi_height,
-            'cam1_capture_percentage': self._cam1_percentage,
-            'cam1_capture_mode': self._cam1_mode,
-            'cam2_capture_percentage': self._cam2_percentage,
-            'cam2_capture_mode': self._cam2_mode,
+            "exposure_us": self._exposure_us,
+            "frame_rate": self._frame_rate,
+            "aoi_width": self._aoi_width,
+            "aoi_height": self._aoi_height,
+            "cam1_capture_percentage": self._cam1_percentage,
+            "cam1_capture_mode": self._cam1_mode,
+            "cam2_capture_percentage": self._cam2_percentage,
+            "cam2_capture_mode": self._cam2_mode,
         }
 
     def set_settings(self, settings: Dict[str, Any]) -> None:
@@ -285,29 +297,29 @@ class CameraPanel(QWidget):
         if not settings:
             return
 
-        if 'exposure_us' in settings:
-            self._exposure_us = settings['exposure_us']
+        if "exposure_us" in settings:
+            self._exposure_us = settings["exposure_us"]
             # Recalculate frame rate from exposure
             if self._exposure_us > 0:
                 exposure_s = self._exposure_us / 1_000_000.0
                 self._frame_rate = min(1.0 / exposure_s, 40.0)
 
-        if 'frame_rate' in settings:
+        if "frame_rate" in settings:
             # Override with stored frame rate if provided
-            self._frame_rate = settings['frame_rate']
+            self._frame_rate = settings["frame_rate"]
 
-        if 'aoi_width' in settings:
-            self._aoi_width = settings['aoi_width']
-        if 'aoi_height' in settings:
-            self._aoi_height = settings['aoi_height']
-        if 'cam1_capture_percentage' in settings:
-            self._cam1_percentage = settings['cam1_capture_percentage']
-        if 'cam1_capture_mode' in settings:
-            self._cam1_mode = settings['cam1_capture_mode']
-        if 'cam2_capture_percentage' in settings:
-            self._cam2_percentage = settings['cam2_capture_percentage']
-        if 'cam2_capture_mode' in settings:
-            self._cam2_mode = settings['cam2_capture_mode']
+        if "aoi_width" in settings:
+            self._aoi_width = settings["aoi_width"]
+        if "aoi_height" in settings:
+            self._aoi_height = settings["aoi_height"]
+        if "cam1_capture_percentage" in settings:
+            self._cam1_percentage = settings["cam1_capture_percentage"]
+        if "cam1_capture_mode" in settings:
+            self._cam1_mode = settings["cam1_capture_mode"]
+        if "cam2_capture_percentage" in settings:
+            self._cam2_percentage = settings["cam2_capture_percentage"]
+        if "cam2_capture_mode" in settings:
+            self._cam2_mode = settings["cam2_capture_mode"]
 
         # Update displays
         self._update_detected_display()
@@ -341,7 +353,7 @@ class CameraPanel(QWidget):
         cam1_percentage: int = 100,
         cam1_mode: int = 0,
         cam2_percentage: int = 100,
-        cam2_mode: int = 0
+        cam2_mode: int = 0,
     ) -> None:
         """Set camera capture settings."""
         self._cam1_percentage = cam1_percentage
@@ -353,27 +365,27 @@ class CameraPanel(QWidget):
     def get_advanced_settings(self) -> Dict[str, Any]:
         """Get advanced camera settings."""
         return {
-            'aoi_width': self._aoi_width,
-            'aoi_height': self._aoi_height,
-            'cam1_capture_percentage': self._cam1_percentage,
-            'cam1_capture_mode': self._cam1_mode,
-            'cam2_capture_percentage': self._cam2_percentage,
-            'cam2_capture_mode': self._cam2_mode,
+            "aoi_width": self._aoi_width,
+            "aoi_height": self._aoi_height,
+            "cam1_capture_percentage": self._cam1_percentage,
+            "cam1_capture_mode": self._cam1_mode,
+            "cam2_capture_percentage": self._cam2_percentage,
+            "cam2_capture_mode": self._cam2_mode,
         }
 
     def set_advanced_settings(self, settings: Dict[str, Any]) -> None:
         """Set advanced camera settings."""
-        if 'aoi_width' in settings:
-            self._aoi_width = settings['aoi_width']
-        if 'aoi_height' in settings:
-            self._aoi_height = settings['aoi_height']
-        if 'cam1_capture_percentage' in settings:
-            self._cam1_percentage = settings['cam1_capture_percentage']
-        if 'cam1_capture_mode' in settings:
-            self._cam1_mode = settings['cam1_capture_mode']
-        if 'cam2_capture_percentage' in settings:
-            self._cam2_percentage = settings['cam2_capture_percentage']
-        if 'cam2_capture_mode' in settings:
-            self._cam2_mode = settings['cam2_capture_mode']
+        if "aoi_width" in settings:
+            self._aoi_width = settings["aoi_width"]
+        if "aoi_height" in settings:
+            self._aoi_height = settings["aoi_height"]
+        if "cam1_capture_percentage" in settings:
+            self._cam1_percentage = settings["cam1_capture_percentage"]
+        if "cam1_capture_mode" in settings:
+            self._cam1_mode = settings["cam1_capture_mode"]
+        if "cam2_capture_percentage" in settings:
+            self._cam2_percentage = settings["cam2_capture_percentage"]
+        if "cam2_capture_mode" in settings:
+            self._cam2_mode = settings["cam2_capture_mode"]
         # Update display
         self._aoi_info.setText(f"AOI: {self._aoi_width}x{self._aoi_height}")

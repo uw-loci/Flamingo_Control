@@ -46,7 +46,9 @@ class CameraController(QObject):
     state_changed = pyqtSignal(object)  # CameraState
     error_occurred = pyqtSignal(str)  # error message
     frame_rate_updated = pyqtSignal(float)  # FPS
-    tile_zstack_frame = pyqtSignal(np.ndarray, dict, int, int)  # (image, position, z_index, frame_num)
+    tile_zstack_frame = pyqtSignal(
+        np.ndarray, dict, int, int
+    )  # (image, position, z_index, frame_num)
 
     def __init__(self, camera_service: CameraService, laser_led_controller=None):
         """
@@ -231,7 +233,9 @@ class CameraController(QObject):
             exposure_us = 1000000
 
         self._exposure_us = exposure_us
-        self.logger.info(f"Exposure time set to {exposure_us} µs ({exposure_us/1000:.2f} ms)")
+        self.logger.info(
+            f"Exposure time set to {exposure_us} µs ({exposure_us/1000:.2f} ms)"
+        )
 
     def get_exposure_time(self) -> int:
         """
@@ -251,7 +255,9 @@ class CameraController(QObject):
         self._workflow_tile_mode = True
         self._current_tile_position = position
         self._z_plane_counter = 0
-        self.logger.info(f"CameraController: Activated tile mode for {position.get('filename', 'unknown')}")
+        self.logger.info(
+            f"CameraController: Activated tile mode for {position.get('filename', 'unknown')}"
+        )
 
         # Enlarge frame buffer so GUI-thread stalls don't cause frame loss
         self.camera_service.set_tile_mode_buffer(True)
@@ -283,11 +289,15 @@ class CameraController(QObject):
 
             if getattr(self, "_workflow_started_timer", False):
                 self._display_timer.stop()
-                self.logger.info("Stopped display timer (was started for tile workflow)")
+                self.logger.info(
+                    "Stopped display timer (was started for tile workflow)"
+                )
             if getattr(self, "_workflow_started_streaming", False):
                 try:
                     self.camera_service.stop_data_receiver()
-                    self.logger.info("Stopped data receiver (was started for tile workflow)")
+                    self.logger.info(
+                        "Stopped data receiver (was started for tile workflow)"
+                    )
                 except Exception as e:
                     self.logger.warning(f"Error stopping data receiver: {e}")
 
@@ -332,7 +342,9 @@ class CameraController(QObject):
         self._display_max = min(65535, max_val)
         self._auto_scale = False
 
-        self.logger.debug(f"Display range set to [{self._display_min}, {self._display_max}]")
+        self.logger.debug(
+            f"Display range set to [{self._display_min}, {self._display_max}]"
+        )
 
     def set_auto_scale(self, enabled: bool) -> None:
         """
@@ -447,7 +459,9 @@ class CameraController(QObject):
             # In tile workflow mode: process buffered frames in bounded batches
             # Processing ALL frames at once can block the GUI thread, causing
             # cascading delays. Limit to MAX_FRAMES_PER_TICK per timer tick.
-            if self._workflow_tile_mode and (self._current_tile_position or self._tile_transition_pending):
+            if self._workflow_tile_mode and (
+                self._current_tile_position or self._tile_transition_pending
+            ):
                 # Handle pending tile transition: flush stale frames from previous tile,
                 # reset z_plane_counter, and adopt the new tile position — all atomically
                 # on the GUI thread to avoid race conditions with background thread.
@@ -460,10 +474,15 @@ class CameraController(QObject):
                         self.logger.info(
                             f"Tile transition: flushed {len(stale)} stale frames, "
                             f"last_frame_num={last_hdr.frame_number} last_ts={last_hdr.timestamp_ms} "
-                            f"last_scale_max={last_hdr.image_scale_max}")
+                            f"last_scale_max={last_hdr.image_scale_max}"
+                        )
                     self._z_plane_counter = 0
-                    self._transition_frame_count = 0  # Track first frames after transition
-                    self._last_drain_timestamp = stale[-1][1].timestamp_ms if stale else 0
+                    self._transition_frame_count = (
+                        0  # Track first frames after transition
+                    )
+                    self._last_drain_timestamp = (
+                        stale[-1][1].timestamp_ms if stale else 0
+                    )
                     self._current_tile_position = self._pending_tile_position
                     self._tile_transition_pending = False
                     self._pending_tile_position = None
@@ -475,7 +494,9 @@ class CameraController(QObject):
                 MAX_FRAMES_PER_TICK = 25
                 all_frames = self.camera_service.drain_all_frames()
                 if all_frames:
-                    self.logger.debug(f"Tile mode: drained {len(all_frames)} frames, routing to Sample View")
+                    self.logger.debug(
+                        f"Tile mode: drained {len(all_frames)} frames, routing to Sample View"
+                    )
 
                 # Process at most MAX_FRAMES_PER_TICK frames this tick
                 frames_to_process = all_frames[:MAX_FRAMES_PER_TICK]
@@ -484,21 +505,24 @@ class CameraController(QObject):
                 # Put unprocessed frames back at the front of the buffer
                 if remaining:
                     self.camera_service.prepend_frames(remaining)
-                    self.logger.debug(f"Tile mode: deferred {len(remaining)} frames to next tick")
+                    self.logger.debug(
+                        f"Tile mode: deferred {len(remaining)} frames to next tick"
+                    )
 
                 for image, header in frames_to_process:
                     # Diagnostic: log first 5 frames after tile transition
                     # to detect stale frames that slipped past the drain
-                    trans_count = getattr(self, '_transition_frame_count', 999)
+                    trans_count = getattr(self, "_transition_frame_count", 999)
                     if trans_count < 5:
-                        drain_ts = getattr(self, '_last_drain_timestamp', 0)
+                        drain_ts = getattr(self, "_last_drain_timestamp", 0)
                         ts_delta = header.timestamp_ms - drain_ts if drain_ts else 0
                         self.logger.info(
                             f"POST-TRANSITION frame {trans_count}: "
                             f"frame_num={header.frame_number} ts={header.timestamp_ms} "
                             f"ts_delta_from_drain={ts_delta}ms "
                             f"scale_max={header.image_scale_max} "
-                            f"exposure_us={header.exposure_us}")
+                            f"exposure_us={header.exposure_us}"
+                        )
                         self._transition_frame_count = trans_count + 1
                     self._route_frame_to_sample_view(image, header)
                     self._z_plane_counter += 1
@@ -506,7 +530,10 @@ class CameraController(QObject):
                 # Also emit latest frame for live display (if any frames were available)
                 if frames_to_process:
                     image, header = frames_to_process[-1]
-                    if self._auto_scale and header.image_scale_min != header.image_scale_max:
+                    if (
+                        self._auto_scale
+                        and header.image_scale_min != header.image_scale_max
+                    ):
                         self._display_min = header.image_scale_min
                         self._display_max = header.image_scale_max
                     self.new_image.emit(image, header)
@@ -568,7 +595,9 @@ class CameraController(QObject):
             return self._frame_buffer[-1]
         return None
 
-    def take_snapshot_and_save(self, sample_name: str, save_directory: str) -> Optional[str]:
+    def take_snapshot_and_save(
+        self, sample_name: str, save_directory: str
+    ) -> Optional[str]:
         """
         Take a snapshot and save it with auto-incrementing filename.
 
@@ -613,7 +642,9 @@ class CameraController(QObject):
             timeout = 5.0  # 5 second timeout
             start_time = time.time()
 
-            while self._captured_snapshot is None and (time.time() - start_time) < timeout:
+            while (
+                self._captured_snapshot is None and (time.time() - start_time) < timeout
+            ):
                 time.sleep(0.1)
 
             if self._captured_snapshot is None:

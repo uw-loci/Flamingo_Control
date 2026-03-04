@@ -4,20 +4,22 @@ These tests verify the complete workflow from connection to workflow execution
 using a mock server to simulate the microscope.
 """
 
-import pytest
-import subprocess
-import time
+import os
 import socket
+import subprocess
+import tempfile
+import time
 from pathlib import Path
 from typing import Optional
-import tempfile
-import os
+
+import pytest
+
+from py2flamingo.controllers import ConnectionController, WorkflowController
 
 # Import all MVC layers
-from py2flamingo.core import TCPConnection, ProtocolEncoder, CommandCode
+from py2flamingo.core import CommandCode, ProtocolEncoder, TCPConnection
 from py2flamingo.models import ConnectionConfig, ConnectionModel, ConnectionState
 from py2flamingo.services import MVCConnectionService, MVCWorkflowService, StatusService
-from py2flamingo.controllers import ConnectionController, WorkflowController
 
 
 class MockServerManager:
@@ -34,7 +36,7 @@ class MockServerManager:
             ["python", "mock_server.py", "--port", str(self.port)],
             cwd="/home/msnelson/LSControl/Flamingo_Control",
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
         )
         # Wait for server to be ready
         self._wait_for_server()
@@ -126,7 +128,7 @@ def workflow_controller(workflow_service, connection_model):
 @pytest.fixture
 def test_workflow_file():
     """Create a temporary test workflow file."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
         f.write("[Experiment Settings]\n")
         f.write("Experiment Name=Test Integration\n")
         f.write("\n")
@@ -146,6 +148,7 @@ def test_workflow_file():
 # ============================================================================
 # Core Layer Integration Tests
 # ============================================================================
+
 
 def test_core_connection_to_mock_server(mock_server, tcp_connection):
     """Test TCP connection can connect to mock server."""
@@ -176,6 +179,7 @@ def test_core_send_encoded_command(mock_server, tcp_connection, protocol_encoder
 # ============================================================================
 # Service Layer Integration Tests
 # ============================================================================
+
 
 def test_service_connect_and_disconnect(mock_server, connection_service):
     """Test connection service can connect and disconnect."""
@@ -225,7 +229,9 @@ def test_service_send_command_while_connected(mock_server, connection_service):
     connection_service.disconnect()
 
 
-def test_workflow_service_load_and_start(mock_server, workflow_service, test_workflow_file):
+def test_workflow_service_load_and_start(
+    mock_server, workflow_service, test_workflow_file
+):
     """Test workflow service can load and start workflow."""
     # Connect first
     config = ConnectionConfig("127.0.0.1", 53717)
@@ -265,6 +271,7 @@ def test_status_service_get_server_status(mock_server, status_service):
 # Controller Layer Integration Tests
 # ============================================================================
 
+
 def test_controller_connect_via_ip_and_port(mock_server, connection_controller):
     """Test controller can connect using IP and port."""
     success, message = connection_controller.connect("127.0.0.1", 53717)
@@ -291,8 +298,9 @@ def test_controller_reconnect(mock_server, connection_controller):
     connection_controller.disconnect()
 
 
-def test_workflow_controller_full_workflow(mock_server, connection_controller,
-                                          workflow_controller, test_workflow_file):
+def test_workflow_controller_full_workflow(
+    mock_server, connection_controller, workflow_controller, test_workflow_file
+):
     """Test workflow controller full lifecycle."""
     # Connect first
     connection_controller.connect("127.0.0.1", 53717)
@@ -316,6 +324,7 @@ def test_workflow_controller_full_workflow(mock_server, connection_controller,
 # ============================================================================
 # Full Stack Integration Tests
 # ============================================================================
+
 
 def test_full_stack_complete_workflow(mock_server, test_workflow_file):
     """Test complete workflow: connect -> load -> start -> stop -> disconnect."""
@@ -345,7 +354,7 @@ def test_full_stack_complete_workflow(mock_server, test_workflow_file):
 
     # Step 4: Check status
     status = workflow_controller.get_workflow_status()
-    assert status['workflow_loaded'] is True
+    assert status["workflow_loaded"] is True
 
     # Step 5: Stop workflow
     success, message = workflow_controller.stop_workflow()
@@ -360,6 +369,7 @@ def test_full_stack_complete_workflow(mock_server, test_workflow_file):
 # ============================================================================
 # Error Handling Integration Tests
 # ============================================================================
+
 
 def test_error_connect_to_nonexistent_server(connection_controller):
     """Test error handling when server is not running."""
@@ -382,7 +392,9 @@ def test_error_workflow_without_connection(workflow_controller, test_workflow_fi
     assert "not connected" in message.lower()
 
 
-def test_error_invalid_workflow_file(mock_server, connection_controller, workflow_controller):
+def test_error_invalid_workflow_file(
+    mock_server, connection_controller, workflow_controller
+):
     """Test error handling with invalid workflow file."""
     connection_controller.connect("127.0.0.1", 53717)
 
@@ -394,15 +406,17 @@ def test_error_invalid_workflow_file(mock_server, connection_controller, workflo
     connection_controller.disconnect()
 
 
-def test_error_workflow_too_large(mock_server, connection_controller, workflow_controller):
+def test_error_workflow_too_large(
+    mock_server, connection_controller, workflow_controller
+):
     """Test error handling with workflow file that's too large."""
     connection_controller.connect("127.0.0.1", 53717)
 
     # Create a large file (>10MB)
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
         # Write 11MB of data
         for _ in range(11 * 1024 * 1024):
-            f.write('x')
+            f.write("x")
         large_file = Path(f.name)
 
     try:
@@ -419,7 +433,10 @@ def test_error_workflow_too_large(mock_server, connection_controller, workflow_c
 # Observable Pattern Integration Tests
 # ============================================================================
 
-def test_observable_connection_state_updates(mock_server, connection_service, connection_model):
+
+def test_observable_connection_state_updates(
+    mock_server, connection_service, connection_model
+):
     """Test that connection model receives state updates."""
     # Track state changes
     states_seen = []
@@ -430,9 +447,9 @@ def test_observable_connection_state_updates(mock_server, connection_service, co
     connection_model.add_observer(on_status_change)
 
     # Use service with this model
-    service = MVCConnectionService(connection_service.tcp_connection,
-                                   connection_service.encoder,
-                                   connection_model)
+    service = MVCConnectionService(
+        connection_service.tcp_connection, connection_service.encoder, connection_model
+    )
 
     config = ConnectionConfig("127.0.0.1", 53717)
 
@@ -449,6 +466,7 @@ def test_observable_connection_state_updates(mock_server, connection_service, co
 # Concurrent Operations Integration Tests
 # ============================================================================
 
+
 def test_multiple_connections_sequential(mock_server):
     """Test multiple sequential connections work correctly."""
     for i in range(3):
@@ -463,8 +481,9 @@ def test_multiple_connections_sequential(mock_server):
         service.disconnect()
 
 
-def test_workflow_start_stop_multiple_times(mock_server, connection_controller,
-                                           workflow_controller, test_workflow_file):
+def test_workflow_start_stop_multiple_times(
+    mock_server, connection_controller, workflow_controller, test_workflow_file
+):
     """Test starting and stopping workflow multiple times."""
     connection_controller.connect("127.0.0.1", 53717)
     workflow_controller.load_workflow(str(test_workflow_file))
@@ -484,6 +503,7 @@ def test_workflow_start_stop_multiple_times(mock_server, connection_controller,
 # ============================================================================
 # Edge Case Integration Tests
 # ============================================================================
+
 
 def test_disconnect_while_not_connected(connection_controller):
     """Test disconnecting when not connected."""
@@ -510,7 +530,7 @@ def test_empty_workflow_file(mock_server, connection_controller, workflow_contro
     connection_controller.connect("127.0.0.1", 53717)
 
     # Create empty file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
         empty_file = Path(f.name)
 
     try:
@@ -526,6 +546,7 @@ def test_empty_workflow_file(mock_server, connection_controller, workflow_contro
 # ============================================================================
 # Cleanup and Resource Management Tests
 # ============================================================================
+
 
 def test_proper_resource_cleanup_on_disconnect(mock_server, tcp_connection):
     """Test that resources are properly cleaned up on disconnect."""
@@ -544,9 +565,9 @@ def test_proper_resource_cleanup_on_disconnect(mock_server, tcp_connection):
 def test_multiple_observers_receive_updates(mock_server, connection_service):
     """Test that multiple observers receive connection updates."""
     model = ConnectionModel()
-    service = MVCConnectionService(connection_service.tcp_connection,
-                                   connection_service.encoder,
-                                   model)
+    service = MVCConnectionService(
+        connection_service.tcp_connection, connection_service.encoder, model
+    )
 
     observer1_calls = []
     observer2_calls = []

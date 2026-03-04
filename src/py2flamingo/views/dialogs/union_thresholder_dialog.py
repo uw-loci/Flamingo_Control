@@ -9,21 +9,31 @@ acquisition profiles at one or more rotation angles.
 import json
 import logging
 import os
-from typing import Optional, List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSlider,
+    QSpinBox,
+    QVBoxLayout,
+)
 from scipy import ndimage
 
 from py2flamingo.pipeline.services.threshold_analysis_service import (
-    ThresholdAnalysisService, ThresholdSettings,
+    ThresholdAnalysisService,
+    ThresholdSettings,
 )
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QSlider, QCheckBox,
-    QSpinBox, QDoubleSpinBox, QLineEdit, QPushButton, QMessageBox,
-    QSizePolicy, QFileDialog,
-)
-
 from py2flamingo.services.window_geometry_manager import PersistentDialog
 
 logger = logging.getLogger(__name__)
@@ -217,11 +227,11 @@ class UnionThresholderDialog(PersistentDialog):
 
     def _setup_channel_sliders(self, parent_layout):
         """Create a threshold slider row for each channel that has data."""
-        channels_config = self._config.get('channels', [])
+        channels_config = self._config.get("channels", [])
 
         for ch_cfg in channels_config:
-            ch_id = ch_cfg['id']
-            ch_name = ch_cfg.get('name', f'Channel {ch_id}')
+            ch_id = ch_cfg["id"]
+            ch_name = ch_cfg.get("name", f"Channel {ch_id}")
 
             has_data = self._voxel_storage.has_data(ch_id)
 
@@ -245,8 +255,10 @@ class UnionThresholderDialog(PersistentDialog):
             if has_data:
                 # Set slider max to observed max intensity in display volume
                 try:
-                    if (ch_id in self._sample_view.channel_layers
-                            and self._sample_view.channel_layers[ch_id].data is not None):
+                    if (
+                        ch_id in self._sample_view.channel_layers
+                        and self._sample_view.channel_layers[ch_id].data is not None
+                    ):
                         vol = self._sample_view.channel_layers[ch_id].data
                     else:
                         vol = self._voxel_storage.get_display_volume(ch_id)
@@ -275,16 +287,22 @@ class UnionThresholderDialog(PersistentDialog):
         if value <= 0:
             self._min_object_volume_label.setText("")
             return
-        voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])
+        voxel_size_um = self._config.get("display", {}).get(
+            "voxel_size_um", [50, 50, 50]
+        )
         if isinstance(voxel_size_um, list):
             vz, vy, vx = voxel_size_um
         else:
             vz = vy = vx = float(voxel_size_um)
         vol_um3 = value * vz * vy * vx
         if vol_um3 >= 1e9:  # >= 1 mm³
-            self._min_object_volume_label.setText(f"\u2248 {vol_um3 / 1e9:.2f} mm\u00b3")
+            self._min_object_volume_label.setText(
+                f"\u2248 {vol_um3 / 1e9:.2f} mm\u00b3"
+            )
         else:
-            self._min_object_volume_label.setText(f"\u2248 {vol_um3:,.0f} \u00b5m\u00b3")
+            self._min_object_volume_label.setText(
+                f"\u2248 {vol_um3:,.0f} \u00b5m\u00b3"
+            )
 
     def _schedule_update(self, *_args):
         """Debounce threshold changes."""
@@ -314,8 +332,10 @@ class UnionThresholderDialog(PersistentDialog):
                 continue
 
             try:
-                if (ch_id in self._sample_view.channel_layers
-                        and self._sample_view.channel_layers[ch_id].data is not None):
+                if (
+                    ch_id in self._sample_view.channel_layers
+                    and self._sample_view.channel_layers[ch_id].data is not None
+                ):
                     vol = self._sample_view.channel_layers[ch_id].data
                 else:
                     vol = self._voxel_storage.get_display_volume(ch_id)
@@ -344,7 +364,7 @@ class UnionThresholderDialog(PersistentDialog):
             min_object_size=self._min_object_spin.value(),
         )
 
-        if not hasattr(self, '_threshold_service'):
+        if not hasattr(self, "_threshold_service"):
             self._threshold_service = ThresholdAnalysisService()
 
         result = self._threshold_service.analyze(volumes=volumes, settings=settings)
@@ -371,7 +391,9 @@ class UnionThresholderDialog(PersistentDialog):
         total_voxels = mask.size
 
         # Volume in mm³
-        voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])
+        voxel_size_um = self._config.get("display", {}).get(
+            "voxel_size_um", [50, 50, 50]
+        )
         if isinstance(voxel_size_um, list):
             vz, vy, vx = voxel_size_um[0], voxel_size_um[1], voxel_size_um[2]
         else:
@@ -385,10 +407,10 @@ class UnionThresholderDialog(PersistentDialog):
         nx_indices = np.where(mask.any(axis=(0, 1)))[0]
 
         # Convert bbox to stage mm
-        stage_config = self._config.get('stage_control', {})
-        x_range = stage_config.get('x_range_mm', [1.0, 12.31])
-        y_range = stage_config.get('y_range_mm', [0.0, 14.0])
-        z_range = stage_config.get('z_range_mm', [12.5, 26.0])
+        stage_config = self._config.get("stage_control", {})
+        x_range = stage_config.get("x_range_mm", [1.0, 12.31])
+        y_range = stage_config.get("y_range_mm", [0.0, 14.0])
+        z_range = stage_config.get("z_range_mm", [12.5, 26.0])
         voxel_size_mm = vx / 1000.0
 
         z_lo = z_range[0] + nz_indices[0] * voxel_size_mm
@@ -425,12 +447,12 @@ class UnionThresholderDialog(PersistentDialog):
         default_colormap in the config, falling back to napari defaults.
         """
         colormap_to_rgba = {
-            'blue':    (0.58, 0.44, 0.86, 1.0),   # #9370DB  (matches 3D viewer)
-            'green':   (0.20, 0.80, 0.20, 1.0),   # #32CD32
-            'red':     (0.86, 0.08, 0.24, 1.0),   # #DC143C
-            'magenta': (1.00, 0.00, 1.00, 1.0),   # #FF00FF
-            'cyan':    (0.00, 0.81, 0.82, 1.0),   # #00CED1
-            'gray':    (0.75, 0.75, 0.75, 1.0),   # #C0C0C0
+            "blue": (0.58, 0.44, 0.86, 1.0),  # #9370DB  (matches 3D viewer)
+            "green": (0.20, 0.80, 0.20, 1.0),  # #32CD32
+            "red": (0.86, 0.08, 0.24, 1.0),  # #DC143C
+            "magenta": (1.00, 0.00, 1.00, 1.0),  # #FF00FF
+            "cyan": (0.00, 0.81, 0.82, 1.0),  # #00CED1
+            "gray": (0.75, 0.75, 0.75, 1.0),  # #C0C0C0
         }
         fallback_colors = [
             (0.58, 0.44, 0.86, 1.0),
@@ -440,12 +462,12 @@ class UnionThresholderDialog(PersistentDialog):
         ]
 
         color_dict = {None: (0.0, 0.0, 0.0, 0.0)}  # background transparent
-        channels_config = self._config.get('channels', [])
+        channels_config = self._config.get("channels", [])
 
         for ch_cfg in channels_config:
-            ch_id = ch_cfg['id']
+            ch_id = ch_cfg["id"]
             label_val = ch_id + 1
-            cmap_name = ch_cfg.get('default_colormap', 'gray')
+            cmap_name = ch_cfg.get("default_colormap", "gray")
             color = colormap_to_rgba.get(cmap_name)
             if color is None:
                 color = fallback_colors[ch_id % len(fallback_colors)]
@@ -473,7 +495,9 @@ class UnionThresholderDialog(PersistentDialog):
             existing.color = color_dict
         else:
             layer = viewer.add_labels(
-                labels, name=_MASK_LAYER_NAME, opacity=opacity,
+                labels,
+                name=_MASK_LAYER_NAME,
+                opacity=opacity,
             )
             layer.color = color_dict
             layer.contour = 2
@@ -516,8 +540,11 @@ class UnionThresholderDialog(PersistentDialog):
     def _get_actual_fov(self) -> Optional[float]:
         """Get field of view from camera service."""
         try:
-            if (not self._app or not hasattr(self._app, 'camera_service')
-                    or not self._app.camera_service):
+            if (
+                not self._app
+                or not hasattr(self._app, "camera_service")
+                or not self._app.camera_service
+            ):
                 return None
 
             pixel_size_mm = self._app.camera_service.get_pixel_field_of_view()
@@ -537,7 +564,10 @@ class UnionThresholderDialog(PersistentDialog):
     def _get_tip_position(self) -> Optional[Tuple[float, float]]:
         """Get tip of sample mount from position presets."""
         try:
-            from py2flamingo.services.position_preset_service import PositionPresetService
+            from py2flamingo.services.position_preset_service import (
+                PositionPresetService,
+            )
+
             preset_service = PositionPresetService()
             preset = preset_service.get_preset("Tip of sample mount")
             if preset is not None:
@@ -553,7 +583,7 @@ class UnionThresholderDialog(PersistentDialog):
         if not text:
             return [0.0]
         angles = []
-        for part in text.split(','):
+        for part in text.split(","):
             part = part.strip()
             if part:
                 try:
@@ -571,12 +601,14 @@ class UnionThresholderDialog(PersistentDialog):
           stage_x = x_range[1] - voxel_x * voxel_size_mm   if invert_x
                     x_range[0] + voxel_x * voxel_size_mm   otherwise
         """
-        stage_config = self._config.get('stage_control', {})
-        x_range = stage_config.get('x_range_mm', [1.0, 12.31])
-        y_range = stage_config.get('y_range_mm', [0.0, 14.0])
-        z_range = stage_config.get('z_range_mm', [12.5, 26.0])
+        stage_config = self._config.get("stage_control", {})
+        x_range = stage_config.get("x_range_mm", [1.0, 12.31])
+        y_range = stage_config.get("y_range_mm", [0.0, 14.0])
+        z_range = stage_config.get("z_range_mm", [12.5, 26.0])
 
-        voxel_size_um = self._config.get('display', {}).get('voxel_size_um', [50, 50, 50])
+        voxel_size_um = self._config.get("display", {}).get(
+            "voxel_size_um", [50, 50, 50]
+        )
         if isinstance(voxel_size_um, list):
             vs_mm = voxel_size_um[0] / 1000.0
         else:
@@ -584,8 +616,9 @@ class UnionThresholderDialog(PersistentDialog):
 
         invert_x = self._invert_x
 
-        def voxel_to_stage(z_voxel: int, y_voxel: int, x_voxel: int
-                           ) -> Tuple[float, float, float]:
+        def voxel_to_stage(
+            z_voxel: int, y_voxel: int, x_voxel: int
+        ) -> Tuple[float, float, float]:
             stage_z = z_range[0] + z_voxel * vs_mm
             stage_y = y_range[1] - y_voxel * vs_mm
             if invert_x:
@@ -606,9 +639,10 @@ class UnionThresholderDialog(PersistentDialog):
         fov_mm = self._get_actual_fov()
         if fov_mm is None:
             QMessageBox.warning(
-                self, "FOV Unavailable",
+                self,
+                "FOV Unavailable",
                 "Could not determine field of view from camera.\n"
-                "Make sure the microscope is connected."
+                "Make sure the microscope is connected.",
             )
             return
 
@@ -619,10 +653,11 @@ class UnionThresholderDialog(PersistentDialog):
 
         if needs_rotation and tip_pos is None:
             QMessageBox.warning(
-                self, "Tip Not Calibrated",
+                self,
+                "Tip Not Calibrated",
                 "Multi-angle profiles require the 'Tip of sample mount' "
                 "position preset.\nPlease calibrate the tip first, or use "
-                "a single angle."
+                "a single angle.",
             )
             return
 
@@ -631,7 +666,9 @@ class UnionThresholderDialog(PersistentDialog):
         voxel_to_stage_fn, voxel_size_mm = self._make_voxel_to_stage_fn()
 
         # Generate profiles
-        from py2flamingo.utils.acquisition_profile_generator import generate_tile_profile
+        from py2flamingo.utils.acquisition_profile_generator import (
+            generate_tile_profile,
+        )
 
         try:
             profiles = generate_tile_profile(
@@ -650,9 +687,10 @@ class UnionThresholderDialog(PersistentDialog):
 
         if not profiles:
             QMessageBox.information(
-                self, "No Tiles",
+                self,
+                "No Tiles",
                 "No tiles were generated. The mask may be too small or the "
-                "FOV too large."
+                "FOV too large.",
             )
             return
 
@@ -667,7 +705,9 @@ class UnionThresholderDialog(PersistentDialog):
         self._remove_napari_mask()
 
         from py2flamingo.models.data.overview_results import TileResult
-        from py2flamingo.views.dialogs.tile_collection_dialog import TileCollectionDialog
+        from py2flamingo.views.dialogs.tile_collection_dialog import (
+            TileCollectionDialog,
+        )
 
         # Group profiles by angle
         by_angle = {}
@@ -677,17 +717,19 @@ class UnionThresholderDialog(PersistentDialog):
         def _to_tile_results(tile_profiles) -> List[TileResult]:
             results = []
             for tp in tile_profiles:
-                results.append(TileResult(
-                    x=tp.x,
-                    y=tp.y,
-                    z=tp.z_center,
-                    tile_x_idx=tp.tile_x_idx,
-                    tile_y_idx=tp.tile_y_idx,
-                    images={},
-                    rotation_angle=tp.rotation_angle,
-                    z_stack_min=tp.z_min,
-                    z_stack_max=tp.z_max,
-                ))
+                results.append(
+                    TileResult(
+                        x=tp.x,
+                        y=tp.y,
+                        z=tp.z_center,
+                        tile_x_idx=tp.tile_x_idx,
+                        tile_y_idx=tp.tile_y_idx,
+                        images={},
+                        rotation_angle=tp.rotation_angle,
+                        z_stack_min=tp.z_min,
+                        z_stack_max=tp.z_max,
+                    )
+                )
             return results
 
         # Process in pairs: angles[0] → left, angles[1] → right, etc.
@@ -698,7 +740,11 @@ class UnionThresholderDialog(PersistentDialog):
             right_angle = angle_list[i + 1] if i + 1 < len(angle_list) else None
 
             left_tiles = _to_tile_results(by_angle[left_angle])
-            right_tiles = _to_tile_results(by_angle[right_angle]) if right_angle is not None else []
+            right_tiles = (
+                _to_tile_results(by_angle[right_angle])
+                if right_angle is not None
+                else []
+            )
 
             dialog = TileCollectionDialog(
                 left_tiles=left_tiles,
@@ -711,7 +757,7 @@ class UnionThresholderDialog(PersistentDialog):
             dialog.show()
 
             # Keep reference to prevent garbage collection
-            if not hasattr(self, '_tile_dialogs'):
+            if not hasattr(self, "_tile_dialogs"):
                 self._tile_dialogs = []
             self._tile_dialogs.append(dialog)
 
@@ -737,13 +783,13 @@ class UnionThresholderDialog(PersistentDialog):
 
     def _get_geometry_manager(self):
         """Get WindowGeometryManager from application."""
-        if self._app and hasattr(self._app, 'geometry_manager'):
+        if self._app and hasattr(self._app, "geometry_manager"):
             return self._app.geometry_manager
         return None
 
     def _get_config_service(self):
         """Get ConfigurationService from application."""
-        if self._app and hasattr(self._app, 'config_service'):
+        if self._app and hasattr(self._app, "config_service"):
             return self._app.config_service
         return None
 
@@ -754,21 +800,21 @@ class UnionThresholderDialog(PersistentDialog):
             return
 
         state = {
-            'channels': {
+            "channels": {
                 str(ch_id): {
-                    'enabled': cb.isChecked(),
-                    'threshold': slider.value(),
+                    "enabled": cb.isChecked(),
+                    "threshold": slider.value(),
                 }
                 for ch_id, (cb, slider, _) in self._channel_controls.items()
             },
-            'opacity': self._opacity_slider.value(),
-            'show_mask': self._show_mask_cb.isChecked(),
-            'buffer_fraction': self._buffer_spin.value(),
-            'angles': self._angles_edit.text(),
-            'gauss_sigma': self._gauss_sigma_spin.value(),
-            'min_object_size': self._min_object_spin.value(),
-            'opening_enabled': self._opening_cb.isChecked(),
-            'opening_radius': self._opening_radius_spin.value(),
+            "opacity": self._opacity_slider.value(),
+            "show_mask": self._show_mask_cb.isChecked(),
+            "buffer_fraction": self._buffer_spin.value(),
+            "angles": self._angles_edit.text(),
+            "gauss_sigma": self._gauss_sigma_spin.value(),
+            "min_object_size": self._min_object_spin.value(),
+            "opening_enabled": self._opening_cb.isChecked(),
+            "opening_radius": self._opening_radius_spin.value(),
         }
 
         try:
@@ -802,27 +848,27 @@ class UnionThresholderDialog(PersistentDialog):
     def _build_preset_dict(self) -> dict:
         """Build a preset dictionary from current dialog state."""
         return {
-            'version': 2,
-            'channels': {
+            "version": 2,
+            "channels": {
                 str(ch_id): {
-                    'enabled': cb.isChecked(),
-                    'threshold': slider.value(),
+                    "enabled": cb.isChecked(),
+                    "threshold": slider.value(),
                 }
                 for ch_id, (cb, slider, _) in self._channel_controls.items()
             },
-            'display': {
-                'opacity': self._opacity_slider.value() / 100.0,
-                'show_mask': self._show_mask_cb.isChecked(),
+            "display": {
+                "opacity": self._opacity_slider.value() / 100.0,
+                "show_mask": self._show_mask_cb.isChecked(),
             },
-            'processing': {
-                'gauss_sigma': self._gauss_sigma_spin.value(),
-                'min_object_size': self._min_object_spin.value(),
-                'opening_enabled': self._opening_cb.isChecked(),
-                'opening_radius': self._opening_radius_spin.value(),
+            "processing": {
+                "gauss_sigma": self._gauss_sigma_spin.value(),
+                "min_object_size": self._min_object_spin.value(),
+                "opening_enabled": self._opening_cb.isChecked(),
+                "opening_radius": self._opening_radius_spin.value(),
             },
-            'profile': {
-                'buffer_fraction': self._buffer_spin.value(),
-                'angles': self._angles_edit.text(),
+            "profile": {
+                "buffer_fraction": self._buffer_spin.value(),
+                "angles": self._angles_edit.text(),
             },
         }
 
@@ -833,7 +879,7 @@ class UnionThresholderDialog(PersistentDialog):
         then triggers one recompute at the end.
         """
         # --- Channel controls ---
-        channels = state.get('channels', {})
+        channels = state.get("channels", {})
         for ch_id, (cb, slider, val_label) in self._channel_controls.items():
             ch_state = channels.get(str(ch_id))
             if ch_state is None:
@@ -844,8 +890,8 @@ class UnionThresholderDialog(PersistentDialog):
             cb.blockSignals(True)
             slider.blockSignals(True)
             try:
-                cb.setChecked(ch_state.get('enabled', cb.isChecked()))
-                threshold = ch_state.get('threshold', slider.value())
+                cb.setChecked(ch_state.get("enabled", cb.isChecked()))
+                threshold = ch_state.get("threshold", slider.value())
                 threshold = max(slider.minimum(), min(slider.maximum(), threshold))
                 slider.setValue(threshold)
                 val_label.setText(str(slider.value()))
@@ -854,79 +900,79 @@ class UnionThresholderDialog(PersistentDialog):
                 slider.blockSignals(False)
 
         # --- Display settings (preset JSON nests under 'display', dialog state is flat) ---
-        display = state.get('display', {})
-        opacity_val = display.get('opacity')
+        display = state.get("display", {})
+        opacity_val = display.get("opacity")
         if opacity_val is not None:
             # Preset stores 0.0-1.0, convert to 0-100
             self._opacity_slider.blockSignals(True)
             self._opacity_slider.setValue(int(round(opacity_val * 100)))
             self._opacity_label.setText(f"{opacity_val:.2f}")
             self._opacity_slider.blockSignals(False)
-        elif 'opacity' in state:
+        elif "opacity" in state:
             # Dialog state stores raw slider value (0-100)
             self._opacity_slider.blockSignals(True)
-            self._opacity_slider.setValue(state['opacity'])
+            self._opacity_slider.setValue(state["opacity"])
             self._opacity_label.setText(f"{state['opacity'] / 100:.2f}")
             self._opacity_slider.blockSignals(False)
 
-        show_mask = display.get('show_mask')
+        show_mask = display.get("show_mask")
         if show_mask is None:
-            show_mask = state.get('show_mask')
+            show_mask = state.get("show_mask")
         if show_mask is not None:
             self._show_mask_cb.blockSignals(True)
             self._show_mask_cb.setChecked(show_mask)
             self._show_mask_cb.blockSignals(False)
 
         # --- Processing settings (preset nests under 'processing', dialog state is flat) ---
-        processing = state.get('processing', {})
+        processing = state.get("processing", {})
 
-        gauss_sigma = processing.get('gauss_sigma')
+        gauss_sigma = processing.get("gauss_sigma")
         if gauss_sigma is None:
-            gauss_sigma = state.get('gauss_sigma')
+            gauss_sigma = state.get("gauss_sigma")
         if gauss_sigma is not None:
             self._gauss_sigma_spin.blockSignals(True)
             self._gauss_sigma_spin.setValue(float(gauss_sigma))
             self._gauss_sigma_spin.blockSignals(False)
 
-        min_obj = processing.get('min_object_size')
+        min_obj = processing.get("min_object_size")
         if min_obj is None:
-            min_obj = state.get('min_object_size')
+            min_obj = state.get("min_object_size")
         if min_obj is not None:
             self._min_object_spin.blockSignals(True)
             self._min_object_spin.setValue(int(min_obj))
             self._min_object_spin.blockSignals(False)
             self._update_min_object_volume_label(int(min_obj))
 
-        opening_enabled = processing.get('opening_enabled')
+        opening_enabled = processing.get("opening_enabled")
         if opening_enabled is None:
-            opening_enabled = state.get('opening_enabled')
+            opening_enabled = state.get("opening_enabled")
         if opening_enabled is not None:
             self._opening_cb.blockSignals(True)
             self._opening_cb.setChecked(bool(opening_enabled))
             self._opening_cb.blockSignals(False)
             self._opening_radius_spin.setEnabled(bool(opening_enabled))
 
-        opening_radius = processing.get('opening_radius')
+        opening_radius = processing.get("opening_radius")
         if opening_radius is None:
-            opening_radius = state.get('opening_radius')
+            opening_radius = state.get("opening_radius")
         if opening_radius is not None:
             self._opening_radius_spin.blockSignals(True)
             self._opening_radius_spin.setValue(int(opening_radius))
             self._opening_radius_spin.blockSignals(False)
 
         # --- Profile settings (preset nests under 'profile', dialog state is flat) ---
-        profile = state.get('profile', {})
-        buffer_val = profile.get('buffer_fraction')
+        profile = state.get("profile", {})
+        buffer_val = profile.get("buffer_fraction")
         if buffer_val is None:
-            buffer_val = state.get('buffer_fraction')
+            buffer_val = state.get("buffer_fraction")
         if buffer_val is not None:
             self._buffer_spin.blockSignals(True)
             self._buffer_spin.setValue(float(buffer_val))
             self._buffer_spin.blockSignals(False)
 
-        angles_val = profile.get('angles')
+        angles_val = profile.get("angles")
         if angles_val is None:
-            angles_val = state.get('angles')
+            angles_val = state.get("angles")
         if angles_val is not None:
             self._angles_edit.blockSignals(True)
             self._angles_edit.setText(str(angles_val))
@@ -937,13 +983,15 @@ class UnionThresholderDialog(PersistentDialog):
 
     def _on_save_preset(self):
         """Save current threshold settings to a JSON preset file."""
-        start_dir = ''
+        start_dir = ""
         cs = self._get_config_service()
         if cs:
-            start_dir = cs.get_thresholder_preset_path() or ''
+            start_dir = cs.get_thresholder_preset_path() or ""
 
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Threshold Preset", start_dir,
+            self,
+            "Save Threshold Preset",
+            start_dir,
             "JSON files (*.json);;All files (*.*)",
         )
         if not path:
@@ -951,7 +999,7 @@ class UnionThresholderDialog(PersistentDialog):
 
         preset = self._build_preset_dict()
         try:
-            with open(path, 'w') as f:
+            with open(path, "w") as f:
                 json.dump(preset, f, indent=2)
             logger.info(f"Saved threshold preset to {path}")
         except Exception as e:
@@ -964,20 +1012,22 @@ class UnionThresholderDialog(PersistentDialog):
 
     def _on_load_preset(self):
         """Load threshold settings from a JSON preset file."""
-        start_dir = ''
+        start_dir = ""
         cs = self._get_config_service()
         if cs:
-            start_dir = cs.get_thresholder_preset_path() or ''
+            start_dir = cs.get_thresholder_preset_path() or ""
 
         path, _ = QFileDialog.getOpenFileName(
-            self, "Load Threshold Preset", start_dir,
+            self,
+            "Load Threshold Preset",
+            start_dir,
             "JSON files (*.json);;All files (*.*)",
         )
         if not path:
             return
 
         try:
-            with open(path, 'r') as f:
+            with open(path, "r") as f:
                 preset = json.load(f)
             logger.info(f"Loaded threshold preset from {path}")
         except Exception as e:

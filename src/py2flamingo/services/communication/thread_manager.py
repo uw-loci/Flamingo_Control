@@ -1,7 +1,9 @@
 # src/py2flamingo/services/communication/thread_manager.py
 from __future__ import annotations
+
 import threading
 from typing import Callable, Optional
+
 
 class ThreadManager:
     """
@@ -26,9 +28,12 @@ class ThreadManager:
         try:
             # Import ONLY when needed; repository may not ship this file anymore
             from py2flamingo.functions.threads import (  # type: ignore
-                command_listen_thread, live_listen_thread,
-                send_thread, processing_thread
+                command_listen_thread,
+                live_listen_thread,
+                processing_thread,
+                send_thread,
             )
+
             return {
                 "command_listen_thread": command_listen_thread,
                 "live_listen_thread": live_listen_thread,
@@ -46,9 +51,11 @@ class ThreadManager:
         legacy = self._try_legacy_import().get(name)
         if callable(legacy):
             return legacy
+
         # Fallback no-op
         def _noop(*args, **kwargs):
             return None
+
         return _noop
 
     def _spawn(self, target: Callable, *args, name: str):
@@ -58,16 +65,22 @@ class ThreadManager:
 
     # ----- public API used by ConnectionService -----
     def start_receivers(self, *args):
-        self._spawn(self._resolve_target("command_listen_target"), *args, name="command-listen")
+        self._spawn(
+            self._resolve_target("command_listen_target"), *args, name="command-listen"
+        )
 
     def start_live_receiver(self, *args):
-        self._spawn(self._resolve_target("live_listen_target"), *args, name="live-listen")
+        self._spawn(
+            self._resolve_target("live_listen_target"), *args, name="live-listen"
+        )
 
     def start_sender(self, *args):
         self._spawn(self._resolve_target("send_target"), *args, name="send-thread")
 
     def start_processing(self, *args):
-        self._spawn(self._resolve_target("processing_target"), *args, name="processing-thread")
+        self._spawn(
+            self._resolve_target("processing_target"), *args, name="processing-thread"
+        )
 
     def stop_all(self, timeout: float = 1.0):
         self._stopped.set()

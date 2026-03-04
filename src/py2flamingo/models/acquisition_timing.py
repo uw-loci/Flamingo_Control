@@ -7,9 +7,9 @@ These models track actual acquisition durations vs estimated durations
 to learn correction factors for more accurate predictions.
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -33,6 +33,7 @@ class AcquisitionTimingRecord:
         actual_duration_s: Measured duration after acquisition
         overhead_s: Difference (actual - theoretical)
     """
+
     timestamp: str
     workflow_type: str
     num_planes: int
@@ -54,10 +55,10 @@ class AcquisitionTimingRecord:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'AcquisitionTimingRecord':
+    def from_dict(cls, data: Dict[str, Any]) -> "AcquisitionTimingRecord":
         """Create record from dictionary (loaded from JSON)."""
         # Remove overhead_s if present since it's calculated
-        data = {k: v for k, v in data.items() if k != 'overhead_s'}
+        data = {k: v for k, v in data.items() if k != "overhead_s"}
         return cls(**data)
 
     @classmethod
@@ -71,8 +72,8 @@ class AcquisitionTimingRecord:
         total_z_travel_mm: float,
         exposure_us: float,
         theoretical_duration_s: float,
-        actual_duration_s: float
-    ) -> 'AcquisitionTimingRecord':
+        actual_duration_s: float,
+    ) -> "AcquisitionTimingRecord":
         """
         Create a new timing record with current timestamp.
 
@@ -100,7 +101,7 @@ class AcquisitionTimingRecord:
             total_z_travel_mm=total_z_travel_mm,
             exposure_us=exposure_us,
             theoretical_duration_s=theoretical_duration_s,
-            actual_duration_s=actual_duration_s
+            actual_duration_s=actual_duration_s,
         )
 
 
@@ -120,6 +121,7 @@ class LearnedOverheadComponents:
         sample_count: Number of samples used to calculate these factors
         last_updated: ISO timestamp of last update
     """
+
     base_overhead_s: float = 0.0
     filter_switch_s: float = 0.0
     settle_correction_per_plane_s: float = 0.0
@@ -132,7 +134,7 @@ class LearnedOverheadComponents:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'LearnedOverheadComponents':
+    def from_dict(cls, data: Dict[str, Any]) -> "LearnedOverheadComponents":
         """Create from dictionary (loaded from JSON)."""
         return cls(**data)
 
@@ -141,7 +143,7 @@ class LearnedOverheadComponents:
         theoretical_time: float,
         num_planes: int,
         num_lasers: int,
-        total_z_travel_mm: float
+        total_z_travel_mm: float,
     ) -> float:
         """
         Calculate corrected time estimate using learned factors.
@@ -158,10 +160,10 @@ class LearnedOverheadComponents:
         filter_switches = max(0, num_lasers - 1)
 
         correction = (
-            self.base_overhead_s +
-            self.filter_switch_s * filter_switches +
-            self.settle_correction_per_plane_s * num_planes +
-            self.z_overhead_per_mm_s * total_z_travel_mm
+            self.base_overhead_s
+            + self.filter_switch_s * filter_switches
+            + self.settle_correction_per_plane_s * num_planes
+            + self.z_overhead_per_mm_s * total_z_travel_mm
         )
 
         return theoretical_time + correction
@@ -183,8 +185,11 @@ class TimingHistory:
         learned_factors: Computed overhead correction factors
         max_records: Maximum number of records to keep
     """
+
     records: List[AcquisitionTimingRecord] = field(default_factory=list)
-    learned_factors: LearnedOverheadComponents = field(default_factory=LearnedOverheadComponents)
+    learned_factors: LearnedOverheadComponents = field(
+        default_factory=LearnedOverheadComponents
+    )
     max_records: int = 100
 
     def add_record(self, record: AcquisitionTimingRecord) -> None:
@@ -198,7 +203,7 @@ class TimingHistory:
 
         # Trim old records
         if len(self.records) > self.max_records:
-            self.records = self.records[:self.max_records]
+            self.records = self.records[: self.max_records]
 
     def get_records_by_type(self, workflow_type: str) -> List[AcquisitionTimingRecord]:
         """Get records filtered by workflow type."""
@@ -207,23 +212,22 @@ class TimingHistory:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
-            'records': [r.to_dict() for r in self.records],
-            'learned_factors': self.learned_factors.to_dict(),
-            'max_records': self.max_records,
+            "records": [r.to_dict() for r in self.records],
+            "learned_factors": self.learned_factors.to_dict(),
+            "max_records": self.max_records,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'TimingHistory':
+    def from_dict(cls, data: Dict[str, Any]) -> "TimingHistory":
         """Create from dictionary (loaded from JSON)."""
         records = [
-            AcquisitionTimingRecord.from_dict(r)
-            for r in data.get('records', [])
+            AcquisitionTimingRecord.from_dict(r) for r in data.get("records", [])
         ]
         learned_factors = LearnedOverheadComponents.from_dict(
-            data.get('learned_factors', {})
+            data.get("learned_factors", {})
         )
         return cls(
             records=records,
             learned_factors=learned_factors,
-            max_records=data.get('max_records', 100)
+            max_records=data.get("max_records", 100),
         )

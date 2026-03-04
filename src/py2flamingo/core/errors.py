@@ -16,10 +16,10 @@ Error Code Ranges:
 - 9000-9999: Unknown/System errors
 """
 
-from typing import Optional, Dict, Any, List
-from datetime import datetime
-import traceback
 import logging
+import traceback
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 
 class FlamingoError(Exception):
@@ -38,7 +38,7 @@ class FlamingoError(Exception):
         error_code: Optional[int] = None,
         context: Optional[Dict[str, Any]] = None,
         cause: Optional[Exception] = None,
-        suggestions: Optional[List[str]] = None
+        suggestions: Optional[List[str]] = None,
     ):
         """
         Initialize a Flamingo error.
@@ -63,20 +63,20 @@ class FlamingoError(Exception):
 
         # Add standard context
         if cause:
-            self.context['original_error'] = str(cause)
-            self.context['original_type'] = type(cause).__name__
+            self.context["original_error"] = str(cause)
+            self.context["original_type"] = type(cause).__name__
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert error to dictionary for logging/serialization."""
         return {
-            'error_type': self.__class__.__name__,
-            'message': self.message,
-            'code': self.error_code,
-            'context': self.context,
-            'suggestions': self.suggestions,
-            'timestamp': self.timestamp.isoformat(),
-            'cause': str(self.cause) if self.cause else None,
-            'stack_trace': self.stack_trace
+            "error_type": self.__class__.__name__,
+            "message": self.message,
+            "code": self.error_code,
+            "context": self.context,
+            "suggestions": self.suggestions,
+            "timestamp": self.timestamp.isoformat(),
+            "cause": str(self.cause) if self.cause else None,
+            "stack_trace": self.stack_trace,
         }
 
     def format_user_message(self) -> str:
@@ -90,9 +90,7 @@ class FlamingoError(Exception):
 
     def format_log_message(self) -> str:
         """Format error for logging (with all details)."""
-        parts = [
-            f"[{self.error_code}] {self.__class__.__name__}: {self.message}"
-        ]
+        parts = [f"[{self.error_code}] {self.__class__.__name__}: {self.message}"]
 
         if self.context:
             parts.append(f"Context: {self.context}")
@@ -108,114 +106,123 @@ class FlamingoError(Exception):
 
 class ConnectionError(FlamingoError):
     """Errors related to network connections and socket operations."""
+
     DEFAULT_CODE = 1001
 
     def __init__(self, message: str, **kwargs):
-        if 'context' not in kwargs:
-            kwargs['context'] = {}
-        kwargs['context']['category'] = 'CONNECTION'
+        if "context" not in kwargs:
+            kwargs["context"] = {}
+        kwargs["context"]["category"] = "CONNECTION"
         super().__init__(message, **kwargs)
 
 
 class CommandError(FlamingoError):
     """Errors related to command execution and protocol violations."""
+
     DEFAULT_CODE = 2001
 
     def __init__(self, message: str, command_code: Optional[int] = None, **kwargs):
-        if 'context' not in kwargs:
-            kwargs['context'] = {}
-        kwargs['context']['category'] = 'COMMAND'
+        if "context" not in kwargs:
+            kwargs["context"] = {}
+        kwargs["context"]["category"] = "COMMAND"
         if command_code is not None:
-            kwargs['context']['command_code'] = command_code
+            kwargs["context"]["command_code"] = command_code
         super().__init__(message, **kwargs)
 
 
 class HardwareError(FlamingoError):
     """Errors related to hardware state and physical limitations."""
+
     DEFAULT_CODE = 3001
 
     def __init__(self, message: str, component: Optional[str] = None, **kwargs):
-        if 'context' not in kwargs:
-            kwargs['context'] = {}
-        kwargs['context']['category'] = 'HARDWARE'
+        if "context" not in kwargs:
+            kwargs["context"] = {}
+        kwargs["context"]["category"] = "HARDWARE"
         if component:
-            kwargs['context']['component'] = component
+            kwargs["context"]["component"] = component
         super().__init__(message, **kwargs)
 
 
 class DataError(FlamingoError):
     """Errors related to data formats, file I/O, and parsing."""
+
     DEFAULT_CODE = 4001
 
     def __init__(self, message: str, file_path: Optional[str] = None, **kwargs):
-        if 'context' not in kwargs:
-            kwargs['context'] = {}
-        kwargs['context']['category'] = 'DATA'
+        if "context" not in kwargs:
+            kwargs["context"] = {}
+        kwargs["context"]["category"] = "DATA"
         if file_path:
-            kwargs['context']['file_path'] = file_path
+            kwargs["context"]["file_path"] = file_path
         super().__init__(message, **kwargs)
 
 
 class WorkflowError(FlamingoError):
     """Errors related to workflow execution and state management."""
+
     DEFAULT_CODE = 5001
 
     def __init__(self, message: str, workflow_name: Optional[str] = None, **kwargs):
-        if 'context' not in kwargs:
-            kwargs['context'] = {}
-        kwargs['context']['category'] = 'WORKFLOW'
+        if "context" not in kwargs:
+            kwargs["context"] = {}
+        kwargs["context"]["category"] = "WORKFLOW"
         if workflow_name:
-            kwargs['context']['workflow'] = workflow_name
+            kwargs["context"]["workflow"] = workflow_name
         super().__init__(message, **kwargs)
 
 
 class ConfigurationError(FlamingoError):
     """Errors related to application configuration and settings."""
+
     DEFAULT_CODE = 6001
 
     def __init__(self, message: str, setting_name: Optional[str] = None, **kwargs):
-        if 'context' not in kwargs:
-            kwargs['context'] = {}
-        kwargs['context']['category'] = 'CONFIGURATION'
+        if "context" not in kwargs:
+            kwargs["context"] = {}
+        kwargs["context"]["category"] = "CONFIGURATION"
         if setting_name:
-            kwargs['context']['setting'] = setting_name
+            kwargs["context"]["setting"] = setting_name
         super().__init__(message, **kwargs)
 
 
 class ValidationError(FlamingoError):
     """Errors related to input validation and parameter checking."""
+
     DEFAULT_CODE = 7001
 
     def __init__(self, message: str, field_name: Optional[str] = None, **kwargs):
-        if 'context' not in kwargs:
-            kwargs['context'] = {}
-        kwargs['context']['category'] = 'VALIDATION'
+        if "context" not in kwargs:
+            kwargs["context"] = {}
+        kwargs["context"]["category"] = "VALIDATION"
         if field_name:
-            kwargs['context']['field'] = field_name
+            kwargs["context"]["field"] = field_name
         super().__init__(message, **kwargs)
 
 
 class TimeoutError(FlamingoError):
     """Errors related to operation timeouts."""
+
     DEFAULT_CODE = 8001
 
     def __init__(self, message: str, timeout_seconds: Optional[float] = None, **kwargs):
-        if 'context' not in kwargs:
-            kwargs['context'] = {}
-        kwargs['context']['category'] = 'TIMEOUT'
+        if "context" not in kwargs:
+            kwargs["context"] = {}
+        kwargs["context"]["category"] = "TIMEOUT"
         if timeout_seconds is not None:
-            kwargs['context']['timeout_seconds'] = timeout_seconds
+            kwargs["context"]["timeout_seconds"] = timeout_seconds
         super().__init__(message, **kwargs)
 
 
 class SystemError(FlamingoError):
     """Errors related to system-level failures and unknown conditions."""
+
     DEFAULT_CODE = 9001
 
     def __init__(self, message: str, **kwargs):
-        if 'context' not in kwargs:
-            kwargs['context'] = {}
-        kwargs['context']['category'] = 'SYSTEM'
+        if "context" not in kwargs:
+            kwargs["context"] = {}
+        kwargs["context"]["category"] = "SYSTEM"
         super().__init__(message, **kwargs)
 
 
@@ -282,7 +289,9 @@ class ErrorCodes:
     DEPRECATED = 9003
 
 
-def wrap_external_error(e: Exception, message: str, error_class=SystemError, **context) -> FlamingoError:
+def wrap_external_error(
+    e: Exception, message: str, error_class=SystemError, **context
+) -> FlamingoError:
     """
     Wrap an external exception in a FlamingoError.
 
@@ -295,8 +304,4 @@ def wrap_external_error(e: Exception, message: str, error_class=SystemError, **c
     Returns:
         A FlamingoError instance wrapping the original exception
     """
-    return error_class(
-        message=message,
-        cause=e,
-        context=context
-    )
+    return error_class(message=message, cause=e, context=context)

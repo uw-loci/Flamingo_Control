@@ -18,11 +18,11 @@ Folder structure expected:
 
 import logging
 import re
-import numpy as np
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 from PyQt5.QtCore import QObject, pyqtSignal
 from scipy.ndimage import zoom
 
@@ -36,7 +36,7 @@ from py2flamingo.visualization.tile_processing_worker import TileFrameBuffer
 logger = logging.getLogger(__name__)
 
 # Pattern: S000_t000000_V000_R0000_X000_Y000_C{ch}_I0_D1_P{planes}.raw
-RAW_FILE_PATTERN = re.compile(r'S\d+_.*_C(\d+)_.*_P(\d+)\.raw$')
+RAW_FILE_PATTERN = re.compile(r"S\d+_.*_C(\d+)_.*_P(\d+)\.raw$")
 
 FRAME_WIDTH = 2048
 FRAME_HEIGHT = 2048
@@ -46,14 +46,17 @@ DOWNSAMPLE_TARGET = 100
 @dataclass
 class DiskTileInfo:
     """Parsed metadata for a single tile folder on disk."""
+
     folder_path: Path
-    x: float                          # Stage X in mm
-    y: float                          # Stage Y in mm
-    z_min: float                      # Z sweep min in mm
-    z_max: float                      # Z sweep max in mm
-    channels: List[int]               # Enabled channel IDs (0-based)
-    raw_files: Dict[int, Path] = field(default_factory=dict)  # channel_idx(1-based) -> path
-    n_planes: int = 0                 # Planes per channel
+    x: float  # Stage X in mm
+    y: float  # Stage Y in mm
+    z_min: float  # Z sweep min in mm
+    z_max: float  # Z sweep max in mm
+    channels: List[int]  # Enabled channel IDs (0-based)
+    raw_files: Dict[int, Path] = field(
+        default_factory=dict
+    )  # channel_idx(1-based) -> path
+    n_planes: int = 0  # Planes per channel
 
 
 class DiskTileLoader(QObject):
@@ -73,7 +76,9 @@ class DiskTileLoader(QObject):
     finished = pyqtSignal(bool, str)
     error = pyqtSignal(str)
 
-    def __init__(self, date_dir: str, tile_worker, voxel_storage, invert_x: bool = False):
+    def __init__(
+        self, date_dir: str, tile_worker, voxel_storage, invert_x: bool = False
+    ):
         """
         Args:
             date_dir: Path to date folder containing X*_Y* tile subfolders.
@@ -130,7 +135,7 @@ class DiskTileLoader(QObject):
         # 3. Set reference position from first tile
         first = tiles[0]
         z_mid = (first.z_min + first.z_max) / 2.0
-        ref_pos = {'x': first.x, 'y': first.y, 'z': z_mid, 'r': 0.0}
+        ref_pos = {"x": first.x, "y": first.y, "z": z_mid, "r": 0.0}
         self._voxel_storage.set_reference_position(ref_pos)
         logger.info(f"Reference position set from first tile: {ref_pos}")
 
@@ -143,9 +148,11 @@ class DiskTileLoader(QObject):
                 self.finished.emit(False, "Loading cancelled")
                 return
 
-            self.progress.emit(idx + 1, total,
-                               f"Loading tile {tile_info.folder_path.name} "
-                               f"({idx + 1}/{total})")
+            self.progress.emit(
+                idx + 1,
+                total,
+                f"Loading tile {tile_info.folder_path.name} " f"({idx + 1}/{total})",
+            )
 
             try:
                 buffer = self._load_tile_to_buffer(tile_info, ref_pos)
@@ -153,26 +160,36 @@ class DiskTileLoader(QObject):
                     self._tile_worker.submit_tile(buffer)
                     self.tile_submitted.emit(buffer.tile_key)
                     tiles_submitted += 1
-                    logger.info(f"Submitted tile {buffer.tile_key} "
-                                f"({buffer.frame_count} frames)")
+                    logger.info(
+                        f"Submitted tile {buffer.tile_key} "
+                        f"({buffer.frame_count} frames)"
+                    )
                 else:
-                    logger.warning(f"No frames loaded for tile {tile_info.folder_path.name}")
+                    logger.warning(
+                        f"No frames loaded for tile {tile_info.folder_path.name}"
+                    )
             except Exception as e:
-                logger.error(f"Error loading tile {tile_info.folder_path.name}: {e}",
-                             exc_info=True)
+                logger.error(
+                    f"Error loading tile {tile_info.folder_path.name}: {e}",
+                    exc_info=True,
+                )
                 self.error.emit(f"Error loading {tile_info.folder_path.name}: {e}")
 
         # 5. Wait for all tiles to be processed
         self.progress.emit(total, total, "Waiting for processing to complete...")
-        logger.info(f"All {tiles_submitted} tiles submitted, waiting for worker to finish...")
+        logger.info(
+            f"All {tiles_submitted} tiles submitted, waiting for worker to finish..."
+        )
         idle = self._tile_worker.wait_for_idle(timeout_ms=300_000)
 
         if idle:
-            self.finished.emit(True,
-                               f"Loaded {tiles_submitted}/{total} tiles successfully")
+            self.finished.emit(
+                True, f"Loaded {tiles_submitted}/{total} tiles successfully"
+            )
         else:
-            self.finished.emit(False,
-                               f"Processing timed out ({tiles_submitted} tiles submitted)")
+            self.finished.emit(
+                False, f"Processing timed out ({tiles_submitted} tiles submitted)"
+            )
 
     def _parse_tile_folder(self, folder: Path) -> Optional[DiskTileInfo]:
         """Parse a tile folder's metadata and find raw files.
@@ -181,7 +198,7 @@ class DiskTileLoader(QObject):
         """
         x, y = parse_coords_from_folder(folder.name)
 
-        workflow_file = folder / 'Workflow.txt'
+        workflow_file = folder / "Workflow.txt"
         if not workflow_file.exists():
             raise FileNotFoundError(f"No Workflow.txt in {folder.name}")
 
@@ -203,21 +220,26 @@ class DiskTileLoader(QObject):
         if not raw_files:
             raise FileNotFoundError(f"No .raw files in {folder.name}")
 
-        logger.info(f"Tile {folder.name}: pos=({x}, {y}), z=[{z_min}, {z_max}], "
-                    f"channels={channels}, raw_files={list(raw_files.keys())}, "
-                    f"planes={n_planes}")
+        logger.info(
+            f"Tile {folder.name}: pos=({x}, {y}), z=[{z_min}, {z_max}], "
+            f"channels={channels}, raw_files={list(raw_files.keys())}, "
+            f"planes={n_planes}"
+        )
 
         return DiskTileInfo(
             folder_path=folder,
-            x=x, y=y,
-            z_min=z_min, z_max=z_max,
+            x=x,
+            y=y,
+            z_min=z_min,
+            z_max=z_max,
             channels=channels,
             raw_files=raw_files,
             n_planes=n_planes,
         )
 
-    def _load_tile_to_buffer(self, tile_info: DiskTileInfo,
-                             ref_pos: dict) -> Optional[TileFrameBuffer]:
+    def _load_tile_to_buffer(
+        self, tile_info: DiskTileInfo, ref_pos: dict
+    ) -> Optional[TileFrameBuffer]:
         """Load all channels from raw files into a single TileFrameBuffer.
 
         Channels are concatenated in order (ch1 frames, then ch2, etc.) to
@@ -225,10 +247,10 @@ class DiskTileLoader(QObject):
         """
         z_mid = (tile_info.z_min + tile_info.z_max) / 2.0
         position = {
-            'x': tile_info.x,
-            'y': tile_info.y,
-            'z': z_mid,
-            'r': 0.0,
+            "x": tile_info.x,
+            "y": tile_info.y,
+            "z": z_mid,
+            "r": 0.0,
         }
 
         buffer = TileFrameBuffer(
@@ -247,8 +269,10 @@ class DiskTileLoader(QObject):
             raw_path = tile_info.raw_files.get(file_ch_idx)
 
             if raw_path is None:
-                logger.warning(f"No raw file for channel index {file_ch_idx} "
-                               f"(channel_id={channel_id}) in {tile_info.folder_path.name}")
+                logger.warning(
+                    f"No raw file for channel index {file_ch_idx} "
+                    f"(channel_id={channel_id}) in {tile_info.folder_path.name}"
+                )
                 continue
 
             frames_before = buffer.frame_count
@@ -272,8 +296,9 @@ class DiskTileLoader(QObject):
 
         return buffer
 
-    def _read_raw_frames_to_buffer(self, raw_path: Path, buffer: TileFrameBuffer,
-                                   n_planes: int):
+    def _read_raw_frames_to_buffer(
+        self, raw_path: Path, buffer: TileFrameBuffer, n_planes: int
+    ):
         """Read raw Z-stack file frame-by-frame, downsample, and append to buffer.
 
         Uses np.memmap to avoid loading the entire file (~3 GB) into memory.
@@ -282,8 +307,10 @@ class DiskTileLoader(QObject):
         file_size = raw_path.stat().st_size
         expected_size = FRAME_WIDTH * FRAME_HEIGHT * n_planes * 2  # uint16 = 2 bytes
         if file_size != expected_size:
-            logger.warning(f"File size mismatch for {raw_path.name}: "
-                           f"expected {expected_size}, got {file_size}")
+            logger.warning(
+                f"File size mismatch for {raw_path.name}: "
+                f"expected {expected_size}, got {file_size}"
+            )
             # Recalculate planes from actual file size
             n_planes = file_size // (FRAME_WIDTH * FRAME_HEIGHT * 2)
             if n_planes == 0:
@@ -291,13 +318,23 @@ class DiskTileLoader(QObject):
                 return
 
         # Memory-map the file
-        mmap = np.memmap(raw_path, dtype=np.uint16, mode='r',
-                         shape=(n_planes, FRAME_HEIGHT, FRAME_WIDTH))
+        mmap = np.memmap(
+            raw_path,
+            dtype=np.uint16,
+            mode="r",
+            shape=(n_planes, FRAME_HEIGHT, FRAME_WIDTH),
+        )
 
         factor = DOWNSAMPLE_TARGET / max(FRAME_WIDTH, FRAME_HEIGHT)
 
         # Sample a few frames for raw-vs-downsampled signal comparison
-        sample_indices = {0, n_planes // 4, n_planes // 2, 3 * n_planes // 4, n_planes - 1}
+        sample_indices = {
+            0,
+            n_planes // 4,
+            n_planes // 2,
+            3 * n_planes // 4,
+            n_planes - 1,
+        }
 
         for plane_idx in range(n_planes):
             if self._shutdown:

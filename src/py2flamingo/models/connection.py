@@ -17,11 +17,10 @@ from datetime import datetime
 from enum import Enum
 from typing import Callable, List, Optional, Tuple
 
-
 # IP address validation pattern (IPv4)
 _IPV4_PATTERN = re.compile(
-    r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}'
-    r'(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+    r"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}"
+    r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
 )
 
 
@@ -52,7 +51,7 @@ class ConnectionConfig:
         """Set live_port to port + 1 if not specified."""
         if self.live_port is None:
             # Use object.__setattr__ since dataclass is frozen
-            object.__setattr__(self, 'live_port', self.port + 1)
+            object.__setattr__(self, "live_port", self.port + 1)
 
     def validate(self) -> Tuple[bool, List[str]]:
         """

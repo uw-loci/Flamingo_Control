@@ -5,21 +5,24 @@ region of interest (ROI) settings, and acquisition parameters.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, Tuple
 from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
+
 from ..base import ValidatedModel, ValidationError, validate_range
 
 
 class TriggerMode(Enum):
     """Camera triggering modes."""
-    INTERNAL = "internal"      # Camera runs at its own frame rate
-    EXTERNAL = "external"      # External trigger signal
-    SOFTWARE = "software"      # Software triggered
+
+    INTERNAL = "internal"  # Camera runs at its own frame rate
+    EXTERNAL = "external"  # External trigger signal
+    SOFTWARE = "software"  # Software triggered
     CONTINUOUS = "continuous"  # Free-running mode
 
 
 class BinningMode(Enum):
     """Camera pixel binning modes."""
+
     BIN_1X1 = (1, 1)
     BIN_2X2 = (2, 2)
     BIN_4X4 = (4, 4)
@@ -38,6 +41,7 @@ class BinningMode(Enum):
 
 class PixelFormat(Enum):
     """Camera pixel data formats."""
+
     MONO8 = "Mono8"
     MONO12 = "Mono12"
     MONO16 = "Mono16"
@@ -52,21 +56,26 @@ class ROI(ValidatedModel):
     Defines a rectangular region within the camera sensor
     to acquire images from.
     """
-    x: int              # X offset in pixels
-    y: int              # Y offset in pixels
-    width: int          # Width in pixels
-    height: int         # Height in pixels
-    sensor_width: int   # Total sensor width
+
+    x: int  # X offset in pixels
+    y: int  # Y offset in pixels
+    width: int  # Width in pixels
+    height: int  # Height in pixels
+    sensor_width: int  # Total sensor width
     sensor_height: int  # Total sensor height
 
     def validate(self) -> None:
         """Validate ROI parameters."""
         # Validate non-negative values
         if self.x < 0 or self.y < 0:
-            raise ValidationError(f"ROI offset cannot be negative: x={self.x}, y={self.y}")
+            raise ValidationError(
+                f"ROI offset cannot be negative: x={self.x}, y={self.y}"
+            )
 
         if self.width <= 0 or self.height <= 0:
-            raise ValidationError(f"ROI dimensions must be positive: {self.width}x{self.height}")
+            raise ValidationError(
+                f"ROI dimensions must be positive: {self.width}x{self.height}"
+            )
 
         # Validate ROI fits within sensor
         if self.x + self.width > self.sensor_width:
@@ -80,7 +89,7 @@ class ROI(ValidatedModel):
             )
 
     @classmethod
-    def full_frame(cls, sensor_width: int, sensor_height: int) -> 'ROI':
+    def full_frame(cls, sensor_width: int, sensor_height: int) -> "ROI":
         """Create a full-frame ROI.
 
         Args:
@@ -91,16 +100,18 @@ class ROI(ValidatedModel):
             ROI covering entire sensor
         """
         return cls(
-            x=0, y=0,
+            x=0,
+            y=0,
             width=sensor_width,
             height=sensor_height,
             sensor_width=sensor_width,
-            sensor_height=sensor_height
+            sensor_height=sensor_height,
         )
 
     @classmethod
-    def centered(cls, width: int, height: int,
-                sensor_width: int, sensor_height: int) -> 'ROI':
+    def centered(
+        cls, width: int, height: int, sensor_width: int, sensor_height: int
+    ) -> "ROI":
         """Create a centered ROI.
 
         Args:
@@ -115,10 +126,12 @@ class ROI(ValidatedModel):
         x = (sensor_width - width) // 2
         y = (sensor_height - height) // 2
         return cls(
-            x=x, y=y,
-            width=width, height=height,
+            x=x,
+            y=y,
+            width=width,
+            height=height,
             sensor_width=sensor_width,
-            sensor_height=sensor_height
+            sensor_height=sensor_height,
         )
 
     def get_center(self) -> Tuple[int, int]:
@@ -129,7 +142,7 @@ class ROI(ValidatedModel):
         """
         return (self.x + self.width // 2, self.y + self.height // 2)
 
-    def scale(self, factor: float) -> 'ROI':
+    def scale(self, factor: float) -> "ROI":
         """Create a scaled ROI maintaining center position.
 
         Args:
@@ -150,16 +163,19 @@ class ROI(ValidatedModel):
         new_y = max(0, min(new_y, self.sensor_height - new_height))
 
         return ROI(
-            x=new_x, y=new_y,
-            width=new_width, height=new_height,
+            x=new_x,
+            y=new_y,
+            width=new_width,
+            height=new_height,
             sensor_width=self.sensor_width,
-            sensor_height=self.sensor_height
+            sensor_height=self.sensor_height,
         )
 
 
 @dataclass
 class ExposureSettings:
     """Camera exposure settings."""
+
     exposure_time_ms: float
     auto_exposure: bool = False
     min_exposure_ms: float = 0.01
@@ -173,20 +189,22 @@ class ExposureSettings:
                 self.exposure_time_ms,
                 min_val=self.min_exposure_ms,
                 max_val=self.max_exposure_ms,
-                field_name="exposure_time_ms"
+                field_name="exposure_time_ms",
             )
 
         if self.target_brightness is not None:
             validate_range(
                 self.target_brightness,
-                min_val=0.0, max_val=1.0,
-                field_name="target_brightness"
+                min_val=0.0,
+                max_val=1.0,
+                field_name="target_brightness",
             )
 
 
 @dataclass
 class GainSettings:
     """Camera gain settings."""
+
     gain_db: float
     auto_gain: bool = False
     min_gain_db: float = 0.0
@@ -199,13 +217,14 @@ class GainSettings:
                 self.gain_db,
                 min_val=self.min_gain_db,
                 max_val=self.max_gain_db,
-                field_name="gain_db"
+                field_name="gain_db",
             )
 
 
 @dataclass
 class AcquisitionSettings(ValidatedModel):
     """Complete camera acquisition settings."""
+
     roi: ROI
     exposure: ExposureSettings
     gain: GainSettings
@@ -224,8 +243,9 @@ class AcquisitionSettings(ValidatedModel):
         if self.frame_rate_hz is not None:
             validate_range(
                 self.frame_rate_hz,
-                min_val=0.1, max_val=1000.0,
-                field_name="frame_rate_hz"
+                min_val=0.1,
+                max_val=1000.0,
+                field_name="frame_rate_hz",
             )
 
         # Validate bit depth matches pixel format
@@ -234,7 +254,7 @@ class AcquisitionSettings(ValidatedModel):
             PixelFormat.MONO12: 12,
             PixelFormat.MONO16: 16,
             PixelFormat.RGB8: 8,
-            PixelFormat.BGR8: 8
+            PixelFormat.BGR8: 8,
         }
 
         expected_depth = format_bit_depths.get(self.pixel_format)
@@ -247,7 +267,9 @@ class AcquisitionSettings(ValidatedModel):
         validate_range(self.gamma, min_val=0.1, max_val=10.0, field_name="gamma")
 
         # Validate black level
-        validate_range(self.black_level, min_val=0.0, max_val=100.0, field_name="black_level")
+        validate_range(
+            self.black_level, min_val=0.0, max_val=100.0, field_name="black_level"
+        )
 
     def get_effective_resolution(self) -> Tuple[int, int]:
         """Get effective image resolution after binning.
@@ -294,11 +316,12 @@ class AcquisitionSettings(ValidatedModel):
 @dataclass
 class CameraCalibration:
     """Camera calibration data."""
-    pixel_size_um: float          # Physical pixel size in micrometers
-    quantum_efficiency: float     # Quantum efficiency (0-1)
-    read_noise_electrons: float   # Read noise in electrons
-    dark_current_eps: float       # Dark current in electrons/pixel/second
-    full_well_capacity: int       # Maximum electrons per pixel
+
+    pixel_size_um: float  # Physical pixel size in micrometers
+    quantum_efficiency: float  # Quantum efficiency (0-1)
+    read_noise_electrons: float  # Read noise in electrons
+    dark_current_eps: float  # Dark current in electrons/pixel/second
+    full_well_capacity: int  # Maximum electrons per pixel
     calibration_date: Optional[str] = None
     temperature_c: Optional[float] = None  # Sensor temperature during calibration
 
@@ -306,6 +329,7 @@ class CameraCalibration:
 @dataclass
 class Camera(ValidatedModel):
     """Complete camera model with all settings and state."""
+
     model_name: str
     serial_number: str
     sensor_width_pixels: int
@@ -331,8 +355,9 @@ class Camera(ValidatedModel):
         if self.cooler_enabled and self.target_temperature_c is not None:
             validate_range(
                 self.target_temperature_c,
-                min_val=-100.0, max_val=50.0,
-                field_name="target_temperature_c"
+                min_val=-100.0,
+                max_val=50.0,
+                field_name="target_temperature_c",
             )
 
     def start_acquisition(self) -> None:
@@ -368,7 +393,7 @@ class Camera(ValidatedModel):
         return (width_mm, height_mm)
 
     @classmethod
-    def create_default(cls) -> 'Camera':
+    def create_default(cls) -> "Camera":
         """Create a camera with default settings."""
         roi = ROI.full_frame(2048, 2048)
         exposure = ExposureSettings(exposure_time_ms=10.0)
@@ -382,5 +407,5 @@ class Camera(ValidatedModel):
             sensor_height_pixels=2048,
             acquisition_settings=acquisition,
             supported_formats=[PixelFormat.MONO8, PixelFormat.MONO16],
-            supported_binning=[BinningMode.BIN_1X1, BinningMode.BIN_2X2]
+            supported_binning=[BinningMode.BIN_1X1, BinningMode.BIN_2X2],
         )

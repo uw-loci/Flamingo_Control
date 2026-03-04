@@ -3,26 +3,27 @@ Unit tests for utils layer parsers (metadata_parser and workflow_parser).
 
 Tests both parsers with real project files and edge cases.
 """
+
+import os
+import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch, mock_open
-import tempfile
-import os
+from unittest.mock import mock_open, patch
 
+from py2flamingo.models.connection import ConnectionConfig
 from py2flamingo.utils.metadata_parser import (
+    _find_microscope_address,
+    extract_connection_info,
     parse_metadata_file,
     validate_metadata_file,
-    extract_connection_info,
-    _find_microscope_address
 )
 from py2flamingo.utils.workflow_parser import (
-    parse_workflow_file,
-    validate_workflow,
     get_workflow_preview,
+    get_workflow_summary,
+    parse_workflow_file,
     read_workflow_as_bytes,
-    get_workflow_summary
+    validate_workflow,
 )
-from py2flamingo.models.connection import ConnectionConfig
 
 
 class TestMetadataParser(unittest.TestCase):
@@ -58,7 +59,7 @@ class TestMetadataParser(unittest.TestCase):
     def test_parse_metadata_file_malformed(self):
         """Test that malformed file raises ValueError."""
         # Create temporary malformed file
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
             f.write("This is not a valid metadata file\n")
             f.write("No microscope address here\n")
             temp_path = f.name
@@ -74,7 +75,7 @@ class TestMetadataParser(unittest.TestCase):
     def test_parse_metadata_file_invalid_ip(self):
         """Test that invalid IP address raises ValueError."""
         # Create temporary file with invalid IP
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
             f.write("<Instrument>\n")
             f.write("Microscope address = 999.999.999.999 53717\n")
             f.write("</Instrument>\n")
@@ -86,7 +87,8 @@ class TestMetadataParser(unittest.TestCase):
 
             # Should fail validation
             self.assertTrue(
-                "Invalid" in str(ctx.exception) or "validation" in str(ctx.exception).lower()
+                "Invalid" in str(ctx.exception)
+                or "validation" in str(ctx.exception).lower()
             )
         finally:
             os.unlink(temp_path)
@@ -94,7 +96,7 @@ class TestMetadataParser(unittest.TestCase):
     def test_parse_metadata_file_invalid_port(self):
         """Test that invalid port raises ValueError."""
         # Create temporary file with invalid port
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
             f.write("<Instrument>\n")
             f.write("Microscope address = 192.168.1.1 99999\n")  # Port > 65535
             f.write("</Instrument>\n")
@@ -183,7 +185,7 @@ class TestMetadataParser(unittest.TestCase):
     def test_validate_metadata_file_malformed(self):
         """Test validating malformed file."""
         # Create temporary malformed file
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
             f.write("No valid content here\n")
             temp_path = f.name
 
@@ -198,26 +200,14 @@ class TestMetadataParser(unittest.TestCase):
     def test_find_microscope_address(self):
         """Test the internal _find_microscope_address function."""
         # Test nested structure
-        data = {
-            "Instrument": {
-                "Type": {
-                    "Microscope address": "192.168.1.1 53717"
-                }
-            }
-        }
+        data = {"Instrument": {"Type": {"Microscope address": "192.168.1.1 53717"}}}
 
         result = _find_microscope_address(data)
         self.assertEqual(result, "192.168.1.1 53717")
 
     def test_find_microscope_address_not_found(self):
         """Test _find_microscope_address when key not present."""
-        data = {
-            "Instrument": {
-                "Type": {
-                    "Other field": "value"
-                }
-            }
-        }
+        data = {"Instrument": {"Type": {"Other field": "value"}}}
 
         result = _find_microscope_address(data)
         self.assertEqual(result, "")
@@ -270,7 +260,7 @@ class TestWorkflowParser(unittest.TestCase):
     def test_parse_workflow_file_empty(self):
         """Test parsing empty file raises ValueError."""
         # Create empty temporary file
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
             temp_path = f.name
 
         try:
@@ -357,7 +347,7 @@ class TestWorkflowParser(unittest.TestCase):
         self.assertTrue(len(workflow_bytes) > 0)
 
         # Verify it's valid UTF-8
-        text = workflow_bytes.decode('utf-8')
+        text = workflow_bytes.decode("utf-8")
         self.assertIn("<Workflow Settings>", text)
 
     def test_read_workflow_as_bytes_nonexistent(self):
@@ -368,12 +358,12 @@ class TestWorkflowParser(unittest.TestCase):
     def test_read_workflow_as_bytes_too_large(self):
         """Test reading excessively large file raises ValueError."""
         # Create a temporary file that's too large
-        with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.txt') as f:
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".txt") as f:
             # Write more than 10MB (10MB = 10 * 1024 * 1024 bytes)
             # Write in chunks to avoid memory issues
             chunk_size = 1024 * 1024  # 1MB
             for _ in range(11):  # 11MB total
-                f.write(b'x' * chunk_size)
+                f.write(b"x" * chunk_size)
             temp_path = f.name
 
         try:
@@ -396,7 +386,7 @@ class TestWorkflowParser(unittest.TestCase):
         self.assertIsInstance(summary, dict)
 
         # Verify expected keys
-        expected_keys = ['frame_rate', 'exposure_time', 'num_planes', 'start_x']
+        expected_keys = ["frame_rate", "exposure_time", "num_planes", "start_x"]
         for key in expected_keys:
             self.assertIn(key, summary)
 
@@ -447,5 +437,5 @@ class TestParserIntegration(unittest.TestCase):
         self.assertIsInstance(config, ConnectionConfig)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

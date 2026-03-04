@@ -5,13 +5,15 @@ Configuration service for managing application settings and file validation.
 This service handles loading configuration files, validating required files,
 and providing configuration data to the application.
 """
+
 import json
-import os
 import logging
-from typing import Dict, Optional, Any
+import os
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 from py2flamingo.utils.file_handlers import text_to_dict, workflow_to_dict
+
 
 class ConfigurationService:
     """
@@ -37,13 +39,19 @@ class ConfigurationService:
         if base_path:
             self.base_path = base_path
             print(f"[ConfigurationService] Using provided base_path: {self.base_path}")
-            self.logger.info(f"[ConfigurationService] Using provided base_path: {self.base_path}")
+            self.logger.info(
+                f"[ConfigurationService] Using provided base_path: {self.base_path}"
+            )
         else:
             # Find project root by looking for microscope_settings directory
             # Start from current working directory and walk up until we find it
             current = Path.cwd()
-            print(f"[ConfigurationService] Searching for project root, starting from: {current}")
-            self.logger.info(f"[ConfigurationService] Searching for project root, starting from: {current}")
+            print(
+                f"[ConfigurationService] Searching for project root, starting from: {current}"
+            )
+            self.logger.info(
+                f"[ConfigurationService] Searching for project root, starting from: {current}"
+            )
 
             search_count = 0
             while current != current.parent:  # Stop at filesystem root
@@ -52,14 +60,20 @@ class ConfigurationService:
                 print(f"[ConfigurationService]   Check #{search_count}: {check_path}")
                 if check_path.exists():
                     self.base_path = current
-                    print(f"[ConfigurationService] ✓ FOUND project root: {self.base_path}")
-                    self.logger.info(f"[ConfigurationService] Found project root: {self.base_path}")
+                    print(
+                        f"[ConfigurationService] ✓ FOUND project root: {self.base_path}"
+                    )
+                    self.logger.info(
+                        f"[ConfigurationService] Found project root: {self.base_path}"
+                    )
                     break
                 current = current.parent
             else:
                 # Fallback to cwd if microscope_settings not found
                 self.base_path = Path.cwd()
-                print(f"[ConfigurationService] ✗ Could not find microscope_settings, using cwd: {self.base_path}")
+                print(
+                    f"[ConfigurationService] ✗ Could not find microscope_settings, using cwd: {self.base_path}"
+                )
                 self.logger.warning(
                     f"[ConfigurationService] Could not find microscope_settings directory, "
                     f"using current directory: {self.base_path}"
@@ -69,7 +83,7 @@ class ConfigurationService:
         self.config = {}
         scope_settings = self._load_scope_settings()
         if scope_settings:
-            self.config['scope_settings'] = scope_settings
+            self.config["scope_settings"] = scope_settings
 
         # Load persisted drive mappings
         self._load_drive_mappings()
@@ -79,11 +93,20 @@ class ConfigurationService:
 
         # Load microscope-specific settings
         microscope_name = self.get_microscope_name()
-        print(f"[ConfigurationService] Detected microscope name: '{microscope_name}' from ScopeSettings.txt")
-        self.logger.info(f"[ConfigurationService] Detected microscope name: '{microscope_name}' from ScopeSettings.txt")
+        print(
+            f"[ConfigurationService] Detected microscope name: '{microscope_name}' from ScopeSettings.txt"
+        )
+        self.logger.info(
+            f"[ConfigurationService] Detected microscope name: '{microscope_name}' from ScopeSettings.txt"
+        )
 
-        from py2flamingo.services.microscope_settings_service import MicroscopeSettingsService
-        self.microscope_settings = MicroscopeSettingsService(microscope_name, self.base_path)
+        from py2flamingo.services.microscope_settings_service import (
+            MicroscopeSettingsService,
+        )
+
+        self.microscope_settings = MicroscopeSettingsService(
+            microscope_name, self.base_path
+        )
 
         # Log the actual stage limits being loaded
         limits = self.microscope_settings.get_stage_limits()
@@ -93,67 +116,75 @@ class ConfigurationService:
         print(f"  Z: {limits['z']['min']:.2f} to {limits['z']['max']:.2f} mm")
         print(f"  R: {limits['r']['min']:.1f} to {limits['r']['max']:.1f} degrees")
 
-        self.logger.info(f"[ConfigurationService] Loaded stage limits: X={limits['x']['min']:.2f}-{limits['x']['max']:.2f}, "
-                        f"Y={limits['y']['min']:.2f}-{limits['y']['max']:.2f}, "
-                        f"Z={limits['z']['min']:.2f}-{limits['z']['max']:.2f}, "
-                        f"R={limits['r']['min']:.1f}-{limits['r']['max']:.1f}")
+        self.logger.info(
+            f"[ConfigurationService] Loaded stage limits: X={limits['x']['min']:.2f}-{limits['x']['max']:.2f}, "
+            f"Y={limits['y']['min']:.2f}-{limits['y']['max']:.2f}, "
+            f"Z={limits['z']['min']:.2f}-{limits['z']['max']:.2f}, "
+            f"R={limits['r']['min']:.1f}-{limits['r']['max']:.1f}"
+        )
         self.logger.info(f"Loaded microscope-specific settings for '{microscope_name}'")
 
     def _load_start_position(self, microscope_name: str) -> Dict[str, float]:
         """
         Load start position for the microscope if available.
-        
+
         Args:
             microscope_name: Name of the microscope
-            
+
         Returns:
             Dict: Start position with x, y, z, r values
         """
-        position_path = self.base_path / 'microscope_settings' / f'{microscope_name}_start_position.txt'
-        
+        position_path = (
+            self.base_path
+            / "microscope_settings"
+            / f"{microscope_name}_start_position.txt"
+        )
+
         if position_path.exists():
             try:
                 position_dict = text_to_dict(str(position_path))
                 pos = position_dict.get(microscope_name, {})
                 return {
-                    'x': float(pos.get('x(mm)', 0.0)),
-                    'y': float(pos.get('y(mm)', 0.0)),
-                    'z': float(pos.get('z(mm)', 0.0)),
-                    'r': float(pos.get('r(°)', 0.0))
+                    "x": float(pos.get("x(mm)", 0.0)),
+                    "y": float(pos.get("y(mm)", 0.0)),
+                    "z": float(pos.get("z(mm)", 0.0)),
+                    "r": float(pos.get("r(°)", 0.0)),
                 }
             except Exception as e:
                 self.logger.warning(f"Failed to load start position: {e}")
-        
+
         # Return default position if file doesn't exist
         self.logger.info("No start position file found, using defaults")
-        return {'x': 0.0, 'y': 0.0, 'z': 0.0, 'r': 0.0}
-    
+        return {"x": 0.0, "y": 0.0, "z": 0.0, "r": 0.0}
+
     def _load_scope_settings(self) -> Optional[Dict[str, Any]]:
         """
         Load scope settings if available.
-        
+
         Returns:
             Optional[Dict]: Scope settings or None
         """
-        settings_path = self.base_path / 'microscope_settings' / 'ScopeSettings.txt'
-        
+        settings_path = self.base_path / "microscope_settings" / "ScopeSettings.txt"
+
         if settings_path.exists():
             try:
                 return text_to_dict(str(settings_path))
             except Exception as e:
                 self.logger.warning(f"Failed to load scope settings: {e}")
                 return None
-        
+
         return None
 
-    def _prompt_for_file(self, filename: str, title: str, message: str) -> Optional[Path]:
+    def _prompt_for_file(
+        self, filename: str, title: str, message: str
+    ) -> Optional[Path]:
         """
         Prompt user to select a file using Qt dialog.
 
         Fixed to avoid QApplication conflicts.
         """
         try:
-            from PyQt5.QtWidgets import QFileDialog, QMessageBox, QApplication
+            from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox
 
             # Check if we're in a Qt environment
             app = QApplication.instance()
@@ -173,10 +204,7 @@ class ConfigurationService:
 
             # Open file dialog
             file_path, _ = QFileDialog.getOpenFileName(
-                None,
-                title,
-                str(self.base_path),
-                "Text files (*.txt);;All files (*.*)"
+                None, title, str(self.base_path), "Text files (*.txt);;All files (*.*)"
             )
 
             return Path(file_path) if file_path else None
@@ -187,47 +215,48 @@ class ConfigurationService:
         except Exception as e:
             self.logger.error(f"Error showing file dialog: {e}")
             return None
-    
+
     def _copy_file_to_settings(self, source_path: Path, target_name: str) -> None:
         """
         Copy a file to the microscope_settings directory.
-        
+
         Args:
             source_path: Source file path
             target_name: Target filename
         """
         import shutil
-        target_path = self.base_path / 'microscope_settings' / target_name
+
+        target_path = self.base_path / "microscope_settings" / target_name
         shutil.copy(source_path, target_path)
         self.logger.info(f"Copied {source_path} to {target_path}")
-    
+
     def get_lasers(self) -> list:
         """
         Get list of available lasers.
-        
+
         Returns:
             list: List of laser names
         """
-        return self.config.get('workflow_template', {}).get('lasers', [])
-    
+        return self.config.get("workflow_template", {}).get("lasers", [])
+
     def get_default_laser(self) -> str:
         """
         Get default laser channel.
-        
+
         Returns:
             str: Default laser channel name
         """
-        return self.config.get('default_laser', 'Laser 3 488 nm')
-    
+        return self.config.get("default_laser", "Laser 3 488 nm")
+
     def get_default_laser_power(self) -> float:
         """
         Get default laser power.
-        
+
         Returns:
             float: Default laser power percentage
         """
-        return self.config.get('default_laser_power', 5.0)
-    
+        return self.config.get("default_laser_power", 5.0)
+
     def get_data_storage_location(self) -> str:
         """
         Get default data storage location.
@@ -236,8 +265,8 @@ class ConfigurationService:
             str: Data storage path, or empty string if not configured.
                  User must select via Refresh button in Advanced Save Settings.
         """
-        return self.config.get('data_storage_location', '')
-    
+        return self.config.get("data_storage_location", "")
+
     def get_microscope_name(self) -> str:
         """
         Get microscope name from scope settings.
@@ -245,9 +274,9 @@ class ConfigurationService:
         Returns:
             str: Microscope name (e.g., "zion")
         """
-        scope_settings = self.config.get('scope_settings', {})
-        type_settings = scope_settings.get('Type', {})
-        microscope_name = type_settings.get('Microscope name', 'default')
+        scope_settings = self.config.get("scope_settings", {})
+        type_settings = scope_settings.get("Type", {})
+        microscope_name = type_settings.get("Microscope name", "default")
         return microscope_name.strip()
 
     def get_stage_limits(self) -> Dict[str, Dict[str, float]]:
@@ -281,7 +310,9 @@ class ConfigurationService:
         """
         return self.microscope_settings.get_position_history_display_count()
 
-    def save_start_position(self, microscope_name: str, position: Dict[str, float]) -> None:
+    def save_start_position(
+        self, microscope_name: str, position: Dict[str, float]
+    ) -> None:
         """
         Save start position to file.
 
@@ -293,19 +324,23 @@ class ConfigurationService:
 
         position_dict = {
             microscope_name: {
-                'x(mm)': position['x'],
-                'y(mm)': position['y'],
-                'z(mm)': position['z'],
-                'r(°)': position['r']
+                "x(mm)": position["x"],
+                "y(mm)": position["y"],
+                "z(mm)": position["z"],
+                "r(°)": position["r"],
             }
         }
 
-        file_path = self.base_path / 'microscope_settings' / f'{microscope_name}_start_position.txt'
+        file_path = (
+            self.base_path
+            / "microscope_settings"
+            / f"{microscope_name}_start_position.txt"
+        )
         dict_to_text(str(file_path), position_dict)
         self.logger.info(f"Saved start position to {file_path}")
 
     # Drive path mapping methods for post-collection folder reorganization
-    DRIVE_MAPPINGS_KEY = 'drive_path_mappings'
+    DRIVE_MAPPINGS_KEY = "drive_path_mappings"
 
     def get_drive_mappings(self) -> Dict[str, str]:
         """Get server-to-local drive mappings.
@@ -363,7 +398,7 @@ class ConfigurationService:
             return True
         return False
 
-    _DRIVE_MAPPINGS_FILE = 'drive_mappings.json'
+    _DRIVE_MAPPINGS_FILE = "drive_mappings.json"
 
     def _drive_mappings_path(self) -> Path:
         """Path to the drive mappings JSON file."""
@@ -375,9 +410,9 @@ class ConfigurationService:
         if not path.exists():
             return
         try:
-            with open(path, 'r') as f:
+            with open(path, "r") as f:
                 data = json.load(f)
-            mappings = data.get('mappings', {})
+            mappings = data.get("mappings", {})
             if mappings:
                 self.config[self.DRIVE_MAPPINGS_KEY] = mappings
                 self.logger.info(f"Loaded {len(mappings)} drive mapping(s) from {path}")
@@ -389,18 +424,18 @@ class ConfigurationService:
         path = self._drive_mappings_path()
         mappings = self.config.get(self.DRIVE_MAPPINGS_KEY, {})
         try:
-            with open(path, 'w') as f:
-                json.dump({'mappings': mappings}, f, indent=2)
+            with open(path, "w") as f:
+                json.dump({"mappings": mappings}, f, indent=2)
             self.logger.debug(f"Saved {len(mappings)} drive mapping(s) to {path}")
         except Exception as e:
             self.logger.warning(f"Failed to save drive mappings: {e}")
 
     # Session save path methods
-    LED_2D_SESSION_PATH_KEY = 'led_2d_overview_session_path'
-    MIP_SESSION_PATH_KEY = 'mip_overview_session_path'
-    ZARR_SESSION_PATH_KEY = 'zarr_3d_session_path'
-    THRESHOLDER_PRESET_PATH_KEY = 'thresholder_preset_path'
-    _SESSION_PATHS_FILE = 'session_paths.json'
+    LED_2D_SESSION_PATH_KEY = "led_2d_overview_session_path"
+    MIP_SESSION_PATH_KEY = "mip_overview_session_path"
+    ZARR_SESSION_PATH_KEY = "zarr_3d_session_path"
+    THRESHOLDER_PRESET_PATH_KEY = "thresholder_preset_path"
+    _SESSION_PATHS_FILE = "session_paths.json"
 
     def _session_paths_file(self) -> Path:
         """Path to the session paths JSON file."""
@@ -412,11 +447,15 @@ class ConfigurationService:
         if not path.exists():
             return
         try:
-            with open(path, 'r') as f:
+            with open(path, "r") as f:
                 data = json.load(f)
             # Load each session path key
-            for key in [self.LED_2D_SESSION_PATH_KEY, self.MIP_SESSION_PATH_KEY,
-                        self.ZARR_SESSION_PATH_KEY, self.THRESHOLDER_PRESET_PATH_KEY]:
+            for key in [
+                self.LED_2D_SESSION_PATH_KEY,
+                self.MIP_SESSION_PATH_KEY,
+                self.ZARR_SESSION_PATH_KEY,
+                self.THRESHOLDER_PRESET_PATH_KEY,
+            ]:
                 if key in data:
                     self.config[key] = data[key]
             self.logger.info(f"Loaded session paths from {path}")
@@ -427,12 +466,16 @@ class ConfigurationService:
         """Save session paths to JSON file on disk."""
         path = self._session_paths_file()
         data = {}
-        for key in [self.LED_2D_SESSION_PATH_KEY, self.MIP_SESSION_PATH_KEY,
-                    self.ZARR_SESSION_PATH_KEY, self.THRESHOLDER_PRESET_PATH_KEY]:
+        for key in [
+            self.LED_2D_SESSION_PATH_KEY,
+            self.MIP_SESSION_PATH_KEY,
+            self.ZARR_SESSION_PATH_KEY,
+            self.THRESHOLDER_PRESET_PATH_KEY,
+        ]:
             if key in self.config:
                 data[key] = self.config[key]
         try:
-            with open(path, 'w') as f:
+            with open(path, "w") as f:
                 json.dump(data, f, indent=2)
             self.logger.debug(f"Saved session paths to {path}")
         except Exception as e:
@@ -493,7 +536,7 @@ class ConfigurationService:
         self.logger.info(f"Set MIP session path: {path}")
 
     # MIP browse path (for Load MIP Files)
-    MIP_BROWSE_PATH_KEY = 'mip_overview_browse_path'
+    MIP_BROWSE_PATH_KEY = "mip_overview_browse_path"
 
     def get_mip_browse_path(self) -> Optional[str]:
         """Get the last-used MIP Overview browse path for Load MIP Files.
@@ -513,7 +556,7 @@ class ConfigurationService:
         self.logger.info(f"Set MIP browse path: {path}")
 
     # Sample View 3D data path (for Save/Load Data in Sample View)
-    SAMPLE_3D_DATA_PATH_KEY = 'sample_view_3d_data_path'
+    SAMPLE_3D_DATA_PATH_KEY = "sample_view_3d_data_path"
 
     def get_sample_3d_data_path(self) -> Optional[str]:
         """Get the last-used Sample View 3D data path.

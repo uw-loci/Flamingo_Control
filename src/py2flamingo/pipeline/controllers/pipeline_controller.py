@@ -6,19 +6,25 @@ wires signals between executor and editor dialog, and manages lifecycle.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 from PyQt5.QtCore import QObject
 
-from py2flamingo.pipeline.models.pipeline import Pipeline, NodeType
-from py2flamingo.pipeline.engine.executor import PipelineExecutor
 from py2flamingo.pipeline.engine.context import ExecutionContext
-from py2flamingo.pipeline.engine.node_runners.workflow_runner import WorkflowRunner
-from py2flamingo.pipeline.engine.node_runners.threshold_runner import ThresholdRunner
+from py2flamingo.pipeline.engine.executor import PipelineExecutor
+from py2flamingo.pipeline.engine.node_runners.conditional_runner import (
+    ConditionalRunner,
+)
+from py2flamingo.pipeline.engine.node_runners.external_command_runner import (
+    ExternalCommandRunner,
+)
 from py2flamingo.pipeline.engine.node_runners.foreach_runner import ForEachRunner
-from py2flamingo.pipeline.engine.node_runners.conditional_runner import ConditionalRunner
-from py2flamingo.pipeline.engine.node_runners.external_command_runner import ExternalCommandRunner
-from py2flamingo.pipeline.engine.node_runners.sample_view_data_runner import SampleViewDataRunner
+from py2flamingo.pipeline.engine.node_runners.sample_view_data_runner import (
+    SampleViewDataRunner,
+)
+from py2flamingo.pipeline.engine.node_runners.threshold_runner import ThresholdRunner
+from py2flamingo.pipeline.engine.node_runners.workflow_runner import WorkflowRunner
+from py2flamingo.pipeline.models.pipeline import NodeType, Pipeline
 from py2flamingo.pipeline.services.pipeline_service import PipelineService
 from py2flamingo.pipeline.ui.pipeline_editor_dialog import PipelineEditorDialog
 
@@ -80,24 +86,29 @@ class PipelineController(QObject):
 
         if self._app:
             # Inject application services
-            if hasattr(self._app, 'workflow_controller') and self._app.workflow_controller:
-                facade = getattr(self._app.workflow_controller, '_workflow_service', None)
+            if (
+                hasattr(self._app, "workflow_controller")
+                and self._app.workflow_controller
+            ):
+                facade = getattr(
+                    self._app.workflow_controller, "_workflow_service", None
+                )
                 if facade:
-                    services['workflow_facade'] = facade
+                    services["workflow_facade"] = facade
 
-            if hasattr(self._app, 'workflow_queue_service'):
-                services['workflow_queue_service'] = self._app.workflow_queue_service
+            if hasattr(self._app, "workflow_queue_service"):
+                services["workflow_queue_service"] = self._app.workflow_queue_service
 
-            if hasattr(self._app, 'voxel_storage'):
-                services['voxel_storage'] = self._app.voxel_storage
+            if hasattr(self._app, "voxel_storage"):
+                services["voxel_storage"] = self._app.voxel_storage
 
-            if hasattr(self._app, 'position_controller'):
-                services['position_controller'] = self._app.position_controller
+            if hasattr(self._app, "position_controller"):
+                services["position_controller"] = self._app.position_controller
 
             # Build coordinate config from visualization YAML
             coord_config = self._build_coordinate_config()
             if coord_config:
-                services['coordinate_config'] = coord_config
+                services["coordinate_config"] = coord_config
 
         context = ExecutionContext(services=services)
 
@@ -119,7 +130,9 @@ class PipelineController(QObject):
             self._executor.node_started.connect(self._editor.on_node_started)
             self._executor.node_completed.connect(self._editor.on_node_completed)
             self._executor.node_error.connect(self._editor.on_node_error)
-            self._executor.pipeline_completed.connect(self._editor.on_pipeline_completed)
+            self._executor.pipeline_completed.connect(
+                self._editor.on_pipeline_completed
+            )
             self._executor.pipeline_error.connect(self._editor.on_pipeline_error)
             self._executor.foreach_iteration.connect(self._editor.on_foreach_iteration)
             self._executor.log_message.connect(self._editor.on_log_message)
@@ -134,17 +147,23 @@ class PipelineController(QObject):
     def _build_coordinate_config(self) -> Optional[dict]:
         """Load visualization config and extract display + stage_control sections."""
         try:
-            import yaml
             from pathlib import Path
-            config_path = Path(__file__).parent.parent.parent / 'configs' / 'visualization_3d_config.yaml'
+
+            import yaml
+
+            config_path = (
+                Path(__file__).parent.parent.parent
+                / "configs"
+                / "visualization_3d_config.yaml"
+            )
             if not config_path.exists():
                 logger.warning(f"Visualization config not found: {config_path}")
                 return None
             with open(config_path) as f:
                 full_config = yaml.safe_load(f)
             return {
-                'display': full_config.get('display', {}),
-                'stage_control': full_config.get('stage_control', {}),
+                "display": full_config.get("display", {}),
+                "stage_control": full_config.get("stage_control", {}),
             }
         except Exception as e:
             logger.warning(f"Failed to load coordinate config: {e}")

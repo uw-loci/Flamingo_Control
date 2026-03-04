@@ -12,12 +12,12 @@ class ViewerInterface(ABC):
     """
     Abstract base class defining the interface for a viewer to display images.
     """
-    
+
     @abstractmethod
     def display_image(self, image: Any, title: str = "", metadata: dict = None):
         """
         Display an image in the viewer.
-        
+
         Args:
             image: Array-like image data.
             title: Title or name for the image.

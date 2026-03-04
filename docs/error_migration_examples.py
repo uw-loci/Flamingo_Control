@@ -9,6 +9,7 @@ FlamingoError framework.
 # EXAMPLE 1: Connection Service
 # ============================================================================
 
+
 # OLD PATTERN - Returning tuples
 def connect_old(ip_address, port):
     try:
@@ -17,9 +18,12 @@ def connect_old(ip_address, port):
     except Exception as e:
         return False, str(e)
 
+
+from py2flamingo.core.error_formatting import log_error
+
 # NEW PATTERN - Using FlamingoError
 from py2flamingo.core.errors import ConnectionError, ErrorCodes
-from py2flamingo.core.error_formatting import log_error
+
 
 def connect_new(ip_address, port):
     """Connect to microscope with proper error handling."""
@@ -30,17 +34,13 @@ def connect_new(ip_address, port):
         error = ConnectionError(
             f"Connection timeout to {ip_address}:{port}",
             error_code=ErrorCodes.CONNECTION_TIMEOUT,
-            context={
-                'ip_address': ip_address,
-                'port': port,
-                'timeout_seconds': 2.0
-            },
+            context={"ip_address": ip_address, "port": port, "timeout_seconds": 2.0},
             cause=e,
             suggestions=[
                 "Check if the microscope is powered on",
                 "Verify the IP address is correct",
-                "Check network connectivity"
-            ]
+                "Check network connectivity",
+            ],
         )
         log_error(error)
         raise error
@@ -49,11 +49,8 @@ def connect_new(ip_address, port):
         error = ConnectionError(
             f"Failed to connect to microscope at {ip_address}:{port}",
             error_code=ErrorCodes.SOCKET_ERROR,
-            context={
-                'ip_address': ip_address,
-                'port': port
-            },
-            cause=e
+            context={"ip_address": ip_address, "port": port},
+            cause=e,
         )
         log_error(error)
         raise error
@@ -62,6 +59,7 @@ def connect_new(ip_address, port):
 # ============================================================================
 # EXAMPLE 2: Command Sending
 # ============================================================================
+
 
 # OLD PATTERN - Silent failures
 def send_command_old(cmd_code, data):
@@ -72,8 +70,10 @@ def send_command_old(cmd_code, data):
         print(f"Failed to send command {cmd_code}")
         return None
 
+
 # NEW PATTERN - Explicit error handling
 from py2flamingo.core.errors import CommandError, ErrorCodes
+
 
 def send_command_new(cmd_code, data):
     """Send command with proper error handling."""
@@ -85,9 +85,9 @@ def send_command_new(cmd_code, data):
             f"Failed to encode command {cmd_code}",
             command_code=cmd_code,
             error_code=ErrorCodes.ENCODING_ERROR,
-            context={'data': data},
+            context={"data": data},
             cause=e,
-            suggestions=["Check command data format", "Verify command code is valid"]
+            suggestions=["Check command data format", "Verify command code is valid"],
         )
 
     try:
@@ -99,13 +99,14 @@ def send_command_new(cmd_code, data):
             command_code=cmd_code,
             error_code=ErrorCodes.COMMAND_FAILED,
             cause=e,
-            suggestions=["Check connection status", "Retry the command"]
+            suggestions=["Check connection status", "Retry the command"],
         )
 
 
 # ============================================================================
 # EXAMPLE 3: Workflow Execution
 # ============================================================================
+
 
 # OLD PATTERN - Generic error messages
 def execute_workflow_old(workflow_path):
@@ -116,8 +117,10 @@ def execute_workflow_old(workflow_path):
     except Exception as e:
         raise Exception(f"Workflow failed: {e}")
 
+
 # NEW PATTERN - Specific error types
-from py2flamingo.core.errors import WorkflowError, DataError, ErrorCodes
+from py2flamingo.core.errors import DataError, ErrorCodes, WorkflowError
+
 
 def execute_workflow_new(workflow_path):
     """Execute workflow with detailed error handling."""
@@ -131,14 +134,14 @@ def execute_workflow_new(workflow_path):
             file_path=str(workflow_path),
             error_code=ErrorCodes.FILE_NOT_FOUND,
             cause=e,
-            suggestions=["Check the workflow file path", "Select a different workflow"]
+            suggestions=["Check the workflow file path", "Select a different workflow"],
         )
     except IOError as e:
         raise DataError(
             f"Cannot read workflow file: {workflow_path}",
             file_path=str(workflow_path),
             error_code=ErrorCodes.FILE_READ_ERROR,
-            cause=e
+            cause=e,
         )
 
     # Parsing errors
@@ -150,7 +153,10 @@ def execute_workflow_new(workflow_path):
             workflow_name=Path(workflow_path).stem,
             error_code=ErrorCodes.WORKFLOW_INVALID,
             cause=e,
-            suggestions=["Check workflow file syntax", "Use the workflow editor to fix issues"]
+            suggestions=[
+                "Check workflow file syntax",
+                "Use the workflow editor to fix issues",
+            ],
         )
 
     # Execution errors
@@ -165,16 +171,17 @@ def execute_workflow_new(workflow_path):
             workflow_name=workflow.name,
             error_code=ErrorCodes.WORKFLOW_FAILED,
             context={
-                'step': workflow.current_step,
-                'total_steps': workflow.total_steps
+                "step": workflow.current_step,
+                "total_steps": workflow.total_steps,
             },
-            cause=e
+            cause=e,
         )
 
 
 # ============================================================================
 # EXAMPLE 4: Hardware Control
 # ============================================================================
+
 
 # OLD PATTERN - Boolean returns
 def move_stage_old(x, y, z):
@@ -183,8 +190,10 @@ def move_stage_old(x, y, z):
     send_move_command(x, y, z)
     return True
 
+
 # NEW PATTERN - Validation errors
-from py2flamingo.core.errors import HardwareError, ValidationError, ErrorCodes
+from py2flamingo.core.errors import ErrorCodes, HardwareError, ValidationError
+
 
 def move_stage_new(x, y, z):
     """Move stage with validation and error handling."""
@@ -192,25 +201,25 @@ def move_stage_new(x, y, z):
     if not isinstance(x, (int, float)):
         raise ValidationError(
             "X position must be numeric",
-            field_name='x',
+            field_name="x",
             error_code=ErrorCodes.TYPE_ERROR,
-            context={'value': x, 'expected_type': 'float'}
+            context={"value": x, "expected_type": "float"},
         )
 
     # Check hardware limits
     if not is_position_valid(x, y, z):
         raise HardwareError(
             f"Stage position ({x}, {y}, {z}) exceeds limits",
-            component='stage',
+            component="stage",
             error_code=ErrorCodes.STAGE_LIMIT,
             context={
-                'requested_position': {'x': x, 'y': y, 'z': z},
-                'limits': get_stage_limits()
+                "requested_position": {"x": x, "y": y, "z": z},
+                "limits": get_stage_limits(),
             },
             suggestions=[
                 "Check stage limits in settings",
-                "Use a position within the valid range"
-            ]
+                "Use a position within the valid range",
+            ],
         )
 
     # Send command
@@ -223,10 +232,10 @@ def move_stage_new(x, y, z):
         # Wrap unexpected errors
         raise HardwareError(
             "Stage movement failed",
-            component='stage',
+            component="stage",
             error_code=ErrorCodes.HARDWARE_ERROR,
-            context={'position': {'x': x, 'y': y, 'z': z}},
-            cause=e
+            context={"position": {"x": x, "y": y, "z": z}},
+            cause=e,
         )
 
 
@@ -234,12 +243,15 @@ def move_stage_new(x, y, z):
 # EXAMPLE 5: GUI Error Display
 # ============================================================================
 
+
 # OLD PATTERN - Simple message boxes
 def handle_error_old(error):
     QMessageBox.critical(None, "Error", str(error))
 
+
 # NEW PATTERN - Structured error display
 from py2flamingo.core.error_formatting import ErrorFormatter
+
 
 def handle_error_new(error):
     """Display error in GUI with appropriate detail level."""
@@ -248,26 +260,26 @@ def handle_error_new(error):
 
     # Create detailed error dialog
     dialog = QMessageBox()
-    dialog.setWindowTitle(error_info['title'])
-    dialog.setText(error_info['message'])
+    dialog.setWindowTitle(error_info["title"])
+    dialog.setText(error_info["message"])
 
     # Add suggestions if available
-    if error_info['suggestions']:
+    if error_info["suggestions"]:
         detailed_text = "Suggestions:\n"
-        for suggestion in error_info['suggestions']:
+        for suggestion in error_info["suggestions"]:
             detailed_text += f"• {suggestion}\n"
         dialog.setDetailedText(detailed_text)
 
     # Set icon based on severity
-    if error_info['severity'] == 'critical':
+    if error_info["severity"] == "critical":
         dialog.setIcon(QMessageBox.Critical)
-    elif error_info['severity'] == 'warning':
+    elif error_info["severity"] == "warning":
         dialog.setIcon(QMessageBox.Warning)
     else:
         dialog.setIcon(QMessageBox.Information)
 
     # Add error code to status bar
-    if hasattr(error, 'error_code'):
+    if hasattr(error, "error_code"):
         status_bar.showMessage(f"Error {error.error_code}: {error.message}", 5000)
 
     dialog.exec_()
@@ -277,8 +289,9 @@ def handle_error_new(error):
 # EXAMPLE 6: Service Layer Pattern
 # ============================================================================
 
-from py2flamingo.core.errors import wrap_external_error
 from py2flamingo.core.error_formatting import get_error_logger
+from py2flamingo.core.errors import wrap_external_error
+
 
 class MicroscopeService:
     """Example service with proper error handling."""
@@ -296,10 +309,13 @@ class MicroscopeService:
             except Exception as e:
                 raise HardwareError(
                     "Camera initialization failed",
-                    component='camera',
+                    component="camera",
                     error_code=ErrorCodes.CAMERA_ERROR,
                     cause=e,
-                    suggestions=["Check camera USB connection", "Restart camera software"]
+                    suggestions=[
+                        "Check camera USB connection",
+                        "Restart camera software",
+                    ],
                 )
 
             # Stage initialization
@@ -309,10 +325,10 @@ class MicroscopeService:
             except Exception as e:
                 raise HardwareError(
                     "Stage initialization failed",
-                    component='stage',
+                    component="stage",
                     error_code=ErrorCodes.STAGE_ERROR,
                     cause=e,
-                    suggestions=["Check stage power", "Manually home the stage"]
+                    suggestions=["Check stage power", "Manually home the stage"],
                 )
 
         except FlamingoError:
@@ -321,10 +337,7 @@ class MicroscopeService:
         except Exception as e:
             # Wrap unexpected errors
             error = wrap_external_error(
-                e,
-                "Hardware initialization failed",
-                HardwareError,
-                component='system'
+                e, "Hardware initialization failed", HardwareError, component="system"
             )
             self.logger.log_and_raise(error)
 
@@ -333,16 +346,15 @@ class MicroscopeService:
 # EXAMPLE 7: Async Operations with Timeout
 # ============================================================================
 
-from py2flamingo.core.errors import TimeoutError, ErrorCodes
 import asyncio
+
+from py2flamingo.core.errors import ErrorCodes, TimeoutError
+
 
 async def wait_for_response_new(timeout_seconds=5.0):
     """Wait for response with timeout error handling."""
     try:
-        response = await asyncio.wait_for(
-            receive_data(),
-            timeout=timeout_seconds
-        )
+        response = await asyncio.wait_for(receive_data(), timeout=timeout_seconds)
         return response
     except asyncio.TimeoutError as e:
         raise TimeoutError(
@@ -353,8 +365,8 @@ async def wait_for_response_new(timeout_seconds=5.0):
             suggestions=[
                 "Check if the microscope is processing a command",
                 "Increase timeout duration",
-                "Verify connection is stable"
-            ]
+                "Verify connection is stable",
+            ],
         )
 
 
@@ -362,8 +374,10 @@ async def wait_for_response_new(timeout_seconds=5.0):
 # EXAMPLE 8: Configuration Handling
 # ============================================================================
 
-from py2flamingo.core.errors import ConfigurationError, ErrorCodes
 import json
+
+from py2flamingo.core.errors import ConfigurationError, ErrorCodes
+
 
 def load_configuration_new(config_path):
     """Load configuration with detailed error handling."""
@@ -374,38 +388,37 @@ def load_configuration_new(config_path):
         # Create default config if missing
         raise ConfigurationError(
             f"Configuration file not found: {config_path}",
-            setting_name='config_file',
+            setting_name="config_file",
             error_code=ErrorCodes.CONFIG_NOT_FOUND,
             cause=e,
             suggestions=[
                 "Run initial setup to create configuration",
-                "Copy default configuration from templates"
-            ]
+                "Copy default configuration from templates",
+            ],
         )
     except json.JSONDecodeError as e:
         raise ConfigurationError(
             f"Invalid JSON in configuration file",
-            setting_name='config_file',
+            setting_name="config_file",
             error_code=ErrorCodes.CONFIG_INVALID,
-            context={
-                'file': str(config_path),
-                'line': e.lineno,
-                'column': e.colno
-            },
+            context={"file": str(config_path), "line": e.lineno, "column": e.colno},
             cause=e,
-            suggestions=["Fix JSON syntax errors", "Restore from backup"]
+            suggestions=["Fix JSON syntax errors", "Restore from backup"],
         )
 
     # Validate required settings
-    required = ['ip_address', 'port', 'timeout']
+    required = ["ip_address", "port", "timeout"]
     missing = [key for key in required if key not in config]
 
     if missing:
         raise ConfigurationError(
             f"Missing required configuration: {', '.join(missing)}",
             error_code=ErrorCodes.MISSING_SETTING,
-            context={'missing_keys': missing},
-            suggestions=["Add missing settings to configuration", "Use configuration wizard"]
+            context={"missing_keys": missing},
+            suggestions=[
+                "Add missing settings to configuration",
+                "Use configuration wizard",
+            ],
         )
 
     return config

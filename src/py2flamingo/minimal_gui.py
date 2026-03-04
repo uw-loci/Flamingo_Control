@@ -5,19 +5,31 @@ Minimal GUI for Flamingo microscope control.
 Allows basic workflow file sending over TCP.
 """
 
-import sys
 import logging
+import sys
 from pathlib import Path
-from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QLineEdit, QComboBox, QTextEdit,
-    QGroupBox, QFileDialog, QMessageBox, QSpinBox
-)
+
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
+from PyQt5.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QFileDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from py2flamingo.tcp_client import TCPClient, parse_metadata_file
-from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR
+from py2flamingo.views.colors import ERROR_COLOR, SUCCESS_COLOR
 
 
 class MinimalFlamingoGUI(QMainWindow):
@@ -41,7 +53,7 @@ class MinimalFlamingoGUI(QMainWindow):
         """Configure logging."""
         logging.basicConfig(
             level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         )
         self.logger = logging.getLogger(__name__)
 
@@ -115,11 +127,15 @@ class MinimalFlamingoGUI(QMainWindow):
         button_layout = QHBoxLayout()
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.clicked.connect(self.toggle_connection)
-        self.connect_btn.setStyleSheet(f"QPushButton {{ background-color: {SUCCESS_COLOR}; color: white; font-weight: bold; }}")
+        self.connect_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {SUCCESS_COLOR}; color: white; font-weight: bold; }}"
+        )
         button_layout.addWidget(self.connect_btn)
 
         self.connection_status = QLabel("Disconnected")
-        self.connection_status.setStyleSheet(f"QLabel {{ color: {ERROR_COLOR}; font-weight: bold; }}")
+        self.connection_status.setStyleSheet(
+            f"QLabel {{ color: {ERROR_COLOR}; font-weight: bold; }}"
+        )
         button_layout.addWidget(self.connection_status)
         button_layout.addStretch()
         layout.addLayout(button_layout)
@@ -158,7 +174,9 @@ class MinimalFlamingoGUI(QMainWindow):
         self.workflow_preview = QTextEdit()
         self.workflow_preview.setReadOnly(True)
         self.workflow_preview.setMaximumHeight(150)
-        self.workflow_preview.setPlaceholderText("Workflow file preview will appear here...")
+        self.workflow_preview.setPlaceholderText(
+            "Workflow file preview will appear here..."
+        )
         layout.addWidget(QLabel("Preview:"))
         layout.addWidget(self.workflow_preview)
 
@@ -167,13 +185,17 @@ class MinimalFlamingoGUI(QMainWindow):
         self.send_btn = QPushButton("Send Workflow")
         self.send_btn.clicked.connect(self.send_workflow)
         self.send_btn.setEnabled(False)
-        self.send_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; font-weight: bold; }")
+        self.send_btn.setStyleSheet(
+            "QPushButton { background-color: #2196F3; color: white; font-weight: bold; }"
+        )
         button_layout.addWidget(self.send_btn)
 
         self.stop_btn = QPushButton("Stop Workflow")
         self.stop_btn.clicked.connect(self.stop_workflow)
         self.stop_btn.setEnabled(False)
-        self.stop_btn.setStyleSheet(f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; font-weight: bold; }}")
+        self.stop_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; font-weight: bold; }}"
+        )
         button_layout.addWidget(self.stop_btn)
         button_layout.addStretch()
         layout.addLayout(button_layout)
@@ -204,7 +226,7 @@ class MinimalFlamingoGUI(QMainWindow):
             self,
             "Select Metadata File",
             "microscope_settings",
-            "Text Files (*.txt);;All Files (*)"
+            "Text Files (*.txt);;All Files (*)",
         )
         if file_path:
             self.metadata_path.setText(file_path)
@@ -228,9 +250,7 @@ class MinimalFlamingoGUI(QMainWindow):
     def browse_workflow_dir(self):
         """Browse for workflow directory."""
         dir_path = QFileDialog.getExistingDirectory(
-            self,
-            "Select Workflow Directory",
-            self.workflow_dir.text()
+            self, "Select Workflow Directory", self.workflow_dir.text()
         )
         if dir_path:
             self.workflow_dir.setText(dir_path)
@@ -263,9 +283,11 @@ class MinimalFlamingoGUI(QMainWindow):
         workflow_path = self.workflow_combo.currentData()
         if workflow_path and Path(workflow_path).exists():
             try:
-                with open(workflow_path, 'r') as f:
+                with open(workflow_path, "r") as f:
                     content = f.read()
-                self.workflow_preview.setPlainText(content[:1000])  # Show first 1000 chars
+                self.workflow_preview.setPlainText(
+                    content[:1000]
+                )  # Show first 1000 chars
             except Exception as e:
                 self.log(f"Error reading workflow: {e}")
 
@@ -293,16 +315,22 @@ class MinimalFlamingoGUI(QMainWindow):
             if nuc and live:
                 self.connected = True
                 self.connect_btn.setText("Disconnect")
-                self.connect_btn.setStyleSheet(f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; font-weight: bold; }}")
+                self.connect_btn.setStyleSheet(
+                    f"QPushButton {{ background-color: {ERROR_COLOR}; color: white; font-weight: bold; }}"
+                )
                 self.connection_status.setText("Connected")
-                self.connection_status.setStyleSheet(f"QLabel {{ color: {SUCCESS_COLOR}; font-weight: bold; }}")
+                self.connection_status.setStyleSheet(
+                    f"QLabel {{ color: {SUCCESS_COLOR}; font-weight: bold; }}"
+                )
                 self.send_btn.setEnabled(True)
                 self.stop_btn.setEnabled(True)
                 self.log("Connected successfully!")
                 self.statusBar().showMessage(f"Connected to {ip_address}:{port}")
             else:
                 self.log("Connection failed")
-                QMessageBox.critical(self, "Connection Error", "Failed to connect to microscope")
+                QMessageBox.critical(
+                    self, "Connection Error", "Failed to connect to microscope"
+                )
         except Exception as e:
             self.log(f"Connection error: {e}")
             QMessageBox.critical(self, "Connection Error", str(e))
@@ -315,9 +343,13 @@ class MinimalFlamingoGUI(QMainWindow):
 
         self.connected = False
         self.connect_btn.setText("Connect")
-        self.connect_btn.setStyleSheet(f"QPushButton {{ background-color: {SUCCESS_COLOR}; color: white; font-weight: bold; }}")
+        self.connect_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {SUCCESS_COLOR}; color: white; font-weight: bold; }}"
+        )
         self.connection_status.setText("Disconnected")
-        self.connection_status.setStyleSheet(f"QLabel {{ color: {ERROR_COLOR}; font-weight: bold; }}")
+        self.connection_status.setStyleSheet(
+            f"QLabel {{ color: {ERROR_COLOR}; font-weight: bold; }}"
+        )
         self.send_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
         self.log("Disconnected")

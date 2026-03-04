@@ -5,6 +5,7 @@ Provides access to application icons and other resources.
 """
 
 from pathlib import Path
+
 from PyQt5.QtGui import QIcon
 
 

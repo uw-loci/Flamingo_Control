@@ -11,10 +11,10 @@ Supports two modes:
 - Asynchronous: Background reader with message dispatcher (for concurrent ops)
 """
 
-import socket
 import logging
+import socket
 import threading
-from typing import Callable, Tuple, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
 if TYPE_CHECKING:
     from .socket_reader import CommandClient, MessageDispatcher, ParsedMessage
@@ -62,10 +62,7 @@ class TCPConnection:
         self._command_client: Optional["CommandClient"] = None
 
     def connect(
-        self,
-        ip: str,
-        port: int,
-        timeout: float = 2.0
+        self, ip: str, port: int, timeout: float = 2.0
     ) -> Tuple[socket.socket, socket.socket]:
         """
         Connect to microscope on both command and live imaging ports.
@@ -241,11 +238,7 @@ class TCPConnection:
         self._ip = None
         self._port = None
 
-    def send_bytes(
-        self,
-        data: bytes,
-        socket_type: str = "command"
-    ) -> None:
+    def send_bytes(self, data: bytes, socket_type: str = "command") -> None:
         """
         Send bytes through the specified socket.
 
@@ -283,9 +276,7 @@ class TCPConnection:
 
             try:
                 sock.sendall(data)
-                self.logger.debug(
-                    f"Sent {len(data)} bytes on {socket_type} socket"
-                )
+                self.logger.debug(f"Sent {len(data)} bytes on {socket_type} socket")
             except OSError as e:
                 self.logger.error(f"Failed to send data: {e}")
                 # Connection likely broken
@@ -293,10 +284,7 @@ class TCPConnection:
                 raise
 
     def receive_bytes(
-        self,
-        size: int,
-        socket_type: str = "command",
-        timeout: Optional[float] = None
+        self, size: int, socket_type: str = "command", timeout: Optional[float] = None
     ) -> bytes:
         """
         Receive bytes from the specified socket.
@@ -368,10 +356,7 @@ class TCPConnection:
                 raise
 
     def receive_all_bytes(
-        self,
-        size: int,
-        socket_type: str = "command",
-        timeout: Optional[float] = None
+        self, size: int, socket_type: str = "command", timeout: Optional[float] = None
     ) -> bytes:
         """
         Receive exact number of bytes from the specified socket.
@@ -424,7 +409,7 @@ class TCPConnection:
                     sock.settimeout(timeout)
 
                 # Receive all bytes
-                received = b''
+                received = b""
                 remaining = size
 
                 while remaining > 0:
@@ -470,9 +455,7 @@ class TCPConnection:
                 raise
 
     def check_for_unsolicited_message(
-        self,
-        socket_type: str = "command",
-        timeout: float = 0.0
+        self, socket_type: str = "command", timeout: float = 0.0
     ) -> Optional[bytes]:
         """
         Check for unsolicited messages (callbacks) from the microscope.
@@ -514,7 +497,7 @@ class TCPConnection:
             data = self.receive_bytes(
                 size=128,  # Standard command size
                 socket_type=socket_type,
-                timeout=timeout
+                timeout=timeout,
             )
             return data
 
@@ -615,10 +598,7 @@ class TCPConnection:
         return None
 
     def send_command_async(
-        self,
-        command_bytes: bytes,
-        expected_response_code: int,
-        timeout: float = 3.0
+        self, command_bytes: bytes, expected_response_code: int, timeout: float = 3.0
     ) -> Optional["ParsedMessage"]:
         """
         Send a command and wait for response using async reader.
@@ -643,16 +623,16 @@ class TCPConnection:
             raise ConnectionError("Not connected to microscope")
 
         if not self._command_client:
-            raise RuntimeError("Async reader not active - use send_bytes/receive_bytes instead")
+            raise RuntimeError(
+                "Async reader not active - use send_bytes/receive_bytes instead"
+            )
 
         return self._command_client.send_command(
             command_bytes, expected_response_code, timeout
         )
 
     def register_callback(
-        self,
-        command_code: int,
-        handler: Callable[["ParsedMessage"], None]
+        self, command_code: int, handler: Callable[["ParsedMessage"], None]
     ) -> None:
         """
         Register a handler for unsolicited callback messages.
@@ -673,9 +653,7 @@ class TCPConnection:
         self._command_client.register_callback(command_code, handler)
 
     def unregister_callback(
-        self,
-        command_code: int,
-        handler: Callable[["ParsedMessage"], None]
+        self, command_code: int, handler: Callable[["ParsedMessage"], None]
     ) -> None:
         """Remove a callback handler."""
         if self._command_client:
@@ -707,7 +685,7 @@ class TCPConnection:
             raise ValueError(f"Invalid IP address: {ip}")
 
         # Simple validation - socket.connect will do thorough validation
-        parts = ip.split('.')
+        parts = ip.split(".")
         if len(parts) != 4:
             raise ValueError(f"Invalid IP address format: {ip}")
 

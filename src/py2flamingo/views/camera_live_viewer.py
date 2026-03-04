@@ -6,23 +6,34 @@ intensity scaling, and performance monitoring.
 """
 
 import logging
-import numpy as np
-from pathlib import Path
 from datetime import datetime
-from typing import Optional
+from pathlib import Path
+
+# Import conditionally to avoid circular imports
+from typing import TYPE_CHECKING, Optional
+
+import numpy as np
+from PyQt5.QtCore import QEvent, Qt, QTimer, pyqtSlot
+from PyQt5.QtGui import QCloseEvent, QHideEvent, QImage, QPixmap, QShowEvent
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QGroupBox, QSlider, QSpinBox, QCheckBox, QSizePolicy, QMessageBox, QFileDialog
+    QCheckBox,
+    QFileDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSlider,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QEvent
-from PyQt5.QtGui import QPixmap, QImage, QCloseEvent, QShowEvent, QHideEvent
 
 from py2flamingo.controllers.camera_controller import CameraController, CameraState
 from py2flamingo.services.camera_service import ImageHeader
-from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR
+from py2flamingo.views.colors import ERROR_COLOR, SUCCESS_COLOR
 
-# Import conditionally to avoid circular imports
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from py2flamingo.services.window_geometry_manager import WindowGeometryManager
 
@@ -42,9 +53,14 @@ class CameraLiveViewer(QWidget):
     # Class variable to remember last snapshot directory across instances
     _last_snapshot_directory: Optional[str] = None
 
-    def __init__(self, camera_controller: CameraController, laser_led_controller=None,
-                 image_controls_window=None, geometry_manager: 'WindowGeometryManager' = None,
-                 parent=None):
+    def __init__(
+        self,
+        camera_controller: CameraController,
+        laser_led_controller=None,
+        image_controls_window=None,
+        geometry_manager: "WindowGeometryManager" = None,
+        parent=None,
+    ):
         """
         Initialize camera live viewer.
 
@@ -104,7 +120,9 @@ class CameraLiveViewer(QWidget):
         self.image_label = QLabel("No image - Click 'Start Live View'")
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setMinimumSize(640, 480)
-        self.image_label.setStyleSheet("QLabel { background-color: black; color: gray; border: 2px solid gray; }")
+        self.image_label.setStyleSheet(
+            "QLabel { background-color: black; color: gray; border: 2px solid gray; }"
+        )
         self.image_label.setScaledContents(False)
         display_layout.addWidget(self.image_label)
 
@@ -120,6 +138,7 @@ class CameraLiveViewer(QWidget):
         # ===== Laser/LED Control Panel =====
         if self.laser_led_controller:
             from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
+
             self.laser_led_panel = LaserLEDControlPanel(self.laser_led_controller)
             right_layout.addWidget(self.laser_led_panel)
 
@@ -132,12 +151,16 @@ class CameraLiveViewer(QWidget):
         lv_layout.addWidget(QLabel("Live View:"))
 
         self.start_btn = QPushButton("Start Live View")
-        self.start_btn.setStyleSheet(f"background-color: {SUCCESS_COLOR}; color: white; font-weight: bold; padding: 8px;")
+        self.start_btn.setStyleSheet(
+            f"background-color: {SUCCESS_COLOR}; color: white; font-weight: bold; padding: 8px;"
+        )
         self.start_btn.clicked.connect(self._on_start_clicked)
         lv_layout.addWidget(self.start_btn)
 
         self.stop_btn = QPushButton("Stop Live View")
-        self.stop_btn.setStyleSheet(f"background-color: {ERROR_COLOR}; color: white; font-weight: bold; padding: 8px;")
+        self.stop_btn.setStyleSheet(
+            f"background-color: {ERROR_COLOR}; color: white; font-weight: bold; padding: 8px;"
+        )
         self.stop_btn.clicked.connect(self._on_stop_clicked)
         self.stop_btn.setEnabled(False)
         lv_layout.addWidget(self.stop_btn)
@@ -146,7 +169,9 @@ class CameraLiveViewer(QWidget):
 
         # Snapshot button
         self.snapshot_btn = QPushButton("Take Snapshot")
-        self.snapshot_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; padding: 8px;")
+        self.snapshot_btn.setStyleSheet(
+            "background-color: #2196F3; color: white; font-weight: bold; padding: 8px;"
+        )
         self.snapshot_btn.clicked.connect(self._on_snapshot_clicked)
         lv_layout.addWidget(self.snapshot_btn)
 
@@ -181,7 +206,9 @@ class CameraLiveViewer(QWidget):
         image_controls_layout.addWidget(self.image_controls_btn)
 
         # Short description
-        desc_label = QLabel("<i>For image transformations, color, and display options</i>")
+        desc_label = QLabel(
+            "<i>For image transformations, color, and display options</i>"
+        )
         desc_label.setStyleSheet("color: #666; font-size: 9pt;")
         desc_label.setWordWrap(True)
         desc_label.setAlignment(Qt.AlignCenter)
@@ -274,7 +301,9 @@ class CameraLiveViewer(QWidget):
             self.start_btn.setEnabled(False)
             self.stop_btn.setEnabled(True)
             self.status_label.setText("Live View Active")
-            self.status_label.setStyleSheet(f"color: {SUCCESS_COLOR}; font-weight: bold;")
+            self.status_label.setStyleSheet(
+                f"color: {SUCCESS_COLOR}; font-weight: bold;"
+            )
 
         elif state == CameraState.ACQUIRING:
             self.start_btn.setEnabled(False)
@@ -311,8 +340,7 @@ class CameraLiveViewer(QWidget):
         # Update Image Controls Window sliders with auto-scale feedback
         if self.image_controls_window and self.camera_controller.is_auto_scale():
             self.image_controls_window.update_auto_scale_feedback(
-                header.image_scale_min,
-                header.image_scale_max
+                header.image_scale_min, header.image_scale_max
             )
 
         # Convert and display image
@@ -339,8 +367,10 @@ class CameraLiveViewer(QWidget):
         """Handle start button click."""
         # Restore any checked illumination BEFORE starting live view
         # This ensures the laser is activated on the server before live view starts
-        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
-            self.logger.info("Restoring checked illumination before starting live view...")
+        if hasattr(self, "laser_led_panel") and self.laser_led_panel:
+            self.logger.info(
+                "Restoring checked illumination before starting live view..."
+            )
             self.laser_led_panel.restore_checked_illumination()
 
         self.camera_controller.start_live_view()
@@ -353,11 +383,14 @@ class CameraLiveViewer(QWidget):
         """Handle snapshot button click with file save dialog."""
         try:
             # Ensure laser/LED is active
-            if self.laser_led_controller and not self.laser_led_controller.is_preview_active():
+            if (
+                self.laser_led_controller
+                and not self.laser_led_controller.is_preview_active()
+            ):
                 QMessageBox.warning(
                     self,
                     "No Light Source",
-                    "Please select and enable a laser or LED before taking a snapshot."
+                    "Please select and enable a laser or LED before taking a snapshot.",
                 )
                 return
 
@@ -367,7 +400,10 @@ class CameraLiveViewer(QWidget):
             else:
                 # Try to get from config, otherwise use home directory
                 try:
-                    from py2flamingo.services.configuration_service import ConfigurationService
+                    from py2flamingo.services.configuration_service import (
+                        ConfigurationService,
+                    )
+
                     config = ConfigurationService()
                     default_dir = config.get_data_storage_location()
                 except:
@@ -382,7 +418,7 @@ class CameraLiveViewer(QWidget):
                 "Save Snapshot",
                 suggested_filename,
                 "TIFF Images (*.tif *.tiff);;PNG Images (*.png);;All Files (*.*)",
-                options=QFileDialog.DontConfirmOverwrite  # We handle auto-increment, so no overwrite prompt
+                options=QFileDialog.DontConfirmOverwrite,  # We handle auto-increment, so no overwrite prompt
             )
 
             # User cancelled
@@ -403,11 +439,15 @@ class CameraLiveViewer(QWidget):
 
                 if success:
                     self.status_label.setText(f"Snapshot saved: {Path(filename).name}")
-                    self.status_label.setStyleSheet(f"color: {SUCCESS_COLOR}; font-weight: bold;")
+                    self.status_label.setStyleSheet(
+                        f"color: {SUCCESS_COLOR}; font-weight: bold;"
+                    )
                     self.logger.info(f"Snapshot saved to {filename}")
                 else:
                     self.status_label.setText("Snapshot failed")
-                    self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-weight: bold;")
+                    self.status_label.setStyleSheet(
+                        f"color: {ERROR_COLOR}; font-weight: bold;"
+                    )
 
                 # Re-enable button
                 self.snapshot_btn.setEnabled(True)
@@ -454,7 +494,7 @@ class CameraLiveViewer(QWidget):
             for file in existing_files:
                 try:
                     # Extract number from filename: snapshot_20231115_005.tif -> 5
-                    parts = file.stem.split('_')
+                    parts = file.stem.split("_")
                     if len(parts) >= 3:
                         num = int(parts[-1])
                         numbers.append(num)
@@ -488,6 +528,7 @@ class CameraLiveViewer(QWidget):
                 self.logger.info("Connecting data socket for snapshot...")
                 self.camera_controller.camera_service.start_live_view_streaming()
                 import time
+
                 time.sleep(0.5)  # Give socket time to connect
 
             # Set flag to capture next frame
@@ -500,10 +541,14 @@ class CameraLiveViewer(QWidget):
 
             # Wait for image to arrive (via existing callback mechanism)
             import time
+
             timeout = 5.0  # 5 second timeout
             start_time = time.time()
 
-            while self.camera_controller._captured_snapshot is None and (time.time() - start_time) < timeout:
+            while (
+                self.camera_controller._captured_snapshot is None
+                and (time.time() - start_time) < timeout
+            ):
                 time.sleep(0.1)
 
             if self.camera_controller._captured_snapshot is None:
@@ -548,25 +593,25 @@ class CameraLiveViewer(QWidget):
             file_path = Path(filename)
 
             # Save based on extension
-            if file_path.suffix.lower() in ['.tif', '.tiff']:
+            if file_path.suffix.lower() in [".tif", ".tiff"]:
                 # Save as 16-bit TIFF
-                pil_image = Image.fromarray(image.astype(np.uint16), mode='I;16')
-                pil_image.save(filename, format='TIFF')
-            elif file_path.suffix.lower() == '.png':
+                pil_image = Image.fromarray(image.astype(np.uint16), mode="I;16")
+                pil_image.save(filename, format="TIFF")
+            elif file_path.suffix.lower() == ".png":
                 # Save as 16-bit PNG
-                pil_image = Image.fromarray(image.astype(np.uint16), mode='I;16')
-                pil_image.save(filename, format='PNG')
+                pil_image = Image.fromarray(image.astype(np.uint16), mode="I;16")
+                pil_image.save(filename, format="PNG")
             else:
                 # Default to TIFF
-                pil_image = Image.fromarray(image.astype(np.uint16), mode='I;16')
-                pil_image.save(filename, format='TIFF')
+                pil_image = Image.fromarray(image.astype(np.uint16), mode="I;16")
+                pil_image.save(filename, format="TIFF")
 
             self.logger.info(f"Image saved: {filename}")
 
         except ImportError:
             # Fallback to numpy save if PIL not available
             self.logger.warning("PIL not available, saving as numpy array")
-            np.save(filename.replace('.tif', '.npy').replace('.png', '.npy'), image)
+            np.save(filename.replace(".tif", ".npy").replace(".png", ".npy"), image)
 
     def _on_exposure_changed(self, value: int) -> None:
         """Handle exposure time change."""
@@ -586,7 +631,7 @@ class CameraLiveViewer(QWidget):
     def _on_crosshair_changed(self, state: int) -> None:
         """Handle crosshair checkbox change."""
         # Update internal state
-        self._show_crosshair = (state == Qt.Checked)
+        self._show_crosshair = state == Qt.Checked
         # Redisplay with/without crosshair
         if self._current_image is not None:
             self._display_image(self._current_image, self._current_header)
@@ -638,8 +683,11 @@ class CameraLiveViewer(QWidget):
 
             # Normalize to 8-bit for display
             if max_val > min_val:
-                normalized = ((transformed.astype(np.float32) - min_val) /
-                            (max_val - min_val) * 255.0)
+                normalized = (
+                    (transformed.astype(np.float32) - min_val)
+                    / (max_val - min_val)
+                    * 255.0
+                )
                 normalized = np.clip(normalized, 0, 255).astype(np.uint8)
             else:
                 normalized = np.zeros_like(transformed, dtype=np.uint8)
@@ -648,22 +696,28 @@ class CameraLiveViewer(QWidget):
             if self._colormap != "Grayscale":
                 normalized = self._apply_colormap(normalized, self._colormap)
                 # Ensure array is C-contiguous for QImage
-                if not normalized.flags['C_CONTIGUOUS']:
+                if not normalized.flags["C_CONTIGUOUS"]:
                     normalized = np.ascontiguousarray(normalized)
                 # Convert to QImage (RGB format)
                 height, width, channels = normalized.shape
                 bytes_per_line = width * channels
-                qimage = QImage(normalized.data, width, height, bytes_per_line,
-                              QImage.Format_RGB888)
+                qimage = QImage(
+                    normalized.data, width, height, bytes_per_line, QImage.Format_RGB888
+                )
             else:
                 # Ensure array is C-contiguous for QImage
-                if not normalized.flags['C_CONTIGUOUS']:
+                if not normalized.flags["C_CONTIGUOUS"]:
                     normalized = np.ascontiguousarray(normalized)
                 # Convert to QImage (grayscale)
                 height, width = normalized.shape
                 bytes_per_line = width
-                qimage = QImage(normalized.data, width, height, bytes_per_line,
-                              QImage.Format_Grayscale8)
+                qimage = QImage(
+                    normalized.data,
+                    width,
+                    height,
+                    bytes_per_line,
+                    QImage.Format_Grayscale8,
+                )
 
             # Add crosshair if enabled (use internal state from Image Controls)
             if self._show_crosshair:
@@ -675,14 +729,13 @@ class CameraLiveViewer(QWidget):
             # Apply zoom
             if self._display_scale != 1.0:
                 new_size = pixmap.size() * self._display_scale
-                pixmap = pixmap.scaled(new_size, Qt.KeepAspectRatio,
-                                      Qt.SmoothTransformation)
+                pixmap = pixmap.scaled(
+                    new_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
 
             # Scale to fit label while maintaining aspect ratio
             scaled_pixmap = pixmap.scaled(
-                self.image_label.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
+                self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
 
             self.image_label.setPixmap(scaled_pixmap)
@@ -738,7 +791,7 @@ class CameraLiveViewer(QWidget):
                 lut[i] = [
                     int(255 * (0.267 + 0.529 * t)),
                     int(255 * (0.005 + 0.839 * t - 0.135 * t * t)),
-                    int(255 * (0.329 - 0.329 * t))
+                    int(255 * (0.329 - 0.329 * t)),
                 ]
 
         elif colormap_name == "Plasma":
@@ -749,7 +802,7 @@ class CameraLiveViewer(QWidget):
                 lut[i] = [
                     int(255 * (0.5 + 0.5 * t)),
                     int(255 * (0.0 + 0.8 * t * t)),
-                    int(255 * (0.8 - 0.8 * t))
+                    int(255 * (0.8 - 0.8 * t)),
                 ]
 
         elif colormap_name == "Inferno":
@@ -760,7 +813,7 @@ class CameraLiveViewer(QWidget):
                 lut[i] = [
                     int(255 * t),
                     int(255 * (t * t)),
-                    int(255 * max(0, 3 * t - 2))
+                    int(255 * max(0, 3 * t - 2)),
                 ]
 
         elif colormap_name == "Magma":
@@ -771,7 +824,7 @@ class CameraLiveViewer(QWidget):
                 lut[i] = [
                     int(255 * t),
                     int(255 * (t * t * t)),
-                    int(255 * max(0, 4 * t - 3))
+                    int(255 * max(0, 4 * t - 3)),
                 ]
 
         elif colormap_name == "Turbo":
@@ -782,7 +835,7 @@ class CameraLiveViewer(QWidget):
                 lut[i] = [
                     int(255 * min(1.0, max(0.0, 1.5 * t - 0.25))),
                     int(255 * min(1.0, max(0.0, -abs(2 * t - 1) + 1))),
-                    int(255 * min(1.0, max(0.0, -1.5 * t + 1.25)))
+                    int(255 * min(1.0, max(0.0, -1.5 * t + 1.25))),
                 ]
 
         else:
@@ -804,8 +857,8 @@ class CameraLiveViewer(QWidget):
         Returns:
             QImage with crosshair
         """
-        from PyQt5.QtGui import QPainter, QPen
         from PyQt5.QtCore import QPoint
+        from PyQt5.QtGui import QPainter, QPen
 
         # Create a copy to draw on
         result = qimage.copy()
@@ -917,20 +970,26 @@ class CameraLiveViewer(QWidget):
             self._geometry_restored = True
 
         # Unblock signals that may have been blocked during hide
-        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+        if hasattr(self, "laser_led_panel") and self.laser_led_panel:
             # Unblock LED slider and spinbox signals
-            if hasattr(self.laser_led_panel, '_led_slider') and self.laser_led_panel._led_slider:
+            if (
+                hasattr(self.laser_led_panel, "_led_slider")
+                and self.laser_led_panel._led_slider
+            ):
                 self.laser_led_panel._led_slider.blockSignals(False)
-            if hasattr(self.laser_led_panel, '_led_spinbox') and self.laser_led_panel._led_spinbox:
+            if (
+                hasattr(self.laser_led_panel, "_led_spinbox")
+                and self.laser_led_panel._led_spinbox
+            ):
                 self.laser_led_panel._led_spinbox.blockSignals(False)
 
             # Unblock all laser sliders
-            if hasattr(self.laser_led_panel, '_laser_sliders'):
+            if hasattr(self.laser_led_panel, "_laser_sliders"):
                 for slider in self.laser_led_panel._laser_sliders.values():
                     slider.blockSignals(False)
 
             # Unblock all laser spinboxes
-            if hasattr(self.laser_led_panel, '_laser_spinboxes'):
+            if hasattr(self.laser_led_panel, "_laser_spinboxes"):
                 for spinbox in self.laser_led_panel._laser_spinboxes.values():
                     spinbox.blockSignals(False)
 
@@ -941,7 +1000,7 @@ class CameraLiveViewer(QWidget):
             self.laser_led_controller.load_laser_powers_from_hardware()
 
         # Restore any checked illumination (if live view was previously running)
-        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+        if hasattr(self, "laser_led_panel") and self.laser_led_panel:
             self.logger.info("Attempting to restore checked illumination sources...")
             self.laser_led_panel.restore_checked_illumination()
 
@@ -958,20 +1017,26 @@ class CameraLiveViewer(QWidget):
 
         # Block ALL signals from laser/LED control panel widgets to prevent
         # Qt widget state changes from triggering unwanted LED_SET commands
-        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+        if hasattr(self, "laser_led_panel") and self.laser_led_panel:
             # Block LED slider and spinbox signals
-            if hasattr(self.laser_led_panel, '_led_slider') and self.laser_led_panel._led_slider:
+            if (
+                hasattr(self.laser_led_panel, "_led_slider")
+                and self.laser_led_panel._led_slider
+            ):
                 self.laser_led_panel._led_slider.blockSignals(True)
-            if hasattr(self.laser_led_panel, '_led_spinbox') and self.laser_led_panel._led_spinbox:
+            if (
+                hasattr(self.laser_led_panel, "_led_spinbox")
+                and self.laser_led_panel._led_spinbox
+            ):
                 self.laser_led_panel._led_spinbox.blockSignals(True)
 
             # Block all laser sliders
-            if hasattr(self.laser_led_panel, '_laser_sliders'):
+            if hasattr(self.laser_led_panel, "_laser_sliders"):
                 for slider in self.laser_led_panel._laser_sliders.values():
                     slider.blockSignals(True)
 
             # Block all laser spinboxes
-            if hasattr(self.laser_led_panel, '_laser_spinboxes'):
+            if hasattr(self.laser_led_panel, "_laser_spinboxes"):
                 for spinbox in self.laser_led_panel._laser_spinboxes.values():
                     spinbox.blockSignals(True)
 
@@ -982,7 +1047,9 @@ class CameraLiveViewer(QWidget):
         """Handle window state changes - log when window is activated."""
         super().changeEvent(event)
         if event.type() == QEvent.WindowActivate:
-            self.logger.info("Camera Live Viewer window activated (user clicked into window)")
+            self.logger.info(
+                "Camera Live Viewer window activated (user clicked into window)"
+            )
         elif event.type() == QEvent.WindowDeactivate:
             self.logger.debug("Camera Live Viewer window deactivated")
 

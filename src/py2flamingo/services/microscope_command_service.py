@@ -14,9 +14,9 @@ preventing socket buffer buildup and ensuring callbacks are never missed.
 """
 
 import logging
-import struct
 import socket
-from typing import Dict, Any, Optional, List, Union, TYPE_CHECKING
+import struct
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from py2flamingo.core.tcp_protocol import CommandDataBits, get_command_name
 
@@ -48,7 +48,7 @@ class MicroscopeCommandService:
         command_code: int,
         command_name: str,
         params: Optional[List[int]] = None,
-        value: float = 0.0
+        value: float = 0.0,
     ) -> Dict[str, Any]:
         """
         Send a query command and return parsed response.
@@ -66,10 +66,7 @@ class MicroscopeCommandService:
             Dict with 'success', 'parsed', 'raw_response', etc.
         """
         if not self.connection.is_connected():
-            return {
-                'success': False,
-                'error': 'Not connected to microscope'
-            }
+            return {"success": False, "error": "Not connected to microscope"}
 
         try:
             # Ensure params[6] has TRIGGER_CALL_BACK flag
@@ -85,19 +82,18 @@ class MicroscopeCommandService:
 
             # Encode command
             cmd_bytes = self.connection.encoder.encode_command(
-                code=command_code,
-                status=0,
-                params=params,
-                value=value,
-                data=b''
+                code=command_code, status=0, params=params, value=value, data=b""
             )
 
             # Use get_command_name for better logging if command_name is generic
-            if command_name == str(command_code) or 'COMMAND' in command_name.upper():
+            if command_name == str(command_code) or "COMMAND" in command_name.upper():
                 command_name = get_command_name(command_code)
 
             # Check if async reader is available
-            if hasattr(self.connection, 'has_async_reader') and self.connection.has_async_reader:
+            if (
+                hasattr(self.connection, "has_async_reader")
+                and self.connection.has_async_reader
+            ):
                 return self._send_via_async_reader(
                     cmd_bytes, command_code, command_name, timeout=3.0
                 )
@@ -106,10 +102,7 @@ class MicroscopeCommandService:
             # Get command socket
             command_socket = self.connection._command_socket
             if command_socket is None:
-                return {
-                    'success': False,
-                    'error': 'Command socket not available'
-                }
+                return {"success": False, "error": "Command socket not available"}
 
             # Send command
             command_socket.sendall(cmd_bytes)
@@ -122,30 +115,22 @@ class MicroscopeCommandService:
             parsed = self._parse_response(ack_response)
 
             # Read additional data if present (CRITICAL for buffer management)
-            add_data_bytes = parsed['reserved']
+            add_data_bytes = parsed["reserved"]
             if add_data_bytes > 0:
                 self.logger.debug(f"Reading {add_data_bytes} additional bytes...")
-                additional_data = self._receive_full_bytes(command_socket, add_data_bytes, timeout=3.0)
-                parsed['additional_data'] = additional_data
+                additional_data = self._receive_full_bytes(
+                    command_socket, add_data_bytes, timeout=3.0
+                )
+                parsed["additional_data"] = additional_data
 
-            return {
-                'success': True,
-                'parsed': parsed,
-                'raw_response': ack_response
-            }
+            return {"success": True, "parsed": parsed, "raw_response": ack_response}
 
         except (socket.timeout, TimeoutError) as e:
             self.logger.error(f"Timeout waiting for {command_name} response")
-            return {
-                'success': False,
-                'error': 'timeout'
-            }
+            return {"success": False, "error": "timeout"}
         except Exception as e:
             self.logger.error(f"Error in {command_name}: {e}", exc_info=True)
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     def _send_command(
         self,
@@ -153,9 +138,9 @@ class MicroscopeCommandService:
         command_name: str,
         params: Optional[List[int]] = None,
         value: float = 0.0,
-        data: bytes = b'',
+        data: bytes = b"",
         additional_data_size: int = 0,
-        wait_for_response: bool = True
+        wait_for_response: bool = True,
     ) -> Dict[str, Any]:
         """
         Send an action command (non-query).
@@ -177,10 +162,7 @@ class MicroscopeCommandService:
             Dict with 'success' and optional 'error'
         """
         if not self.connection.is_connected():
-            return {
-                'success': False,
-                'error': 'Not connected to microscope'
-            }
+            return {"success": False, "error": "Not connected to microscope"}
 
         try:
             # Ensure params[6] has TRIGGER_CALL_BACK flag
@@ -196,7 +178,7 @@ class MicroscopeCommandService:
 
             # Convert string data to bytes if needed
             if isinstance(data, str):
-                data = data.encode('utf-8')
+                data = data.encode("utf-8")
 
             # Encode command with data
             cmd_bytes = self.connection.encoder.encode_command(
@@ -205,28 +187,31 @@ class MicroscopeCommandService:
                 params=params,
                 value=value,
                 data=data,
-                additional_data_size=additional_data_size
+                additional_data_size=additional_data_size,
             )
 
             # Use get_command_name for better logging if command_name is generic
-            if command_name == str(command_code) or 'COMMAND' in command_name.upper():
+            if command_name == str(command_code) or "COMMAND" in command_name.upper():
                 command_name = get_command_name(command_code)
 
             # Check if async reader is available
-            if hasattr(self.connection, 'has_async_reader') and self.connection.has_async_reader:
+            if (
+                hasattr(self.connection, "has_async_reader")
+                and self.connection.has_async_reader
+            ):
                 return self._send_via_async_reader(
-                    cmd_bytes, command_code, command_name, timeout=3.0,
-                    wait_for_response=wait_for_response
+                    cmd_bytes,
+                    command_code,
+                    command_name,
+                    timeout=3.0,
+                    wait_for_response=wait_for_response,
                 )
 
             # Fall back to synchronous mode
             # Get command socket
             command_socket = self.connection._command_socket
             if command_socket is None:
-                return {
-                    'success': False,
-                    'error': 'Command socket not available'
-                }
+                return {"success": False, "error": "Command socket not available"}
 
             # Send command
             command_socket.sendall(cmd_bytes)
@@ -235,11 +220,10 @@ class MicroscopeCommandService:
             # Fire-and-forget mode: don't wait for response
             # Used for laser commands (0x20xx) that never send ACK responses
             if not wait_for_response:
-                self.logger.debug(f"{command_name} sent (fire-and-forget, no response expected)")
-                return {
-                    'success': True,
-                    'fire_and_forget': True
-                }
+                self.logger.debug(
+                    f"{command_name} sent (fire-and-forget, no response expected)"
+                )
+                return {"success": True, "fire_and_forget": True}
 
             # Read 128-byte response
             ack_response = self._receive_full_bytes(command_socket, 128, timeout=3.0)
@@ -248,32 +232,24 @@ class MicroscopeCommandService:
             parsed = self._parse_response(ack_response)
 
             # Read additional data if present
-            add_data_bytes = parsed['reserved']
+            add_data_bytes = parsed["reserved"]
             if add_data_bytes > 0:
                 self.logger.debug(f"Reading {add_data_bytes} additional bytes...")
-                additional_data = self._receive_full_bytes(command_socket, add_data_bytes, timeout=3.0)
-                parsed['additional_data'] = additional_data
+                additional_data = self._receive_full_bytes(
+                    command_socket, add_data_bytes, timeout=3.0
+                )
+                parsed["additional_data"] = additional_data
 
-            return {
-                'success': True,
-                'parsed': parsed,
-                'raw_response': ack_response
-            }
+            return {"success": True, "parsed": parsed, "raw_response": ack_response}
 
         except (socket.timeout, TimeoutError) as e:
             self.logger.error(f"Timeout waiting for {command_name} response")
-            return {
-                'success': False,
-                'error': 'timeout'
-            }
+            return {"success": False, "error": "timeout"}
         except Exception as e:
             self.logger.error(f"Error in {command_name}: {e}", exc_info=True)
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            return {"success": False, "error": str(e)}
 
-    def _send_workflow_command(self, cmd: 'Command', timeout: float = 5.0) -> bytes:
+    def _send_workflow_command(self, cmd: "Command", timeout: float = 5.0) -> bytes:
         """
         Send a workflow command with workflow data.
 
@@ -321,7 +297,9 @@ class MicroscopeCommandService:
 
         # Parse workflow for debugging info (not used in actual command)
         workflow_flags = self._parse_workflow_flags(workflow_data)
-        self.logger.info(f"Sending workflow: {file_size} bytes (detected_flags=0x{workflow_flags:08X})")
+        self.logger.info(
+            f"Sending workflow: {file_size} bytes (detected_flags=0x{workflow_flags:08X})"
+        )
 
         try:
             # Get command socket
@@ -338,7 +316,7 @@ class MicroscopeCommandService:
             # OLD CODE (tcpip_nuc.py lines 59-63):
             # - addDataBytes = fileBytes (file size goes HERE, not in buffer)
             # - buffer_72 = b"\0" * 72 (empty buffer!)
-            empty_buffer = b'\x00' * 72
+            empty_buffer = b"\x00" * 72
 
             # Encode command header with file size in addDataBytes field
             cmd_bytes = self.connection.encoder.encode_command(
@@ -347,7 +325,7 @@ class MicroscopeCommandService:
                 params=params,
                 value=0.0,
                 data=empty_buffer,  # Empty buffer, NOT file size!
-                additional_data_size=file_size  # File size goes HERE!
+                additional_data_size=file_size,  # File size goes HERE!
             )
 
             # Send header
@@ -360,7 +338,7 @@ class MicroscopeCommandService:
 
             # No response expected - workflow commands are fire-and-forget
             # Status updates come asynchronously via system state events
-            return b''
+            return b""
 
         except Exception as e:
             self.logger.error(f"Error sending workflow: {e}", exc_info=True)
@@ -386,42 +364,46 @@ class MicroscopeCommandService:
 
         try:
             # Decode workflow text
-            workflow_text = workflow_data.decode('utf-8', errors='replace')
+            workflow_text = workflow_data.decode("utf-8", errors="replace")
 
             # Detect Stack option
-            stack_match = re.search(r'Stack option\s*=\s*(\w+)', workflow_text)
-            stack_option = stack_match.group(1).lower() if stack_match else 'none'
+            stack_match = re.search(r"Stack option\s*=\s*(\w+)", workflow_text)
+            stack_option = stack_match.group(1).lower() if stack_match else "none"
 
             # Detect save settings
-            save_data_match = re.search(r'Save image data\s*=\s*(\w+)', workflow_text)
-            save_data = save_data_match.group(1).lower() if save_data_match else 'notsaved'
-            saving_to_disk = save_data not in ('notsaved', 'none', '')
+            save_data_match = re.search(r"Save image data\s*=\s*(\w+)", workflow_text)
+            save_data = (
+                save_data_match.group(1).lower() if save_data_match else "notsaved"
+            )
+            saving_to_disk = save_data not in ("notsaved", "none", "")
 
-            save_mip_match = re.search(r'Save max projection\s*=\s*(\w+)', workflow_text)
-            save_mip = save_mip_match.group(1).lower() if save_mip_match else 'false'
-            saving_mip = save_mip == 'true'
+            save_mip_match = re.search(
+                r"Save max projection\s*=\s*(\w+)", workflow_text
+            )
+            save_mip = save_mip_match.group(1).lower() if save_mip_match else "false"
+            saving_mip = save_mip == "true"
 
             # Set flags based on workflow type
             # Reference: CommandDataBits in tcp_protocol.py
-            if stack_option in ('zstack', 'zstack movie', 'zsweep'):
+            if stack_option in ("zstack", "zstack movie", "zsweep"):
                 # Z-stack workflows: enable Z-sweep mode
                 flags |= CommandDataBits.STAGE_ZSWEEP  # 0x00000020
                 if saving_mip:
                     flags |= CommandDataBits.MAX_PROJECTION  # 0x00000004
 
-            elif stack_option == 'tile':
+            elif stack_option == "tile":
                 # Tile/mosaic workflows: positions buffered
                 flags |= CommandDataBits.STAGE_POSITIONS_IN_BUFFER  # 0x00000002
                 # Don't update client during rapid tile movements
                 flags |= CommandDataBits.STAGE_NOT_UPDATE_CLIENT  # 0x00000010
 
-            elif stack_option in ('opt', 'opt zstacks'):
+            elif stack_option in ("opt", "opt zstacks"):
                 # OPT (Optical Projection Tomography) workflows
                 flags |= CommandDataBits.STAGE_ZSWEEP  # 0x00000020
                 if saving_mip:
                     flags |= CommandDataBits.MAX_PROJECTION  # 0x00000004
 
-            elif stack_option == 'bidirectional':
+            elif stack_option == "bidirectional":
                 # Bidirectional scanning
                 flags |= CommandDataBits.STAGE_ZSWEEP  # 0x00000020
 
@@ -432,8 +414,10 @@ class MicroscopeCommandService:
             # Always include experiment time remaining for progress tracking
             flags |= CommandDataBits.EXPERIMENT_TIME_REMAINING  # 0x00000001
 
-            self.logger.debug(f"Workflow type: {stack_option}, saving: {saving_to_disk}, "
-                            f"MIP: {saving_mip}, flags: 0x{flags:08X}")
+            self.logger.debug(
+                f"Workflow type: {stack_option}, saving: {saving_to_disk}, "
+                f"MIP: {saving_mip}, flags: 0x{flags:08X}"
+            )
 
         except Exception as e:
             self.logger.warning(f"Failed to parse workflow flags, using defaults: {e}")
@@ -442,7 +426,9 @@ class MicroscopeCommandService:
 
         return flags
 
-    def _send_workflow_stop_command(self, cmd: 'Command', timeout: float = 3.0) -> bytes:
+    def _send_workflow_stop_command(
+        self, cmd: "Command", timeout: float = 3.0
+    ) -> bytes:
         """
         Send a workflow stop command.
 
@@ -482,7 +468,7 @@ class MicroscopeCommandService:
                 status=0,
                 params=[0] * 7,  # No special flags for stop
                 value=0.0,
-                data=b''
+                data=b"",
             )
 
             # Send command
@@ -494,14 +480,18 @@ class MicroscopeCommandService:
 
             # Parse response
             parsed = self._parse_response(response)
-            status = parsed.get('status_code', 0)
+            status = parsed.get("status_code", 0)
 
             # Handle any additional data
-            add_data_bytes = parsed.get('reserved', 0)
+            add_data_bytes = parsed.get("reserved", 0)
             if add_data_bytes > 0:
-                self.logger.debug(f"Reading {add_data_bytes} additional bytes from stop response...")
-                additional_data = self._receive_full_bytes(command_socket, add_data_bytes, timeout=3.0)
-                parsed['additional_data'] = additional_data
+                self.logger.debug(
+                    f"Reading {add_data_bytes} additional bytes from stop response..."
+                )
+                additional_data = self._receive_full_bytes(
+                    command_socket, add_data_bytes, timeout=3.0
+                )
+                parsed["additional_data"] = additional_data
 
             self.logger.info(f"Workflow stop acknowledged (status={status})")
             return response
@@ -513,7 +503,9 @@ class MicroscopeCommandService:
             self.logger.error(f"Error sending workflow stop: {e}", exc_info=True)
             raise
 
-    def _receive_full_bytes(self, sock: socket.socket, num_bytes: int, timeout: float = 3.0) -> bytes:
+    def _receive_full_bytes(
+        self, sock: socket.socket, num_bytes: int, timeout: float = 3.0
+    ) -> bytes:
         """
         Receive exact number of bytes from socket.
 
@@ -530,7 +522,7 @@ class MicroscopeCommandService:
             RuntimeError: If socket closes prematurely
         """
         sock.settimeout(timeout)
-        data = b''
+        data = b""
         while len(data) < num_bytes:
             chunk = sock.recv(num_bytes - len(data))
             if not chunk:
@@ -562,29 +554,29 @@ class MicroscopeCommandService:
         if len(response) != 128:
             raise ValueError(f"Invalid response size: {len(response)} (expected 128)")
 
-        start_marker = struct.unpack('<I', response[0:4])[0]
-        response_code = struct.unpack('<I', response[4:8])[0]
-        status_code = struct.unpack('<I', response[8:12])[0]
+        start_marker = struct.unpack("<I", response[0:4])[0]
+        response_code = struct.unpack("<I", response[4:8])[0]
+        status_code = struct.unpack("<I", response[8:12])[0]
 
         # Unpack 7 parameters
         params = []
         for i in range(7):
             offset = 12 + (i * 4)
-            param = struct.unpack('<i', response[offset:offset+4])[0]
+            param = struct.unpack("<i", response[offset : offset + 4])[0]
             params.append(param)
 
         # Unpack value (double)
-        value = struct.unpack('<d', response[40:48])[0]
+        value = struct.unpack("<d", response[40:48])[0]
 
         # Get addDataBytes field
-        add_data_bytes = struct.unpack('<I', response[48:52])[0]
+        add_data_bytes = struct.unpack("<I", response[48:52])[0]
 
         # Extract 72-byte data buffer (bytes 52-123)
         # This is where responses like laser power strings are stored
         data_buffer = response[52:124]
 
         # Get end marker
-        end_marker = struct.unpack('<I', response[124:128])[0]
+        end_marker = struct.unpack("<I", response[124:128])[0]
 
         # Validate markers
         expected_start = 0xF321E654
@@ -601,14 +593,14 @@ class MicroscopeCommandService:
             )
 
         return {
-            'start_marker': start_marker,
-            'command_code': response_code,
-            'status_code': status_code,
-            'params': params,
-            'value': value,
-            'reserved': add_data_bytes,
-            'data': data_buffer,  # ADDED: 72-byte buffer field
-            'end_marker': end_marker
+            "start_marker": start_marker,
+            "command_code": response_code,
+            "status_code": status_code,
+            "params": params,
+            "value": value,
+            "reserved": add_data_bytes,
+            "data": data_buffer,  # ADDED: 72-byte buffer field
+            "end_marker": end_marker,
         }
 
     def _send_via_async_reader(
@@ -617,7 +609,7 @@ class MicroscopeCommandService:
         command_code: int,
         command_name: str,
         timeout: float = 3.0,
-        wait_for_response: bool = True
+        wait_for_response: bool = True,
     ) -> Dict[str, Any]:
         """
         Send command via async reader and convert response.
@@ -642,16 +634,12 @@ class MicroscopeCommandService:
                 # Send directly via socket without registering for response
                 command_socket = self.connection._command_socket
                 if command_socket is None:
-                    return {
-                        'success': False,
-                        'error': 'Command socket not available'
-                    }
+                    return {"success": False, "error": "Command socket not available"}
                 command_socket.sendall(cmd_bytes)
-                self.logger.debug(f"{command_name} sent (fire-and-forget via async path)")
-                return {
-                    'success': True,
-                    'fire_and_forget': True
-                }
+                self.logger.debug(
+                    f"{command_name} sent (fire-and-forget via async path)"
+                )
+                return {"success": True, "fire_and_forget": True}
 
             # Send via async reader and wait for response
             response = self.connection.send_command_async(
@@ -659,11 +647,10 @@ class MicroscopeCommandService:
             )
 
             if response is None:
-                self.logger.error(f"Timeout waiting for {command_name} response (async)")
-                return {
-                    'success': False,
-                    'error': 'timeout'
-                }
+                self.logger.error(
+                    f"Timeout waiting for {command_name} response (async)"
+                )
+                return {"success": False, "error": "timeout"}
 
             self.logger.debug(f"Received {command_name} response (async)")
 
@@ -675,21 +662,20 @@ class MicroscopeCommandService:
             raw_response = response.raw_data
             if response.additional_data:
                 raw_response = raw_response + response.additional_data
-                self.logger.debug(f"{command_name} has {len(response.additional_data)} bytes additional data")
+                self.logger.debug(
+                    f"{command_name} has {len(response.additional_data)} bytes additional data"
+                )
 
             return {
-                'success': True,
-                'parsed': parsed,
-                'raw_response': raw_response,
-                'additional_data': response.additional_data
+                "success": True,
+                "parsed": parsed,
+                "raw_response": raw_response,
+                "additional_data": response.additional_data,
             }
 
         except Exception as e:
             self.logger.error(f"Error in async {command_name}: {e}", exc_info=True)
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     def _convert_parsed_message(self, msg: "ParsedMessage") -> Dict[str, Any]:
         """
@@ -713,19 +699,19 @@ class MicroscopeCommandService:
         ]
 
         result = {
-            'start_marker': msg.start_marker,
-            'command_code': msg.command_code,
-            'status_code': msg.status_code,
-            'params': params,
-            'value': msg.value,
-            'reserved': msg.additional_data_size,
-            'data': msg.data_field,
-            'end_marker': msg.end_marker
+            "start_marker": msg.start_marker,
+            "command_code": msg.command_code,
+            "status_code": msg.status_code,
+            "params": params,
+            "value": msg.value,
+            "reserved": msg.additional_data_size,
+            "data": msg.data_field,
+            "end_marker": msg.end_marker,
         }
 
         # Include additional data if present
-        if hasattr(msg, 'additional_data') and msg.additional_data:
-            result['additional_data'] = msg.additional_data
+        if hasattr(msg, "additional_data") and msg.additional_data:
+            result["additional_data"] = msg.additional_data
 
         return result
 
@@ -738,7 +724,7 @@ class MicroscopeCommandService:
         command_code: int,
         command_data: Optional[List] = None,
         wait_response: bool = False,
-        timeout: float = 5.0
+        timeout: float = 5.0,
     ) -> Optional[bytes]:
         """
         Legacy compatibility method for direct command sending.
@@ -768,18 +754,22 @@ class MicroscopeCommandService:
         if command_data:
             # Extract components from legacy format
             status = command_data[0] if len(command_data) > 0 else 0
-            params = command_data[1:8] if len(command_data) > 7 else command_data[1:] if len(command_data) > 1 else []
+            params = (
+                command_data[1:8]
+                if len(command_data) > 7
+                else command_data[1:] if len(command_data) > 1 else []
+            )
             value = command_data[8] if len(command_data) > 8 else 0.0
-            data = command_data[9] if len(command_data) > 9 else b''
+            data = command_data[9] if len(command_data) > 9 else b""
         else:
             status = 0
             params = []
             value = 0.0
-            data = b''
+            data = b""
 
         # Convert data to bytes if it's a string
         if isinstance(data, str):
-            data = data.encode('utf-8')
+            data = data.encode("utf-8")
 
         # Get human-readable command name for logging
         cmd_name = get_command_name(command_code)
@@ -788,13 +778,9 @@ class MicroscopeCommandService:
         if wait_response:
             # Use existing _send_command for response handling
             result = self._send_command(
-                command_code,
-                cmd_name,
-                params=params,
-                value=value,
-                data=data
+                command_code, cmd_name, params=params, value=value, data=data
             )
-            return result['raw_response'] if result['success'] else None
+            return result["raw_response"] if result["success"] else None
         else:
             # Fire-and-forget mode - send without waiting for response
             try:
@@ -812,7 +798,7 @@ class MicroscopeCommandService:
                     status=0,  # Always 0 for sending
                     params=params,
                     value=value,
-                    data=data
+                    data=data,
                 )
 
                 # Get command socket
@@ -832,9 +818,9 @@ class MicroscopeCommandService:
 
     def send_command(
         self,
-        cmd: Union['Command', int],
+        cmd: Union["Command", int],
         timeout: float = 5.0,
-        command_data: Optional[List] = None
+        command_data: Optional[List] = None,
     ) -> bytes:
         """
         MVC-compatible command sending method.
@@ -865,27 +851,30 @@ class MicroscopeCommandService:
             response = service.send_command(0x2001, command_data=[0,0,0,1,0,0,0,0,10.5,b""])
         """
         # Handle Command object
-        if hasattr(cmd, 'code'):
+        if hasattr(cmd, "code"):
             # Check if this is a WorkflowCommand (with workflow data)
-            if hasattr(cmd, 'workflow_data') and cmd.workflow_data is not None:
+            if hasattr(cmd, "workflow_data") and cmd.workflow_data is not None:
                 # Special handling for WorkflowCommand
                 return self._send_workflow_command(cmd, timeout)
 
             # Check if this is a workflow stop command
             # WORKFLOW_STOP should NOT use TRIGGER_CALL_BACK flag
             from py2flamingo.core.tcp_protocol import CommandCode
+
             if cmd.code == CommandCode.CMD_WORKFLOW_STOP:
                 return self._send_workflow_stop_command(cmd, timeout)
 
             # Extract from Command object
             command_code = cmd.code
-            params = cmd.parameters.get('params', [])
-            value = cmd.parameters.get('value', 0.0)
-            data = cmd.parameters.get('data', b'')
+            params = cmd.parameters.get("params", [])
+            value = cmd.parameters.get("value", 0.0)
+            data = cmd.parameters.get("data", b"")
 
             # Get command name
             cmd_name = get_command_name(command_code)
-            self.logger.debug(f"send_command (Command): {cmd_name} ({command_code:#06x})")
+            self.logger.debug(
+                f"send_command (Command): {cmd_name} ({command_code:#06x})"
+            )
 
         # Handle integer command code
         elif isinstance(cmd, int):
@@ -893,13 +882,17 @@ class MicroscopeCommandService:
 
             # Parse legacy command_data if provided
             if command_data:
-                params = command_data[1:8] if len(command_data) > 7 else command_data[1:] if len(command_data) > 1 else []
+                params = (
+                    command_data[1:8]
+                    if len(command_data) > 7
+                    else command_data[1:] if len(command_data) > 1 else []
+                )
                 value = command_data[8] if len(command_data) > 8 else 0.0
-                data = command_data[9] if len(command_data) > 9 else b''
+                data = command_data[9] if len(command_data) > 9 else b""
             else:
                 params = []
                 value = 0.0
-                data = b''
+                data = b""
 
             # Get command name
             cmd_name = get_command_name(command_code)
@@ -914,24 +907,26 @@ class MicroscopeCommandService:
             cmd_name,
             params=params,
             value=value,
-            data=data if isinstance(data, bytes) else data.encode('utf-8') if isinstance(data, str) else b''
+            data=(
+                data
+                if isinstance(data, bytes)
+                else data.encode("utf-8") if isinstance(data, str) else b""
+            ),
         )
 
-        if result['success']:
-            return result['raw_response']
+        if result["success"]:
+            return result["raw_response"]
         else:
-            error_msg = result.get('error', 'Unknown error')
-            if error_msg == 'timeout':
+            error_msg = result.get("error", "Unknown error")
+            if error_msg == "timeout":
                 raise TimeoutError(f"Timeout waiting for {cmd_name} response")
-            elif error_msg == 'Not connected to microscope':
+            elif error_msg == "Not connected to microscope":
                 raise RuntimeError(error_msg)
             else:
                 raise ValueError(f"Command {cmd_name} failed: {error_msg}")
 
     def send_command_queued(
-        self,
-        command_code: int,
-        command_data: Optional[List] = None
+        self, command_code: int, command_data: Optional[List] = None
     ) -> None:
         """
         Queue-based command sending for asynchronous operation.
@@ -947,20 +942,22 @@ class MicroscopeCommandService:
             This requires the connection to have queue_manager and event_manager
             attributes for queue-based operation.
         """
-        if hasattr(self.connection, 'queue_manager') and hasattr(self.connection, 'event_manager'):
+        if hasattr(self.connection, "queue_manager") and hasattr(
+            self.connection, "event_manager"
+        ):
             # Queue-based sending (for ConnectionService compatibility)
             queue_manager = self.connection.queue_manager
             event_manager = self.connection.event_manager
 
             # Put command in queue
-            queue_manager.get_queue('command').put(command_code)
+            queue_manager.get_queue("command").put(command_code)
 
             # Put data if provided
             if command_data:
-                queue_manager.get_queue('command_data').put(command_data)
+                queue_manager.get_queue("command_data").put(command_data)
 
             # Set send event
-            event_manager.get_event('send').set()
+            event_manager.get_event("send").set()
 
             # Log the queued command
             cmd_name = get_command_name(command_code)

@@ -52,10 +52,10 @@ class Command:
             >>> assert 'timestamp' in d
         """
         return {
-            'code': self.code,
-            'timestamp': self.timestamp.isoformat(),
-            'parameters': self.parameters.copy(),
-            'type': self.__class__.__name__
+            "code": self.code,
+            "timestamp": self.timestamp.isoformat(),
+            "parameters": self.parameters.copy(),
+            "type": self.__class__.__name__,
         }
 
 
@@ -98,8 +98,10 @@ class WorkflowCommand(Command):
             >>> assert 'workflow_path' in d
         """
         result = super().to_dict()
-        result['workflow_path'] = str(self.workflow_path) if self.workflow_path else None
-        result['workflow_size'] = len(self.workflow_data) if self.workflow_data else 0
+        result["workflow_path"] = (
+            str(self.workflow_path) if self.workflow_path else None
+        )
+        result["workflow_size"] = len(self.workflow_data) if self.workflow_data else 0
         return result
 
 
@@ -135,7 +137,7 @@ class StatusCommand(Command):
             >>> assert d['query_type'] == "position"
         """
         result = super().to_dict()
-        result['query_type'] = self.query_type
+        result["query_type"] = self.query_type
         return result
 
 
@@ -177,7 +179,7 @@ class PositionCommand(Command):
             >>> assert d['z'] == 30.0
         """
         result = super().to_dict()
-        result['x'] = self.x
-        result['y'] = self.y
-        result['z'] = self.z
+        result["x"] = self.x
+        result["y"] = self.y
+        result["z"] = self.z
         return result

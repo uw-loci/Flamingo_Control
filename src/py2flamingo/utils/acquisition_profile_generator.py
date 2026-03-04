@@ -6,10 +6,10 @@ Generates tile acquisition profiles from 3D boolean masks,
 with per-tile Z-depth based on mask extent at each XY position.
 """
 
-import math
 import logging
+import math
 from dataclasses import dataclass
-from typing import List, Tuple, Optional, Callable
+from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 
@@ -29,6 +29,7 @@ class TileProfile:
         tile_x_idx: Tile X index in the grid
         tile_y_idx: Tile Y index in the grid
     """
+
     x: float
     y: float
     z_min: float
@@ -83,8 +84,10 @@ def mask_z_profile_at_xy(
 
 
 def rotate_point(
-    x: float, z: float,
-    tip_x: float, tip_z: float,
+    x: float,
+    z: float,
+    tip_x: float,
+    tip_z: float,
     angle_deg: float,
 ) -> Tuple[float, float]:
     """Rotate a point around tip position by given angle in X-Z plane.
@@ -271,7 +274,8 @@ def generate_tile_profile(
 
 
 def _stage_to_voxel_approx(
-    x_mm: float, y_mm: float,
+    x_mm: float,
+    y_mm: float,
     voxel_to_stage_fn: Callable,
     voxel_size_mm: float,
     mask_shape: Tuple[int, int, int],
@@ -315,8 +319,10 @@ def _stage_to_voxel_approx(
 
 def _generate_tiles_for_angle(
     mask: np.ndarray,
-    x_min_mm: float, x_max_mm: float,
-    y_min_mm: float, y_max_mm: float,
+    x_min_mm: float,
+    x_max_mm: float,
+    y_min_mm: float,
+    y_max_mm: float,
     z_buffer_mm: float,
     fov_mm: float,
     fov_half_voxels: int,
@@ -375,15 +381,17 @@ def _generate_tiles_for_angle(
             z_min_stage -= z_buffer_mm
             z_max_stage += z_buffer_mm
 
-            profiles.append(TileProfile(
-                x=x_pos,
-                y=y_pos,
-                z_min=z_min_stage,
-                z_max=z_max_stage,
-                rotation_angle=rotation_angle,
-                tile_x_idx=x_idx,
-                tile_y_idx=y_idx,
-            ))
+            profiles.append(
+                TileProfile(
+                    x=x_pos,
+                    y=y_pos,
+                    z_min=z_min_stage,
+                    z_max=z_max_stage,
+                    rotation_angle=rotation_angle,
+                    tile_x_idx=x_idx,
+                    tile_y_idx=y_idx,
+                )
+            )
 
     logger.info(
         f"Angle {rotation_angle}°: {len(profiles)} tiles from "
@@ -394,9 +402,12 @@ def _generate_tiles_for_angle(
 
 def _generate_tiles_for_rotated_angle(
     mask: np.ndarray,
-    tile_x_min: float, tile_x_max: float,
-    y_min_mm: float, y_max_mm: float,
-    z_min_mm: float, z_max_mm: float,
+    tile_x_min: float,
+    tile_x_max: float,
+    y_min_mm: float,
+    y_max_mm: float,
+    z_min_mm: float,
+    z_max_mm: float,
     z_buffer_mm: float,
     fov_mm: float,
     fov_half_voxels: int,
@@ -441,8 +452,7 @@ def _generate_tiles_for_rotated_angle(
         for y_idx, y_pos in y_range:
             # Inverse-rotate to find where this tile sees the mask
             orig_x, orig_z_center = rotate_point(
-                x_pos, (z_min_mm + z_max_mm) / 2,
-                tip_x, tip_z, inverse_angle
+                x_pos, (z_min_mm + z_max_mm) / 2, tip_x, tip_z, inverse_angle
             )
 
             # Convert to voxel coords and check mask
@@ -466,23 +476,29 @@ def _generate_tiles_for_rotated_angle(
                 z_min_stage, z_max_stage = z_max_stage, z_min_stage
 
             # Rotate the Z range to the rotated frame
-            _, rot_z_min = rotate_point(orig_x, z_min_stage, tip_x, tip_z, rotation_angle)
-            _, rot_z_max = rotate_point(orig_x, z_max_stage, tip_x, tip_z, rotation_angle)
+            _, rot_z_min = rotate_point(
+                orig_x, z_min_stage, tip_x, tip_z, rotation_angle
+            )
+            _, rot_z_max = rotate_point(
+                orig_x, z_max_stage, tip_x, tip_z, rotation_angle
+            )
             if rot_z_min > rot_z_max:
                 rot_z_min, rot_z_max = rot_z_max, rot_z_min
 
             rot_z_min -= z_buffer_mm
             rot_z_max += z_buffer_mm
 
-            profiles.append(TileProfile(
-                x=x_pos,
-                y=y_pos,
-                z_min=rot_z_min,
-                z_max=rot_z_max,
-                rotation_angle=rotation_angle,
-                tile_x_idx=x_idx,
-                tile_y_idx=y_idx,
-            ))
+            profiles.append(
+                TileProfile(
+                    x=x_pos,
+                    y=y_pos,
+                    z_min=rot_z_min,
+                    z_max=rot_z_max,
+                    rotation_angle=rotation_angle,
+                    tile_x_idx=x_idx,
+                    tile_y_idx=y_idx,
+                )
+            )
 
     logger.info(
         f"Angle {rotation_angle}°: {len(profiles)} tiles from "

@@ -5,9 +5,10 @@ This module provides utilities to parse FlamingoMetaData.txt files and extract
 connection configuration. It leverages existing file_handlers utilities and
 returns typed ConnectionConfig objects.
 """
-from pathlib import Path
-from typing import Tuple, List, Union
+
 import re
+from pathlib import Path
+from typing import List, Tuple, Union
 
 from ..models.connection import ConnectionConfig
 from .file_handlers import text_to_dict
@@ -64,7 +65,7 @@ def parse_metadata_file(path: Union[str, Path]) -> ConnectionConfig:
     config = ConnectionConfig(
         ip_address=ip,
         port=port,
-        live_port=port + 1  # Live port is always command port + 1
+        live_port=port + 1,  # Live port is always command port + 1
     )
 
     # Validate the configuration
@@ -130,7 +131,7 @@ def extract_connection_info(line: str) -> Tuple[str, int]:
     port_str = parts[1]
 
     # Validate IP format (basic IPv4 regex)
-    ip_pattern = re.compile(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$')
+    ip_pattern = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
     if not ip_pattern.match(ip_address):
         raise ValueError(f"Invalid IP address format: '{ip_address}'")
 

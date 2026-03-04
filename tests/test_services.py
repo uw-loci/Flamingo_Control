@@ -5,15 +5,15 @@ Tests MVCConnectionService, MVCWorkflowService, and StatusService
 with mocked dependencies.
 """
 
-import unittest
-from unittest.mock import Mock, MagicMock, patch, call
-from pathlib import Path
-import socket
-from datetime import datetime
-import time
-import tempfile
-import shutil
 import json
+import shutil
+import socket
+import tempfile
+import time
+import unittest
+from datetime import datetime
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, call, patch
 
 
 class TestMVCConnectionService(unittest.TestCase):
@@ -27,9 +27,9 @@ class TestMVCConnectionService(unittest.TestCase):
 
         # Import and create service (direct import to avoid numpy dependency)
         from py2flamingo.services.connection_service import MVCConnectionService
+
         self.service = MVCConnectionService(
-            tcp_connection=self.mock_tcp,
-            encoder=self.mock_encoder
+            tcp_connection=self.mock_tcp, encoder=self.mock_encoder
         )
 
     def test_init(self):
@@ -175,8 +175,8 @@ class TestMVCConnectionService(unittest.TestCase):
 
     def test_send_command_success(self):
         """Test sending command successfully."""
-        from py2flamingo.models.connection import ConnectionConfig, ConnectionState
         from py2flamingo.models.command import Command
+        from py2flamingo.models.connection import ConnectionConfig, ConnectionState
 
         # Connect first
         config = ConnectionConfig("192.168.1.100", 53717)
@@ -186,11 +186,11 @@ class TestMVCConnectionService(unittest.TestCase):
         self.service.connect(config)
 
         # Mock encoder
-        encoded_cmd = b'\x00' * 128
+        encoded_cmd = b"\x00" * 128
         self.mock_encoder.encode_command.return_value = encoded_cmd
 
         # Mock socket response
-        mock_cmd_sock.recv.return_value = b'\x01' * 128
+        mock_cmd_sock.recv.return_value = b"\x01" * 128
 
         # Create and send command
         cmd = Command(code=12292)
@@ -219,8 +219,8 @@ class TestMVCConnectionService(unittest.TestCase):
 
     def test_send_command_network_error(self):
         """Test sending command with network error."""
-        from py2flamingo.models.connection import ConnectionConfig
         from py2flamingo.models.command import Command
+        from py2flamingo.models.connection import ConnectionConfig
 
         # Connect first
         config = ConnectionConfig("192.168.1.100", 53717)
@@ -258,9 +258,8 @@ class TestMVCWorkflowService(unittest.TestCase):
 
         # Import and create service (direct import to avoid numpy dependency)
         from py2flamingo.services.workflow_service import MVCWorkflowService
-        self.service = MVCWorkflowService(
-            connection_service=self.mock_conn_service
-        )
+
+        self.service = MVCWorkflowService(connection_service=self.mock_conn_service)
 
         # Create temp workflow file
         self.temp_workflow = Path("/tmp/test_workflow.txt")
@@ -298,8 +297,8 @@ class TestMVCWorkflowService(unittest.TestCase):
         large_file = Path("/tmp/large_workflow.txt")
         try:
             # Write 11MB of data
-            with open(large_file, 'wb') as f:
-                f.write(b'x' * (11 * 1024 * 1024))
+            with open(large_file, "wb") as f:
+                f.write(b"x" * (11 * 1024 * 1024))
 
             with self.assertRaises(ValueError) as ctx:
                 self.service.load_workflow(large_file)
@@ -314,7 +313,7 @@ class TestMVCWorkflowService(unittest.TestCase):
         """Test starting workflow."""
         # Mock connected
         self.mock_conn_service.is_connected.return_value = True
-        self.mock_conn_service.send_command.return_value = b'\x00' * 128
+        self.mock_conn_service.send_command.return_value = b"\x00" * 128
 
         workflow_data = b"Test workflow data"
 
@@ -350,7 +349,7 @@ class TestMVCWorkflowService(unittest.TestCase):
         """Test stopping workflow."""
         # Mock connected
         self.mock_conn_service.is_connected.return_value = True
-        self.mock_conn_service.send_command.return_value = b'\x00' * 128
+        self.mock_conn_service.send_command.return_value = b"\x00" * 128
 
         result = self.service.stop_workflow()
 
@@ -371,7 +370,7 @@ class TestMVCWorkflowService(unittest.TestCase):
         """Test getting workflow status."""
         # Mock connected
         self.mock_conn_service.is_connected.return_value = True
-        self.mock_conn_service.send_command.return_value = b'\x00' * 128
+        self.mock_conn_service.send_command.return_value = b"\x00" * 128
 
         status = self.service.get_workflow_status()
 
@@ -389,9 +388,8 @@ class TestStatusService(unittest.TestCase):
 
         # Import and create service (direct import to avoid numpy dependency)
         from py2flamingo.services.status_service import StatusService
-        self.service = StatusService(
-            connection_service=self.mock_conn_service
-        )
+
+        self.service = StatusService(connection_service=self.mock_conn_service)
 
     def test_init(self):
         """Test service initialization."""
@@ -403,14 +401,14 @@ class TestStatusService(unittest.TestCase):
         """Test getting server status."""
         # Mock connected
         self.mock_conn_service.is_connected.return_value = True
-        self.mock_conn_service.send_command.return_value = b'\x00' * 128
+        self.mock_conn_service.send_command.return_value = b"\x00" * 128
 
         status = self.service.get_server_status()
 
         self.assertIsInstance(status, dict)
-        self.assertIn('state', status)
-        self.assertIn('response_size', status)
-        self.assertIn('timestamp', status)
+        self.assertIn("state", status)
+        self.assertIn("response_size", status)
+        self.assertIn("timestamp", status)
 
     def test_get_server_status_not_connected(self):
         """Test getting status when not connected."""
@@ -426,7 +424,7 @@ class TestStatusService(unittest.TestCase):
         """Test cache functionality."""
         # Mock connected
         self.mock_conn_service.is_connected.return_value = True
-        self.mock_conn_service.send_command.return_value = b'\x00' * 128
+        self.mock_conn_service.send_command.return_value = b"\x00" * 128
 
         # First call - should query
         status1 = self.service.get_server_status()
@@ -444,7 +442,7 @@ class TestStatusService(unittest.TestCase):
         """Test cache expiration."""
         # Mock connected
         self.mock_conn_service.is_connected.return_value = True
-        self.mock_conn_service.send_command.return_value = b'\x00' * 128
+        self.mock_conn_service.send_command.return_value = b"\x00" * 128
 
         # Set short TTL
         self.service._cache_ttl = 0.1
@@ -465,7 +463,7 @@ class TestStatusService(unittest.TestCase):
         """Test successful ping."""
         # Mock connected
         self.mock_conn_service.is_connected.return_value = True
-        self.mock_conn_service.send_command.return_value = b'\x00' * 128
+        self.mock_conn_service.send_command.return_value = b"\x00" * 128
 
         result = self.service.ping()
 
@@ -483,7 +481,9 @@ class TestStatusService(unittest.TestCase):
         """Test ping with connection error."""
         # Mock connected
         self.mock_conn_service.is_connected.return_value = True
-        self.mock_conn_service.send_command.side_effect = ConnectionError("Lost connection")
+        self.mock_conn_service.send_command.side_effect = ConnectionError(
+            "Lost connection"
+        )
 
         result = self.service.ping()
 
@@ -493,7 +493,9 @@ class TestStatusService(unittest.TestCase):
         """Test ping with timeout."""
         # Mock connected
         self.mock_conn_service.is_connected.return_value = True
-        self.mock_conn_service.send_command.side_effect = TimeoutError("Query timed out")
+        self.mock_conn_service.send_command.side_effect = TimeoutError(
+            "Query timed out"
+        )
 
         result = self.service.ping()
 
@@ -503,7 +505,7 @@ class TestStatusService(unittest.TestCase):
         """Test getting position."""
         # Mock connected
         self.mock_conn_service.is_connected.return_value = True
-        self.mock_conn_service.send_command.return_value = b'\x00' * 128
+        self.mock_conn_service.send_command.return_value = b"\x00" * 128
 
         position = self.service.get_position()
 
@@ -524,7 +526,7 @@ class TestStatusService(unittest.TestCase):
         """Test getting position with empty response."""
         # Mock connected
         self.mock_conn_service.is_connected.return_value = True
-        self.mock_conn_service.send_command.return_value = b''
+        self.mock_conn_service.send_command.return_value = b""
 
         with self.assertRaises(ValueError) as ctx:
             self.service.get_position()
@@ -535,7 +537,7 @@ class TestStatusService(unittest.TestCase):
         """Test clearing cache."""
         # Mock connected
         self.mock_conn_service.is_connected.return_value = True
-        self.mock_conn_service.send_command.return_value = b'\x00' * 128
+        self.mock_conn_service.send_command.return_value = b"\x00" * 128
 
         # Populate cache
         self.service.get_server_status()
@@ -550,9 +552,9 @@ class TestStatusService(unittest.TestCase):
         self.assertEqual(self.mock_conn_service.send_command.call_count, 2)
 
 
+import json
 import shutil
 from pathlib import Path
-import json
 
 
 class TestConfigurationManager(unittest.TestCase):
@@ -566,6 +568,7 @@ class TestConfigurationManager(unittest.TestCase):
 
         # Import and create service
         from py2flamingo.services.configuration_manager import ConfigurationManager
+
         self.manager = ConfigurationManager(config_file=str(self.config_file))
 
     def tearDown(self):
@@ -585,7 +588,9 @@ class TestConfigurationManager(unittest.TestCase):
 
     def test_save_configuration(self):
         """Test saving a new configuration."""
-        success, message = self.manager.save_configuration("TestMicroscope", "192.168.1.100", 53717)
+        success, message = self.manager.save_configuration(
+            "TestMicroscope", "192.168.1.100", 53717
+        )
 
         self.assertTrue(success)
         self.assertIn("saved successfully", message.lower())
@@ -692,17 +697,19 @@ class TestConfigurationManager(unittest.TestCase):
         self.manager.save_configuration("Test", "192.168.1.1", 53717)
 
         # Manually modify the JSON file
-        with open(self.config_file, 'r') as f:
+        with open(self.config_file, "r") as f:
             data = json.load(f)
 
-        data['configurations'].append({
-            'name': 'ManuallyAdded',
-            'ip_address': '192.168.1.2',
-            'port': 53718,
-            'description': ''
-        })
+        data["configurations"].append(
+            {
+                "name": "ManuallyAdded",
+                "ip_address": "192.168.1.2",
+                "port": 53718,
+                "description": "",
+            }
+        )
 
-        with open(self.config_file, 'w') as f:
+        with open(self.config_file, "w") as f:
             json.dump(data, f)
 
         # Refresh should pick up the manual change
@@ -749,6 +756,8 @@ class TestConfigurationManager(unittest.TestCase):
         self.assertIn("Test", string_rep)
         self.assertIn("192.168.1.1", string_rep)
         self.assertIn("53717", string_rep)
+
+
 class TestServiceIntegration(unittest.TestCase):
     """Integration tests for services working together."""
 
@@ -786,10 +795,10 @@ class TestServiceIntegration(unittest.TestCase):
 
     def test_services_share_connection_state(self):
         """Test that services share connection state via connection service."""
-        from py2flamingo.services.connection_service import MVCConnectionService
-        from py2flamingo.services.workflow_service import MVCWorkflowService
-        from py2flamingo.services.status_service import StatusService
         from py2flamingo.models.connection import ConnectionConfig
+        from py2flamingo.services.connection_service import MVCConnectionService
+        from py2flamingo.services.status_service import StatusService
+        from py2flamingo.services.workflow_service import MVCWorkflowService
 
         # Create mocks
         mock_tcp = Mock()
@@ -812,5 +821,5 @@ class TestServiceIntegration(unittest.TestCase):
         self.assertTrue(status_service.connection_service.is_connected())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

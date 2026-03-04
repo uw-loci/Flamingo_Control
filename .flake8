@@ -1,0 +1,35 @@
+[flake8]
+max-line-length = 120
+# What we DO enforce: F811 (redefined unused), E711/E712 (is/== None/True/False),
+#   syntax errors, indentation errors — in new/modified code only
+# TODO: Tighten these ignores over time as codebase is cleaned up
+extend-ignore =
+    # Black-incompatible rules
+    E203,
+    W503,
+    # Unused imports — too noisy for existing codebase, clean up gradually
+    F401,
+    # f-string without placeholders — cosmetic, not bugs
+    F541,
+    # Line too long — Black handles this; remaining cases are strings/comments
+    E501,
+    # Bare except — existing codebase pattern, clean up gradually
+    E722,
+    # Missing whitespace after ':' — cosmetic
+    E231,
+    # Module level import not at top — some files need conditional imports
+    E402,
+    # Undefined name — too many false positives from string type annotations
+    F821,
+    # Unused variable — existing codebase has many, clean up separately
+    F841,
+    # Lambda assignment — Black sometimes produces these; low value
+    E731
+# Exclude example/documentation files that aren't real modules
+exclude =
+    MOTION_TRACKING_EXAMPLES.py,
+    docs/*
+# Per-file ignores for files with known patterns
+per-file-ignores =
+    # Tests often have unused imports for fixtures, late imports, etc.
+    tests/*:F401,F811,E402,F824

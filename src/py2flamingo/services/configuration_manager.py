@@ -4,14 +4,14 @@ Configuration management service for Flamingo microscope settings.
 This module provides utilities to save, load, and manage microscope
 configurations using JSON-based persistent storage.
 """
-from pathlib import Path
-from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass, asdict
-import logging
+
 import json
+import logging
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 from ..models.connection import ConnectionConfig
-
 
 logger = logging.getLogger(__name__)
 
@@ -32,28 +32,26 @@ class MicroscopeConfiguration:
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
-            'name': self.name,
-            'ip_address': self.ip_address,
-            'port': self.port,
-            'description': self.description
+            "name": self.name,
+            "ip_address": self.ip_address,
+            "port": self.port,
+            "description": self.description,
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'MicroscopeConfiguration':
+    def from_dict(cls, data: dict) -> "MicroscopeConfiguration":
         """Create from dictionary loaded from JSON."""
         return cls(
-            name=data['name'],
-            ip_address=data['ip_address'],
-            port=data['port'],
-            description=data.get('description', '')
+            name=data["name"],
+            ip_address=data["ip_address"],
+            port=data["port"],
+            description=data.get("description", ""),
         )
 
     def to_connection_config(self) -> ConnectionConfig:
         """Convert to ConnectionConfig for connection service."""
         return ConnectionConfig(
-            ip_address=self.ip_address,
-            port=self.port,
-            live_port=self.port + 1
+            ip_address=self.ip_address, port=self.port, live_port=self.port + 1
         )
 
 
@@ -78,20 +76,24 @@ class ConfigurationManager:
         If file doesn't exist, start with empty configuration set.
         """
         if not self.config_file.exists():
-            logger.info(f"Configuration file not found: {self.config_file}. Starting with empty configuration set.")
+            logger.info(
+                f"Configuration file not found: {self.config_file}. Starting with empty configuration set."
+            )
             self._configurations = {}
             return
 
         try:
-            with open(self.config_file, 'r') as f:
+            with open(self.config_file, "r") as f:
                 data = json.load(f)
 
             # Load each configuration
-            for config_data in data.get('configurations', []):
+            for config_data in data.get("configurations", []):
                 config = MicroscopeConfiguration.from_dict(config_data)
                 self._configurations[config.name] = config
 
-            logger.info(f"Loaded {len(self._configurations)} configurations from {self.config_file}")
+            logger.info(
+                f"Loaded {len(self._configurations)} configurations from {self.config_file}"
+            )
 
         except Exception as e:
             logger.error(f"Error loading configurations from JSON: {e}")
@@ -103,19 +105,18 @@ class ConfigurationManager:
             # Convert configurations to list of dicts
             config_list = [config.to_dict() for config in self._configurations.values()]
 
-            data = {
-                'configurations': config_list,
-                'version': '1.0'
-            }
+            data = {"configurations": config_list, "version": "1.0"}
 
             # Ensure parent directory exists
             self.config_file.parent.mkdir(parents=True, exist_ok=True)
 
             # Write to file with nice formatting
-            with open(self.config_file, 'w') as f:
+            with open(self.config_file, "w") as f:
                 json.dump(data, f, indent=2)
 
-            logger.info(f"Saved {len(self._configurations)} configurations to {self.config_file}")
+            logger.info(
+                f"Saved {len(self._configurations)} configurations to {self.config_file}"
+            )
 
         except Exception as e:
             logger.error(f"Error saving configurations to JSON: {e}")
@@ -179,7 +180,9 @@ class ConfigurationManager:
         self._load_from_json()
         return list(self._configurations.values())
 
-    def save_configuration(self, name: str, ip: str, port: int, description: str = "") -> Tuple[bool, str]:
+    def save_configuration(
+        self, name: str, ip: str, port: int, description: str = ""
+    ) -> Tuple[bool, str]:
         """Save a new configuration to JSON storage.
 
         Creates or updates a configuration with the specified connection parameters.
@@ -202,11 +205,7 @@ class ConfigurationManager:
         """
         try:
             # Validate connection parameters
-            config = ConnectionConfig(
-                ip_address=ip,
-                port=port,
-                live_port=port + 1
-            )
+            config = ConnectionConfig(ip_address=ip, port=port, live_port=port + 1)
             valid, errors = config.validate()
             if not valid:
                 error_msg = ", ".join(errors)
@@ -216,14 +215,14 @@ class ConfigurationManager:
             # Check if configuration already exists
             if name in self._configurations:
                 logger.warning(f"Configuration '{name}' already exists")
-                return False, f"Configuration '{name}' already exists. Please use a different name or delete the existing one first."
+                return (
+                    False,
+                    f"Configuration '{name}' already exists. Please use a different name or delete the existing one first.",
+                )
 
             # Create new configuration
             new_config = MicroscopeConfiguration(
-                name=name,
-                ip_address=ip,
-                port=port,
-                description=description
+                name=name, ip_address=ip, port=port, description=description
             )
 
             # Add to configurations

@@ -5,18 +5,22 @@ scattered across multiple components into a single, consistent validator.
 """
 
 import logging
-from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 
-from ..models.data.workflow import (
-    Workflow, WorkflowType, WorkflowState,
-    IlluminationSettings, StackSettings, TileSettings,
-    TimeLapseSettings, ExperimentSettings
-)
-from ..models.hardware.stage import Position, StageLimits
-from ..models.hardware.laser import PowerLimits
 from ..core.errors import FlamingoError, ValidationError
-
+from ..models.data.workflow import (
+    ExperimentSettings,
+    IlluminationSettings,
+    StackSettings,
+    TileSettings,
+    TimeLapseSettings,
+    Workflow,
+    WorkflowState,
+    WorkflowType,
+)
+from ..models.hardware.laser import PowerLimits
+from ..models.hardware.stage import Position, StageLimits
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +28,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ValidationResult:
     """Result of workflow validation."""
+
     is_valid: bool
     errors: List[str]
     warnings: List[str]
@@ -48,13 +53,16 @@ class ValidationResult:
             return "Validation passed"
         else:
             errors_str = f"Errors: {', '.join(self.errors)}" if self.errors else ""
-            warnings_str = f"Warnings: {', '.join(self.warnings)}" if self.warnings else ""
+            warnings_str = (
+                f"Warnings: {', '.join(self.warnings)}" if self.warnings else ""
+            )
             return f"Validation failed. {errors_str} {warnings_str}"
 
 
 @dataclass
 class HardwareConstraints:
     """Hardware constraints for validation."""
+
     stage_limits: Optional[StageLimits] = None
     laser_power_limits: Optional[PowerLimits] = None
     available_lasers: List[str] = None
@@ -70,6 +78,7 @@ class HardwareConstraints:
 
 class WorkflowValidationError(ValidationError):
     """Raised when workflow validation fails."""
+
     pass
 
 
@@ -101,7 +110,7 @@ class WorkflowValidator:
                 "Laser 4 515 nm",
                 "Laser 5 561 nm",
                 "Laser 6 594 nm",
-                "Laser 7 640 nm"
+                "Laser 7 640 nm",
             ]
 
         if not self.constraints.available_filters:
@@ -109,6 +118,7 @@ class WorkflowValidator:
 
         if not self.constraints.laser_power_limits:
             from ..models.hardware.laser import PowerLimits
+
             self.constraints.laser_power_limits = PowerLimits(
                 min_mw=0, max_mw=100, safe_max_mw=50
             )
@@ -137,10 +147,7 @@ class WorkflowValidator:
 
         if not result.is_valid:
             error_msg = f"Workflow validation failed: {', '.join(result.errors)}"
-            raise WorkflowValidationError(
-                error_msg,
-                suggestions=result.suggestions
-            )
+            raise WorkflowValidationError(error_msg, suggestions=result.suggestions)
 
         return True
 
@@ -153,12 +160,7 @@ class WorkflowValidator:
         Returns:
             Detailed validation result
         """
-        result = ValidationResult(
-            is_valid=True,
-            errors=[],
-            warnings=[],
-            suggestions=[]
-        )
+        result = ValidationResult(is_valid=True, errors=[], warnings=[], suggestions=[])
 
         # Structure validation
         self._validate_structure(workflow, result)
@@ -206,13 +208,19 @@ class WorkflowValidator:
             result.add_error("Workflow must have a start position")
 
         # Check required settings for workflow type
-        if workflow.workflow_type == WorkflowType.ZSTACK and not workflow.stack_settings:
+        if (
+            workflow.workflow_type == WorkflowType.ZSTACK
+            and not workflow.stack_settings
+        ):
             result.add_error("Z-stack workflow requires stack settings")
 
         if workflow.workflow_type == WorkflowType.TILE and not workflow.tile_settings:
             result.add_error("Tile workflow requires tile settings")
 
-        if workflow.workflow_type == WorkflowType.TIME_LAPSE and not workflow.time_lapse_settings:
+        if (
+            workflow.workflow_type == WorkflowType.TIME_LAPSE
+            and not workflow.time_lapse_settings
+        ):
             result.add_error("Time-lapse workflow requires time-lapse settings")
 
     # ==================== Position Validation ====================
@@ -225,14 +233,18 @@ class WorkflowValidator:
 
         # Validate start position
         if workflow.start_position:
-            if not self.constraints.stage_limits.is_position_valid(workflow.start_position):
+            if not self.constraints.stage_limits.is_position_valid(
+                workflow.start_position
+            ):
                 result.add_error(
                     f"Start position {workflow.start_position} is outside stage limits"
                 )
 
         # Validate end position if present
         if workflow.end_position:
-            if not self.constraints.stage_limits.is_position_valid(workflow.end_position):
+            if not self.constraints.stage_limits.is_position_valid(
+                workflow.end_position
+            ):
                 result.add_error(
                     f"End position {workflow.end_position} is outside stage limits"
                 )
@@ -240,13 +252,13 @@ class WorkflowValidator:
         # Validate multiple positions
         for i, pos in enumerate(workflow.positions):
             if not self.constraints.stage_limits.is_position_valid(pos):
-                result.add_error(
-                    f"Position {i} ({pos}) is outside stage limits"
-                )
+                result.add_error(f"Position {i} ({pos}) is outside stage limits")
 
         # Validate tile positions if applicable
         if workflow.tile_settings and workflow.start_position:
-            tile_positions = workflow.tile_settings.get_tile_positions(workflow.start_position)
+            tile_positions = workflow.tile_settings.get_tile_positions(
+                workflow.start_position
+            )
             for i, pos in enumerate(tile_positions):
                 if not self.constraints.stage_limits.is_position_valid(pos):
                     result.add_warning(
@@ -269,23 +281,32 @@ class WorkflowValidator:
             if not illum.laser_channel:
                 result.add_error("Laser enabled but no channel specified")
 
-            if illum.laser_channel and illum.laser_channel not in self.constraints.available_lasers:
+            if (
+                illum.laser_channel
+                and illum.laser_channel not in self.constraints.available_lasers
+            ):
                 result.add_error(
                     f"Laser channel '{illum.laser_channel}' not available. "
                     f"Available: {', '.join(self.constraints.available_lasers)}"
                 )
 
             if illum.laser_power_mw < 0:
-                result.add_error(f"Laser power cannot be negative: {illum.laser_power_mw} mW")
+                result.add_error(
+                    f"Laser power cannot be negative: {illum.laser_power_mw} mW"
+                )
 
             if self.constraints.laser_power_limits:
                 limits = self.constraints.laser_power_limits
-                if not limits.is_valid_power(illum.laser_power_mw, use_safe_limit=False):
+                if not limits.is_valid_power(
+                    illum.laser_power_mw, use_safe_limit=False
+                ):
                     result.add_error(
                         f"Laser power {illum.laser_power_mw} mW outside limits "
                         f"({limits.min_mw}-{limits.max_mw} mW)"
                     )
-                elif not limits.is_valid_power(illum.laser_power_mw, use_safe_limit=True):
+                elif not limits.is_valid_power(
+                    illum.laser_power_mw, use_safe_limit=True
+                ):
                     result.add_warning(
                         f"Laser power {illum.laser_power_mw} mW exceeds safe limit "
                         f"({limits.safe_max_mw} mW)"
@@ -323,19 +344,25 @@ class WorkflowValidator:
         if stack.num_planes < 1:
             result.add_error(f"Number of planes must be >= 1: {stack.num_planes}")
         elif stack.num_planes > 1000:
-            result.add_warning(f"Large number of planes ({stack.num_planes}) may take long time")
+            result.add_warning(
+                f"Large number of planes ({stack.num_planes}) may take long time"
+            )
 
         # Validate z-step
         if stack.z_step_um <= 0:
             result.add_error(f"Z step must be positive: {stack.z_step_um} μm")
         elif stack.z_step_um < 0.1:
-            result.add_warning(f"Very small Z step ({stack.z_step_um} μm) may not be achievable")
+            result.add_warning(
+                f"Very small Z step ({stack.z_step_um} μm) may not be achievable"
+            )
         elif stack.z_step_um > 100:
             result.add_warning(f"Large Z step ({stack.z_step_um} μm) may miss details")
 
         # Validate velocity
         if stack.z_velocity_mm_s <= 0:
-            result.add_error(f"Z velocity must be positive: {stack.z_velocity_mm_s} mm/s")
+            result.add_error(
+                f"Z velocity must be positive: {stack.z_velocity_mm_s} mm/s"
+            )
         elif stack.z_velocity_mm_s < self.constraints.min_z_velocity_mm_s:
             result.add_error(
                 f"Z velocity too slow: {stack.z_velocity_mm_s} mm/s "
@@ -367,8 +394,12 @@ class WorkflowValidator:
 
         total_tiles = tile.total_tiles
         if total_tiles > 1000:
-            result.add_warning(f"Large number of tiles ({total_tiles}) will take long time")
-            result.add_suggestion("Consider reducing tile count or using lower resolution")
+            result.add_warning(
+                f"Large number of tiles ({total_tiles}) will take long time"
+            )
+            result.add_suggestion(
+                "Consider reducing tile count or using lower resolution"
+            )
 
         # Validate tile size
         if tile.tile_size_x_mm <= 0 or tile.tile_size_y_mm <= 0:
@@ -386,11 +417,15 @@ class WorkflowValidator:
         # Check total scan area
         scan_width, scan_height = tile.calculate_scan_area()
         if scan_width > 50 or scan_height > 50:  # mm
-            result.add_warning(f"Large scan area: {scan_width:.1f} x {scan_height:.1f} mm")
+            result.add_warning(
+                f"Large scan area: {scan_width:.1f} x {scan_height:.1f} mm"
+            )
 
     # ==================== Time-Lapse Validation ====================
 
-    def _validate_time_lapse_settings(self, workflow: Workflow, result: ValidationResult):
+    def _validate_time_lapse_settings(
+        self, workflow: Workflow, result: ValidationResult
+    ):
         """Validate time-lapse settings."""
         time_lapse = workflow.time_lapse_settings
 
@@ -406,7 +441,9 @@ class WorkflowValidator:
         if interval_s <= 0:
             result.add_error("Time interval must be positive")
         elif interval_s < 1:
-            result.add_warning("Very short interval may not allow acquisition to complete")
+            result.add_warning(
+                "Very short interval may not allow acquisition to complete"
+            )
 
         # Check total duration
         total_duration = time_lapse.calculate_total_duration()
@@ -417,7 +454,9 @@ class WorkflowValidator:
 
     # ==================== Experiment Settings Validation ====================
 
-    def _validate_experiment_settings(self, workflow: Workflow, result: ValidationResult):
+    def _validate_experiment_settings(
+        self, workflow: Workflow, result: ValidationResult
+    ):
         """Validate experiment settings."""
         exp = workflow.experiment_settings
 
@@ -451,7 +490,9 @@ class WorkflowValidator:
 
     # ==================== Hardware Compatibility ====================
 
-    def _validate_hardware_compatibility(self, workflow: Workflow, result: ValidationResult):
+    def _validate_hardware_compatibility(
+        self, workflow: Workflow, result: ValidationResult
+    ):
         """Validate hardware compatibility."""
         compatibility = self.check_hardware_compatibility(workflow)
 
@@ -489,7 +530,8 @@ class WorkflowValidator:
         # Check filter compatibility
         if workflow.illumination and workflow.illumination.filter_position is not None:
             compatibility["filter"] = (
-                workflow.illumination.filter_position in self.constraints.available_filters
+                workflow.illumination.filter_position
+                in self.constraints.available_filters
             )
         else:
             compatibility["filter"] = True
@@ -523,7 +565,9 @@ class WorkflowValidator:
         if workflow.time_lapse_settings:
             interval = workflow.time_lapse_settings.get_interval_seconds()
             if workflow.stack_settings:
-                stack_time = workflow.stack_settings.calculate_acquisition_time(10)  # 10ms exposure
+                stack_time = workflow.stack_settings.calculate_acquisition_time(
+                    10
+                )  # 10ms exposure
                 if stack_time > interval * 0.8:
                     result.add_warning(
                         "Stack acquisition time may exceed time-lapse interval"

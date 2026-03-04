@@ -7,13 +7,13 @@ Orchestrates connection operations between UI and service layer.
 Handles user actions related to connection management.
 """
 
-import re
 import logging
-from typing import Tuple, Dict, Any, Optional
+import re
 from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
-from ..services import MVCConnectionService, ConfigurationManager
-from ..models import ConnectionModel, ConnectionConfig, ConnectionState
+from ..models import ConnectionConfig, ConnectionModel, ConnectionState
+from ..services import ConfigurationManager, MVCConnectionService
 
 
 class ConnectionController:
@@ -29,8 +29,12 @@ class ConnectionController:
         _logger: Logger instance
     """
 
-    def __init__(self, service: MVCConnectionService, model: ConnectionModel,
-                 config_manager: Optional[ConfigurationManager] = None):
+    def __init__(
+        self,
+        service: MVCConnectionService,
+        model: ConnectionModel,
+        config_manager: Optional[ConfigurationManager] = None,
+    ):
         """
         Initialize controller with dependencies.
 
@@ -66,7 +70,10 @@ class ConnectionController:
             return (False, "IP address cannot be empty")
 
         if not self._validate_ip(ip):
-            return (False, f"Invalid IP address format. Expected: XXX.XXX.XXX.XXX, got: {ip}")
+            return (
+                False,
+                f"Invalid IP address format. Expected: XXX.XXX.XXX.XXX, got: {ip}",
+            )
 
         # Validate port
         if not isinstance(port, int):
@@ -77,15 +84,15 @@ class ConnectionController:
 
         # Check if already connected
         if self._service.is_connected():
-            return (False, "Already connected. Disconnect first before connecting again.")
+            return (
+                False,
+                "Already connected. Disconnect first before connecting again.",
+            )
 
         # Create config
         try:
             config = ConnectionConfig(
-                ip_address=ip,
-                port=port,
-                live_port=port + 1,
-                timeout=2.0
+                ip_address=ip, port=port, live_port=port + 1, timeout=2.0
             )
 
             # Validate config
@@ -110,7 +117,10 @@ class ConnectionController:
 
         except ConnectionRefusedError:
             self._logger.error(f"Connection refused by {ip}:{port}")
-            return (False, f"Connection refused. Is the server listening on port {port}?")
+            return (
+                False,
+                f"Connection refused. Is the server listening on port {port}?",
+            )
 
         except OSError as e:
             self._logger.error(f"Network error: {e}")
@@ -167,7 +177,10 @@ class ConnectionController:
         if self._service.is_connected():
             disconnect_result = self.disconnect()
             if not disconnect_result[0]:
-                return (False, f"Failed to disconnect before reconnecting: {disconnect_result[1]}")
+                return (
+                    False,
+                    f"Failed to disconnect before reconnecting: {disconnect_result[1]}",
+                )
 
         # Reconnect using previous config
         try:
@@ -203,12 +216,12 @@ class ConnectionController:
         status = self._model.status
 
         return {
-            'connected': self._service.is_connected(),
-            'state': status.state.value if status.state else 'unknown',
-            'ip': status.ip,
-            'port': status.port,
-            'connected_at': status.connected_at,
-            'last_error': status.last_error
+            "connected": self._service.is_connected(),
+            "state": status.state.value if status.state else "unknown",
+            "ip": status.ip,
+            "port": status.port,
+            "connected_at": status.connected_at,
+            "last_error": status.last_error,
         }
 
     def handle_connection_error(self, error: Exception) -> str:
@@ -252,7 +265,9 @@ class ConnectionController:
             self._logger.exception(f"Unhandled error type: {error_type}")
             return f"Error: {error_msg}"
 
-    def test_connection(self, ip: str, port: int, timeout: float = 2.0) -> Tuple[bool, str]:
+    def test_connection(
+        self, ip: str, port: int, timeout: float = 2.0
+    ) -> Tuple[bool, str]:
         """
         Test connection to microscope without establishing a persistent connection.
 
@@ -293,15 +308,24 @@ class ConnectionController:
                 sock.connect((ip, port))
                 sock.close()
                 self._logger.info(f"Connection test successful: {ip}:{port}")
-                return (True, f"Connection test successful! Server is reachable at {ip}:{port}")
+                return (
+                    True,
+                    f"Connection test successful! Server is reachable at {ip}:{port}",
+                )
 
             except socket.timeout:
                 self._logger.warning(f"Connection test timeout: {ip}:{port}")
-                return (False, f"Connection timeout. Server at {ip}:{port} is not responding.")
+                return (
+                    False,
+                    f"Connection timeout. Server at {ip}:{port} is not responding.",
+                )
 
             except ConnectionRefusedError:
                 self._logger.warning(f"Connection test refused: {ip}:{port}")
-                return (False, f"Connection refused. Server is not listening on port {port}.")
+                return (
+                    False,
+                    f"Connection refused. Server is not listening on port {port}.",
+                )
 
             except OSError as e:
                 self._logger.warning(f"Connection test OS error: {e}")
@@ -333,14 +357,14 @@ class ConnectionController:
             True if valid IPv4 format, False otherwise
         """
         # IPv4 regex pattern
-        pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+        pattern = r"^(\d{1,3}\.){3}\d{1,3}$"
 
         if not re.match(pattern, ip):
             return False
 
         # Check each octet is 0-255
         try:
-            octets = ip.split('.')
+            octets = ip.split(".")
             return all(0 <= int(octet) <= 255 for octet in octets)
         except (ValueError, AttributeError):
             return False
@@ -386,15 +410,15 @@ class ConnectionController:
         # Save configuration via configuration manager
         try:
             success, message = self._config_manager.save_configuration(
-                name=name.strip(),
-                ip=ip,
-                port=port
+                name=name.strip(), ip=ip, port=port
             )
 
             if success:
                 self._logger.info(f"Saved configuration: {name}")
             else:
-                self._logger.warning(f"Failed to save configuration '{name}': {message}")
+                self._logger.warning(
+                    f"Failed to save configuration '{name}': {message}"
+                )
 
             return (success, message)
 
@@ -435,7 +459,9 @@ class ConnectionController:
             if success:
                 self._logger.info(f"Deleted configuration: {name}")
             else:
-                self._logger.warning(f"Failed to delete configuration '{name}': {message}")
+                self._logger.warning(
+                    f"Failed to delete configuration '{name}': {message}"
+                )
 
             return (success, message)
 
@@ -475,36 +501,42 @@ class ConnectionController:
             # MVCConnectionService doesn't have get_microscope_settings yet
             # We need to check if the service has this method
 
-            if hasattr(self._service, 'get_microscope_settings'):
+            if hasattr(self._service, "get_microscope_settings"):
                 self._logger.debug("Calling service.get_microscope_settings()")
                 pixel_size, settings_dict = self._service.get_microscope_settings()
 
                 # Add pixel size to settings if available
                 if pixel_size and settings_dict:
-                    if 'Camera' not in settings_dict:
-                        settings_dict['Camera'] = {}
-                    settings_dict['Camera']['Pixel size (mm)'] = pixel_size
+                    if "Camera" not in settings_dict:
+                        settings_dict["Camera"] = {}
+                    settings_dict["Camera"]["Pixel size (mm)"] = pixel_size
 
-                self._logger.info(f"Retrieved settings with {len(settings_dict)} sections")
+                self._logger.info(
+                    f"Retrieved settings with {len(settings_dict)} sections"
+                )
                 return settings_dict
             else:
                 # Service doesn't support getting settings yet
                 # Return a placeholder for now
-                self._logger.warning("Service does not support get_microscope_settings()")
+                self._logger.warning(
+                    "Service does not support get_microscope_settings()"
+                )
 
                 # Get connection info from service's model
                 status = self._service.get_status()
 
                 return {
-                    'Connection': {
-                        'Status': 'Connected',
-                        'IP': status.ip or 'Unknown',
-                        'Port': status.port or 'Unknown',
-                        'Connected at': str(status.connected_at) if status.connected_at else 'N/A'
+                    "Connection": {
+                        "Status": "Connected",
+                        "IP": status.ip or "Unknown",
+                        "Port": status.port or "Unknown",
+                        "Connected at": (
+                            str(status.connected_at) if status.connected_at else "N/A"
+                        ),
                     },
-                    'Note': {
-                        'Message': 'Full settings retrieval not yet implemented for this connection type'
-                    }
+                    "Note": {
+                        "Message": "Full settings retrieval not yet implemented for this connection type"
+                    },
                 }
 
         except Exception as e:

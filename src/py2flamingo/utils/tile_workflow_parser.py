@@ -7,7 +7,7 @@ extracted from tile_collection_dialog.py.
 import logging
 import re
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -24,19 +24,19 @@ def parse_workflow_position(workflow_file: Path) -> Optional[Dict]:
         Dictionary with 'x', 'y', 'r', 'filename' or None if parse fails
     """
     # Match X and Y (required)
-    xy_match = re.search(r'X([-\d.]+)_Y([-\d.]+)', workflow_file.stem)
+    xy_match = re.search(r"X([-\d.]+)_Y([-\d.]+)", workflow_file.stem)
     if xy_match:
         result = {
-            'x': float(xy_match.group(1)),
-            'y': float(xy_match.group(2)),
-            'filename': workflow_file.name
+            "x": float(xy_match.group(1)),
+            "y": float(xy_match.group(2)),
+            "filename": workflow_file.name,
         }
         # Also extract rotation if present (R90, R-45, etc.)
-        r_match = re.search(r'_R([-\d.]+)_', workflow_file.stem)
+        r_match = re.search(r"_R([-\d.]+)_", workflow_file.stem)
         if r_match:
-            result['r'] = float(r_match.group(1))
+            result["r"] = float(r_match.group(1))
         else:
-            result['r'] = 0.0  # Default to 0 if not in filename
+            result["r"] = 0.0  # Default to 0 if not in filename
         return result
     logger.warning(f"Could not parse position from filename: {workflow_file.name}")
     return None
@@ -52,18 +52,22 @@ def read_z_range_from_workflow(workflow_file: Path) -> Tuple[float, float]:
         Tuple of (z_min, z_max) in mm
     """
     try:
-        with open(workflow_file, 'r') as f:
+        with open(workflow_file, "r") as f:
             content = f.read()
 
         # Parse Start Position Z
         z_min = 0.0
         z_max = 0.0
 
-        start_match = re.search(r'<Start Position>.*?Z \(mm\) = ([-\d.]+)', content, re.DOTALL)
+        start_match = re.search(
+            r"<Start Position>.*?Z \(mm\) = ([-\d.]+)", content, re.DOTALL
+        )
         if start_match:
             z_min = float(start_match.group(1))
 
-        end_match = re.search(r'<End Position>.*?Z \(mm\) = ([-\d.]+)', content, re.DOTALL)
+        end_match = re.search(
+            r"<End Position>.*?Z \(mm\) = ([-\d.]+)", content, re.DOTALL
+        )
         if end_match:
             z_max = float(end_match.group(1))
 
@@ -95,13 +99,12 @@ def read_laser_channels_from_workflow(workflow_file: Path) -> List[int]:
         Falls back to [0] if parsing fails.
     """
     try:
-        with open(workflow_file, 'r') as f:
+        with open(workflow_file, "r") as f:
             content = f.read()
 
         # Extract Illumination Source block
         illum_match = re.search(
-            r'<Illumination Source>(.*?)</Illumination Source>',
-            content, re.DOTALL
+            r"<Illumination Source>(.*?)</Illumination Source>", content, re.DOTALL
         )
         if not illum_match:
             logger.warning(f"No Illumination Source block in {workflow_file.name}")
@@ -113,8 +116,7 @@ def read_laser_channels_from_workflow(workflow_file: Path) -> List[int]:
         # Match lines like: "Laser 2 2: 488 nm MLE = 10.00 1"
         # The last number (1 or 0) indicates enabled/disabled
         for match in re.finditer(
-            r'Laser\s+(\d+)\s+\d+:\s+\d+\s+nm\s+MLE\s*=\s*[\d.]+\s+(\d+)',
-            illum_block
+            r"Laser\s+(\d+)\s+\d+:\s+\d+\s+nm\s+MLE\s*=\s*[\d.]+\s+(\d+)", illum_block
         ):
             laser_num = int(match.group(1))
             enabled = int(match.group(2))
@@ -123,7 +125,9 @@ def read_laser_channels_from_workflow(workflow_file: Path) -> List[int]:
                 channels.append(laser_num - 1)
 
         if not channels:
-            logger.warning(f"No enabled lasers found in {workflow_file.name}, defaulting to channel 0")
+            logger.warning(
+                f"No enabled lasers found in {workflow_file.name}, defaulting to channel 0"
+            )
             return [0]
 
         logger.info(f"Parsed laser channels from {workflow_file.name}: {channels}")
@@ -147,9 +151,9 @@ def read_num_planes_from_workflow(workflow_file: Path) -> Optional[int]:
         Number of planes per channel, or None if not found
     """
     try:
-        with open(workflow_file, 'r') as f:
+        with open(workflow_file, "r") as f:
             content = f.read()
-        match = re.search(r'Number of planes\s*=\s*(\d+)', content)
+        match = re.search(r"Number of planes\s*=\s*(\d+)", content)
         if match:
             num_planes = int(match.group(1))
             logger.debug(f"Parsed num_planes from {workflow_file.name}: {num_planes}")
@@ -169,12 +173,14 @@ def read_z_velocity_from_workflow(workflow_file: Path) -> float:
         Z velocity in mm/s (default 1.0)
     """
     try:
-        with open(workflow_file, 'r') as f:
+        with open(workflow_file, "r") as f:
             content = f.read()
-        match = re.search(r'Z stage velocity \(mm/s\)\s*=\s*([\d.]+)', content)
+        match = re.search(r"Z stage velocity \(mm/s\)\s*=\s*([\d.]+)", content)
         if match:
             velocity = float(match.group(1))
-            logger.debug(f"Parsed Z velocity from {workflow_file.name}: {velocity} mm/s")
+            logger.debug(
+                f"Parsed Z velocity from {workflow_file.name}: {velocity} mm/s"
+            )
             return velocity
     except Exception as e:
         logger.error(f"Failed to read Z velocity from {workflow_file.name}: {e}")

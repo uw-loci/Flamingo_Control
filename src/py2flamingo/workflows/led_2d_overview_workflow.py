@@ -14,16 +14,17 @@ rotating the sample 90 degrees swaps X and Z from the camera's perspective.
 
 import logging
 import time
+from typing import List, Optional, Tuple
+
 import numpy as np
-from typing import Optional, List, Tuple
-from PyQt5.QtCore import QObject, pyqtSignal, QTimer
+from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 from PyQt5.QtWidgets import QApplication
 
 from py2flamingo.models.data.overview_results import (
     VISUALIZATION_TYPES,
-    TileResult,
-    RotationResult,
     EffectiveBoundingBox,
+    RotationResult,
+    TileResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,16 +98,17 @@ class LED2DOverviewWorkflow(QObject):
 
         # Calculate rotation angles - only include second rotation if tip is calibrated
         if self._tip_position is not None:
-            self._rotation_angles = [
-                config.starting_r,
-                config.starting_r + 90.0
-            ]
-            logger.info(f"Tip position found at X={self._tip_position[0]:.3f}, Z={self._tip_position[1]:.3f} - "
-                       f"will scan both rotations")
+            self._rotation_angles = [config.starting_r, config.starting_r + 90.0]
+            logger.info(
+                f"Tip position found at X={self._tip_position[0]:.3f}, Z={self._tip_position[1]:.3f} - "
+                f"will scan both rotations"
+            )
         else:
             self._rotation_angles = [config.starting_r]
-            logger.warning("Tip position not calibrated - only scanning first rotation. "
-                          "Use Tools > Calibrate to enable second rotation.")
+            logger.warning(
+                "Tip position not calibrated - only scanning first rotation. "
+                "Use Tools > Calibrate to enable second rotation."
+            )
 
     def _calculate_actual_fov(self) -> Optional[float]:
         """Calculate the actual field of view from microscope settings.
@@ -119,7 +121,11 @@ class LED2DOverviewWorkflow(QObject):
             Field of view in mm, or None if it cannot be determined
         """
         try:
-            if not self._app or not hasattr(self._app, 'camera_service') or not self._app.camera_service:
+            if (
+                not self._app
+                or not hasattr(self._app, "camera_service")
+                or not self._app.camera_service
+            ):
                 logger.error("Camera service not available - cannot determine FOV")
                 return None
 
@@ -132,22 +138,30 @@ class LED2DOverviewWorkflow(QObject):
 
             # Validate values - camera might return 0 if not properly initialized
             if frame_size <= 0:
-                logger.error(f"Invalid frame size from camera: {frame_size} - cannot determine FOV")
+                logger.error(
+                    f"Invalid frame size from camera: {frame_size} - cannot determine FOV"
+                )
                 return None
 
             if pixel_size_mm <= 0:
-                logger.error(f"Invalid pixel size from camera: {pixel_size_mm} - cannot determine FOV")
+                logger.error(
+                    f"Invalid pixel size from camera: {pixel_size_mm} - cannot determine FOV"
+                )
                 return None
 
             actual_fov = pixel_size_mm * frame_size
 
             # Sanity check - FOV should be reasonable (0.01mm to 50mm typically)
             if actual_fov < 0.01 or actual_fov > 50:
-                logger.error(f"Calculated FOV {actual_fov:.4f}mm is outside reasonable range (0.01-50mm)")
+                logger.error(
+                    f"Calculated FOV {actual_fov:.4f}mm is outside reasonable range (0.01-50mm)"
+                )
                 return None
 
-            logger.info(f"Calculated actual FOV: {actual_fov:.4f} mm "
-                       f"(pixel_size={pixel_size_mm:.6f} mm, frame={frame_size}px)")
+            logger.info(
+                f"Calculated actual FOV: {actual_fov:.4f} mm "
+                f"(pixel_size={pixel_size_mm:.6f} mm, frame={frame_size}px)"
+            )
 
             return actual_fov
 
@@ -167,20 +181,25 @@ class LED2DOverviewWorkflow(QObject):
         """
         try:
             from pathlib import Path
+
             import yaml
 
             # Look for config in standard locations
             config_paths = [
-                Path(__file__).parent.parent / "configs" / "visualization_3d_config.yaml",
+                Path(__file__).parent.parent
+                / "configs"
+                / "visualization_3d_config.yaml",
                 Path.cwd() / "configs" / "visualization_3d_config.yaml",
             ]
 
             for config_path in config_paths:
                 if config_path.exists():
-                    with open(config_path, 'r') as f:
+                    with open(config_path, "r") as f:
                         config = yaml.safe_load(f)
 
-                    invert_x = config.get('stage_control', {}).get('invert_x_default', False)
+                    invert_x = config.get("stage_control", {}).get(
+                        "invert_x_default", False
+                    )
                     logger.info(f"Loaded invert_x={invert_x} from {config_path.name}")
                     return invert_x
 
@@ -200,7 +219,10 @@ class LED2DOverviewWorkflow(QObject):
             Tuple of (x, z) for tip position, or None if not calibrated
         """
         try:
-            from py2flamingo.services.position_preset_service import PositionPresetService
+            from py2flamingo.services.position_preset_service import (
+                PositionPresetService,
+            )
+
             preset_service = PositionPresetService()
             preset = preset_service.get_preset("Tip of sample mount")
 
@@ -265,7 +287,7 @@ class LED2DOverviewWorkflow(QObject):
                 tile_y_min=bbox.y_min,
                 tile_y_max=bbox.y_max,
                 z_min=bbox.z_min,
-                z_max=bbox.z_max
+                z_max=bbox.z_max,
             )
         else:
             # Rotated view: transform all 4 corners of the X-Z bounding box
@@ -288,8 +310,10 @@ class LED2DOverviewWorkflow(QObject):
             new_z_min = min(new_z_coords)
             new_z_max = max(new_z_coords)
 
-            logger.info(f"Rotated bbox: X=[{new_x_min:.2f}, {new_x_max:.2f}], "
-                       f"Z=[{new_z_min:.2f}, {new_z_max:.2f}] (tip at X={self._tip_position[0]:.2f}, Z={self._tip_position[1]:.2f})")
+            logger.info(
+                f"Rotated bbox: X=[{new_x_min:.2f}, {new_x_max:.2f}], "
+                f"Z=[{new_z_min:.2f}, {new_z_max:.2f}] (tip at X={self._tip_position[0]:.2f}, Z={self._tip_position[1]:.2f})"
+            )
 
             return EffectiveBoundingBox(
                 tile_x_min=new_x_min,
@@ -297,7 +321,7 @@ class LED2DOverviewWorkflow(QObject):
                 tile_y_min=bbox.y_min,  # Y unchanged
                 tile_y_max=bbox.y_max,
                 z_min=new_z_min,
-                z_max=new_z_max
+                z_max=new_z_max,
             )
 
     def _get_controllers(self):
@@ -309,10 +333,12 @@ class LED2DOverviewWorkflow(QObject):
         return (
             sample_view.movement_controller,
             sample_view.camera_controller,
-            getattr(self._app, 'position_controller', None)
+            getattr(self._app, "position_controller", None),
         )
 
-    def _generate_tile_positions(self, effective_bbox: EffectiveBoundingBox) -> List[Tuple[float, float, float, int, int]]:
+    def _generate_tile_positions(
+        self, effective_bbox: EffectiveBoundingBox
+    ) -> List[Tuple[float, float, float, int, int]]:
         """Generate tile positions using serpentine pattern.
 
         Args:
@@ -362,11 +388,13 @@ class LED2DOverviewWorkflow(QObject):
             for y_idx, y_pos in y_range:
                 positions.append((x_pos, y_pos, z_center, x_idx, y_idx))
 
-        logger.info(f"Generated {len(positions)} tile positions "
-                   f"({self._tiles_x} x {self._tiles_y}) for effective bbox: "
-                   f"X=[{effective_bbox.tile_x_min:.2f}, {effective_bbox.tile_x_max:.2f}], "
-                   f"Y=[{effective_bbox.tile_y_min:.2f}, {effective_bbox.tile_y_max:.2f}], "
-                   f"Z-stack=[{effective_bbox.z_min:.2f}, {effective_bbox.z_max:.2f}]")
+        logger.info(
+            f"Generated {len(positions)} tile positions "
+            f"({self._tiles_x} x {self._tiles_y}) for effective bbox: "
+            f"X=[{effective_bbox.tile_x_min:.2f}, {effective_bbox.tile_x_max:.2f}], "
+            f"Y=[{effective_bbox.tile_y_min:.2f}, {effective_bbox.tile_y_max:.2f}], "
+            f"Z-stack=[{effective_bbox.z_min:.2f}, {effective_bbox.z_max:.2f}]"
+        )
 
         return positions
 
@@ -377,19 +405,27 @@ class LED2DOverviewWorkflow(QObject):
             True if LED enabled successfully
         """
         led_name = self._config.led_name
-        if not led_name or led_name.lower() in ('none', '--', 'sample view not open'):
+        if not led_name or led_name.lower() in ("none", "--", "sample view not open"):
             logger.warning(f"No valid LED configured (led_name='{led_name}')")
             return False
 
         # Map LED name to color index
         led_map = {
-            'led_red': 0, 'led_r': 0, 'red': 0,
-            'led_green': 1, 'led_g': 1, 'green': 1,
-            'led_blue': 2, 'led_b': 2, 'blue': 2,
-            'led_white': 3, 'led_w': 3, 'white': 3,
+            "led_red": 0,
+            "led_r": 0,
+            "red": 0,
+            "led_green": 1,
+            "led_g": 1,
+            "green": 1,
+            "led_blue": 2,
+            "led_b": 2,
+            "blue": 2,
+            "led_white": 3,
+            "led_w": 3,
+            "white": 3,
         }
 
-        led_lower = led_name.lower().replace(' ', '_')
+        led_lower = led_name.lower().replace(" ", "_")
         led_color = led_map.get(led_lower)
 
         if led_color is None:
@@ -408,7 +444,7 @@ class LED2DOverviewWorkflow(QObject):
                 return False
 
             # Enable the LED
-            color_names = ['Red', 'Green', 'Blue', 'White']
+            color_names = ["Red", "Green", "Blue", "White"]
             logger.info(f"Enabling {color_names[led_color]} LED for scan...")
             success = laser_led_controller.enable_led_for_preview(led_color)
 
@@ -444,9 +480,11 @@ class LED2DOverviewWorkflow(QObject):
 
         # CRITICAL: Abort if FOV could not be determined - using wrong FOV could damage equipment
         if self._actual_fov_mm is None:
-            error_msg = ("Cannot start scan: Field of View (FOV) could not be determined from camera. "
-                        "This is required to calculate safe stage movements. "
-                        "Please ensure the camera is properly initialized and try again.")
+            error_msg = (
+                "Cannot start scan: Field of View (FOV) could not be determined from camera. "
+                "This is required to calculate safe stage movements. "
+                "Please ensure the camera is properly initialized and try again."
+            )
             logger.error(error_msg)
             self.scan_error.emit(error_msg)
             return
@@ -465,8 +503,10 @@ class LED2DOverviewWorkflow(QObject):
             tiles_y = max(1, int((eff_bbox.tile_y_max - eff_bbox.tile_y_min) / fov) + 1)
             total_tiles += tiles_x * tiles_y
 
-        logger.info(f"Starting LED 2D Overview: ~{total_tiles} total tiles, "
-                   f"rotations: {self._rotation_angles}, FOV: {fov:.4f} mm")
+        logger.info(
+            f"Starting LED 2D Overview: ~{total_tiles} total tiles, "
+            f"rotations: {self._rotation_angles}, FOV: {fov:.4f} mm"
+        )
 
         # Lock microscope controls during acquisition
         if self._app:
@@ -475,7 +515,9 @@ class LED2DOverviewWorkflow(QObject):
         # Enable the LED before starting
         if not self._enable_led():
             logger.error("Failed to enable LED - scan may produce black images!")
-            self.scan_error.emit("LED could not be enabled. Check light source settings.")
+            self.scan_error.emit(
+                "LED could not be enabled. Check light source settings."
+            )
             self._running = False
             if self._app:
                 self._app.stop_acquisition("LED 2D Overview")
@@ -503,34 +545,42 @@ class LED2DOverviewWorkflow(QObject):
             return
 
         rotation = self._rotation_angles[self._current_rotation_idx]
-        logger.info(f"Starting rotation {self._current_rotation_idx + 1}/"
-                   f"{len(self._rotation_angles)}: {rotation}°")
+        logger.info(
+            f"Starting rotation {self._current_rotation_idx + 1}/"
+            f"{len(self._rotation_angles)}: {rotation}°"
+        )
 
         self.scan_progress.emit(
             f"Moving to rotation {rotation}°",
-            (self._current_rotation_idx / len(self._rotation_angles)) * 100
+            (self._current_rotation_idx / len(self._rotation_angles)) * 100,
         )
 
         # Get effective bounding box for this rotation (X/Z swapped for rotated view)
-        self._current_effective_bbox = self._get_effective_bbox(self._current_rotation_idx)
+        self._current_effective_bbox = self._get_effective_bbox(
+            self._current_rotation_idx
+        )
 
         # Generate tile positions for this rotation
-        self._tile_positions = self._generate_tile_positions(self._current_effective_bbox)
+        self._tile_positions = self._generate_tile_positions(
+            self._current_effective_bbox
+        )
 
         # Create result container for this rotation
-        self._results.append(RotationResult(
-            rotation_angle=rotation,
-            tiles_x=self._tiles_x,
-            tiles_y=self._tiles_y,
-            invert_x=self._invert_x
-        ))
+        self._results.append(
+            RotationResult(
+                rotation_angle=rotation,
+                tiles_x=self._tiles_x,
+                tiles_y=self._tiles_y,
+                invert_x=self._invert_x,
+            )
+        )
 
         # Move to rotation angle
         self._current_tile_idx = 0
 
         try:
             movement_controller, _, _ = self._get_controllers()
-            movement_controller.move_absolute('r', rotation)
+            movement_controller.move_absolute("r", rotation)
 
             # Wait for rotation to complete, then start tiles
             # Use fast continuous mode if enabled, otherwise use slow tile-by-tile mode
@@ -557,7 +607,7 @@ class LED2DOverviewWorkflow(QObject):
             self._finish_cancelled()
             return
 
-        from py2flamingo.services.stage_service import StageService, AxisCode
+        from py2flamingo.services.stage_service import AxisCode, StageService
         from py2flamingo.utils.focus_detection import variance_of_laplacian
 
         _, camera_controller, _ = self._get_controllers()
@@ -588,7 +638,9 @@ class LED2DOverviewWorkflow(QObject):
         tiles_y = len(y_positions)
         total_tiles = tiles_x * tiles_y
 
-        logger.info(f"Fast mode: Scanning {tiles_x}x{tiles_y}={total_tiles} tiles with continuous Z sweeps")
+        logger.info(
+            f"Fast mode: Scanning {tiles_x}x{tiles_y}={total_tiles} tiles with continuous Z sweeps"
+        )
         logger.info(f"Fast mode: Z range {z_min:.3f} to {z_max:.3f}mm")
 
         # Scan in serpentine pattern
@@ -662,29 +714,32 @@ class LED2DOverviewWorkflow(QObject):
                         tile_x_idx=x_idx,
                         tile_y_idx=y_idx,
                         images=images,
-                        rotation_angle=self._rotation_angles[self._current_rotation_idx],
+                        rotation_angle=self._rotation_angles[
+                            self._current_rotation_idx
+                        ],
                         z_stack_min=z_min,
-                        z_stack_max=z_max
+                        z_stack_max=z_max,
                     )
                     rotation_result.tiles.append(tile_result)
 
                 tile_idx += 1
 
                 # Emit tile_completed signal for progress tracking
-                logger.info(f"Emitting tile_completed signal (fast mode): rotation={self._current_rotation_idx}, "
-                           f"tile={tile_idx - 1}, total={total_tiles}")
+                logger.info(
+                    f"Emitting tile_completed signal (fast mode): rotation={self._current_rotation_idx}, "
+                    f"tile={tile_idx - 1}, total={total_tiles}"
+                )
                 self.tile_completed.emit(
                     self._current_rotation_idx,
                     tile_idx - 1,  # tile_idx was just incremented, so subtract 1
-                    total_tiles
+                    total_tiles,
                 )
 
                 # Update progress periodically
                 if tile_idx % 5 == 0 or tile_idx == total_tiles:
                     percent = (tile_idx / total_tiles) * 100
                     self.scan_progress.emit(
-                        f"Fast scan: {tile_idx}/{total_tiles} tiles",
-                        percent
+                        f"Fast scan: {tile_idx}/{total_tiles} tiles", percent
                     )
 
                 # Process events after every tile to update UI
@@ -713,7 +768,9 @@ class LED2DOverviewWorkflow(QObject):
 
         if self._current_tile_idx >= len(self._tile_positions):
             # Finished this rotation
-            logger.info(f"All {len(self._tile_positions)} tiles complete for rotation {self._current_rotation_idx}")
+            logger.info(
+                f"All {len(self._tile_positions)} tiles complete for rotation {self._current_rotation_idx}"
+            )
             self._finish_rotation()
             return
 
@@ -728,12 +785,14 @@ class LED2DOverviewWorkflow(QObject):
 
         self.scan_progress.emit(
             f"Tile {self._current_tile_idx + 1}/{total_tiles} at R={self._rotation_angles[self._current_rotation_idx]}°",
-            percent
+            percent,
         )
 
         # Log every 10th tile at INFO level to track progress
         if self._current_tile_idx % 10 == 0:
-            logger.info(f"Tile {self._current_tile_idx + 1}/{total_tiles}: X={x:.3f}, Y={y:.3f}")
+            logger.info(
+                f"Tile {self._current_tile_idx + 1}/{total_tiles}: X={x:.3f}, Y={y:.3f}"
+            )
 
         try:
             tile_result = self._capture_tile(x, y, z, tile_x_idx, tile_y_idx)
@@ -741,12 +800,12 @@ class LED2DOverviewWorkflow(QObject):
             if tile_result:
                 self._results[self._current_rotation_idx].tiles.append(tile_result)
 
-            logger.info(f"Emitting tile_completed signal: rotation={self._current_rotation_idx}, "
-                       f"tile={self._current_tile_idx}, total={total_tiles}")
+            logger.info(
+                f"Emitting tile_completed signal: rotation={self._current_rotation_idx}, "
+                f"tile={self._current_tile_idx}, total={total_tiles}"
+            )
             self.tile_completed.emit(
-                self._current_rotation_idx,
-                self._current_tile_idx,
-                total_tiles
+                self._current_rotation_idx, self._current_tile_idx, total_tiles
             )
 
             self._current_tile_idx += 1
@@ -760,8 +819,9 @@ class LED2DOverviewWorkflow(QObject):
             self.scan_error.emit(str(e))
             self._running = False
 
-    def _capture_tile(self, x: float, y: float, z_center: float,
-                      tile_x_idx: int, tile_y_idx: int) -> Optional[TileResult]:
+    def _capture_tile(
+        self, x: float, y: float, z_center: float, tile_x_idx: int, tile_y_idx: int
+    ) -> Optional[TileResult]:
         """Capture a tile with Z-stack and select best focus.
 
         Args:
@@ -774,8 +834,8 @@ class LED2DOverviewWorkflow(QObject):
         Returns:
             TileResult with best-focused image, or None on failure
         """
+        from py2flamingo.services.stage_service import AxisCode, StageService
         from py2flamingo.utils.focus_detection import variance_of_laplacian
-        from py2flamingo.services.stage_service import StageService, AxisCode
 
         _, camera_controller, _ = self._get_controllers()
 
@@ -807,7 +867,9 @@ class LED2DOverviewWorkflow(QObject):
             z_positions = [z_positions[i] for i in indices]
             logger.info(f"Capped Z-stack to {MAX_Z_POSITIONS} planes for speed")
 
-        logger.debug(f"Capturing Z-stack: {len(z_positions)} planes from {z_positions[0]:.3f} to {z_positions[-1]:.3f}")
+        logger.debug(
+            f"Capturing Z-stack: {len(z_positions)} planes from {z_positions[0]:.3f} to {z_positions[-1]:.3f}"
+        )
 
         # Capture frames at each Z position
         frames = []  # List of (z, image, focus_score)
@@ -831,18 +893,25 @@ class LED2DOverviewWorkflow(QObject):
 
         # Log capture results
         if frames_failed > 0:
-            logger.warning(f"Tile ({x:.2f}, {y:.2f}): {frames_captured}/{len(z_positions)} frames captured, {frames_failed} failed")
+            logger.warning(
+                f"Tile ({x:.2f}, {y:.2f}): {frames_captured}/{len(z_positions)} frames captured, {frames_failed} failed"
+            )
 
         if not frames:
-            logger.warning(f"No frames captured for tile at ({x:.3f}, {y:.3f}) - using placeholder")
+            logger.warning(
+                f"No frames captured for tile at ({x:.3f}, {y:.3f}) - using placeholder"
+            )
             placeholder = np.zeros((100, 100), dtype=np.uint16)
             return TileResult(
-                x=x, y=y, z=z_center,
-                tile_x_idx=tile_x_idx, tile_y_idx=tile_y_idx,
+                x=x,
+                y=y,
+                z=z_center,
+                tile_x_idx=tile_x_idx,
+                tile_y_idx=tile_y_idx,
                 images={vtype: placeholder.copy() for vtype, _ in VISUALIZATION_TYPES},
                 rotation_angle=self._rotation_angles[self._current_rotation_idx],
                 z_stack_min=eff_bbox.z_min,
-                z_stack_max=eff_bbox.z_max
+                z_stack_max=eff_bbox.z_max,
             )
 
         # Calculate all visualization types from the captured frames
@@ -869,7 +938,7 @@ class LED2DOverviewWorkflow(QObject):
             images=images,
             rotation_angle=self._rotation_angles[self._current_rotation_idx],
             z_stack_min=eff_bbox.z_min,
-            z_stack_max=eff_bbox.z_max
+            z_stack_max=eff_bbox.z_max,
         )
 
     def _focus_stack_frames(self, frames: list) -> np.ndarray:
@@ -943,9 +1012,9 @@ class LED2DOverviewWorkflow(QObject):
         num_frames = len(images)
 
         # Laplacian kernel for edge detection (focus measure)
-        laplacian_kernel = np.array([[0, 1, 0],
-                                      [1, -4, 1],
-                                      [0, 1, 0]], dtype=np.float32)
+        laplacian_kernel = np.array(
+            [[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=np.float32
+        )
 
         # Calculate local focus measure for each frame
         # Use local variance of Laplacian response as sharpness indicator
@@ -956,13 +1025,17 @@ class LED2DOverviewWorkflow(QObject):
             img_float = img.astype(np.float32)
 
             # Apply Laplacian filter
-            laplacian = ndimage.convolve(img_float, laplacian_kernel, mode='reflect')
+            laplacian = ndimage.convolve(img_float, laplacian_kernel, mode="reflect")
 
             # Calculate local variance using a uniform filter
             # This gives us a per-pixel sharpness measure
             kernel_size = 9  # Size of local neighborhood for variance calculation
-            local_mean = ndimage.uniform_filter(laplacian, size=kernel_size, mode='reflect')
-            local_sq_mean = ndimage.uniform_filter(laplacian**2, size=kernel_size, mode='reflect')
+            local_mean = ndimage.uniform_filter(
+                laplacian, size=kernel_size, mode="reflect"
+            )
+            local_sq_mean = ndimage.uniform_filter(
+                laplacian**2, size=kernel_size, mode="reflect"
+            )
             local_variance = local_sq_mean - local_mean**2
 
             # Ensure non-negative variance
@@ -978,7 +1051,9 @@ class LED2DOverviewWorkflow(QObject):
 
         # Build the output image by selecting pixels from best-focused frames
         # Create index arrays for advanced indexing
-        row_idx, col_idx = np.meshgrid(np.arange(height), np.arange(width), indexing='ij')
+        row_idx, col_idx = np.meshgrid(
+            np.arange(height), np.arange(width), indexing="ij"
+        )
 
         # Stack original images
         image_stack = np.stack(images, axis=0)  # Shape: (num_frames, height, width)
@@ -989,7 +1064,9 @@ class LED2DOverviewWorkflow(QObject):
         # Optional: Apply slight smoothing to reduce artifacts at frame boundaries
         # result = ndimage.median_filter(result, size=3)
 
-        logger.debug(f"Focus stacking: combined {num_frames} frames using local variance method")
+        logger.debug(
+            f"Focus stacking: combined {num_frames} frames using local variance method"
+        )
 
         return result.astype(np.uint16)
 
@@ -1003,17 +1080,23 @@ class LED2DOverviewWorkflow(QObject):
         try:
             stitched_images = self._assemble_all_visualizations(rotation_result)
             rotation_result.stitched_images = stitched_images
-            logger.info(f"Assembled {len(rotation_result.tiles)} tiles into {len(stitched_images)} visualizations")
+            logger.info(
+                f"Assembled {len(rotation_result.tiles)} tiles into {len(stitched_images)} visualizations"
+            )
         except Exception as e:
             logger.error(f"Error assembling tiles: {e}")
 
         self.rotation_completed.emit(self._current_rotation_idx, rotation_result)
 
-        logger.info(f"Completed rotation {rotation_result.rotation_angle}° "
-                   f"with {len(rotation_result.tiles)} tiles")
+        logger.info(
+            f"Completed rotation {rotation_result.rotation_angle}° "
+            f"with {len(rotation_result.tiles)} tiles"
+        )
 
         self._current_rotation_idx += 1
-        logger.info(f"Moving to rotation index {self._current_rotation_idx} (total: {len(self._rotation_angles)})")
+        logger.info(
+            f"Moving to rotation index {self._current_rotation_idx} (total: {len(self._rotation_angles)})"
+        )
         QTimer.singleShot(500, self._start_rotation)
 
     def _assemble_all_visualizations(self, result: RotationResult) -> dict:
@@ -1032,8 +1115,9 @@ class LED2DOverviewWorkflow(QObject):
                 stitched[viz_type] = assembled
         return stitched
 
-    def _assemble_tiles(self, result: RotationResult,
-                        visualization_type: str = "best_focus") -> Optional[np.ndarray]:
+    def _assemble_tiles(
+        self, result: RotationResult, visualization_type: str = "best_focus"
+    ) -> Optional[np.ndarray]:
         """Assemble tiles into a single grid image.
 
         Args:
@@ -1049,7 +1133,9 @@ class LED2DOverviewWorkflow(QObject):
         # Get tile dimensions from first tile
         first_tile_images = result.tiles[0].images
         if visualization_type not in first_tile_images:
-            logger.warning(f"Visualization type '{visualization_type}' not available in tiles")
+            logger.warning(
+                f"Visualization type '{visualization_type}' not available in tiles"
+            )
             return None
 
         first_tile = first_tile_images[visualization_type]
@@ -1065,7 +1151,9 @@ class LED2DOverviewWorkflow(QObject):
 
         # Create output array
         if len(first_tile.shape) == 3:
-            output = np.zeros((output_h, output_w, first_tile.shape[2]), dtype=first_tile.dtype)
+            output = np.zeros(
+                (output_h, output_w, first_tile.shape[2]), dtype=first_tile.dtype
+            )
         else:
             output = np.zeros((output_h, output_w), dtype=first_tile.dtype)
 
@@ -1095,7 +1183,9 @@ class LED2DOverviewWorkflow(QObject):
             tile_crop_w = x_end - x_offset
             tile_crop_h = y_end - y_offset
 
-            output[y_offset:y_end, x_offset:x_end] = tile_img[:tile_crop_h, :tile_crop_w]
+            output[y_offset:y_end, x_offset:x_end] = tile_img[
+                :tile_crop_h, :tile_crop_w
+            ]
 
         logger.debug(f"Assembled tiles with invert_x={self._invert_x}")
         return output
@@ -1113,11 +1203,15 @@ class LED2DOverviewWorkflow(QObject):
 
         # Log summary
         total_tiles = sum(len(r.tiles) for r in self._results)
-        logger.info(f"LED 2D Overview completed: {len(self._results)} rotations, {total_tiles} total tiles captured")
+        logger.info(
+            f"LED 2D Overview completed: {len(self._results)} rotations, {total_tiles} total tiles captured"
+        )
 
         for i, result in enumerate(self._results):
-            logger.info(f"  Rotation {i+1}: {result.rotation_angle}°, {len(result.tiles)} tiles, "
-                       f"grid {result.tiles_x}x{result.tiles_y}")
+            logger.info(
+                f"  Rotation {i+1}: {result.rotation_angle}°, {len(result.tiles)} tiles, "
+                f"grid {result.tiles_x}x{result.tiles_y}"
+            )
 
         self.scan_completed.emit(self._results)
 
@@ -1157,7 +1251,10 @@ class LED2DOverviewWorkflow(QObject):
             return
 
         try:
-            from py2flamingo.views.dialogs.led_2d_overview_result import LED2DOverviewResultWindow
+            from py2flamingo.views.dialogs.led_2d_overview_result import (
+                LED2DOverviewResultWindow,
+            )
+
             logger.info("LED2DOverviewResultWindow imported successfully")
 
             # Keep reference to prevent garbage collection
@@ -1165,7 +1262,7 @@ class LED2DOverviewWorkflow(QObject):
                 results=self._results,
                 config=self._config,
                 app=self._app,
-                parent=None  # Make it independent window
+                parent=None,  # Make it independent window
             )
             logger.info(f"Result window created: {self._result_window}")
 
@@ -1193,5 +1290,5 @@ class LED2DOverviewWorkflow(QObject):
         return (
             self._current_rotation_idx,
             self._current_tile_idx,
-            len(self._tile_positions)
+            len(self._tile_positions),
         )

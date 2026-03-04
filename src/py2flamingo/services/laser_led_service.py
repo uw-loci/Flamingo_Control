@@ -5,8 +5,8 @@ Handles laser and LED control including power setting, preview mode,
 and switching between light sources for imaging.
 """
 
-from typing import Dict, List
 from dataclasses import dataclass
+from typing import Dict, List
 
 from py2flamingo.services.microscope_command_service import MicroscopeCommandService
 
@@ -14,6 +14,7 @@ from py2flamingo.services.microscope_command_service import MicroscopeCommandSer
 @dataclass
 class LaserInfo:
     """Information about a laser line."""
+
     index: int  # 1-based laser index (1, 2, 3, 4)
     wavelength: int  # Wavelength in nm (405, 488, 561, 640)
     max_power: float  # Maximum power in mW
@@ -88,43 +89,50 @@ class LaserLEDService(MicroscopeCommandService):
         """Load laser configuration from ControlSettings."""
         try:
             # Parse ControlSettings.txt for laser parameters
-            from py2flamingo.utils.file_handlers import text_to_dict
             from pathlib import Path
 
+            from py2flamingo.utils.file_handlers import text_to_dict
+
             base_path = self._config.base_path
-            control_settings_path = base_path / 'microscope_settings' / 'ControlSettings.txt'
+            control_settings_path = (
+                base_path / "microscope_settings" / "ControlSettings.txt"
+            )
 
             if not control_settings_path.exists():
-                self.logger.warning(f"ControlSettings.txt not found at {control_settings_path}")
+                self.logger.warning(
+                    f"ControlSettings.txt not found at {control_settings_path}"
+                )
                 return
 
             settings = text_to_dict(str(control_settings_path))
 
             # Extract laser parameters
-            laser_params = settings.get('Laser parameters', {})
-            attached_devices = settings.get('Attached devices', {})
+            laser_params = settings.get("Laser parameters", {})
+            attached_devices = settings.get("Attached devices", {})
 
             # Get number of laser lines
-            num_lasers = int(laser_params.get('Laser lines', 4))
+            num_lasers = int(laser_params.get("Laser lines", 4))
 
             # Load each laser
             for i in range(1, num_lasers + 1):
-                wavelength = int(laser_params.get(f'Laser {i} wave length (nm)', 0))
-                max_power = float(laser_params.get(f'Laser {i} max power (mw)', 0))
-                attached = int(attached_devices.get(f'Attached laser line {i}', 0)) == 1
+                wavelength = int(laser_params.get(f"Laser {i} wave length (nm)", 0))
+                max_power = float(laser_params.get(f"Laser {i} max power (mw)", 0))
+                attached = int(attached_devices.get(f"Attached laser line {i}", 0)) == 1
 
                 if wavelength > 0:  # Valid laser
                     laser = LaserInfo(
                         index=i,
                         wavelength=wavelength,
                         max_power=max_power,
-                        attached=attached
+                        attached=attached,
                     )
                     self._lasers.append(laser)
-                    self.logger.info(f"Loaded {laser.name}, max power: {max_power} mW, attached: {attached}")
+                    self.logger.info(
+                        f"Loaded {laser.name}, max power: {max_power} mW, attached: {attached}"
+                    )
 
             # Check if LED is attached
-            self._led_available = int(attached_devices.get('Attached LED', 0)) == 1
+            self._led_available = int(attached_devices.get("Attached LED", 0)) == 1
             self.logger.info(f"LED available: {self._led_available}")
 
         except Exception as e:
@@ -171,33 +179,47 @@ class LaserLEDService(MicroscopeCommandService):
         result = self._query_command(
             LaserLEDCommandCode.LASER_LEVEL_GET,
             f"LASER_{laser_index}_LEVEL_GET",
-            params=[0, 0, 0, laser_index, 0, 0, 0]  # laser_index in params[3] (int32Data0)
+            params=[
+                0,
+                0,
+                0,
+                laser_index,
+                0,
+                0,
+                0,
+            ],  # laser_index in params[3] (int32Data0)
         )
 
-        if not result['success']:
-            self.logger.error(f"Failed to query laser {laser_index} power: {result.get('error', 'unknown')}")
+        if not result["success"]:
+            self.logger.error(
+                f"Failed to query laser {laser_index} power: {result.get('error', 'unknown')}"
+            )
             return -1.0
 
         # Parse response - power is returned as string in the 72-byte data field
-        parsed = result.get('parsed', {})
+        parsed = result.get("parsed", {})
 
         # The power string is in the main 'data' field (72 bytes), not additional_data
-        buffer_data = parsed.get('data', b'')
+        buffer_data = parsed.get("data", b"")
 
         if not buffer_data:
-            self.logger.error(f"No data field in LASER_LEVEL_GET response for laser {laser_index}")
+            self.logger.error(
+                f"No data field in LASER_LEVEL_GET response for laser {laser_index}"
+            )
             return -1.0
 
         # Extract null-terminated string from buffer
         try:
             # Find first null byte and decode
-            if b'\x00' in buffer_data:
-                buffer_data = buffer_data[:buffer_data.index(b'\x00')]
+            if b"\x00" in buffer_data:
+                buffer_data = buffer_data[: buffer_data.index(b"\x00")]
 
-            power_str = buffer_data.decode('utf-8', errors='ignore').strip()
+            power_str = buffer_data.decode("utf-8", errors="ignore").strip()
 
             if not power_str:
-                self.logger.error(f"Empty power string in response for laser {laser_index}")
+                self.logger.error(
+                    f"Empty power string in response for laser {laser_index}"
+                )
                 return -1.0
 
             actual_power = float(power_str)
@@ -205,10 +227,14 @@ class LaserLEDService(MicroscopeCommandService):
             return actual_power
 
         except (ValueError, UnicodeDecodeError) as e:
-            self.logger.error(f"Failed to parse laser power from response: buffer={buffer_data!r}, error={e}")
+            self.logger.error(
+                f"Failed to parse laser power from response: buffer={buffer_data!r}, error={e}"
+            )
             return -1.0
 
-    def set_laser_power(self, laser_index: int, power_percent: float, verify: bool = True) -> tuple[bool, float]:
+    def set_laser_power(
+        self, laser_index: int, power_percent: float, verify: bool = True
+    ) -> tuple[bool, float]:
         """
         Set laser power level as percentage and optionally verify actual power.
 
@@ -245,19 +271,29 @@ class LaserLEDService(MicroscopeCommandService):
         # From logs: buffer = "5.00", "11.49", etc.
         power_str = f"{power_percent:.2f}"
 
-        self.logger.info(f"DEBUG: Sending LASER_LEVEL_SET with int32Data0={laser_index}, buffer='{power_str}'")
+        self.logger.info(
+            f"DEBUG: Sending LASER_LEVEL_SET with int32Data0={laser_index}, buffer='{power_str}'"
+        )
 
         # Send command - fire-and-forget (laser commands don't send ACK responses)
         result = self._send_command(
             LaserLEDCommandCode.LASER_LEVEL_SET,
             f"LASER_{laser_index}_LEVEL_SET",
-            params=[0, 0, 0, laser_index, 0, 0, 0],  # laser_index in params[3] (int32Data0)
+            params=[
+                0,
+                0,
+                0,
+                laser_index,
+                0,
+                0,
+                0,
+            ],  # laser_index in params[3] (int32Data0)
             data=power_str,
-            wait_for_response=False  # Laser commands are fire-and-forget
+            wait_for_response=False,  # Laser commands are fire-and-forget
         )
 
-        if not result['success']:
-            error = result.get('error', 'unknown error')
+        if not result["success"]:
+            error = result.get("error", "unknown error")
             self.logger.error(f"Laser {laser_index} power set FAILED: {error}")
             return False, power_percent
 
@@ -293,12 +329,20 @@ class LaserLEDService(MicroscopeCommandService):
         result = self._send_command(
             LaserLEDCommandCode.LASER_ENABLE_PREVIEW,
             f"LASER_{laser_index}_ENABLE_PREVIEW",
-            params=[0, 0, 0, laser_index, 0, 0, 0],  # laser_index in params[3] (int32Data0)
-            wait_for_response=False  # Laser commands are fire-and-forget
+            params=[
+                0,
+                0,
+                0,
+                laser_index,
+                0,
+                0,
+                0,
+            ],  # laser_index in params[3] (int32Data0)
+            wait_for_response=False,  # Laser commands are fire-and-forget
         )
 
-        if not result['success']:
-            error = result.get('error', 'unknown error')
+        if not result["success"]:
+            error = result.get("error", "unknown error")
             self.logger.error(f"Laser {laser_index} ENABLE_PREVIEW FAILED: {error}")
             return False
 
@@ -326,11 +370,11 @@ class LaserLEDService(MicroscopeCommandService):
                 LaserLEDCommandCode.LASER_DISABLE_ALL,
                 f"LASER_DISABLE_ALL (Laser {laser_index})",
                 params=[0, 0, 0, laser_index, 0, 0, 0],  # int32Data0 = laser_index
-                wait_for_response=False  # Laser commands are fire-and-forget
+                wait_for_response=False,  # Laser commands are fire-and-forget
             )
 
-            if not result['success']:
-                error = result.get('error', 'unknown error')
+            if not result["success"]:
+                error = result.get("error", "unknown error")
                 self.logger.warning(f"Failed to disable laser {laser_index}: {error}")
                 all_success = False
             else:
@@ -357,7 +401,9 @@ class LaserLEDService(MicroscopeCommandService):
             return False
 
         if not (0 <= led_color <= 3):
-            self.logger.error(f"LED color must be 0-3 (Red/Green/Blue/White), got {led_color}")
+            self.logger.error(
+                f"LED color must be 0-3 (Red/Green/Blue/White), got {led_color}"
+            )
             return False
 
         if not (0.0 <= intensity_percent <= 100.0):
@@ -365,7 +411,9 @@ class LaserLEDService(MicroscopeCommandService):
             return False
 
         color_names = ["Red", "Green", "Blue", "White"]
-        self.logger.debug(f"Setting {color_names[led_color]} LED intensity to {intensity_percent:.1f}%")
+        self.logger.debug(
+            f"Setting {color_names[led_color]} LED intensity to {intensity_percent:.1f}%"
+        )
 
         # LED RANGE FIX: Map UI 0-100% to second half of 16-bit range (positive percentages)
         # LED uses signed percentage system: -100% to +100% mapped to unsigned 16-bit
@@ -379,7 +427,9 @@ class LaserLEDService(MicroscopeCommandService):
         LED_MAX = 65534
         led_value = LED_MIN + int((LED_MAX - LED_MIN) * (intensity_percent / 100.0))
 
-        self.logger.debug(f"LED value mapping: UI {intensity_percent:.1f}% → LED value {led_value} (server +{intensity_percent:.1f}%)")
+        self.logger.debug(
+            f"LED value mapping: UI {intensity_percent:.1f}% → LED value {led_value} (server +{intensity_percent:.1f}%)"
+        )
 
         # LED_SET command (0x4001):
         # int32Data0 = led_color (0=Red, 1=Green, 2=Blue, 3=White)
@@ -387,7 +437,7 @@ class LaserLEDService(MicroscopeCommandService):
         result = self._send_command(
             LaserLEDCommandCode.LED_SET,
             "LED_SET",
-            params=[0, 0, 0, led_color, led_value, 0, 0]
+            params=[0, 0, 0, led_color, led_value, 0, 0],
         )
 
         return self._handle_set_command_result(result, "LED_SET")
@@ -408,7 +458,7 @@ class LaserLEDService(MicroscopeCommandService):
         result = self._send_command(
             LaserLEDCommandCode.LED_PREVIEW_ENABLE,
             "LED_PREVIEW_ENABLE",
-            params=[0, 0, 0, 0, 0, 0, 0]
+            params=[0, 0, 0, 0, 0, 0, 0],
         )
 
         return self._handle_set_command_result(result, "LED_PREVIEW_ENABLE")
@@ -429,7 +479,7 @@ class LaserLEDService(MicroscopeCommandService):
         result = self._send_command(
             LaserLEDCommandCode.LED_PREVIEW_DISABLE,
             "LED_PREVIEW_DISABLE",
-            params=[0, 0, 0, 0, 0, 0, 0]
+            params=[0, 0, 0, 0, 0, 0, 0],
         )
 
         return self._handle_set_command_result(result, "LED_PREVIEW_DISABLE")
@@ -449,12 +499,12 @@ class LaserLEDService(MicroscopeCommandService):
         Returns:
             True if command succeeded (or timed out, which is normal)
         """
-        if result['success']:
+        if result["success"]:
             self.logger.debug(f"{command_name} - SUCCESS (ACK received)")
             return True
 
-        error = result.get('error', 'unknown error')
-        if error == 'timeout':
+        error = result.get("error", "unknown error")
+        if error == "timeout":
             # SET commands may not receive ACK - treat timeout as success
             self.logger.debug(f"{command_name} sent (no ACK response - this is normal)")
             return True
@@ -491,18 +541,24 @@ class LaserLEDService(MicroscopeCommandService):
             result = self._send_command(
                 LaserLEDCommandCode.ILLUMINATION_LEFT_ENABLE,
                 "ILLUMINATION_LEFT_ENABLE",
-                params=[0, 0, 0, 0, 0, 0, 0]
+                params=[0, 0, 0, 0, 0, 0, 0],
             )
-            success = success and self._handle_set_command_result(result, "ILLUMINATION_LEFT_ENABLE")
+            success = success and self._handle_set_command_result(
+                result, "ILLUMINATION_LEFT_ENABLE"
+            )
 
         if right:
-            self.logger.info("Enabling RIGHT illumination path for synchronized imaging")
+            self.logger.info(
+                "Enabling RIGHT illumination path for synchronized imaging"
+            )
             result = self._send_command(
                 LaserLEDCommandCode.ILLUMINATION_RIGHT_ENABLE,
                 "ILLUMINATION_RIGHT_ENABLE",
-                params=[0, 0, 0, 0, 0, 0, 0]
+                params=[0, 0, 0, 0, 0, 0, 0],
             )
-            success = success and self._handle_set_command_result(result, "ILLUMINATION_RIGHT_ENABLE")
+            success = success and self._handle_set_command_result(
+                result, "ILLUMINATION_RIGHT_ENABLE"
+            )
 
         if not left and not right:
             self.logger.warning("enable_illumination called with both paths disabled")
@@ -521,7 +577,7 @@ class LaserLEDService(MicroscopeCommandService):
         result = self._send_command(
             LaserLEDCommandCode.ILLUMINATION_LEFT_DISABLE,
             "ILLUMINATION_LEFT_DISABLE",
-            params=[0, 0, 0, 0, 0, 0, 0]
+            params=[0, 0, 0, 0, 0, 0, 0],
         )
 
         return self._handle_set_command_result(result, "ILLUMINATION_LEFT_DISABLE")

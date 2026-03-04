@@ -22,8 +22,9 @@ Usage:
 """
 
 import logging
+from typing import Optional, Tuple, Union
+
 import numpy as np
-from typing import Tuple, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,9 @@ def _init_gpu():
 
     except ImportError:
         logger.debug("CuPy not installed - GPU acceleration disabled")
-        logger.debug("  Install with: pip install cupy-cuda12x (or appropriate CUDA version)")
+        logger.debug(
+            "  Install with: pip install cupy-cuda12x (or appropriate CUDA version)"
+        )
         _gpu_initialized = True
         return False
     except Exception as e:
@@ -89,11 +92,11 @@ def _init_gpu():
         _gpu_initialized = True
         return False
 
+
 # CPU fallbacks (always available)
 from scipy.ndimage import affine_transform as cpu_affine_transform
 from scipy.ndimage import gaussian_filter as cpu_gaussian_filter
 from scipy.ndimage import shift as cpu_shift
-
 
 # Threshold for using GPU (overhead only worth it for larger volumes)
 GPU_MIN_VOLUME_SIZE = 128**3  # ~2M voxels
@@ -119,14 +122,16 @@ def is_gpu_beneficial(volume: np.ndarray) -> bool:
     return volume_size >= GPU_MIN_VOLUME_SIZE
 
 
-def affine_transform_auto(volume: np.ndarray,
-                          matrix: np.ndarray,
-                          offset: Optional[np.ndarray] = None,
-                          order: int = 1,
-                          mode: str = 'constant',
-                          cval: float = 0.0,
-                          force_gpu: bool = False,
-                          force_cpu: bool = False) -> np.ndarray:
+def affine_transform_auto(
+    volume: np.ndarray,
+    matrix: np.ndarray,
+    offset: Optional[np.ndarray] = None,
+    order: int = 1,
+    mode: str = "constant",
+    cval: float = 0.0,
+    force_gpu: bool = False,
+    force_cpu: bool = False,
+) -> np.ndarray:
     """Apply affine transform with automatic GPU/CPU selection.
 
     For volumes >256³, GPU provides 10-100x speedup.
@@ -148,8 +153,7 @@ def affine_transform_auto(volume: np.ndarray,
         offset = np.zeros(3)
 
     # Lazy GPU init and check if beneficial
-    use_gpu = (not force_cpu and
-               (force_gpu or is_gpu_beneficial(volume)))
+    use_gpu = not force_cpu and (force_gpu or is_gpu_beneficial(volume))
 
     if use_gpu:
         try:
@@ -160,8 +164,12 @@ def affine_transform_auto(volume: np.ndarray,
 
             # GPU transform
             result_gpu = gpu_affine_transform(
-                volume_gpu, matrix_gpu, offset=offset_gpu,
-                order=order, mode=mode, cval=cval
+                volume_gpu,
+                matrix_gpu,
+                offset=offset_gpu,
+                order=order,
+                mode=mode,
+                cval=cval,
             )
 
             # Transfer back to CPU
@@ -179,16 +187,22 @@ def affine_transform_auto(volume: np.ndarray,
 
     # CPU fallback
     result = cpu_affine_transform(
-        volume.astype(np.float32), matrix, offset=offset,
-        order=order, mode=mode, cval=cval
+        volume.astype(np.float32),
+        matrix,
+        offset=offset,
+        order=order,
+        mode=mode,
+        cval=cval,
     )
     return result.astype(volume.dtype)
 
 
-def gaussian_filter_auto(volume: np.ndarray,
-                         sigma: Union[float, Tuple[float, float, float]],
-                         force_gpu: bool = False,
-                         force_cpu: bool = False) -> np.ndarray:
+def gaussian_filter_auto(
+    volume: np.ndarray,
+    sigma: Union[float, Tuple[float, float, float]],
+    force_gpu: bool = False,
+    force_cpu: bool = False,
+) -> np.ndarray:
     """Apply Gaussian filter with automatic GPU/CPU selection.
 
     Gaussian smoothing is often the biggest bottleneck.
@@ -204,8 +218,7 @@ def gaussian_filter_auto(volume: np.ndarray,
         Smoothed volume
     """
     # Lazy GPU init and check if beneficial
-    use_gpu = (not force_cpu and
-               (force_gpu or is_gpu_beneficial(volume)))
+    use_gpu = not force_cpu and (force_gpu or is_gpu_beneficial(volume))
 
     if use_gpu:
         try:
@@ -226,13 +239,15 @@ def gaussian_filter_auto(volume: np.ndarray,
     return result.astype(volume.dtype)
 
 
-def shift_auto(volume: np.ndarray,
-               offset: Tuple[float, float, float],
-               order: int = 1,
-               mode: str = 'constant',
-               cval: float = 0.0,
-               force_gpu: bool = False,
-               force_cpu: bool = False) -> np.ndarray:
+def shift_auto(
+    volume: np.ndarray,
+    offset: Tuple[float, float, float],
+    order: int = 1,
+    mode: str = "constant",
+    cval: float = 0.0,
+    force_gpu: bool = False,
+    force_cpu: bool = False,
+) -> np.ndarray:
     """Apply translation shift with automatic GPU/CPU selection.
 
     Args:
@@ -248,14 +263,14 @@ def shift_auto(volume: np.ndarray,
         Shifted volume
     """
     # Lazy GPU init and check if beneficial
-    use_gpu = (not force_cpu and
-               (force_gpu or is_gpu_beneficial(volume)))
+    use_gpu = not force_cpu and (force_gpu or is_gpu_beneficial(volume))
 
     if use_gpu:
         try:
             volume_gpu = cp.asarray(volume, dtype=cp.float32)
-            result_gpu = gpu_shift(volume_gpu, offset, order=order,
-                                   mode=mode, cval=cval)
+            result_gpu = gpu_shift(
+                volume_gpu, offset, order=order, mode=mode, cval=cval
+            )
             result = cp.asnumpy(result_gpu)
 
             del volume_gpu, result_gpu
@@ -267,16 +282,19 @@ def shift_auto(volume: np.ndarray,
             logger.warning(f"GPU shift failed, falling back to CPU: {e}")
 
     # CPU fallback
-    result = cpu_shift(volume.astype(np.float32), offset, order=order,
-                       mode=mode, cval=cval)
+    result = cpu_shift(
+        volume.astype(np.float32), offset, order=order, mode=mode, cval=cval
+    )
     return result.astype(volume.dtype)
 
 
-def combined_transform_gpu(volume: np.ndarray,
-                           rotation_matrix: np.ndarray,
-                           center_voxels: np.ndarray,
-                           translation_voxels: Tuple[float, float, float],
-                           order: int = 1) -> np.ndarray:
+def combined_transform_gpu(
+    volume: np.ndarray,
+    rotation_matrix: np.ndarray,
+    center_voxels: np.ndarray,
+    translation_voxels: Tuple[float, float, float],
+    order: int = 1,
+) -> np.ndarray:
     """Combined rotation + translation in single GPU pass.
 
     More efficient than separate operations as it:
@@ -316,8 +334,8 @@ def combined_transform_gpu(volume: np.ndarray,
             combined_inv[:3, :3],
             offset=combined_inv[:3, 3],
             order=order,
-            mode='constant',
-            cval=0
+            mode="constant",
+            cval=0,
         ).astype(volume.dtype)
 
     # GPU path
@@ -345,8 +363,8 @@ def combined_transform_gpu(volume: np.ndarray,
             combined_inv[:3, :3],
             offset=combined_inv[:3, 3],
             order=order,
-            mode='constant',
-            cval=0
+            mode="constant",
+            cval=0,
         )
 
         result = cp.asnumpy(result_gpu)
@@ -362,8 +380,7 @@ def combined_transform_gpu(volume: np.ndarray,
         logger.warning(f"GPU combined transform failed: {e}")
         # Recursive call with CPU fallback
         return combined_transform_gpu(
-            volume, rotation_matrix, center_voxels,
-            translation_voxels, order
+            volume, rotation_matrix, center_voxels, translation_voxels, order
         )
 
 
@@ -379,17 +396,17 @@ def get_gpu_info() -> dict:
     _init_gpu()
 
     info = {
-        'available': GPU_AVAILABLE,
-        'device_name': GPU_DEVICE_NAME,
-        'memory_gb': GPU_MEMORY_TOTAL,
-        'min_volume_for_gpu': GPU_MIN_VOLUME_SIZE
+        "available": GPU_AVAILABLE,
+        "device_name": GPU_DEVICE_NAME,
+        "memory_gb": GPU_MEMORY_TOTAL,
+        "min_volume_for_gpu": GPU_MIN_VOLUME_SIZE,
     }
 
     if GPU_AVAILABLE and cp is not None:
         try:
             free_mem, total_mem = cp.cuda.Device().mem_info
-            info['memory_free_gb'] = free_mem / (1024**3)
-            info['memory_used_gb'] = (total_mem - free_mem) / (1024**3)
+            info["memory_free_gb"] = free_mem / (1024**3)
+            info["memory_used_gb"] = (total_mem - free_mem) / (1024**3)
         except Exception:
             pass
 

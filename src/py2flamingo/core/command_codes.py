@@ -37,8 +37,8 @@ class SystemCommands:
     """
 
     # System state commands
-    STATE_GET = 0xa007  # 40967 - Get current system state
-    STATE_IDLE = 0xa002  # 40962 - Set system to IDLE state
+    STATE_GET = 0xA007  # 40967 - Get current system state
+    STATE_IDLE = 0xA002  # 40962 - Set system to IDLE state
 
     # System state values (returned in int32Data0)
     STATE_VALUE_IDLE = 0  # System is idle, ready for commands
@@ -70,7 +70,9 @@ class StageCommands:
     """
 
     # Position commands
-    POSITION_SET_MOVE = 0x6004  # 24580 - Set stage position with motion (Python GUI uses this)
+    POSITION_SET_MOVE = (
+        0x6004  # 24580 - Set stage position with motion (Python GUI uses this)
+    )
     POSITION_SET = 0x6005  # 24581 - Set stage position (slide control)
     POSITION_GET = 0x6008  # 24584 - Get current stage position
 
@@ -80,12 +82,12 @@ class StageCommands:
     VELOCITY_SET = 0x6006  # 24582 - Set stage velocity
 
     # Motion status commands
-    WAIT_FOR_MOTION = 0x600f  # 24591 - Wait for motion to complete
+    WAIT_FOR_MOTION = 0x600F  # 24591 - Wait for motion to complete
     MOTION_STOPPED = 0x6010  # 24592 - Motion stopped callback
 
     # Save location commands
     SAVE_LOCATIONS_GET = 0x6009  # 24585 - Get saved stage positions
-    SAVE_LOCATIONS_SET = 0x600a  # 24586 - Save current positions
+    SAVE_LOCATIONS_SET = 0x600A  # 24586 - Save current positions
 
 
 class LaserCommands:

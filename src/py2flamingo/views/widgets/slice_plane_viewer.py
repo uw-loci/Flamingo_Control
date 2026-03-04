@@ -5,18 +5,18 @@ views with sample holder, objective, and viewing frame position overlays.
 Supports pan/zoom interaction and multi-channel display with colormaps.
 """
 
-import numpy as np
-from typing import Optional, Dict, Tuple
+from typing import Dict, Optional, Tuple
 
-from PyQt5.QtWidgets import QFrame, QVBoxLayout, QLabel
+import numpy as np
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtWidgets import QFrame, QLabel, QVBoxLayout
 
 # Axis colors matching napari 3D viewer
 AXIS_COLORS = {
-    'x': '#008B8B',  # Cyan
-    'y': '#8B008B',  # Magenta
-    'z': '#8B8B00',  # Yellow/Olive
+    "x": "#008B8B",  # Cyan
+    "y": "#8B008B",  # Magenta
+    "z": "#8B8B00",  # Yellow/Olive
 }
 
 
@@ -33,18 +33,26 @@ class SlicePlaneViewer(QFrame):
 
     # Colormaps for multi-channel display
     CHANNEL_COLORMAPS = {
-        'blue': lambda v: np.stack([np.zeros_like(v), np.zeros_like(v), v], axis=-1),
-        'cyan': lambda v: np.stack([np.zeros_like(v), v, v], axis=-1),
-        'green': lambda v: np.stack([np.zeros_like(v), v, np.zeros_like(v)], axis=-1),
-        'red': lambda v: np.stack([v, np.zeros_like(v), np.zeros_like(v)], axis=-1),
-        'magenta': lambda v: np.stack([v, np.zeros_like(v), v], axis=-1),
-        'yellow': lambda v: np.stack([v, v, np.zeros_like(v)], axis=-1),
-        'gray': lambda v: np.stack([v, v, v], axis=-1),
+        "blue": lambda v: np.stack([np.zeros_like(v), np.zeros_like(v), v], axis=-1),
+        "cyan": lambda v: np.stack([np.zeros_like(v), v, v], axis=-1),
+        "green": lambda v: np.stack([np.zeros_like(v), v, np.zeros_like(v)], axis=-1),
+        "red": lambda v: np.stack([v, np.zeros_like(v), np.zeros_like(v)], axis=-1),
+        "magenta": lambda v: np.stack([v, np.zeros_like(v), v], axis=-1),
+        "yellow": lambda v: np.stack([v, v, np.zeros_like(v)], axis=-1),
+        "gray": lambda v: np.stack([v, v, v], axis=-1),
     }
 
-    def __init__(self, plane: str, h_axis: str, v_axis: str,
-                 width: int, height: int, h_axis_inverted: bool = False,
-                 v_axis_inverted: bool = False, parent=None):
+    def __init__(
+        self,
+        plane: str,
+        h_axis: str,
+        v_axis: str,
+        width: int,
+        height: int,
+        h_axis_inverted: bool = False,
+        v_axis_inverted: bool = False,
+        parent=None,
+    ):
         """
         Initialize slice plane viewer.
 
@@ -85,11 +93,15 @@ class SlicePlaneViewer(QFrame):
         # Overlay positions (in physical coordinates, mm)
         self._holder_pos: Optional[Tuple[float, float]] = None  # (h, v)
         self._objective_pos: Optional[Tuple[float, float]] = None
-        self._frame_pos: Optional[Tuple[float, float, float, float]] = None  # (h1, v1, h2, v2)
+        self._frame_pos: Optional[Tuple[float, float, float, float]] = (
+            None  # (h1, v1, h2, v2)
+        )
 
         # Target marker for double-click navigation
         self._target_pos: Optional[Tuple[float, float]] = None  # (h, v) target position
-        self._target_active: bool = True  # True = orange (active), False = purple (stale)
+        self._target_active: bool = (
+            True  # True = orange (active), False = purple (stale)
+        )
 
         # Focal plane indicator position (for showing current slice position)
         self._focal_plane_pos: Optional[float] = None  # Position along the third axis
@@ -98,11 +110,15 @@ class SlicePlaneViewer(QFrame):
         self._zoom_level: float = 1.0  # Zoom factor (1.0 = fit to widget)
         self._pan_offset: Tuple[float, float] = (0.0, 0.0)  # Pan offset in pixels
         self._drag_start: Optional[Tuple[int, int]] = None  # For tracking drag gesture
-        self._drag_start_pan: Optional[Tuple[float, float]] = None  # Pan offset at drag start
+        self._drag_start_pan: Optional[Tuple[float, float]] = (
+            None  # Pan offset at drag start
+        )
         self._is_dragging: bool = False  # Distinguish click vs drag
 
         # Mouse position tracking for coordinate display
-        self._mouse_pos: Optional[Tuple[float, float]] = None  # Current mouse position in physical coords
+        self._mouse_pos: Optional[Tuple[float, float]] = (
+            None  # Current mouse position in physical coords
+        )
         self._show_axis_labels: bool = True  # Show min/max axis labels
         self._show_coordinate_readout: bool = True  # Show mouse position readout
 
@@ -114,8 +130,8 @@ class SlicePlaneViewer(QFrame):
         self.setFixedSize(self._width, self._height)
 
         # Get border colors from axis
-        h_color = AXIS_COLORS.get(self.h_axis, '#444')
-        v_color = AXIS_COLORS.get(self.v_axis, '#444')
+        h_color = AXIS_COLORS.get(self.h_axis, "#444")
+        v_color = AXIS_COLORS.get(self.v_axis, "#444")
 
         # Create colored border using stylesheet
         # Left/Right borders use horizontal axis color, Top/Bottom use vertical axis color
@@ -137,7 +153,9 @@ class SlicePlaneViewer(QFrame):
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setStyleSheet("background-color: transparent; border: none;")
-        self.image_label.setText(f"{self.plane.upper()}\n(Double-click to move\nDrag to pan, scroll to zoom)")
+        self.image_label.setText(
+            f"{self.plane.upper()}\n(Double-click to move\nDrag to pan, scroll to zoom)"
+        )
         self.image_label.setStyleSheet("color: #666; background-color: transparent;")
         layout.addWidget(self.image_label)
 
@@ -177,8 +195,9 @@ class SlicePlaneViewer(QFrame):
         self._frame_pos = (h1, v1, h2, v2)
         self._update_display()
 
-    def set_multi_channel_mip(self, channel_mips: Dict[int, np.ndarray],
-                               channel_settings: Dict[int, dict]):
+    def set_multi_channel_mip(
+        self, channel_mips: Dict[int, np.ndarray], channel_settings: Dict[int, dict]
+    ):
         """Set MIP data for multiple channels with display settings.
 
         Args:
@@ -244,7 +263,7 @@ class SlicePlaneViewer(QFrame):
 
     def _update_display(self):
         """Update the display with current MIP data and overlays."""
-        from PyQt5.QtGui import QPainter, QPen, QColor, QBrush, QFont
+        from PyQt5.QtGui import QBrush, QColor, QFont, QPainter, QPen
 
         # Create image from MIP data
         display_width = self._width - 6  # Account for borders
@@ -293,7 +312,11 @@ class SlicePlaneViewer(QFrame):
             pixmap.fill(Qt.black)
 
         # Apply zoom and pan transforms - fit image within the reduced image area
-        base_scale = min(display_width / pixmap.width(), img_area_height / pixmap.height()) if pixmap.width() > 0 else 1.0
+        base_scale = (
+            min(display_width / pixmap.width(), img_area_height / pixmap.height())
+            if pixmap.width() > 0
+            else 1.0
+        )
         effective_scale = base_scale * self._zoom_level
 
         # Calculate scaled dimensions
@@ -302,7 +325,9 @@ class SlicePlaneViewer(QFrame):
 
         # Scale the pixmap
         if scaled_w > 0 and scaled_h > 0:
-            scaled_pixmap = pixmap.scaled(scaled_w, scaled_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            scaled_pixmap = pixmap.scaled(
+                scaled_w, scaled_h, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
         else:
             scaled_pixmap = pixmap
 
@@ -315,7 +340,11 @@ class SlicePlaneViewer(QFrame):
 
         # Calculate centered position with pan offset, shifted down by top margin
         center_x = (display_width - scaled_pixmap.width()) / 2 + self._pan_offset[0]
-        center_y = label_margin_top + (img_area_height - scaled_pixmap.height()) / 2 + self._pan_offset[1]
+        center_y = (
+            label_margin_top
+            + (img_area_height - scaled_pixmap.height()) / 2
+            + self._pan_offset[1]
+        )
 
         # Draw the scaled MIP image
         painter.drawPixmap(int(center_x), int(center_y), scaled_pixmap)
@@ -323,8 +352,16 @@ class SlicePlaneViewer(QFrame):
         # Calculate scale factors for overlay positions (relative to the scaled image)
         img_w = scaled_pixmap.width()
         img_h = scaled_pixmap.height()
-        h_scale = img_w / (self.h_range[1] - self.h_range[0]) if self.h_range[1] != self.h_range[0] else 1
-        v_scale = img_h / (self.v_range[1] - self.v_range[0]) if self.v_range[1] != self.v_range[0] else 1
+        h_scale = (
+            img_w / (self.h_range[1] - self.h_range[0])
+            if self.h_range[1] != self.h_range[0]
+            else 1
+        )
+        v_scale = (
+            img_h / (self.v_range[1] - self.v_range[0])
+            if self.v_range[1] != self.v_range[0]
+            else 1
+        )
 
         def to_pixel(h_coord, v_coord):
             """Convert physical coordinates to pixel coordinates on the final pixmap."""
@@ -344,15 +381,15 @@ class SlicePlaneViewer(QFrame):
 
         # Draw focal plane indicator (cyan dashed line through objective position)
         if self._focal_plane_pos is not None:
-            pen = QPen(QColor('#00FFFF'))
+            pen = QPen(QColor("#00FFFF"))
             pen.setWidth(1)
             pen.setStyle(Qt.DashLine)
             painter.setPen(pen)
-            if self.plane in ('xz', 'xy'):
+            if self.plane in ("xz", "xy"):
                 # Focal plane is a V-axis value: draw horizontal line spanning full width
                 _, py = to_pixel(self.h_range[0], self._focal_plane_pos)
                 painter.drawLine(int(center_x), py, int(center_x + img_w), py)
-            elif self.plane == 'yz':
+            elif self.plane == "yz":
                 # Focal plane is an H-axis value (Z): draw vertical line spanning full height
                 px, _ = to_pixel(self._focal_plane_pos, self.v_range[0])
                 painter.drawLine(px, int(center_y), px, int(center_y + img_h))
@@ -360,11 +397,11 @@ class SlicePlaneViewer(QFrame):
         # Draw target marker (orange active, purple stale)
         if self._target_pos:
             if self._target_active:
-                pen = QPen(QColor('#FFA500'))  # Orange for active
-                brush = QBrush(QColor('#FFA500'))
+                pen = QPen(QColor("#FFA500"))  # Orange for active
+                brush = QBrush(QColor("#FFA500"))
             else:
-                pen = QPen(QColor('#9370DB'))  # Purple for stale
-                brush = QBrush(QColor('#9370DB'))
+                pen = QPen(QColor("#9370DB"))  # Purple for stale
+                brush = QBrush(QColor("#9370DB"))
             pen.setWidth(2)
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
@@ -378,22 +415,23 @@ class SlicePlaneViewer(QFrame):
 
         # Draw objective indicator (gold/yellow)
         if self._objective_pos:
-            pen = QPen(QColor('#FFCC00'))
+            pen = QPen(QColor("#FFCC00"))
             painter.setBrush(Qt.NoBrush)
             px, py = to_pixel(*self._objective_pos)
             obj_radius = max(6, min(40, min(img_w, img_h) // 6))
-            if self.plane == 'xy':
+            if self.plane == "xy":
                 # Front view: objective is a circle in XY plane
                 pen.setWidth(2)
                 painter.setPen(pen)
-                painter.drawEllipse(px - obj_radius, py - obj_radius,
-                                    obj_radius * 2, obj_radius * 2)
-            elif self.plane == 'xz':
+                painter.drawEllipse(
+                    px - obj_radius, py - obj_radius, obj_radius * 2, obj_radius * 2
+                )
+            elif self.plane == "xz":
                 # Top-down view: objective circle seen edge-on → horizontal line at Z_min
                 pen.setWidth(3)
                 painter.setPen(pen)
                 painter.drawLine(px - obj_radius, py, px + obj_radius, py)
-            elif self.plane == 'yz':
+            elif self.plane == "yz":
                 # Side view: objective circle seen edge-on → vertical line at Z_min
                 pen.setWidth(3)
                 painter.setPen(pen)
@@ -401,7 +439,7 @@ class SlicePlaneViewer(QFrame):
 
         # Draw sample holder position (white cross)
         if self._holder_pos:
-            pen = QPen(QColor('#FFFFFF'))
+            pen = QPen(QColor("#FFFFFF"))
             pen.setWidth(2)
             painter.setPen(pen)
             px, py = to_pixel(*self._holder_pos)
@@ -411,14 +449,15 @@ class SlicePlaneViewer(QFrame):
 
         # Draw viewing frame (cyan dashed rectangle)
         if self._frame_pos:
-            pen = QPen(QColor('#00FFFF'))
+            pen = QPen(QColor("#00FFFF"))
             pen.setWidth(1)
             pen.setStyle(Qt.DashLine)
             painter.setPen(pen)
             px1, py1 = to_pixel(self._frame_pos[0], self._frame_pos[1])
             px2, py2 = to_pixel(self._frame_pos[2], self._frame_pos[3])
-            painter.drawRect(min(px1, px2), min(py1, py2),
-                           abs(px2 - px1), abs(py2 - py1))
+            painter.drawRect(
+                min(px1, px2), min(py1, py2), abs(px2 - px1), abs(py2 - py1)
+            )
 
         # Draw axis labels (min/max values at corners)
         if self._show_axis_labels:
@@ -456,8 +495,13 @@ class SlicePlaneViewer(QFrame):
                     y = y - text_height - padding * 2
 
                 # Draw background
-                painter.fillRect(int(x), int(y), text_width + padding * 2, text_height + padding,
-                               label_bg)
+                painter.fillRect(
+                    int(x),
+                    int(y),
+                    text_width + padding * 2,
+                    text_height + padding,
+                    label_bg,
+                )
                 # Draw text
                 painter.setPen(label_fg)
                 painter.drawText(int(x + padding), int(y + text_height - padding), text)
@@ -476,11 +520,23 @@ class SlicePlaneViewer(QFrame):
             if self._v_axis_inverted:
                 # Inverted: max at top, min at bottom
                 draw_label(v_max_str, img_left + 2, img_top - 15)
-                draw_label(v_min_str, img_right - 2, img_bottom + 2, align_right=True, align_bottom=True)
+                draw_label(
+                    v_min_str,
+                    img_right - 2,
+                    img_bottom + 2,
+                    align_right=True,
+                    align_bottom=True,
+                )
             else:
                 # Normal: min at top, max at bottom
                 draw_label(v_min_str, img_left + 2, img_top - 15)
-                draw_label(v_max_str, img_right - 2, img_bottom + 2, align_right=True, align_bottom=True)
+                draw_label(
+                    v_max_str,
+                    img_right - 2,
+                    img_bottom + 2,
+                    align_right=True,
+                    align_bottom=True,
+                )
 
         # Draw coordinate readout (mouse position)
         if self._show_coordinate_readout and self._mouse_pos is not None:
@@ -502,11 +558,18 @@ class SlicePlaneViewer(QFrame):
             y = 4
 
             # Draw background with slight transparency
-            painter.fillRect(int(x), int(y), text_width + padding * 2, text_height + padding,
-                           QColor(0, 0, 0, 180))
+            painter.fillRect(
+                int(x),
+                int(y),
+                text_width + padding * 2,
+                text_height + padding,
+                QColor(0, 0, 0, 180),
+            )
             # Draw text in bright color
             painter.setPen(QColor(255, 255, 100))  # Yellow for visibility
-            painter.drawText(int(x + padding), int(y + text_height - padding), coord_text)
+            painter.drawText(
+                int(x + padding), int(y + text_height - padding), coord_text
+            )
 
         painter.end()
 
@@ -541,23 +604,27 @@ class SlicePlaneViewer(QFrame):
             settings = self._channel_settings.get(ch_id, {})
 
             # Check visibility
-            if not settings.get('visible', True):
+            if not settings.get("visible", True):
                 continue
 
             # Get contrast limits
-            contrast_min = settings.get('contrast_min', 0)
-            contrast_max = settings.get('contrast_max', 65535)
+            contrast_min = settings.get("contrast_min", 0)
+            contrast_max = settings.get("contrast_max", 65535)
 
             # Normalize data using contrast limits
             data = ch_data.astype(np.float32)
             if contrast_max > contrast_min:
-                data = np.clip((data - contrast_min) / (contrast_max - contrast_min), 0, 1)
+                data = np.clip(
+                    (data - contrast_min) / (contrast_max - contrast_min), 0, 1
+                )
             else:
                 data = np.zeros_like(data)
 
             # Get colormap and apply
-            colormap_name = settings.get('colormap', 'gray')
-            colormap_fn = self.CHANNEL_COLORMAPS.get(colormap_name, self.CHANNEL_COLORMAPS['gray'])
+            colormap_name = settings.get("colormap", "gray")
+            colormap_fn = self.CHANNEL_COLORMAPS.get(
+                colormap_name, self.CHANNEL_COLORMAPS["gray"]
+            )
 
             # Apply colormap (returns H, W, 3)
             ch_rgb = colormap_fn(data)
@@ -600,7 +667,7 @@ class SlicePlaneViewer(QFrame):
                 # Update pan offset
                 self._pan_offset = (
                     self._drag_start_pan[0] + dx,
-                    self._drag_start_pan[1] + dy
+                    self._drag_start_pan[1] + dy,
                 )
                 self._update_display()
 
@@ -672,7 +739,7 @@ class SlicePlaneViewer(QFrame):
                 # New pan offset to keep mouse at same physical location
                 self._pan_offset = (
                     self._pan_offset[0] - offset_x * (scale_change - 1),
-                    self._pan_offset[1] - offset_y * (scale_change - 1)
+                    self._pan_offset[1] - offset_y * (scale_change - 1),
                 )
 
                 self._zoom_level = new_zoom
@@ -719,7 +786,11 @@ class SlicePlaneViewer(QFrame):
             orig_h, orig_w = img_area_height, display_width
 
         # Calculate scale to fit image in reduced area (same as _update_display)
-        base_scale = min(display_width / orig_w, img_area_height / orig_h) if orig_w > 0 and orig_h > 0 else 1.0
+        base_scale = (
+            min(display_width / orig_w, img_area_height / orig_h)
+            if orig_w > 0 and orig_h > 0
+            else 1.0
+        )
         effective_scale = base_scale * self._zoom_level
 
         scaled_w = orig_w * effective_scale
@@ -727,7 +798,9 @@ class SlicePlaneViewer(QFrame):
 
         # Image position on display (shifted down by top margin)
         img_x = (display_width - scaled_w) / 2 + self._pan_offset[0]
-        img_y = label_margin_top + (img_area_height - scaled_h) / 2 + self._pan_offset[1]
+        img_y = (
+            label_margin_top + (img_area_height - scaled_h) / 2 + self._pan_offset[1]
+        )
 
         # Check if click is within image bounds
         if px < img_x or px > img_x + scaled_w or py < img_y or py > img_y + scaled_h:
@@ -737,15 +810,23 @@ class SlicePlaneViewer(QFrame):
         # Convert to physical coordinates
         if self._h_axis_inverted:
             # Inverted: left of image is h_max, right is h_min
-            h_coord = self.h_range[1] - ((px - img_x) / scaled_w) * (self.h_range[1] - self.h_range[0])
+            h_coord = self.h_range[1] - ((px - img_x) / scaled_w) * (
+                self.h_range[1] - self.h_range[0]
+            )
         else:
             # Normal: left of image is h_min, right is h_max
-            h_coord = self.h_range[0] + ((px - img_x) / scaled_w) * (self.h_range[1] - self.h_range[0])
+            h_coord = self.h_range[0] + ((px - img_x) / scaled_w) * (
+                self.h_range[1] - self.h_range[0]
+            )
         if self._v_axis_inverted:
             # Inverted: top of image is v_max, bottom is v_min
-            v_coord = self.v_range[1] - ((py - img_y) / scaled_h) * (self.v_range[1] - self.v_range[0])
+            v_coord = self.v_range[1] - ((py - img_y) / scaled_h) * (
+                self.v_range[1] - self.v_range[0]
+            )
         else:
             # Normal: top of image is v_min, bottom is v_max
-            v_coord = self.v_range[0] + ((py - img_y) / scaled_h) * (self.v_range[1] - self.v_range[0])
+            v_coord = self.v_range[0] + ((py - img_y) / scaled_h) * (
+                self.v_range[1] - self.v_range[0]
+            )
 
         return (h_coord, v_coord)

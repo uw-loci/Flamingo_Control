@@ -5,25 +5,37 @@ This module provides the LiveFeedView widget that displays live images from
 the microscope with user-configurable transformations. Updates are suppressed
 during workflow execution.
 """
+
 import logging
+from queue import Empty, Queue
 from typing import Optional
-from queue import Queue, Empty
 
 import numpy as np
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QCheckBox, QComboBox, QGroupBox, QSlider, QSizePolicy,
-    QDoubleSpinBox, QSpinBox, QLineEdit, QScrollArea
-)
-from PyQt5.QtCore import QTimer, Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QPixmap
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSlider,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
+from ..controllers import WorkflowController
 from ..models import ImageDisplayModel
 from ..models.microscope import Position
-from ..controllers import WorkflowController
-from ..utils.image_transforms import Rotation, Colormap, apply_transforms
 from ..utils.image_processing import convert_to_qimage
-from .colors import SUCCESS_COLOR, ERROR_COLOR
+from ..utils.image_transforms import Colormap, Rotation, apply_transforms
+from .colors import ERROR_COLOR, SUCCESS_COLOR
 
 
 class LiveFeedView(QWidget):
@@ -59,14 +71,16 @@ class LiveFeedView(QWidget):
     # Signal for settings sync
     sync_settings_requested = pyqtSignal()
 
-    def __init__(self,
-                 workflow_controller: WorkflowController,
-                 visualize_queue: Queue,
-                 display_model: Optional[ImageDisplayModel] = None,
-                 update_interval_ms: int = 500,
-                 position_controller=None,
-                 image_acquisition_service=None,
-                 initialization_service=None):
+    def __init__(
+        self,
+        workflow_controller: WorkflowController,
+        visualize_queue: Queue,
+        display_model: Optional[ImageDisplayModel] = None,
+        update_interval_ms: int = 500,
+        position_controller=None,
+        image_acquisition_service=None,
+        initialization_service=None,
+    ):
         """
         Initialize live feed view.
 
@@ -100,7 +114,7 @@ class LiveFeedView(QWidget):
             "Laser 2 445 nm",
             "Laser 3 488 nm",
             "Laser 4 561 nm",
-            "Laser 5 638 nm"
+            "Laser 5 638 nm",
         ]
 
         # Setup UI
@@ -114,7 +128,9 @@ class LiveFeedView(QWidget):
         self.timer.timeout.connect(self._check_for_image)
         self.timer.start(self.update_interval_ms)
 
-        self._logger.info(f"LiveFeedView initialized (poll interval: {update_interval_ms}ms)")
+        self._logger.info(
+            f"LiveFeedView initialized (poll interval: {update_interval_ms}ms)"
+        )
 
     def setup_ui(self) -> None:
         """Create and layout UI components."""
@@ -142,7 +158,9 @@ class LiveFeedView(QWidget):
         self.image_label.setMinimumSize(512, 512)
         self.image_label.setMaximumSize(800, 800)
         self.image_label.setScaledContents(False)
-        self.image_label.setStyleSheet("QLabel { background-color: black; color: gray; }")
+        self.image_label.setStyleSheet(
+            "QLabel { background-color: black; color: gray; }"
+        )
         display_layout.addWidget(self.image_label)
 
         # Status label
@@ -272,10 +290,10 @@ class LiveFeedView(QWidget):
         self.x_spinbox.setValue(0.0)
         x_layout.addWidget(self.x_spinbox)
         self.x_minus_btn = QPushButton("-0.1")
-        self.x_minus_btn.clicked.connect(lambda: self._move_relative('X', -0.1))
+        self.x_minus_btn.clicked.connect(lambda: self._move_relative("X", -0.1))
         x_layout.addWidget(self.x_minus_btn)
         self.x_plus_btn = QPushButton("+0.1")
-        self.x_plus_btn.clicked.connect(lambda: self._move_relative('X', 0.1))
+        self.x_plus_btn.clicked.connect(lambda: self._move_relative("X", 0.1))
         x_layout.addWidget(self.x_plus_btn)
         stage_layout.addLayout(x_layout)
 
@@ -289,10 +307,10 @@ class LiveFeedView(QWidget):
         self.y_spinbox.setValue(0.0)
         y_layout.addWidget(self.y_spinbox)
         self.y_minus_btn = QPushButton("-0.1")
-        self.y_minus_btn.clicked.connect(lambda: self._move_relative('Y', -0.1))
+        self.y_minus_btn.clicked.connect(lambda: self._move_relative("Y", -0.1))
         y_layout.addWidget(self.y_minus_btn)
         self.y_plus_btn = QPushButton("+0.1")
-        self.y_plus_btn.clicked.connect(lambda: self._move_relative('Y', 0.1))
+        self.y_plus_btn.clicked.connect(lambda: self._move_relative("Y", 0.1))
         y_layout.addWidget(self.y_plus_btn)
         stage_layout.addLayout(y_layout)
 
@@ -306,10 +324,10 @@ class LiveFeedView(QWidget):
         self.z_spinbox.setValue(0.0)
         z_layout.addWidget(self.z_spinbox)
         self.z_minus_btn = QPushButton("-0.01")
-        self.z_minus_btn.clicked.connect(lambda: self._move_relative('Z', -0.01))
+        self.z_minus_btn.clicked.connect(lambda: self._move_relative("Z", -0.01))
         z_layout.addWidget(self.z_minus_btn)
         self.z_plus_btn = QPushButton("+0.01")
-        self.z_plus_btn.clicked.connect(lambda: self._move_relative('Z', 0.01))
+        self.z_plus_btn.clicked.connect(lambda: self._move_relative("Z", 0.01))
         z_layout.addWidget(self.z_plus_btn)
         stage_layout.addLayout(z_layout)
 
@@ -323,10 +341,10 @@ class LiveFeedView(QWidget):
         self.r_spinbox.setValue(0.0)
         r_layout.addWidget(self.r_spinbox)
         self.r_minus_btn = QPushButton("-1°")
-        self.r_minus_btn.clicked.connect(lambda: self._move_relative('R', -1.0))
+        self.r_minus_btn.clicked.connect(lambda: self._move_relative("R", -1.0))
         r_layout.addWidget(self.r_minus_btn)
         self.r_plus_btn = QPushButton("+1°")
-        self.r_plus_btn.clicked.connect(lambda: self._move_relative('R', 1.0))
+        self.r_plus_btn.clicked.connect(lambda: self._move_relative("R", 1.0))
         r_layout.addWidget(self.r_plus_btn)
         stage_layout.addLayout(r_layout)
 
@@ -386,12 +404,16 @@ class LiveFeedView(QWidget):
 
         self.snapshot_btn = QPushButton("Take Snapshot")
         self.snapshot_btn.clicked.connect(self._on_snapshot_clicked)
-        self.snapshot_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        self.snapshot_btn.setStyleSheet(
+            "background-color: #4CAF50; color: white; font-weight: bold;"
+        )
         acq_btn_layout.addWidget(self.snapshot_btn)
 
         self.brightfield_btn = QPushButton("Acquire Brightfield")
         self.brightfield_btn.clicked.connect(self._on_brightfield_clicked)
-        self.brightfield_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
+        self.brightfield_btn.setStyleSheet(
+            "background-color: #2196F3; color: white; font-weight: bold;"
+        )
         acq_btn_layout.addWidget(self.brightfield_btn)
 
         acquisition_layout.addLayout(acq_btn_layout)
@@ -400,7 +422,9 @@ class LiveFeedView(QWidget):
         sync_layout = QHBoxLayout()
         self.sync_settings_btn = QPushButton("Sync Settings from Microscope")
         self.sync_settings_btn.clicked.connect(self._on_sync_settings)
-        self.sync_settings_btn.setToolTip("Pull current settings from microscope and update GUI")
+        self.sync_settings_btn.setToolTip(
+            "Pull current settings from microscope and update GUI"
+        )
         sync_layout.addWidget(self.sync_settings_btn)
         acquisition_layout.addLayout(sync_layout)
 
@@ -471,7 +495,7 @@ class LiveFeedView(QWidget):
                 flip_vertical=self.display_model.flip_vertical,
                 downsample_factor=self.display_model.downsample_factor,
                 colormap=self.display_model.colormap,
-                normalize=True
+                normalize=True,
             )
 
             # Convert to QImage for display
@@ -481,10 +505,12 @@ class LiveFeedView(QWidget):
             elif transformed.ndim == 3 and transformed.shape[2] == 3:
                 # RGB uint8 from colormap
                 from PyQt5.QtGui import QImage
+
                 h, w, c = transformed.shape
                 bytes_per_line = w * 3
-                qimage = QImage(transformed.data, w, h, bytes_per_line,
-                              QImage.Format_RGB888).copy()
+                qimage = QImage(
+                    transformed.data, w, h, bytes_per_line, QImage.Format_RGB888
+                ).copy()
             else:
                 self._logger.error(f"Unexpected image shape: {transformed.shape}")
                 return
@@ -494,21 +520,23 @@ class LiveFeedView(QWidget):
 
             # Scale to fit label while maintaining aspect ratio
             scaled_pixmap = pixmap.scaled(
-                self.image_label.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
+                self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
 
             self.image_label.setPixmap(scaled_pixmap)
 
             # Update status
             self.status_label.setText(f"Status: Live ({self._frame_count} frames)")
-            self.status_label.setStyleSheet(f"color: {SUCCESS_COLOR}; font-style: italic;")
+            self.status_label.setStyleSheet(
+                f"color: {SUCCESS_COLOR}; font-style: italic;"
+            )
 
         except Exception as e:
             self._logger.exception(f"Error displaying image: {e}")
             self.status_label.setText(f"Status: Error - {str(e)}")
-            self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-style: italic;")
+            self.status_label.setStyleSheet(
+                f"color: {ERROR_COLOR}; font-style: italic;"
+            )
 
     def _set_rotation(self, degrees: int) -> None:
         """
@@ -547,7 +575,7 @@ class LiveFeedView(QWidget):
             value: Slider value (0-3, representing 2^value downsampling)
         """
         # Convert slider value to downsample factor: 2^value
-        factor = 2 ** value
+        factor = 2**value
         self.display_model.downsample_factor = factor
         self.downsample_label.setText(f"{factor}x")
 
@@ -618,16 +646,16 @@ class LiveFeedView(QWidget):
         """
         try:
             # Update current position
-            if axis == 'X':
+            if axis == "X":
                 self._current_position.x += delta
                 self.x_spinbox.setValue(self._current_position.x)
-            elif axis == 'Y':
+            elif axis == "Y":
                 self._current_position.y += delta
                 self.y_spinbox.setValue(self._current_position.y)
-            elif axis == 'Z':
+            elif axis == "Z":
                 self._current_position.z += delta
                 self.z_spinbox.setValue(self._current_position.z)
-            elif axis == 'R':
+            elif axis == "R":
                 self._current_position.r += delta
                 self.r_spinbox.setValue(self._current_position.r)
 
@@ -642,7 +670,9 @@ class LiveFeedView(QWidget):
         except Exception as e:
             self._logger.error(f"Error moving {axis}: {e}")
             self.status_label.setText(f"Status: Error moving stage - {str(e)}")
-            self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-style: italic;")
+            self.status_label.setStyleSheet(
+                f"color: {ERROR_COLOR}; font-style: italic;"
+            )
 
     def _on_move_to_position(self) -> None:
         """Handle move to absolute position button click."""
@@ -652,7 +682,7 @@ class LiveFeedView(QWidget):
                 x=self.x_spinbox.value(),
                 y=self.y_spinbox.value(),
                 z=self.z_spinbox.value(),
-                r=self.r_spinbox.value()
+                r=self.r_spinbox.value(),
             )
 
             # Emit signal for absolute movement
@@ -669,7 +699,9 @@ class LiveFeedView(QWidget):
         except Exception as e:
             self._logger.error(f"Error moving to position: {e}")
             self.status_label.setText(f"Status: Error - {str(e)}")
-            self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-style: italic;")
+            self.status_label.setStyleSheet(
+                f"color: {ERROR_COLOR}; font-style: italic;"
+            )
 
     def _update_position_display(self) -> None:
         """Update the position label with current position."""
@@ -702,7 +734,9 @@ class LiveFeedView(QWidget):
         to initialize the position display with actual microscope position.
         """
         if self.position_controller is None:
-            self._logger.warning("Cannot request position: position_controller not available")
+            self._logger.warning(
+                "Cannot request position: position_controller not available"
+            )
             return
 
         try:
@@ -747,10 +781,7 @@ class LiveFeedView(QWidget):
         Returns:
             Tuple of (laser_channel, laser_power)
         """
-        return (
-            self.laser_combo.currentText(),
-            self.power_spinbox.value()
-        )
+        return (self.laser_combo.currentText(), self.power_spinbox.value())
 
     # Image acquisition methods
     def _on_snapshot_clicked(self) -> None:
@@ -772,7 +803,9 @@ class LiveFeedView(QWidget):
         except Exception as e:
             self._logger.error(f"Error requesting snapshot: {e}")
             self.status_label.setText(f"Status: Snapshot error - {str(e)}")
-            self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-style: italic;")
+            self.status_label.setStyleSheet(
+                f"color: {ERROR_COLOR}; font-style: italic;"
+            )
             self.snapshot_btn.setEnabled(True)
 
     def _on_brightfield_clicked(self) -> None:
@@ -794,7 +827,9 @@ class LiveFeedView(QWidget):
         except Exception as e:
             self._logger.error(f"Error requesting brightfield: {e}")
             self.status_label.setText(f"Status: Brightfield error - {str(e)}")
-            self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-style: italic;")
+            self.status_label.setStyleSheet(
+                f"color: {ERROR_COLOR}; font-style: italic;"
+            )
             self.brightfield_btn.setEnabled(True)
 
     def _on_sync_settings(self) -> None:
@@ -816,7 +851,9 @@ class LiveFeedView(QWidget):
         except Exception as e:
             self._logger.error(f"Error syncing settings: {e}")
             self.status_label.setText(f"Status: Sync error - {str(e)}")
-            self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-style: italic;")
+            self.status_label.setStyleSheet(
+                f"color: {ERROR_COLOR}; font-style: italic;"
+            )
             self.sync_settings_btn.setEnabled(True)
 
     def set_controls_enabled(self, enabled: bool) -> None:

@@ -5,15 +5,20 @@ extracted from led_2d_overview_result.py.
 """
 
 import logging
-from typing import Optional, List
+from typing import List, Optional
 
-from PyQt5.QtWidgets import QLabel, QScrollArea
-from PyQt5.QtCore import Qt, QSize, QPoint, QTimer, pyqtSignal
+from PyQt5.QtCore import QPoint, QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import (
-    QPixmap, QWheelEvent, QMouseEvent, QPainter, QFont, QColor,
-    QFontMetrics, QPaintEvent,
+    QColor,
+    QFont,
+    QFontMetrics,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QPixmap,
+    QWheelEvent,
 )
-
+from PyQt5.QtWidgets import QLabel, QScrollArea
 
 logger = logging.getLogger(__name__)
 
@@ -103,11 +108,11 @@ class ZoomableImageLabel(QLabel):
         if new_width < 1 or new_height < 1:
             return
 
-        transform = Qt.FastTransformation if self._interactive else Qt.SmoothTransformation
+        transform = (
+            Qt.FastTransformation if self._interactive else Qt.SmoothTransformation
+        )
         scaled = self._original_pixmap.scaled(
-            new_width, new_height,
-            Qt.KeepAspectRatio,
-            transform
+            new_width, new_height, Qt.KeepAspectRatio, transform
         )
         super().setPixmap(scaled)
 
@@ -127,8 +132,12 @@ class ZoomableImageLabel(QLabel):
         """Paint the label, then overlay coordinate labels when zoomed in."""
         super().paintEvent(event)
 
-        if (not self._tile_coords or self._tiles_x <= 0 or self._tiles_y <= 0
-                or self._original_pixmap is None):
+        if (
+            not self._tile_coords
+            or self._tiles_x <= 0
+            or self._tiles_y <= 0
+            or self._original_pixmap is None
+        ):
             return
 
         # Only draw labels when tiles are large enough on screen to read
@@ -156,11 +165,10 @@ class ZoomableImageLabel(QLabel):
         if self._scroll_area:
             vp = self._scroll_area.viewport().rect()
             # Map viewport rect to label coordinates
-            top_left = self.mapFrom(self._scroll_area.viewport(),
-                                     vp.topLeft())
-            bottom_right = self.mapFrom(self._scroll_area.viewport(),
-                                         vp.bottomRight())
+            top_left = self.mapFrom(self._scroll_area.viewport(), vp.topLeft())
+            bottom_right = self.mapFrom(self._scroll_area.viewport(), vp.bottomRight())
             from PyQt5.QtCore import QRect
+
             visible_rect = QRect(top_left, bottom_right)
 
         painter.setPen(QColor(255, 255, 255))
@@ -182,10 +190,12 @@ class ZoomableImageLabel(QLabel):
 
             # Skip tiles not visible in viewport
             if visible_rect is not None:
-                if (tile_left + tile_display_w < visible_rect.left()
-                        or tile_left > visible_rect.right()
-                        or tile_top + tile_display_h < visible_rect.top()
-                        or tile_top > visible_rect.bottom()):
+                if (
+                    tile_left + tile_display_w < visible_rect.left()
+                    or tile_left > visible_rect.right()
+                    or tile_top + tile_display_h < visible_rect.top()
+                    or tile_top > visible_rect.bottom()
+                ):
                     continue
 
             text1 = f"X:{x_val:.2f}"
@@ -193,10 +203,12 @@ class ZoomableImageLabel(QLabel):
             t1w = fm.horizontalAdvance(text1)
             t2w = fm.horizontalAdvance(text2)
 
-            painter.drawText(int(tile_cx - t1w / 2),
-                           int(tile_cy - line_height * 0.1), text1)
-            painter.drawText(int(tile_cx - t2w / 2),
-                           int(tile_cy + line_height * 0.9), text2)
+            painter.drawText(
+                int(tile_cx - t1w / 2), int(tile_cy - line_height * 0.1), text1
+            )
+            painter.drawText(
+                int(tile_cx - t2w / 2), int(tile_cy + line_height * 0.9), text2
+            )
 
         painter.end()
 
@@ -354,8 +366,10 @@ class ZoomableImageLabel(QLabel):
         # Clamp to reasonable range
         self._zoom = max(self._min_zoom, min(self._max_zoom, self._zoom))
 
-        logger.debug(f"fit_to_view: image={img_w}x{img_h}, view={view_w}x{view_h}, "
-                    f"scale_x={scale_x:.4f}, scale_y={scale_y:.4f}, zoom={self._zoom:.4f}")
+        logger.debug(
+            f"fit_to_view: image={img_w}x{img_h}, view={view_w}x{view_h}, "
+            f"scale_x={scale_x:.4f}, scale_y={scale_y:.4f}, zoom={self._zoom:.4f}"
+        )
 
         self._update_display()
 

@@ -5,16 +5,19 @@ their spatial boundaries, and regions of interest.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, Dict, Any
 from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
+
 from ..base import BaseModel, ValidatedModel, ValidationError
 from ..hardware.stage import Position
 
 
 class SampleType(Enum):
     """Types of biological samples."""
+
     CELL_CULTURE = "cell_culture"
     TISSUE_SECTION = "tissue_section"
     WHOLE_MOUNT = "whole_mount"
@@ -27,6 +30,7 @@ class SampleType(Enum):
 
 class MountingMedium(Enum):
     """Sample mounting media."""
+
     WATER = "water"
     PBS = "pbs"
     GLYCEROL = "glycerol"
@@ -39,14 +43,16 @@ class MountingMedium(Enum):
 
 class FluorophoreLabel:
     """Fluorescent label information."""
+
     name: str
     target: str  # What it labels (e.g., "nuclei", "actin")
     excitation_nm: float
     emission_nm: float
     concentration: Optional[str] = None  # e.g., "1:1000"
 
-    def is_compatible_with_laser(self, laser_wavelength_nm: float,
-                                tolerance_nm: float = 20.0) -> bool:
+    def is_compatible_with_laser(
+        self, laser_wavelength_nm: float, tolerance_nm: float = 20.0
+    ) -> bool:
         """Check if fluorophore is excitable by laser.
 
         Args:
@@ -62,6 +68,7 @@ class FluorophoreLabel:
 @dataclass
 class SampleBounds(ValidatedModel):
     """3D bounding box of a sample in stage coordinates."""
+
     min_position: Position  # Minimum corner
     max_position: Position  # Maximum corner
     padding_um: float = 0.0  # Safety padding around sample
@@ -89,7 +96,7 @@ class SampleBounds(ValidatedModel):
             x=(self.min_position.x + self.max_position.x) / 2,
             y=(self.min_position.y + self.max_position.y) / 2,
             z=(self.min_position.z + self.max_position.z) / 2,
-            r=(self.min_position.r + self.max_position.r) / 2
+            r=(self.min_position.r + self.max_position.r) / 2,
         )
 
     def get_dimensions(self) -> Tuple[float, float, float]:
@@ -101,7 +108,7 @@ class SampleBounds(ValidatedModel):
         return (
             self.max_position.x - self.min_position.x,
             self.max_position.y - self.min_position.y,
-            self.max_position.z - self.min_position.z
+            self.max_position.z - self.min_position.z,
         )
 
     def get_volume(self) -> float:
@@ -113,8 +120,7 @@ class SampleBounds(ValidatedModel):
         width, height, depth = self.get_dimensions()
         return width * height * depth
 
-    def contains_position(self, position: Position,
-                         use_padding: bool = True) -> bool:
+    def contains_position(self, position: Position, use_padding: bool = True) -> bool:
         """Check if position is within bounds.
 
         Args:
@@ -127,12 +133,18 @@ class SampleBounds(ValidatedModel):
         padding_mm = self.padding_um / 1000.0 if use_padding else 0
 
         return (
-            self.min_position.x - padding_mm <= position.x <= self.max_position.x + padding_mm and
-            self.min_position.y - padding_mm <= position.y <= self.max_position.y + padding_mm and
-            self.min_position.z - padding_mm <= position.z <= self.max_position.z + padding_mm
+            self.min_position.x - padding_mm
+            <= position.x
+            <= self.max_position.x + padding_mm
+            and self.min_position.y - padding_mm
+            <= position.y
+            <= self.max_position.y + padding_mm
+            and self.min_position.z - padding_mm
+            <= position.z
+            <= self.max_position.z + padding_mm
         )
 
-    def expand_to_include(self, position: Position) -> 'SampleBounds':
+    def expand_to_include(self, position: Position) -> "SampleBounds":
         """Create expanded bounds to include a position.
 
         Args:
@@ -146,19 +158,20 @@ class SampleBounds(ValidatedModel):
                 x=min(self.min_position.x, position.x),
                 y=min(self.min_position.y, position.y),
                 z=min(self.min_position.z, position.z),
-                r=self.min_position.r
+                r=self.min_position.r,
             ),
             max_position=Position(
                 x=max(self.max_position.x, position.x),
                 y=max(self.max_position.y, position.y),
                 z=max(self.max_position.z, position.z),
-                r=self.max_position.r
+                r=self.max_position.r,
             ),
-            padding_um=self.padding_um
+            padding_um=self.padding_um,
         )
 
-    def get_grid_positions(self, spacing_mm: float,
-                          z_plane: Optional[float] = None) -> List[Position]:
+    def get_grid_positions(
+        self, spacing_mm: float, z_plane: Optional[float] = None
+    ) -> List[Position]:
         """Generate grid of positions within bounds.
 
         Args:
@@ -182,7 +195,7 @@ class SampleBounds(ValidatedModel):
                     x=self.min_position.x + i * spacing_mm,
                     y=self.min_position.y + j * spacing_mm,
                     z=z_plane,
-                    r=self.min_position.r
+                    r=self.min_position.r,
                 )
                 if self.contains_position(pos, use_padding=False):
                     positions.append(pos)
@@ -193,6 +206,7 @@ class SampleBounds(ValidatedModel):
 @dataclass
 class SampleRegion(BaseModel):
     """Region of interest within a sample."""
+
     name: str
     bounds: Optional[SampleBounds] = None
     center: Optional[Position] = None
@@ -268,6 +282,7 @@ class SampleRegion(BaseModel):
 @dataclass
 class Sample(BaseModel):
     """Complete sample model with metadata and spatial information."""
+
     name: str
     sample_type: SampleType
     preparation_date: datetime
@@ -327,19 +342,21 @@ class Sample(BaseModel):
                     x=min(self.bounds.min_position.x, region.bounds.min_position.x),
                     y=min(self.bounds.min_position.y, region.bounds.min_position.y),
                     z=min(self.bounds.min_position.z, region.bounds.min_position.z),
-                    r=self.bounds.min_position.r
+                    r=self.bounds.min_position.r,
                 ),
                 max_position=Position(
                     x=max(self.bounds.max_position.x, region.bounds.max_position.x),
                     y=max(self.bounds.max_position.y, region.bounds.max_position.y),
                     z=max(self.bounds.max_position.z, region.bounds.max_position.z),
-                    r=self.bounds.max_position.r
-                )
+                    r=self.bounds.max_position.r,
+                ),
             )
         elif region.bounds:
             self.bounds = region.bounds
 
-    def add_reference_position(self, position: Position, name: Optional[str] = None) -> None:
+    def add_reference_position(
+        self, position: Position, name: Optional[str] = None
+    ) -> None:
         """Add a reference position.
 
         Args:
@@ -359,7 +376,9 @@ class Sample(BaseModel):
         """
         return sorted(self.regions, key=lambda r: r.priority, reverse=True)
 
-    def find_compatible_laser(self, available_lasers: List[float]) -> Dict[str, List[float]]:
+    def find_compatible_laser(
+        self, available_lasers: List[float]
+    ) -> Dict[str, List[float]]:
         """Find compatible lasers for fluorophores.
 
         Args:
@@ -371,13 +390,15 @@ class Sample(BaseModel):
         compatible = {}
         for fluorophore in self.fluorophores:
             compatible[fluorophore.name] = [
-                laser for laser in available_lasers
+                laser
+                for laser in available_lasers
                 if fluorophore.is_compatible_with_laser(laser)
             ]
         return compatible
 
-    def estimate_imaging_time(self, positions_per_region: int,
-                            time_per_position: float) -> float:
+    def estimate_imaging_time(
+        self, positions_per_region: int, time_per_position: float
+    ) -> float:
         """Estimate total imaging time.
 
         Args:
@@ -391,8 +412,9 @@ class Sample(BaseModel):
         total_positions += len(self.reference_positions)
         return total_positions * time_per_position
 
-    def get_storage_requirements(self, images_per_position: int,
-                                bytes_per_image: int) -> float:
+    def get_storage_requirements(
+        self, images_per_position: int, bytes_per_image: int
+    ) -> float:
         """Estimate data storage requirements.
 
         Args:
@@ -413,10 +435,10 @@ class Sample(BaseModel):
                 total_positions += int(positions)
 
         total_bytes = total_positions * images_per_position * bytes_per_image
-        return total_bytes / (1024 ** 3)  # Convert to GB
+        return total_bytes / (1024**3)  # Convert to GB
 
     @classmethod
-    def create_calibration_sample(cls) -> 'Sample':
+    def create_calibration_sample(cls) -> "Sample":
         """Create a standard calibration sample.
 
         Returns:
@@ -427,5 +449,5 @@ class Sample(BaseModel):
             sample_type=SampleType.BEAD_SAMPLE,
             preparation_date=datetime.now(),
             mounting_medium=MountingMedium.WATER,
-            notes="Fluorescent calibration beads for system alignment"
+            notes="Fluorescent calibration beads for system alignment",
         )

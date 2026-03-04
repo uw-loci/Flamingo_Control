@@ -9,12 +9,13 @@ Performance optimizations (SciPy 1.14+):
 - Optimized rotation matrix construction
 """
 
-import numpy as np
-from scipy.spatial.transform import Rotation, Slerp
-from typing import Tuple, Optional, Dict
+import logging
 from enum import IntEnum
 from functools import lru_cache
-import logging
+from typing import Dict, Optional, Tuple
+
+import numpy as np
+from scipy.spatial.transform import Rotation, Slerp
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +40,9 @@ def _cached_inverse_matrix(matrix_tuple: tuple) -> np.ndarray:
 
 class TransformQuality(IntEnum):
     """Quality modes for volume transforms."""
-    FAST = 0      # Nearest-neighbor interpolation - ~3-5x faster
-    QUALITY = 1   # Linear interpolation - smoother but slower
+
+    FAST = 0  # Nearest-neighbor interpolation - ~3-5x faster
+    QUALITY = 1  # Linear interpolation - smoother but slower
 
 
 class CoordinateTransformer:
@@ -58,9 +60,11 @@ class CoordinateTransformer:
         """
         self.sample_center = np.array(sample_center or [0, 0, 0])
         self.rotation_matrix = np.eye(3)
-        self.current_rotation = {'rx': 0, 'ry': 0, 'rz': 0}  # degrees
+        self.current_rotation = {"rx": 0, "ry": 0, "rz": 0}  # degrees
 
-        logger.info(f"Initialized CoordinateTransformer with center at {self.sample_center}")
+        logger.info(
+            f"Initialized CoordinateTransformer with center at {self.sample_center}"
+        )
 
     def set_rotation(self, rx: float = 0, ry: float = 0, rz: float = 0):
         """
@@ -71,15 +75,17 @@ class CoordinateTransformer:
             ry: Rotation around Y axis (degrees)
             rz: Rotation around Z axis (degrees)
         """
-        self.current_rotation = {'rx': rx, 'ry': ry, 'rz': rz}
+        self.current_rotation = {"rx": rx, "ry": ry, "rz": rz}
 
         # Create rotation matrix (order matters - typically Z-Y-X for microscopy)
-        r = Rotation.from_euler('zyx', [rz, ry, rx], degrees=True)
+        r = Rotation.from_euler("zyx", [rz, ry, rx], degrees=True)
         self.rotation_matrix = r.as_matrix()
 
         logger.debug(f"Updated rotation to rx={rx}°, ry={ry}°, rz={rz}°")
 
-    def camera_to_world(self, camera_coords: np.ndarray, z_position: float) -> np.ndarray:
+    def camera_to_world(
+        self, camera_coords: np.ndarray, z_position: float
+    ) -> np.ndarray:
         """
         Transform 2D camera coordinates + Z position to 3D world coordinates
         accounting for sample rotation.
@@ -96,11 +102,13 @@ class CoordinateTransformer:
             camera_coords = camera_coords.reshape(1, -1)
 
         # Convert 2D camera coords to 3D by adding Z
-        coords_3d = np.column_stack([
-            camera_coords[:, 0],
-            camera_coords[:, 1],
-            np.full(len(camera_coords), z_position)
-        ])
+        coords_3d = np.column_stack(
+            [
+                camera_coords[:, 0],
+                camera_coords[:, 1],
+                np.full(len(camera_coords), z_position),
+            ]
+        )
 
         # Center coordinates around rotation center
         centered = coords_3d - self.sample_center
@@ -113,7 +121,9 @@ class CoordinateTransformer:
 
         return world_coords
 
-    def world_to_camera(self, world_coords: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def world_to_camera(
+        self, world_coords: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Transform 3D world coordinates to camera space.
         Inverse of camera_to_world.
@@ -140,8 +150,9 @@ class CoordinateTransformer:
 
         return camera_coords, z_positions
 
-    def world_to_voxel(self, world_coords: np.ndarray,
-                      voxel_size: Tuple[float, float, float]) -> np.ndarray:
+    def world_to_voxel(
+        self, world_coords: np.ndarray, voxel_size: Tuple[float, float, float]
+    ) -> np.ndarray:
         """
         Convert world coordinates (micrometers) to voxel indices.
 
@@ -157,8 +168,9 @@ class CoordinateTransformer:
         voxel_indices = np.round(voxel_coords).astype(int)
         return voxel_indices
 
-    def voxel_to_world(self, voxel_indices: np.ndarray,
-                      voxel_size: Tuple[float, float, float]) -> np.ndarray:
+    def voxel_to_world(
+        self, voxel_indices: np.ndarray, voxel_size: Tuple[float, float, float]
+    ) -> np.ndarray:
         """
         Convert voxel indices to world coordinates.
 
@@ -189,7 +201,9 @@ class CoordinateTransformer:
         T[:3, 3] = self.sample_center
         return T
 
-    def apply_to_plane(self, plane_corners: np.ndarray, z_position: float) -> np.ndarray:
+    def apply_to_plane(
+        self, plane_corners: np.ndarray, z_position: float
+    ) -> np.ndarray:
         """
         Apply transformation to the corners of an imaging plane.
         Useful for visualizing the scan region in 3D.
@@ -214,20 +228,22 @@ class CoordinateTransformer:
             Dictionary with 'min' and 'max' points in world space
         """
         # Create corners of scan volume
-        x_min, x_max = scan_bounds['x_range']
-        y_min, y_max = scan_bounds['y_range']
-        z_min, z_max = scan_bounds['z_range']
+        x_min, x_max = scan_bounds["x_range"]
+        y_min, y_max = scan_bounds["y_range"]
+        z_min, z_max = scan_bounds["z_range"]
 
-        corners = np.array([
-            [x_min, y_min, z_min],
-            [x_min, y_min, z_max],
-            [x_min, y_max, z_min],
-            [x_min, y_max, z_max],
-            [x_max, y_min, z_min],
-            [x_max, y_min, z_max],
-            [x_max, y_max, z_min],
-            [x_max, y_max, z_max]
-        ])
+        corners = np.array(
+            [
+                [x_min, y_min, z_min],
+                [x_min, y_min, z_max],
+                [x_min, y_max, z_min],
+                [x_min, y_max, z_max],
+                [x_max, y_min, z_min],
+                [x_max, y_min, z_max],
+                [x_max, y_max, z_min],
+                [x_max, y_max, z_max],
+            ]
+        )
 
         # Transform corners
         transformed = []
@@ -238,14 +254,11 @@ class CoordinateTransformer:
 
         transformed = np.array(transformed)
 
-        return {
-            'min': np.min(transformed, axis=0),
-            'max': np.max(transformed, axis=0)
-        }
+        return {"min": np.min(transformed, axis=0), "max": np.max(transformed, axis=0)}
 
-    def create_rotation_interpolation(self, start_rotation: dict,
-                                     end_rotation: dict,
-                                     num_steps: int) -> list:
+    def create_rotation_interpolation(
+        self, start_rotation: dict, end_rotation: dict, num_steps: int
+    ) -> list:
         """
         Create interpolated rotation steps for smooth transitions.
 
@@ -261,16 +274,16 @@ class CoordinateTransformer:
             List of rotation dictionaries
         """
         # Convert to Rotation objects
-        r_start = Rotation.from_euler('zyx',
-                                      [start_rotation['rz'],
-                                       start_rotation['ry'],
-                                       start_rotation['rx']],
-                                      degrees=True)
-        r_end = Rotation.from_euler('zyx',
-                                    [end_rotation['rz'],
-                                     end_rotation['ry'],
-                                     end_rotation['rx']],
-                                    degrees=True)
+        r_start = Rotation.from_euler(
+            "zyx",
+            [start_rotation["rz"], start_rotation["ry"], start_rotation["rx"]],
+            degrees=True,
+        )
+        r_end = Rotation.from_euler(
+            "zyx",
+            [end_rotation["rz"], end_rotation["ry"], end_rotation["rx"]],
+            degrees=True,
+        )
 
         # Use scipy's built-in Slerp class (SciPy 1.14+ optimized)
         # This is 2-3x faster than manual quaternion interpolation
@@ -284,18 +297,14 @@ class CoordinateTransformer:
         # Convert back to Euler angles
         interpolated = []
         for r_interp in interpolated_rotations:
-            angles = r_interp.as_euler('zyx', degrees=True)
-            interpolated.append({
-                'rx': angles[2],
-                'ry': angles[1],
-                'rz': angles[0]
-            })
+            angles = r_interp.as_euler("zyx", degrees=True)
+            interpolated.append({"rx": angles[2], "ry": angles[1], "rz": angles[0]})
 
         return interpolated
 
-    def create_rotation_interpolation_batch(self, start_rotation: dict,
-                                            end_rotation: dict,
-                                            times: np.ndarray) -> np.ndarray:
+    def create_rotation_interpolation_batch(
+        self, start_rotation: dict, end_rotation: dict, times: np.ndarray
+    ) -> np.ndarray:
         """
         Batch SLERP interpolation for multiple time points.
 
@@ -310,16 +319,16 @@ class CoordinateTransformer:
         Returns:
             (N, 3) array of Euler angles [rx, ry, rz] in degrees
         """
-        r_start = Rotation.from_euler('zyx',
-                                      [start_rotation['rz'],
-                                       start_rotation['ry'],
-                                       start_rotation['rx']],
-                                      degrees=True)
-        r_end = Rotation.from_euler('zyx',
-                                    [end_rotation['rz'],
-                                     end_rotation['ry'],
-                                     end_rotation['rx']],
-                                    degrees=True)
+        r_start = Rotation.from_euler(
+            "zyx",
+            [start_rotation["rz"], start_rotation["ry"], start_rotation["rx"]],
+            degrees=True,
+        )
+        r_end = Rotation.from_euler(
+            "zyx",
+            [end_rotation["rz"], end_rotation["ry"], end_rotation["rx"]],
+            degrees=True,
+        )
 
         key_rotations = Rotation.concatenate([r_start, r_end])
         slerp = Slerp([0, 1], key_rotations)
@@ -328,17 +337,20 @@ class CoordinateTransformer:
         interpolated = slerp(times)
 
         # Convert to Euler angles (returns [rz, ry, rx] per scipy convention)
-        euler_zyx = interpolated.as_euler('zyx', degrees=True)
+        euler_zyx = interpolated.as_euler("zyx", degrees=True)
 
         # Reorder to [rx, ry, rz]
         return euler_zyx[:, ::-1]
 
-    def transform_voxel_volume_affine(self, volume: np.ndarray,
-                                     stage_offset_mm: Tuple[float, float, float],
-                                     rotation_deg: float,
-                                     center_voxels: np.ndarray,
-                                     voxel_size_um: float = 50.0,
-                                     quality: TransformQuality = TransformQuality.QUALITY) -> np.ndarray:
+    def transform_voxel_volume_affine(
+        self,
+        volume: np.ndarray,
+        stage_offset_mm: Tuple[float, float, float],
+        rotation_deg: float,
+        center_voxels: np.ndarray,
+        voxel_size_um: float = 50.0,
+        quality: TransformQuality = TransformQuality.QUALITY,
+    ) -> np.ndarray:
         """
         Transform entire voxel volume using affine transformation.
         Uses existing rotation utilities for consistency.
@@ -414,16 +426,19 @@ class CoordinateTransformer:
             combined_inv[:3, :3],  # Inverse rotation/scale matrix
             offset=combined_inv[:3, 3],  # Inverse offset
             order=interp_order,
-            mode='constant',
-            cval=0
+            mode="constant",
+            cval=0,
         )
 
         return transformed
 
-    def rotate_volume_with_padding(self, volume: np.ndarray,
-                                  angle_degrees: float,
-                                  center_voxels: np.ndarray,
-                                  pad_size: int = 20) -> np.ndarray:
+    def rotate_volume_with_padding(
+        self,
+        volume: np.ndarray,
+        angle_degrees: float,
+        center_voxels: np.ndarray,
+        pad_size: int = 20,
+    ) -> np.ndarray:
         """
         Rotate volume with padding to prevent edge clipping.
 
@@ -437,7 +452,7 @@ class CoordinateTransformer:
             Rotated volume with same shape as input
         """
         # Pad volume to prevent clipping
-        padded = np.pad(volume, pad_size, mode='constant', constant_values=0)
+        padded = np.pad(volume, pad_size, mode="constant", constant_values=0)
 
         # Adjust center for padding
         center_padded = center_voxels + pad_size
@@ -447,15 +462,13 @@ class CoordinateTransformer:
             padded,
             stage_offset_mm=(0, 0, 0),
             rotation_deg=angle_degrees,
-            center_voxels=center_padded
+            center_voxels=center_padded,
         )
 
         # Crop back to original size
         if pad_size > 0:
             return rotated_padded[
-                pad_size:-pad_size,
-                pad_size:-pad_size,
-                pad_size:-pad_size
+                pad_size:-pad_size, pad_size:-pad_size, pad_size:-pad_size
             ]
         return rotated_padded
 
@@ -494,22 +507,24 @@ class PhysicalToNapariMapper:
                 - voxel_size_um: Voxel size in micrometers
         """
         # Physical ranges (mm)
-        self.x_range_mm = tuple(config['x_range_mm'])
-        self.y_range_mm = tuple(config['y_range_mm'])
-        self.z_range_mm = tuple(config['z_range_mm'])
+        self.x_range_mm = tuple(config["x_range_mm"])
+        self.y_range_mm = tuple(config["y_range_mm"])
+        self.z_range_mm = tuple(config["z_range_mm"])
 
         # Voxel size (convert µm to mm)
-        self.voxel_size_mm = config['voxel_size_um'] / 1000.0
+        self.voxel_size_mm = config["voxel_size_um"] / 1000.0
 
         # Inversion flags (can be set by user preferences)
-        self.invert_x = config.get('invert_x', False)
-        self.invert_z = config.get('invert_z', False)
+        self.invert_x = config.get("invert_x", False)
+        self.invert_z = config.get("invert_z", False)
 
         # Calculate napari dimensions in pixels
         self.napari_dims = self._calculate_napari_dimensions()
 
         logger.info(f"Initialized PhysicalToNapariMapper:")
-        logger.info(f"  Physical ranges: X={self.x_range_mm}, Y={self.y_range_mm}, Z={self.z_range_mm}")
+        logger.info(
+            f"  Physical ranges: X={self.x_range_mm}, Y={self.y_range_mm}, Z={self.z_range_mm}"
+        )
         logger.info(f"  Voxel size: {self.voxel_size_mm*1000:.1f} µm")
         logger.info(f"  Napari dims: {self.napari_dims} pixels")
         logger.info(f"  Inversions: X={self.invert_x}, Z={self.invert_z}")
@@ -538,7 +553,9 @@ class PhysicalToNapariMapper:
             self.invert_z = invert_z
             logger.info(f"Z axis inversion set to: {self.invert_z}")
 
-    def physical_to_napari(self, x_mm: float, y_mm: float, z_mm: float) -> Tuple[int, int, int]:
+    def physical_to_napari(
+        self, x_mm: float, y_mm: float, z_mm: float
+    ) -> Tuple[int, int, int]:
         """
         Convert physical stage coordinates (mm) to napari pixel coordinates.
 
@@ -576,7 +593,9 @@ class PhysicalToNapariMapper:
 
         return (napari_x, napari_y, napari_z)
 
-    def napari_to_physical(self, napari_x: int, napari_y: int, napari_z: int) -> Tuple[float, float, float]:
+    def napari_to_physical(
+        self, napari_x: int, napari_y: int, napari_z: int
+    ) -> Tuple[float, float, float]:
         """
         Convert napari pixel coordinates to physical stage coordinates (mm).
 
@@ -645,18 +664,15 @@ class PhysicalToNapariMapper:
 
     def get_physical_bounds(self) -> Dict[str, Tuple[float, float]]:
         """Get physical coordinate bounds."""
-        return {
-            'x': self.x_range_mm,
-            'y': self.y_range_mm,
-            'z': self.z_range_mm
-        }
+        return {"x": self.x_range_mm, "y": self.y_range_mm, "z": self.z_range_mm}
 
     def get_napari_dimensions(self) -> Tuple[int, int, int]:
         """Get napari volume dimensions in pixels."""
         return self.napari_dims
 
-    def test_round_trip(self, x_mm: float, y_mm: float, z_mm: float,
-                       tolerance: float = None) -> bool:
+    def test_round_trip(
+        self, x_mm: float, y_mm: float, z_mm: float, tolerance: float = None
+    ) -> bool:
         """
         Test round-trip transformation (physical → napari → physical).
 
@@ -684,8 +700,10 @@ class PhysicalToNapariMapper:
 
         max_error = max(error_x, error_y, error_z)
 
-        logger.debug(f"Round-trip test: ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) → "
-                    f"{napari_coords} → ({x_back:.2f}, {y_back:.2f}, {z_back:.2f})")
+        logger.debug(
+            f"Round-trip test: ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) → "
+            f"{napari_coords} → ({x_back:.2f}, {y_back:.2f}, {z_back:.2f})"
+        )
         logger.debug(f"  Max error: {max_error:.4f} mm (tolerance: {tolerance:.4f} mm)")
 
         return max_error <= tolerance

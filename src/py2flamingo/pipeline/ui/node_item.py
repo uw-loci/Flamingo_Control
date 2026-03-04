@@ -7,18 +7,33 @@ and a status indicator dot.
 """
 
 import logging
-from PyQt5.QtWidgets import (
-    QGraphicsItem, QGraphicsRectItem, QGraphicsTextItem,
-    QGraphicsEllipseItem, QStyleOptionGraphicsItem, QWidget
-)
-from PyQt5.QtCore import Qt, QRectF, QPointF
+
+from PyQt5.QtCore import QPointF, QRectF, Qt
 from PyQt5.QtGui import (
-    QBrush, QPen, QColor, QPainter, QFont, QFontMetrics,
-    QPainterPath
+    QBrush,
+    QColor,
+    QFont,
+    QFontMetrics,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
+from PyQt5.QtWidgets import (
+    QGraphicsEllipseItem,
+    QGraphicsItem,
+    QGraphicsRectItem,
+    QGraphicsTextItem,
+    QStyleOptionGraphicsItem,
+    QWidget,
 )
 
-from py2flamingo.pipeline.models.pipeline import PipelineNode, NodeType, NODE_COLORS, PortDirection
-from py2flamingo.pipeline.ui.port_item import PortItem, PORT_RADIUS
+from py2flamingo.pipeline.models.pipeline import (
+    NODE_COLORS,
+    NodeType,
+    PipelineNode,
+    PortDirection,
+)
+from py2flamingo.pipeline.ui.port_item import PORT_RADIUS, PortItem
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +62,7 @@ class NodeItem(QGraphicsItem):
 
         # State
         self._selected = False
-        self._status = 'idle'  # idle, running, completed, error
+        self._status = "idle"  # idle, running, completed, error
 
         # Make movable and selectable
         self.setFlag(QGraphicsItem.ItemIsMovable)
@@ -64,9 +79,9 @@ class NodeItem(QGraphicsItem):
         self._total_height = HEADER_HEIGHT + self._body_height
 
         # Colors
-        self._header_color = QColor(NODE_COLORS.get(pipeline_node.node_type, '#607d8b'))
-        self._body_color = QColor('#2d2d2d')
-        self._border_color = QColor('#555555')
+        self._header_color = QColor(NODE_COLORS.get(pipeline_node.node_type, "#607d8b"))
+        self._body_color = QColor("#2d2d2d")
+        self._border_color = QColor("#555555")
 
         # Create port items
         self._create_ports()
@@ -102,8 +117,12 @@ class NodeItem(QGraphicsItem):
     def boundingRect(self) -> QRectF:
         return QRectF(-2, -2, NODE_WIDTH + 4, self._total_height + 4)
 
-    def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem,
-              widget: QWidget = None):
+    def paint(
+        self,
+        painter: QPainter,
+        option: QStyleOptionGraphicsItem,
+        widget: QWidget = None,
+    ):
         # Body
         body_rect = QRectF(0, 0, NODE_WIDTH, self._total_height)
         path = QPainterPath()
@@ -118,52 +137,54 @@ class NodeItem(QGraphicsItem):
         header_rect = QRectF(0, 0, NODE_WIDTH, HEADER_HEIGHT)
         header_path.addRoundedRect(header_rect, CORNER_RADIUS, CORNER_RADIUS)
         # Clip bottom corners of header
-        header_path.addRect(QRectF(0, HEADER_HEIGHT - CORNER_RADIUS,
-                                   NODE_WIDTH, CORNER_RADIUS))
+        header_path.addRect(
+            QRectF(0, HEADER_HEIGHT - CORNER_RADIUS, NODE_WIDTH, CORNER_RADIUS)
+        )
 
         painter.setBrush(QBrush(self._header_color))
         painter.drawPath(header_path.simplified())
 
         # Border (with selection highlight)
         border_pen = QPen(
-            QColor('#4fc3f7') if self.isSelected() else self._border_color,
-            2.0 if self.isSelected() else 1.0
+            QColor("#4fc3f7") if self.isSelected() else self._border_color,
+            2.0 if self.isSelected() else 1.0,
         )
         painter.setPen(border_pen)
         painter.setBrush(Qt.NoBrush)
         painter.drawRoundedRect(body_rect, CORNER_RADIUS, CORNER_RADIUS)
 
         # Node name
-        painter.setPen(QPen(QColor('#ffffff')))
-        font = QFont('Sans', 9, QFont.Bold)
+        painter.setPen(QPen(QColor("#ffffff")))
+        font = QFont("Sans", 9, QFont.Bold)
         painter.setFont(font)
         name_rect = QRectF(8, 2, NODE_WIDTH - 30, HEADER_HEIGHT - 4)
-        painter.drawText(name_rect, Qt.AlignVCenter | Qt.AlignLeft,
-                         self.pipeline_node.name)
+        painter.drawText(
+            name_rect, Qt.AlignVCenter | Qt.AlignLeft, self.pipeline_node.name
+        )
 
         # Status dot
         status_colors = {
-            'idle': '#888888',
-            'running': '#42a5f5',
-            'completed': '#66bb6a',
-            'error': '#ef5350',
+            "idle": "#888888",
+            "running": "#42a5f5",
+            "completed": "#66bb6a",
+            "error": "#ef5350",
         }
-        dot_color = QColor(status_colors.get(self._status, '#888888'))
+        dot_color = QColor(status_colors.get(self._status, "#888888"))
         painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(dot_color))
         painter.drawEllipse(QPointF(NODE_WIDTH - 14, HEADER_HEIGHT / 2), 5, 5)
 
         # Port labels
-        label_font = QFont('Sans', 8)
+        label_font = QFont("Sans", 8)
         painter.setFont(label_font)
-        painter.setPen(QPen(QColor('#cccccc')))
+        painter.setPen(QPen(QColor("#cccccc")))
 
         for i, port in enumerate(self.pipeline_node.inputs):
             y = HEADER_HEIGHT + BODY_PADDING + PORT_RADIUS + i * PORT_SPACING
             painter.drawText(
                 QRectF(PORT_RADIUS + 4, y - 8, NODE_WIDTH / 2 - PORT_RADIUS, 16),
                 Qt.AlignVCenter | Qt.AlignLeft,
-                port.name
+                port.name,
             )
 
         for i, port in enumerate(self.pipeline_node.outputs):
@@ -171,7 +192,7 @@ class NodeItem(QGraphicsItem):
             painter.drawText(
                 QRectF(NODE_WIDTH / 2, y - 8, NODE_WIDTH / 2 - PORT_RADIUS - 4, 16),
                 Qt.AlignVCenter | Qt.AlignRight,
-                port.name
+                port.name,
             )
 
     def itemChange(self, change, value):

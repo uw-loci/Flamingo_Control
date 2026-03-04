@@ -9,9 +9,9 @@ that allow users to quickly return to frequently-used stage locations.
 
 import json
 import logging
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
-from dataclasses import dataclass, asdict
 
 from py2flamingo.models.microscope import Position
 
@@ -19,6 +19,7 @@ from py2flamingo.models.microscope import Position
 @dataclass
 class PositionPreset:
     """Named position preset."""
+
     name: str
     x: float
     y: float
@@ -31,7 +32,9 @@ class PositionPreset:
         return Position(x=self.x, y=self.y, z=self.z, r=self.r)
 
     @classmethod
-    def from_position(cls, name: str, position: Position, description: str = "") -> 'PositionPreset':
+    def from_position(
+        cls, name: str, position: Position, description: str = ""
+    ) -> "PositionPreset":
         """Create preset from Position object."""
         return cls(
             name=name,
@@ -39,7 +42,7 @@ class PositionPreset:
             y=position.y,
             z=position.z,
             r=position.r,
-            description=description
+            description=description,
         )
 
 
@@ -73,15 +76,19 @@ class PositionPresetService:
         """Load presets from JSON file."""
         try:
             if self.presets_file.exists():
-                with open(self.presets_file, 'r') as f:
+                with open(self.presets_file, "r") as f:
                     data = json.load(f)
                     self._presets = {
                         name: PositionPreset(**preset_data)
                         for name, preset_data in data.items()
                     }
-                self.logger.info(f"Loaded {len(self._presets)} position presets from {self.presets_file}")
+                self.logger.info(
+                    f"Loaded {len(self._presets)} position presets from {self.presets_file}"
+                )
             else:
-                self.logger.info(f"No preset file found at {self.presets_file}, starting with empty presets")
+                self.logger.info(
+                    f"No preset file found at {self.presets_file}, starting with empty presets"
+                )
                 self._presets = {}
         except Exception as e:
             self.logger.error(f"Error loading presets: {e}", exc_info=True)
@@ -90,13 +97,12 @@ class PositionPresetService:
     def _save_presets(self) -> None:
         """Save presets to JSON file."""
         try:
-            data = {
-                name: asdict(preset)
-                for name, preset in self._presets.items()
-            }
-            with open(self.presets_file, 'w') as f:
+            data = {name: asdict(preset) for name, preset in self._presets.items()}
+            with open(self.presets_file, "w") as f:
                 json.dump(data, f, indent=2)
-            self.logger.info(f"Saved {len(self._presets)} presets to {self.presets_file}")
+            self.logger.info(
+                f"Saved {len(self._presets)} presets to {self.presets_file}"
+            )
         except Exception as e:
             self.logger.error(f"Error saving presets: {e}", exc_info=True)
             raise
@@ -122,7 +128,9 @@ class PositionPresetService:
         self._presets[name] = preset
         self._save_presets()
 
-        self.logger.info(f"Saved preset '{name}': X={position.x:.3f}, Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.2f}")
+        self.logger.info(
+            f"Saved preset '{name}': X={position.x:.3f}, Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.2f}"
+        )
 
     def get_preset(self, name: str) -> Optional[PositionPreset]:
         """

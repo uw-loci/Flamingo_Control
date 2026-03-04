@@ -4,21 +4,26 @@ This module handles the core workflow business logic, coordinating
 between different components and managing workflow lifecycle.
 """
 
-import logging
-from typing import Optional, Dict, Any, List, Callable
-from pathlib import Path
-from datetime import datetime
-from dataclasses import dataclass
 import json
+import logging
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
+from ..core.errors import FlamingoError
 from ..models.data.workflow import (
-    Workflow, WorkflowType, WorkflowState, WorkflowStep,
-    IlluminationSettings, StackSettings, TileSettings,
-    TimeLapseSettings, ExperimentSettings
+    ExperimentSettings,
+    IlluminationSettings,
+    StackSettings,
+    TileSettings,
+    TimeLapseSettings,
+    Workflow,
+    WorkflowState,
+    WorkflowStep,
+    WorkflowType,
 )
 from ..models.hardware.stage import Position
-from ..core.errors import FlamingoError
-
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +31,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class WorkflowConfiguration:
     """Configuration for workflow orchestrator."""
+
     default_laser_channel: str = "Laser 3 488 nm"
     default_laser_power_mw: float = 5.0
     default_save_directory: Path = Path("data/workflows")
@@ -39,6 +45,7 @@ class WorkflowConfiguration:
 
 class WorkflowOrchestrationError(FlamingoError):
     """Raised when workflow orchestration fails."""
+
     pass
 
 
@@ -59,11 +66,11 @@ class WorkflowOrchestrator:
         self.config = config or WorkflowConfiguration()
         self._active_workflows: Dict[str, Workflow] = {}
         self._workflow_callbacks: Dict[str, List[Callable]] = {
-            'started': [],
-            'completed': [],
-            'error': [],
-            'progress': [],
-            'step_completed': []
+            "started": [],
+            "completed": [],
+            "error": [],
+            "progress": [],
+            "step_completed": [],
         }
         self._workflow_defaults: Dict[str, Any] = {}
         self._initialize_defaults()
@@ -71,12 +78,12 @@ class WorkflowOrchestrator:
     def _initialize_defaults(self):
         """Initialize default workflow parameters."""
         self._workflow_defaults = {
-            'laser_channel': self.config.default_laser_channel,
-            'laser_power_mw': self.config.default_laser_power_mw,
-            'exposure_ms': self.config.default_exposure_ms,
-            'z_step_um': self.config.default_z_step_um,
-            'tile_overlap_percent': self.config.default_tile_overlap_percent,
-            'save_directory': self.config.default_save_directory
+            "laser_channel": self.config.default_laser_channel,
+            "laser_power_mw": self.config.default_laser_power_mw,
+            "exposure_ms": self.config.default_exposure_ms,
+            "z_step_um": self.config.default_z_step_um,
+            "tile_overlap_percent": self.config.default_tile_overlap_percent,
+            "save_directory": self.config.default_save_directory,
         }
 
     # ==================== Workflow Creation ====================
@@ -98,19 +105,15 @@ class WorkflowOrchestrator:
             workflow_type = self._determine_workflow_type(workflow_dict)
 
             # Extract positions
-            start_pos = self._extract_position(
-                workflow_dict.get("Start Position", {})
-            )
-            end_pos = self._extract_position(
-                workflow_dict.get("End Position")
-            )
+            start_pos = self._extract_position(workflow_dict.get("Start Position", {}))
+            end_pos = self._extract_position(workflow_dict.get("End Position"))
 
             # Create base workflow
             workflow = Workflow(
                 workflow_type=workflow_type,
                 name=workflow_dict.get("name", "Custom Workflow"),
                 start_position=start_pos,
-                end_position=end_pos
+                end_position=end_pos,
             )
 
             # Apply illumination settings
@@ -162,7 +165,9 @@ class WorkflowOrchestrator:
         # Default to snapshot
         return WorkflowType.SNAPSHOT
 
-    def _extract_position(self, pos_dict: Optional[Dict[str, Any]]) -> Optional[Position]:
+    def _extract_position(
+        self, pos_dict: Optional[Dict[str, Any]]
+    ) -> Optional[Position]:
         """Extract position from dictionary."""
         if not pos_dict:
             return None
@@ -171,7 +176,7 @@ class WorkflowOrchestrator:
             x=float(pos_dict.get("X (mm)", 0)),
             y=float(pos_dict.get("Y (mm)", 0)),
             z=float(pos_dict.get("Z (mm)", 0)),
-            r=float(pos_dict.get("Angle (degrees)", 0))
+            r=float(pos_dict.get("Angle (degrees)", 0)),
         )
 
     def _parse_illumination(self, illum_dict: Dict[str, str]) -> IlluminationSettings:
@@ -200,12 +205,15 @@ class WorkflowOrchestrator:
         """Parse stack settings from dictionary."""
         return StackSettings(
             num_planes=int(stack_dict.get("Number of planes", 1)),
-            z_step_um=float(stack_dict.get("Change in Z axis (mm)", 0.01)) * 1000,  # Convert to um
+            z_step_um=float(stack_dict.get("Change in Z axis (mm)", 0.01))
+            * 1000,  # Convert to um
             z_velocity_mm_s=float(stack_dict.get("Z stage velocity (mm/s)", "0.4")),
-            bidirectional=stack_dict.get("Bidirectional", "false").lower() == "true"
+            bidirectional=stack_dict.get("Bidirectional", "false").lower() == "true",
         )
 
-    def _parse_experiment_settings(self, exp_dict: Dict[str, Any]) -> ExperimentSettings:
+    def _parse_experiment_settings(
+        self, exp_dict: Dict[str, Any]
+    ) -> ExperimentSettings:
         """Parse experiment settings from dictionary."""
         save_format = exp_dict.get("Save image data", "NotSaved")
         save_data = save_format != "NotSaved"
@@ -215,11 +223,19 @@ class WorkflowOrchestrator:
             save_format=save_format.lower() if save_data else "tiff",
             save_directory=Path(exp_dict.get("Save image directory", "data")),
             comment=exp_dict.get("Comments", ""),
-            max_projection_display=exp_dict.get("Display max projection", "true").lower() == "true",
-            display_during_acquisition=exp_dict.get("Work flow live view enabled", "false").lower() == "true"
+            max_projection_display=exp_dict.get(
+                "Display max projection", "true"
+            ).lower()
+            == "true",
+            display_during_acquisition=exp_dict.get(
+                "Work flow live view enabled", "false"
+            ).lower()
+            == "true",
         )
 
-    def _apply_additional_settings(self, workflow: Workflow, workflow_dict: Dict[str, Any]):
+    def _apply_additional_settings(
+        self, workflow: Workflow, workflow_dict: Dict[str, Any]
+    ):
         """Apply any additional settings from dictionary."""
         # Apply metadata
         if "metadata" in workflow_dict:
@@ -268,18 +284,20 @@ class WorkflowOrchestrator:
             self._active_workflows[workflow.id] = workflow
 
             # Trigger callback
-            self._trigger_callback('started', workflow)
+            self._trigger_callback("started", workflow)
 
-            logger.info(f"Prepared workflow: {workflow.name} with {len(workflow.steps)} steps")
+            logger.info(
+                f"Prepared workflow: {workflow.name} with {len(workflow.steps)} steps"
+            )
             return True
 
         except Exception as e:
             logger.error(f"Failed to prepare workflow: {e}")
             return False
 
-    def update_workflow_progress(self, workflow: Workflow,
-                                step_index: int,
-                                status: str = "completed") -> None:
+    def update_workflow_progress(
+        self, workflow: Workflow, step_index: int, status: str = "completed"
+    ) -> None:
         """Update workflow progress.
 
         Args:
@@ -296,22 +314,22 @@ class WorkflowOrchestrator:
                 workflow.current_step_index = step_index + 1
 
                 # Trigger step callback
-                self._trigger_callback('step_completed', workflow, step)
+                self._trigger_callback("step_completed", workflow, step)
 
             elif status == "error":
                 step.mark_error("Step failed")
                 workflow.mark_error(f"Failed at step {step_index}")
 
                 # Trigger error callback
-                self._trigger_callback('error', workflow, step)
+                self._trigger_callback("error", workflow, step)
 
         # Update workflow state if all steps complete
         if workflow.current_step_index >= len(workflow.steps):
             workflow.mark_completed()
-            self._trigger_callback('completed', workflow)
+            self._trigger_callback("completed", workflow)
 
         # Trigger progress callback
-        self._trigger_callback('progress', workflow)
+        self._trigger_callback("progress", workflow)
 
     def finalize_workflow(self, workflow: Workflow, success: bool = True) -> None:
         """Finalize a workflow after execution.
@@ -345,16 +363,26 @@ class WorkflowOrchestrator:
             filepath.parent.mkdir(parents=True, exist_ok=True)
 
             # Save workflow metadata
-            with open(filepath, 'w') as f:
-                json.dump({
-                    'name': workflow.name,
-                    'type': workflow.workflow_type.value,
-                    'start_time': workflow.start_time.isoformat() if workflow.start_time else None,
-                    'end_time': workflow.end_time.isoformat() if workflow.end_time else None,
-                    'images_acquired': workflow.images_acquired,
-                    'state': workflow.state.value,
-                    'error': workflow.error_message
-                }, f, indent=2)
+            with open(filepath, "w") as f:
+                json.dump(
+                    {
+                        "name": workflow.name,
+                        "type": workflow.workflow_type.value,
+                        "start_time": (
+                            workflow.start_time.isoformat()
+                            if workflow.start_time
+                            else None
+                        ),
+                        "end_time": (
+                            workflow.end_time.isoformat() if workflow.end_time else None
+                        ),
+                        "images_acquired": workflow.images_acquired,
+                        "state": workflow.state.value,
+                        "error": workflow.error_message,
+                    },
+                    f,
+                    indent=2,
+                )
 
             logger.info(f"Auto-saved workflow to {filepath}")
 
@@ -397,6 +425,7 @@ class WorkflowOrchestrator:
         if workflow.tile_settings:
             # Snake pattern is usually optimal
             from ..models.data.workflow import TillingPattern
+
             workflow.tile_settings.pattern = TillingPattern.SNAKE
 
     def _optimize_position_order(self, workflow: Workflow):
@@ -459,30 +488,30 @@ class WorkflowOrchestrator:
 
     def set_default_laser(self, laser_channel: str, power_mw: float):
         """Set default laser settings."""
-        self._workflow_defaults['laser_channel'] = laser_channel
-        self._workflow_defaults['laser_power_mw'] = power_mw
+        self._workflow_defaults["laser_channel"] = laser_channel
+        self._workflow_defaults["laser_power_mw"] = power_mw
         logger.info(f"Set default laser: {laser_channel} at {power_mw} mW")
 
     def set_default_save_directory(self, directory: Path):
         """Set default save directory."""
         self.config.default_save_directory = Path(directory)
-        self._workflow_defaults['save_directory'] = self.config.default_save_directory
+        self._workflow_defaults["save_directory"] = self.config.default_save_directory
 
     def get_configuration(self) -> Dict[str, Any]:
         """Get current configuration."""
         return {
-            'defaults': self._workflow_defaults,
-            'config': {
-                'default_laser_channel': self.config.default_laser_channel,
-                'default_laser_power_mw': self.config.default_laser_power_mw,
-                'default_save_directory': str(self.config.default_save_directory),
-                'default_exposure_ms': self.config.default_exposure_ms,
-                'default_z_step_um': self.config.default_z_step_um,
-                'default_tile_overlap_percent': self.config.default_tile_overlap_percent,
-                'enable_auto_save': self.config.enable_auto_save,
-                'enable_progress_callbacks': self.config.enable_progress_callbacks
+            "defaults": self._workflow_defaults,
+            "config": {
+                "default_laser_channel": self.config.default_laser_channel,
+                "default_laser_power_mw": self.config.default_laser_power_mw,
+                "default_save_directory": str(self.config.default_save_directory),
+                "default_exposure_ms": self.config.default_exposure_ms,
+                "default_z_step_um": self.config.default_z_step_um,
+                "default_tile_overlap_percent": self.config.default_tile_overlap_percent,
+                "enable_auto_save": self.config.enable_auto_save,
+                "enable_progress_callbacks": self.config.enable_progress_callbacks,
             },
-            'active_workflows': len(self._active_workflows)
+            "active_workflows": len(self._active_workflows),
         }
 
     # ==================== Utilities ====================

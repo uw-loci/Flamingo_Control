@@ -10,14 +10,15 @@ Handles:
 """
 
 import logging
-from PyQt5.QtWidgets import QGraphicsView, QGraphicsItem, QMenu, QAction
-from PyQt5.QtCore import Qt, QPointF
+
+from PyQt5.QtCore import QPointF, Qt
 from PyQt5.QtGui import QPainter
+from PyQt5.QtWidgets import QAction, QGraphicsItem, QGraphicsView, QMenu
 
 from py2flamingo.pipeline.models.pipeline import NodeType
+from py2flamingo.pipeline.ui.connection_item import ConnectionItem
 from py2flamingo.pipeline.ui.graph_scene import PipelineGraphScene
 from py2flamingo.pipeline.ui.port_item import PortItem
-from py2flamingo.pipeline.ui.connection_item import ConnectionItem
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,7 @@ class PipelineGraphView(QGraphicsView):
             if not self._scene.remove_selected_connection():
                 selected = self._scene.selectedItems()
                 from py2flamingo.pipeline.ui.node_item import NodeItem
+
                 for item in selected:
                     if isinstance(item, NodeItem):
                         self._scene.remove_node(item.pipeline_node.id)
@@ -194,7 +196,7 @@ class PipelineGraphView(QGraphicsView):
         add_menu = menu.addMenu("Add Node")
         node_type_actions = {}
         for node_type in NodeType:
-            display_name = node_type.name.replace('_', ' ').title()
+            display_name = node_type.name.replace("_", " ").title()
             action = add_menu.addAction(display_name)
             node_type_actions[action] = node_type
 
@@ -207,7 +209,9 @@ class PipelineGraphView(QGraphicsView):
             return
 
         if action in node_type_actions:
-            self._scene.add_node(node_type_actions[action], scene_pos.x(), scene_pos.y())
+            self._scene.add_node(
+                node_type_actions[action], scene_pos.x(), scene_pos.y()
+            )
         elif action == fit_action:
             self.fit_to_content()
         elif action == reset_action:

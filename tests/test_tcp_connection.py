@@ -5,11 +5,12 @@ Tests the TCPConnection class for socket management, connection handling,
 and data transmission with the Flamingo microscope.
 """
 
-import unittest
 import socket
 import threading
 import time
-from unittest.mock import Mock, patch, MagicMock
+import unittest
+from unittest.mock import MagicMock, Mock, patch
+
 from py2flamingo.core.tcp_connection import TCPConnection
 
 
@@ -56,7 +57,7 @@ class TestTCPConnectionValidation(unittest.TestCase):
             "10.0.0",
             "10.0.0.0.0",
             "",
-            "10.0.0.256"
+            "10.0.0.256",
         ]
 
         for invalid_ip in invalid_ips:
@@ -91,7 +92,7 @@ class TestTCPConnectionValidation(unittest.TestCase):
 
     def test_send_bytes_validates_socket_type(self):
         """Test that invalid socket_type raises ValueError."""
-        with patch.object(self.connection, '_connected', True):
+        with patch.object(self.connection, "_connected", True):
             with self.assertRaises(ValueError):
                 self.connection.send_bytes(b"data", socket_type="invalid")
 
@@ -105,7 +106,7 @@ class TestTCPConnectionValidation(unittest.TestCase):
 
     def test_receive_bytes_validates_socket_type(self):
         """Test that invalid socket_type raises ValueError."""
-        with patch.object(self.connection, '_connected', True):
+        with patch.object(self.connection, "_connected", True):
             with self.assertRaises(ValueError):
                 self.connection.receive_bytes(128, socket_type="invalid")
 
@@ -125,7 +126,9 @@ class TestTCPConnectionWithMockServer(unittest.TestCase):
     def test_connect_to_mock_server(self):
         """Test connection to mock server."""
         try:
-            cmd_sock, live_sock = self.connection.connect("127.0.0.1", 53717, timeout=2.0)
+            cmd_sock, live_sock = self.connection.connect(
+                "127.0.0.1", 53717, timeout=2.0
+            )
 
             self.assertIsNotNone(cmd_sock)
             self.assertIsNotNone(live_sock)
@@ -260,7 +263,7 @@ class TestTCPConnectionThreadSafety(unittest.TestCase):
             t.join()
 
         # All results should be consistent (all False)
-        self.assertTrue(all(r == False for r in results))
+        self.assertTrue(all(r is False for r in results))
 
     def test_concurrent_get_connection_info(self):
         """Test that get_connection_info is thread-safe."""
@@ -287,7 +290,7 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
         """Set up test fixtures."""
         self.connection = TCPConnection()
 
-    @patch('socket.socket')
+    @patch("socket.socket")
     def test_connect_clears_timeout_after_connection(self, mock_socket_class):
         """Test that timeout is cleared after successful connection."""
         mock_cmd_socket = MagicMock()
@@ -306,7 +309,7 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
         mock_live_socket.settimeout.assert_any_call(2.0)
         mock_live_socket.settimeout.assert_any_call(None)
 
-    @patch('socket.socket')
+    @patch("socket.socket")
     def test_connect_connects_to_correct_ports(self, mock_socket_class):
         """Test that connect uses correct ports."""
         mock_cmd_socket = MagicMock()
@@ -322,7 +325,7 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
         # Verify live port connection (command port + 1)
         mock_live_socket.connect.assert_called_once_with(("127.0.0.1", 53718))
 
-    @patch('socket.socket')
+    @patch("socket.socket")
     def test_send_bytes_uses_sendall(self, mock_socket_class):
         """Test that send_bytes uses sendall."""
         mock_cmd_socket = MagicMock()
@@ -337,7 +340,7 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
 
         mock_cmd_socket.sendall.assert_called_once_with(data)
 
-    @patch('socket.socket')
+    @patch("socket.socket")
     def test_send_bytes_to_live_socket(self, mock_socket_class):
         """Test that send_bytes can use live socket."""
         mock_cmd_socket = MagicMock()
@@ -352,7 +355,7 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
 
         mock_live_socket.sendall.assert_called_once_with(data)
 
-    @patch('socket.socket')
+    @patch("socket.socket")
     def test_receive_bytes_uses_recv(self, mock_socket_class):
         """Test that receive_bytes uses recv."""
         mock_cmd_socket = MagicMock()
@@ -369,7 +372,7 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
         mock_cmd_socket.recv.assert_called_once_with(128)
         self.assertEqual(result, b"response data")
 
-    @patch('socket.socket')
+    @patch("socket.socket")
     def test_receive_bytes_from_live_socket(self, mock_socket_class):
         """Test that receive_bytes can use live socket."""
         mock_cmd_socket = MagicMock()
@@ -386,7 +389,7 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
         mock_live_socket.recv.assert_called_once_with(128)
         self.assertEqual(result, b"live data")
 
-    @patch('socket.socket')
+    @patch("socket.socket")
     def test_receive_bytes_with_timeout(self, mock_socket_class):
         """Test that receive_bytes sets and clears timeout."""
         mock_cmd_socket = MagicMock()
@@ -404,7 +407,7 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
         mock_cmd_socket.settimeout.assert_any_call(1.5)
         mock_cmd_socket.settimeout.assert_any_call(None)
 
-    @patch('socket.socket')
+    @patch("socket.socket")
     def test_receive_bytes_timeout_clears_timeout(self, mock_socket_class):
         """Test that timeout is cleared even when recv times out."""
         mock_cmd_socket = MagicMock()
@@ -422,7 +425,7 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
         # Verify timeout was cleared
         mock_cmd_socket.settimeout.assert_any_call(None)
 
-    @patch('socket.socket')
+    @patch("socket.socket")
     def test_disconnect_closes_both_sockets(self, mock_socket_class):
         """Test that disconnect closes both sockets."""
         mock_cmd_socket = MagicMock()
@@ -437,5 +440,5 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
         mock_live_socket.close.assert_called_once()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

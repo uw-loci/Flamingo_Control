@@ -7,14 +7,24 @@ color mapping, intensity scaling, and zoom.
 """
 
 import logging
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
+
+from PyQt5.QtCore import QEvent, Qt, pyqtSignal
+from PyQt5.QtGui import QCloseEvent, QHideEvent, QShowEvent
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QGroupBox, QSlider, QCheckBox, QComboBox, QButtonGroup,
-    QRadioButton, QSpinBox
+    QButtonGroup,
+    QCheckBox,
+    QComboBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QRadioButton,
+    QSlider,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QEvent
-from PyQt5.QtGui import QCloseEvent, QShowEvent, QHideEvent
 
 if TYPE_CHECKING:
     from py2flamingo.services.window_geometry_manager import WindowGeometryManager
@@ -49,7 +59,7 @@ class ImageControlsWindow(QWidget):
     zoom_changed = pyqtSignal(float)  # zoom as percentage (1.0 = 100%)
     crosshair_changed = pyqtSignal(bool)
 
-    def __init__(self, geometry_manager: 'WindowGeometryManager' = None, parent=None):
+    def __init__(self, geometry_manager: "WindowGeometryManager" = None, parent=None):
         """
         Initialize image controls window.
 
@@ -145,16 +155,18 @@ class ImageControlsWindow(QWidget):
         colormap_layout.addWidget(QLabel("Color Map:"))
 
         self.colormap_combo = QComboBox()
-        self.colormap_combo.addItems([
-            "Grayscale",
-            "Hot",
-            "Jet",
-            "Viridis",
-            "Plasma",
-            "Inferno",
-            "Magma",
-            "Turbo"
-        ])
+        self.colormap_combo.addItems(
+            [
+                "Grayscale",
+                "Hot",
+                "Jet",
+                "Viridis",
+                "Plasma",
+                "Inferno",
+                "Magma",
+                "Turbo",
+            ]
+        )
         self.colormap_combo.currentTextChanged.connect(self._on_colormap_changed)
         colormap_layout.addWidget(self.colormap_combo)
 
@@ -502,7 +514,9 @@ class ImageControlsWindow(QWidget):
         """Handle window state changes - log when window is activated."""
         super().changeEvent(event)
         if event.type() == QEvent.WindowActivate:
-            self.logger.info("Image Controls window activated (user clicked into window)")
+            self.logger.info(
+                "Image Controls window activated (user clicked into window)"
+            )
         elif event.type() == QEvent.WindowDeactivate:
             self.logger.debug("Image Controls window deactivated")
 

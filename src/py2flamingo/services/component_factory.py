@@ -16,15 +16,15 @@ def create_core_layer() -> dict:
     Returns:
         Dict with keys: tcp_connection, protocol_encoder, queue_manager, event_manager
     """
-    from py2flamingo.core import ProtocolEncoder, TCPConnection, QueueManager
+    from py2flamingo.core import ProtocolEncoder, QueueManager, TCPConnection
     from py2flamingo.core.events import EventManager
 
     logger.debug("Creating core layer components...")
     return {
-        'tcp_connection': TCPConnection(),
-        'protocol_encoder': ProtocolEncoder(),
-        'queue_manager': QueueManager(),
-        'event_manager': EventManager(),
+        "tcp_connection": TCPConnection(),
+        "protocol_encoder": ProtocolEncoder(),
+        "queue_manager": QueueManager(),
+        "event_manager": EventManager(),
     }
 
 
@@ -34,20 +34,26 @@ def create_models_layer() -> dict:
     Returns:
         Dict with keys: connection_model, workflow_model, display_model
     """
-    from py2flamingo.models import ConnectionModel, WorkflowModel, Position, ImageDisplayModel
+    from py2flamingo.models import (
+        ConnectionModel,
+        ImageDisplayModel,
+        Position,
+        WorkflowModel,
+    )
 
     logger.debug("Creating models layer components...")
     return {
-        'connection_model': ConnectionModel(),
-        'workflow_model': WorkflowModel.create_snapshot(
+        "connection_model": ConnectionModel(),
+        "workflow_model": WorkflowModel.create_snapshot(
             position=Position(x=0.0, y=0.0, z=0.0, r=0.0)
         ),
-        'display_model': ImageDisplayModel(),
+        "display_model": ImageDisplayModel(),
     }
 
 
-def create_services_layer(tcp_connection, protocol_encoder, queue_manager,
-                          connection_model, event_manager) -> dict:
+def create_services_layer(
+    tcp_connection, protocol_encoder, queue_manager, connection_model, event_manager
+) -> dict:
     """Create services layer components.
 
     Args:
@@ -62,9 +68,13 @@ def create_services_layer(tcp_connection, protocol_encoder, queue_manager,
             status_indicator_service, config_manager, geometry_manager
     """
     from py2flamingo.services import (
-        MVCConnectionService, MVCWorkflowService, StatusService,
-        ConfigurationManager, StatusIndicatorService,
-        WindowGeometryManager, set_default_geometry_manager
+        ConfigurationManager,
+        MVCConnectionService,
+        MVCWorkflowService,
+        StatusIndicatorService,
+        StatusService,
+        WindowGeometryManager,
+        set_default_geometry_manager,
     )
 
     logger.debug("Creating services layer components...")
@@ -73,13 +83,10 @@ def create_services_layer(tcp_connection, protocol_encoder, queue_manager,
         tcp_connection,
         protocol_encoder,
         queue_manager,
-        connection_model=connection_model
+        connection_model=connection_model,
     )
 
-    workflow_service = MVCWorkflowService(
-        connection_service,
-        event_manager
-    )
+    workflow_service = MVCWorkflowService(connection_service, event_manager)
 
     status_service = StatusService(connection_service)
     status_indicator_service = StatusIndicatorService(connection_service)
@@ -90,18 +97,23 @@ def create_services_layer(tcp_connection, protocol_encoder, queue_manager,
     set_default_geometry_manager(geometry_manager)
 
     return {
-        'connection_service': connection_service,
-        'workflow_service': workflow_service,
-        'status_service': status_service,
-        'status_indicator_service': status_indicator_service,
-        'config_manager': config_manager,
-        'geometry_manager': geometry_manager,
+        "connection_service": connection_service,
+        "workflow_service": workflow_service,
+        "status_service": status_service,
+        "status_indicator_service": status_indicator_service,
+        "config_manager": config_manager,
+        "geometry_manager": geometry_manager,
     }
 
 
-def create_controllers_layer(connection_service, connection_model, config_manager,
-                             workflow_service, workflow_model,
-                             status_indicator_service) -> dict:
+def create_controllers_layer(
+    connection_service,
+    connection_model,
+    config_manager,
+    workflow_service,
+    workflow_model,
+    status_indicator_service,
+) -> dict:
     """Create controllers layer components.
 
     Lazy imports for CameraService, ConfigurationService, LaserLEDService,
@@ -121,46 +133,45 @@ def create_controllers_layer(connection_service, connection_model, config_manage
             config_service, laser_led_service, laser_led_controller,
             camera_service, camera_controller
     """
-    from py2flamingo.controllers import ConnectionController, WorkflowController, PositionController
-    from py2flamingo.controllers.movement_controller import MovementController
+    from py2flamingo.controllers import (
+        ConnectionController,
+        PositionController,
+        WorkflowController,
+    )
     from py2flamingo.controllers.camera_controller import CameraController
-    from py2flamingo.services.workflow_queue_service import WorkflowQueueService
+    from py2flamingo.controllers.laser_led_controller import LaserLEDController
+    from py2flamingo.controllers.movement_controller import MovementController
+    from py2flamingo.controllers.position_controller_adapter import wire_motion_tracking
 
     # Lazy imports (deferred to avoid circular imports at module level)
     from py2flamingo.services.camera_service import CameraService
     from py2flamingo.services.configuration_service import ConfigurationService
     from py2flamingo.services.laser_led_service import LaserLEDService
-    from py2flamingo.controllers.laser_led_controller import LaserLEDController
-    from py2flamingo.controllers.position_controller_adapter import wire_motion_tracking
+    from py2flamingo.services.workflow_queue_service import WorkflowQueueService
 
     logger.debug("Creating controllers layer components...")
 
     connection_controller = ConnectionController(
-        connection_service,
-        connection_model,
-        config_manager
+        connection_service, connection_model, config_manager
     )
 
     workflow_controller = WorkflowController(
         workflow_service,
         connection_model,
         workflow_model,
-        connection_service=connection_service
+        connection_service=connection_service,
     )
 
     workflow_queue_service = WorkflowQueueService(
         workflow_controller=workflow_controller,
         connection_service=connection_service,
-        status_indicator_service=status_indicator_service
+        status_indicator_service=status_indicator_service,
     )
     logger.info("WorkflowQueueService created for sequential multi-tile execution")
 
     position_controller = PositionController(connection_service)
 
-    movement_controller = MovementController(
-        connection_service,
-        position_controller
-    )
+    movement_controller = MovementController(connection_service, position_controller)
 
     # Configuration service for laser/LED settings
     config_service = ConfigurationService()
@@ -184,23 +195,30 @@ def create_controllers_layer(connection_service, connection_model, config_manage
     workflow_controller.set_camera_controller(camera_controller)
 
     return {
-        'connection_controller': connection_controller,
-        'workflow_controller': workflow_controller,
-        'workflow_queue_service': workflow_queue_service,
-        'position_controller': position_controller,
-        'movement_controller': movement_controller,
-        'config_service': config_service,
-        'laser_led_service': laser_led_service,
-        'laser_led_controller': laser_led_controller,
-        'camera_service': camera_service,
-        'camera_controller': camera_controller,
+        "connection_controller": connection_controller,
+        "workflow_controller": workflow_controller,
+        "workflow_queue_service": workflow_queue_service,
+        "position_controller": position_controller,
+        "movement_controller": movement_controller,
+        "config_service": config_service,
+        "laser_led_service": laser_led_service,
+        "laser_led_controller": laser_led_controller,
+        "camera_service": camera_service,
+        "camera_controller": camera_controller,
     }
 
 
-def create_views_layer(connection_controller, config_manager, position_controller,
-                       workflow_service, workflow_controller, movement_controller,
-                       camera_controller, laser_led_controller,
-                       geometry_manager) -> dict:
+def create_views_layer(
+    connection_controller,
+    config_manager,
+    position_controller,
+    workflow_service,
+    workflow_controller,
+    movement_controller,
+    camera_controller,
+    laser_led_controller,
+    geometry_manager,
+) -> dict:
     """Create views layer components.
 
     Args:
@@ -219,8 +237,11 @@ def create_views_layer(connection_controller, config_manager, position_controlle
             stage_control_view, image_controls_window, camera_live_viewer
     """
     from py2flamingo.views import (
-        ConnectionView, WorkflowView, SampleInfoView,
-        ImageControlsWindow, StageControlView
+        ConnectionView,
+        ImageControlsWindow,
+        SampleInfoView,
+        StageControlView,
+        WorkflowView,
     )
     from py2flamingo.views.camera_live_viewer import CameraLiveViewer
 
@@ -230,16 +251,14 @@ def create_views_layer(connection_controller, config_manager, position_controlle
         connection_controller,
         config_manager=config_manager,
         position_controller=position_controller,
-        workflow_service=workflow_service
+        workflow_service=workflow_service,
     )
 
     workflow_view = WorkflowView(workflow_controller)
 
     sample_info_view = SampleInfoView()
 
-    stage_control_view = StageControlView(
-        movement_controller=movement_controller
-    )
+    stage_control_view = StageControlView(movement_controller=movement_controller)
 
     # Create independent image controls window (starts hidden)
     image_controls_window = ImageControlsWindow(geometry_manager=geometry_manager)
@@ -250,17 +269,17 @@ def create_views_layer(connection_controller, config_manager, position_controlle
         camera_controller=camera_controller,
         laser_led_controller=laser_led_controller,
         image_controls_window=image_controls_window,
-        geometry_manager=geometry_manager
+        geometry_manager=geometry_manager,
     )
     camera_live_viewer.hide()
 
     return {
-        'connection_view': connection_view,
-        'workflow_view': workflow_view,
-        'sample_info_view': sample_info_view,
-        'stage_control_view': stage_control_view,
-        'image_controls_window': image_controls_window,
-        'camera_live_viewer': camera_live_viewer,
+        "connection_view": connection_view,
+        "workflow_view": workflow_view,
+        "sample_info_view": sample_info_view,
+        "stage_control_view": stage_control_view,
+        "image_controls_window": image_controls_window,
+        "camera_live_viewer": camera_live_viewer,
     }
 
 
@@ -273,8 +292,8 @@ def create_pipeline_layer(app=None) -> dict:
     Returns:
         Dict with keys: pipeline_service, pipeline_controller
     """
-    from py2flamingo.pipeline.services.pipeline_service import PipelineService
     from py2flamingo.pipeline.controllers.pipeline_controller import PipelineController
+    from py2flamingo.pipeline.services.pipeline_service import PipelineService
 
     logger.debug("Creating pipeline layer components...")
 
@@ -285,6 +304,6 @@ def create_pipeline_layer(app=None) -> dict:
     )
 
     return {
-        'pipeline_service': pipeline_service,
-        'pipeline_controller': pipeline_controller,
+        "pipeline_service": pipeline_service,
+        "pipeline_controller": pipeline_controller,
     }

@@ -3,9 +3,9 @@
 Module defining global queues and events for inter-thread communication.
 """
 
+import platform
 from queue import Queue
 from threading import Event
-import platform
 
 # Queues for data and commands
 image_queue = Queue()
@@ -28,6 +28,7 @@ visualize_event = Event()  # <- This was missing!
 # OS info (tests expect this)
 OS = platform.system()
 
+
 def clear_all_events_queues():
     """
     Clear all event flags and queues.
@@ -43,10 +44,10 @@ def clear_all_events_queues():
         visualize_event,
     ]:
         ev.clear()
-    
+
     # Set system_idle after clearing (expected initial state)
     system_idle.set()
-    
+
     # Empty queues
     for q in [
         image_queue,

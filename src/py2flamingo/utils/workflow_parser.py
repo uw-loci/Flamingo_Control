@@ -5,8 +5,9 @@ This module provides utilities to parse, validate, and preview workflow .txt fil
 It leverages existing file_handlers utilities and adds additional validation and
 error handling for robust workflow processing.
 """
+
 from pathlib import Path
-from typing import Dict, Any, Tuple, List, Union
+from typing import Any, Dict, List, Tuple, Union
 
 from .file_handlers import workflow_to_dict
 
@@ -86,7 +87,7 @@ def validate_workflow(workflow_dict: Dict[str, Any]) -> Tuple[bool, List[str]]:
         "Experiment Settings",
         "Stack Settings",
         "Start Position",
-        "Illumination Source"
+        "Illumination Source",
     ]
 
     missing_sections = []
@@ -105,7 +106,9 @@ def validate_workflow(workflow_dict: Dict[str, Any]) -> Tuple[bool, List[str]]:
             critical_fields = ["Frame rate (f/s)", "Exposure time (us)"]
             for field in critical_fields:
                 if field not in exp_settings:
-                    errors.append(f"Missing critical field in Experiment Settings: {field}")
+                    errors.append(
+                        f"Missing critical field in Experiment Settings: {field}"
+                    )
 
     # Validate Start Position if present
     if "Start Position" in workflow_dict:
@@ -157,17 +160,17 @@ def get_workflow_preview(path: Union[str, Path], max_lines: int = 20) -> str:
         # Read file with encoding error handling
         lines = []
         total_lines = 0
-        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
             for i, line in enumerate(f):
                 total_lines = i + 1
                 if i < max_lines:
                     # Keep the line with trailing newline removed
-                    lines.append(line.rstrip('\n\r'))
+                    lines.append(line.rstrip("\n\r"))
                 else:
                     # Just count remaining lines
                     pass
 
-        preview = '\n'.join(lines)
+        preview = "\n".join(lines)
 
         # Add truncation indicator if file is longer
         if total_lines > max_lines:
@@ -221,12 +224,12 @@ def read_workflow_as_bytes(path: Union[str, Path]) -> bytes:
 
     try:
         # Read entire file as bytes
-        with open(path, 'rb') as f:
+        with open(path, "rb") as f:
             workflow_bytes = f.read()
 
         # Verify it's valid UTF-8 (workflows should be text files)
         try:
-            workflow_bytes.decode('utf-8')
+            workflow_bytes.decode("utf-8")
         except UnicodeDecodeError:
             raise ValueError(
                 "Workflow file contains invalid UTF-8 encoding. "
@@ -265,28 +268,28 @@ def get_workflow_summary(workflow_dict: Dict[str, Any]) -> Dict[str, Any]:
     if "Experiment Settings" in workflow_dict:
         exp = workflow_dict["Experiment Settings"]
         if isinstance(exp, dict):
-            summary['frame_rate'] = exp.get('Frame rate (f/s)', 'N/A')
-            summary['exposure_time'] = exp.get('Exposure time (us)', 'N/A')
-            summary['duration'] = exp.get('Duration (dd:hh:mm:ss)', 'N/A')
-            summary['sample'] = exp.get('Sample', 'N/A')
-            summary['save_directory'] = exp.get('Save image directory', 'N/A')
+            summary["frame_rate"] = exp.get("Frame rate (f/s)", "N/A")
+            summary["exposure_time"] = exp.get("Exposure time (us)", "N/A")
+            summary["duration"] = exp.get("Duration (dd:hh:mm:ss)", "N/A")
+            summary["sample"] = exp.get("Sample", "N/A")
+            summary["save_directory"] = exp.get("Save image directory", "N/A")
 
     # Extract stack settings
     if "Stack Settings" in workflow_dict:
         stack = workflow_dict["Stack Settings"]
         if isinstance(stack, dict):
-            summary['num_planes'] = stack.get('Number of planes', 'N/A')
-            summary['plane_spacing'] = stack.get('Change in Z axis (mm)', 'N/A')
-            summary['stack_option'] = stack.get('Stack option', 'N/A')
+            summary["num_planes"] = stack.get("Number of planes", "N/A")
+            summary["plane_spacing"] = stack.get("Change in Z axis (mm)", "N/A")
+            summary["stack_option"] = stack.get("Stack option", "N/A")
 
     # Extract start position
     if "Start Position" in workflow_dict:
         start = workflow_dict["Start Position"]
         if isinstance(start, dict):
-            summary['start_x'] = start.get('X (mm)', 'N/A')
-            summary['start_y'] = start.get('Y (mm)', 'N/A')
-            summary['start_z'] = start.get('Z (mm)', 'N/A')
-            summary['start_angle'] = start.get('Angle (degrees)', 'N/A')
+            summary["start_x"] = start.get("X (mm)", "N/A")
+            summary["start_y"] = start.get("Y (mm)", "N/A")
+            summary["start_z"] = start.get("Z (mm)", "N/A")
+            summary["start_angle"] = start.get("Angle (degrees)", "N/A")
 
     return summary
 
@@ -378,54 +381,54 @@ def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:
 
     # Experiment Settings section
     lines.append("    <Experiment Settings>")
-    exp = workflow_dict.get('Experiment Settings', {})
+    exp = workflow_dict.get("Experiment Settings", {})
 
     # Plane spacing (from stack settings or default)
-    plane_spacing = exp.get('Plane spacing (um)', 1.0)
+    plane_spacing = exp.get("Plane spacing (um)", 1.0)
     lines.append(f"    Plane spacing (um) = {plane_spacing}")
 
     # Frame rate and exposure
-    frame_rate = exp.get('Frame rate (f/s)', 100.0)
-    exposure_time = exp.get('Exposure time (us)', 10000)
+    frame_rate = exp.get("Frame rate (f/s)", 100.0)
+    exposure_time = exp.get("Exposure time (us)", 10000)
     lines.append(f"    Frame rate (f/s) = {frame_rate:.1f}")
     lines.append(f"    Exposure time (us) = {int(exposure_time)}")
 
     # Time-lapse settings
-    duration = exp.get('Duration (dd:hh:mm:ss)', '00:00:00:01')
-    interval = exp.get('Interval (dd:hh:mm:ss)', '00:00:00:01')
+    duration = exp.get("Duration (dd:hh:mm:ss)", "00:00:00:01")
+    interval = exp.get("Interval (dd:hh:mm:ss)", "00:00:00:01")
     lines.append(f"    Duration (dd:hh:mm:ss) = {duration}")
     lines.append(f"    Interval (dd:hh:mm:ss) = {interval}")
 
     # Sample name
-    sample = exp.get('Sample', '')
+    sample = exp.get("Sample", "")
     lines.append(f"    Sample = {sample}")
 
     # Multi-angle settings
-    num_angles = exp.get('Number of angles', 1)
-    angle_step = exp.get('Angle step size', 0)
+    num_angles = exp.get("Number of angles", 1)
+    angle_step = exp.get("Angle step size", 0)
     lines.append(f"    Number of angles = {num_angles}")
     lines.append(f"    Angle step size = {angle_step}")
 
     # Region
-    region = exp.get('Region', '')
+    region = exp.get("Region", "")
     lines.append(f"    Region = {region}")
 
     # Save settings
-    save_drive = exp.get('Save image drive', '/media/deploy/ctlsm1')
-    save_dir = exp.get('Save image directory', 'data')
+    save_drive = exp.get("Save image drive", "/media/deploy/ctlsm1")
+    save_dir = exp.get("Save image directory", "data")
     lines.append(f"    Save image drive = {save_drive}")
     lines.append(f"    Save image directory = {save_dir}")
 
     # Comments
-    comments = exp.get('Comments', '')
+    comments = exp.get("Comments", "")
     lines.append(f"    Comments = {comments}")
 
     # Display/Save options
-    save_mip = exp.get('Save max projection', 'false')
-    display_mip = exp.get('Display max projection', 'true')
-    save_format = exp.get('Save image data', 'Tiff')
-    save_subfolders = exp.get('Save to subfolders', 'false')
-    live_view = exp.get('Work flow live view enabled', 'true')
+    save_mip = exp.get("Save max projection", "false")
+    display_mip = exp.get("Display max projection", "true")
+    save_format = exp.get("Save image data", "Tiff")
+    save_subfolders = exp.get("Save to subfolders", "false")
+    live_view = exp.get("Work flow live view enabled", "true")
 
     lines.append(f"    Save max projection = {save_mip}")
     lines.append(f"    Display max projection = {display_mip}")
@@ -438,12 +441,12 @@ def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:
     # Camera Settings section
     lines.append("")
     lines.append("    <Camera Settings>")
-    cam = workflow_dict.get('Camera Settings', {})
+    cam = workflow_dict.get("Camera Settings", {})
 
-    cam_exposure = cam.get('Exposure time (us)', 10000)
-    cam_framerate = cam.get('Frame rate (f/s)', 100.0)
-    aoi_width = cam.get('AOI width', 2048)
-    aoi_height = cam.get('AOI height', 2048)
+    cam_exposure = cam.get("Exposure time (us)", 10000)
+    cam_framerate = cam.get("Frame rate (f/s)", 100.0)
+    aoi_width = cam.get("AOI width", 2048)
+    aoi_height = cam.get("AOI height", 2048)
 
     lines.append(f"    Exposure time (us) = {int(cam_exposure)}")
     lines.append(f"    Frame rate (f/s) = {cam_framerate:.1f}")
@@ -454,27 +457,43 @@ def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:
     # Stack Settings section
     lines.append("")
     lines.append("    <Stack Settings>")
-    stack = workflow_dict.get('Stack Settings', {})
+    stack = workflow_dict.get("Stack Settings", {})
 
     lines.append("    Stack index = ")
-    lines.append(f"    Change in Z axis (mm) = {stack.get('Change in Z axis (mm)', 0.001):.6f}")
+    lines.append(
+        f"    Change in Z axis (mm) = {stack.get('Change in Z axis (mm)', 0.001):.6f}"
+    )
     lines.append(f"    Number of planes = {stack.get('Number of planes', 1)}")
-    lines.append(f"    Z stage velocity (mm/s) = {stack.get('Z stage velocity (mm/s)', 0.4)}")
-    lines.append(f"    Rotational stage velocity (°/s) = {stack.get('Rotational stage velocity (°/s)', 0)}")
-    lines.append(f"    Auto update stack calculations = {stack.get('Auto update stack calculations', 'true')}")
-    lines.append(f"    Camera 1 capture percentage = {stack.get('Camera 1 capture percentage', 100)}")
+    lines.append(
+        f"    Z stage velocity (mm/s) = {stack.get('Z stage velocity (mm/s)', 0.4)}"
+    )
+    lines.append(
+        f"    Rotational stage velocity (°/s) = {stack.get('Rotational stage velocity (°/s)', 0)}"
+    )
+    lines.append(
+        f"    Auto update stack calculations = {stack.get('Auto update stack calculations', 'true')}"
+    )
+    lines.append(
+        f"    Camera 1 capture percentage = {stack.get('Camera 1 capture percentage', 100)}"
+    )
     lines.append(f"    Camera 1 capture mode = {stack.get('Camera 1 capture mode', 0)}")
-    lines.append(f"    Camera 2 capture percentage = {stack.get('Camera 2 capture percentage', 100)}")
+    lines.append(
+        f"    Camera 2 capture percentage = {stack.get('Camera 2 capture percentage', 100)}"
+    )
     lines.append(f"    Camera 2 capture mode = {stack.get('Camera 2 capture mode', 0)}")
     lines.append(f"    Stack option = {stack.get('Stack option', 'None')}")
-    lines.append(f"    Stack option settings 1 = {stack.get('Stack option settings 1', 0)}")
-    lines.append(f"    Stack option settings 2 = {stack.get('Stack option settings 2', 0)}")
+    lines.append(
+        f"    Stack option settings 1 = {stack.get('Stack option settings 1', 0)}"
+    )
+    lines.append(
+        f"    Stack option settings 2 = {stack.get('Stack option settings 2', 0)}"
+    )
     lines.append("    </Stack Settings>")
 
     # Start Position section
     lines.append("")
     lines.append("    <Start Position>")
-    start_pos = workflow_dict.get('Start Position', {})
+    start_pos = workflow_dict.get("Start Position", {})
     lines.append(f"    X (mm) = {start_pos.get('X (mm)', 0.0):.6f}")
     lines.append(f"    Y (mm) = {start_pos.get('Y (mm)', 0.0):.6f}")
     lines.append(f"    Z (mm) = {start_pos.get('Z (mm)', 10.0):.6f}")
@@ -484,7 +503,7 @@ def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:
     # End Position section
     lines.append("")
     lines.append("    <End Position>")
-    end_pos = workflow_dict.get('End Position', start_pos)
+    end_pos = workflow_dict.get("End Position", start_pos)
     lines.append(f"    X (mm) = {end_pos.get('X (mm)', 0.0):.6f}")
     lines.append(f"    Y (mm) = {end_pos.get('Y (mm)', 0.0):.6f}")
     lines.append(f"    Z (mm) = {end_pos.get('Z (mm)', 10.0):.6f}")
@@ -494,11 +513,11 @@ def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:
     # Illumination Source section
     lines.append("")
     lines.append("    <Illumination Source>")
-    illum = workflow_dict.get('Illumination Source', {})
+    illum = workflow_dict.get("Illumination Source", {})
 
     # Write all illumination settings (except path settings)
     for key, value in illum.items():
-        if key in ('Left path', 'Right path'):
+        if key in ("Left path", "Right path"):
             continue
         lines.append(f"    {key} = {value}")
 
@@ -507,8 +526,8 @@ def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:
     # Illumination Path section
     lines.append("")
     lines.append("    <Illumination Path>")
-    left_path = illum.get('Left path', 'ON 1')
-    right_path = illum.get('Right path', 'OFF 0')
+    left_path = illum.get("Left path", "ON 1")
+    right_path = illum.get("Right path", "OFF 0")
     lines.append(f"    Left path = {left_path}")
     lines.append(f"    Right path = {right_path}")
     lines.append("    </Illumination Path>")
@@ -516,8 +535,8 @@ def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:
     # Illumination Options section
     lines.append("")
     lines.append("    <Illumination Options>")
-    illum_opts = workflow_dict.get('Illumination Options', {})
-    multi_laser = illum_opts.get('Run stack with multiple lasers on', 'false')
+    illum_opts = workflow_dict.get("Illumination Options", {})
+    multi_laser = illum_opts.get("Run stack with multiple lasers on", "false")
     lines.append(f"    Run stack with multiple lasers on = {multi_laser}")
     lines.append("    </Illumination Options>")
 
@@ -558,4 +577,4 @@ class WorkflowTextFormatter:
         Returns:
             Workflow file content as UTF-8 encoded bytes
         """
-        return dict_to_workflow_text(workflow_dict).encode('utf-8')
+        return dict_to_workflow_text(workflow_dict).encode("utf-8")

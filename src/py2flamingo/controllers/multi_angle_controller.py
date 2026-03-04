@@ -6,27 +6,31 @@ Controller for multi-angle data collection.
 
 import logging
 from typing import Optional
-import numpy as np
 
-from py2flamingo.models.microscope import Position
+import numpy as np
 from controllers.microscope_controller import MicroscopeController
 from controllers.sample_controller import SampleController
-from py2flamingo.services.communication.connection_manager import ConnectionManager
+
 import py2flamingo.utils.calculations as calc
 import py2flamingo.utils.file_handlers as txt
+from py2flamingo.models.microscope import Position
+from py2flamingo.services.communication.connection_manager import ConnectionManager
 
 
 class MultiAngleController:
     """
     Controller to handle multi-angle image collection.
     """
-    def __init__(self,
-                 microscope_controller: MicroscopeController,
-                 sample_controller: SampleController,
-                 connection_manager: ConnectionManager):
+
+    def __init__(
+        self,
+        microscope_controller: MicroscopeController,
+        sample_controller: SampleController,
+        connection_manager: ConnectionManager,
+    ):
         """
         Initialize multi-angle controller.
-        
+
         Args:
             microscope_controller: Main microscope controller.
             sample_controller: Sample controller for image capture.
@@ -37,10 +41,12 @@ class MultiAngleController:
         self.sample_controller = sample_controller
         self.connection = connection_manager
 
-    def collect_images(self, angles: Optional[list] = None, save_directory: str = "multi_angle_images"):
+    def collect_images(
+        self, angles: Optional[list] = None, save_directory: str = "multi_angle_images"
+    ):
         """
         Collect images of the sample at multiple angles and save to disk.
-        
+
         Args:
             angles: List of angles (degrees) at which to capture images. If None, uses default angles.
             save_directory: Directory to save collected images.
@@ -50,6 +56,7 @@ class MultiAngleController:
         try:
             # Ensure save directory exists
             import os
+
             os.makedirs(save_directory, exist_ok=True)
             for angle in angles:
                 # Rotate microscope to the angle

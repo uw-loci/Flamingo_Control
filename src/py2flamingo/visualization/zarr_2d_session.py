@@ -24,28 +24,28 @@ Session structures:
 
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
-from .session_manager import (
-    ZARR_AVAILABLE, ZARR_3_AVAILABLE, _create_zarr_store,
-)
+from .session_manager import ZARR_3_AVAILABLE, ZARR_AVAILABLE, _create_zarr_store
 
 logger = logging.getLogger(__name__)
 
 # Import zarr and codecs conditionally (mirrors session_manager.py)
 if ZARR_AVAILABLE:
     import zarr
+
     if ZARR_3_AVAILABLE:
         from zarr.codecs import BloscCodec
     else:
         from numcodecs import Blosc
+
         BloscCodec = None
 
 # Constants
 DEFAULT_2D_CHUNK_SIZE = (512, 512)
-DEFAULT_COMPRESSOR = 'zstd'
+DEFAULT_COMPRESSOR = "zstd"
 DEFAULT_COMPRESSION_LEVEL = 3
 
 
@@ -113,9 +113,9 @@ def save_2d_zarr_session(
     root = zarr.group(store=store, overwrite=True)
 
     # Write metadata to .zattrs
-    root.attrs['format_version'] = '1.0'
-    root.attrs['format_type'] = format_type
-    root.attrs['session_metadata'] = metadata
+    root.attrs["format_version"] = "1.0"
+    root.attrs["format_type"] = format_type
+    root.attrs["session_metadata"] = metadata
 
     # Write each image as a dataset
     for key, image in images_dict.items():
@@ -123,7 +123,7 @@ def save_2d_zarr_session(
             continue
 
         # Handle hierarchical paths (e.g. "rotation_0/stitched_best_focus")
-        parts = key.split('/')
+        parts = key.split("/")
         if len(parts) > 1:
             # Ensure parent groups exist
             group = root
@@ -169,16 +169,16 @@ def load_2d_zarr_session(
         raise FileNotFoundError(f"Session not found: {load_path}")
 
     store = _create_zarr_store(str(load_path))
-    root = zarr.open_group(store=store, mode='r')
+    root = zarr.open_group(store=store, mode="r")
 
     # Read metadata
-    metadata = dict(root.attrs.get('session_metadata', {}))
+    metadata = dict(root.attrs.get("session_metadata", {}))
     if not metadata:
         raise ValueError(f"No session_metadata in {load_path}")
 
     # Recursively collect all 2D datasets
     images_dict = {}
-    _collect_datasets(root, '', images_dict)
+    _collect_datasets(root, "", images_dict)
 
     logger.info(f"2D zarr session loaded: {load_path} ({len(images_dict)} datasets)")
     return metadata, images_dict
@@ -189,17 +189,17 @@ def _collect_datasets(group, prefix: str, out: Dict[str, np.ndarray]):
     for key in group:
         child = group[key]
         full_key = f"{prefix}{key}" if not prefix else f"{prefix}/{key}"
-        if hasattr(child, 'shape') and len(child.shape) > 0:
+        if hasattr(child, "shape") and len(child.shape) > 0:
             # It's a dataset — load as numpy array
             out[full_key] = np.array(child)
-        elif hasattr(child, 'keys'):
+        elif hasattr(child, "keys"):
             # It's a group — recurse
             _collect_datasets(child, full_key, out)
 
 
 def load_2d_zarr_session_lazy(
     load_path: Path,
-) -> Tuple[Dict[str, Any], 'zarr.Group']:
+) -> Tuple[Dict[str, Any], "zarr.Group"]:
     """Load metadata from a 2D zarr session without reading any array data.
 
     Returns the zarr root group so callers can load individual datasets
@@ -224,9 +224,9 @@ def load_2d_zarr_session_lazy(
         raise FileNotFoundError(f"Session not found: {load_path}")
 
     store = _create_zarr_store(str(load_path))
-    root = zarr.open_group(store=store, mode='r')
+    root = zarr.open_group(store=store, mode="r")
 
-    metadata = dict(root.attrs.get('session_metadata', {}))
+    metadata = dict(root.attrs.get("session_metadata", {}))
     if not metadata:
         raise ValueError(f"No session_metadata in {load_path}")
 
@@ -234,15 +234,15 @@ def load_2d_zarr_session_lazy(
     return metadata, root
 
 
-def _collect_dataset_keys(group, prefix: str = '') -> list:
+def _collect_dataset_keys(group, prefix: str = "") -> list:
     """Recursively enumerate all dataset keys in a zarr group without loading data."""
     keys = []
     for key in group:
         child = group[key]
         full_key = f"{prefix}{key}" if not prefix else f"{prefix}/{key}"
-        if hasattr(child, 'shape') and len(child.shape) > 0:
+        if hasattr(child, "shape") and len(child.shape) > 0:
             keys.append(full_key)
-        elif hasattr(child, 'keys'):
+        elif hasattr(child, "keys"):
             keys.extend(_collect_dataset_keys(child, full_key))
     return keys
 
@@ -261,14 +261,14 @@ def detect_session_format(folder_path: Path) -> Optional[str]:
     folder_path = Path(folder_path)
 
     # Check for zarr markers
-    if (folder_path / '.zattrs').exists() or (folder_path / '.zgroup').exists():
-        return 'zarr'
+    if (folder_path / ".zattrs").exists() or (folder_path / ".zgroup").exists():
+        return "zarr"
     # Zarr 3.x uses zarr.json instead of .zattrs/.zgroup
-    if (folder_path / 'zarr.json').exists():
-        return 'zarr'
+    if (folder_path / "zarr.json").exists():
+        return "zarr"
 
     # Check for TIFF session markers
-    if (folder_path / 'metadata.json').exists():
-        return 'tiff'
+    if (folder_path / "metadata.json").exists():
+        return "tiff"
 
     return None

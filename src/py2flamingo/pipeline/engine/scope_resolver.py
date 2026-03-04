@@ -8,9 +8,9 @@ the appropriate runner for scoped execution.
 """
 
 import logging
-from typing import Dict, Set, List
+from typing import Dict, List, Set
 
-from py2flamingo.pipeline.models.pipeline import Pipeline, NodeType
+from py2flamingo.pipeline.models.pipeline import NodeType, Pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ class ScopeResolver:
         scope = ScopeInfo(node_id, NodeType.FOR_EACH)
 
         # Collect downstream from current_item and index outputs
-        for port_name in ('current_item', 'index'):
+        for port_name in ("current_item", "index"):
             port = node.get_output(port_name)
             if port:
                 downstream = self._pipeline.get_downstream_from_port(node_id, port.id)
@@ -96,7 +96,10 @@ class ScopeResolver:
 
         scope = ScopeInfo(node_id, NodeType.CONDITIONAL)
 
-        for branch_name, port_name in [('true', 'true_branch'), ('false', 'false_branch')]:
+        for branch_name, port_name in [
+            ("true", "true_branch"),
+            ("false", "false_branch"),
+        ]:
             port = node.get_output(port_name)
             if port:
                 downstream = self._pipeline.get_downstream_from_port(node_id, port.id)

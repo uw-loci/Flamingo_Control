@@ -10,6 +10,7 @@ allowing the status indicator service to track stage motion.
 
 import logging
 from typing import Optional
+
 from PyQt5.QtCore import QObject, pyqtSignal
 
 
@@ -41,7 +42,7 @@ class PositionControllerMotionAdapter(QObject):
     motion_started = pyqtSignal()
     motion_stopped = pyqtSignal()
 
-    def __init__(self, position_controller: 'PositionController'):
+    def __init__(self, position_controller: "PositionController"):
         """
         Initialize adapter with existing PositionController.
 
@@ -120,9 +121,10 @@ class PositionControllerMotionAdapter(QObject):
 
 
 # Convenience function to wrap a position controller
-def create_motion_tracking_adapter(position_controller: 'PositionController',
-                                   status_indicator_service: Optional['StatusIndicatorService'] = None
-                                   ) -> PositionControllerMotionAdapter:
+def create_motion_tracking_adapter(
+    position_controller: "PositionController",
+    status_indicator_service: Optional["StatusIndicatorService"] = None,
+) -> PositionControllerMotionAdapter:
     """
     Create a motion tracking adapter for a PositionController.
 
@@ -150,12 +152,16 @@ def create_motion_tracking_adapter(position_controller: 'PositionController',
     if status_indicator_service:
         adapter.motion_started.connect(status_indicator_service.on_motion_started)
         adapter.motion_stopped.connect(status_indicator_service.on_motion_stopped)
-        logging.getLogger(__name__).info("Connected motion adapter to status indicator service")
+        logging.getLogger(__name__).info(
+            "Connected motion adapter to status indicator service"
+        )
 
     return adapter
 
 
-def wire_motion_tracking(controller, status_indicator_service: 'StatusIndicatorService') -> None:
+def wire_motion_tracking(
+    controller, status_indicator_service: "StatusIndicatorService"
+) -> None:
     """
     Wire motion tracking from a controller to StatusIndicatorService.
 
@@ -191,7 +197,7 @@ def wire_motion_tracking(controller, status_indicator_service: 'StatusIndicatorS
     logger = logging.getLogger(__name__)
 
     # Check if controller is a MovementController (has Qt signals)
-    if hasattr(controller, 'motion_started') and hasattr(controller, 'motion_stopped'):
+    if hasattr(controller, "motion_started") and hasattr(controller, "motion_stopped"):
         # MovementController - connect signals directly
         # Use lambda to ignore axis name parameter that MovementController emits
         controller.motion_started.connect(

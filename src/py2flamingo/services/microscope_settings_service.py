@@ -15,7 +15,7 @@ and can be easily updated without modifying code.
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 
 class MicroscopeSettingsService:
@@ -43,10 +43,16 @@ class MicroscopeSettingsService:
             self.base_path / "microscope_settings" / f"{microscope_name}_settings.json"
         )
 
-        print(f"[MicroscopeSettingsService] Initializing for microscope: '{microscope_name}'")
+        print(
+            f"[MicroscopeSettingsService] Initializing for microscope: '{microscope_name}'"
+        )
         print(f"[MicroscopeSettingsService] Base path: {self.base_path}")
-        print(f"[MicroscopeSettingsService] Looking for settings file: {self.settings_file}")
-        print(f"[MicroscopeSettingsService] Settings file exists: {self.settings_file.exists()}")
+        print(
+            f"[MicroscopeSettingsService] Looking for settings file: {self.settings_file}"
+        )
+        print(
+            f"[MicroscopeSettingsService] Settings file exists: {self.settings_file.exists()}"
+        )
 
         self.settings = self._load_settings()
 
@@ -63,8 +69,12 @@ class MicroscopeSettingsService:
             print(f"[MicroscopeSettingsService] ✗ Settings file NOT FOUND!")
             print(f"[MicroscopeSettingsService]   Expected: {self.settings_file}")
             print(f"[MicroscopeSettingsService]   Base path: {self.base_path}")
-            print(f"[MicroscopeSettingsService]   Microscope name: '{self.microscope_name}'")
-            print(f"[MicroscopeSettingsService] ⚠ Falling back to DEFAULT settings (stage limits will be 0-26)")
+            print(
+                f"[MicroscopeSettingsService]   Microscope name: '{self.microscope_name}'"
+            )
+            print(
+                f"[MicroscopeSettingsService] ⚠ Falling back to DEFAULT settings (stage limits will be 0-26)"
+            )
 
             self.logger.warning(
                 f"[MicroscopeSettingsService] Settings file NOT FOUND: {self.settings_file}"
@@ -78,17 +88,21 @@ class MicroscopeSettingsService:
             return self._get_default_settings()
 
         try:
-            with open(self.settings_file, 'r') as f:
+            with open(self.settings_file, "r") as f:
                 settings = json.load(f)
-                print(f"[MicroscopeSettingsService] ✓ Successfully loaded settings from: {self.settings_file}")
+                print(
+                    f"[MicroscopeSettingsService] ✓ Successfully loaded settings from: {self.settings_file}"
+                )
                 self.logger.info(
                     f"[MicroscopeSettingsService] Successfully loaded settings for microscope '{self.microscope_name}' "
                     f"from {self.settings_file}"
                 )
                 # Log stage limits to verify correct file was loaded
-                if 'stage_limits' in settings:
-                    limits = settings['stage_limits']
-                    print(f"[MicroscopeSettingsService] Settings file contains stage limits:")
+                if "stage_limits" in settings:
+                    limits = settings["stage_limits"]
+                    print(
+                        f"[MicroscopeSettingsService] Settings file contains stage limits:"
+                    )
                     print(f"  X: {limits['x']['min']} to {limits['x']['max']} mm")
                     print(f"  Y: {limits['y']['min']} to {limits['y']['max']} mm")
                     print(f"  Z: {limits['z']['min']} to {limits['z']['max']} mm")
@@ -101,7 +115,9 @@ class MicroscopeSettingsService:
                 return settings
         except Exception as e:
             print(f"[MicroscopeSettingsService] ✗ Error loading settings file: {e}")
-            self.logger.error(f"[MicroscopeSettingsService] Error loading settings file: {e}")
+            self.logger.error(
+                f"[MicroscopeSettingsService] Error loading settings file: {e}"
+            )
             return self._get_default_settings()
 
     def _get_default_settings(self) -> Dict[str, Any]:
@@ -116,17 +132,14 @@ class MicroscopeSettingsService:
         )
         return {
             "microscope_name": self.microscope_name,
-            "position_history": {
-                "max_size": 100,
-                "display_count": 20
-            },
+            "position_history": {"max_size": 100, "display_count": 20},
             "stage_limits": {
                 "x": {"min": 0.0, "max": 26.0, "unit": "mm"},
                 "y": {"min": 0.0, "max": 26.0, "unit": "mm"},
                 "z": {"min": 0.0, "max": 26.0, "unit": "mm"},
-                "r": {"min": -720.0, "max": 720.0, "unit": "degrees"}
+                "r": {"min": -720.0, "max": 720.0, "unit": "degrees"},
             },
-            "version": "1.0"
+            "version": "1.0",
         }
 
     def get_stage_limits(self) -> Dict[str, Dict[str, float]]:
@@ -140,25 +153,25 @@ class MicroscopeSettingsService:
             >>> limits['x']
             {'min': 1.0, 'max': 12.31}
         """
-        stage_limits = self.settings.get('stage_limits', {})
+        stage_limits = self.settings.get("stage_limits", {})
 
         return {
-            'x': {
-                'min': float(stage_limits.get('x', {}).get('min', 0.0)),
-                'max': float(stage_limits.get('x', {}).get('max', 26.0))
+            "x": {
+                "min": float(stage_limits.get("x", {}).get("min", 0.0)),
+                "max": float(stage_limits.get("x", {}).get("max", 26.0)),
             },
-            'y': {
-                'min': float(stage_limits.get('y', {}).get('min', 0.0)),
-                'max': float(stage_limits.get('y', {}).get('max', 26.0))
+            "y": {
+                "min": float(stage_limits.get("y", {}).get("min", 0.0)),
+                "max": float(stage_limits.get("y", {}).get("max", 26.0)),
             },
-            'z': {
-                'min': float(stage_limits.get('z', {}).get('min', 0.0)),
-                'max': float(stage_limits.get('z', {}).get('max', 26.0))
+            "z": {
+                "min": float(stage_limits.get("z", {}).get("min", 0.0)),
+                "max": float(stage_limits.get("z", {}).get("max", 26.0)),
             },
-            'r': {
-                'min': float(stage_limits.get('r', {}).get('min', -720.0)),
-                'max': float(stage_limits.get('r', {}).get('max', 720.0))
-            }
+            "r": {
+                "min": float(stage_limits.get("r", {}).get("min", -720.0)),
+                "max": float(stage_limits.get("r", {}).get("max", 720.0)),
+            },
         }
 
     def get_position_history_max_size(self) -> int:
@@ -167,7 +180,7 @@ class MicroscopeSettingsService:
         Returns:
             Maximum number of positions to store
         """
-        return self.settings.get('position_history', {}).get('max_size', 100)
+        return self.settings.get("position_history", {}).get("max_size", 100)
 
     def get_position_history_display_count(self) -> int:
         """Get number of positions to display in history dialog.
@@ -175,7 +188,7 @@ class MicroscopeSettingsService:
         Returns:
             Number of visible positions in list
         """
-        return self.settings.get('position_history', {}).get('display_count', 20)
+        return self.settings.get("position_history", {}).get("display_count", 20)
 
     def save_settings(self) -> None:
         """Save current settings back to JSON file.
@@ -185,7 +198,7 @@ class MicroscopeSettingsService:
         try:
             self.settings_file.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(self.settings_file, 'w') as f:
+            with open(self.settings_file, "w") as f:
                 json.dump(self.settings, indent=2, fp=f)
 
             self.logger.info(f"Saved settings to {self.settings_file}")
@@ -204,7 +217,7 @@ class MicroscopeSettingsService:
             >>> settings.update_setting("stage_limits.x.max", 15.0)
             >>> settings.save_settings()
         """
-        keys = key_path.split('.')
+        keys = key_path.split(".")
         current = self.settings
 
         # Navigate to the parent of the target key
@@ -230,7 +243,7 @@ class MicroscopeSettingsService:
         Example:
             >>> max_history = settings.get_setting("position_history.max_size", 100)
         """
-        keys = key_path.split('.')
+        keys = key_path.split(".")
         current = self.settings
 
         for key in keys:

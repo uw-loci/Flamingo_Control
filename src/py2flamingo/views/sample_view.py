@@ -13,37 +13,62 @@ Combines all elements needed for sample viewing and interaction:
 
 import logging
 import time
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+
 import numpy as np
 import yaml
-from pathlib import Path
-from typing import Optional, Dict, Any, Tuple, TYPE_CHECKING
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QGroupBox, QSlider, QComboBox, QCheckBox, QProgressBar,
-    QSplitter, QSizePolicy, QFrame, QSpinBox,
-    QGridLayout, QLineEdit, QTabWidget
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
+from PyQt5.QtGui import (
+    QCloseEvent,
+    QDoubleValidator,
+    QFont,
+    QHideEvent,
+    QIcon,
+    QImage,
+    QPixmap,
+    QShowEvent,
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer, pyqtSignal
-from PyQt5.QtGui import QPixmap, QImage, QFont, QDoubleValidator, QShowEvent, QCloseEvent, QHideEvent, QIcon
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QProgressBar,
+    QPushButton,
+    QSizePolicy,
+    QSlider,
+    QSpinBox,
+    QSplitter,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
-from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.resources import get_app_icon
-from py2flamingo.visualization.tile_processing_worker import TileFrameBuffer, TileProcessingWorker
+from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.visualization.tile_processing_worker import (
+    TileFrameBuffer,
+    TileProcessingWorker,
+)
 
 if TYPE_CHECKING:
     from py2flamingo.services.window_geometry_manager import WindowGeometryManager
-from superqt import QRangeSlider
 
-from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
-from py2flamingo.views.colors import SUCCESS_COLOR, ERROR_COLOR, WARNING_BG
-from py2flamingo.services.position_preset_service import PositionPresetService
-from py2flamingo.views.widgets.slice_plane_viewer import SlicePlaneViewer, AXIS_COLORS
-from py2flamingo.views.dialogs.viewer_controls_dialog import ViewerControlsDialog
-from py2flamingo.views.chamber_visualization_manager import ChamberVisualizationManager
+from superqt import QRangeSlider
 
 # Import camera state for live view control
 from py2flamingo.controllers.camera_controller import CameraState
-
+from py2flamingo.services.position_preset_service import PositionPresetService
+from py2flamingo.views.chamber_visualization_manager import ChamberVisualizationManager
+from py2flamingo.views.colors import ERROR_COLOR, SUCCESS_COLOR, WARNING_BG
+from py2flamingo.views.dialogs.viewer_controls_dialog import ViewerControlsDialog
+from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
+from py2flamingo.views.widgets.slice_plane_viewer import AXIS_COLORS, SlicePlaneViewer
 
 
 class SampleView(QWidget):
@@ -65,9 +90,9 @@ class SampleView(QWidget):
         laser_led_controller,
         voxel_storage=None,
         image_controls_window=None,
-        geometry_manager: 'WindowGeometryManager' = None,
+        geometry_manager: "WindowGeometryManager" = None,
         configuration_service=None,
-        parent=None
+        parent=None,
     ):
         """
         Initialize Sample View.
@@ -123,7 +148,9 @@ class SampleView(QWidget):
 
         # Load visualization config for axis inversion settings
         self._config = self._load_visualization_config()
-        self._invert_x = self._config.get('stage_control', {}).get('invert_x_default', False)
+        self._invert_x = self._config.get("stage_control", {}).get(
+            "invert_x_default", False
+        )
 
         # Channel visibility/contrast state for 4 viewers - load from config
         self._channel_states = self._load_channel_settings_from_config()
@@ -152,7 +179,7 @@ class SampleView(QWidget):
         self.coord_mapper = None  # Will be set from voxel_storage
 
         # Stage position tracking for dynamic 3D updates
-        self.last_stage_position = {'x': 0, 'y': 0, 'z': 0, 'r': 0}
+        self.last_stage_position = {"x": 0, "y": 0, "z": 0, "r": 0}
         self._pending_stage_update = None
 
         # Focal point for 2D plane click-to-move (set by _update_plane_overlays)
@@ -197,12 +224,16 @@ class SampleView(QWidget):
         self._channel_availability_timer = QTimer(self)
         self._channel_availability_timer.setSingleShot(True)
         self._channel_availability_timer.setInterval(500)
-        self._channel_availability_timer.timeout.connect(self._update_channel_availability)
+        self._channel_availability_timer.timeout.connect(
+            self._update_channel_availability
+        )
 
         # Debounced timer for visualization updates during acquisition
         self._visualization_update_timer = QTimer(self)
         self._visualization_update_timer.setSingleShot(True)
-        self._visualization_update_timer.setInterval(500)  # Update 500ms after last frame
+        self._visualization_update_timer.setInterval(
+            500
+        )  # Update 500ms after last frame
         self._visualization_update_timer.timeout.connect(self._update_visualization)
 
         # Background visualization update machinery
@@ -218,10 +249,12 @@ class SampleView(QWidget):
 
     def _load_visualization_config(self) -> Dict[str, Any]:
         """Load visualization config from YAML file."""
-        config_path = Path(__file__).parent.parent / "configs" / "visualization_3d_config.yaml"
+        config_path = (
+            Path(__file__).parent.parent / "configs" / "visualization_3d_config.yaml"
+        )
         try:
             if config_path.exists():
-                with open(config_path, 'r') as f:
+                with open(config_path, "r") as f:
                     config = yaml.safe_load(f)
                 self.logger.info(f"Loaded visualization config from {config_path}")
                 return config
@@ -230,9 +263,9 @@ class SampleView(QWidget):
 
         # Return default config if file not found
         return {
-            'stage_control': {
-                'invert_x_default': False,
-                'invert_z_default': False,
+            "stage_control": {
+                "invert_x_default": False,
+                "invert_z_default": False,
             }
         }
 
@@ -255,36 +288,38 @@ class SampleView(QWidget):
             - contrast_max: int
         """
         channel_states = {}
-        channels_config = self._config.get('channels', [])
+        channels_config = self._config.get("channels", [])
 
         for i in range(4):
             # Find channel config by id
             channel_config = None
             for ch in channels_config:
-                if ch.get('id') == i:
+                if ch.get("id") == i:
                     channel_config = ch
                     break
 
             if channel_config:
                 channel_states[i] = {
-                    'visible': channel_config.get('default_visible', True),
-                    'contrast_min': channel_config.get('default_contrast_min', 0),
-                    'contrast_max': channel_config.get('default_contrast_max', 65535),
+                    "visible": channel_config.get("default_visible", True),
+                    "contrast_min": channel_config.get("default_contrast_min", 0),
+                    "contrast_max": channel_config.get("default_contrast_max", 65535),
                 }
-                self.logger.debug(f"Loaded channel {i} settings from config: {channel_states[i]}")
+                self.logger.debug(
+                    f"Loaded channel {i} settings from config: {channel_states[i]}"
+                )
             else:
                 # Default if not in config
                 channel_states[i] = {
-                    'visible': True,
-                    'contrast_min': 0,
-                    'contrast_max': 65535,
+                    "visible": True,
+                    "contrast_min": 0,
+                    "contrast_max": 65535,
                 }
 
         # Also load live display settings for the main display
-        live_config = self._config.get('live_display', {})
-        self._intensity_min = live_config.get('default_contrast_min', 0)
-        self._intensity_max = live_config.get('default_contrast_max', 65535)
-        self._auto_scale = live_config.get('auto_scale', True)
+        live_config = self._config.get("live_display", {})
+        self._intensity_min = live_config.get("default_contrast_min", 0)
+        self._intensity_max = live_config.get("default_contrast_max", 65535)
+        self._auto_scale = live_config.get("auto_scale", True)
 
         self.logger.info(f"Loaded channel and live display settings from config")
 
@@ -312,7 +347,9 @@ class SampleView(QWidget):
         self.live_settings_btn.setToolTip("Open Live View Settings dialog")
         self.live_settings_btn.clicked.connect(self._on_live_settings_clicked)
         self.live_settings_btn.setMaximumWidth(70)
-        self.live_settings_btn.setStyleSheet("QPushButton { padding: 4px 8px; font-size: 9pt; }")
+        self.live_settings_btn.setStyleSheet(
+            "QPushButton { padding: 4px 8px; font-size: 9pt; }"
+        )
         display_row.addWidget(self.live_settings_btn)
 
         left_column.addLayout(display_row)
@@ -394,7 +431,9 @@ class SampleView(QWidget):
         self.live_image_label = QLabel("No image - Start live view from main window")
         self.live_image_label.setAlignment(Qt.AlignCenter)
         self.live_image_label.setMinimumSize(320, 240)  # 4:3 minimum
-        self.live_image_label.setFixedSize(360, 270)    # 4:3 fixed size for compact layout
+        self.live_image_label.setFixedSize(
+            360, 270
+        )  # 4:3 fixed size for compact layout
         self.live_image_label.setStyleSheet(
             "QLabel { background-color: black; color: gray; border: 1px solid #444; }"
         )
@@ -431,7 +470,9 @@ class SampleView(QWidget):
 
         row1.addWidget(QLabel("Display:"))
         self.colormap_combo = QComboBox()
-        self.colormap_combo.addItems(["Grayscale", "Hot", "Viridis", "Plasma", "Inferno"])
+        self.colormap_combo.addItems(
+            ["Grayscale", "Hot", "Viridis", "Plasma", "Inferno"]
+        )
         self.colormap_combo.setCurrentText("Grayscale")
         self.colormap_combo.currentTextChanged.connect(self._on_colormap_changed)
         self.colormap_combo.setMaximumWidth(90)
@@ -528,7 +569,9 @@ class SampleView(QWidget):
             "border: 2px dashed #444; font-size: 14pt; }"
         )
         self.viewer_placeholder.setMinimumSize(250, 450)  # Tall/vertical orientation
-        self.viewer_placeholder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.viewer_placeholder.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Expanding
+        )
         layout.addWidget(self.viewer_placeholder)
 
         # Info row: Navigation help, Memory/Voxels stats, Zoom, Reset button
@@ -580,7 +623,9 @@ class SampleView(QWidget):
 
         # Reset view button next to zoom
         self.reset_view_btn = QPushButton("⟲ Reset")
-        self.reset_view_btn.setToolTip("Reset camera view to defaults (orientation and zoom)")
+        self.reset_view_btn.setToolTip(
+            "Reset camera view to defaults (orientation and zoom)"
+        )
         self.reset_view_btn.setMaximumWidth(70)
         self.reset_view_btn.setStyleSheet("""
             QPushButton {
@@ -633,10 +678,10 @@ class SampleView(QWidget):
 
         # Create slider for each axis
         axes = [
-            ('x', 'X', 'mm', 3),
-            ('y', 'Y', 'mm', 3),
-            ('z', 'Z', 'mm', 3),
-            ('r', 'R', '°', 2),
+            ("x", "X", "mm", 3),
+            ("y", "Y", "mm", 3),
+            ("z", "Z", "mm", 3),
+            ("r", "R", "°", 2),
         ]
 
         for axis_id, axis_name, unit, decimals in axes:
@@ -644,7 +689,7 @@ class SampleView(QWidget):
             row.setSpacing(8)
 
             # Get axis color (XYZ have colors, R doesn't)
-            axis_color = AXIS_COLORS.get(axis_id, '#666666')
+            axis_color = AXIS_COLORS.get(axis_id, "#666666")
 
             # Axis label with color
             axis_label = QLabel(f"<b>{axis_name}:</b>")
@@ -726,11 +771,11 @@ class SampleView(QWidget):
             row.addWidget(unit_label)
 
             # Store min/max labels for later updates
-            slider.setProperty('min_label', min_label)
-            slider.setProperty('max_label', max_label)
-            slider.setProperty('unit', unit)
-            slider.setProperty('decimals', decimals)
-            slider.setProperty('value_edit', value_edit)
+            slider.setProperty("min_label", min_label)
+            slider.setProperty("max_label", max_label)
+            slider.setProperty("unit", unit)
+            slider.setProperty("decimals", decimals)
+            slider.setProperty("value_edit", value_edit)
 
             layout.addLayout(row)
 
@@ -756,7 +801,7 @@ class SampleView(QWidget):
             clamped_value = max(min_val, min(max_val, value))
 
             # Update the edit field if value was clamped
-            decimals = slider.property('decimals')
+            decimals = slider.property("decimals")
             if clamped_value != value:
                 edit.setText(f"{clamped_value:.{decimals}f}")
 
@@ -771,7 +816,7 @@ class SampleView(QWidget):
         except ValueError:
             # Invalid input - restore from slider
             current_value = slider.value() / self._slider_scale
-            decimals = slider.property('decimals')
+            decimals = slider.property("decimals")
             edit.setText(f"{current_value:.{decimals}f}")
 
     def _create_plane_views_section(self) -> QWidget:
@@ -837,10 +882,10 @@ class SampleView(QWidget):
 
         # Get ranges from config
         # Y range is in chamber/visualization coordinates (0-14mm)
-        stage_config = self._config.get('stage_control', {})
-        x_range = tuple(stage_config.get('x_range_mm', [1.0, 12.31]))
-        y_range = tuple(stage_config.get('y_range_mm', [0.0, 14.0]))
-        z_range = tuple(stage_config.get('z_range_mm', [12.5, 26.0]))
+        stage_config = self._config.get("stage_control", {})
+        x_range = tuple(stage_config.get("x_range_mm", [1.0, 12.31]))
+        y_range = tuple(stage_config.get("y_range_mm", [0.0, 14.0]))
+        z_range = tuple(stage_config.get("z_range_mm", [12.5, 26.0]))
 
         # XZ Plane (Top-Down) - X horizontal, Z vertical
         # X axis inverted to match 3D view (high X on left when invert_x is True)
@@ -848,11 +893,18 @@ class SampleView(QWidget):
         xz_layout = QVBoxLayout()
         xz_layout.setContentsMargins(4, 4, 4, 4)
         # Aspect ~11:13.5 ≈ 0.81, use 180x220
-        self.xz_plane_viewer = SlicePlaneViewer('xz', 'x', 'z', 180, 220,
-                                                 h_axis_inverted=self._invert_x, v_axis_inverted=False)
+        self.xz_plane_viewer = SlicePlaneViewer(
+            "xz",
+            "x",
+            "z",
+            180,
+            220,
+            h_axis_inverted=self._invert_x,
+            v_axis_inverted=False,
+        )
         self.xz_plane_viewer.set_ranges(x_range, z_range)
         self.xz_plane_viewer.position_clicked.connect(
-            lambda h, v: self._on_plane_click('xz', h, v)
+            lambda h, v: self._on_plane_click("xz", h, v)
         )
         xz_layout.addWidget(self.xz_plane_viewer, alignment=Qt.AlignCenter)
         xz_group.setLayout(xz_layout)
@@ -867,11 +919,18 @@ class SampleView(QWidget):
         xy_layout = QVBoxLayout()
         xy_layout.setContentsMargins(4, 4, 4, 4)
         # Aspect ~11:14 ≈ 0.79, use 130x240
-        self.xy_plane_viewer = SlicePlaneViewer('xy', 'x', 'y', 130, 240,
-                                                 h_axis_inverted=self._invert_x, v_axis_inverted=True)
+        self.xy_plane_viewer = SlicePlaneViewer(
+            "xy",
+            "x",
+            "y",
+            130,
+            240,
+            h_axis_inverted=self._invert_x,
+            v_axis_inverted=True,
+        )
         self.xy_plane_viewer.set_ranges(x_range, y_range)
         self.xy_plane_viewer.position_clicked.connect(
-            lambda h, v: self._on_plane_click('xy', h, v)
+            lambda h, v: self._on_plane_click("xy", h, v)
         )
         xy_layout.addWidget(self.xy_plane_viewer, alignment=Qt.AlignCenter)
         xy_group.setLayout(xy_layout)
@@ -882,11 +941,12 @@ class SampleView(QWidget):
         yz_layout = QVBoxLayout()
         yz_layout.setContentsMargins(4, 4, 4, 4)
         # Aspect ~13.5:14 ≈ 0.96, use 160x240
-        self.yz_plane_viewer = SlicePlaneViewer('yz', 'z', 'y', 160, 240,
-                                                 h_axis_inverted=False, v_axis_inverted=True)
+        self.yz_plane_viewer = SlicePlaneViewer(
+            "yz", "z", "y", 160, 240, h_axis_inverted=False, v_axis_inverted=True
+        )
         self.yz_plane_viewer.set_ranges(z_range, y_range)
         self.yz_plane_viewer.position_clicked.connect(
-            lambda h, v: self._on_plane_click('yz', h, v)
+            lambda h, v: self._on_plane_click("yz", h, v)
         )
         yz_layout.addWidget(self.yz_plane_viewer, alignment=Qt.AlignCenter)
         yz_group.setLayout(yz_layout)
@@ -906,7 +966,7 @@ class SampleView(QWidget):
 
         # Get channel names from visualization config (wavelengths)
         # Falls back to default names if config not available
-        channels_config = self._config.get('channels', [])
+        channels_config = self._config.get("channels", [])
         default_channel_info = [
             {"name": "405nm", "color": "#9370DB"},  # Violet
             {"name": "488nm", "color": "#00CED1"},  # Cyan
@@ -925,27 +985,37 @@ class SampleView(QWidget):
             if i < len(channels_config):
                 ch_config = channels_config[i]
                 # Extract wavelength from name like "405nm (DAPI)" -> "405nm"
-                name = ch_config.get('name', default_channel_info[i]['name'])
-                if '(' in name:
-                    name = name.split('(')[0].strip()
+                name = ch_config.get("name", default_channel_info[i]["name"])
+                if "(" in name:
+                    name = name.split("(")[0].strip()
             else:
-                name = default_channel_info[i]['name']
+                name = default_channel_info[i]["name"]
 
             # Get colormap color for the channel
-            colormap = channels_config[i].get('default_colormap', 'gray') if i < len(channels_config) else 'gray'
+            colormap = (
+                channels_config[i].get("default_colormap", "gray")
+                if i < len(channels_config)
+                else "gray"
+            )
             colormap_colors = {
-                'blue': '#9370DB', 'green': '#32CD32', 'red': '#DC143C',
-                'magenta': '#FF00FF', 'cyan': '#00CED1', 'gray': '#808080'
+                "blue": "#9370DB",
+                "green": "#32CD32",
+                "red": "#DC143C",
+                "magenta": "#FF00FF",
+                "cyan": "#00CED1",
+                "gray": "#808080",
             }
-            color = colormap_colors.get(colormap, default_channel_info[i]['color'])
+            color = colormap_colors.get(colormap, default_channel_info[i]["color"])
 
             row_layout = QHBoxLayout()
             row_layout.setSpacing(4)
 
             # Visibility checkbox with wavelength name
             checkbox = QCheckBox(name)
-            checkbox.setChecked(self._channel_states[i].get('visible', True))
-            checkbox.setStyleSheet(f"QCheckBox {{ color: {color}; font-weight: bold; }}")
+            checkbox.setChecked(self._channel_states[i].get("visible", True))
+            checkbox.setStyleSheet(
+                f"QCheckBox {{ color: {color}; font-weight: bold; }}"
+            )
             checkbox.stateChanged.connect(
                 lambda state, ch=i: self._on_channel_visibility_changed(ch, state)
             )
@@ -958,8 +1028,8 @@ class SampleView(QWidget):
             slider = QRangeSlider(Qt.Horizontal)
             slider.setRange(0, 500)
             # Load initial values from channel state (clamped to slider range)
-            min_val = min(self._channel_states[i].get('contrast_min', 0), 500)
-            max_val = min(self._channel_states[i].get('contrast_max', 500), 500)
+            min_val = min(self._channel_states[i].get("contrast_min", 0), 500)
+            max_val = min(self._channel_states[i].get("contrast_max", 500), 500)
             slider.setValue((min_val, max_val))
             slider.setToolTip(f"Adjust contrast range for {name}")
             # Style the range slider handles to be visible
@@ -1015,7 +1085,9 @@ class SampleView(QWidget):
 
         # Auto Contrast button
         auto_contrast_btn = QPushButton("Auto Contrast")
-        auto_contrast_btn.setToolTip("Calculate contrast from actual data (2nd-98th percentile)")
+        auto_contrast_btn.setToolTip(
+            "Calculate contrast from actual data (2nd-98th percentile)"
+        )
         auto_contrast_btn.clicked.connect(self._auto_contrast_channels)
         layout.addWidget(auto_contrast_btn)
 
@@ -1068,7 +1140,9 @@ class SampleView(QWidget):
         # Populate from Live View toggle button
         self.populate_btn = QPushButton("Populate from Live")
         self.populate_btn.setCheckable(True)
-        self.populate_btn.setToolTip("Capture frames from Live View and accumulate into 3D volume")
+        self.populate_btn.setToolTip(
+            "Capture frames from Live View and accumulate into 3D volume"
+        )
         self.populate_btn.clicked.connect(self._on_populate_toggled)
         self.populate_btn.setStyleSheet(
             "QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 8px 16px; }"
@@ -1114,19 +1188,25 @@ class SampleView(QWidget):
 
         # Load Test Data button
         self.load_test_data_btn = QPushButton("Load Test Data")
-        self.load_test_data_btn.setToolTip("Load .zarr, .tif, or .npy test data into viewer")
+        self.load_test_data_btn.setToolTip(
+            "Load .zarr, .tif, or .npy test data into viewer"
+        )
         self.load_test_data_btn.clicked.connect(self._on_load_test_data_clicked)
         perf_row.addWidget(self.load_test_data_btn)
 
         # Load Tiles from Disk button
         self.load_tiles_btn = QPushButton("Load Tiles")
-        self.load_tiles_btn.setToolTip("Load raw tiled acquisition data from disk for diagnostic comparison")
+        self.load_tiles_btn.setToolTip(
+            "Load raw tiled acquisition data from disk for diagnostic comparison"
+        )
         self.load_tiles_btn.clicked.connect(self._on_load_tiles_from_disk_clicked)
         perf_row.addWidget(self.load_tiles_btn)
 
         # Save Session button
         self.save_session_btn = QPushButton("Save Session")
-        self.save_session_btn.setToolTip("Save current 3D data and settings to OME-Zarr session")
+        self.save_session_btn.setToolTip(
+            "Save current 3D data and settings to OME-Zarr session"
+        )
         self.save_session_btn.clicked.connect(self._on_save_session_clicked)
         perf_row.addWidget(self.save_session_btn)
 
@@ -1160,9 +1240,13 @@ class SampleView(QWidget):
             self.camera_controller.state_changed.connect(self._on_camera_state_changed)
 
             # Connect tile Z-stack frame signal for Sample View integration
-            if hasattr(self.camera_controller, 'tile_zstack_frame'):
-                self.camera_controller.tile_zstack_frame.connect(self._on_tile_zstack_frame)
-                self.logger.info("Connected tile Z-stack frame signal for Sample View integration")
+            if hasattr(self.camera_controller, "tile_zstack_frame"):
+                self.camera_controller.tile_zstack_frame.connect(
+                    self._on_tile_zstack_frame
+                )
+                self.logger.info(
+                    "Connected tile Z-stack frame signal for Sample View integration"
+                )
 
         # Movement signals
         if self.movement_controller:
@@ -1179,13 +1263,13 @@ class SampleView(QWidget):
             self._stage_limits = self.movement_controller.get_stage_limits()
 
             # Update sliders with actual limits
-            for axis_id in ['x', 'y', 'z', 'r']:
+            for axis_id in ["x", "y", "z", "r"]:
                 if axis_id in self._stage_limits and axis_id in self.position_sliders:
                     limits = self._stage_limits[axis_id]
                     slider = self.position_sliders[axis_id]
 
-                    min_val = limits['min']
-                    max_val = limits['max']
+                    min_val = limits["min"]
+                    max_val = limits["max"]
 
                     # Update slider range (scaled to integers)
                     slider.setMinimum(int(min_val * self._slider_scale))
@@ -1199,19 +1283,19 @@ class SampleView(QWidget):
                             validator.setRange(min_val, max_val, validator.decimals())
 
                     # Update min/max labels
-                    min_label = slider.property('min_label')
-                    max_label = slider.property('max_label')
-                    decimals = slider.property('decimals')
+                    min_label = slider.property("min_label")
+                    max_label = slider.property("max_label")
+                    decimals = slider.property("decimals")
 
                     # For X axis: if inverted, swap the displayed labels (high on left, low on right)
-                    if axis_id == 'x' and self._invert_x:
+                    if axis_id == "x" and self._invert_x:
                         # Inverted: show max on left, min on right
                         if min_label:
                             min_label.setText(f"{max_val:.{decimals}f}")
                         if max_label:
                             max_label.setText(f"{min_val:.{decimals}f}")
                         # Mark slider as inverted for value display
-                        slider.setProperty('inverted', True)
+                        slider.setProperty("inverted", True)
                         slider.setInvertedAppearance(True)
                     else:
                         # Normal: show min on left, max on right
@@ -1219,7 +1303,7 @@ class SampleView(QWidget):
                             min_label.setText(f"{min_val:.{decimals}f}")
                         if max_label:
                             max_label.setText(f"{max_val:.{decimals}f}")
-                        slider.setProperty('inverted', False)
+                        slider.setProperty("inverted", False)
 
             self.logger.info(f"Stage limits initialized (X inverted: {self._invert_x})")
 
@@ -1236,7 +1320,9 @@ class SampleView(QWidget):
         not default values that could cause dangerous movements.
         """
         if not self.movement_controller:
-            self.logger.warning("No movement controller - cannot load current positions")
+            self.logger.warning(
+                "No movement controller - cannot load current positions"
+            )
             return
 
         try:
@@ -1244,24 +1330,30 @@ class SampleView(QWidget):
             current_pos = self.movement_controller.get_position()
 
             if current_pos is None:
-                self.logger.warning("Could not retrieve current position from controller")
+                self.logger.warning(
+                    "Could not retrieve current position from controller"
+                )
                 return
 
             # Extract positions (current_pos is a Position object when axis=None)
             positions = {
-                'x': current_pos.x,
-                'y': current_pos.y,
-                'z': current_pos.z,
-                'r': current_pos.r
+                "x": current_pos.x,
+                "y": current_pos.y,
+                "z": current_pos.z,
+                "r": current_pos.r,
             }
 
-            self.logger.info(f"Loading current positions: X={positions['x']:.3f}, "
-                           f"Y={positions['y']:.3f}, Z={positions['z']:.3f}, R={positions['r']:.2f}")
+            self.logger.info(
+                f"Loading current positions: X={positions['x']:.3f}, "
+                f"Y={positions['y']:.3f}, Z={positions['z']:.3f}, R={positions['r']:.2f}"
+            )
 
             # Update internal position tracking (critical for 3D viewer and transforms!)
             self.last_stage_position = positions.copy()
-            self.current_rotation['ry'] = positions['r']
-            self.logger.info(f"Updated last_stage_position and current_rotation from hardware")
+            self.current_rotation["ry"] = positions["r"]
+            self.logger.info(
+                f"Updated last_stage_position and current_rotation from hardware"
+            )
 
             # Update each slider to current position
             for axis_id, value in positions.items():
@@ -1275,7 +1367,7 @@ class SampleView(QWidget):
                     slider.blockSignals(False)
 
                     # Update value edit field (unit is now a separate label)
-                    decimals = slider.property('decimals')
+                    decimals = slider.property("decimals")
                     edit.blockSignals(True)
                     edit.setText(f"{value:.{decimals}f}")
                     edit.blockSignals(False)
@@ -1285,6 +1377,7 @@ class SampleView(QWidget):
         except Exception as e:
             self.logger.error(f"Error loading current positions: {e}")
             import traceback
+
             traceback.print_exc()
 
     # ========== Slot Handlers ==========
@@ -1314,22 +1407,27 @@ class SampleView(QWidget):
 
             # Normalize to 0-255
             if img_max > img_min:
-                normalized = ((image.astype(np.float32) - img_min) /
-                             (img_max - img_min) * 255).clip(0, 255).astype(np.uint8)
+                normalized = (
+                    ((image.astype(np.float32) - img_min) / (img_max - img_min) * 255)
+                    .clip(0, 255)
+                    .astype(np.uint8)
+                )
             else:
                 normalized = np.zeros_like(image, dtype=np.uint8)
 
             # Convert to QImage and display
             height, width = normalized.shape
             bytes_per_line = width
-            qimage = QImage(normalized.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+            qimage = QImage(
+                normalized.data, width, height, bytes_per_line, QImage.Format_Grayscale8
+            )
 
             # Scale to fit label while maintaining aspect ratio
             pixmap = QPixmap.fromImage(qimage)
             scaled_pixmap = pixmap.scaled(
                 self.live_image_label.size(),
                 Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
+                Qt.SmoothTransformation,
             )
             self.live_image_label.setPixmap(scaled_pixmap)
 
@@ -1365,7 +1463,9 @@ class SampleView(QWidget):
         # Quick check: if image is very dark compared to current_max, jump directly
         # This handles the case where we start at 65535 but sample is dim
         image_actual_max = int(np.max(image))
-        if image_actual_max < current_max * 0.1:  # Actual max is less than 10% of display max
+        if (
+            image_actual_max < current_max * 0.1
+        ):  # Actual max is less than 10% of display max
             # Image is very dark - set max based on actual data
             # Use 99th percentile for robustness against hot pixels
             p99 = np.percentile(image, 99)
@@ -1373,8 +1473,10 @@ class SampleView(QWidget):
             new_max = max(100, min(65535, new_max))  # Clamp to reasonable range
 
             if new_max < current_max * 0.5:  # Only jump if it's a significant change
-                self.logger.info(f"Auto-contrast: quick adjustment {current_max} -> {new_max} "
-                                f"(image max={image_actual_max}, p99={p99:.0f})")
+                self.logger.info(
+                    f"Auto-contrast: quick adjustment {current_max} -> {new_max} "
+                    f"(image max={image_actual_max}, p99={p99:.0f})"
+                )
                 self._auto_contrast_max = new_max
                 self._last_contrast_adjustment = current_time
                 return self._auto_contrast_max
@@ -1389,14 +1491,18 @@ class SampleView(QWidget):
             # This allows large jumps when transitioning to heavily stained areas
             top_5_percent_count = max(1, int(total_pixels * 0.05))
             # Use partition for efficiency (faster than full sort)
-            top_values = np.partition(image.ravel(), -top_5_percent_count)[-top_5_percent_count:]
+            top_values = np.partition(image.ravel(), -top_5_percent_count)[
+                -top_5_percent_count:
+            ]
             top_5_mean = np.mean(top_values)
             new_max = int(top_5_mean / 0.95)  # Set so top 5% mean is at 95%
             new_max = min(65535, max(1000, new_max))  # Clamp to reasonable range
 
             if new_max != self._auto_contrast_max:
-                self.logger.debug(f"Auto-contrast: raising max {self._auto_contrast_max} -> {new_max} "
-                                 f"(saturated: {saturated_ratio:.1%}, top 5% mean: {top_5_mean:.0f})")
+                self.logger.debug(
+                    f"Auto-contrast: raising max {self._auto_contrast_max} -> {new_max} "
+                    f"(saturated: {saturated_ratio:.1%}, top 5% mean: {top_5_mean:.0f})"
+                )
                 self._auto_contrast_max = new_max
                 self._last_contrast_adjustment = current_time
         else:
@@ -1411,8 +1517,10 @@ class SampleView(QWidget):
                 new_max = max(1000, new_max)  # Don't go below 1000
 
                 if new_max != self._auto_contrast_max:
-                    self.logger.debug(f"Auto-contrast: lowering max {self._auto_contrast_max} -> {new_max} "
-                                     f"(bright pixels: {bright_ratio:.1%})")
+                    self.logger.debug(
+                        f"Auto-contrast: lowering max {self._auto_contrast_max} -> {new_max} "
+                        f"(bright pixels: {bright_ratio:.1%})"
+                    )
                     self._auto_contrast_max = new_max
                     self._last_contrast_adjustment = current_time
 
@@ -1427,7 +1535,9 @@ class SampleView(QWidget):
         the camera is controlled externally (e.g., by workflows).
         """
         state_names = {0: "Idle", 1: "Starting", 2: "Running", 3: "Stopping"}
-        state_name = state_names.get(state.value if hasattr(state, 'value') else state, "Unknown")
+        state_name = state_names.get(
+            state.value if hasattr(state, "value") else state, "Unknown"
+        )
         self.live_status_label.setText(f"Status: {state_name}")
 
         # Also update the live view button to match actual camera state
@@ -1436,8 +1546,10 @@ class SampleView(QWidget):
     @pyqtSlot(float, float, float, float)
     def _on_position_changed(self, x: float, y: float, z: float, r: float) -> None:
         """Handle position change from movement controller."""
-        self.logger.debug(f"Position changed signal received: X={x:.3f}, Y={y:.3f}, Z={z:.3f}, R={r:.1f}")
-        positions = {'x': x, 'y': y, 'z': z, 'r': r}
+        self.logger.debug(
+            f"Position changed signal received: X={x:.3f}, Y={y:.3f}, Z={z:.3f}, R={r:.1f}"
+        )
+        positions = {"x": x, "y": y, "z": z, "r": r}
 
         for axis_id, value in positions.items():
             if axis_id in self.position_sliders:
@@ -1450,13 +1562,13 @@ class SampleView(QWidget):
                 slider.blockSignals(False)
 
                 # Update value edit field
-                decimals = slider.property('decimals')
+                decimals = slider.property("decimals")
                 edit.blockSignals(True)
                 edit.setText(f"{value:.{decimals}f}")
                 edit.blockSignals(False)
 
         # Queue 3D visualization update (throttled to 20 FPS max)
-        self._pending_stage_update = {'x': x, 'y': y, 'z': z, 'r': r}
+        self._pending_stage_update = {"x": x, "y": y, "z": z, "r": r}
         if not self._stage_update_timer.isActive():
             self._stage_update_timer.start()
 
@@ -1473,7 +1585,7 @@ class SampleView(QWidget):
             edit = self.position_edits[axis]
 
             real_value = value / self._slider_scale
-            decimals = slider.property('decimals')
+            decimals = slider.property("decimals")
             edit.blockSignals(True)
             edit.setText(f"{real_value:.{decimals}f}")
             edit.blockSignals(False)
@@ -1508,7 +1620,7 @@ class SampleView(QWidget):
 
     def _on_auto_scale_changed(self, state: int) -> None:
         """Handle auto-scale checkbox change."""
-        self._auto_scale = (state == Qt.Checked)
+        self._auto_scale = state == Qt.Checked
         enabled = not self._auto_scale
         self.min_intensity_spinbox.setEnabled(enabled)
         self.max_intensity_spinbox.setEnabled(enabled)
@@ -1555,8 +1667,8 @@ class SampleView(QWidget):
 
     def _on_channel_visibility_changed(self, channel: int, state: int) -> None:
         """Handle channel visibility checkbox change."""
-        visible = (state == Qt.Checked)
-        self._channel_states[channel]['visible'] = visible
+        visible = state == Qt.Checked
+        self._channel_states[channel]["visible"] = visible
         self.logger.debug(f"Channel {channel} visibility: {visible}")
 
         # Toggle visibility on the actual napari layer
@@ -1576,8 +1688,8 @@ class SampleView(QWidget):
             value: Tuple of (min, max) contrast values from QRangeSlider
         """
         min_val, max_val = value
-        self._channel_states[channel]['contrast_min'] = min_val
-        self._channel_states[channel]['contrast_max'] = max_val
+        self._channel_states[channel]["contrast_min"] = min_val
+        self._channel_states[channel]["contrast_max"] = max_val
 
         # Update min/max labels
         if channel in self.channel_min_labels:
@@ -1641,8 +1753,8 @@ class SampleView(QWidget):
                 self.channel_max_labels[ch_id].setText(str(max_val))
 
             # Update channel state
-            self._channel_states[ch_id]['contrast_min'] = min_val
-            self._channel_states[ch_id]['contrast_max'] = max_val
+            self._channel_states[ch_id]["contrast_min"] = min_val
+            self._channel_states[ch_id]["contrast_max"] = max_val
 
             self.logger.debug(f"Auto-contrast channel {ch_id}: [{min_val}, {max_val}]")
 
@@ -1651,7 +1763,7 @@ class SampleView(QWidget):
         if not self.voxel_storage:
             return
 
-        channels_config = self._config.get('channels', [])
+        channels_config = self._config.get("channels", [])
 
         for ch_id in range(4):
             has_data = self.voxel_storage.has_data(ch_id)
@@ -1674,10 +1786,16 @@ class SampleView(QWidget):
                 # Explicitly set layer visibility (don't rely only on signal)
                 if ch_id in self.channel_layers:
                     self.channel_layers[ch_id].visible = True
-                    self._channel_states[ch_id]['visible'] = True
+                    self._channel_states[ch_id]["visible"] = True
 
-                name = channels_config[ch_id].get('name', f'Ch {ch_id}') if ch_id < len(channels_config) else f'Ch {ch_id}'
-                checkbox.setToolTip(f"{name} — Data available. Click to toggle visibility.")
+                name = (
+                    channels_config[ch_id].get("name", f"Ch {ch_id}")
+                    if ch_id < len(channels_config)
+                    else f"Ch {ch_id}"
+                )
+                checkbox.setToolTip(
+                    f"{name} — Data available. Click to toggle visibility."
+                )
                 self.logger.info(f"Channel {ch_id} auto-enabled (data received)")
 
     def _get_viewer(self):
@@ -1705,7 +1823,7 @@ class SampleView(QWidget):
         dialog = ViewerControlsDialog(
             viewer_container=self,  # SampleView now owns viewer and channel_layers
             config=self._config,
-            parent=self
+            parent=self,
         )
         # Connect signal to update plane views when channel settings change
         dialog.plane_views_update_requested.connect(self._update_plane_views)
@@ -1716,12 +1834,13 @@ class SampleView(QWidget):
         if not self.voxel_storage:
             self.logger.warning("No voxel storage - cannot export data")
             from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Not Ready",
-                              "Voxel storage not initialized.")
+
+            QMessageBox.warning(self, "Not Ready", "Voxel storage not initialized.")
             return
 
-        from PyQt5.QtWidgets import QFileDialog, QMessageBox
         from pathlib import Path
+
+        from PyQt5.QtWidgets import QFileDialog, QMessageBox
 
         # Get last-used path from configuration service
         default_path = ""
@@ -1732,41 +1851,54 @@ class SampleView(QWidget):
 
         # Basic export dialog
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Export 3D Data", default_path,
-            "TIFF Stack (*.tif);;NumPy Array (*.npy);;All Files (*)"
+            self,
+            "Export 3D Data",
+            default_path,
+            "TIFF Stack (*.tif);;NumPy Array (*.npy);;All Files (*)",
         )
         if file_path:
             # Remember the directory for next time
             if self._configuration_service:
-                self._configuration_service.set_sample_3d_data_path(str(Path(file_path).parent))
+                self._configuration_service.set_sample_3d_data_path(
+                    str(Path(file_path).parent)
+                )
 
             try:
                 if self.voxel_storage:
                     data = self.voxel_storage.get_display_data()
                     if data is not None and data.size > 0:
-                        if file_path.endswith('.npy'):
+                        if file_path.endswith(".npy"):
                             np.save(file_path, data)
                         else:
                             import tifffile
+
                             tifffile.imwrite(file_path, data)
                         self.logger.info(f"Exported data to {file_path}")
-                        QMessageBox.information(self, "Export Complete",
-                                              f"Data exported to:\n{file_path}")
+                        QMessageBox.information(
+                            self, "Export Complete", f"Data exported to:\n{file_path}"
+                        )
                     else:
-                        QMessageBox.warning(self, "No Data",
-                                          "No data to export. Use 'Populate from Live' first.")
+                        QMessageBox.warning(
+                            self,
+                            "No Data",
+                            "No data to export. Use 'Populate from Live' first.",
+                        )
             except Exception as e:
                 self.logger.error(f"Export failed: {e}")
                 QMessageBox.critical(self, "Export Error", f"Failed to export: {e}")
 
     def _on_load_test_data_clicked(self) -> None:
         """Load test data from file for benchmarking and testing."""
-        from PyQt5.QtWidgets import QFileDialog, QMessageBox
         from pathlib import Path
 
+        from PyQt5.QtWidgets import QFileDialog, QMessageBox
+
         if not self.voxel_storage:
-            QMessageBox.warning(self, "Not Ready",
-                              "Voxel storage not initialized. Open 3D visualization first.")
+            QMessageBox.warning(
+                self,
+                "Not Ready",
+                "Voxel storage not initialized. Open 3D visualization first.",
+            )
             return
 
         # Get last-used path from configuration service
@@ -1777,14 +1909,18 @@ class SampleView(QWidget):
                 default_path = saved_path
 
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Load Test Data", default_path,
-            "All Supported (*.zarr *.tif *.tiff *.npy);;Zarr Sessions (*.zarr);;TIFF Files (*.tif *.tiff);;NumPy Arrays (*.npy)"
+            self,
+            "Load Test Data",
+            default_path,
+            "All Supported (*.zarr *.tif *.tiff *.npy);;Zarr Sessions (*.zarr);;TIFF Files (*.tif *.tiff);;NumPy Arrays (*.npy)",
         )
 
         if file_path:
             # Remember the directory for next time
             if self._configuration_service:
-                self._configuration_service.set_sample_3d_data_path(str(Path(file_path).parent))
+                self._configuration_service.set_sample_3d_data_path(
+                    str(Path(file_path).parent)
+                )
 
             try:
                 from py2flamingo.visualization.session_manager import load_test_data
@@ -1793,13 +1929,17 @@ class SampleView(QWidget):
 
                 if success:
                     self.logger.info(f"Loaded test data from {file_path}")
-                    QMessageBox.information(self, "Data Loaded",
-                                          f"Test data loaded successfully from:\n{file_path}")
+                    QMessageBox.information(
+                        self,
+                        "Data Loaded",
+                        f"Test data loaded successfully from:\n{file_path}",
+                    )
                     # Update visualization
                     self._update_visualization()
                 else:
-                    QMessageBox.warning(self, "Load Failed",
-                                      f"Failed to load data from:\n{file_path}")
+                    QMessageBox.warning(
+                        self, "Load Failed", f"Failed to load data from:\n{file_path}"
+                    )
             except Exception as e:
                 self.logger.exception(f"Load test data failed: {e}")
                 QMessageBox.critical(self, "Load Error", f"Error loading data: {e}")
@@ -1809,23 +1949,30 @@ class SampleView(QWidget):
         from PyQt5.QtWidgets import QInputDialog, QMessageBox
 
         if not self.voxel_storage:
-            QMessageBox.warning(self, "Not Ready",
-                              "Voxel storage not initialized. Capture some data first.")
+            QMessageBox.warning(
+                self,
+                "Not Ready",
+                "Voxel storage not initialized. Capture some data first.",
+            )
             return
 
         try:
             from py2flamingo.visualization.session_manager import SessionManager
 
             if not SessionManager.is_available():
-                QMessageBox.warning(self, "Zarr Not Available",
-                                  "zarr library not installed.\nInstall with: pip install zarr")
+                QMessageBox.warning(
+                    self,
+                    "Zarr Not Available",
+                    "zarr library not installed.\nInstall with: pip install zarr",
+                )
                 return
 
             # Prompt for session name
             session_name, ok = QInputDialog.getText(
-                self, "Save Session",
+                self,
+                "Save Session",
                 "Enter session name:",
-                text=f"session_{time.strftime('%Y%m%d_%H%M')}"
+                text=f"session_{time.strftime('%Y%m%d_%H%M')}",
             )
 
             if ok and session_name:
@@ -1833,12 +1980,13 @@ class SampleView(QWidget):
                 session_path = manager.save_session(
                     self.voxel_storage,
                     session_name,
-                    description="Saved from Sample View"
+                    description="Saved from Sample View",
                 )
 
                 self.logger.info(f"Session saved to {session_path}")
-                QMessageBox.information(self, "Session Saved",
-                                      f"Session saved to:\n{session_path}")
+                QMessageBox.information(
+                    self, "Session Saved", f"Session saved to:\n{session_path}"
+                )
         except Exception as e:
             self.logger.exception(f"Save session failed: {e}")
             QMessageBox.critical(self, "Save Error", f"Error saving session: {e}")
@@ -1848,16 +1996,18 @@ class SampleView(QWidget):
         from PyQt5.QtWidgets import QFileDialog, QMessageBox
 
         if not self.voxel_storage:
-            QMessageBox.warning(self, "Not Ready",
-                              "Voxel storage not initialized.")
+            QMessageBox.warning(self, "Not Ready", "Voxel storage not initialized.")
             return
 
         try:
             from py2flamingo.visualization.session_manager import SessionManager
 
             if not SessionManager.is_available():
-                QMessageBox.warning(self, "Zarr Not Available",
-                                  "zarr library not installed.\nInstall with: pip install zarr")
+                QMessageBox.warning(
+                    self,
+                    "Zarr Not Available",
+                    "zarr library not installed.\nInstall with: pip install zarr",
+                )
                 return
 
             # Get last-used path from configuration service (independent of other dialogs)
@@ -1869,24 +2019,30 @@ class SampleView(QWidget):
 
             # Open file dialog for .zarr directory
             file_path = QFileDialog.getExistingDirectory(
-                self, "Select Session (.zarr folder)",
-                start_path
+                self, "Select Session (.zarr folder)", start_path
             )
 
-            if file_path and file_path.endswith('.zarr'):
+            if file_path and file_path.endswith(".zarr"):
                 from pathlib import Path
 
                 # Save the parent directory for next time
                 if self._configuration_service:
-                    self._configuration_service.set_zarr_session_path(str(Path(file_path).parent))
+                    self._configuration_service.set_zarr_session_path(
+                        str(Path(file_path).parent)
+                    )
 
                 manager = SessionManager()
-                metadata = manager.restore_to_storage(self.voxel_storage, Path(file_path))
+                metadata = manager.restore_to_storage(
+                    self.voxel_storage, Path(file_path)
+                )
 
                 self.logger.info(f"Session loaded: {metadata.session_name}")
-                QMessageBox.information(self, "Session Loaded",
-                                      f"Loaded session: {metadata.session_name}\n"
-                                      f"Total voxels: {metadata.total_voxels:,}")
+                QMessageBox.information(
+                    self,
+                    "Session Loaded",
+                    f"Loaded session: {metadata.session_name}\n"
+                    f"Total voxels: {metadata.total_voxels:,}",
+                )
 
                 # Sync last_stage_position from hardware so the transform
                 # places loaded data at the correct chamber location
@@ -1901,11 +2057,15 @@ class SampleView(QWidget):
                 self._auto_contrast_channels()
 
                 # Auto-enable focal move mode now that data is present
-                if hasattr(self, '_move_data_to_focus_cb') and not self._move_data_to_focus_cb.isChecked():
+                if (
+                    hasattr(self, "_move_data_to_focus_cb")
+                    and not self._move_data_to_focus_cb.isChecked()
+                ):
                     self._move_data_to_focus_cb.setChecked(True)
             elif file_path:
-                QMessageBox.warning(self, "Invalid Selection",
-                                  "Please select a .zarr folder")
+                QMessageBox.warning(
+                    self, "Invalid Selection", "Please select a .zarr folder"
+                )
         except Exception as e:
             self.logger.exception(f"Load session failed: {e}")
             QMessageBox.critical(self, "Load Error", f"Error loading session: {e}")
@@ -1913,47 +2073,51 @@ class SampleView(QWidget):
     def _on_settings_clicked(self) -> None:
         """Open the application settings dialog."""
         try:
+            from py2flamingo.services.microscope_settings_service import (
+                MicroscopeSettingsService,
+            )
             from py2flamingo.views.dialogs.settings_dialog import SettingsDialog
-            from py2flamingo.services.microscope_settings_service import MicroscopeSettingsService
 
             # Get or create the settings service
-            settings_service = getattr(self, '_settings_service', None)
+            settings_service = getattr(self, "_settings_service", None)
             if settings_service is None:
                 # Try to get microscope name from configuration service
                 microscope_name = "n7"  # Default
                 if self._configuration_service:
                     config = self._configuration_service.get_current_configuration()
                     if config:
-                        microscope_name = config.get('name', 'n7')
+                        microscope_name = config.get("name", "n7")
 
                 # Create settings service (will use the microscope_settings directory)
                 from pathlib import Path
-                base_path = Path(__file__).parent.parent.parent.parent  # Go up to project root
+
+                base_path = Path(
+                    __file__
+                ).parent.parent.parent.parent  # Go up to project root
                 settings_service = MicroscopeSettingsService(microscope_name, base_path)
                 self._settings_service = settings_service
 
-            dialog = SettingsDialog(
-                settings_service=settings_service,
-                parent=self
-            )
+            dialog = SettingsDialog(settings_service=settings_service, parent=self)
 
             if dialog.exec_():
                 self.logger.info("Settings dialog accepted - settings saved")
                 # Notify user if display settings changed (requires restart)
                 settings = dialog.get_settings()
-                if 'display' in settings:
+                if "display" in settings:
                     from PyQt5.QtWidgets import QMessageBox
+
                     QMessageBox.information(
-                        self, "Settings Saved",
+                        self,
+                        "Settings Saved",
                         "Display settings have been saved.\n\n"
                         "Note: Changes to storage voxel size or downsample factor "
-                        "will take effect after restarting the application."
+                        "will take effect after restarting the application.",
                     )
         except Exception as e:
             self.logger.exception(f"Error opening settings dialog: {e}")
             from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "Error",
-                               f"Could not open settings dialog: {e}")
+
+            QMessageBox.critical(self, "Error", f"Could not open settings dialog: {e}")
 
     # ========== Data Collection Controls ==========
 
@@ -1969,7 +2133,7 @@ class SampleView(QWidget):
             self.populate_btn.setText("Stop Populating")
             self.logger.info("Started populating from live view")
             # Start populate timer if not running
-            if not hasattr(self, '_populate_timer'):
+            if not hasattr(self, "_populate_timer"):
                 self._populate_timer = QTimer()
                 self._populate_timer.timeout.connect(self._on_populate_tick)
                 self._populate_timer.setInterval(100)  # 10 Hz
@@ -1977,16 +2141,16 @@ class SampleView(QWidget):
         else:
             self.populate_btn.setText("Populate from Live")
             self.logger.info("Stopped populating from live view")
-            if hasattr(self, '_populate_timer'):
+            if hasattr(self, "_populate_timer"):
                 self._populate_timer.stop()
 
     def _on_populate_tick(self) -> None:
         """Capture current frame and add to 3D volume."""
-        if not getattr(self, '_is_populating', False) or not self.camera_controller:
+        if not getattr(self, "_is_populating", False) or not self.camera_controller:
             return
 
         # Don't populate during tile workflows - they write their own data
-        if getattr(self, '_tile_workflow_active', False):
+        if getattr(self, "_tile_workflow_active", False):
             return
 
         try:
@@ -2012,7 +2176,7 @@ class SampleView(QWidget):
                 return
 
             # Add frame to volume
-            stage_pos = {'x': position.x, 'y': position.y, 'z': position.z}
+            stage_pos = {"x": position.x, "y": position.y, "z": position.z}
             self.add_frame_to_volume(image, stage_pos, channel_id)
 
         except Exception as e:
@@ -2039,15 +2203,18 @@ class SampleView(QWidget):
             return
 
         from PyQt5.QtWidgets import QMessageBox
+
         reply = QMessageBox.question(
-            self, "Clear Data",
+            self,
+            "Clear Data",
             "Are you sure you want to clear all accumulated data?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
             self.voxel_storage.clear()
             self._update_visualization()
-            if hasattr(self, '_move_data_to_focus_cb'):
+            if hasattr(self, "_move_data_to_focus_cb"):
                 self._move_data_to_focus_cb.setChecked(False)
             # Uncheck all channel visibility checkboxes
             for cb in self.channel_checkboxes.values():
@@ -2059,7 +2226,7 @@ class SampleView(QWidget):
         if self.voxel_storage:
             self.voxel_storage.clear()
             self._update_visualization()
-            if hasattr(self, '_move_data_to_focus_cb'):
+            if hasattr(self, "_move_data_to_focus_cb"):
                 self._move_data_to_focus_cb.setChecked(False)
             # Reset channel controls to disabled (same as initial state).
             # _check_channel_availability() re-enables them when new data arrives
@@ -2084,9 +2251,14 @@ class SampleView(QWidget):
                     self.logger.info("Removed threshold mask layer")
                     break
 
-    def add_frame_to_volume(self, image: np.ndarray, stage_position_mm: dict,
-                            channel_id: int, timestamp: float = None,
-                            reference_position: dict = None) -> None:
+    def add_frame_to_volume(
+        self,
+        image: np.ndarray,
+        stage_position_mm: dict,
+        channel_id: int,
+        timestamp: float = None,
+        reference_position: dict = None,
+    ) -> None:
         """
         Place a camera frame into the 3D voxel storage.
 
@@ -2108,6 +2280,7 @@ class SampleView(QWidget):
 
         try:
             import time as time_module
+
             if timestamp is None:
                 timestamp = time_module.time() * 1000
 
@@ -2116,7 +2289,9 @@ class SampleView(QWidget):
             H, W = downsampled.shape
 
             # Generate pixel coordinate grid
-            y_indices, x_indices = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
+            y_indices, x_indices = np.meshgrid(
+                np.arange(H), np.arange(W), indexing="ij"
+            )
 
             # Calculate FOV from magnification
             FOV_mm = 0.5182  # Field of view in mm
@@ -2124,39 +2299,41 @@ class SampleView(QWidget):
             pixel_size_um = FOV_um / W
 
             # Convert to camera space (micrometers)
-            camera_x = (x_indices - W/2) * pixel_size_um
-            camera_y = (y_indices - H/2) * pixel_size_um
+            camera_x = (x_indices - W / 2) * pixel_size_um
+            camera_y = (y_indices - H / 2) * pixel_size_um
 
             # Stack into (N, 2) array
             camera_coords_2d = np.column_stack([camera_x.ravel(), camera_y.ravel()])
 
             # Get sample region center from config
-            sample_center = self._config.get('sample_chamber', {}).get(
-                'sample_region_center_um', [6655, 7000, 19250]
+            sample_center = self._config.get("sample_chamber", {}).get(
+                "sample_region_center_um", [6655, 7000, 19250]
             )
 
             # Get reference position
-            pos_x = stage_position_mm['x']
-            pos_y = stage_position_mm['y']
-            pos_z = stage_position_mm['z']
+            pos_x = stage_position_mm["x"]
+            pos_y = stage_position_mm["y"]
+            pos_z = stage_position_mm["z"]
 
             # Get reference position for delta calculation
             if reference_position is not None:
                 # Use explicitly provided reference (for tile workflows)
                 # This avoids setting voxel_storage.reference_stage_position,
                 # which would enable display transform (causing double-delta)
-                ref_x = reference_position['x']
-                ref_y = reference_position['y']
-                ref_z = reference_position['z']
+                ref_x = reference_position["x"]
+                ref_y = reference_position["y"]
+                ref_z = reference_position["z"]
             elif self.voxel_storage.reference_stage_position is not None:
                 # Use stored reference (for live view)
-                ref_x = self.voxel_storage.reference_stage_position['x']
-                ref_y = self.voxel_storage.reference_stage_position['y']
-                ref_z = self.voxel_storage.reference_stage_position['z']
+                ref_x = self.voxel_storage.reference_stage_position["x"]
+                ref_y = self.voxel_storage.reference_stage_position["y"]
+                ref_z = self.voxel_storage.reference_stage_position["z"]
             else:
                 # First frame in live view - set reference in voxel_storage
                 self.voxel_storage.set_reference_position(stage_position_mm)
-                self.logger.info(f"First frame - set reference position to ({pos_x:.3f}, {pos_y:.3f}, {pos_z:.3f})")
+                self.logger.info(
+                    f"First frame - set reference position to ({pos_x:.3f}, {pos_y:.3f}, {pos_z:.3f})"
+                )
                 ref_x = pos_x
                 ref_y = pos_y
                 ref_z = pos_z
@@ -2167,9 +2344,11 @@ class SampleView(QWidget):
             delta_z = pos_z - ref_z
 
             # Log delta values for debugging 3D distribution
-            self.logger.debug(f"add_frame_to_volume: pos=({pos_x:.3f}, {pos_y:.3f}, {pos_z:.3f}), "
-                             f"ref=({ref_x:.3f}, {ref_y:.3f}, {ref_z:.3f}), "
-                             f"delta=({delta_x:.3f}, {delta_y:.3f}, {delta_z:.3f})")
+            self.logger.debug(
+                f"add_frame_to_volume: pos=({pos_x:.3f}, {pos_y:.3f}, {pos_z:.3f}), "
+                f"ref=({ref_x:.3f}, {ref_y:.3f}, {ref_z:.3f}), "
+                f"delta=({delta_x:.3f}, {delta_y:.3f}, {delta_z:.3f})"
+            )
 
             # Storage position (ZYX order)
             base_z_um = sample_center[2]
@@ -2182,30 +2361,37 @@ class SampleView(QWidget):
             # Storage uses: [-dz, +dy, +dx(invert)/-dx(normal)]
             delta_x_storage = delta_x if self._invert_x else -delta_x
 
-            world_center_um = np.array([
-                base_z_um - delta_z * 1000,         # Z: negated (opposite of display +dz)
-                base_y_um + delta_y * 1000,         # Y: positive (opposite of display -dy)
-                base_x_um + delta_x_storage * 1000  # X: conditional (opposite of display)
-            ])
+            world_center_um = np.array(
+                [
+                    base_z_um - delta_z * 1000,  # Z: negated (opposite of display +dz)
+                    base_y_um + delta_y * 1000,  # Y: positive (opposite of display -dy)
+                    base_x_um
+                    + delta_x_storage * 1000,  # X: conditional (opposite of display)
+                ]
+            )
 
             # Log world center for debugging 3D placement
-            self.logger.info(f"Frame placed at world_center_um (Z,Y,X): ({world_center_um[0]:.1f}, {world_center_um[1]:.1f}, {world_center_um[2]:.1f})")
+            self.logger.info(
+                f"Frame placed at world_center_um (Z,Y,X): ({world_center_um[0]:.1f}, {world_center_um[1]:.1f}, {world_center_um[2]:.1f})"
+            )
 
             # Create 3D coords
             slice_thickness_um = 100
             num_pixels = len(camera_coords_2d)
-            z_offsets = np.linspace(-slice_thickness_um/2, slice_thickness_um/2, num_pixels)
+            z_offsets = np.linspace(
+                -slice_thickness_um / 2, slice_thickness_um / 2, num_pixels
+            )
 
             # When invert_x, camera image X is mirrored relative to world X
             # (optics flip X). Negate camera X so pixels within each tile
             # have correct orientation. Inter-tile positioning (delta_x_storage)
             # is handled separately above.
-            camera_x_offset = -camera_coords_2d[:, 0] if self._invert_x else camera_coords_2d[:, 0]
-            camera_offsets_3d = np.column_stack([
-                z_offsets,
-                camera_coords_2d[:, 1],
-                camera_x_offset
-            ])
+            camera_x_offset = (
+                -camera_coords_2d[:, 0] if self._invert_x else camera_coords_2d[:, 0]
+            )
+            camera_offsets_3d = np.column_stack(
+                [z_offsets, camera_coords_2d[:, 1], camera_x_offset]
+            )
 
             world_coords_3d = camera_offsets_3d + world_center_um
             values = downsampled.ravel()
@@ -2216,21 +2402,24 @@ class SampleView(QWidget):
                 world_coords=world_coords_3d,
                 pixel_values=values,
                 timestamp=timestamp,
-                update_mode='maximum'
+                update_mode="maximum",
             )
 
             # Auto-enable focal move mode now that data is present
-            if hasattr(self, '_move_data_to_focus_cb') and not self._move_data_to_focus_cb.isChecked():
+            if (
+                hasattr(self, "_move_data_to_focus_cb")
+                and not self._move_data_to_focus_cb.isChecked()
+            ):
                 self._move_data_to_focus_cb.setChecked(True)
 
             # Trigger channel availability check
-            if hasattr(self, '_channel_availability_timer'):
+            if hasattr(self, "_channel_availability_timer"):
                 self._channel_availability_timer.start()
 
             # Trigger debounced visualization update (suppress during tile workflows
             # to avoid expensive 3D transforms blocking the GUI thread mid-acquisition)
-            if not getattr(self, '_tile_workflow_active', False):
-                if hasattr(self, '_visualization_update_timer'):
+            if not getattr(self, "_tile_workflow_active", False):
+                if hasattr(self, "_visualization_update_timer"):
                     self._visualization_update_timer.start()
 
         except Exception as e:
@@ -2253,7 +2442,7 @@ class SampleView(QWidget):
         return image.astype(np.uint16)
 
         # Reset channel controls to disabled
-        channels_config = self._config.get('channels', [])
+        channels_config = self._config.get("channels", [])
         for ch_id in range(4):
             cb = self.channel_checkboxes.get(ch_id)
             sl = self.channel_contrast_sliders.get(ch_id)
@@ -2262,7 +2451,11 @@ class SampleView(QWidget):
             if cb:
                 cb.setEnabled(False)
                 cb.setChecked(False)
-                name = channels_config[ch_id].get('name', f'Ch {ch_id}') if ch_id < len(channels_config) else f'Ch {ch_id}'
+                name = (
+                    channels_config[ch_id].get("name", f"Ch {ch_id}")
+                    if ch_id < len(channels_config)
+                    else f"Ch {ch_id}"
+                )
                 cb.setToolTip(
                     f"{name} channel — No data loaded.\n"
                     "This channel will activate automatically when 3D volume data is received."
@@ -2310,8 +2503,8 @@ class SampleView(QWidget):
         window can display, while chamber geometry and data layers are populated
         on the next event loop iteration (~5s saved from blocking __init__).
         """
-        self._chamber_viz._position_sliders = getattr(self, 'position_sliders', None)
-        placeholder = getattr(self, 'viewer_placeholder', None)
+        self._chamber_viz._position_sliders = getattr(self, "position_sliders", None)
+        placeholder = getattr(self, "viewer_placeholder", None)
 
         # Set callback so we copy channel_layers once deferred setup completes
         self._chamber_viz._on_setup_complete = self._on_3d_viewer_ready
@@ -2351,18 +2544,20 @@ class SampleView(QWidget):
         stage_pos = self._pending_stage_update
         self._pending_stage_update = None
 
-        self.logger.info(f"Stage update received: X={stage_pos['x']:.3f}, Y={stage_pos['y']:.3f}, "
-                        f"Z={stage_pos['z']:.3f}, R={stage_pos['r']:.1f}")
+        self.logger.info(
+            f"Stage update received: X={stage_pos['x']:.3f}, Y={stage_pos['y']:.3f}, "
+            f"Z={stage_pos['z']:.3f}, R={stage_pos['r']:.1f}"
+        )
 
         # During tile workflows, don't update last_stage_position from hardware -
         # _on_tile_zstack_frame() manages it based on workflow positions.
         # Also skip data layer updates since _update_visualization() handles that.
-        if getattr(self, '_tile_workflow_active', False):
+        if getattr(self, "_tile_workflow_active", False):
             # Still update geometry (holder position) but not data transforms
             self.logger.info("  Skipping data transform (tile workflow active)")
-            self.current_rotation['ry'] = stage_pos.get('r', 0)
+            self.current_rotation["ry"] = stage_pos.get("r", 0)
             self._update_sample_holder_position(
-                stage_pos['x'], stage_pos['y'], stage_pos['z']
+                stage_pos["x"], stage_pos["y"], stage_pos["z"]
             )
             return
 
@@ -2370,11 +2565,11 @@ class SampleView(QWidget):
         self.last_stage_position = stage_pos
 
         # Update rotation tracking
-        self.current_rotation['ry'] = stage_pos.get('r', 0)
+        self.current_rotation["ry"] = stage_pos.get("r", 0)
 
         # Update reference geometry (holder, extension, rotation indicator)
         self._update_sample_holder_position(
-            stage_pos['x'], stage_pos['y'], stage_pos['z']
+            stage_pos["x"], stage_pos["y"], stage_pos["z"]
         )
 
         # Update data layers with transformed volumes (data moves with stage)
@@ -2384,15 +2579,19 @@ class SampleView(QWidget):
 
         # Check if reference position is set (required for transform)
         if self.voxel_storage.reference_stage_position is None:
-            self.logger.info("  Skipping data transform (reference_stage_position not set)")
+            self.logger.info(
+                "  Skipping data transform (reference_stage_position not set)"
+            )
             return
 
         # Get holder position for rotation center
-        holder_pos_voxels = np.array([
-            self.holder_position['x'],
-            self.holder_position['y'],
-            self.holder_position['z']
-        ])
+        holder_pos_voxels = np.array(
+            [
+                self.holder_position["x"],
+                self.holder_position["y"],
+                self.holder_position["z"],
+            ]
+        )
 
         channels_updated = 0
         for ch_id in range(self.voxel_storage.num_channels):
@@ -2407,11 +2606,15 @@ class SampleView(QWidget):
                 self.channel_layers[ch_id].data = volume
                 channels_updated += 1
 
-                self.logger.debug(f"Stage update: Channel {ch_id} - "
-                                 f"non-zero voxels: {np.count_nonzero(volume)}")
+                self.logger.debug(
+                    f"Stage update: Channel {ch_id} - "
+                    f"non-zero voxels: {np.count_nonzero(volume)}"
+                )
 
         if channels_updated > 0:
-            self.logger.info(f"  Updated {channels_updated} channel(s) with transformed data")
+            self.logger.info(
+                f"  Updated {channels_updated} channel(s) with transformed data"
+            )
             # Also update 2D plane views with the same transformed data
             self._update_plane_views()
 
@@ -2419,7 +2622,7 @@ class SampleView(QWidget):
         """Update the 3D visualization with latest data from voxel storage."""
         # During tile workflows, run transforms off the GUI thread to avoid
         # blocking frame buffer draining
-        if getattr(self, '_tile_workflow_active', False):
+        if getattr(self, "_tile_workflow_active", False):
             self._update_visualization_async()
             return
 
@@ -2441,11 +2644,13 @@ class SampleView(QWidget):
                     if self.last_stage_position and any(
                         v != 0 for v in self.last_stage_position.values()
                     ):
-                        holder_pos = np.array([
-                            self.holder_position['x'],
-                            self.holder_position['y'],
-                            self.holder_position['z']
-                        ])
+                        holder_pos = np.array(
+                            [
+                                self.holder_position["x"],
+                                self.holder_position["y"],
+                                self.holder_position["z"],
+                            ]
+                        )
                         volume = self.voxel_storage.get_display_volume_transformed(
                             ch_id, self.last_stage_position, holder_pos
                         )
@@ -2463,7 +2668,7 @@ class SampleView(QWidget):
 
                     # Auto-contrast if this is first data for channel
                     layer = self.channel_layers[ch_id]
-                    if not getattr(layer, '_auto_contrast_applied', False):
+                    if not getattr(layer, "_auto_contrast_applied", False):
                         self._auto_contrast_channels()
                         layer._auto_contrast_applied = True
 
@@ -2488,13 +2693,16 @@ class SampleView(QWidget):
 
         # Capture current state (immutable snapshot for the thread)
         stage_pos = dict(self.last_stage_position) if self.last_stage_position else None
-        holder_pos = np.array([
-            self.holder_position['x'],
-            self.holder_position['y'],
-            self.holder_position['z']
-        ])
+        holder_pos = np.array(
+            [
+                self.holder_position["x"],
+                self.holder_position["y"],
+                self.holder_position["z"],
+            ]
+        )
         channels_with_data = [
-            ch_id for ch_id in range(self.voxel_storage.num_channels)
+            ch_id
+            for ch_id in range(self.voxel_storage.num_channels)
             if ch_id in self.channel_layers and self.voxel_storage.has_data(ch_id)
         ]
         if not channels_with_data:
@@ -2503,6 +2711,7 @@ class SampleView(QWidget):
         self._viz_update_in_progress = True
 
         import threading
+
         def _compute():
             try:
                 results = {}
@@ -2534,7 +2743,7 @@ class SampleView(QWidget):
                     self.channel_layers[ch_id].data = volume
 
                     layer = self.channel_layers[ch_id]
-                    if not getattr(layer, '_auto_contrast_applied', False):
+                    if not getattr(layer, "_auto_contrast_applied", False):
                         self._auto_contrast_channels()
                         layer._auto_contrast_applied = True
 
@@ -2572,7 +2781,7 @@ class SampleView(QWidget):
             else:
                 # Re-enable the selected light source before starting camera
                 # (it was disabled when live view stopped previously)
-                if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+                if hasattr(self, "laser_led_panel") and self.laser_led_panel:
                     self.laser_led_panel.restore_checked_illumination()
 
                 # Start live view
@@ -2620,7 +2829,7 @@ class SampleView(QWidget):
     def _update_zoom_display(self) -> None:
         """Update the zoom level display from napari viewer."""
         viewer = self._get_viewer()
-        if viewer and hasattr(viewer, 'camera'):
+        if viewer and hasattr(viewer, "camera"):
             zoom = viewer.camera.zoom
             self.zoom_label.setText(f"Zoom: {zoom:.2f}")
         else:
@@ -2629,7 +2838,7 @@ class SampleView(QWidget):
     def _on_reset_zoom_clicked(self) -> None:
         """Reset camera view to defaults (orientation and zoom)."""
         viewer = self._get_viewer()
-        if viewer and hasattr(viewer, 'camera'):
+        if viewer and hasattr(viewer, "camera"):
             viewer.reset_view()  # Reset orientation to napari defaults
             viewer.camera.zoom = 1.57  # Set zoom after reset
             self._update_zoom_display()
@@ -2645,7 +2854,7 @@ class SampleView(QWidget):
 
         # Update FPS from camera controller if live
         if self._live_view_active and self.camera_controller:
-            fps = getattr(self.camera_controller, '_current_fps', None)
+            fps = getattr(self.camera_controller, "_current_fps", None)
             if fps is not None:
                 self.fps_label.setText(f"FPS: {fps:.1f}")
             else:
@@ -2661,7 +2870,7 @@ class SampleView(QWidget):
         try:
             stats = self.voxel_storage.get_memory_usage()
             self.memory_label.setText(f"Memory: {stats['total_mb']:.1f} MB")
-            voxels = stats['storage_voxels']
+            voxels = stats["storage_voxels"]
             if voxels >= 1_000_000:
                 self.voxel_label.setText(f"Voxels: {voxels/1_000_000:.1f}M")
             elif voxels >= 1_000:
@@ -2675,6 +2884,7 @@ class SampleView(QWidget):
         """Handle Fast Transform checkbox toggle."""
         try:
             from py2flamingo.visualization.coordinate_transforms import TransformQuality
+
             quality = TransformQuality.FAST if fast_mode else TransformQuality.QUALITY
             if self.voxel_storage:
                 self.voxel_storage.transform_quality = quality
@@ -2709,7 +2919,7 @@ class SampleView(QWidget):
 
         try:
             # Determine mode: focal (checkbox checked AND focal point available) vs direct
-            use_focal = (self._move_data_to_focus_cb.isChecked() and self._focal_point)
+            use_focal = self._move_data_to_focus_cb.isChecked() and self._focal_point
 
             # Get current position to preserve unchanged axes
             current_pos = self.movement_controller.get_position()
@@ -2725,46 +2935,70 @@ class SampleView(QWidget):
                 # All axes: target = current + (focal - click)
                 focal_x, focal_y_viz, focal_z = self._focal_point
 
-                if plane == 'xz':
+                if plane == "xz":
                     target_x = current_pos.x + (focal_x - h_coord)
                     target_z = current_pos.z + (focal_z - v_coord)
-                    target = Position(x=target_x, y=current_pos.y, z=target_z, r=current_pos.r)
-                    self.logger.info(f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
-                                     f"stage X={target_x:.3f}, Z={target_z:.3f}")
-                elif plane == 'xy':
+                    target = Position(
+                        x=target_x, y=current_pos.y, z=target_z, r=current_pos.r
+                    )
+                    self.logger.info(
+                        f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
+                        f"stage X={target_x:.3f}, Z={target_z:.3f}"
+                    )
+                elif plane == "xy":
                     target_x = current_pos.x + (focal_x - h_coord)
                     target_y = current_pos.y + (focal_y_viz - v_coord)
-                    target = Position(x=target_x, y=target_y, z=current_pos.z, r=current_pos.r)
-                    self.logger.info(f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
-                                     f"stage X={target_x:.3f}, Y={target_y:.3f}")
-                elif plane == 'yz':
+                    target = Position(
+                        x=target_x, y=target_y, z=current_pos.z, r=current_pos.r
+                    )
+                    self.logger.info(
+                        f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
+                        f"stage X={target_x:.3f}, Y={target_y:.3f}"
+                    )
+                elif plane == "yz":
                     target_z = current_pos.z + (focal_z - h_coord)
                     target_y = current_pos.y + (focal_y_viz - v_coord)
-                    target = Position(x=current_pos.x, y=target_y, z=target_z, r=current_pos.r)
-                    self.logger.info(f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
-                                     f"stage Z={target_z:.3f}, Y={target_y:.3f}")
+                    target = Position(
+                        x=current_pos.x, y=target_y, z=target_z, r=current_pos.r
+                    )
+                    self.logger.info(
+                        f"Focal move: click=({h_coord:.2f},{v_coord:.2f}) → "
+                        f"stage Z={target_z:.3f}, Y={target_y:.3f}"
+                    )
                 else:
                     self.logger.warning(f"Unknown plane: {plane}")
                     return
             else:
                 # Direct mode: move stage directly to clicked coordinate
-                if plane == 'xz':
+                if plane == "xz":
                     # h=X, v=Z — Y unchanged
-                    target = Position(x=h_coord, y=current_pos.y, z=v_coord, r=current_pos.r)
-                    self.logger.info(f"Direct move: click=({h_coord:.2f},{v_coord:.2f}) → "
-                                     f"stage X={h_coord:.3f}, Z={v_coord:.3f}")
-                elif plane == 'xy':
+                    target = Position(
+                        x=h_coord, y=current_pos.y, z=v_coord, r=current_pos.r
+                    )
+                    self.logger.info(
+                        f"Direct move: click=({h_coord:.2f},{v_coord:.2f}) → "
+                        f"stage X={h_coord:.3f}, Z={v_coord:.3f}"
+                    )
+                elif plane == "xy":
                     # h=X, v=Y(viz) — Z unchanged; convert viz Y to stage Y
                     target_y = self._viz_y_to_stage_y(v_coord)
-                    target = Position(x=h_coord, y=target_y, z=current_pos.z, r=current_pos.r)
-                    self.logger.info(f"Direct move: click=({h_coord:.2f},{v_coord:.2f}) → "
-                                     f"stage X={h_coord:.3f}, Y={target_y:.3f}")
-                elif plane == 'yz':
+                    target = Position(
+                        x=h_coord, y=target_y, z=current_pos.z, r=current_pos.r
+                    )
+                    self.logger.info(
+                        f"Direct move: click=({h_coord:.2f},{v_coord:.2f}) → "
+                        f"stage X={h_coord:.3f}, Y={target_y:.3f}"
+                    )
+                elif plane == "yz":
                     # h=Z, v=Y(viz) — X unchanged; convert viz Y to stage Y
                     target_y = self._viz_y_to_stage_y(v_coord)
-                    target = Position(x=current_pos.x, y=target_y, z=h_coord, r=current_pos.r)
-                    self.logger.info(f"Direct move: click=({h_coord:.2f},{v_coord:.2f}) → "
-                                     f"stage Z={h_coord:.3f}, Y={target_y:.3f}")
+                    target = Position(
+                        x=current_pos.x, y=target_y, z=h_coord, r=current_pos.r
+                    )
+                    self.logger.info(
+                        f"Direct move: click=({h_coord:.2f},{v_coord:.2f}) → "
+                        f"stage Z={h_coord:.3f}, Y={target_y:.3f}"
+                    )
                 else:
                     self.logger.warning(f"Unknown plane: {plane}")
                     return
@@ -2773,7 +3007,9 @@ class SampleView(QWidget):
             self._plane_stage_targets[plane] = target
 
             # Use move_to_position for multi-axis move (handles lock properly)
-            self.movement_controller.position_controller.move_to_position(target, validate=True)
+            self.movement_controller.position_controller.move_to_position(
+                target, validate=True
+            )
 
         except Exception as e:
             self.logger.error(f"Error moving from plane click: {e}")
@@ -2805,7 +3041,10 @@ class SampleView(QWidget):
 
                 # Prefer using napari layer data (already transformed with stage position)
                 # over raw voxel storage data, so 2D planes match 3D viewer position
-                if ch_id in self.channel_layers and self.channel_layers[ch_id].data is not None:
+                if (
+                    ch_id in self.channel_layers
+                    and self.channel_layers[ch_id].data is not None
+                ):
                     volume = self.channel_layers[ch_id].data
                 else:
                     # Fallback to raw storage data
@@ -2832,41 +3071,55 @@ class SampleView(QWidget):
 
                 # Get channel settings from napari layer or use defaults
                 settings = {
-                    'visible': True,
-                    'colormap': 'gray',
-                    'contrast_min': 0,
-                    'contrast_max': 65535
+                    "visible": True,
+                    "colormap": "gray",
+                    "contrast_min": 0,
+                    "contrast_max": 65535,
                 }
 
                 # Try to get settings from napari layer
                 if ch_id in self.channel_layers:
                     layer = self.channel_layers[ch_id]
-                    if hasattr(layer, 'visible'):
-                        settings['visible'] = layer.visible
-                    if hasattr(layer, 'colormap') and hasattr(layer.colormap, 'name'):
-                        settings['colormap'] = layer.colormap.name
-                    if hasattr(layer, 'contrast_limits'):
+                    if hasattr(layer, "visible"):
+                        settings["visible"] = layer.visible
+                    if hasattr(layer, "colormap") and hasattr(layer.colormap, "name"):
+                        settings["colormap"] = layer.colormap.name
+                    if hasattr(layer, "contrast_limits"):
                         limits = layer.contrast_limits
-                        settings['contrast_min'] = int(limits[0])
-                        settings['contrast_max'] = int(limits[1])
+                        settings["contrast_min"] = int(limits[0])
+                        settings["contrast_max"] = int(limits[1])
 
                 channel_settings[ch_id] = settings
 
             # Update plane viewers with multi-channel data (empty dicts clear the display)
-            self.xz_plane_viewer.set_multi_channel_mip(xz_channel_mips, channel_settings)
-            self.xy_plane_viewer.set_multi_channel_mip(xy_channel_mips, channel_settings)
-            self.yz_plane_viewer.set_multi_channel_mip(yz_channel_mips, channel_settings)
+            self.xz_plane_viewer.set_multi_channel_mip(
+                xz_channel_mips, channel_settings
+            )
+            self.xy_plane_viewer.set_multi_channel_mip(
+                xy_channel_mips, channel_settings
+            )
+            self.yz_plane_viewer.set_multi_channel_mip(
+                yz_channel_mips, channel_settings
+            )
 
         except Exception as e:
             self.logger.error(f"Error updating plane views: {e}")
 
     def _stage_y_to_viz_y(self, stage_y: float) -> float:
         """Convert stage Y coordinate to visualization/chamber Y coordinate."""
-        return stage_y - self._chamber_viz.STAGE_Y_AT_OBJECTIVE + self._chamber_viz.OBJECTIVE_CHAMBER_Y_MM
+        return (
+            stage_y
+            - self._chamber_viz.STAGE_Y_AT_OBJECTIVE
+            + self._chamber_viz.OBJECTIVE_CHAMBER_Y_MM
+        )
 
     def _viz_y_to_stage_y(self, viz_y: float) -> float:
         """Convert visualization/chamber Y coordinate to stage Y coordinate."""
-        return viz_y + self._chamber_viz.STAGE_Y_AT_OBJECTIVE - self._chamber_viz.OBJECTIVE_CHAMBER_Y_MM
+        return (
+            viz_y
+            + self._chamber_viz.STAGE_Y_AT_OBJECTIVE
+            - self._chamber_viz.OBJECTIVE_CHAMBER_Y_MM
+        )
 
     def _update_plane_overlays(self) -> None:
         """Update overlay positions on all plane viewers."""
@@ -2887,20 +3140,24 @@ class SampleView(QWidget):
                     self.yz_plane_viewer.set_holder_position(z, viz_y)
 
             # Get objective position and focal point from calibration
-            stage_config = self._config.get('stage_control', {})
-            obj_z_wall = stage_config.get('z_range_mm', [12.5, 26])[0]
+            stage_config = self._config.get("stage_control", {})
+            obj_z_wall = stage_config.get("z_range_mm", [12.5, 26])[0]
 
             # Objective Y is always at its fixed chamber position (matches 3D view)
-            obj_y_viz = self._chamber_viz.OBJECTIVE_CHAMBER_Y_MM  # 7.0mm in chamber coords
+            obj_y_viz = (
+                self._chamber_viz.OBJECTIVE_CHAMBER_Y_MM
+            )  # 7.0mm in chamber coords
 
             cal = self.objective_xy_calibration
             if cal:
-                obj_x = cal['x']
-                focal_z = cal['z']  # Z where objective focuses (data capture depth)
+                obj_x = cal["x"]
+                focal_z = cal["z"]  # Z where objective focuses (data capture depth)
             else:
                 # Fallback to defaults
-                obj_x = (stage_config.get('x_range_mm', [1, 12.31])[0] +
-                         stage_config.get('x_range_mm', [1, 12.31])[1]) / 2
+                obj_x = (
+                    stage_config.get("x_range_mm", [1, 12.31])[0]
+                    + stage_config.get("x_range_mm", [1, 12.31])[1]
+                ) / 2
                 focal_z = obj_z_wall  # No calibration, assume wall position
 
             # Store focal point for click-to-move calculations
@@ -2912,9 +3169,15 @@ class SampleView(QWidget):
             self.yz_plane_viewer.set_objective_position(obj_z_wall, obj_y_viz)
 
             # Focal plane lines = where data is captured (cyan dashed, at cal Z)
-            self.xz_plane_viewer.set_focal_plane_position(focal_z)   # horizontal at focal Z
-            self.xy_plane_viewer.set_focal_plane_position(obj_y_viz)  # horizontal at obj Y
-            self.yz_plane_viewer.set_focal_plane_position(focal_z)   # vertical at focal Z
+            self.xz_plane_viewer.set_focal_plane_position(
+                focal_z
+            )  # horizontal at focal Z
+            self.xy_plane_viewer.set_focal_plane_position(
+                obj_y_viz
+            )  # horizontal at obj Y
+            self.yz_plane_viewer.set_focal_plane_position(
+                focal_z
+            )  # vertical at focal Z
 
         except Exception as e:
             self.logger.error(f"Error updating plane overlays: {e}")
@@ -2932,22 +3195,28 @@ class SampleView(QWidget):
         """
         threshold = 0.05  # 50 microns tolerance
 
-        for plane, viewer in [('xz', self.xz_plane_viewer),
-                              ('xy', self.xy_plane_viewer),
-                              ('yz', self.yz_plane_viewer)]:
+        for plane, viewer in [
+            ("xz", self.xz_plane_viewer),
+            ("xy", self.xy_plane_viewer),
+            ("yz", self.yz_plane_viewer),
+        ]:
             if not (viewer._target_pos and viewer._target_active):
                 continue
             stage_target = self._plane_stage_targets.get(plane)
             if not stage_target:
                 continue
-            if (abs(x - stage_target.x) < threshold and
-                abs(y - stage_target.y) < threshold and
-                abs(z - stage_target.z) < threshold):
+            if (
+                abs(x - stage_target.x) < threshold
+                and abs(y - stage_target.y) < threshold
+                and abs(z - stage_target.z) < threshold
+            ):
                 viewer.set_target_stale()
 
     # ========== Public Methods ==========
 
-    def update_workflow_progress(self, status: str, progress: int, time_remaining: str) -> None:
+    def update_workflow_progress(
+        self, status: str, progress: int, time_remaining: str
+    ) -> None:
         """
         Update workflow progress display.
 
@@ -3034,13 +3303,17 @@ class SampleView(QWidget):
         state["intensity_max"] = self.max_intensity_spinbox.value()
 
         # Illumination selections from the laser/LED panel
-        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
-            state["illumination"] = self.laser_led_panel.get_illumination_selection_state()
+        if hasattr(self, "laser_led_panel") and self.laser_led_panel:
+            state["illumination"] = (
+                self.laser_led_panel.get_illumination_selection_state()
+            )
 
         self._geometry_manager.save_dialog_state("SampleView", state)
-        self.logger.debug(f"Saved dialog state: colormap={state['colormap']}, "
-                         f"auto_scale={state['auto_scale']}, "
-                         f"intensity={state['intensity_min']}-{state['intensity_max']}")
+        self.logger.debug(
+            f"Saved dialog state: colormap={state['colormap']}, "
+            f"auto_scale={state['auto_scale']}, "
+            f"intensity={state['intensity_min']}-{state['intensity_max']}"
+        )
 
     def _restore_dialog_state(self) -> None:
         """Restore dialog state (display settings and illumination selections) from persistence.
@@ -3098,12 +3371,20 @@ class SampleView(QWidget):
             self.range_slider.blockSignals(False)
 
         # Restore illumination selections
-        if "illumination" in state and hasattr(self, 'laser_led_panel') and self.laser_led_panel:
-            self.laser_led_panel.restore_illumination_selection_state(state["illumination"])
+        if (
+            "illumination" in state
+            and hasattr(self, "laser_led_panel")
+            and self.laser_led_panel
+        ):
+            self.laser_led_panel.restore_illumination_selection_state(
+                state["illumination"]
+            )
 
-        self.logger.info(f"Restored dialog state: colormap={state.get('colormap')}, "
-                        f"auto_scale={state.get('auto_scale')}, "
-                        f"intensity={state.get('intensity_min')}-{state.get('intensity_max')}")
+        self.logger.info(
+            f"Restored dialog state: colormap={state.get('colormap')}, "
+            f"auto_scale={state.get('auto_scale')}, "
+            f"intensity={state.get('intensity_min')}-{state.get('intensity_max')}"
+        )
 
     # ========== Acquisition Lock Controls ==========
 
@@ -3119,21 +3400,23 @@ class SampleView(QWidget):
         Args:
             enabled: True to enable controls, False to disable
         """
-        self.logger.info(f"Stage controls {'enabled' if enabled else 'disabled'} (acquisition lock)")
+        self.logger.info(
+            f"Stage controls {'enabled' if enabled else 'disabled'} (acquisition lock)"
+        )
 
         # Disable/enable position sliders
-        if hasattr(self, 'position_sliders'):
+        if hasattr(self, "position_sliders"):
             for slider in self.position_sliders.values():
                 slider.setEnabled(enabled)
 
         # Disable/enable position edit fields
-        if hasattr(self, 'position_edits'):
+        if hasattr(self, "position_edits"):
             for edit in self.position_edits.values():
                 edit.setEnabled(enabled)
 
         # Disable/enable illumination controls during acquisition
         # (acquisition controls the LED, user shouldn't change it)
-        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+        if hasattr(self, "laser_led_panel") and self.laser_led_panel:
             self.laser_led_panel.setEnabled(enabled)
 
     # ========== Tile Workflow Integration ==========
@@ -3150,7 +3433,9 @@ class SampleView(QWidget):
         self._tile_buffers_submitted = {}  # Track which tiles have been submitted
         self._current_tile_buffer = None  # Current TileFrameBuffer being filled
         self._tile_reference_set = False  # Set reference on first tile frame
-        self._tile_reference_position = None  # Local reference (not in voxel_storage to avoid transform)
+        self._tile_reference_position = (
+            None  # Local reference (not in voxel_storage to avoid transform)
+        )
 
         # Cache camera FPS for progress-bar estimates (display only, not data)
         self._tile_camera_fps = 40.0  # Default matches typical Flamingo hardware
@@ -3159,12 +3444,14 @@ class SampleView(QWidget):
                 hw_fps = self.camera_controller.camera_service.get_frame_rate()
                 if hw_fps and hw_fps > 0:
                     self._tile_camera_fps = hw_fps
-                self.logger.info(f"Sample View: Camera FPS for progress display: {self._tile_camera_fps}")
+                self.logger.info(
+                    f"Sample View: Camera FPS for progress display: {self._tile_camera_fps}"
+                )
             except Exception:
                 pass
 
         # Disable Populate from Live during tile workflows to prevent interference
-        if getattr(self, '_is_populating', False):
+        if getattr(self, "_is_populating", False):
             self._was_populating_before_workflow = True
             self.populate_btn.setChecked(False)  # This triggers _on_populate_toggled
             self.logger.info("Disabled Populate from Live for tile workflow")
@@ -3172,26 +3459,30 @@ class SampleView(QWidget):
             self._was_populating_before_workflow = False
 
         # Disable the populate button during tile workflows
-        if hasattr(self, 'populate_btn'):
+        if hasattr(self, "populate_btn"):
             self.populate_btn.setEnabled(False)
             self.populate_btn.setToolTip("Disabled during tile workflow")
 
         # Uncheck LED (RGB) if the workflow uses lasers, not LED.
-        if hasattr(self, 'laser_led_panel') and self.laser_led_panel:
+        if hasattr(self, "laser_led_panel") and self.laser_led_panel:
             channels_in_use = set()
             for ti in tile_info:
-                for ch in ti.get('channels', []):
+                for ch in ti.get("channels", []):
                     channels_in_use.add(ch)
             if channels_in_use:
-                led_radio = getattr(self.laser_led_panel, '_led_radio', None)
+                led_radio = getattr(self.laser_led_panel, "_led_radio", None)
                 if led_radio and led_radio.isChecked():
                     led_radio.setChecked(False)
-                    self.logger.info("Unchecked LED (RGB) — workflow uses laser channels")
+                    self.logger.info(
+                        "Unchecked LED (RGB) — workflow uses laser channels"
+                    )
 
         # Start background tile processing worker
         self._start_tile_worker()
 
-        self.logger.info(f"Sample View: Prepared to receive {len(tile_info)} tile workflows")
+        self.logger.info(
+            f"Sample View: Prepared to receive {len(tile_info)} tile workflows"
+        )
 
     def finish_tile_workflows(self):
         """Mark tile workflows as complete and restore UI state.
@@ -3206,29 +3497,38 @@ class SampleView(QWidget):
         self._tile_workflow_active = False
 
         # Submit the last tile buffer (no subsequent tile transition to trigger it)
-        if self._current_tile_buffer is not None and self._current_tile_buffer.frame_count > 0:
-            self.logger.info(f"Submitting final tile buffer: {self._current_tile_buffer.tile_key} "
-                            f"({self._current_tile_buffer.frame_count} frames)")
-            if hasattr(self, '_tile_worker') and self._tile_worker:
+        if (
+            self._current_tile_buffer is not None
+            and self._current_tile_buffer.frame_count > 0
+        ):
+            self.logger.info(
+                f"Submitting final tile buffer: {self._current_tile_buffer.tile_key} "
+                f"({self._current_tile_buffer.frame_count} frames)"
+            )
+            if hasattr(self, "_tile_worker") and self._tile_worker:
                 self._tile_worker.submit_tile(self._current_tile_buffer)
             self._current_tile_buffer = None
 
         # Wait for background worker to finish processing all tiles
-        if hasattr(self, '_tile_worker') and self._tile_worker:
+        if hasattr(self, "_tile_worker") and self._tile_worker:
             self.logger.info("Waiting for tile processing worker to finish...")
             idle = self._tile_worker.wait_for_idle(timeout_ms=120000)
             if not idle:
-                self.logger.warning("Tile processing worker did not finish within 120s timeout")
+                self.logger.warning(
+                    "Tile processing worker did not finish within 120s timeout"
+                )
             else:
-                self.logger.info(f"Tile processing worker idle. "
-                                f"Processed {self._tile_worker.tiles_processed} tiles.")
+                self.logger.info(
+                    f"Tile processing worker idle. "
+                    f"Processed {self._tile_worker.tiles_processed} tiles."
+                )
 
             # Log per-tile per-channel completeness report from worker stats
             tile_channel_counts = self._tile_worker.channel_frame_counts
             if tile_channel_counts:
                 all_channels = set()
                 tile_keys_set = set()
-                for (tk, ch) in tile_channel_counts:
+                for tk, ch in tile_channel_counts:
                     all_channels.add(ch)
                     tile_keys_set.add(tk)
                 all_channels = sorted(all_channels)
@@ -3239,28 +3539,38 @@ class SampleView(QWidget):
                     for ch in all_channels:
                         count = tile_channel_counts.get((tk, ch), 0)
                         parts.append(f"Ch{ch}={count}")
-                    self.logger.info(f"  Tile ({tk[0]:.2f}, {tk[1]:.2f}): {', '.join(parts)}")
+                    self.logger.info(
+                        f"  Tile ({tk[0]:.2f}, {tk[1]:.2f}): {', '.join(parts)}"
+                    )
 
         # Stop the background worker thread
         self._stop_tile_worker()
 
-        self.logger.info(f"Sample View: Tile workflows finished. "
-                        f"Submitted {len(self._tile_buffers_submitted)} tiles.")
+        self.logger.info(
+            f"Sample View: Tile workflows finished. "
+            f"Submitted {len(self._tile_buffers_submitted)} tiles."
+        )
 
         # Trigger final visualization update to show the last tile's data.
         self._visualization_update_timer.start()
 
         # Auto-enable focal move mode now that data is present
-        if hasattr(self, '_move_data_to_focus_cb') and not self._move_data_to_focus_cb.isChecked():
+        if (
+            hasattr(self, "_move_data_to_focus_cb")
+            and not self._move_data_to_focus_cb.isChecked()
+        ):
             self._move_data_to_focus_cb.setChecked(True)
 
         # Re-enable the populate button
-        if hasattr(self, 'populate_btn'):
+        if hasattr(self, "populate_btn"):
             self.populate_btn.setEnabled(True)
-            self.populate_btn.setToolTip("Capture frames from Live View and accumulate into 3D volume")
+            self.populate_btn.setToolTip(
+                "Capture frames from Live View and accumulate into 3D volume"
+            )
 
-    def _on_tile_zstack_frame(self, image: np.ndarray, position: dict,
-                              z_index: int, frame_num: int):
+    def _on_tile_zstack_frame(
+        self, image: np.ndarray, position: dict, z_index: int, frame_num: int
+    ):
         """Handle incoming Z-stack frame from tile workflow.
 
         Buffers downsampled frames on the GUI thread (~0.5ms per frame).
@@ -3276,29 +3586,34 @@ class SampleView(QWidget):
         if not self._tile_workflow_active:
             return
 
-        z_min = position['z_min']
-        z_max = position['z_max']
-        channels = position.get('channels', [0])
+        z_min = position["z_min"]
+        z_max = position["z_max"]
+        channels = position.get("channels", [0])
         num_channels = len(channels)
-        tile_key = (position['x'], position['y'])
+        tile_key = (position["x"], position["y"])
 
         is_new_tile = tile_key not in self._tile_buffers_submitted and (
-            self._current_tile_buffer is None or
-            self._current_tile_buffer.tile_key != tile_key
+            self._current_tile_buffer is None
+            or self._current_tile_buffer.tile_key != tile_key
         )
 
         if is_new_tile:
             # Submit PREVIOUS tile's buffer to background worker
-            if self._current_tile_buffer is not None and self._current_tile_buffer.frame_count > 0:
-                self.logger.info(f"Tile {self._current_tile_buffer.tile_key} complete: "
-                                f"{self._current_tile_buffer.frame_count} frames buffered, "
-                                f"submitting to worker")
+            if (
+                self._current_tile_buffer is not None
+                and self._current_tile_buffer.frame_count > 0
+            ):
+                self.logger.info(
+                    f"Tile {self._current_tile_buffer.tile_key} complete: "
+                    f"{self._current_tile_buffer.frame_count} frames buffered, "
+                    f"submitting to worker"
+                )
                 self._tile_buffers_submitted[self._current_tile_buffer.tile_key] = True
-                if hasattr(self, '_tile_worker') and self._tile_worker:
+                if hasattr(self, "_tile_worker") and self._tile_worker:
                     self._tile_worker.submit_tile(self._current_tile_buffer)
 
                 # Trigger visualization update for the previous tile
-                if hasattr(self, '_visualization_update_timer'):
+                if hasattr(self, "_visualization_update_timer"):
                     self._visualization_update_timer.start()
 
             # CRITICAL: Force position update at start of each new tile
@@ -3306,39 +3621,48 @@ class SampleView(QWidget):
                 try:
                     pos = self.movement_controller.get_position()
                     if pos:
-                        self.logger.info(f"New tile starting - forcing position update: "
-                                        f"X={pos.x:.3f}, Y={pos.y:.3f}, Z={pos.z:.3f}")
+                        self.logger.info(
+                            f"New tile starting - forcing position update: "
+                            f"X={pos.x:.3f}, Y={pos.y:.3f}, Z={pos.z:.3f}"
+                        )
                         self._on_position_changed(pos.x, pos.y, pos.z, pos.r)
                 except Exception as e:
-                    self.logger.warning(f"Could not force position update for new tile: {e}")
+                    self.logger.warning(
+                        f"Could not force position update for new tile: {e}"
+                    )
 
             # Set reference on first tile
             if not self._tile_reference_set and self.voxel_storage:
-                ref_x = position['x']
-                ref_y = position['y']
+                ref_x = position["x"]
+                ref_y = position["y"]
                 z_mid = (z_min + z_max) / 2
                 ref_z = z_mid
-                ref_r = position.get('r', self.last_stage_position.get('r', 0))
+                ref_r = position.get("r", self.last_stage_position.get("r", 0))
 
                 self._tile_reference_position = {
-                    'x': ref_x, 'y': ref_y, 'z': ref_z, 'r': ref_r
+                    "x": ref_x,
+                    "y": ref_y,
+                    "z": ref_z,
+                    "r": ref_r,
                 }
                 self._tile_reference_set = True
                 self.voxel_storage.set_reference_position(self._tile_reference_position)
-                self.logger.info(f"Sample View: Tile reference set to "
-                                f"X={ref_x:.3f}, Y={ref_y:.3f}, Z={ref_z:.3f}, R={ref_r:.1f}°")
+                self.logger.info(
+                    f"Sample View: Tile reference set to "
+                    f"X={ref_x:.3f}, Y={ref_y:.3f}, Z={ref_z:.3f}, R={ref_r:.1f}°"
+                )
 
             # Update last_stage_position for display transform (once per tile)
             z_mid_tile = (z_min + z_max) / 2
             self.last_stage_position = {
-                'x': position['x'],
-                'y': position['y'],
-                'z': z_mid_tile,
-                'r': position.get('r', self.last_stage_position.get('r', 0))
+                "x": position["x"],
+                "y": position["y"],
+                "z": z_mid_tile,
+                "r": position.get("r", self.last_stage_position.get("r", 0)),
             }
 
             # Create new buffer for this tile
-            num_planes = position.get('num_planes')
+            num_planes = position.get("num_planes")
             self._current_tile_buffer = TileFrameBuffer(
                 tile_key=tile_key,
                 position=position,
@@ -3348,9 +3672,11 @@ class SampleView(QWidget):
                 reference_position=self._tile_reference_position,
                 planes_per_channel=num_planes,
             )
-            self.logger.info(f"Sample View: New tile buffer for ({position['x']:.3f}, {position['y']:.3f}), "
-                            f"expected {num_planes} planes/channel x {num_channels} channels"
-                            f" = {num_planes * num_channels if num_planes else '?'} total")
+            self.logger.info(
+                f"Sample View: New tile buffer for ({position['x']:.3f}, {position['y']:.3f}), "
+                f"expected {num_planes} planes/channel x {num_channels} channels"
+                f" = {num_planes * num_channels if num_planes else '?'} total"
+            )
 
         # Downsample and buffer (~0.5ms)
         downsampled = self._downsample_for_storage(image)
@@ -3388,9 +3714,9 @@ class SampleView(QWidget):
         Uses the same physics formula as before, but ONLY for the progress bar.
         Actual channel splitting uses exact counts in the background worker.
         """
-        z_range = position['z_max'] - position['z_min']
-        z_velocity = position.get('z_velocity', 0)
-        camera_fps = getattr(self, '_tile_camera_fps', 40.0)
+        z_range = position["z_max"] - position["z_min"]
+        z_velocity = position.get("z_velocity", 0)
+        camera_fps = getattr(self, "_tile_camera_fps", 40.0)
 
         if z_velocity > 0 and z_range > 0:
             sweep_duration = z_range / z_velocity
@@ -3410,7 +3736,7 @@ class SampleView(QWidget):
         self._tile_worker = TileProcessingWorker(
             voxel_storage=self.voxel_storage,
             config=self._config,
-            invert_x=self._invert_x
+            invert_x=self._invert_x,
         )
         self._tile_worker.moveToThread(self._tile_worker_thread)
 
@@ -3431,12 +3757,14 @@ class SampleView(QWidget):
         the thread. The worker checks _shutdown between tiles, so the worst
         case wait is one tile processing time (~3-15s).
         """
-        if hasattr(self, '_tile_worker') and self._tile_worker:
+        if hasattr(self, "_tile_worker") and self._tile_worker:
             self._tile_worker.shutdown()
-        if hasattr(self, '_tile_worker_thread') and self._tile_worker_thread:
+        if hasattr(self, "_tile_worker_thread") and self._tile_worker_thread:
             self._tile_worker_thread.quit()
             if not self._tile_worker_thread.wait(60000):
-                self.logger.warning("Tile worker thread did not stop within 60s, terminating")
+                self.logger.warning(
+                    "Tile worker thread did not stop within 60s, terminating"
+                )
                 self._tile_worker_thread.terminate()
                 self._tile_worker_thread.wait(5000)
             self.logger.info("Tile processing worker thread stopped")
@@ -3451,13 +3779,16 @@ class SampleView(QWidget):
         self.logger.info(f"Tile {tile_key} processed: {stats}")
 
         # Kick visualization and channel availability timers
-        if hasattr(self, '_visualization_update_timer'):
+        if hasattr(self, "_visualization_update_timer"):
             self._visualization_update_timer.start()
-        if hasattr(self, '_channel_availability_timer'):
+        if hasattr(self, "_channel_availability_timer"):
             self._channel_availability_timer.start()
 
         # Auto-enable focal move mode now that data is present
-        if hasattr(self, '_move_data_to_focus_cb') and not self._move_data_to_focus_cb.isChecked():
+        if (
+            hasattr(self, "_move_data_to_focus_cb")
+            and not self._move_data_to_focus_cb.isChecked()
+        ):
             self._move_data_to_focus_cb.setChecked(True)
 
     # ── Disk tile loading ──────────────────────────────────────────────
@@ -3467,8 +3798,9 @@ class SampleView(QWidget):
         from PyQt5.QtWidgets import QFileDialog, QMessageBox
 
         if not self.voxel_storage:
-            QMessageBox.warning(self, "No Storage",
-                                "Voxel storage not initialised. Open 3D view first.")
+            QMessageBox.warning(
+                self, "No Storage", "Voxel storage not initialised. Open 3D view first."
+            )
             return
 
         # Start from last MIP browse path, or fall back to mapped data drive
@@ -3479,13 +3811,16 @@ class SampleView(QWidget):
                 default_path = saved
             else:
                 # Fall back to first mapped local drive (e.g. G:/CTLSM1)
-                for local_path in self._configuration_service.get_drive_mappings().values():
+                for (
+                    local_path
+                ) in self._configuration_service.get_drive_mappings().values():
                     if Path(local_path).exists():
                         default_path = local_path
                         break
 
         date_dir = QFileDialog.getExistingDirectory(
-            self, "Select Date Folder with Tile Data",
+            self,
+            "Select Date Folder with Tile Data",
             default_path,
             QFileDialog.ShowDirsOnly,
         )
@@ -3506,6 +3841,7 @@ class SampleView(QWidget):
 
         # Create loader on a background thread
         from PyQt5.QtCore import QThread
+
         from py2flamingo.visualization.disk_tile_loader import DiskTileLoader
 
         self._disk_loader_thread = QThread()
@@ -3544,7 +3880,7 @@ class SampleView(QWidget):
         self._stop_tile_worker()
 
         # Clean up loader thread
-        if hasattr(self, '_disk_loader_thread') and self._disk_loader_thread:
+        if hasattr(self, "_disk_loader_thread") and self._disk_loader_thread:
             self._disk_loader_thread.quit()
             self._disk_loader_thread.wait(5000)
             self._disk_loader_thread = None
@@ -3554,7 +3890,7 @@ class SampleView(QWidget):
         self._update_visualization()
 
         # Auto-enable focal move mode
-        if hasattr(self, '_move_data_to_focus_cb'):
+        if hasattr(self, "_move_data_to_focus_cb"):
             self._move_data_to_focus_cb.setChecked(True)
 
         # Restore button
@@ -3565,4 +3901,3 @@ class SampleView(QWidget):
             QMessageBox.information(self, "Load Complete", message)
         else:
             QMessageBox.warning(self, "Load Issue", message)
-

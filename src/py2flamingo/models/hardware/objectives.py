@@ -4,15 +4,17 @@ This module provides models for objective lenses and
 their optical properties.
 """
 
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
-from enum import Enum
 import math
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
 from ..base import ValidatedModel, ValidationError, validate_range
 
 
 class ImmersionMedium(Enum):
     """Objective immersion media."""
+
     AIR = ("air", 1.0)
     WATER = ("water", 1.33)
     GLYCEROL = ("glycerol", 1.47)
@@ -26,19 +28,21 @@ class ImmersionMedium(Enum):
 
 class ObjectiveType(Enum):
     """Types of objective lenses."""
-    DRY = "dry"                    # Air objective
-    WATER_IMMERSION = "water"      # Water immersion
-    OIL_IMMERSION = "oil"          # Oil immersion
-    WATER_DIPPING = "dipping"      # Water dipping objective
-    MULTI_IMMERSION = "multi"      # Multiple immersion media
+
+    DRY = "dry"  # Air objective
+    WATER_IMMERSION = "water"  # Water immersion
+    OIL_IMMERSION = "oil"  # Oil immersion
+    WATER_DIPPING = "dipping"  # Water dipping objective
+    MULTI_IMMERSION = "multi"  # Multiple immersion media
 
 
 class CorrectionType(Enum):
     """Objective optical corrections."""
-    ACHROMAT = "achromat"          # Basic chromatic correction
-    FLUORITE = "fluorite"          # Semi-apochromatic
-    APOCHROMAT = "apochromat"      # Full apochromatic correction
-    PLAN = "plan"                  # Field-flattened
+
+    ACHROMAT = "achromat"  # Basic chromatic correction
+    FLUORITE = "fluorite"  # Semi-apochromatic
+    APOCHROMAT = "apochromat"  # Full apochromatic correction
+    PLAN = "plan"  # Field-flattened
     PLAN_ACHROMAT = "plan_achromat"
     PLAN_FLUORITE = "plan_fluorite"
     PLAN_APOCHROMAT = "plan_apochromat"
@@ -47,6 +51,7 @@ class CorrectionType(Enum):
 @dataclass
 class ObjectiveProperties:
     """Optical properties of an objective lens."""
+
     magnification: float
     numerical_aperture: float
     working_distance_mm: float
@@ -81,16 +86,15 @@ class ObjectiveProperties:
 
         # Check reasonable magnification range
         validate_range(
-            self.magnification,
-            min_val=0.5, max_val=200.0,
-            field_name="magnification"
+            self.magnification, min_val=0.5, max_val=200.0, field_name="magnification"
         )
 
         # Check reasonable NA range
         validate_range(
             self.numerical_aperture,
-            min_val=0.01, max_val=1.65,
-            field_name="numerical_aperture"
+            min_val=0.01,
+            max_val=1.65,
+            field_name="numerical_aperture",
         )
 
         # Working distance typically decreases with magnification
@@ -112,8 +116,9 @@ class ObjectiveProperties:
         # Rayleigh criterion: r = 0.61 * λ / NA
         return 0.61 * wavelength_nm / (self.numerical_aperture * 1000)
 
-    def get_depth_of_field_um(self, wavelength_nm: float = 520,
-                              detector_pixel_um: float = 6.5) -> float:
+    def get_depth_of_field_um(
+        self, wavelength_nm: float = 520, detector_pixel_um: float = 6.5
+    ) -> float:
         """Calculate depth of field.
 
         Args:
@@ -124,7 +129,7 @@ class ObjectiveProperties:
             Depth of field in micrometers
         """
         # Wave optical depth of field
-        wave_dof = wavelength_nm / (self.numerical_aperture ** 2) / 1000
+        wave_dof = wavelength_nm / (self.numerical_aperture**2) / 1000
 
         # Geometrical depth of field
         n = self.immersion_medium.refractive_index
@@ -151,12 +156,13 @@ class ObjectiveProperties:
         Returns:
             Relative brightness (proportional to NA²/Mag²)
         """
-        return (self.numerical_aperture ** 2) / (self.magnification ** 2)
+        return (self.numerical_aperture**2) / (self.magnification**2)
 
 
 @dataclass
 class Objective(ValidatedModel):
     """Complete objective lens model."""
+
     name: str
     manufacturer: str
     part_number: Optional[str]
@@ -181,16 +187,15 @@ class Objective(ValidatedModel):
         # Validate immersion type matches objective type
         if self.objective_type == ObjectiveType.DRY:
             if self.properties.immersion_medium != ImmersionMedium.AIR:
-                raise ValidationError(
-                    "Dry objective must use air as immersion medium"
-                )
+                raise ValidationError("Dry objective must use air as immersion medium")
         elif self.objective_type == ObjectiveType.WATER_IMMERSION:
             if self.properties.immersion_medium != ImmersionMedium.WATER:
-                raise ValidationError(
-                    "Water immersion objective must use water medium"
-                )
+                raise ValidationError("Water immersion objective must use water medium")
         elif self.objective_type == ObjectiveType.OIL_IMMERSION:
-            if self.properties.immersion_medium not in [ImmersionMedium.OIL, ImmersionMedium.SILICONE]:
+            if self.properties.immersion_medium not in [
+                ImmersionMedium.OIL,
+                ImmersionMedium.SILICONE,
+            ]:
                 raise ValidationError(
                     "Oil immersion objective must use oil or silicone medium"
                 )
@@ -199,8 +204,9 @@ class Objective(ValidatedModel):
         if self.requires_coverslip:
             validate_range(
                 self.coverslip_thickness_mm,
-                min_val=0.0, max_val=0.5,
-                field_name="coverslip_thickness_mm"
+                min_val=0.0,
+                max_val=0.5,
+                field_name="coverslip_thickness_mm",
             )
 
     def get_display_name(self) -> str:
@@ -214,16 +220,22 @@ class Objective(ValidatedModel):
             immersion = f" {self.properties.immersion_medium.medium_name.capitalize()}"
 
         correction = ""
-        if self.correction_type in [CorrectionType.PLAN_APOCHROMAT,
-                                   CorrectionType.APOCHROMAT]:
+        if self.correction_type in [
+            CorrectionType.PLAN_APOCHROMAT,
+            CorrectionType.APOCHROMAT,
+        ]:
             correction = " Apo"
-        elif self.correction_type in [CorrectionType.PLAN_FLUORITE,
-                                     CorrectionType.FLUORITE]:
+        elif self.correction_type in [
+            CorrectionType.PLAN_FLUORITE,
+            CorrectionType.FLUORITE,
+        ]:
             correction = " Fluor"
 
-        return (f"{self.properties.magnification:.0f}x/"
-                f"{self.properties.numerical_aperture:.2f}"
-                f"{immersion}{correction}")
+        return (
+            f"{self.properties.magnification:.0f}x/"
+            f"{self.properties.numerical_aperture:.2f}"
+            f"{immersion}{correction}"
+        )
 
     def is_compatible_with_wavelength(self, wavelength_nm: float) -> bool:
         """Check if objective is suitable for given wavelength.
@@ -249,7 +261,9 @@ class Objective(ValidatedModel):
         return sensor_pixel_um / self.properties.magnification
 
     @classmethod
-    def create_default(cls, magnification: float = 20.0, na: float = 0.75) -> 'Objective':
+    def create_default(
+        cls, magnification: float = 20.0, na: float = 0.75
+    ) -> "Objective":
         """Create objective with default settings.
 
         Args:
@@ -262,7 +276,7 @@ class Objective(ValidatedModel):
         properties = ObjectiveProperties(
             magnification=magnification,
             numerical_aperture=na,
-            working_distance_mm=1.0  # Typical for 20x
+            working_distance_mm=1.0,  # Typical for 20x
         )
 
         return cls(
@@ -271,13 +285,14 @@ class Objective(ValidatedModel):
             part_number=None,
             properties=properties,
             objective_type=ObjectiveType.DRY,
-            correction_type=CorrectionType.PLAN_ACHROMAT
+            correction_type=CorrectionType.PLAN_ACHROMAT,
         )
 
 
 @dataclass
 class ObjectiveTurret(ValidatedModel):
     """Objective turret/nosepiece model."""
+
     num_positions: int
     objectives: List[Optional[Objective]]
     current_position: int = 0
@@ -288,9 +303,7 @@ class ObjectiveTurret(ValidatedModel):
         """Validate turret configuration."""
         # Validate number of positions
         validate_range(
-            self.num_positions,
-            min_val=1, max_val=10,
-            field_name="num_positions"
+            self.num_positions, min_val=1, max_val=10, field_name="num_positions"
         )
 
         # Validate objectives list length
@@ -310,7 +323,7 @@ class ObjectiveTurret(ValidatedModel):
         for i, obj in enumerate(self.objectives):
             if obj is not None:
                 obj.position_index = i
-                obj.is_selected = (i == self.current_position)
+                obj.is_selected = i == self.current_position
 
     def get_current_objective(self) -> Optional[Objective]:
         """Get currently selected objective.
@@ -349,7 +362,7 @@ class ObjectiveTurret(ValidatedModel):
         # Update selection state
         for i, obj in enumerate(self.objectives):
             if obj:
-                obj.is_selected = (i == position)
+                obj.is_selected = i == position
 
         self.current_position = position
         self.update()

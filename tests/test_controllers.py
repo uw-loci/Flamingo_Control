@@ -6,19 +6,25 @@ Tests for MVC Controllers Layer.
 Tests ConnectionController and WorkflowController with mocked services.
 """
 
-import unittest
-from unittest.mock import Mock, MagicMock, patch
-from pathlib import Path
-from datetime import datetime
 import socket
 
 # Import controllers
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+import unittest
+from datetime import datetime
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, patch
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from py2flamingo.controllers.connection_controller import ConnectionController
 from py2flamingo.controllers.workflow_controller import WorkflowController
-from py2flamingo.models.connection import ConnectionConfig, ConnectionState, ConnectionStatus, ConnectionModel
+from py2flamingo.models.connection import (
+    ConnectionConfig,
+    ConnectionModel,
+    ConnectionState,
+    ConnectionStatus,
+)
 
 
 class TestConnectionController(unittest.TestCase):
@@ -34,7 +40,7 @@ class TestConnectionController(unittest.TestCase):
             ip=None,
             port=None,
             connected_at=None,
-            last_error=None
+            last_error=None,
         )
 
         # Create controller
@@ -196,7 +202,7 @@ class TestConnectionController(unittest.TestCase):
             ip="127.0.0.1",
             port=53717,
             connected_at=None,
-            last_error=None
+            last_error=None,
         )
         self.mock_service.is_connected.return_value = False
         self.mock_service.reconnect.return_value = None
@@ -214,7 +220,7 @@ class TestConnectionController(unittest.TestCase):
             ip=None,
             port=None,
             connected_at=None,
-            last_error=None
+            last_error=None,
         )
 
         success, message = self.controller.reconnect()
@@ -230,7 +236,7 @@ class TestConnectionController(unittest.TestCase):
             ip="127.0.0.1",
             port=53717,
             connected_at=None,
-            last_error=None
+            last_error=None,
         )
         self.mock_service.is_connected.return_value = False
         self.mock_service.reconnect.side_effect = TimeoutError()
@@ -247,18 +253,18 @@ class TestConnectionController(unittest.TestCase):
             ip="127.0.0.1",
             port=53717,
             connected_at=datetime(2025, 1, 1, 12, 0, 0),
-            last_error=None
+            last_error=None,
         )
         self.mock_service.is_connected.return_value = True
 
         status = self.controller.get_connection_status()
 
-        self.assertTrue(status['connected'])
-        self.assertEqual(status['state'], 'connected')  # Enum value is lowercase
-        self.assertEqual(status['ip'], "127.0.0.1")
-        self.assertEqual(status['port'], 53717)
-        self.assertIsNotNone(status['connected_at'])
-        self.assertIsNone(status['last_error'])
+        self.assertTrue(status["connected"])
+        self.assertEqual(status["state"], "connected")  # Enum value is lowercase
+        self.assertEqual(status["ip"], "127.0.0.1")
+        self.assertEqual(status["port"], 53717)
+        self.assertIsNotNone(status["connected_at"])
+        self.assertIsNone(status["last_error"])
 
     def test_handle_connection_error_timeout(self):
         """Test error handling for timeout."""
@@ -291,7 +297,7 @@ class TestConnectionController(unittest.TestCase):
 
     def test_test_connection_success(self):
         """Test successful connection test."""
-        with patch('socket.socket') as mock_socket_class:
+        with patch("socket.socket") as mock_socket_class:
             # Mock successful connection
             mock_socket = Mock()
             mock_socket_class.return_value = mock_socket
@@ -332,7 +338,9 @@ class TestConnectionController(unittest.TestCase):
 
     def test_test_connection_invalid_port_type(self):
         """Test connection test with invalid port type."""
-        success, message = self.controller.test_connection("192.168.1.100", "not_a_port")
+        success, message = self.controller.test_connection(
+            "192.168.1.100", "not_a_port"
+        )
 
         self.assertFalse(success)
         self.assertIn("invalid port", message.lower())
@@ -342,18 +350,22 @@ class TestConnectionController(unittest.TestCase):
         invalid_ports = [0, -1, 65536, 70000]
 
         for invalid_port in invalid_ports:
-            success, message = self.controller.test_connection("192.168.1.100", invalid_port)
+            success, message = self.controller.test_connection(
+                "192.168.1.100", invalid_port
+            )
             self.assertFalse(success, f"Should reject port {invalid_port}")
             self.assertIn("invalid port", message.lower())
 
     def test_test_connection_timeout(self):
         """Test connection test with timeout."""
-        with patch('socket.socket') as mock_socket_class:
+        with patch("socket.socket") as mock_socket_class:
             mock_socket = Mock()
             mock_socket_class.return_value = mock_socket
             mock_socket.connect.side_effect = socket.timeout("Connection timed out")
 
-            success, message = self.controller.test_connection("192.168.1.100", 53717, timeout=1.0)
+            success, message = self.controller.test_connection(
+                "192.168.1.100", 53717, timeout=1.0
+            )
 
             self.assertFalse(success)
             self.assertIn("timeout", message.lower())
@@ -364,7 +376,7 @@ class TestConnectionController(unittest.TestCase):
 
     def test_test_connection_refused(self):
         """Test connection test with connection refused."""
-        with patch('socket.socket') as mock_socket_class:
+        with patch("socket.socket") as mock_socket_class:
             mock_socket = Mock()
             mock_socket_class.return_value = mock_socket
             mock_socket.connect.side_effect = ConnectionRefusedError()
@@ -379,7 +391,7 @@ class TestConnectionController(unittest.TestCase):
 
     def test_test_connection_host_unreachable(self):
         """Test connection test with host unreachable."""
-        with patch('socket.socket') as mock_socket_class:
+        with patch("socket.socket") as mock_socket_class:
             mock_socket = Mock()
             mock_socket_class.return_value = mock_socket
             mock_socket.connect.side_effect = OSError("No route to host")
@@ -393,7 +405,7 @@ class TestConnectionController(unittest.TestCase):
 
     def test_test_connection_network_unreachable(self):
         """Test connection test with network unreachable."""
-        with patch('socket.socket') as mock_socket_class:
+        with patch("socket.socket") as mock_socket_class:
             mock_socket = Mock()
             mock_socket_class.return_value = mock_socket
             mock_socket.connect.side_effect = OSError("Network is unreachable")
@@ -408,7 +420,7 @@ class TestConnectionController(unittest.TestCase):
 
     def test_test_connection_generic_error(self):
         """Test connection test with generic error."""
-        with patch('socket.socket') as mock_socket_class:
+        with patch("socket.socket") as mock_socket_class:
             mock_socket = Mock()
             mock_socket_class.return_value = mock_socket
             mock_socket.connect.side_effect = Exception("Unknown error")
@@ -422,12 +434,14 @@ class TestConnectionController(unittest.TestCase):
 
     def test_test_connection_custom_timeout(self):
         """Test connection test with custom timeout."""
-        with patch('socket.socket') as mock_socket_class:
+        with patch("socket.socket") as mock_socket_class:
             mock_socket = Mock()
             mock_socket_class.return_value = mock_socket
             mock_socket.connect.return_value = None
 
-            success, message = self.controller.test_connection("192.168.1.100", 53717, timeout=5.0)
+            success, message = self.controller.test_connection(
+                "192.168.1.100", 53717, timeout=5.0
+            )
 
             self.assertTrue(success)
             # Verify timeout was set
@@ -436,7 +450,7 @@ class TestConnectionController(unittest.TestCase):
     def test_test_connection_validates_before_connecting(self):
         """Test that validation happens before attempting connection."""
         # Invalid IP should not create socket
-        with patch('socket.socket') as mock_socket_class:
+        with patch("socket.socket") as mock_socket_class:
             success, message = self.controller.test_connection("invalid_ip", 53717)
 
             self.assertFalse(success)
@@ -490,11 +504,13 @@ class TestWorkflowController(unittest.TestCase):
             ip=None,
             port=None,
             connected_at=None,
-            last_error=None
+            last_error=None,
         )
 
         # Create controller
-        self.controller = WorkflowController(self.mock_service, self.mock_connection_model)
+        self.controller = WorkflowController(
+            self.mock_service, self.mock_connection_model
+        )
 
     def test_init(self):
         """Test controller initialization."""
@@ -507,7 +523,8 @@ class TestWorkflowController(unittest.TestCase):
         """Test successful workflow loading."""
         # Create temp file
         import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             f.write("Test workflow content")
             temp_path = f.name
 
@@ -542,7 +559,8 @@ class TestWorkflowController(unittest.TestCase):
     def test_load_workflow_invalid_extension(self):
         """Test load workflow with non-.txt file."""
         import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write("# Not a workflow")
             temp_path = f.name
 
@@ -558,7 +576,8 @@ class TestWorkflowController(unittest.TestCase):
     def test_load_workflow_empty_file(self):
         """Test load workflow with empty file."""
         import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             # Write nothing
             temp_path = f.name
 
@@ -579,7 +598,7 @@ class TestWorkflowController(unittest.TestCase):
             ip="127.0.0.1",
             port=53717,
             connected_at=datetime.now(),
-            last_error=None
+            last_error=None,
         )
 
         # Load a workflow first
@@ -599,7 +618,7 @@ class TestWorkflowController(unittest.TestCase):
             ip=None,
             port=None,
             connected_at=None,
-            last_error=None
+            last_error=None,
         )
 
         success, message = self.controller.start_workflow()
@@ -615,7 +634,7 @@ class TestWorkflowController(unittest.TestCase):
             ip="127.0.0.1",
             port=53717,
             connected_at=datetime.now(),
-            last_error=None
+            last_error=None,
         )
         self.controller._current_workflow_path = None
 
@@ -632,10 +651,12 @@ class TestWorkflowController(unittest.TestCase):
             ip="127.0.0.1",
             port=53717,
             connected_at=datetime.now(),
-            last_error=None
+            last_error=None,
         )
         self.controller._current_workflow_path = Path("/fake/workflow.txt")
-        self.mock_service.start_workflow.side_effect = ConnectionError("Lost connection")
+        self.mock_service.start_workflow.side_effect = ConnectionError(
+            "Lost connection"
+        )
 
         success, message = self.controller.start_workflow()
 
@@ -649,7 +670,7 @@ class TestWorkflowController(unittest.TestCase):
             ip="127.0.0.1",
             port=53717,
             connected_at=datetime.now(),
-            last_error=None
+            last_error=None,
         )
         self.mock_service.stop_workflow.return_value = None
 
@@ -666,7 +687,7 @@ class TestWorkflowController(unittest.TestCase):
             ip=None,
             port=None,
             connected_at=None,
-            last_error=None
+            last_error=None,
         )
 
         success, message = self.controller.stop_workflow()
@@ -686,29 +707,28 @@ class TestWorkflowController(unittest.TestCase):
 
         status = self.controller.get_workflow_status()
 
-        self.assertTrue(status['loaded'])
-        self.assertTrue(status['running'])
-        self.assertEqual(status['workflow_name'], "workflow.txt")
-        self.assertIn("workflow.txt", status['workflow_path'])
+        self.assertTrue(status["loaded"])
+        self.assertTrue(status["running"])
+        self.assertEqual(status["workflow_name"], "workflow.txt")
+        self.assertIn("workflow.txt", status["workflow_path"])
 
     def test_get_workflow_status_no_workflow(self):
         """Test getting workflow status with no workflow loaded."""
         self.controller._current_workflow_path = None
-        self.mock_service.get_workflow_status.return_value = {
-            'running': False
-        }
+        self.mock_service.get_workflow_status.return_value = {"running": False}
 
         status = self.controller.get_workflow_status()
 
-        self.assertFalse(status['loaded'])
-        self.assertFalse(status['running'])
-        self.assertIsNone(status['workflow_name'])
-        self.assertIsNone(status['workflow_path'])
+        self.assertFalse(status["loaded"])
+        self.assertFalse(status["running"])
+        self.assertIsNone(status["workflow_name"])
+        self.assertIsNone(status["workflow_path"])
 
     def test_validate_workflow_file_valid(self):
         """Test workflow file validation with valid file."""
         import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             f.write("Valid workflow content")
             temp_path = f.name
 
@@ -730,7 +750,8 @@ class TestWorkflowController(unittest.TestCase):
     def test_validate_workflow_file_wrong_extension(self):
         """Test workflow file validation with wrong extension."""
         import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write("# Not a workflow")
             temp_path = f.name
 
@@ -745,7 +766,8 @@ class TestWorkflowController(unittest.TestCase):
     def test_validate_workflow_file_empty(self):
         """Test workflow file validation with empty file."""
         import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             # Write nothing
             temp_path = f.name
 
@@ -760,6 +782,7 @@ class TestWorkflowController(unittest.TestCase):
     def test_validate_workflow_file_directory(self):
         """Test workflow file validation with directory instead of file."""
         import tempfile
+
         with tempfile.TemporaryDirectory() as temp_dir:
             valid, errors = self.controller.validate_workflow_file(temp_dir)
 
@@ -767,5 +790,5 @@ class TestWorkflowController(unittest.TestCase):
             self.assertTrue(any("not a file" in err.lower() for err in errors))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

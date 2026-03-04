@@ -24,14 +24,15 @@ import struct
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set
 from enum import IntEnum
+from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
 
 class ProtocolCommands(IntEnum):
     """Known command codes from the Flamingo protocol (for socket reader use)."""
+
     # Stage commands
     STAGE_HOME = 0x6001  # 24577
     STAGE_HALT = 0x6002  # 24578
@@ -40,13 +41,13 @@ class ProtocolCommands(IntEnum):
     STAGE_VELOCITY_SET = 0x6006  # 24582
     STAGE_POSITION_GET = 0x6008  # 24584
     STAGE_SAVE_LOCATIONS_GET = 0x6009  # 24585
-    STAGE_SAVE_LOCATIONS_SET = 0x600a  # 24586
-    STAGE_WAIT_FOR_MOTION = 0x600f  # 24591
+    STAGE_SAVE_LOCATIONS_SET = 0x600A  # 24586
+    STAGE_WAIT_FOR_MOTION = 0x600F  # 24591
     STAGE_MOTION_STOPPED = 0x6010  # 24592 - UNSOLICITED CALLBACK
 
     # System commands
-    SYSTEM_STATE_GET = 0xa007  # 40967
-    SYSTEM_STATE_IDLE = 0xa002  # 40962
+    SYSTEM_STATE_GET = 0xA007  # 40967
+    SYSTEM_STATE_IDLE = 0xA002  # 40962
     SYSTEM_SCOPE_SETTINGS = 0x1007  # 4103
 
     # Camera commands
@@ -98,6 +99,7 @@ UNSOLICITED_COMMANDS: Set[int] = {
 @dataclass
 class ParsedMessage:
     """Parsed 128-byte protocol message."""
+
     raw_data: bytes
     start_marker: int
     command_code: int
@@ -119,8 +121,7 @@ class ParsedMessage:
     @property
     def is_valid(self) -> bool:
         """Check if message has valid markers."""
-        return (self.start_marker == 0xF321E654 and
-                self.end_marker == 0xFEDC4321)
+        return self.start_marker == 0xF321E654 and self.end_marker == 0xFEDC4321
 
     @property
     def is_unsolicited(self) -> bool:
@@ -161,10 +162,10 @@ class MessageDispatcher:
 
         # Statistics for debugging
         self._stats = {
-            'messages_received': 0,
-            'responses_dispatched': 0,
-            'callbacks_dispatched': 0,
-            'messages_dropped': 0,
+            "messages_received": 0,
+            "responses_dispatched": 0,
+            "callbacks_dispatched": 0,
+            "messages_dropped": 0,
         }
 
     def register_pending_request(self, command_code: int) -> queue.Queue:
@@ -181,7 +182,9 @@ class MessageDispatcher:
         with self._lock:
             # If there's already a pending request for this code, log warning
             if command_code in self._pending_requests:
-                logger.warning(f"Overwriting pending request for command 0x{command_code:04X}")
+                logger.warning(
+                    f"Overwriting pending request for command 0x{command_code:04X}"
+                )
             self._pending_requests[command_code] = response_queue
         return response_queue
 
@@ -190,8 +193,9 @@ class MessageDispatcher:
         with self._lock:
             self._pending_requests.pop(command_code, None)
 
-    def register_callback_handler(self, command_code: int,
-                                   handler: Callable[[ParsedMessage], None]):
+    def register_callback_handler(
+        self, command_code: int, handler: Callable[[ParsedMessage], None]
+    ):
         """
         Register a handler for unsolicited callback messages.
 
@@ -205,8 +209,9 @@ class MessageDispatcher:
             self._callback_handlers[command_code].append(handler)
             logger.info(f"Registered callback handler for 0x{command_code:04X}")
 
-    def unregister_callback_handler(self, command_code: int,
-                                     handler: Callable[[ParsedMessage], None]):
+    def unregister_callback_handler(
+        self, command_code: int, handler: Callable[[ParsedMessage], None]
+    ):
         """Remove a callback handler."""
         with self._lock:
             if command_code in self._callback_handlers:
@@ -222,29 +227,44 @@ class MessageDispatcher:
         Args:
             message: Parsed message to dispatch
         """
-        self._stats['messages_received'] += 1
+        self._stats["messages_received"] += 1
         command_code = message.command_code
 
         # Log laser/LED command responses at INFO level for debugging
-        LASER_LED_COMMANDS = {0x2001, 0x2002, 0x2004, 0x2005, 0x2007, 0x4001, 0x4002, 0x4003}
+        LASER_LED_COMMANDS = {
+            0x2001,
+            0x2002,
+            0x2004,
+            0x2005,
+            0x2007,
+            0x4001,
+            0x4002,
+            0x4003,
+        }
         if command_code in LASER_LED_COMMANDS:
-            logger.info(f"[RX] Laser/LED response received: code=0x{command_code:04X} ({message.command_name}), "
-                       f"status={message.status_code}, int32Data0={message.int32_data0}")
+            logger.info(
+                f"[RX] Laser/LED response received: code=0x{command_code:04X} ({message.command_name}), "
+                f"status={message.status_code}, int32Data0={message.int32_data0}"
+            )
 
         with self._lock:
             # Log pending requests when receiving laser commands (for debugging)
             if command_code in LASER_LED_COMMANDS:
                 pending_codes = list(self._pending_requests.keys())
-                logger.info(f"[RX] Pending requests: {[f'0x{c:04X}' for c in pending_codes]}")
+                logger.info(
+                    f"[RX] Pending requests: {[f'0x{c:04X}' for c in pending_codes]}"
+                )
 
             # Check if this is a response to a pending request
             if command_code in self._pending_requests:
                 try:
                     self._pending_requests[command_code].put_nowait(message)
-                    self._stats['responses_dispatched'] += 1
+                    self._stats["responses_dispatched"] += 1
                     # Remove from pending after delivering
                     del self._pending_requests[command_code]
-                    logger.info(f"[RX] Dispatched response for 0x{command_code:04X} to waiting caller")
+                    logger.info(
+                        f"[RX] Dispatched response for 0x{command_code:04X} to waiting caller"
+                    )
                     return
                 except queue.Full:
                     logger.error(f"Response queue full for 0x{command_code:04X}")
@@ -258,9 +278,11 @@ class MessageDispatcher:
             for handler in handlers:
                 try:
                     handler(message)
-                    self._stats['callbacks_dispatched'] += 1
+                    self._stats["callbacks_dispatched"] += 1
                 except Exception as e:
-                    logger.error(f"Callback handler error for 0x{command_code:04X}: {e}")
+                    logger.error(
+                        f"Callback handler error for 0x{command_code:04X}: {e}"
+                    )
             return
 
         # No handler found - queue as unsolicited or log
@@ -270,13 +292,13 @@ class MessageDispatcher:
             # 0x9004 = progress bar update, 0x9003 = progress bar size,
             # 0x6010 = MOTION_STOPPED (stage moves between tiles)
             if command_code in (0x9003, 0x9004, 0x6010):
-                self._stats['messages_dropped'] += 1
+                self._stats["messages_dropped"] += 1
                 return
             try:
                 self._unsolicited_queue.put_nowait(message)
                 logger.debug(f"Queued unsolicited message 0x{command_code:04X}")
             except queue.Full:
-                self._stats['messages_dropped'] += 1
+                self._stats["messages_dropped"] += 1
                 logger.warning(f"Unsolicited queue full, dropping 0x{command_code:04X}")
         else:
             # This could be:
@@ -284,7 +306,9 @@ class MessageDispatcher:
             # 2. A response that arrived after timeout
             # Log at DEBUG - these are normal during workflow
             if command_code in LASER_LED_COMMANDS:
-                logger.debug(f"[RX] Unsolicited laser/LED status: 0x{command_code:04X} ({message.command_name})")
+                logger.debug(
+                    f"[RX] Unsolicited laser/LED status: 0x{command_code:04X} ({message.command_name})"
+                )
             else:
                 logger.debug(f"Unhandled message 0x{command_code:04X} (late response?)")
 
@@ -327,10 +351,10 @@ class SocketReader:
 
         # Statistics
         self._stats = {
-            'messages_read': 0,
-            'parse_errors': 0,
-            'socket_errors': 0,
-            'bytes_read': 0,
+            "messages_read": 0,
+            "parse_errors": 0,
+            "socket_errors": 0,
+            "bytes_read": 0,
         }
 
     def start(self):
@@ -342,9 +366,7 @@ class SocketReader:
 
             self._running = True
             self._thread = threading.Thread(
-                target=self._read_loop,
-                name="SocketReader",
-                daemon=True
+                target=self._read_loop, name="SocketReader", daemon=True
             )
             self._thread.start()
             logger.info("SocketReader background thread started")
@@ -391,7 +413,9 @@ class SocketReader:
 
         # Wait for the reader thread to confirm it's paused
         if not self._paused_confirmed.wait(timeout=wait_timeout):
-            logger.warning(f"SocketReader pause confirmation timeout after {wait_timeout}s")
+            logger.warning(
+                f"SocketReader pause confirmation timeout after {wait_timeout}s"
+            )
         else:
             logger.info("SocketReader paused for synchronous operation")
 
@@ -422,7 +446,7 @@ class SocketReader:
         self._socket.settimeout(0.5)  # 500ms timeout allows shutdown checks
 
         # Buffer for handling sync issues
-        self._resync_buffer = b''
+        self._resync_buffer = b""
         consecutive_invalid = 0
 
         try:
@@ -459,7 +483,9 @@ class SocketReader:
                             # This MUST be read before the next message or we'll lose sync
                             additional_data = None
                             if message.additional_data_size > 0:
-                                additional_data = self._read_additional_data(message.additional_data_size)
+                                additional_data = self._read_additional_data(
+                                    message.additional_data_size
+                                )
                                 if additional_data:
                                     logger.debug(
                                         f"Read {len(additional_data)} additional bytes for "
@@ -471,14 +497,17 @@ class SocketReader:
                                 message.additional_data = additional_data
 
                             self._dispatcher.dispatch(message)
-                            self._stats['messages_read'] += 1
+                            self._stats["messages_read"] += 1
                             consecutive_invalid = 0  # Reset counter on valid message
                         else:
                             consecutive_invalid += 1
-                            self._stats['parse_errors'] += 1
+                            self._stats["parse_errors"] += 1
 
                             # Only log occasionally to avoid spam
-                            if consecutive_invalid <= 3 or consecutive_invalid % 100 == 0:
+                            if (
+                                consecutive_invalid <= 3
+                                or consecutive_invalid % 100 == 0
+                            ):
                                 logger.warning(
                                     f"Invalid message markers: start=0x{message.start_marker:08X}, "
                                     f"end=0x{message.end_marker:08X} (consecutive: {consecutive_invalid})"
@@ -493,7 +522,7 @@ class SocketReader:
 
                     except Exception as e:
                         logger.error(f"Message parse error: {e}")
-                        self._stats['parse_errors'] += 1
+                        self._stats["parse_errors"] += 1
 
                 except socket.timeout:
                     # Normal timeout - just continue loop
@@ -502,7 +531,7 @@ class SocketReader:
                 except socket.error as e:
                     if self._running:
                         logger.error(f"Socket error in reader: {e}")
-                        self._stats['socket_errors'] += 1
+                        self._stats["socket_errors"] += 1
                     break
 
                 except Exception as e:
@@ -529,7 +558,7 @@ class SocketReader:
             True if resync was successful, False otherwise
         """
         # Start marker bytes in little-endian
-        START_MARKER_BYTES = struct.pack('<I', self.START_MARKER)  # 0xF321E654
+        START_MARKER_BYTES = struct.pack("<I", self.START_MARKER)  # 0xF321E654
 
         # Read up to 512 bytes looking for the start marker
         try:
@@ -537,7 +566,7 @@ class SocketReader:
             if not search_data:
                 return False
 
-            self._stats['bytes_read'] += len(search_data)
+            self._stats["bytes_read"] += len(search_data)
 
             # Look for start marker in the data
             marker_pos = search_data.find(START_MARKER_BYTES)
@@ -553,22 +582,22 @@ class SocketReader:
             bytes_needed = self.MESSAGE_SIZE - len(data_after_marker)
 
             if bytes_needed > 0:
-                additional = b''
+                additional = b""
                 while len(additional) < bytes_needed:
                     chunk = self._socket.recv(bytes_needed - len(additional))
                     if not chunk:
                         return False
                     additional += chunk
-                    self._stats['bytes_read'] += len(chunk)
+                    self._stats["bytes_read"] += len(chunk)
                 full_message = data_after_marker + additional
             else:
-                full_message = data_after_marker[:self.MESSAGE_SIZE]
+                full_message = data_after_marker[: self.MESSAGE_SIZE]
 
             # Verify this is a valid message
             message = self._parse_message(full_message)
             if message.is_valid:
                 self._dispatcher.dispatch(message)
-                self._stats['messages_read'] += 1
+                self._stats["messages_read"] += 1
                 return True
             else:
                 logger.debug("Resync found marker but message still invalid")
@@ -587,7 +616,7 @@ class SocketReader:
         Returns:
             128 bytes of data, empty bytes if socket closed, None on timeout
         """
-        data = b''
+        data = b""
         while len(data) < self.MESSAGE_SIZE:
             try:
                 remaining = self.MESSAGE_SIZE - len(data)
@@ -595,10 +624,10 @@ class SocketReader:
 
                 if not chunk:
                     # Socket closed
-                    return b''
+                    return b""
 
                 data += chunk
-                self._stats['bytes_read'] += len(chunk)
+                self._stats["bytes_read"] += len(chunk)
 
             except socket.timeout:
                 if len(data) == 0:
@@ -625,18 +654,20 @@ class SocketReader:
         if size <= 0:
             return None
 
-        data = b''
+        data = b""
         try:
             while len(data) < size:
                 remaining = size - len(data)
                 chunk = self._socket.recv(remaining)
 
                 if not chunk:
-                    logger.warning(f"Socket closed while reading additional data ({len(data)}/{size})")
+                    logger.warning(
+                        f"Socket closed while reading additional data ({len(data)}/{size})"
+                    )
                     return None
 
                 data += chunk
-                self._stats['bytes_read'] += len(chunk)
+                self._stats["bytes_read"] += len(chunk)
 
             return data
 
@@ -661,30 +692,30 @@ class SocketReader:
             raise ValueError(f"Invalid message size: {len(data)}")
 
         # Unpack header fields
-        start_marker = struct.unpack('<I', data[0:4])[0]
-        command_code = struct.unpack('<I', data[4:8])[0]
-        status_code = struct.unpack('<I', data[8:12])[0]
+        start_marker = struct.unpack("<I", data[0:4])[0]
+        command_code = struct.unpack("<I", data[4:8])[0]
+        status_code = struct.unpack("<I", data[8:12])[0]
 
         # Unpack parameter fields (7 x 4 bytes = 28 bytes at offset 12-39)
-        hardware_id = struct.unpack('<I', data[12:16])[0]
-        subsystem_id = struct.unpack('<I', data[16:20])[0]
-        client_id = struct.unpack('<I', data[20:24])[0]
-        int32_data0 = struct.unpack('<i', data[24:28])[0]  # Signed - often axis
-        int32_data1 = struct.unpack('<i', data[28:32])[0]
-        int32_data2 = struct.unpack('<i', data[32:36])[0]
-        cmd_data_bits = struct.unpack('<I', data[36:40])[0]
+        hardware_id = struct.unpack("<I", data[12:16])[0]
+        subsystem_id = struct.unpack("<I", data[16:20])[0]
+        client_id = struct.unpack("<I", data[20:24])[0]
+        int32_data0 = struct.unpack("<i", data[24:28])[0]  # Signed - often axis
+        int32_data1 = struct.unpack("<i", data[28:32])[0]
+        int32_data2 = struct.unpack("<i", data[32:36])[0]
+        cmd_data_bits = struct.unpack("<I", data[36:40])[0]
 
         # Unpack value (double at offset 40-47)
-        value = struct.unpack('<d', data[40:48])[0]
+        value = struct.unpack("<d", data[40:48])[0]
 
         # Additional data size (at offset 48-51)
-        additional_data_size = struct.unpack('<I', data[48:52])[0]
+        additional_data_size = struct.unpack("<I", data[48:52])[0]
 
         # Data field (72 bytes at offset 52-123)
         data_field = data[52:124]
 
         # End marker (at offset 124-127)
-        end_marker = struct.unpack('<I', data[124:128])[0]
+        end_marker = struct.unpack("<I", data[124:128])[0]
 
         return ParsedMessage(
             raw_data=data,
@@ -701,7 +732,7 @@ class SocketReader:
             value=value,
             additional_data_size=additional_data_size,
             data_field=data_field,
-            end_marker=end_marker
+            end_marker=end_marker,
         )
 
     def get_stats(self) -> Dict[str, int]:
@@ -753,9 +784,9 @@ class CommandClient:
         """Check if reader is paused."""
         return self._reader.is_paused()
 
-    def send_command(self, command_bytes: bytes,
-                     expected_response_code: int,
-                     timeout: float = 3.0) -> Optional[ParsedMessage]:
+    def send_command(
+        self, command_bytes: bytes, expected_response_code: int, timeout: float = 3.0
+    ) -> Optional[ParsedMessage]:
         """
         Send a command and wait for response.
 
@@ -768,7 +799,9 @@ class CommandClient:
             ParsedMessage response, or None on timeout
         """
         # Register for response before sending
-        response_queue = self._dispatcher.register_pending_request(expected_response_code)
+        response_queue = self._dispatcher.register_pending_request(
+            expected_response_code
+        )
 
         try:
             # Send command (serialized to prevent interleaving)
@@ -780,15 +813,18 @@ class CommandClient:
                 message = response_queue.get(timeout=timeout)
                 return message
             except queue.Empty:
-                logger.warning(f"Timeout waiting for response to 0x{expected_response_code:04X}")
+                logger.warning(
+                    f"Timeout waiting for response to 0x{expected_response_code:04X}"
+                )
                 return None
 
         finally:
             # Clean up pending request
             self._dispatcher.unregister_pending_request(expected_response_code)
 
-    def register_callback(self, command_code: int,
-                          handler: Callable[[ParsedMessage], None]):
+    def register_callback(
+        self, command_code: int, handler: Callable[[ParsedMessage], None]
+    ):
         """
         Register a handler for unsolicited callback messages.
 
@@ -798,8 +834,9 @@ class CommandClient:
         """
         self._dispatcher.register_callback_handler(command_code, handler)
 
-    def unregister_callback(self, command_code: int,
-                            handler: Callable[[ParsedMessage], None]):
+    def unregister_callback(
+        self, command_code: int, handler: Callable[[ParsedMessage], None]
+    ):
         """Remove a callback handler."""
         self._dispatcher.unregister_callback_handler(command_code, handler)
 
@@ -811,6 +848,6 @@ class CommandClient:
     def get_stats(self) -> Dict[str, Any]:
         """Get combined statistics."""
         return {
-            'reader': self._reader.get_stats(),
-            'dispatcher': self._dispatcher.get_stats(),
+            "reader": self._reader.get_stats(),
+            "dispatcher": self._dispatcher.get_stats(),
         }

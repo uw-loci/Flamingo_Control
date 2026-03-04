@@ -5,26 +5,42 @@ images at different rotation angles with coordinate overlays.
 """
 
 import logging
-from typing import Optional, List
 from dataclasses import dataclass
+from typing import List, Optional
+
 import numpy as np
-
+from PyQt5.QtCore import QPoint, QSize, Qt, pyqtSignal
+from PyQt5.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QSplitter, QGroupBox, QFileDialog, QMessageBox,
-    QSizePolicy, QFrame, QComboBox, QMenu, QAction, QSlider
+    QAction,
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSlider,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
 )
-from py2flamingo.services.window_geometry_manager import PersistentWidget
-from PyQt5.QtCore import Qt, QSize, QPoint, pyqtSignal
-from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QIcon
 
+from py2flamingo.services.window_geometry_manager import PersistentWidget
 
 logger = logging.getLogger(__name__)
 
 from py2flamingo.views.widgets.zoomable_image_label import ZoomableImageLabel
 from py2flamingo.visualization.zarr_2d_session import (
-    ZARR_AVAILABLE, save_2d_zarr_session, load_2d_zarr_session,
-    load_2d_zarr_session_lazy, detect_session_format,
+    ZARR_AVAILABLE,
+    detect_session_format,
+    load_2d_zarr_session,
+    load_2d_zarr_session_lazy,
+    save_2d_zarr_session,
 )
 
 
@@ -52,11 +68,15 @@ class ImagePanel(QWidget):
         self._display_image: Optional[np.ndarray] = None  # Downsampled for display
         self._display_scale: int = 1  # Stride factor used for downsampling
         self._pixmap: Optional[QPixmap] = None
-        self._base_pixmap: Optional[QPixmap] = None  # Cached base (image + grid + coords, no selections)
+        self._base_pixmap: Optional[QPixmap] = (
+            None  # Cached base (image + grid + coords, no selections)
+        )
         self._show_grid = True
         self._tiles_x = 0
         self._tiles_y = 0
-        self._tile_coords: List[tuple] = []  # (x, y, tile_x_idx, tile_y_idx) for each tile
+        self._tile_coords: List[tuple] = (
+            []
+        )  # (x, y, tile_x_idx, tile_y_idx) for each tile
         self._invert_x = False  # Whether X-axis is inverted for display
         self._selected_tiles: set = set()  # Set of (tile_x_idx, tile_y_idx) tuples
         self._tile_results: List = []  # Store TileResult objects for retrieval
@@ -84,7 +104,9 @@ class ImagePanel(QWidget):
         # Hint label for user interaction
         self.hint_label = QLabel("Right-click tile to move to center Z")
         self.hint_label.setAlignment(Qt.AlignCenter)
-        self.hint_label.setStyleSheet("color: #888; font-size: 9pt; font-style: italic;")
+        self.hint_label.setStyleSheet(
+            "color: #888; font-size: 9pt; font-style: italic;"
+        )
         layout.addWidget(self.hint_label)
 
         # Scroll area with zoomable image
@@ -209,7 +231,9 @@ class ImagePanel(QWidget):
         max_pct = int(self._contrast_max_slider / 10)
         self._contrast_label.setText(f"{min_pct}-{max_pct}%")
 
-    def set_image(self, image: Optional[np.ndarray], tiles_x: int = 0, tiles_y: int = 0):
+    def set_image(
+        self, image: Optional[np.ndarray], tiles_x: int = 0, tiles_y: int = 0
+    ):
         """Set the image to display.
 
         Args:
@@ -227,16 +251,23 @@ class ImagePanel(QWidget):
             # at 4096px max dim it takes <0.5s with no visible quality loss.
             max_dim = max(image.shape[0], image.shape[1])
             import math
+
             self._display_scale = max(1, math.ceil(max_dim / self.MAX_DISPLAY_DIM))
             if self._display_scale > 1:
-                self._display_image = image[::self._display_scale, ::self._display_scale].copy()
-                logger.info(f"ImagePanel.set_image: image shape={image.shape}, "
-                           f"downsampled {self._display_scale}x to {self._display_image.shape}, "
-                           f"tiles={tiles_x}x{tiles_y}")
+                self._display_image = image[
+                    :: self._display_scale, :: self._display_scale
+                ].copy()
+                logger.info(
+                    f"ImagePanel.set_image: image shape={image.shape}, "
+                    f"downsampled {self._display_scale}x to {self._display_image.shape}, "
+                    f"tiles={tiles_x}x{tiles_y}"
+                )
             else:
                 self._display_image = image
-                logger.info(f"ImagePanel.set_image: image shape={image.shape}, tiles={tiles_x}x{tiles_y}, "
-                           f"existing coords={len(self._tile_coords)}, invert_x={self._invert_x}")
+                logger.info(
+                    f"ImagePanel.set_image: image shape={image.shape}, tiles={tiles_x}x{tiles_y}, "
+                    f"existing coords={len(self._tile_coords)}, invert_x={self._invert_x}"
+                )
 
             # Calculate image intensity range for contrast sliders
             # Use the display image (representative subsample) for speed
@@ -244,7 +275,11 @@ class ImagePanel(QWidget):
             if len(display.shape) == 2:
                 flat = display.ravel()
             else:
-                flat = display[:, :, 0].ravel() if display.shape[2] >= 1 else display.ravel()
+                flat = (
+                    display[:, :, 0].ravel()
+                    if display.shape[2] >= 1
+                    else display.ravel()
+                )
 
             self._image_min = float(np.min(flat))
             self._image_max_pct = float(np.percentile(flat, 99.5))
@@ -253,7 +288,9 @@ class ImagePanel(QWidget):
             if self._image_max_pct <= self._image_min:
                 self._image_max_pct = self._image_min + 1
 
-            logger.debug(f"Contrast range: min={self._image_min:.1f}, 99.5%={self._image_max_pct:.1f}")
+            logger.debug(
+                f"Contrast range: min={self._image_min:.1f}, 99.5%={self._image_max_pct:.1f}"
+            )
 
             # Reset sliders to full range
             self._min_slider.blockSignals(True)
@@ -308,9 +345,11 @@ class ImagePanel(QWidget):
             y_indices = [c[3] for c in coords if len(c) >= 4]
             max_x = max(x_indices) if x_indices else -1
             max_y = max(y_indices) if y_indices else -1
-            logger.info(f"ImagePanel.set_tile_coordinates: {len(coords)} coords, "
-                       f"tile indices up to ({max_x}, {max_y}), invert_x={invert_x}, "
-                       f"expected grid={self._tiles_x}x{self._tiles_y}")
+            logger.info(
+                f"ImagePanel.set_tile_coordinates: {len(coords)} coords, "
+                f"tile indices up to ({max_x}, {max_y}), invert_x={invert_x}, "
+                f"expected grid={self._tiles_x}x{self._tiles_y}"
+            )
 
         # Invalidate cached base pixmap since coordinates changed
         self._invalidate_base_pixmap()
@@ -377,7 +416,9 @@ class ImagePanel(QWidget):
         self._base_pixmap = self._array_to_pixmap(self._display_image)
         if self._show_grid and self._tiles_x > 0 and self._tiles_y > 0:
             self._draw_base_overlay()
-        logger.debug(f"Rebuilt base pixmap: {self._base_pixmap.width()}x{self._base_pixmap.height()}")
+        logger.debug(
+            f"Rebuilt base pixmap: {self._base_pixmap.width()}x{self._base_pixmap.height()}"
+        )
 
     def _invalidate_base_pixmap(self):
         """Invalidate the cached base pixmap (call when image/grid/coords change)."""
@@ -434,8 +475,12 @@ class ImagePanel(QWidget):
             # Apply contrast adjustment using slider values
             # Slider values (0-1000) map to the range [_image_min, _image_max_pct]
             intensity_range = self._image_max_pct - self._image_min
-            display_min = self._image_min + (self._contrast_min_slider / 1000.0) * intensity_range
-            display_max = self._image_min + (self._contrast_max_slider / 1000.0) * intensity_range
+            display_min = (
+                self._image_min + (self._contrast_min_slider / 1000.0) * intensity_range
+            )
+            display_max = (
+                self._image_min + (self._contrast_max_slider / 1000.0) * intensity_range
+            )
 
             # Ensure valid range
             if display_max <= display_min:
@@ -444,7 +489,9 @@ class ImagePanel(QWidget):
             # Clip and rescale to 8-bit
             img_float = image.astype(np.float32)
             img_clipped = np.clip(img_float, display_min, display_max)
-            img_8bit = ((img_clipped - display_min) / (display_max - display_min) * 255).astype(np.uint8)
+            img_8bit = (
+                (img_clipped - display_min) / (display_max - display_min) * 255
+            ).astype(np.uint8)
 
             # Ensure contiguous array for QImage
             img_8bit = np.ascontiguousarray(img_8bit)
@@ -499,23 +546,29 @@ class ImagePanel(QWidget):
             y = int(i * tile_h)
             painter.drawLine(0, y, w, y)
 
-        logger.debug(f"_draw_base_overlay: drew grid lines, {self._tiles_x}x{self._tiles_y} tiles")
+        logger.debug(
+            f"_draw_base_overlay: drew grid lines, {self._tiles_x}x{self._tiles_y} tiles"
+        )
 
         painter.end()
 
     def _draw_selection_overlay(self):
         """Draw selection highlights on the current pixmap (fast, called on every click)."""
         if self._pixmap is None or self._tiles_x <= 0 or self._tiles_y <= 0:
-            logger.debug(f"_draw_selection_overlay: skipping - pixmap={self._pixmap is not None}, "
-                        f"tiles={self._tiles_x}x{self._tiles_y}")
+            logger.debug(
+                f"_draw_selection_overlay: skipping - pixmap={self._pixmap is not None}, "
+                f"tiles={self._tiles_x}x{self._tiles_y}"
+            )
             return
         if not self._selected_tiles:
             logger.debug("_draw_selection_overlay: no selected tiles")
             return  # Nothing to draw
 
-        logger.info(f"_draw_selection_overlay: drawing {len(self._selected_tiles)} selections, "
-                   f"tiles={self._tiles_x}x{self._tiles_y}, invert_x={self._invert_x}, "
-                   f"pixmap={self._pixmap.width()}x{self._pixmap.height()}")
+        logger.info(
+            f"_draw_selection_overlay: drawing {len(self._selected_tiles)} selections, "
+            f"tiles={self._tiles_x}x{self._tiles_y}, invert_x={self._invert_x}, "
+            f"pixmap={self._pixmap.width()}x{self._pixmap.height()}"
+        )
 
         painter = QPainter(self._pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -526,6 +579,7 @@ class ImagePanel(QWidget):
         tile_h = h / self._tiles_y
 
         from PyQt5.QtCore import Qt
+
         # Outline only - no fill for selected tiles
         painter.setBrush(Qt.NoBrush)
 
@@ -553,15 +607,19 @@ class ImagePanel(QWidget):
             # Check if selection rectangle is within bounds
             if x_pos < 0 or x_pos >= w or y_pos < 0 or y_pos >= h:
                 selections_skipped += 1
-                logger.warning(f"Selection out of bounds: tile({tile_x_idx},{tile_y_idx}) -> "
-                              f"display({display_x_idx},{tile_y_idx}) -> pos({x_pos},{y_pos}), "
-                              f"pixmap={w}x{h}")
+                logger.warning(
+                    f"Selection out of bounds: tile({tile_x_idx},{tile_y_idx}) -> "
+                    f"display({display_x_idx},{tile_y_idx}) -> pos({x_pos},{y_pos}), "
+                    f"pixmap={w}x{h}"
+                )
                 continue
 
             painter.drawRect(x_pos, y_pos, int(tile_w), int(tile_h))
             selections_drawn += 1
 
-        logger.info(f"_draw_selection_overlay: drew {selections_drawn}, skipped {selections_skipped}")
+        logger.info(
+            f"_draw_selection_overlay: drew {selections_drawn}, skipped {selections_skipped}"
+        )
         painter.end()
 
     def get_image(self) -> Optional[np.ndarray]:
@@ -576,7 +634,14 @@ class LED2DOverviewResultWindow(PersistentWidget):
     with grid overlays and coordinate information.
     """
 
-    def __init__(self, results=None, config=None, preview_mode: bool = False, app=None, parent=None):
+    def __init__(
+        self,
+        results=None,
+        config=None,
+        preview_mode: bool = False,
+        app=None,
+        parent=None,
+    ):
         """Initialize the result window.
 
         Args:
@@ -596,7 +661,11 @@ class LED2DOverviewResultWindow(PersistentWidget):
         self._session_folder = None  # Path to loaded session folder
         self._session_format = None  # 'zarr' or 'tiff'
 
-        self.setWindowTitle("LED 2D Overview - Results" if not preview_mode else "LED 2D Overview - Preview")
+        self.setWindowTitle(
+            "LED 2D Overview - Results"
+            if not preview_mode
+            else "LED 2D Overview - Preview"
+        )
         self.setMinimumSize(800, 500)
 
         # Track first show for auto-fit
@@ -617,6 +686,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
             self._first_show = False
             # Fit both panels after window is visible and laid out
             from PyQt5.QtCore import QTimer
+
             QTimer.singleShot(50, self._fit_all_panels)
 
     def _fit_all_panels(self):
@@ -636,7 +706,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
         self.left_panel = ImagePanel("Rotation 1")
         self.left_panel.selection_changed.connect(self._on_selection_changed)
         self.left_panel.tile_right_clicked.connect(
-            lambda x, y: self._on_tile_right_clicked(x, y, panel='left')
+            lambda x, y: self._on_tile_right_clicked(x, y, panel="left")
         )
         splitter.addWidget(self.left_panel)
 
@@ -644,7 +714,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
         self.right_panel = ImagePanel("Rotation 2")
         self.right_panel.selection_changed.connect(self._on_selection_changed)
         self.right_panel.tile_right_clicked.connect(
-            lambda x, y: self._on_tile_right_clicked(x, y, panel='right')
+            lambda x, y: self._on_tile_right_clicked(x, y, panel="right")
         )
         splitter.addWidget(self.right_panel)
 
@@ -690,7 +760,9 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
         # Auto-select button (thresholder)
         self.auto_select_btn = QPushButton("Auto-Select...")
-        self.auto_select_btn.setToolTip("Automatically select tiles containing sample (not background)")
+        self.auto_select_btn.setToolTip(
+            "Automatically select tiles containing sample (not background)"
+        )
         self.auto_select_btn.clicked.connect(self._on_auto_select)
         button_layout.addWidget(self.auto_select_btn)
 
@@ -741,7 +813,9 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
         # Whole Session - default option (saves everything for later loading)
         self.save_session_action = QAction("Whole Session", self)
-        self.save_session_action.setToolTip("Save all images and metadata to a folder (can be loaded later)")
+        self.save_session_action.setToolTip(
+            "Save all images and metadata to a folder (can be loaded later)"
+        )
         self.save_session_action.triggered.connect(self._save_session)
         save_menu.addAction(self.save_session_action)
 
@@ -749,14 +823,20 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
         # Initial image (rotation 0 / left panel)
         self.save_initial_action = QAction("Initial image", self)
-        self.save_initial_action.setToolTip("Save the initial rotation image (left panel)")
-        self.save_initial_action.triggered.connect(lambda: self._save_single_rotation(0))
+        self.save_initial_action.setToolTip(
+            "Save the initial rotation image (left panel)"
+        )
+        self.save_initial_action.triggered.connect(
+            lambda: self._save_single_rotation(0)
+        )
         save_menu.addAction(self.save_initial_action)
 
         # Rotated image (rotation 1 / right panel)
         self.save_rotated_action = QAction("Rotated image", self)
         self.save_rotated_action.setToolTip("Save the rotated image (right panel)")
-        self.save_rotated_action.triggered.connect(lambda: self._save_single_rotation(1))
+        self.save_rotated_action.triggered.connect(
+            lambda: self._save_single_rotation(1)
+        )
         save_menu.addAction(self.save_rotated_action)
 
         self.save_btn.setMenu(save_menu)
@@ -796,14 +876,20 @@ class LED2DOverviewResultWindow(PersistentWidget):
             # Debug: log expected vs actual tile counts
             expected_tiles = result1.tiles_x * result1.tiles_y
             actual_tiles = len(result1.tiles)
-            logger.info(f"LEFT PANEL: R={result1.rotation_angle}°, expected grid={result1.tiles_x}x{result1.tiles_y}={expected_tiles}, "
-                       f"actual grid={actual_tiles_x}x{actual_tiles_y}, actual tiles={actual_tiles}, invert_x={result1.invert_x}")
+            logger.info(
+                f"LEFT PANEL: R={result1.rotation_angle}°, expected grid={result1.tiles_x}x{result1.tiles_y}={expected_tiles}, "
+                f"actual grid={actual_tiles_x}x{actual_tiles_y}, actual tiles={actual_tiles}, invert_x={result1.invert_x}"
+            )
             if actual_tiles != expected_tiles:
-                logger.warning(f"MISMATCH: Expected {expected_tiles} tiles but got {actual_tiles}!")
+                logger.warning(
+                    f"MISMATCH: Expected {expected_tiles} tiles but got {actual_tiles}!"
+                )
 
             img1 = result1.stitched_images.get(viz_type)
             if img1 is not None:
-                logger.info(f"LEFT PANEL: image shape={img1.shape}, viz_type={viz_type}")
+                logger.info(
+                    f"LEFT PANEL: image shape={img1.shape}, viz_type={viz_type}"
+                )
                 # Use actual grid dimensions to match stitched image
                 self.left_panel.set_image(img1, actual_tiles_x, actual_tiles_y)
                 # Set tile coordinates with grid indices for correct label positioning
@@ -825,8 +911,10 @@ class LED2DOverviewResultWindow(PersistentWidget):
                 actual_tiles_x = result2.tiles_x
                 actual_tiles_y = result2.tiles_y
 
-            logger.info(f"RIGHT PANEL: R={result2.rotation_angle}°, expected grid={result2.tiles_x}x{result2.tiles_y}, "
-                       f"actual grid={actual_tiles_x}x{actual_tiles_y}, actual tiles={len(result2.tiles)}, invert_x={result2.invert_x}")
+            logger.info(
+                f"RIGHT PANEL: R={result2.rotation_angle}°, expected grid={result2.tiles_x}x{result2.tiles_y}, "
+                f"actual grid={actual_tiles_x}x{actual_tiles_y}, actual tiles={len(result2.tiles)}, invert_x={result2.invert_x}"
+            )
 
             img2 = result2.stitched_images.get(viz_type)
             if img2 is not None:
@@ -863,12 +951,12 @@ class LED2DOverviewResultWindow(PersistentWidget):
         for i in range(tiles_x + 1):
             x = i * 100
             if x < preview_w:
-                preview_img[:, x:x+2] = 100
+                preview_img[:, x : x + 2] = 100
 
         for i in range(tiles_y + 1):
             y = i * 100
             if y < preview_h:
-                preview_img[y:y+2, :] = 100
+                preview_img[y : y + 2, :] = 100
 
         # Set titles
         r1 = self._config.starting_r
@@ -1022,8 +1110,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
         image = self.left_panel.get_image()
         if image is None:
             QMessageBox.warning(
-                self, "No Image",
-                "No image loaded. Please wait for scan to complete."
+                self, "No Image", "No image loaded. Please wait for scan to complete."
             )
             return
 
@@ -1032,8 +1119,9 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
         if tiles_x <= 0 or tiles_y <= 0:
             QMessageBox.warning(
-                self, "No Tiles",
-                "Tile grid not configured. Please ensure scan completed correctly."
+                self,
+                "No Tiles",
+                "Tile grid not configured. Please ensure scan completed correctly.",
             )
             return
 
@@ -1041,10 +1129,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
         from .overview_thresholder_dialog import OverviewThresholderDialog
 
         dialog = OverviewThresholderDialog(
-            image=image,
-            tiles_x=tiles_x,
-            tiles_y=tiles_y,
-            parent=self
+            image=image, tiles_x=tiles_x, tiles_y=tiles_y, parent=self
         )
 
         # Connect selection signal
@@ -1066,7 +1151,9 @@ class LED2DOverviewResultWindow(PersistentWidget):
             # Update selection UI
             self._on_selection_changed()
 
-            logger.info(f"Auto-select applied {len(selected_tiles)} tiles to both panels")
+            logger.info(
+                f"Auto-select applied {len(selected_tiles)} tiles to both panels"
+            )
 
         dialog.selection_ready.connect(apply_selection)
         dialog.exec_()
@@ -1088,10 +1175,12 @@ class LED2DOverviewResultWindow(PersistentWidget):
             tile_y_idx: Tile Y index
             panel: 'left' or 'right' indicating which panel was clicked
         """
-        logger.info(f"Right-click on tile ({tile_x_idx}, {tile_y_idx}) in {panel} panel")
+        logger.info(
+            f"Right-click on tile ({tile_x_idx}, {tile_y_idx}) in {panel} panel"
+        )
 
         # Get the panel and its tile results
-        if panel == 'left':
+        if panel == "left":
             image_panel = self.left_panel
         else:
             image_panel = self.right_panel
@@ -1106,9 +1195,14 @@ class LED2DOverviewResultWindow(PersistentWidget):
                 break
 
         if target_tile is None:
-            logger.warning(f"Could not find tile ({tile_x_idx}, {tile_y_idx}) in results")
-            QMessageBox.warning(self, "Tile Not Found",
-                              f"Could not find data for tile ({tile_x_idx}, {tile_y_idx}).")
+            logger.warning(
+                f"Could not find tile ({tile_x_idx}, {tile_y_idx}) in results"
+            )
+            QMessageBox.warning(
+                self,
+                "Tile Not Found",
+                f"Could not find data for tile ({tile_x_idx}, {tile_y_idx}).",
+            )
             return
 
         # Calculate center Z from z_stack range
@@ -1117,34 +1211,44 @@ class LED2DOverviewResultWindow(PersistentWidget):
             # No Z range data, use tile's Z position
             z_center = target_tile.z
 
-        logger.info(f"Moving to tile ({tile_x_idx}, {tile_y_idx}): "
-                    f"X={target_tile.x:.3f}, Y={target_tile.y:.3f}, Z={z_center:.3f} mm "
-                    f"(Z range: {target_tile.z_stack_min:.3f} - {target_tile.z_stack_max:.3f})")
+        logger.info(
+            f"Moving to tile ({tile_x_idx}, {tile_y_idx}): "
+            f"X={target_tile.x:.3f}, Y={target_tile.y:.3f}, Z={z_center:.3f} mm "
+            f"(Z range: {target_tile.z_stack_min:.3f} - {target_tile.z_stack_max:.3f})"
+        )
 
         # Move stage to tile position using move_to_position for multi-axis move
-        if self._app and hasattr(self._app, 'movement_controller') and self._app.movement_controller:
+        if (
+            self._app
+            and hasattr(self._app, "movement_controller")
+            and self._app.movement_controller
+        ):
             try:
                 from py2flamingo.models.microscope import Position
+
                 pos_ctrl = self._app.movement_controller.position_controller
                 current = pos_ctrl._current_position
                 target_position = Position(
                     x=target_tile.x,
                     y=target_tile.y,
                     z=z_center,
-                    r=current.r if current else 0.0
+                    r=current.r if current else 0.0,
                 )
                 pos_ctrl.move_to_position(target_position, validate=True)
                 self.info_text.setText(
                     f"Moving to X={target_tile.x:.3f}, Y={target_tile.y:.3f}, "
-                    f"Z={z_center:.3f} mm (tile {tile_x_idx},{tile_y_idx})")
+                    f"Z={z_center:.3f} mm (tile {tile_x_idx},{tile_y_idx})"
+                )
             except Exception as e:
                 logger.error(f"Failed to move to tile position: {e}")
-                QMessageBox.warning(self, "Move Failed",
-                                  f"Failed to move stage: {e}")
+                QMessageBox.warning(self, "Move Failed", f"Failed to move stage: {e}")
         else:
             logger.warning("Movement controller not available")
-            QMessageBox.warning(self, "Not Connected",
-                              "Cannot move stage - not connected to microscope.")
+            QMessageBox.warning(
+                self,
+                "Not Connected",
+                "Cannot move stage - not connected to microscope.",
+            )
 
     def _on_collect_tiles(self):
         """Open dialog to configure and collect workflows for selected tiles."""
@@ -1153,15 +1257,23 @@ class LED2DOverviewResultWindow(PersistentWidget):
         right_tiles = self.right_panel.get_selected_tiles()
 
         if not left_tiles and not right_tiles:
-            QMessageBox.warning(self, "No Selection", "Please select at least one tile first.")
+            QMessageBox.warning(
+                self, "No Selection", "Please select at least one tile first."
+            )
             return
 
         # Get rotation angles
-        left_rotation = self._results[0].rotation_angle if len(self._results) >= 1 else 0.0
-        right_rotation = self._results[1].rotation_angle if len(self._results) >= 2 else 90.0
+        left_rotation = (
+            self._results[0].rotation_angle if len(self._results) >= 1 else 0.0
+        )
+        right_rotation = (
+            self._results[1].rotation_angle if len(self._results) >= 2 else 90.0
+        )
 
         # Open collection dialog
-        from py2flamingo.views.dialogs.tile_collection_dialog import TileCollectionDialog
+        from py2flamingo.views.dialogs.tile_collection_dialog import (
+            TileCollectionDialog,
+        )
 
         dialog = TileCollectionDialog(
             left_tiles=left_tiles,
@@ -1170,7 +1282,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
             right_rotation=right_rotation,
             config=self._config,
             app=self._app,
-            parent=self
+            parent=self,
         )
         dialog.exec_()
 
@@ -1180,12 +1292,12 @@ class LED2DOverviewResultWindow(PersistentWidget):
         Args:
             which: 'left', 'right', or 'both'
         """
-        if which == 'both':
-            self._save_image('left')
-            self._save_image('right')
+        if which == "both":
+            self._save_image("left")
+            self._save_image("right")
             return
 
-        panel = self.left_panel if which == 'left' else self.right_panel
+        panel = self.left_panel if which == "left" else self.right_panel
         image = panel.get_image()
 
         if image is None:
@@ -1198,7 +1310,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
             self,
             f"Save {which.title()} Image",
             default_name,
-            "PNG Images (*.png);;TIFF Images (*.tiff *.tif);;All Files (*)"
+            "PNG Images (*.png);;TIFF Images (*.tiff *.tif);;All Files (*)",
         )
 
         if not path:
@@ -1214,8 +1326,12 @@ class LED2DOverviewResultWindow(PersistentWidget):
             new_h = original_h // downsample_factor
 
             # Use INTER_AREA for best quality when downsampling
-            downsampled = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
-            logger.info(f"Downsampled image from {original_w}x{original_h} to {new_w}x{new_h} (4x)")
+            downsampled = cv2.resize(
+                image, (new_w, new_h), interpolation=cv2.INTER_AREA
+            )
+            logger.info(
+                f"Downsampled image from {original_w}x{original_h} to {new_w}x{new_h} (4x)"
+            )
 
             # Ensure image is in the right format for saving
             if len(downsampled.shape) == 3 and downsampled.shape[2] == 3:
@@ -1226,7 +1342,11 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
             cv2.imwrite(path, save_img)
             logger.info(f"Saved image to {path}")
-            QMessageBox.information(self, "Saved", f"Image saved to:\n{path}\n\nDownsampled 4x: {new_w}x{new_h} pixels")
+            QMessageBox.information(
+                self,
+                "Saved",
+                f"Image saved to:\n{path}\n\nDownsampled 4x: {new_w}x{new_h} pixels",
+            )
 
         except ImportError:
             # Fallback without OpenCV - use PIL
@@ -1242,12 +1362,17 @@ class LED2DOverviewResultWindow(PersistentWidget):
                 pil_img = PILImage.fromarray(image)
                 pil_img = pil_img.resize((new_w, new_h), PILImage.Resampling.LANCZOS)
                 pil_img.save(path)
-                logger.info(f"Saved image to {path} (downsampled 4x to {new_w}x{new_h})")
-                QMessageBox.information(self, "Saved", f"Image saved to:\n{path}\n\nDownsampled 4x: {new_w}x{new_h} pixels")
+                logger.info(
+                    f"Saved image to {path} (downsampled 4x to {new_w}x{new_h})"
+                )
+                QMessageBox.information(
+                    self,
+                    "Saved",
+                    f"Image saved to:\n{path}\n\nDownsampled 4x: {new_w}x{new_h} pixels",
+                )
             except ImportError:
                 QMessageBox.critical(
-                    self, "Error",
-                    "Neither OpenCV nor PIL available for saving images"
+                    self, "Error", "Neither OpenCV nor PIL available for saving images"
                 )
         except Exception as e:
             logger.error(f"Error saving image: {e}")
@@ -1280,7 +1405,11 @@ class LED2DOverviewResultWindow(PersistentWidget):
                     break
 
         if image is None:
-            QMessageBox.warning(self, "No Image", f"No stitched image available for rotation {rotation_idx}")
+            QMessageBox.warning(
+                self,
+                "No Image",
+                f"No stitched image available for rotation {rotation_idx}",
+            )
             return
 
         # Build default filename
@@ -1292,7 +1421,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
             self,
             f"Save {'Initial' if rotation_idx == 0 else 'Rotated'} Image",
             default_name,
-            "TIFF Images (*.tiff *.tif);;PNG Images (*.png);;All Files (*)"
+            "TIFF Images (*.tiff *.tif);;PNG Images (*.png);;All Files (*)",
         )
 
         if not path:
@@ -1307,10 +1436,11 @@ class LED2DOverviewResultWindow(PersistentWidget):
                 tifffile.imwrite(path, image)
                 logger.info(f"Saved 16-bit TIFF to {path}")
                 QMessageBox.information(
-                    self, "Saved",
+                    self,
+                    "Saved",
                     f"Image saved to:\n{path}\n\n"
                     f"Full resolution: {image.shape[1]}x{image.shape[0]} pixels\n"
-                    f"16-bit grayscale"
+                    f"16-bit grayscale",
                 )
             else:
                 # Downsample for RGB or 8-bit images
@@ -1320,13 +1450,17 @@ class LED2DOverviewResultWindow(PersistentWidget):
                 new_h = original_h // downsample_factor
 
                 import cv2
-                downsampled = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+                downsampled = cv2.resize(
+                    image, (new_w, new_h), interpolation=cv2.INTER_AREA
+                )
                 tifffile.imwrite(path, downsampled)
                 logger.info(f"Saved downsampled image to {path}")
                 QMessageBox.information(
-                    self, "Saved",
+                    self,
+                    "Saved",
                     f"Image saved to:\n{path}\n\n"
-                    f"Downsampled 4x: {new_w}x{new_h} pixels"
+                    f"Downsampled 4x: {new_w}x{new_h} pixels",
                 )
 
         except ImportError as e:
@@ -1340,7 +1474,9 @@ class LED2DOverviewResultWindow(PersistentWidget):
                 original_h, original_w = image.shape[:2]
                 new_w = original_w // downsample_factor
                 new_h = original_h // downsample_factor
-                downsampled = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                downsampled = cv2.resize(
+                    image, (new_w, new_h), interpolation=cv2.INTER_AREA
+                )
 
                 if len(downsampled.shape) == 3 and downsampled.shape[2] == 3:
                     save_img = cv2.cvtColor(downsampled, cv2.COLOR_RGB2BGR)
@@ -1349,9 +1485,15 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
                 cv2.imwrite(path, save_img)
                 logger.info(f"Saved image to {path}")
-                QMessageBox.information(self, "Saved", f"Image saved to:\n{path}\n\nDownsampled 4x: {new_w}x{new_h} pixels")
+                QMessageBox.information(
+                    self,
+                    "Saved",
+                    f"Image saved to:\n{path}\n\nDownsampled 4x: {new_w}x{new_h} pixels",
+                )
             except ImportError:
-                QMessageBox.critical(self, "Error", "Required libraries (tifffile or cv2) not available")
+                QMessageBox.critical(
+                    self, "Error", "Required libraries (tifffile or cv2) not available"
+                )
         except Exception as e:
             logger.error(f"Error saving rotation image: {e}")
             QMessageBox.critical(self, "Error", f"Failed to save image:\n{e}")
@@ -1374,9 +1516,9 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
     def _save_session(self):
         """Save all scan results (Zarr if available, TIFF fallback)."""
-        from pathlib import Path
-        from datetime import datetime
         import json
+        from datetime import datetime
+        from pathlib import Path
 
         if not self._results:
             QMessageBox.warning(self, "No Results", "No scan results to save")
@@ -1387,7 +1529,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
         default_folder = None
 
         # Check for user's saved preference via configuration service
-        if self._app and hasattr(self._app, 'config_service'):
+        if self._app and hasattr(self._app, "config_service"):
             saved_path = self._app.config_service.get_led_2d_session_path()
             if saved_path and Path(saved_path).exists():
                 default_folder = saved_path
@@ -1407,47 +1549,48 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
         # Get save location
         folder = QFileDialog.getExistingDirectory(
-            self, "Select Folder to Save Session",
+            self,
+            "Select Folder to Save Session",
             default_folder,
-            QFileDialog.ShowDirsOnly
+            QFileDialog.ShowDirsOnly,
         )
         if not folder:
             return
 
         # Remember user's choice for future sessions
-        if self._app and hasattr(self._app, 'config_service'):
+        if self._app and hasattr(self._app, "config_service"):
             self._app.config_service.set_led_2d_session_path(folder)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         # Build metadata
         metadata = {
-            'version': '1.0',
-            'saved_at': datetime.now().isoformat(),
-            'config': {},
-            'rotations': []
+            "version": "1.0",
+            "saved_at": datetime.now().isoformat(),
+            "config": {},
+            "rotations": [],
         }
 
         # Save config if available
         if self._config:
-            metadata['config'] = {
-                'bounding_box': {
-                    'x_min': self._config.bounding_box.x_min,
-                    'x_max': self._config.bounding_box.x_max,
-                    'y_min': self._config.bounding_box.y_min,
-                    'y_max': self._config.bounding_box.y_max,
-                    'z_min': self._config.bounding_box.z_min,
-                    'z_max': self._config.bounding_box.z_max,
+            metadata["config"] = {
+                "bounding_box": {
+                    "x_min": self._config.bounding_box.x_min,
+                    "x_max": self._config.bounding_box.x_max,
+                    "y_min": self._config.bounding_box.y_min,
+                    "y_max": self._config.bounding_box.y_max,
+                    "z_min": self._config.bounding_box.z_min,
+                    "z_max": self._config.bounding_box.z_max,
                 },
-                'starting_r': self._config.starting_r,
-                'led_name': self._config.led_name,
-                'led_intensity': self._config.led_intensity,
-                'z_step_size': getattr(self._config, 'z_step_size', 0.250),
+                "starting_r": self._config.starting_r,
+                "led_name": self._config.led_name,
+                "led_intensity": self._config.led_intensity,
+                "z_step_size": getattr(self._config, "z_step_size", 0.250),
             }
 
         # Collect rotation metadata (without images)
         for rotation in self._results:
-            metadata['rotations'].append(rotation.to_dict())
+            metadata["rotations"].append(rotation.to_dict())
 
         if ZARR_AVAILABLE:
             save_path = Path(folder) / f"led_2d_overview_{timestamp}.zarr"
@@ -1475,15 +1618,17 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
         logger.info(f"Saved LED 2D Overview session to {save_path}")
         QMessageBox.information(
-            self, "Session Saved",
+            self,
+            "Session Saved",
             f"Session saved to:\n{save_path}\n\n"
-            f"Contains {len(self._results)} rotation(s) with all visualization types."
+            f"Contains {len(self._results)} rotation(s) with all visualization types.",
         )
 
-    def _save_session_tiff(self, result_folder: 'Path', metadata: dict):
+    def _save_session_tiff(self, result_folder: "Path", metadata: dict):
         """TIFF fallback for session save when zarr is unavailable."""
-        from pathlib import Path
         import json
+        from pathlib import Path
+
         import tifffile
 
         result_folder = Path(result_folder)
@@ -1500,11 +1645,11 @@ class LED2DOverviewResultWindow(PersistentWidget):
                     tifffile.imwrite(str(img_path), image)
 
         # Save metadata JSON
-        with open(result_folder / 'metadata.json', 'w') as f:
+        with open(result_folder / "metadata.json", "w") as f:
             json.dump(metadata, f, indent=2)
 
     @classmethod
-    def load_from_folder(cls, folder_path, app=None) -> 'LED2DOverviewResultWindow':
+    def load_from_folder(cls, folder_path, app=None) -> "LED2DOverviewResultWindow":
         """Load saved results from folder and create result window (Zarr or TIFF).
 
         For zarr sessions, only the default visualization type is loaded
@@ -1518,18 +1663,18 @@ class LED2DOverviewResultWindow(PersistentWidget):
         Returns:
             LED2DOverviewResultWindow instance with loaded data
         """
-        from pathlib import Path
         import json
+        from pathlib import Path
 
         folder_path = Path(folder_path)
         fmt = detect_session_format(folder_path)
 
         zarr_root = None  # Kept alive for on-demand loading
 
-        if fmt == 'zarr':
+        if fmt == "zarr":
             metadata, zarr_root = load_2d_zarr_session_lazy(folder_path)
-        elif fmt == 'tiff':
-            metadata_path = folder_path / 'metadata.json'
+        elif fmt == "tiff":
+            metadata_path = folder_path / "metadata.json"
             if not metadata_path.exists():
                 raise FileNotFoundError(f"No metadata.json found in {folder_path}")
 
@@ -1540,37 +1685,40 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
         # Reconstruct config
         config = None
-        if metadata.get('config'):
+        if metadata.get("config"):
             from .led_2d_overview_dialog import BoundingBox, ScanConfiguration
 
-            bbox_data = metadata['config'].get('bounding_box', {})
+            bbox_data = metadata["config"].get("bounding_box", {})
             bounding_box = BoundingBox(
-                x_min=bbox_data.get('x_min', 0),
-                x_max=bbox_data.get('x_max', 0),
-                y_min=bbox_data.get('y_min', 0),
-                y_max=bbox_data.get('y_max', 0),
-                z_min=bbox_data.get('z_min', 0),
-                z_max=bbox_data.get('z_max', 0)
+                x_min=bbox_data.get("x_min", 0),
+                x_max=bbox_data.get("x_max", 0),
+                y_min=bbox_data.get("y_min", 0),
+                y_max=bbox_data.get("y_max", 0),
+                z_min=bbox_data.get("z_min", 0),
+                z_max=bbox_data.get("z_max", 0),
             )
 
             config = ScanConfiguration(
                 bounding_box=bounding_box,
-                starting_r=metadata['config'].get('starting_r', 0),
-                led_name=metadata['config'].get('led_name', 'led_red'),
-                led_intensity=metadata['config'].get('led_intensity', 50),
-                z_step_size=metadata['config'].get('z_step_size', 0.250)
+                starting_r=metadata["config"].get("starting_r", 0),
+                led_name=metadata["config"].get("led_name", "led_red"),
+                led_intensity=metadata["config"].get("led_intensity", 50),
+                z_step_size=metadata["config"].get("z_step_size", 0.250),
             )
 
         # Determine default viz type (matches _populate_visualization_types index 2)
         from py2flamingo.models.data.overview_results import VISUALIZATION_TYPES
-        default_viz_type = VISUALIZATION_TYPES[2][0] if len(VISUALIZATION_TYPES) > 2 else "best_focus"
+
+        default_viz_type = (
+            VISUALIZATION_TYPES[2][0] if len(VISUALIZATION_TYPES) > 2 else "best_focus"
+        )
 
         # Load rotations
-        from py2flamingo.models.data.overview_results import TileResult, RotationResult
+        from py2flamingo.models.data.overview_results import RotationResult, TileResult
 
         results = []
-        for i, rot_data in enumerate(metadata.get('rotations', [])):
-            if fmt == 'zarr':
+        for i, rot_data in enumerate(metadata.get("rotations", [])):
+            if fmt == "zarr":
                 # Only load the default viz type eagerly
                 stitched_images = {}
                 zarr_key = f"rotation_{i}/stitched_{default_viz_type}"
@@ -1585,31 +1733,32 @@ class LED2DOverviewResultWindow(PersistentWidget):
                         rot_group = zarr_root[rot_group_key]
                         for child_key in rot_group:
                             child = rot_group[child_key]
-                            if hasattr(child, 'shape') and len(child.shape) > 0:
-                                vis_type = child_key.replace('stitched_', '', 1)
+                            if hasattr(child, "shape") and len(child.shape) > 0:
+                                vis_type = child_key.replace("stitched_", "", 1)
                                 stitched_images[vis_type] = np.array(child)
-                                logger.debug(f"Fallback loaded {rot_group_key}/{child_key}")
+                                logger.debug(
+                                    f"Fallback loaded {rot_group_key}/{child_key}"
+                                )
                                 break
             else:
                 # TIFF path — load all (usually just a few files)
                 import tifffile
+
                 rot_folder = folder_path / f"rotation_{i}"
                 stitched_images = {}
-                for vis_type in rot_data.get('stitched_image_types', ['best_focus']):
+                for vis_type in rot_data.get("stitched_image_types", ["best_focus"]):
                     img_path = rot_folder / f"stitched_{vis_type}.tif"
                     if img_path.exists():
                         stitched_images[vis_type] = tifffile.imread(str(img_path))
 
             # Reconstruct tiles (for coordinate display)
             tiles = []
-            for tile_data in rot_data.get('tiles', []):
+            for tile_data in rot_data.get("tiles", []):
                 tile = TileResult.from_dict(tile_data)
                 tiles.append(tile)
 
             rotation = RotationResult.from_dict(
-                rot_data,
-                stitched_images=stitched_images,
-                tiles=tiles
+                rot_data, stitched_images=stitched_images, tiles=tiles
             )
             results.append(rotation)
 

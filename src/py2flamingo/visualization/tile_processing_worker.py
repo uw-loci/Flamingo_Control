@@ -17,14 +17,14 @@ Background Worker (per tile, ~3-7s):
   - single update_storage_vectorized() call per channel
 """
 
-import logging
-import time
 import collections
+import logging
 import threading
-import numpy as np
+import time
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Dict
+from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 from PyQt5.QtCore import QObject, pyqtSignal
 
 logger = logging.getLogger(__name__)
@@ -39,14 +39,19 @@ class TileFrameBuffer:
 
     Memory: ~21 MB per tile (1089 frames x 20 KB each at 100x100 uint16).
     """
-    tile_key: Tuple[float, float]           # (x_mm, y_mm)
-    position: dict                           # Full position dict from workflow
-    channels: list                           # List of channel IDs
-    z_min: float                             # Z sweep minimum (mm)
-    z_max: float                             # Z sweep maximum (mm)
-    reference_position: Optional[dict]       # Reference position for delta calc
-    planes_per_channel: Optional[int] = None # Expected planes from workflow (authoritative)
-    frames: List[Tuple[np.ndarray, int]] = field(default_factory=list)  # (downsampled_image, z_index)
+
+    tile_key: Tuple[float, float]  # (x_mm, y_mm)
+    position: dict  # Full position dict from workflow
+    channels: list  # List of channel IDs
+    z_min: float  # Z sweep minimum (mm)
+    z_max: float  # Z sweep maximum (mm)
+    reference_position: Optional[dict]  # Reference position for delta calc
+    planes_per_channel: Optional[int] = (
+        None  # Expected planes from workflow (authoritative)
+    )
+    frames: List[Tuple[np.ndarray, int]] = field(
+        default_factory=list
+    )  # (downsampled_image, z_index)
 
     def append(self, downsampled_image: np.ndarray, z_index: int):
         """Append a downsampled frame (called on GUI thread, ~0.1ms)."""
@@ -104,8 +109,10 @@ class TileProcessingWorker(QObject):
         if buffer is None or buffer.frame_count == 0:
             return
 
-        logger.info(f"Submitting tile {buffer.tile_key} with {buffer.frame_count} frames "
-                    f"for background processing")
+        logger.info(
+            f"Submitting tile {buffer.tile_key} with {buffer.frame_count} frames "
+            f"for background processing"
+        )
         self._idle_event.clear()
         self._queue.appendleft(buffer)
         self._queue_event.set()
@@ -158,15 +165,18 @@ class TileProcessingWorker(QObject):
                     self._process_tile(buffer)
                     self._tiles_processed += 1
                 except Exception as e:
-                    logger.error(f"Error processing tile {buffer.tile_key}: {e}",
-                                exc_info=True)
+                    logger.error(
+                        f"Error processing tile {buffer.tile_key}: {e}", exc_info=True
+                    )
                     self.error.emit(f"Tile {buffer.tile_key}: {e}")
 
             # If queue is empty and not shutting down, signal idle
             if not self._queue:
                 self._idle_event.set()
 
-        logger.info(f"Tile processing worker stopped. Processed {self._tiles_processed} tiles.")
+        logger.info(
+            f"Tile processing worker stopped. Processed {self._tiles_processed} tiles."
+        )
 
     def _process_tile(self, buffer: TileFrameBuffer):
         """Process a single tile's buffered frames.
@@ -196,28 +206,34 @@ class TileProcessingWorker(QObject):
                 # Trim excess frames from the END — the camera keeps running
                 # briefly after the Z-stack completes, producing garbage frames
                 # that would otherwise be assigned to the last channel
-                logger.info(f"Tile {tile_key}: trimming {excess} excess frames from end "
-                            f"(got {total_frames}, expected {expected_total})")
+                logger.info(
+                    f"Tile {tile_key}: trimming {excess} excess frames from end "
+                    f"(got {total_frames}, expected {expected_total})"
+                )
                 buffer.frames = buffer.frames[:expected_total]
                 total_frames = expected_total
             elif excess < 0:
                 # Fewer frames than expected (e.g., last tile cut short)
-                logger.warning(f"Tile {tile_key}: {-excess} fewer frames than expected "
-                               f"(got {total_frames}, expected {expected_total})")
+                logger.warning(
+                    f"Tile {tile_key}: {-excess} fewer frames than expected "
+                    f"(got {total_frames}, expected {expected_total})"
+                )
                 frames_per_channel = total_frames // num_channels
         else:
             frames_per_channel = total_frames // num_channels
 
         remainder = total_frames - (frames_per_channel * num_channels)
 
-        logger.info(f"Processing tile {tile_key}: {total_frames} frames, "
-                    f"{num_channels} channels, {frames_per_channel} frames/channel"
-                    f"{f' (+{remainder} remainder)' if remainder else ''}"
-                    f"{f', planes_per_channel={buffer.planes_per_channel}' if buffer.planes_per_channel else ''}")
+        logger.info(
+            f"Processing tile {tile_key}: {total_frames} frames, "
+            f"{num_channels} channels, {frames_per_channel} frames/channel"
+            f"{f' (+{remainder} remainder)' if remainder else ''}"
+            f"{f', planes_per_channel={buffer.planes_per_channel}' if buffer.planes_per_channel else ''}"
+        )
 
         # Get coordinate calculation parameters
-        sample_center = self._config.get('sample_chamber', {}).get(
-            'sample_region_center_um', [6655, 7000, 19250]
+        sample_center = self._config.get("sample_chamber", {}).get(
+            "sample_region_center_um", [6655, 7000, 19250]
         )
 
         z_min = buffer.z_min
@@ -229,7 +245,7 @@ class TileProcessingWorker(QObject):
         # to the same resolution). This avoids redundant meshgrid per frame.
         first_frame = buffer.frames[0][0]
         H, W = first_frame.shape
-        y_indices, x_indices = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
+        y_indices, x_indices = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
 
         FOV_mm = 0.5182
         FOV_um = FOV_mm * 1000
@@ -241,21 +257,23 @@ class TileProcessingWorker(QObject):
 
         slice_thickness_um = 100
         num_pixels = len(camera_coords_2d)
-        z_offsets = np.linspace(-slice_thickness_um / 2, slice_thickness_um / 2, num_pixels)
+        z_offsets = np.linspace(
+            -slice_thickness_um / 2, slice_thickness_um / 2, num_pixels
+        )
 
-        camera_x_offset = -camera_coords_2d[:, 0] if self._invert_x else camera_coords_2d[:, 0]
-        camera_offsets_3d = np.column_stack([
-            z_offsets,
-            camera_coords_2d[:, 1],
-            camera_x_offset
-        ])
+        camera_x_offset = (
+            -camera_coords_2d[:, 0] if self._invert_x else camera_coords_2d[:, 0]
+        )
+        camera_offsets_3d = np.column_stack(
+            [z_offsets, camera_coords_2d[:, 1], camera_x_offset]
+        )
 
         # Pre-compute tile position deltas (constant for all frames in this tile)
-        pos_x = buffer.position['x']
-        pos_y = buffer.position['y']
+        pos_x = buffer.position["x"]
+        pos_y = buffer.position["y"]
         if ref is not None:
-            delta_x = pos_x - ref['x']
-            delta_y = pos_y - ref['y']
+            delta_x = pos_x - ref["x"]
+            delta_y = pos_y - ref["y"]
         else:
             delta_x = delta_y = 0.0
         delta_x_storage = delta_x if self._invert_x else -delta_x
@@ -263,10 +281,9 @@ class TileProcessingWorker(QObject):
         base_z_um = sample_center[2]
         base_y_um = sample_center[1]
         base_x_um = sample_center[0]
-        base_world_yx = np.array([
-            base_y_um + delta_y * 1000,
-            base_x_um + delta_x_storage * 1000
-        ])
+        base_world_yx = np.array(
+            [base_y_um + delta_y * 1000, base_x_um + delta_x_storage * 1000]
+        )
 
         total_voxels = 0
 
@@ -296,7 +313,7 @@ class TileProcessingWorker(QObject):
                 z_position = z_min + z_fraction * z_range
 
                 # Only Z delta varies per frame
-                delta_z = (z_position - ref['z']) if ref is not None else 0.0
+                delta_z = (z_position - ref["z"]) if ref is not None else 0.0
                 world_center_z = base_z_um - delta_z * 1000
 
                 # Build world coords (reuse pre-computed camera offsets)
@@ -313,18 +330,20 @@ class TileProcessingWorker(QObject):
                     world_coords=world_coords_3d,
                     pixel_values=values,
                     timestamp=timestamp,
-                    update_mode='maximum'
+                    update_mode="maximum",
                 )
 
             logger.info(f"  Channel {channel_id}: {n_frames} frames processed")
 
         elapsed = time.time() - t0
         stats = {
-            'total_frames': total_frames,
-            'num_channels': num_channels,
-            'frames_per_channel': frames_per_channel,
-            'total_voxels': total_voxels,
-            'processing_time_s': elapsed,
+            "total_frames": total_frames,
+            "num_channels": num_channels,
+            "frames_per_channel": frames_per_channel,
+            "total_voxels": total_voxels,
+            "processing_time_s": elapsed,
         }
-        logger.info(f"Tile {tile_key} processed in {elapsed:.2f}s ({total_voxels} voxels)")
+        logger.info(
+            f"Tile {tile_key} processed in {elapsed:.2f}s ({total_voxels} voxels)"
+        )
         self.tile_processed.emit(tile_key, stats)

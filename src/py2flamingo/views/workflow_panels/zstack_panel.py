@@ -6,16 +6,23 @@ Provides UI for Z-stack acquisition parameters.
 
 import logging
 import math
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QDoubleSpinBox, QSpinBox, QCheckBox, QGroupBox, QGridLayout, QComboBox
-)
 from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 from py2flamingo.models.data.workflow import StackSettings
-
 
 # System limits for Z velocity (from C++ SystemLimits.h)
 Z_VELOCITY_MIN_MM_S = 0.001
@@ -30,7 +37,7 @@ STACK_OPTIONS = [
     "ZSweep",
     "OPT",
     "OPT ZStacks",
-    "Bidirectional"
+    "Bidirectional",
 ]
 
 
@@ -77,7 +84,9 @@ class ZStackPanel(QWidget):
 
         # Z range can be set externally (for tile collection)
         self._z_range_mm = None  # None means calculate from num_planes * z_step
-        self._auto_num_planes = False  # Auto-calculate num_planes from z_range and z_step
+        self._auto_num_planes = (
+            False  # Auto-calculate num_planes from z_range and z_step
+        )
 
         self._setup_ui()
 
@@ -94,11 +103,11 @@ class ZStackPanel(QWidget):
 
         try:
             # Try to get from config_service -> scope settings
-            config_service = getattr(self._app, 'config_service', None)
+            config_service = getattr(self._app, "config_service", None)
             if config_service is not None:
-                scope_settings = config_service.config.get('scope_settings', {})
-                stage_limits = scope_settings.get('Stage limits', {})
-                z_velocity = stage_limits.get('Default velocity z-axis', None)
+                scope_settings = config_service.config.get("scope_settings", {})
+                stage_limits = scope_settings.get("Stage limits", {})
+                z_velocity = stage_limits.get("Default velocity z-axis", None)
                 if z_velocity is not None:
                     velocity = float(z_velocity)
                     self._logger.info(f"Using Z velocity from system: {velocity} mm/s")
@@ -131,7 +140,9 @@ class ZStackPanel(QWidget):
         self._z_range_spinbox.setSingleStep(0.001)
         self._z_range_spinbox.setSuffix(" mm")
         self._z_range_spinbox.valueChanged.connect(self._on_z_range_changed)
-        self._z_range_spinbox.setVisible(False)  # Hidden by default, shown only in tile mode
+        self._z_range_spinbox.setVisible(
+            False
+        )  # Hidden by default, shown only in tile mode
         z_range_layout.addWidget(self._z_range_spinbox)
 
         self._z_range_label = QLabel("250.0 um")
@@ -146,7 +157,9 @@ class ZStackPanel(QWidget):
         num_planes_layout.setSpacing(8)
 
         self._num_planes = QSpinBox()
-        self._num_planes.setRange(1, 50000)  # Support large Z ranges (100mm / 0.002mm = 50000)
+        self._num_planes.setRange(
+            1, 50000
+        )  # Support large Z ranges (100mm / 0.002mm = 50000)
         self._num_planes.setValue(100)
         self._num_planes.valueChanged.connect(self._on_num_planes_changed)
         num_planes_layout.addWidget(self._num_planes)
@@ -157,8 +170,12 @@ class ZStackPanel(QWidget):
             "Auto-calculate number of planes from Z range and Z step.\n"
             "Formula: Num_planes = ceiling(Z_range / Z_step) + 1"
         )
-        self._auto_num_planes_checkbox.stateChanged.connect(self._on_auto_num_planes_changed)
-        self._auto_num_planes_checkbox.setVisible(False)  # Hidden by default, shown only in tile mode
+        self._auto_num_planes_checkbox.stateChanged.connect(
+            self._on_auto_num_planes_changed
+        )
+        self._auto_num_planes_checkbox.setVisible(
+            False
+        )  # Hidden by default, shown only in tile mode
         num_planes_layout.addWidget(self._auto_num_planes_checkbox)
 
         grid.addWidget(QLabel("Number of Planes:"), 1, 0)
@@ -217,7 +234,9 @@ class ZStackPanel(QWidget):
 
         # Z range validation warning (hidden by default)
         self._z_range_warning = QLabel("")
-        self._z_range_warning.setStyleSheet("color: #d9534f; font-size: 11px; font-weight: bold;")
+        self._z_range_warning.setStyleSheet(
+            "color: #d9534f; font-size: 11px; font-weight: bold;"
+        )
         self._z_range_warning.setWordWrap(True)
         self._z_range_warning.setVisible(False)
         grid.addWidget(self._z_range_warning, 6, 0, 1, 2)
@@ -349,7 +368,9 @@ class ZStackPanel(QWidget):
         # Update UI state
         self._z_velocity.setReadOnly(is_auto)
         if is_auto:
-            self._z_velocity.setStyleSheet("QDoubleSpinBox { background-color: #f0f0f0; }")
+            self._z_velocity.setStyleSheet(
+                "QDoubleSpinBox { background-color: #f0f0f0; }"
+            )
             self._update_auto_velocity()
         else:
             self._z_velocity.setStyleSheet("")
@@ -490,9 +511,11 @@ class ZStackPanel(QWidget):
         if self._z_range_mm is not None:
             z_step_mm = z_step_um / 1000.0
             if z_step_mm > z_range_mm:
-                warning = (f"Warning: Z step ({z_step_um:.1f} µm) is larger than Z range "
-                          f"({z_range_um:.1f} µm). Only {num_planes} plane(s) will be acquired, "
-                          f"covering {(num_planes - 1) * z_step_um:.1f} µm.")
+                warning = (
+                    f"Warning: Z step ({z_step_um:.1f} µm) is larger than Z range "
+                    f"({z_range_um:.1f} µm). Only {num_planes} plane(s) will be acquired, "
+                    f"covering {(num_planes - 1) * z_step_um:.1f} µm."
+                )
                 self._z_range_warning.setText(warning)
                 self._z_range_warning.setVisible(True)
             else:
@@ -563,16 +586,16 @@ class ZStackPanel(QWidget):
         tiles_y = self._tiles_y.value() if stack_option == "Tile" else 0
 
         return {
-            'Number of planes': num_planes,
-            'Change in Z axis (mm)': z_range_mm,  # Total range, not step!
-            'Z stage velocity (mm/s)': self._z_velocity.value(),
-            'Rotational stage velocity (°/s)': self._rotational_velocity.value(),
-            'Stack option': stack_option,
-            'Stack option settings 1': tiles_x,
-            'Stack option settings 2': tiles_y,
-            'Auto update stack calculations': 'true',
-            'Camera 1 capture percentage': 100,
-            'Camera 1 capture mode': 0,
+            "Number of planes": num_planes,
+            "Change in Z axis (mm)": z_range_mm,  # Total range, not step!
+            "Z stage velocity (mm/s)": self._z_velocity.value(),
+            "Rotational stage velocity (°/s)": self._rotational_velocity.value(),
+            "Stack option": stack_option,
+            "Stack option settings 1": tiles_x,
+            "Stack option settings 2": tiles_y,
+            "Auto update stack calculations": "true",
+            "Camera 1 capture percentage": 100,
+            "Camera 1 capture mode": 0,
         }
 
     def set_settings(self, settings: StackSettings) -> None:
@@ -735,12 +758,12 @@ class ZStackPanel(QWidget):
             Dictionary with UI-specific state
         """
         return {
-            'z_step_um': self._z_step.value(),
-            'num_planes': self._num_planes.value(),
-            'z_velocity_mm_s': self._z_velocity.value(),
-            'auto_velocity': self._auto_velocity.isChecked(),
-            'return_to_start': self._return_to_start.isChecked(),
-            'stack_option': self._stack_option.currentText(),
+            "z_step_um": self._z_step.value(),
+            "num_planes": self._num_planes.value(),
+            "z_velocity_mm_s": self._z_velocity.value(),
+            "auto_velocity": self._auto_velocity.isChecked(),
+            "return_to_start": self._return_to_start.isChecked(),
+            "stack_option": self._stack_option.currentText(),
         }
 
     def set_ui_state(self, state: Dict[str, Any]) -> None:
@@ -758,29 +781,31 @@ class ZStackPanel(QWidget):
 
         self._updating = True
 
-        if 'z_step_um' in state:
-            self._z_step.setValue(state['z_step_um'])
+        if "z_step_um" in state:
+            self._z_step.setValue(state["z_step_um"])
 
-        if 'num_planes' in state:
-            self._num_planes.setValue(state['num_planes'])
+        if "num_planes" in state:
+            self._num_planes.setValue(state["num_planes"])
 
-        if 'z_velocity_mm_s' in state:
-            self._z_velocity.setValue(state['z_velocity_mm_s'])
+        if "z_velocity_mm_s" in state:
+            self._z_velocity.setValue(state["z_velocity_mm_s"])
 
-        if 'auto_velocity' in state:
-            is_auto = state['auto_velocity']
+        if "auto_velocity" in state:
+            is_auto = state["auto_velocity"]
             self._auto_velocity.setChecked(is_auto)
             self._z_velocity.setReadOnly(is_auto)
             if is_auto:
-                self._z_velocity.setStyleSheet("QDoubleSpinBox { background-color: #f0f0f0; }")
+                self._z_velocity.setStyleSheet(
+                    "QDoubleSpinBox { background-color: #f0f0f0; }"
+                )
             else:
                 self._z_velocity.setStyleSheet("")
 
-        if 'return_to_start' in state:
-            self._return_to_start.setChecked(state['return_to_start'])
+        if "return_to_start" in state:
+            self._return_to_start.setChecked(state["return_to_start"])
 
-        if 'stack_option' in state and state['stack_option'] in STACK_OPTIONS:
-            self._stack_option.setCurrentText(state['stack_option'])
+        if "stack_option" in state and state["stack_option"] in STACK_OPTIONS:
+            self._stack_option.setCurrentText(state["stack_option"])
 
         self._updating = False
 
@@ -811,7 +836,9 @@ class ZStackPanel(QWidget):
             self._auto_num_planes_checkbox.setChecked(True)
             self._num_planes.setReadOnly(True)
             self._num_planes.setStyleSheet("QSpinBox { background-color: #f0f0f0; }")
-            self._num_planes.setToolTip("Auto-calculated from Position A/B Z values and Z step")
+            self._num_planes.setToolTip(
+                "Auto-calculated from Position A/B Z values and Z step"
+            )
         else:
             # Return to manual mode
             self._auto_num_planes_checkbox.setVisible(False)
@@ -849,5 +876,7 @@ class ZStackPanel(QWidget):
         # Update Z range display
         self._update_calculations()
 
-        self._logger.debug(f"Z range from positions: {z_range_mm:.3f} mm, "
-                          f"{self._num_planes.value()} planes at {self._z_step.value():.1f} um step")
+        self._logger.debug(
+            f"Z range from positions: {z_range_mm:.3f} mm, "
+            f"{self._num_planes.value()} planes at {self._z_step.value():.1f} um step"
+        )

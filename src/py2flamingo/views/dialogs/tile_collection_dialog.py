@@ -7,33 +7,51 @@ from the LED 2D Overview result window.
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict
+from typing import Dict, List, Optional, Tuple
 
-from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QGroupBox, QComboBox, QScrollArea, QWidget,
-    QMessageBox, QProgressDialog, QFrame, QCheckBox
-)
-from py2flamingo.services.window_geometry_manager import PersistentDialog
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QIcon
-
-from py2flamingo.views.workflow_panels import (
-    IlluminationPanel, ZStackPanel, SavePanel, CameraPanel
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressDialog,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
-from py2flamingo.models.data.workflow import WorkflowType, Workflow, StackSettings
+
+from py2flamingo.models.data.workflow import StackSettings, Workflow, WorkflowType
 from py2flamingo.models.microscope import Position
 from py2flamingo.services.tiff_size_validator import (
-    validate_workflow_params, parse_workflow_file, get_recommended_planes,
-    TiffSizeEstimate, TIFF_4GB_LIMIT
+    TIFF_4GB_LIMIT,
+    TiffSizeEstimate,
+    get_recommended_planes,
+    parse_workflow_file,
+    validate_workflow_params,
+)
+from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.utils.tile_folder_organizer import reorganize_tile_folders
+from py2flamingo.utils.tile_workflow_parser import (
+    parse_workflow_position,
+    read_laser_channels_from_workflow,
+    read_num_planes_from_workflow,
+    read_z_range_from_workflow,
+    read_z_velocity_from_workflow,
 )
 from py2flamingo.utils.tile_z_range import calculate_tile_z_ranges
-from py2flamingo.utils.tile_workflow_parser import (
-    parse_workflow_position, read_z_range_from_workflow,
-    read_laser_channels_from_workflow, read_z_velocity_from_workflow,
-    read_num_planes_from_workflow,
+from py2flamingo.views.workflow_panels import (
+    CameraPanel,
+    IlluminationPanel,
+    SavePanel,
+    ZStackPanel,
 )
-from py2flamingo.utils.tile_folder_organizer import reorganize_tile_folders
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +63,17 @@ class TileCollectionDialog(PersistentDialog):
     without position inputs - positions come from selected tiles.
     """
 
-    def __init__(self, left_tiles: List, right_tiles: List,
-                 left_rotation: float, right_rotation: float,
-                 config=None, app=None, parent=None,
-                 local_base_folder: str = None):
+    def __init__(
+        self,
+        left_tiles: List,
+        right_tiles: List,
+        left_rotation: float,
+        right_rotation: float,
+        config=None,
+        app=None,
+        parent=None,
+        local_base_folder: str = None,
+    ):
         """Initialize the dialog.
 
         Args:
@@ -71,7 +96,9 @@ class TileCollectionDialog(PersistentDialog):
         self._config = config
         self._app = app
         self._local_base_folder_hint = local_base_folder
-        self._workflow_type = WorkflowType.ZSTACK  # Default to Z-Stack (user preference)
+        self._workflow_type = (
+            WorkflowType.ZSTACK
+        )  # Default to Z-Stack (user preference)
 
         # Determine if 90-degree overlap mode is available
         self._has_dual_view = bool(left_tiles) and bool(right_tiles)
@@ -107,18 +134,22 @@ class TileCollectionDialog(PersistentDialog):
 
         # Don't override if already configured
         config_service = None
-        if self._app and hasattr(self._app, 'config_service'):
+        if self._app and hasattr(self._app, "config_service"):
             config_service = self._app.config_service
 
         if config_service:
             existing = config_service.get_local_path_for_drive(current_drive)
             if existing:
-                logger.info(f"Local access already configured for {current_drive}: {existing}")
+                logger.info(
+                    f"Local access already configured for {current_drive}: {existing}"
+                )
                 return
 
         # Configure the mapping and enable local access in the UI
         self._save_panel.enable_local_access(local_base_folder)
-        logger.info(f"Auto-configured local access for {current_drive} -> {local_base_folder}")
+        logger.info(
+            f"Auto-configured local access for {current_drive} -> {local_base_folder}"
+        )
 
     def _update_z_ranges(self) -> None:
         """Update Z ranges for tiles based on primary direction and overlap."""
@@ -212,19 +243,29 @@ class TileCollectionDialog(PersistentDialog):
 
         # Initialize Z velocity with current frame rate
         camera_settings = self._camera_panel.get_settings()
-        self._zstack_panel.set_frame_rate(camera_settings['frame_rate'])
+        self._zstack_panel.set_frame_rate(camera_settings["frame_rate"])
 
         # Save panel - pass app for system storage location and connection_service for drive refresh
         # Only pass connection_service if it has query_available_drives method
-        connection_service = getattr(self._app, 'connection_service', None) if self._app else None
-        if connection_service and not hasattr(connection_service, 'query_available_drives'):
-            logger.warning("Connection service lacks query_available_drives method - disabling drive refresh")
+        connection_service = (
+            getattr(self._app, "connection_service", None) if self._app else None
+        )
+        if connection_service and not hasattr(
+            connection_service, "query_available_drives"
+        ):
+            logger.warning(
+                "Connection service lacks query_available_drives method - disabling drive refresh"
+            )
             connection_service = None
-        self._save_panel = SavePanel(app=self._app, connection_service=connection_service)
+        self._save_panel = SavePanel(
+            app=self._app, connection_service=connection_service
+        )
         container_layout.addWidget(self._save_panel)
 
         # Sample View Integration checkbox
-        self._add_to_sample_view_checkbox = QCheckBox("Add Z-stacks to Sample View (live)")
+        self._add_to_sample_view_checkbox = QCheckBox(
+            "Add Z-stacks to Sample View (live)"
+        )
         self._add_to_sample_view_checkbox.setToolTip(
             "If checked, Z-stack frames will be added to Sample View 3D\n"
             "visualization in real-time as each tile workflow executes.\n"
@@ -280,13 +321,17 @@ class TileCollectionDialog(PersistentDialog):
 
         if self._config:
             bbox = self._config.bounding_box
-            summary_text += f"\nBounding box Z range: {bbox.z_min:.2f} to {bbox.z_max:.2f} mm"
+            summary_text += (
+                f"\nBounding box Z range: {bbox.z_min:.2f} to {bbox.z_max:.2f} mm"
+            )
 
         # Show overlap Z range info if both views have tiles
         if self._has_dual_view:
             # Calculate Z range from current settings
             if self._tile_z_ranges:
-                z_values = [(z_min, z_max) for z_min, z_max in self._tile_z_ranges.values()]
+                z_values = [
+                    (z_min, z_max) for z_min, z_max in self._tile_z_ranges.values()
+                ]
                 if z_values:
                     global_z_min = min(z[0] for z in z_values)
                     global_z_max = max(z[1] for z in z_values)
@@ -324,7 +369,9 @@ class TileCollectionDialog(PersistentDialog):
 
         self._direction_combo = QComboBox()
         self._direction_combo.addItem(f"Left panel (R={self._left_rotation}°)", "left")
-        self._direction_combo.addItem(f"Right panel (R={self._right_rotation}°)", "right")
+        self._direction_combo.addItem(
+            f"Right panel (R={self._right_rotation}°)", "right"
+        )
         self._direction_combo.currentIndexChanged.connect(self._on_direction_changed)
         dir_layout.addWidget(self._direction_combo)
         dir_layout.addStretch()
@@ -342,14 +389,14 @@ class TileCollectionDialog(PersistentDialog):
 
     def _on_direction_changed(self, index: int) -> None:
         """Handle primary direction change."""
-        self._primary_is_left = (self._direction_combo.currentData() == "left")
+        self._primary_is_left = self._direction_combo.currentData() == "left"
         self._update_z_ranges()
         self._update_z_range_info()
         self._update_summary_label()
 
     def _update_z_range_info(self) -> None:
         """Update the Z range info label."""
-        if not hasattr(self, '_z_range_info'):
+        if not hasattr(self, "_z_range_info"):
             return
 
         if self._primary_is_left:
@@ -377,7 +424,7 @@ class TileCollectionDialog(PersistentDialog):
 
     def _update_summary_label(self) -> None:
         """Update the summary label with current Z range info."""
-        if not hasattr(self, '_summary_label'):
+        if not hasattr(self, "_summary_label"):
             return
 
         total = len(self._left_tiles) + len(self._right_tiles)
@@ -390,7 +437,9 @@ class TileCollectionDialog(PersistentDialog):
 
         if self._config:
             bbox = self._config.bounding_box
-            summary_text += f"\nBounding box Z range: {bbox.z_min:.2f} to {bbox.z_max:.2f} mm"
+            summary_text += (
+                f"\nBounding box Z range: {bbox.z_min:.2f} to {bbox.z_max:.2f} mm"
+            )
 
         if self._has_dual_view and self._tile_z_ranges:
             z_values = [(z_min, z_max) for z_min, z_max in self._tile_z_ranges.values()]
@@ -471,7 +520,10 @@ class TileCollectionDialog(PersistentDialog):
         if not self._tile_z_ranges:
             # Fallback to bounding box
             if self._config:
-                return (self._config.bounding_box.z_min, self._config.bounding_box.z_max)
+                return (
+                    self._config.bounding_box.z_min,
+                    self._config.bounding_box.z_max,
+                )
             return (0.0, 10.0)
 
         # Find the largest Z range (for UI display)
@@ -479,7 +531,7 @@ class TileCollectionDialog(PersistentDialog):
         max_range = 0.0
         best_z_min, best_z_max = 0.0, 0.0
 
-        for (z_min, z_max) in self._tile_z_ranges.values():
+        for z_min, z_max in self._tile_z_ranges.values():
             z_range = z_max - z_min
             if z_range > max_range:
                 max_range = z_range
@@ -489,20 +541,24 @@ class TileCollectionDialog(PersistentDialog):
 
     def _on_camera_settings_changed(self, settings: dict):
         """Handle camera settings change - update Z velocity calculation."""
-        frame_rate = settings.get('frame_rate', 100.0)
+        frame_rate = settings.get("frame_rate", 100.0)
         self._zstack_panel.set_frame_rate(frame_rate)
 
     def _on_create_workflows(self):
         """Create and execute workflows for selected tiles."""
         name_prefix = self._name_prefix.text().strip()
         if not name_prefix:
-            QMessageBox.warning(self, "Missing Name", "Please enter a workflow name prefix.")
+            QMessageBox.warning(
+                self, "Missing Name", "Please enter a workflow name prefix."
+            )
             return
 
         # Validate illumination - get_settings() returns a list of IlluminationSettings
         illumination_list = self._illumination_panel.get_settings()
         if not illumination_list:
-            QMessageBox.warning(self, "No Illumination", "Please enable at least one light source.")
+            QMessageBox.warning(
+                self, "No Illumination", "Please enable at least one light source."
+            )
             return
 
         # Get save settings
@@ -513,14 +569,22 @@ class TileCollectionDialog(PersistentDialog):
         # But the workflow files themselves must be local so Python can read and send them
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         # Find project root (where the workflows directory should be)
-        project_root = Path(__file__).parent.parent.parent.parent.parent  # Up from views/dialogs to project root
-        workflow_folder = project_root / "workflows" / f"{save_settings['save_directory']}_{timestamp}"
+        project_root = Path(
+            __file__
+        ).parent.parent.parent.parent.parent  # Up from views/dialogs to project root
+        workflow_folder = (
+            project_root
+            / "workflows"
+            / f"{save_settings['save_directory']}_{timestamp}"
+        )
 
         try:
             workflow_folder.mkdir(parents=True, exist_ok=True)
             logger.info(f"Created local workflow folder: {workflow_folder}")
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to create workflow folder:\n{e}")
+            QMessageBox.critical(
+                self, "Error", f"Failed to create workflow folder:\n{e}"
+            )
             return
 
         # Collect tiles based on mode:
@@ -541,19 +605,37 @@ class TileCollectionDialog(PersistentDialog):
                 z_min, z_max = self._get_z_range_for_tile(tile)
                 tiles_to_process.append((tile, primary_rotation, z_min, z_max))
 
-            logger.info(f"90° overlap mode: {len(primary_tiles)} primary tiles at R={primary_rotation}°")
+            logger.info(
+                f"90° overlap mode: {len(primary_tiles)} primary tiles at R={primary_rotation}°"
+            )
         else:
             # Single view mode: use per-tile Z range if available, else bounding box
             bbox_z_min = self._config.bounding_box.z_min if self._config else 0.0
             bbox_z_max = self._config.bounding_box.z_max if self._config else 10.0
 
             for tile in self._left_tiles:
-                z_min = tile.z_stack_min if tile.z_stack_min != tile.z_stack_max else bbox_z_min
-                z_max = tile.z_stack_max if tile.z_stack_min != tile.z_stack_max else bbox_z_max
+                z_min = (
+                    tile.z_stack_min
+                    if tile.z_stack_min != tile.z_stack_max
+                    else bbox_z_min
+                )
+                z_max = (
+                    tile.z_stack_max
+                    if tile.z_stack_min != tile.z_stack_max
+                    else bbox_z_max
+                )
                 tiles_to_process.append((tile, self._left_rotation, z_min, z_max))
             for tile in self._right_tiles:
-                z_min = tile.z_stack_min if tile.z_stack_min != tile.z_stack_max else bbox_z_min
-                z_max = tile.z_stack_max if tile.z_stack_min != tile.z_stack_max else bbox_z_max
+                z_min = (
+                    tile.z_stack_min
+                    if tile.z_stack_min != tile.z_stack_max
+                    else bbox_z_min
+                )
+                z_max = (
+                    tile.z_stack_max
+                    if tile.z_stack_min != tile.z_stack_max
+                    else bbox_z_max
+                )
                 tiles_to_process.append((tile, self._right_rotation, z_min, z_max))
 
         total = len(tiles_to_process)
@@ -570,17 +652,17 @@ class TileCollectionDialog(PersistentDialog):
         # Use FLATTENED directory names for server compatibility (single directory level)
         # Format: base_date_tile (e.g., Test_2026-01-27_X11.09_Y14.46)
         # Post-collection reorganization will move to nested structure if local access available
-        base_save_directory = save_settings['save_directory']
+        base_save_directory = save_settings["save_directory"]
         date_folder = datetime.now().strftime("%Y-%m-%d")
 
         # Track folders for post-collection reorganization
         # Maps flattened_name -> (date_folder, tile_folder) for later reorganization
         self._tile_folder_mapping: Dict[str, Tuple[str, str]] = {}
         self._base_save_directory = base_save_directory
-        self._save_drive = save_settings['save_drive']
+        self._save_drive = save_settings["save_drive"]
         # Get local path directly from save settings (configured via Browse button)
-        self._local_path = save_settings.get('local_path')
-        self._local_access_enabled = save_settings.get('local_access_enabled', False)
+        self._local_path = save_settings.get("local_path")
+        self._local_access_enabled = save_settings.get("local_access_enabled", False)
 
         created_files = []
         for i, (tile, rotation, z_min, z_max) in enumerate(tiles_to_process):
@@ -604,20 +686,25 @@ class TileCollectionDialog(PersistentDialog):
 
             # Create a copy of save_settings with the tile-specific directory
             tile_save_settings = save_settings.copy()
-            tile_save_settings['save_directory'] = tile_save_directory
+            tile_save_settings["save_directory"] = tile_save_directory
 
             # Create position
             position = Position(x=tile.x, y=tile.y, z=tile.z, r=rotation)
 
             # Build workflow text with per-tile Z range and per-tile save directory
             workflow_text = self._build_workflow_text(
-                workflow_name, position, illumination_list, tile_save_settings, z_min, z_max
+                workflow_name,
+                position,
+                illumination_list,
+                tile_save_settings,
+                z_min,
+                z_max,
             )
 
             # Save to file
             workflow_file = workflow_folder / f"{workflow_name}.txt"
             try:
-                with open(workflow_file, 'w') as f:
+                with open(workflow_file, "w") as f:
                     f.write(workflow_text)
                 created_files.append(workflow_file)
                 logger.info(f"Created workflow: {workflow_file.name}")
@@ -634,16 +721,18 @@ class TileCollectionDialog(PersistentDialog):
             if tiff_warning:
                 # Show warning with detailed information
                 warning_result = QMessageBox.warning(
-                    self, "TIFF File Size Warning",
+                    self,
+                    "TIFF File Size Warning",
                     tiff_warning + "\n\nDo you want to proceed anyway?",
                     QMessageBox.Yes | QMessageBox.No | QMessageBox.Help,
-                    QMessageBox.No
+                    QMessageBox.No,
                 )
 
                 if warning_result == QMessageBox.Help:
                     # Show detailed help
                     QMessageBox.information(
-                        self, "TIFF 4GB Limit Explained",
+                        self,
+                        "TIFF 4GB Limit Explained",
                         "Standard TIFF format uses 32-bit file offsets, which limits "
                         "files to 4GB (4,294,967,296 bytes).\n\n"
                         "When acquiring large Z-stacks, the server writes images to a "
@@ -654,18 +743,21 @@ class TileCollectionDialog(PersistentDialog):
                         "2. Increase the Z step size (fewer planes)\n"
                         "3. Use camera binning to reduce image size\n\n"
                         "For 2048x2048 16-bit images, the maximum safe number of planes "
-                        "is approximately 500 per acquisition."
+                        "is approximately 500 per acquisition.",
                     )
                     # Ask again after showing help
                     warning_result = QMessageBox.warning(
-                        self, "TIFF File Size Warning",
+                        self,
+                        "TIFF File Size Warning",
                         tiff_warning + "\n\nDo you want to proceed anyway?",
                         QMessageBox.Yes | QMessageBox.No,
-                        QMessageBox.No
+                        QMessageBox.No,
                     )
 
                 if warning_result != QMessageBox.Yes:
-                    logger.info("User cancelled workflow execution due to TIFF size warning - returning to dialog")
+                    logger.info(
+                        "User cancelled workflow execution due to TIFF size warning - returning to dialog"
+                    )
                     # Don't close the dialog - let user adjust settings and try again
                     # The workflow files were created but we return to let user modify parameters
                     return
@@ -676,8 +768,11 @@ class TileCollectionDialog(PersistentDialog):
             msg += "Would you like to execute them now?"
 
             result = QMessageBox.question(
-                self, "Workflows Created", msg,
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+                self,
+                "Workflows Created",
+                msg,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
             )
 
             if result == QMessageBox.Yes:
@@ -705,8 +800,8 @@ class TileCollectionDialog(PersistentDialog):
 
         # Check save format - only standard TIFF has 4GB limit
         save_settings = self._save_panel.get_settings()
-        save_format = save_settings.get('save_format', 'Tiff')
-        if save_format != 'Tiff':
+        save_format = save_settings.get("save_format", "Tiff")
+        if save_format != "Tiff":
             # BigTiff, Raw, and NotSaved don't have the 4GB limit
             logger.debug(f"Skipping TIFF size validation - format is {save_format}")
             return None
@@ -719,15 +814,15 @@ class TileCollectionDialog(PersistentDialog):
             stack_settings = self._zstack_panel.get_settings()
 
             # Get Z range from panel
-            z_range_mm = stack_settings.get('z_range_mm', 4.0)
-            z_step_um = stack_settings.get('z_step_um', 2.5)
+            z_range_mm = stack_settings.get("z_range_mm", 4.0)
+            z_step_um = stack_settings.get("z_step_um", 2.5)
 
             estimate = validate_workflow_params(
                 z_range_mm=z_range_mm,
                 z_step_um=z_step_um,
-                image_width=camera_settings.get('aoi_width', 2048),
-                image_height=camera_settings.get('aoi_height', 2048),
-                bytes_per_pixel=2
+                image_width=camera_settings.get("aoi_width", 2048),
+                image_height=camera_settings.get("aoi_height", 2048),
+                bytes_per_pixel=2,
             )
 
         if estimate.exceeds_limit:
@@ -739,9 +834,11 @@ class TileCollectionDialog(PersistentDialog):
             # Get recommended settings
             camera_settings = self._camera_panel.get_settings()
             max_planes, min_step_um = get_recommended_planes(
-                z_range_mm=abs(estimate.num_planes * 0.0025),  # Estimate from num_planes
-                image_width=camera_settings.get('aoi_width', 2048),
-                image_height=camera_settings.get('aoi_height', 2048)
+                z_range_mm=abs(
+                    estimate.num_planes * 0.0025
+                ),  # Estimate from num_planes
+                image_width=camera_settings.get("aoi_width", 2048),
+                image_height=camera_settings.get("aoi_height", 2048),
             )
 
             warning_msg = (
@@ -760,9 +857,15 @@ class TileCollectionDialog(PersistentDialog):
 
         return None
 
-    def _build_workflow_text(self, name: str, position: Position,
-                             illumination_list: List, save_settings: dict,
-                             z_min: float, z_max: float) -> str:
+    def _build_workflow_text(
+        self,
+        name: str,
+        position: Position,
+        illumination_list: List,
+        save_settings: dict,
+        z_min: float,
+        z_max: float,
+    ) -> str:
         """Build workflow file text content.
 
         Args:
@@ -780,13 +883,17 @@ class TileCollectionDialog(PersistentDialog):
 
         # Get camera settings
         camera_settings = self._camera_panel.get_settings()
-        exposure_us = camera_settings['exposure_us']
-        frame_rate = camera_settings['frame_rate']
+        exposure_us = camera_settings["exposure_us"]
+        frame_rate = camera_settings["frame_rate"]
 
         # Experiment Settings - 2 spaces for section tags, 4 spaces for fields
         lines.append("  <Experiment Settings>")
 
-        stack = self._zstack_panel.get_settings() if self._workflow_type == WorkflowType.ZSTACK else None
+        stack = (
+            self._zstack_panel.get_settings()
+            if self._workflow_type == WorkflowType.ZSTACK
+            else None
+        )
         plane_spacing = stack.z_step_um if stack else 1.0
 
         lines.append(f"    Plane spacing (um) = {plane_spacing}")
@@ -802,11 +909,19 @@ class TileCollectionDialog(PersistentDialog):
         lines.append(f"    Save image drive = {save_settings['save_drive']}")
         lines.append(f"    Save image directory = {save_settings['save_directory']}")
         lines.append("    Comments = Tile collection workflow")
-        lines.append(f"    Save max projection = {'true' if save_settings['save_mip'] else 'false'}")
-        lines.append(f"    Display max projection = {'true' if save_settings['display_mip'] else 'false'}")
-        lines.append(f"    Save image data = {save_settings['save_format'] if save_settings['save_enabled'] else 'NotSaved'}")
+        lines.append(
+            f"    Save max projection = {'true' if save_settings['save_mip'] else 'false'}"
+        )
+        lines.append(
+            f"    Display max projection = {'true' if save_settings['display_mip'] else 'false'}"
+        )
+        lines.append(
+            f"    Save image data = {save_settings['save_format'] if save_settings['save_enabled'] else 'NotSaved'}"
+        )
         lines.append("    Save to subfolders = false")
-        lines.append(f"    Work flow live view enabled = {'true' if save_settings['live_view'] else 'false'}")
+        lines.append(
+            f"    Work flow live view enabled = {'true' if save_settings['live_view'] else 'false'}"
+        )
         lines.append("  </Experiment Settings>")
         # Camera Settings
         lines.append("  <Camera Settings>")
@@ -839,14 +954,24 @@ class TileCollectionDialog(PersistentDialog):
         lines.append("    Auto update stack calculations = true")
         lines.append("    Date time stamp = ")
         lines.append("    Stack file name = ")
-        lines.append(f"    Camera 1 capture percentage = {camera_settings['cam1_capture_percentage']}")
-        lines.append(f"    Camera 1 capture mode (0 full, 1 from front, 2 from back, 3 none) = {camera_settings['cam1_capture_mode']}")
+        lines.append(
+            f"    Camera 1 capture percentage = {camera_settings['cam1_capture_percentage']}"
+        )
+        lines.append(
+            f"    Camera 1 capture mode (0 full, 1 from front, 2 from back, 3 none) = {camera_settings['cam1_capture_mode']}"
+        )
         lines.append("    Camera 1 capture range = ")
-        lines.append(f"    Camera 2 capture percentage = {camera_settings['cam2_capture_percentage']}")
-        lines.append(f"    Camera 2 capture mode (0 full, 1 from front, 2 from back, 3 none) = {camera_settings['cam2_capture_mode']}")
+        lines.append(
+            f"    Camera 2 capture percentage = {camera_settings['cam2_capture_percentage']}"
+        )
+        lines.append(
+            f"    Camera 2 capture mode (0 full, 1 from front, 2 from back, 3 none) = {camera_settings['cam2_capture_mode']}"
+        )
         lines.append("    Camera 2 capture range = ")
         # Stack option determines workflow type - ZStack for z-stack, Tile for tiling
-        stack_option = "ZStack" if self._workflow_type == WorkflowType.ZSTACK else "Snapshot"
+        stack_option = (
+            "ZStack" if self._workflow_type == WorkflowType.ZSTACK else "Snapshot"
+        )
         lines.append(f"    Stack option = {stack_option}")
         lines.append("    Stack option settings 1 = ")
         lines.append("    Stack option settings 2 = ")
@@ -902,14 +1027,18 @@ class TileCollectionDialog(PersistentDialog):
                 else:
                     power = 0.0
                     enabled = 0
-                lines.append(f"    Laser {laser_num} {laser_num}: {wavelength} MLE = {power:.2f} {enabled}")
+                lines.append(
+                    f"    Laser {laser_num} {laser_num}: {wavelength} MLE = {power:.2f} {enabled}"
+                )
             else:
                 # Empty laser slot
                 lines.append(f"    Laser {laser_num} = 0.00 0")
 
         # LED settings
         if led_settings:
-            lines.append(f"    LED_RGB_Board = {led_settings.led_intensity_percent:.2f} 1")
+            lines.append(
+                f"    LED_RGB_Board = {led_settings.led_intensity_percent:.2f} 1"
+            )
             lines.append("    LED selection = 0 0")
             lines.append("    LED DAC = 42000 0")
         else:
@@ -921,15 +1050,21 @@ class TileCollectionDialog(PersistentDialog):
         lines.append("  <Illumination Path>")
         # Get illumination path settings from panel's UI state (not get_settings which returns a list)
         illum_ui_state = self._illumination_panel.get_ui_state()
-        left_on = illum_ui_state.get('left_path', True)
-        right_on = illum_ui_state.get('right_path', False)
-        lines.append(f"    Left path = {'ON' if left_on else 'OFF'} {1 if left_on else 0}")
-        lines.append(f"    Right path = {'ON' if right_on else 'OFF'} {1 if right_on else 0}")
+        left_on = illum_ui_state.get("left_path", True)
+        right_on = illum_ui_state.get("right_path", False)
+        lines.append(
+            f"    Left path = {'ON' if left_on else 'OFF'} {1 if left_on else 0}"
+        )
+        lines.append(
+            f"    Right path = {'ON' if right_on else 'OFF'} {1 if right_on else 0}"
+        )
         lines.append("  </Illumination Path>")
         # Illumination Options
         lines.append("  <Illumination Options>")
-        multi_laser = illum_ui_state.get('multi_laser_mode', False)
-        lines.append(f"    Run stack with multiple lasers on = {'true' if multi_laser else 'false'}")
+        multi_laser = illum_ui_state.get("multi_laser_mode", False)
+        lines.append(
+            f"    Run stack with multiple lasers on = {'true' if multi_laser else 'false'}"
+        )
         lines.append("  </Illumination Options>")
         lines.append("</Workflow Settings>")
 
@@ -942,7 +1077,7 @@ class TileCollectionDialog(PersistentDialog):
         Returns:
             Sample View instance if available, None otherwise
         """
-        if self._app and hasattr(self._app, 'sample_view'):
+        if self._app and hasattr(self._app, "sample_view"):
             return self._app.sample_view
         return None
 
@@ -960,20 +1095,24 @@ class TileCollectionDialog(PersistentDialog):
             if position:
                 # Read Z-range from workflow file
                 z_min, z_max = read_z_range_from_workflow(wf_file)
-                position['z_min'] = z_min
-                position['z_max'] = z_max
+                position["z_min"] = z_min
+                position["z_max"] = z_max
                 z_stack_info.append(position)
 
         # Clear old data before starting new tile workflows
-        if hasattr(sample_view, 'clear_data_for_workflows'):
+        if hasattr(sample_view, "clear_data_for_workflows"):
             sample_view.clear_data_for_workflows()
 
         # Pass to Sample View for initialization
-        if hasattr(sample_view, 'prepare_for_tile_workflows'):
+        if hasattr(sample_view, "prepare_for_tile_workflows"):
             sample_view.prepare_for_tile_workflows(z_stack_info)
-            logger.info(f"Sample View prepared to receive {len(z_stack_info)} tile workflows")
+            logger.info(
+                f"Sample View prepared to receive {len(z_stack_info)} tile workflows"
+            )
         else:
-            logger.warning("Sample View does not have prepare_for_tile_workflows method")
+            logger.warning(
+                "Sample View does not have prepare_for_tile_workflows method"
+            )
 
     def _execute_workflows(self, workflow_files: List[Path]):
         """Execute the created workflow files using the workflow queue.
@@ -1001,48 +1140,63 @@ class TileCollectionDialog(PersistentDialog):
         try:
             if not self._app:
                 from PyQt5.QtWidgets import QApplication
+
                 app = QApplication.instance()
 
                 # Find the main application
-                if hasattr(app, 'flamingo_app'):
+                if hasattr(app, "flamingo_app"):
                     self._app = app.flamingo_app
                 else:
                     parent = self.parent()
                     while parent:
-                        if hasattr(parent, '_app'):
+                        if hasattr(parent, "_app"):
                             self._app = parent._app
                             break
                         parent = parent.parent()
 
             if not self._app:
-                logger.warning("Could not find FlamingoApplication - workflows saved but not executed")
+                logger.warning(
+                    "Could not find FlamingoApplication - workflows saved but not executed"
+                )
                 QMessageBox.information(
-                    self, "Workflows Saved",
-                    "Workflow files saved. Execute them manually from the Workflow tab."
+                    self,
+                    "Workflows Saved",
+                    "Workflow files saved. Execute them manually from the Workflow tab.",
                 )
                 return
 
             # Check for workflow queue service
-            has_queue = hasattr(self._app, 'workflow_queue_service')
-            queue_service = getattr(self._app, 'workflow_queue_service', None) if has_queue else None
-            logger.info(f"Workflow execution: has_queue_attr={has_queue}, queue_service_exists={queue_service is not None}")
+            has_queue = hasattr(self._app, "workflow_queue_service")
+            queue_service = (
+                getattr(self._app, "workflow_queue_service", None)
+                if has_queue
+                else None
+            )
+            logger.info(
+                f"Workflow execution: has_queue_attr={has_queue}, queue_service_exists={queue_service is not None}"
+            )
 
             if queue_service is not None:
                 logger.info("Using WorkflowQueueService for sequential execution")
                 self._execute_with_queue_service(workflow_files, add_to_sample_view)
             else:
                 # Fallback to workflow controller (sequential, but no completion detection)
-                logger.warning("WorkflowQueueService not available - using fallback execution")
+                logger.warning(
+                    "WorkflowQueueService not available - using fallback execution"
+                )
                 self._execute_workflows_fallback(workflow_files, add_to_sample_view)
 
         except Exception as e:
             logger.error(f"Error during workflow execution: {e}")
             QMessageBox.warning(
-                self, "Execution Error",
-                f"Error executing workflows: {e}\n\nWorkflow files have been saved."
+                self,
+                "Execution Error",
+                f"Error executing workflows: {e}\n\nWorkflow files have been saved.",
             )
 
-    def _execute_with_queue_service(self, workflow_files: List[Path], add_to_sample_view: bool):
+    def _execute_with_queue_service(
+        self, workflow_files: List[Path], add_to_sample_view: bool
+    ):
         """Execute workflows using WorkflowQueueService.
 
         Args:
@@ -1061,11 +1215,13 @@ class TileCollectionDialog(PersistentDialog):
                 tile_position = parse_workflow_position(wf_file)
                 if tile_position:
                     z_min, z_max = read_z_range_from_workflow(wf_file)
-                    tile_position['z_min'] = z_min
-                    tile_position['z_max'] = z_max
-                    tile_position['channels'] = read_laser_channels_from_workflow(wf_file)
-                    tile_position['z_velocity'] = read_z_velocity_from_workflow(wf_file)
-                    tile_position['num_planes'] = read_num_planes_from_workflow(wf_file)
+                    tile_position["z_min"] = z_min
+                    tile_position["z_max"] = z_max
+                    tile_position["channels"] = read_laser_channels_from_workflow(
+                        wf_file
+                    )
+                    tile_position["z_velocity"] = read_z_velocity_from_workflow(wf_file)
+                    tile_position["num_planes"] = read_num_planes_from_workflow(wf_file)
                     metadata = tile_position
             metadata_list.append(metadata)
 
@@ -1073,9 +1229,9 @@ class TileCollectionDialog(PersistentDialog):
         # Instead of using set_active_tile_position (signal-based, queued by exec_()),
         # we update tile metadata directly from the background thread (GIL-safe).
         camera_controller = None
-        if add_to_sample_view and hasattr(self._app, 'workflow_controller'):
+        if add_to_sample_view and hasattr(self._app, "workflow_controller"):
             wc = self._app.workflow_controller
-            camera_controller = getattr(wc, '_camera_controller', None)
+            camera_controller = getattr(wc, "_camera_controller", None)
 
             def on_workflow_start(file_path: Path, metadata: Dict):
                 """Signal a pending tile transition from the background thread.
@@ -1096,10 +1252,10 @@ class TileCollectionDialog(PersistentDialog):
         # Create progress dialog as a top-level window (no parent)
         # This allows the tile collection dialog to close while progress remains visible
         # Use 0-100 range for percentage-based progress
-        progress = QProgressDialog(
-            "Executing workflows...", "Cancel", 0, 100, None
-        )
-        progress.setWindowModality(Qt.NonModal)  # Non-modal so user can interact with other windows
+        progress = QProgressDialog("Executing workflows...", "Cancel", 0, 100, None)
+        progress.setWindowModality(
+            Qt.NonModal
+        )  # Non-modal so user can interact with other windows
         progress.setMinimumDuration(0)
         progress.setWindowTitle("Workflow Progress")
         progress.setMinimumWidth(400)
@@ -1112,7 +1268,9 @@ class TileCollectionDialog(PersistentDialog):
         total_workflows = len(workflow_files)
         current_workflow_images = [0, 0]  # [acquired, expected]
 
-        def calculate_overall_progress(workflow_idx: int, img_acquired: int, img_expected: int) -> int:
+        def calculate_overall_progress(
+            workflow_idx: int, img_acquired: int, img_expected: int
+        ) -> int:
             """Calculate overall progress 0-100 based on workflow and image progress."""
             if total_workflows == 0:
                 return 0
@@ -1120,15 +1278,23 @@ class TileCollectionDialog(PersistentDialog):
             base_progress = (workflow_idx / total_workflows) * 100
             # Progress within current workflow
             if img_expected > 0:
-                workflow_progress = (img_acquired / img_expected) * (100 / total_workflows)
+                workflow_progress = (img_acquired / img_expected) * (
+                    100 / total_workflows
+                )
             else:
                 workflow_progress = 0
-            return min(99, int(base_progress + workflow_progress))  # Cap at 99 until complete
+            return min(
+                99, int(base_progress + workflow_progress)
+            )  # Cap at 99 until complete
 
         # Connect signals for progress updates
         def update_sample_view(status, pct):
             """Update Sample View's workflow progress display."""
-            if self._app and hasattr(self._app, 'sample_view') and self._app.sample_view:
+            if (
+                self._app
+                and hasattr(self._app, "sample_view")
+                and self._app.sample_view
+            ):
                 self._app.sample_view.update_workflow_progress(status, pct, "--:--")
 
         def on_progress(current, total, message):
@@ -1175,10 +1341,12 @@ class TileCollectionDialog(PersistentDialog):
             self._queue_completed = True
             progress.setValue(100)  # 100% complete
             update_sample_view("Complete!", 100)  # Show 100% with status
-            QTimer.singleShot(1500, lambda: update_sample_view("Not Running", 0))  # Delayed reset
+            QTimer.singleShot(
+                1500, lambda: update_sample_view("Not Running", 0)
+            )  # Delayed reset
 
             # Clean up signals before closing progress dialog
-            if hasattr(progress, '_cleanup_signals'):
+            if hasattr(progress, "_cleanup_signals"):
                 progress._cleanup_signals()
 
             progress.close()  # Close the progress dialog
@@ -1186,34 +1354,38 @@ class TileCollectionDialog(PersistentDialog):
             # Clean up tile mode when all workflows are done
             if camera_controller:
                 camera_controller.clear_tile_mode()
-            if add_to_sample_view and hasattr(self._app, 'workflow_controller'):
+            if add_to_sample_view and hasattr(self._app, "workflow_controller"):
                 self._app.workflow_controller._suppress_tile_clear = False
 
             # Notify Sample View that tile workflows are complete
             if add_to_sample_view:
                 sample_view = self._get_sample_view_instance()
-                if sample_view and hasattr(sample_view, 'finish_tile_workflows'):
+                if sample_view and hasattr(sample_view, "finish_tile_workflows"):
                     sample_view.finish_tile_workflows()
 
             # Reorganize folders AFTER all workflows confirmed complete
             # This is safe because queue_completed only fires after all
             # SYSTEM_STATE_IDLE callbacks have been received
             reorganized = reorganize_tile_folders(
-                self._local_path, self._base_save_directory,
-                self._tile_folder_mapping, self._local_access_enabled
+                self._local_path,
+                self._base_save_directory,
+                self._tile_folder_mapping,
+                self._local_access_enabled,
             )
 
             # Use None as parent since tile collection dialog is closed
             if reorganized:
                 QMessageBox.information(
-                    None, "Execution Complete",
+                    None,
+                    "Execution Complete",
                     f"Successfully executed {len(workflow_files)} workflows.\n\n"
-                    f"Folders reorganized into nested structure for MIP Overview compatibility."
+                    f"Folders reorganized into nested structure for MIP Overview compatibility.",
                 )
             else:
                 QMessageBox.information(
-                    None, "Execution Complete",
-                    f"Successfully executed {len(workflow_files)} workflows."
+                    None,
+                    "Execution Complete",
+                    f"Successfully executed {len(workflow_files)} workflows.",
                 )
 
         def on_queue_cancelled():
@@ -1221,25 +1393,24 @@ class TileCollectionDialog(PersistentDialog):
             update_sample_view("Not Running", 0)
 
             # Clean up signals before closing progress dialog
-            if hasattr(progress, '_cleanup_signals'):
+            if hasattr(progress, "_cleanup_signals"):
                 progress._cleanup_signals()
 
             if camera_controller:
                 camera_controller.clear_tile_mode()
-            if add_to_sample_view and hasattr(self._app, 'workflow_controller'):
+            if add_to_sample_view and hasattr(self._app, "workflow_controller"):
                 self._app.workflow_controller._suppress_tile_clear = False
 
             # Notify Sample View that tile workflows are complete (even if cancelled)
             if add_to_sample_view:
                 sample_view = self._get_sample_view_instance()
-                if sample_view and hasattr(sample_view, 'finish_tile_workflows'):
+                if sample_view and hasattr(sample_view, "finish_tile_workflows"):
                     sample_view.finish_tile_workflows()
 
             progress.close()  # Close the progress dialog
             # Use None as parent since tile collection dialog is closed
             QMessageBox.warning(
-                None, "Execution Cancelled",
-                "Workflow queue was cancelled."
+                None, "Execution Cancelled", "Workflow queue was cancelled."
             )
 
         def on_error(message):
@@ -1248,7 +1419,9 @@ class TileCollectionDialog(PersistentDialog):
 
         # Connect signals
         queue_service.progress_updated.connect(on_progress)
-        queue_service.workflow_progress.connect(on_image_progress)  # Image-level progress
+        queue_service.workflow_progress.connect(
+            on_image_progress
+        )  # Image-level progress
         queue_service.workflow_completed.connect(on_workflow_completed)
         queue_service.queue_completed.connect(on_queue_completed)
         queue_service.queue_cancelled.connect(on_queue_cancelled)
@@ -1267,12 +1440,16 @@ class TileCollectionDialog(PersistentDialog):
                 wc = self._app.workflow_controller
                 wc._suppress_tile_clear = True  # Prevent per-workflow clear
                 camera_controller._workflow_tile_mode = True
-                camera_controller._current_tile_position = metadata_list[0] if metadata_list else {}
+                camera_controller._current_tile_position = (
+                    metadata_list[0] if metadata_list else {}
+                )
                 camera_controller._z_plane_counter = 0
                 # Start display timer on main thread (QTimer thread affinity)
                 if not camera_controller._display_timer.isActive():
                     camera_controller._workflow_started_timer = True
-                    camera_controller._display_timer.start(camera_controller._display_timer_interval_ms)
+                    camera_controller._display_timer.start(
+                        camera_controller._display_timer_interval_ms
+                    )
                 # Enlarge frame buffer so GUI-thread stalls don't cause frame loss
                 camera_controller.camera_service.set_tile_mode_buffer(True)
                 # Start data receiver (listen-only, no LIVE_VIEW_START)
@@ -1293,8 +1470,9 @@ class TileCollectionDialog(PersistentDialog):
                 update_sample_view("Not Running", 0)
                 progress.close()
                 QMessageBox.warning(
-                    None, "Queue Error",
-                    "Failed to start workflow queue. Check logs for details."
+                    None,
+                    "Queue Error",
+                    "Failed to start workflow queue. Check logs for details.",
                 )
                 return
 
@@ -1321,10 +1499,12 @@ class TileCollectionDialog(PersistentDialog):
             logger.error(f"Error setting up workflow execution: {e}")
             if camera_controller and camera_controller._workflow_tile_mode:
                 camera_controller.clear_tile_mode()
-            if add_to_sample_view and hasattr(self._app, 'workflow_controller'):
+            if add_to_sample_view and hasattr(self._app, "workflow_controller"):
                 self._app.workflow_controller._suppress_tile_clear = False
 
-    def _execute_workflows_fallback(self, workflow_files: List[Path], add_to_sample_view: bool):
+    def _execute_workflows_fallback(
+        self, workflow_files: List[Path], add_to_sample_view: bool
+    ):
         """Fallback workflow execution without queue service.
 
         Uses simple sequential execution with estimated timing.
@@ -1334,7 +1514,9 @@ class TileCollectionDialog(PersistentDialog):
             workflow_files: List of workflow file paths
             add_to_sample_view: Whether to integrate with Sample View
         """
-        progress = QProgressDialog("Executing workflows...", "Cancel", 0, len(workflow_files), self)
+        progress = QProgressDialog(
+            "Executing workflows...", "Cancel", 0, len(workflow_files), self
+        )
         progress.setWindowModality(Qt.WindowModal)
 
         for i, workflow_file in enumerate(workflow_files):
@@ -1350,15 +1532,19 @@ class TileCollectionDialog(PersistentDialog):
                 tile_position = parse_workflow_position(workflow_file)
                 if tile_position:
                     z_min, z_max = read_z_range_from_workflow(workflow_file)
-                    tile_position['z_min'] = z_min
-                    tile_position['z_max'] = z_max
+                    tile_position["z_min"] = z_min
+                    tile_position["z_max"] = z_max
 
             try:
-                if hasattr(self._app, 'workflow_controller'):
+                if hasattr(self._app, "workflow_controller"):
                     controller = self._app.workflow_controller
                     success, msg = controller.load_workflow(str(workflow_file))
                     if success:
-                        if add_to_sample_view and tile_position and hasattr(controller, 'set_active_tile_position'):
+                        if (
+                            add_to_sample_view
+                            and tile_position
+                            and hasattr(controller, "set_active_tile_position")
+                        ):
                             controller.set_active_tile_position(tile_position)
 
                         success, msg = controller.start_workflow()
@@ -1366,10 +1552,19 @@ class TileCollectionDialog(PersistentDialog):
                             logger.info(f"Started workflow: {workflow_file.name}")
                             # Estimate workflow time based on Z range
                             # This is a rough estimate - actual time depends on many factors
-                            z_range = (tile_position['z_max'] - tile_position['z_min']) if tile_position else 1.0
-                            estimated_time = max(5.0, z_range * 10.0)  # ~10s per mm of Z
-                            logger.info(f"Waiting {estimated_time:.1f}s for workflow completion...")
+                            z_range = (
+                                (tile_position["z_max"] - tile_position["z_min"])
+                                if tile_position
+                                else 1.0
+                            )
+                            estimated_time = max(
+                                5.0, z_range * 10.0
+                            )  # ~10s per mm of Z
+                            logger.info(
+                                f"Waiting {estimated_time:.1f}s for workflow completion..."
+                            )
                             import time
+
                             time.sleep(estimated_time)
                         else:
                             logger.error(f"Failed to start {workflow_file.name}: {msg}")
@@ -1380,21 +1575,22 @@ class TileCollectionDialog(PersistentDialog):
 
         progress.setValue(len(workflow_files))
         QMessageBox.information(
-            self, "Execution Complete",
+            self,
+            "Execution Complete",
             f"Executed {len(workflow_files)} workflows.\n\n"
             "Note: Used fallback timing. For better reliability, "
-            "ensure WorkflowQueueService is configured."
+            "ensure WorkflowQueueService is configured.",
         )
 
     def _get_config_service(self):
         """Get ConfigurationService from application."""
-        if self._app and hasattr(self._app, 'config_service'):
+        if self._app and hasattr(self._app, "config_service"):
             return self._app.config_service
         return None
 
     def _get_geometry_manager(self):
         """Get WindowGeometryManager from application."""
-        if self._app and hasattr(self._app, 'geometry_manager'):
+        if self._app and hasattr(self._app, "geometry_manager"):
             return self._app.geometry_manager
         return None
 
@@ -1406,20 +1602,19 @@ class TileCollectionDialog(PersistentDialog):
 
         state = {
             # Dialog-level settings
-            'workflow_type': self._type_combo.currentIndex(),
-            'name_prefix': self._name_prefix.text(),
-            'add_to_sample_view': self._add_to_sample_view_checkbox.isChecked(),
-
+            "workflow_type": self._type_combo.currentIndex(),
+            "name_prefix": self._name_prefix.text(),
+            "add_to_sample_view": self._add_to_sample_view_checkbox.isChecked(),
             # Panel settings (using ui_state methods for raw dict persistence)
-            'illumination': self._illumination_panel.get_ui_state(),
-            'camera': self._camera_panel.get_settings(),
-            'zstack': self._zstack_panel.get_ui_state(),
-            'save': self._save_panel.get_settings(),
+            "illumination": self._illumination_panel.get_ui_state(),
+            "camera": self._camera_panel.get_settings(),
+            "zstack": self._zstack_panel.get_ui_state(),
+            "save": self._save_panel.get_settings(),
         }
 
         # Primary direction (only if dual view mode available)
         if self._has_dual_view:
-            state['primary_is_left'] = self._primary_is_left
+            state["primary_is_left"] = self._primary_is_left
 
         try:
             gm.save_dialog_state("TileCollectionDialog", state)
@@ -1447,49 +1642,49 @@ class TileCollectionDialog(PersistentDialog):
         logger.debug("Restoring TileCollectionDialog state")
 
         # Restore workflow type
-        if 'workflow_type' in state:
-            idx = state['workflow_type']
+        if "workflow_type" in state:
+            idx = state["workflow_type"]
             self._type_combo.setCurrentIndex(idx)
             self._on_type_changed(idx)
 
         # Restore name prefix
-        if 'name_prefix' in state:
-            self._name_prefix.setText(state['name_prefix'])
+        if "name_prefix" in state:
+            self._name_prefix.setText(state["name_prefix"])
 
         # Restore add to sample view checkbox
-        if 'add_to_sample_view' in state:
-            self._add_to_sample_view_checkbox.setChecked(state['add_to_sample_view'])
+        if "add_to_sample_view" in state:
+            self._add_to_sample_view_checkbox.setChecked(state["add_to_sample_view"])
 
         # Restore panel settings
-        if 'illumination' in state:
+        if "illumination" in state:
             try:
-                self._illumination_panel.set_ui_state(state['illumination'])
+                self._illumination_panel.set_ui_state(state["illumination"])
             except Exception as e:
                 logger.warning(f"Failed to restore illumination settings: {e}")
 
-        if 'camera' in state:
+        if "camera" in state:
             try:
-                self._camera_panel.set_settings(state['camera'])
+                self._camera_panel.set_settings(state["camera"])
             except Exception as e:
                 logger.warning(f"Failed to restore camera settings: {e}")
 
-        if 'zstack' in state:
+        if "zstack" in state:
             try:
-                self._zstack_panel.set_ui_state(state['zstack'])
+                self._zstack_panel.set_ui_state(state["zstack"])
             except Exception as e:
                 logger.warning(f"Failed to restore zstack settings: {e}")
 
-        if 'save' in state:
+        if "save" in state:
             try:
-                self._save_panel.set_settings(state['save'])
+                self._save_panel.set_settings(state["save"])
             except Exception as e:
                 logger.warning(f"Failed to restore save settings: {e}")
 
         # Restore primary direction
-        if 'primary_is_left' in state and self._has_dual_view:
-            self._primary_is_left = state['primary_is_left']
+        if "primary_is_left" in state and self._has_dual_view:
+            self._primary_is_left = state["primary_is_left"]
             # Update combo box
-            if hasattr(self, '_direction_combo'):
+            if hasattr(self, "_direction_combo"):
                 self._direction_combo.setCurrentIndex(0 if self._primary_is_left else 1)
 
     def accept(self):

@@ -6,7 +6,7 @@ extracted from tile_collection_dialog.py.
 
 import logging
 import math
-from typing import List, Dict, Tuple
+from typing import Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ def calculate_tile_z_ranges(
     primary_tiles: List,
     secondary_tiles: List,
     fallback_z_min: float,
-    fallback_z_max: float
+    fallback_z_max: float,
 ) -> Dict[Tuple[int, int], Tuple[float, float]]:
     """Calculate Z range for each primary tile based on secondary tile overlap.
 
@@ -39,8 +39,10 @@ def calculate_tile_z_ranges(
     """
     # If no secondary tiles, use fallback range for all primary tiles
     if not secondary_tiles:
-        logger.info(f"No secondary tiles - using fallback Z range [{fallback_z_min:.3f}, {fallback_z_max:.3f}] mm "
-                   f"for all {len(primary_tiles)} primary tiles")
+        logger.info(
+            f"No secondary tiles - using fallback Z range [{fallback_z_min:.3f}, {fallback_z_max:.3f}] mm "
+            f"for all {len(primary_tiles)} primary tiles"
+        )
         return {
             (tile.tile_x_idx, tile.tile_y_idx): (fallback_z_min, fallback_z_max)
             for tile in primary_tiles
@@ -65,14 +67,16 @@ def calculate_tile_z_ranges(
             dx = p_tile.x - s_tile.x
             dy = p_tile.y - s_tile.y
             dz = p_tile.z - s_tile.z
-            distance = math.sqrt(dx*dx + dy*dy + dz*dz)
+            distance = math.sqrt(dx * dx + dy * dy + dz * dz)
 
             # If tiles are within overlap threshold, use secondary's Z-stack bounds
             if distance < overlap_threshold:
                 # Use the Z-stack bounds from the secondary tile
                 # These represent the actual Z range that was scanned
                 if s_tile.z_stack_min != 0.0 or s_tile.z_stack_max != 0.0:
-                    overlapping_z_bounds.append((s_tile.z_stack_min, s_tile.z_stack_max))
+                    overlapping_z_bounds.append(
+                        (s_tile.z_stack_min, s_tile.z_stack_max)
+                    )
                     logger.debug(
                         f"Tile ({p_tile.tile_x_idx},{p_tile.tile_y_idx}) overlaps with secondary tile at "
                         f"({s_tile.x:.3f},{s_tile.y:.3f},{s_tile.z:.3f}), distance={distance*1000:.1f}µm, "
@@ -103,18 +107,24 @@ def calculate_tile_z_ranges(
 
         # Validate Z range
         if z_max <= z_min:
-            logger.error(f"Invalid Z range for tile ({p_tile.tile_x_idx},{p_tile.tile_y_idx}): "
-                        f"[{z_min:.3f}, {z_max:.3f}] - z_max <= z_min!")
+            logger.error(
+                f"Invalid Z range for tile ({p_tile.tile_x_idx},{p_tile.tile_y_idx}): "
+                f"[{z_min:.3f}, {z_max:.3f}] - z_max <= z_min!"
+            )
         elif abs(z_max - z_min) < 0.001:  # Less than 1 um
-            logger.warning(f"Very small Z range for tile ({p_tile.tile_x_idx},{p_tile.tile_y_idx}): "
-                          f"{(z_max-z_min)*1000:.1f} µm")
+            logger.warning(
+                f"Very small Z range for tile ({p_tile.tile_x_idx},{p_tile.tile_y_idx}): "
+                f"{(z_max-z_min)*1000:.1f} µm"
+            )
 
         tile_z_ranges[(p_tile.tile_x_idx, p_tile.tile_y_idx)] = (z_min, z_max)
 
     # Log summary
     overlap_count = len(tile_z_ranges) - fallback_count
-    logger.info(f"Z range calculation complete: {overlap_count} tiles with overlap-based ranges, "
-               f"{fallback_count} tiles using fallback")
+    logger.info(
+        f"Z range calculation complete: {overlap_count} tiles with overlap-based ranges, "
+        f"{fallback_count} tiles using fallback"
+    )
 
     return tile_z_ranges
 
@@ -136,14 +146,14 @@ def estimate_fov_from_tiles(primary_tiles: List, secondary_tiles: List) -> float
     # Try to estimate from primary tiles first (same rotation)
     if len(primary_tiles) >= 2:
         fov = min_distance_in_tile_set(primary_tiles)
-        if fov < float('inf'):
+        if fov < float("inf"):
             logger.debug(f"FOV estimated from primary tiles: {fov*1000:.1f} µm")
             return fov
 
     # Fallback to secondary tiles if primary insufficient
     if len(secondary_tiles) >= 2:
         fov = min_distance_in_tile_set(secondary_tiles)
-        if fov < float('inf'):
+        if fov < float("inf"):
             logger.debug(f"FOV estimated from secondary tiles: {fov*1000:.1f} µm")
             return fov
 
@@ -162,16 +172,16 @@ def min_distance_in_tile_set(tiles: List) -> float:
         Minimum distance in mm, or inf if no valid distance found
     """
     if len(tiles) < 2:
-        return float('inf')
+        return float("inf")
 
-    min_distance = float('inf')
+    min_distance = float("inf")
 
     for i, tile1 in enumerate(tiles):
-        for tile2 in tiles[i+1:]:
+        for tile2 in tiles[i + 1 :]:
             # Calculate Euclidean distance in XY plane
             dx = tile1.x - tile2.x
             dy = tile1.y - tile2.y
-            distance = math.sqrt(dx*dx + dy*dy)
+            distance = math.sqrt(dx * dx + dy * dy)
 
             # Skip zero distances (same tile) and update minimum
             if distance > 1e-6 and distance < min_distance:

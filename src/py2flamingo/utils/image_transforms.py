@@ -7,13 +7,16 @@ This module provides functions for transforming microscope images:
 - Downsampling
 - Colormap application
 """
-import numpy as np
-from typing import Tuple, Optional
+
 from enum import Enum
+from typing import Optional, Tuple
+
+import numpy as np
 
 
 class Rotation(Enum):
     """Rotation angles for image display."""
+
     NONE = 0
     CW_90 = 90
     CW_180 = 180
@@ -22,6 +25,7 @@ class Rotation(Enum):
 
 class Colormap(Enum):
     """Available colormaps for image display."""
+
     GRAY = "gray"
     VIRIDIS = "viridis"
     PLASMA = "plasma"
@@ -60,9 +64,9 @@ def rotate_image(image: np.ndarray, rotation: Rotation) -> np.ndarray:
     return np.rot90(image, k=-k)
 
 
-def flip_image(image: np.ndarray,
-               flip_horizontal: bool = False,
-               flip_vertical: bool = False) -> np.ndarray:
+def flip_image(
+    image: np.ndarray, flip_horizontal: bool = False, flip_vertical: bool = False
+) -> np.ndarray:
     """
     Flip image horizontally and/or vertically.
 
@@ -123,9 +127,9 @@ def downsample_image(image: np.ndarray, factor: int) -> np.ndarray:
         raise ValueError(f"Expected 2D or 3D image, got {image.ndim}D")
 
 
-def normalize_to_uint8(image: np.ndarray,
-                       percentile_low: float = 1.0,
-                       percentile_high: float = 99.0) -> np.ndarray:
+def normalize_to_uint8(
+    image: np.ndarray, percentile_low: float = 1.0, percentile_high: float = 99.0
+) -> np.ndarray:
     """
     Normalize image to uint8 range using percentile clipping.
 
@@ -198,8 +202,8 @@ def apply_colormap(image: np.ndarray, colormap: Colormap) -> np.ndarray:
 
     # Import matplotlib colormap
     try:
-        import matplotlib.pyplot as plt
         import matplotlib.cm as cm
+        import matplotlib.pyplot as plt
     except ImportError:
         # Fallback to grayscale if matplotlib not available
         return image
@@ -223,13 +227,15 @@ def apply_colormap(image: np.ndarray, colormap: Colormap) -> np.ndarray:
     return img_rgb
 
 
-def apply_transforms(image: np.ndarray,
-                    rotation: Rotation = Rotation.NONE,
-                    flip_horizontal: bool = False,
-                    flip_vertical: bool = False,
-                    downsample_factor: int = 1,
-                    colormap: Colormap = Colormap.GRAY,
-                    normalize: bool = True) -> np.ndarray:
+def apply_transforms(
+    image: np.ndarray,
+    rotation: Rotation = Rotation.NONE,
+    flip_horizontal: bool = False,
+    flip_vertical: bool = False,
+    downsample_factor: int = 1,
+    colormap: Colormap = Colormap.GRAY,
+    normalize: bool = True,
+) -> np.ndarray:
     """
     Apply complete transformation pipeline to image.
 

@@ -5,19 +5,27 @@ Provides UI for multi-angle/OPT acquisition parameters.
 """
 
 import logging
-from typing import Optional, Dict, Any
 from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QSpinBox, QDoubleSpinBox, QGroupBox, QGridLayout, QFrame
-)
 from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtWidgets import (
+    QDoubleSpinBox,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 @dataclass
 class MultiAngleSettings:
     """Settings for multi-angle acquisition."""
+
     num_angles: int = 1
     angle_step_degrees: float = 0.0
 
@@ -102,9 +110,11 @@ class MultiAnglePanel(QWidget):
         grid.addWidget(self._coverage_label, 4, 1)
 
         # Info text
-        info_label = QLabel("Multi-angle acquisition rotates the sample and captures "
-                           "images at each angle. For OPT (Optical Projection Tomography), "
-                           "typically use 360+ angles for good reconstruction.")
+        info_label = QLabel(
+            "Multi-angle acquisition rotates the sample and captures "
+            "images at each angle. For OPT (Optical Projection Tomography), "
+            "typically use 360+ angles for good reconstruction."
+        )
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: gray; font-size: 9pt;")
         grid.addWidget(info_label, 5, 0, 1, 2)
@@ -196,8 +206,8 @@ class MultiAnglePanel(QWidget):
             Dictionary for workflow file Experiment Settings section
         """
         return {
-            'Number of angles': self._num_angles.value(),
-            'Angle step size': self._angle_step.value(),
+            "Number of angles": self._num_angles.value(),
+            "Angle step size": self._angle_step.value(),
         }
 
     def set_settings(self, settings: MultiAngleSettings) -> None:

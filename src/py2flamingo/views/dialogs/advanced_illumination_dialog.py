@@ -5,17 +5,23 @@ such as light path selection, multi-laser mode, and LED DAC values.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel,
-    QDoubleSpinBox, QComboBox, QCheckBox, QGroupBox,
-    QPushButton, QDialogButtonBox
-)
-from py2flamingo.services.window_geometry_manager import PersistentDialog
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+)
 
+from py2flamingo.services.window_geometry_manager import PersistentDialog
 
 LED_COLORS = ["Red", "Green", "Blue", "White"]
 
@@ -115,9 +121,7 @@ class AdvancedIlluminationDialog(PersistentDialog):
         layout.addStretch()
 
         # Dialog buttons
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
-        )
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
@@ -134,10 +138,10 @@ class AdvancedIlluminationDialog(PersistentDialog):
             Dictionary with settings
         """
         return {
-            'multi_laser_mode': self._multi_laser_mode.isChecked(),
-            'led_color_index': self._led_color.currentIndex(),
-            'led_color': self._led_color.currentText(),
-            'led_dac_percent': self._led_brightness.value(),
+            "multi_laser_mode": self._multi_laser_mode.isChecked(),
+            "led_color_index": self._led_color.currentIndex(),
+            "led_color": self._led_color.currentText(),
+            "led_dac_percent": self._led_brightness.value(),
         }
 
     def set_settings(self, settings: Dict[str, Any]) -> None:
@@ -146,12 +150,12 @@ class AdvancedIlluminationDialog(PersistentDialog):
         Args:
             settings: Dictionary with settings to apply
         """
-        if 'multi_laser_mode' in settings:
-            self._multi_laser_mode.setChecked(settings['multi_laser_mode'])
-        if 'led_color_index' in settings:
-            self._led_color.setCurrentIndex(settings['led_color_index'])
-        if 'led_dac_percent' in settings:
-            self._led_brightness.setValue(settings['led_dac_percent'])
+        if "multi_laser_mode" in settings:
+            self._multi_laser_mode.setChecked(settings["multi_laser_mode"])
+        if "led_color_index" in settings:
+            self._led_color.setCurrentIndex(settings["led_color_index"])
+        if "led_dac_percent" in settings:
+            self._led_brightness.setValue(settings["led_dac_percent"])
 
     # Individual property accessors
     @property

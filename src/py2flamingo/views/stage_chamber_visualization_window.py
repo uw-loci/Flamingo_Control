@@ -11,14 +11,24 @@ integrated with the Stage Control tab.
 import logging
 import math
 from typing import TYPE_CHECKING
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QGroupBox, QGridLayout, QMessageBox
-)
-from PyQt5.QtCore import Qt, pyqtSlot, QEvent
-from PyQt5.QtGui import QFont, QShowEvent, QHideEvent
 
-from py2flamingo.views.widgets.stage_chamber_visualization import StageChamberVisualizationWidget
+from PyQt5.QtCore import QEvent, Qt, pyqtSlot
+from PyQt5.QtGui import QFont, QHideEvent, QShowEvent
+from PyQt5.QtWidgets import (
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
+
 from py2flamingo.models import Position
+from py2flamingo.views.widgets.stage_chamber_visualization import (
+    StageChamberVisualizationWidget,
+)
 
 if TYPE_CHECKING:
     from py2flamingo.services.window_geometry_manager import WindowGeometryManager
@@ -39,8 +49,12 @@ class StageChamberVisualizationWindow(QWidget):
     - Automatic enable/disable based on motion state
     """
 
-    def __init__(self, movement_controller, geometry_manager: 'WindowGeometryManager' = None,
-                 parent=None):
+    def __init__(
+        self,
+        movement_controller,
+        geometry_manager: "WindowGeometryManager" = None,
+        parent=None,
+    ):
         """
         Initialize stage chamber visualization window.
 
@@ -60,17 +74,31 @@ class StageChamberVisualizationWindow(QWidget):
         self.stage_limits = self.movement_controller.get_stage_limits()
 
         # Log stage limits for debugging (console + log file)
-        print(f"[StageChamberVisualizationWindow] Received stage limits from MovementController:")
-        print(f"  X: {self.stage_limits['x']['min']:.2f} to {self.stage_limits['x']['max']:.2f} mm")
-        print(f"  Y: {self.stage_limits['y']['min']:.2f} to {self.stage_limits['y']['max']:.2f} mm")
-        print(f"  Z: {self.stage_limits['z']['min']:.2f} to {self.stage_limits['z']['max']:.2f} mm")
-        print(f"  R: {self.stage_limits['r']['min']:.1f} to {self.stage_limits['r']['max']:.1f} degrees")
+        print(
+            f"[StageChamberVisualizationWindow] Received stage limits from MovementController:"
+        )
+        print(
+            f"  X: {self.stage_limits['x']['min']:.2f} to {self.stage_limits['x']['max']:.2f} mm"
+        )
+        print(
+            f"  Y: {self.stage_limits['y']['min']:.2f} to {self.stage_limits['y']['max']:.2f} mm"
+        )
+        print(
+            f"  Z: {self.stage_limits['z']['min']:.2f} to {self.stage_limits['z']['max']:.2f} mm"
+        )
+        print(
+            f"  R: {self.stage_limits['r']['min']:.1f} to {self.stage_limits['r']['max']:.1f} degrees"
+        )
 
-        self.logger.info(f"[StageChamberVisualizationWindow] Received stage limits from MovementController:")
-        self.logger.info(f"  X={self.stage_limits['x']['min']:.2f}-{self.stage_limits['x']['max']:.2f}, "
-                        f"Y={self.stage_limits['y']['min']:.2f}-{self.stage_limits['y']['max']:.2f}, "
-                        f"Z={self.stage_limits['z']['min']:.2f}-{self.stage_limits['z']['max']:.2f}, "
-                        f"R={self.stage_limits['r']['min']:.1f}-{self.stage_limits['r']['max']:.1f}")
+        self.logger.info(
+            f"[StageChamberVisualizationWindow] Received stage limits from MovementController:"
+        )
+        self.logger.info(
+            f"  X={self.stage_limits['x']['min']:.2f}-{self.stage_limits['x']['max']:.2f}, "
+            f"Y={self.stage_limits['y']['min']:.2f}-{self.stage_limits['y']['max']:.2f}, "
+            f"Z={self.stage_limits['z']['min']:.2f}-{self.stage_limits['z']['max']:.2f}, "
+            f"R={self.stage_limits['r']['min']:.1f}-{self.stage_limits['r']['max']:.1f}"
+        )
 
         # Track motion state for enabling/disabling controls
         self._controls_enabled = True
@@ -136,8 +164,9 @@ class StageChamberVisualizationWindow(QWidget):
         grid.setSpacing(10)
 
         # Helper to create slider with labels
-        def create_axis_slider(axis_name: str, min_val: float, max_val: float,
-                              decimals: int, suffix: str) -> tuple:
+        def create_axis_slider(
+            axis_name: str, min_val: float, max_val: float, decimals: int, suffix: str
+        ) -> tuple:
             """Create slider row with labels."""
             # Axis label
             axis_label = QLabel(f"<b>{axis_name}:</b>")
@@ -151,7 +180,7 @@ class StageChamberVisualizationWindow(QWidget):
 
             # Slider (scaled to integer range for precision)
             # Scale factor: 10^decimals to preserve decimal precision
-            scale_factor = 10 ** decimals
+            scale_factor = 10**decimals
             slider = QSlider(Qt.Horizontal)
             slider.setMinimum(int(min_val * scale_factor))
             slider.setMaximum(int(max_val * scale_factor))
@@ -179,8 +208,9 @@ class StageChamberVisualizationWindow(QWidget):
 
         # X axis slider
         row = 0
-        x_widgets = create_axis_slider("X", self.stage_limits['x']['min'],
-                                      self.stage_limits['x']['max'], 3, "mm")
+        x_widgets = create_axis_slider(
+            "X", self.stage_limits["x"]["min"], self.stage_limits["x"]["max"], 3, "mm"
+        )
         self.x_slider = x_widgets[2]
         self.x_value_label = x_widgets[4]
         self.x_scale_factor = x_widgets[5]
@@ -192,8 +222,9 @@ class StageChamberVisualizationWindow(QWidget):
 
         # Y axis slider
         row = 1
-        y_widgets = create_axis_slider("Y", self.stage_limits['y']['min'],
-                                      self.stage_limits['y']['max'], 3, "mm")
+        y_widgets = create_axis_slider(
+            "Y", self.stage_limits["y"]["min"], self.stage_limits["y"]["max"], 3, "mm"
+        )
         self.y_slider = y_widgets[2]
         self.y_value_label = y_widgets[4]
         self.y_scale_factor = y_widgets[5]
@@ -205,8 +236,9 @@ class StageChamberVisualizationWindow(QWidget):
 
         # Z axis slider
         row = 2
-        z_widgets = create_axis_slider("Z", self.stage_limits['z']['min'],
-                                      self.stage_limits['z']['max'], 3, "mm")
+        z_widgets = create_axis_slider(
+            "Z", self.stage_limits["z"]["min"], self.stage_limits["z"]["max"], 3, "mm"
+        )
         self.z_slider = z_widgets[2]
         self.z_value_label = z_widgets[4]
         self.z_scale_factor = z_widgets[5]
@@ -218,8 +250,9 @@ class StageChamberVisualizationWindow(QWidget):
 
         # R axis slider (rotation)
         row = 3
-        r_widgets = create_axis_slider("R", self.stage_limits['r']['min'],
-                                      self.stage_limits['r']['max'], 2, "°")
+        r_widgets = create_axis_slider(
+            "R", self.stage_limits["r"]["min"], self.stage_limits["r"]["max"], 2, "°"
+        )
         self.r_slider = r_widgets[2]
         self.r_value_label = r_widgets[4]
         self.r_scale_factor = r_widgets[5]
@@ -248,17 +281,11 @@ class StageChamberVisualizationWindow(QWidget):
     def _connect_signals(self) -> None:
         """Connect to movement controller signals."""
         # Connect position_changed signal to update visualization and sliders
-        self.movement_controller.position_changed.connect(
-            self._on_position_changed
-        )
+        self.movement_controller.position_changed.connect(self._on_position_changed)
 
         # Connect motion state signals for enable/disable synchronization
-        self.movement_controller.motion_started.connect(
-            self._on_motion_started
-        )
-        self.movement_controller.motion_stopped.connect(
-            self._on_motion_stopped
-        )
+        self.movement_controller.motion_started.connect(self._on_motion_started)
+        self.movement_controller.motion_stopped.connect(self._on_motion_stopped)
 
         # Connect click-to-move signals from visualization panels
         self.visualization_widget.xz_panel.click_position.connect(
@@ -295,7 +322,7 @@ class StageChamberVisualizationWindow(QWidget):
         if self._controls_enabled:
             x_value = self.x_slider.value() / self.x_scale_factor
             try:
-                self.movement_controller.move_absolute('x', x_value, verify=False)
+                self.movement_controller.move_absolute("x", x_value, verify=False)
                 self.logger.debug(f"X slider released - moving to {x_value:.3f} mm")
             except Exception as e:
                 self.logger.error(f"Error moving X axis: {e}")
@@ -305,7 +332,7 @@ class StageChamberVisualizationWindow(QWidget):
         if self._controls_enabled:
             y_value = self.y_slider.value() / self.y_scale_factor
             try:
-                self.movement_controller.move_absolute('y', y_value, verify=False)
+                self.movement_controller.move_absolute("y", y_value, verify=False)
                 self.logger.debug(f"Y slider released - moving to {y_value:.3f} mm")
             except Exception as e:
                 self.logger.error(f"Error moving Y axis: {e}")
@@ -315,7 +342,7 @@ class StageChamberVisualizationWindow(QWidget):
         if self._controls_enabled:
             z_value = self.z_slider.value() / self.z_scale_factor
             try:
-                self.movement_controller.move_absolute('z', z_value, verify=False)
+                self.movement_controller.move_absolute("z", z_value, verify=False)
                 self.logger.debug(f"Z slider released - moving to {z_value:.3f} mm")
             except Exception as e:
                 self.logger.error(f"Error moving Z axis: {e}")
@@ -325,7 +352,7 @@ class StageChamberVisualizationWindow(QWidget):
         if self._controls_enabled:
             r_value = self.r_slider.value() / self.r_scale_factor
             try:
-                self.movement_controller.move_absolute('r', r_value, verify=False)
+                self.movement_controller.move_absolute("r", r_value, verify=False)
                 self.logger.debug(f"R slider released - moving to {r_value:.2f}°")
             except Exception as e:
                 self.logger.error(f"Error moving R axis: {e}")
@@ -371,7 +398,11 @@ class StageChamberVisualizationWindow(QWidget):
                 return
 
             # Validate target coordinates are within stage limits (double-check)
-            if not (self.stage_limits['x']['min'] <= x_target <= self.stage_limits['x']['max']):
+            if not (
+                self.stage_limits["x"]["min"]
+                <= x_target
+                <= self.stage_limits["x"]["max"]
+            ):
                 self.logger.error(
                     f"Click X={x_target:.3f} is outside valid range "
                     f"[{self.stage_limits['x']['min']:.3f}, {self.stage_limits['x']['max']:.3f}] - "
@@ -380,7 +411,11 @@ class StageChamberVisualizationWindow(QWidget):
                 self.visualization_widget.xz_panel.clear_target_position()
                 return
 
-            if not (self.stage_limits['z']['min'] <= z_target <= self.stage_limits['z']['max']):
+            if not (
+                self.stage_limits["z"]["min"]
+                <= z_target
+                <= self.stage_limits["z"]["max"]
+            ):
                 self.logger.error(
                     f"Click Z={z_target:.3f} is outside valid range "
                     f"[{self.stage_limits['z']['min']:.3f}, {self.stage_limits['z']['max']:.3f}] - "
@@ -390,8 +425,8 @@ class StageChamberVisualizationWindow(QWidget):
                 return
 
             # Calculate distances as percentage of total range
-            x_range = self.stage_limits['x']['max'] - self.stage_limits['x']['min']
-            z_range = self.stage_limits['z']['max'] - self.stage_limits['z']['min']
+            x_range = self.stage_limits["x"]["max"] - self.stage_limits["x"]["min"]
+            z_range = self.stage_limits["z"]["max"] - self.stage_limits["z"]["min"]
 
             x_distance = abs(x_target - current_pos.x)
             z_distance = abs(z_target - current_pos.z)
@@ -410,7 +445,7 @@ class StageChamberVisualizationWindow(QWidget):
                     f"Z: {current_pos.z:.2f} → {z_target:.2f} mm ({z_percent:.1f}% of range)\n\n"
                     f"Continue with move?",
                     QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
+                    QMessageBox.No,
                 )
 
                 if reply == QMessageBox.No:
@@ -425,13 +460,12 @@ class StageChamberVisualizationWindow(QWidget):
                 x=x_target,
                 y=current_pos.y,  # Keep Y at current position
                 z=z_target,
-                r=current_pos.r   # Keep R at current position
+                r=current_pos.r,  # Keep R at current position
             )
 
             # Use move_to_position which handles multi-axis moves with a single lock
             self.movement_controller.position_controller.move_to_position(
-                target_position,
-                validate=True
+                target_position, validate=True
             )
             self.logger.info(f"Click-to-move XZ: X={x_target:.3f}, Z={z_target:.3f}")
 
@@ -463,7 +497,11 @@ class StageChamberVisualizationWindow(QWidget):
                 return
 
             # Validate target coordinates are within stage limits (double-check)
-            if not (self.stage_limits['x']['min'] <= x_target <= self.stage_limits['x']['max']):
+            if not (
+                self.stage_limits["x"]["min"]
+                <= x_target
+                <= self.stage_limits["x"]["max"]
+            ):
                 self.logger.error(
                     f"Click X={x_target:.3f} is outside valid range "
                     f"[{self.stage_limits['x']['min']:.3f}, {self.stage_limits['x']['max']:.3f}] - "
@@ -472,7 +510,11 @@ class StageChamberVisualizationWindow(QWidget):
                 self.visualization_widget.xy_panel.clear_target_position()
                 return
 
-            if not (self.stage_limits['y']['min'] <= y_target <= self.stage_limits['y']['max']):
+            if not (
+                self.stage_limits["y"]["min"]
+                <= y_target
+                <= self.stage_limits["y"]["max"]
+            ):
                 self.logger.error(
                     f"Click Y={y_target:.3f} is outside valid range "
                     f"[{self.stage_limits['y']['min']:.3f}, {self.stage_limits['y']['max']:.3f}] - "
@@ -482,8 +524,8 @@ class StageChamberVisualizationWindow(QWidget):
                 return
 
             # Calculate distances as percentage of total range
-            x_range = self.stage_limits['x']['max'] - self.stage_limits['x']['min']
-            y_range = self.stage_limits['y']['max'] - self.stage_limits['y']['min']
+            x_range = self.stage_limits["x"]["max"] - self.stage_limits["x"]["min"]
+            y_range = self.stage_limits["y"]["max"] - self.stage_limits["y"]["min"]
 
             x_distance = abs(x_target - current_pos.x)
             y_distance = abs(y_target - current_pos.y)
@@ -502,7 +544,7 @@ class StageChamberVisualizationWindow(QWidget):
                     f"Y: {current_pos.y:.2f} → {y_target:.2f} mm ({y_percent:.1f}% of range)\n\n"
                     f"Continue with move?",
                     QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
+                    QMessageBox.No,
                 )
 
                 if reply == QMessageBox.No:
@@ -517,13 +559,12 @@ class StageChamberVisualizationWindow(QWidget):
                 x=x_target,
                 y=y_target,
                 z=current_pos.z,  # Keep Z at current position
-                r=current_pos.r   # Keep R at current position
+                r=current_pos.r,  # Keep R at current position
             )
 
             # Use move_to_position which handles multi-axis moves with a single lock
             self.movement_controller.position_controller.move_to_position(
-                target_position,
-                validate=True
+                target_position, validate=True
             )
             self.logger.info(f"Click-to-move XY: X={x_target:.3f}, Y={y_target:.3f}")
 
@@ -541,7 +582,9 @@ class StageChamberVisualizationWindow(QWidget):
             position = self.movement_controller.get_position()
             if position:
                 # Update visualization with current position
-                self._on_position_changed(position.x, position.y, position.z, position.r)
+                self._on_position_changed(
+                    position.x, position.y, position.z, position.r
+                )
                 self.logger.info(f"Initial position loaded: {position}")
             else:
                 self.logger.warning("No initial position available")
@@ -593,7 +636,9 @@ class StageChamberVisualizationWindow(QWidget):
             f"Position: X={x:.2f} mm, Y={y:.2f} mm, Z={z:.2f} mm, R={r:.2f}°"
         )
 
-        self.logger.debug(f"Position updated: X={x:.2f}, Y={y:.2f}, Z={z:.2f}, R={r:.2f}")
+        self.logger.debug(
+            f"Position updated: X={x:.2f}, Y={y:.2f}, Z={z:.2f}, R={r:.2f}"
+        )
 
     def showEvent(self, event: QShowEvent) -> None:
         """Handle window show event - restore geometry and log."""
@@ -601,7 +646,9 @@ class StageChamberVisualizationWindow(QWidget):
 
         # Restore geometry on first show
         if not self._geometry_restored and self._geometry_manager:
-            self._geometry_manager.restore_geometry("StageChamberVisualizationWindow", self)
+            self._geometry_manager.restore_geometry(
+                "StageChamberVisualizationWindow", self
+            )
             self._geometry_restored = True
 
         self.logger.info("Stage chamber visualization window opened")
@@ -610,7 +657,9 @@ class StageChamberVisualizationWindow(QWidget):
         """Handle window hide event - save geometry and log."""
         # Save geometry when hiding
         if self._geometry_manager:
-            self._geometry_manager.save_geometry("StageChamberVisualizationWindow", self)
+            self._geometry_manager.save_geometry(
+                "StageChamberVisualizationWindow", self
+            )
 
         super().hideEvent(event)
         self.logger.info("Stage chamber visualization window hidden")
@@ -619,7 +668,9 @@ class StageChamberVisualizationWindow(QWidget):
         """Handle window state changes - log when window is activated."""
         super().changeEvent(event)
         if event.type() == QEvent.WindowActivate:
-            self.logger.info("Stage chamber visualization window activated (user clicked into window)")
+            self.logger.info(
+                "Stage chamber visualization window activated (user clicked into window)"
+            )
         elif event.type() == QEvent.WindowDeactivate:
             self.logger.debug("Stage chamber visualization window deactivated")
 
@@ -627,7 +678,9 @@ class StageChamberVisualizationWindow(QWidget):
         """Handle window close event - save geometry."""
         # Save geometry on close
         if self._geometry_manager:
-            self._geometry_manager.save_geometry("StageChamberVisualizationWindow", self)
+            self._geometry_manager.save_geometry(
+                "StageChamberVisualizationWindow", self
+            )
 
         self.logger.info("Stage chamber visualization window closed")
         event.accept()

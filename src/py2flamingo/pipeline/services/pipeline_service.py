@@ -6,11 +6,13 @@ Acts as the service layer between the controller and the engine/models.
 """
 
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 
-from py2flamingo.pipeline.models.pipeline import Pipeline, NodeType, create_node
+from py2flamingo.pipeline.models.pipeline import NodeType, Pipeline, create_node
 from py2flamingo.pipeline.services.pipeline_repository import PipelineRepository
-from py2flamingo.pipeline.services.threshold_analysis_service import ThresholdAnalysisService
+from py2flamingo.pipeline.services.threshold_analysis_service import (
+    ThresholdAnalysisService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,21 +69,35 @@ class PipelineService:
         pipeline = Pipeline(name="Example: Acquire-Analyze-Reacquire")
 
         # Create nodes
-        acquire = create_node(NodeType.WORKFLOW, name="Initial Acquisition",
-                              config={'workflow_type': 'zstack'}, x=50, y=100)
-        threshold = create_node(NodeType.THRESHOLD, name="Detect Objects",
-                                config={
-                                    'channel_thresholds': {0: 200},
-                                    'gauss_sigma': 1.0,
-                                    'min_object_size': 100,
-                                }, x=300, y=100)
-        for_each = create_node(NodeType.FOR_EACH, name="For Each Object",
-                               x=550, y=100)
-        reacquire = create_node(NodeType.WORKFLOW, name="Re-acquire at Object",
-                                config={
-                                    'workflow_type': 'zstack',
-                                    'use_input_position': True,
-                                }, x=800, y=100)
+        acquire = create_node(
+            NodeType.WORKFLOW,
+            name="Initial Acquisition",
+            config={"workflow_type": "zstack"},
+            x=50,
+            y=100,
+        )
+        threshold = create_node(
+            NodeType.THRESHOLD,
+            name="Detect Objects",
+            config={
+                "channel_thresholds": {0: 200},
+                "gauss_sigma": 1.0,
+                "min_object_size": 100,
+            },
+            x=300,
+            y=100,
+        )
+        for_each = create_node(NodeType.FOR_EACH, name="For Each Object", x=550, y=100)
+        reacquire = create_node(
+            NodeType.WORKFLOW,
+            name="Re-acquire at Object",
+            config={
+                "workflow_type": "zstack",
+                "use_input_position": True,
+            },
+            x=800,
+            y=100,
+        )
 
         # Add nodes
         for node in [acquire, threshold, for_each, reacquire]:
@@ -89,20 +105,26 @@ class PipelineService:
 
         # Connect: Acquire.volume → Threshold.volume
         pipeline.add_connection(
-            acquire.id, acquire.get_output('volume').id,
-            threshold.id, threshold.get_input('volume').id,
+            acquire.id,
+            acquire.get_output("volume").id,
+            threshold.id,
+            threshold.get_input("volume").id,
         )
 
         # Connect: Threshold.objects → ForEach.collection
         pipeline.add_connection(
-            threshold.id, threshold.get_output('objects').id,
-            for_each.id, for_each.get_input('collection').id,
+            threshold.id,
+            threshold.get_output("objects").id,
+            for_each.id,
+            for_each.get_input("collection").id,
         )
 
         # Connect: ForEach.current_item → Reacquire.position
         pipeline.add_connection(
-            for_each.id, for_each.get_output('current_item').id,
-            reacquire.id, reacquire.get_input('position').id,
+            for_each.id,
+            for_each.get_output("current_item").id,
+            reacquire.id,
+            reacquire.get_input("position").id,
         )
 
         return pipeline

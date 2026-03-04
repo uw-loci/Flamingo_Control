@@ -4,9 +4,10 @@ This module provides functions to evaluate image focus quality,
 used for selecting the best-focused frame from a Z-stack.
 """
 
-import numpy as np
-from typing import Optional, Tuple, List
 import logging
+from typing import List, Optional, Tuple
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,9 @@ def _variance_of_laplacian_numpy(image: np.ndarray) -> float:
     if len(image.shape) == 3:
         # Use luminosity method
         if image.shape[2] >= 3:
-            gray = 0.299 * image[:, :, 0] + 0.587 * image[:, :, 1] + 0.114 * image[:, :, 2]
+            gray = (
+                0.299 * image[:, :, 0] + 0.587 * image[:, :, 1] + 0.114 * image[:, :, 2]
+            )
         else:
             gray = image[:, :, 0]
         gray = gray.astype(np.float64)
@@ -71,15 +74,13 @@ def _variance_of_laplacian_numpy(image: np.ndarray) -> float:
         gray = image.astype(np.float64)
 
     # Laplacian kernel
-    kernel = np.array([[0, 1, 0],
-                       [1, -4, 1],
-                       [0, 1, 0]], dtype=np.float64)
+    kernel = np.array([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=np.float64)
 
     # Apply convolution (simplified without scipy)
     from numpy.lib.stride_tricks import sliding_window_view
 
     # Pad image
-    padded = np.pad(gray, 1, mode='edge')
+    padded = np.pad(gray, 1, mode="edge")
 
     # Use sliding window for convolution
     windows = sliding_window_view(padded, (3, 3))
@@ -105,7 +106,9 @@ def brenner_gradient(image: np.ndarray) -> float:
     # Convert to grayscale if needed
     if len(image.shape) == 3:
         if image.shape[2] >= 3:
-            gray = 0.299 * image[:, :, 0] + 0.587 * image[:, :, 1] + 0.114 * image[:, :, 2]
+            gray = (
+                0.299 * image[:, :, 0] + 0.587 * image[:, :, 1] + 0.114 * image[:, :, 2]
+            )
         else:
             gray = image[:, :, 0]
         gray = gray.astype(np.float64)
@@ -119,7 +122,7 @@ def brenner_gradient(image: np.ndarray) -> float:
     v_diff = gray[2:, :] - gray[:-2, :]
 
     # Return sum of squared differences
-    return float(np.sum(h_diff ** 2) + np.sum(v_diff ** 2))
+    return float(np.sum(h_diff**2) + np.sum(v_diff**2))
 
 
 def tenengrad(image: np.ndarray) -> float:
@@ -150,16 +153,16 @@ def tenengrad(image: np.ndarray) -> float:
         gy = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
 
         # Return sum of squared gradient magnitudes
-        return float(np.sum(gx ** 2 + gy ** 2))
+        return float(np.sum(gx**2 + gy**2))
 
     except ImportError:
         # Fallback: use Brenner gradient
         return brenner_gradient(image)
 
 
-def find_best_focus(images: List[np.ndarray],
-                    z_positions: List[float],
-                    method: str = 'laplacian') -> Tuple[int, float, np.ndarray]:
+def find_best_focus(
+    images: List[np.ndarray], z_positions: List[float], method: str = "laplacian"
+) -> Tuple[int, float, np.ndarray]:
     """Find the best-focused image from a Z-stack.
 
     Args:
@@ -177,14 +180,16 @@ def find_best_focus(images: List[np.ndarray],
         raise ValueError("Images and z_positions cannot be empty")
 
     if len(images) != len(z_positions):
-        raise ValueError(f"Mismatch: {len(images)} images vs {len(z_positions)} positions")
+        raise ValueError(
+            f"Mismatch: {len(images)} images vs {len(z_positions)} positions"
+        )
 
     # Select focus metric
-    if method == 'laplacian':
+    if method == "laplacian":
         focus_fn = variance_of_laplacian
-    elif method == 'brenner':
+    elif method == "brenner":
         focus_fn = brenner_gradient
-    elif method == 'tenengrad':
+    elif method == "tenengrad":
         focus_fn = tenengrad
     else:
         raise ValueError(f"Unknown focus method: {method}")
@@ -204,7 +209,9 @@ def find_best_focus(images: List[np.ndarray],
     best_z = z_positions[best_idx]
     best_img = images[best_idx]
 
-    logger.debug(f"Best focus at index {best_idx}, Z={best_z:.3f}mm, score={scores[best_idx]:.2f}")
+    logger.debug(
+        f"Best focus at index {best_idx}, Z={best_z:.3f}mm, score={scores[best_idx]:.2f}"
+    )
 
     return best_idx, best_z, best_img
 
@@ -223,10 +230,10 @@ def evaluate_focus_quality(image: np.ndarray) -> str:
     # These thresholds are empirical and may need adjustment
     # based on the specific imaging conditions
     if score < 100:
-        return 'poor'
+        return "poor"
     elif score < 500:
-        return 'fair'
+        return "fair"
     elif score < 1000:
-        return 'good'
+        return "good"
     else:
-        return 'excellent'
+        return "excellent"
