@@ -251,7 +251,24 @@ class DiskTileLoader(QObject):
                                f"(channel_id={channel_id}) in {tile_info.folder_path.name}")
                 continue
 
+            frames_before = buffer.frame_count
             self._read_raw_frames_to_buffer(raw_path, buffer, tile_info.n_planes)
+            frames_added = buffer.frame_count - frames_before
+
+            # Diagnostic: signal statistics for this channel's frames
+            if frames_added > 0:
+                ch_frames = buffer.frames[frames_before:]
+                maxvals = [f[0].max() for f in ch_frames]
+                nonzero_counts = [np.count_nonzero(f[0]) for f in ch_frames]
+                total_pixels = ch_frames[0][0].size
+                frames_with_signal = sum(1 for m in maxvals if m > 0)
+                logger.info(
+                    f"  Channel {channel_id} (C{file_ch_idx:02d}): "
+                    f"{frames_added} frames, "
+                    f"{frames_with_signal}/{frames_added} have signal, "
+                    f"max pixel range [{min(maxvals)}-{max(maxvals)}], "
+                    f"avg nonzero pixels {sum(nonzero_counts)/len(nonzero_counts):.0f}/{total_pixels}"
+                )
 
         return buffer
 
@@ -279,12 +296,27 @@ class DiskTileLoader(QObject):
 
         factor = DOWNSAMPLE_TARGET / max(FRAME_WIDTH, FRAME_HEIGHT)
 
+        # Sample a few frames for raw-vs-downsampled signal comparison
+        sample_indices = {0, n_planes // 4, n_planes // 2, 3 * n_planes // 4, n_planes - 1}
+
         for plane_idx in range(n_planes):
             if self._shutdown:
                 return
 
             frame = mmap[plane_idx]
             downsampled = zoom(frame, factor, order=1).astype(np.uint16)
+
+            if plane_idx in sample_indices:
+                raw_max = int(frame.max())
+                raw_nonzero = int(np.count_nonzero(frame))
+                ds_max = int(downsampled.max())
+                ds_nonzero = int(np.count_nonzero(downsampled))
+                logger.info(
+                    f"    Frame {plane_idx}/{n_planes}: "
+                    f"raw max={raw_max} nonzero={raw_nonzero}/{frame.size} "
+                    f"→ ds max={ds_max} nonzero={ds_nonzero}/{downsampled.size}"
+                )
+
             buffer.append(downsampled, plane_idx)
 
         del mmap  # Release memmap
