@@ -1118,6 +1118,12 @@ class SampleView(QWidget):
         self.load_test_data_btn.clicked.connect(self._on_load_test_data_clicked)
         perf_row.addWidget(self.load_test_data_btn)
 
+        # Load Tiles from Disk button
+        self.load_tiles_btn = QPushButton("Load Tiles")
+        self.load_tiles_btn.setToolTip("Load raw tiled acquisition data from disk for diagnostic comparison")
+        self.load_tiles_btn.clicked.connect(self._on_load_tiles_from_disk_clicked)
+        perf_row.addWidget(self.load_tiles_btn)
+
         # Save Session button
         self.save_session_btn = QPushButton("Save Session")
         self.save_session_btn.setToolTip("Save current 3D data and settings to OME-Zarr session")
@@ -3437,4 +3443,93 @@ class SampleView(QWidget):
         # Auto-enable focal move mode now that data is present
         if hasattr(self, '_move_data_to_focus_cb') and not self._move_data_to_focus_cb.isChecked():
             self._move_data_to_focus_cb.setChecked(True)
+
+    # ── Disk tile loading ──────────────────────────────────────────────
+
+    def _on_load_tiles_from_disk_clicked(self):
+        """Browse to a date folder and load raw tile data through the tile worker."""
+        from PyQt5.QtWidgets import QFileDialog, QMessageBox
+
+        if not self.voxel_storage:
+            QMessageBox.warning(self, "No Storage",
+                                "Voxel storage not initialised. Open 3D view first.")
+            return
+
+        date_dir = QFileDialog.getExistingDirectory(
+            self, "Select Date Folder with Tile Data",
+            "",  # start dir
+            QFileDialog.ShowDirsOnly,
+        )
+        if not date_dir:
+            return
+
+        self.logger.info(f"Loading tiles from disk: {date_dir}")
+
+        # Clear existing data
+        self.clear_data_for_workflows()
+
+        # Start tile processing worker (same as live path)
+        self._start_tile_worker()
+
+        # Create loader on a background thread
+        from PyQt5.QtCore import QThread
+        from visualization.disk_tile_loader import DiskTileLoader
+
+        self._disk_loader_thread = QThread()
+        self._disk_loader = DiskTileLoader(
+            date_dir=date_dir,
+            tile_worker=self._tile_worker,
+            voxel_storage=self.voxel_storage,
+            invert_x=self._invert_x,
+        )
+        self._disk_loader.moveToThread(self._disk_loader_thread)
+
+        # Connect signals
+        self._disk_loader_thread.started.connect(self._disk_loader.run)
+        self._disk_loader.progress.connect(self._on_disk_load_progress)
+        self._disk_loader.finished.connect(self._on_disk_load_finished)
+        self._disk_loader.error.connect(
+            lambda msg: self.logger.warning(f"Disk loader: {msg}")
+        )
+
+        self.load_tiles_btn.setEnabled(False)
+        self.load_tiles_btn.setText("Loading...")
+        self._disk_loader_thread.start()
+
+    def _on_disk_load_progress(self, current, total, description):
+        """Update UI with disk loading progress."""
+        self.logger.info(description)
+        self.load_tiles_btn.setText(f"Loading {current}/{total}")
+
+    def _on_disk_load_finished(self, success, message):
+        """Clean up after disk tile loading completes."""
+        from PyQt5.QtWidgets import QMessageBox
+
+        self.logger.info(f"Disk load finished: success={success}, {message}")
+
+        # Stop tile worker
+        self._stop_tile_worker()
+
+        # Clean up loader thread
+        if hasattr(self, '_disk_loader_thread') and self._disk_loader_thread:
+            self._disk_loader_thread.quit()
+            self._disk_loader_thread.wait(5000)
+            self._disk_loader_thread = None
+            self._disk_loader = None
+
+        # Update visualization
+        self._update_visualization()
+
+        # Auto-enable focal move mode
+        if hasattr(self, '_move_data_to_focus_cb'):
+            self._move_data_to_focus_cb.setChecked(True)
+
+        # Restore button
+        self.load_tiles_btn.setText("Load Tiles")
+        self.load_tiles_btn.setEnabled(True)
+
+        if success:
+            QMessageBox.information(self, "Load Complete", message)
+        else:
+            QMessageBox.warning(self, "Load Issue", message)
 
