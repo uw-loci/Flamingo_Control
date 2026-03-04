@@ -26,12 +26,12 @@ from typing import Dict, List, Optional, Tuple
 from PyQt5.QtCore import QObject, pyqtSignal
 from scipy.ndimage import zoom
 
-from models.mip_overview import find_tile_folders, parse_coords_from_folder
-from utils.tile_workflow_parser import (
+from py2flamingo.models.mip_overview import find_tile_folders, parse_coords_from_folder
+from py2flamingo.utils.tile_workflow_parser import (
     read_laser_channels_from_workflow,
     read_z_range_from_workflow,
 )
-from visualization.tile_processing_worker import TileFrameBuffer
+from py2flamingo.visualization.tile_processing_worker import TileFrameBuffer
 
 logger = logging.getLogger(__name__)
 
