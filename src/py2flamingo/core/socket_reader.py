@@ -265,6 +265,11 @@ class MessageDispatcher:
 
         # No handler found - queue as unsolicited or log
         if message.is_unsolicited:
+            # High-frequency progress messages (0x9004) flood the queue during
+            # acquisition — drop silently when no callback is registered
+            if command_code == 0x9004:
+                self._stats['messages_dropped'] += 1
+                return
             try:
                 self._unsolicited_queue.put_nowait(message)
                 logger.debug(f"Queued unsolicited message 0x{command_code:04X}")
