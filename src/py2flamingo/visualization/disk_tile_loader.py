@@ -55,7 +55,7 @@ class DiskTileInfo:
     channels: List[int]  # Enabled channel IDs (0-based)
     raw_files: Dict[int, Path] = field(
         default_factory=dict
-    )  # channel_idx(1-based) -> path
+    )  # channel_id (0-based) -> path
     n_planes: int = 0  # Planes per channel
 
 
@@ -180,7 +180,7 @@ class DiskTileLoader(QObject):
         logger.info(
             f"All {tiles_submitted} tiles submitted, waiting for worker to finish..."
         )
-        idle = self._tile_worker.wait_for_idle(timeout_ms=300_000)
+        idle = self._tile_worker.wait_for_idle(timeout_ms=900_000)
 
         if idle:
             self.finished.emit(
@@ -212,7 +212,9 @@ class DiskTileLoader(QObject):
         for f in folder.iterdir():
             match = RAW_FILE_PATTERN.match(f.name)
             if match:
-                ch_idx = int(match.group(1))  # 1-based channel index
+                ch_idx = int(
+                    match.group(1)
+                )  # C-number from filename = 0-based channel_id
                 planes = int(match.group(2))
                 raw_files[ch_idx] = f
                 n_planes = max(n_planes, planes)
@@ -262,16 +264,20 @@ class DiskTileLoader(QObject):
             reference_position=ref_pos,
         )
 
-        # Load each channel's raw file in order
-        for ch_seq_idx, channel_id in enumerate(tile_info.channels):
-            # Channel file index is 1-based sequential: C01, C02, C03...
-            file_ch_idx = ch_seq_idx + 1
-            raw_path = tile_info.raw_files.get(file_ch_idx)
+        # Load each channel's raw file by direct channel_id lookup.
+        # Raw file C-numbers (C02, C03...) ARE the 0-based channel_id.
+        logger.info(
+            f"Channel mapping: channels={tile_info.channels}, "
+            f"raw_file_keys={sorted(tile_info.raw_files.keys())}"
+        )
 
+        for channel_id in tile_info.channels:
+            raw_path = tile_info.raw_files.get(channel_id)
             if raw_path is None:
                 logger.warning(
-                    f"No raw file for channel index {file_ch_idx} "
-                    f"(channel_id={channel_id}) in {tile_info.folder_path.name}"
+                    f"No raw file for channel {channel_id} "
+                    f"in {tile_info.folder_path.name}. "
+                    f"Available: {sorted(tile_info.raw_files.keys())}"
                 )
                 continue
 
@@ -287,7 +293,7 @@ class DiskTileLoader(QObject):
                 total_pixels = ch_frames[0][0].size
                 frames_with_signal = sum(1 for m in maxvals if m > 0)
                 logger.info(
-                    f"  Channel {channel_id} (C{file_ch_idx:02d}): "
+                    f"  Channel {channel_id} (C{channel_id:02d}): "
                     f"{frames_added} frames, "
                     f"{frames_with_signal}/{frames_added} have signal, "
                     f"max pixel range [{min(maxvals)}-{max(maxvals)}], "

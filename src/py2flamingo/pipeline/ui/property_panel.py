@@ -72,10 +72,10 @@ _CONFIG_SCHEMAS: Dict[NodeType, list] = {
         ("timeout_seconds", "Timeout (s)", "int", 300),
     ],
     NodeType.SAMPLE_VIEW_DATA: [
-        ("channel_0", "Channel 0 (405nm)", "bool", True),
-        ("channel_1", "Channel 1 (488nm)", "bool", True),
-        ("channel_2", "Channel 2 (561nm)", "bool", True),
-        ("channel_3", "Channel 3 (640nm)", "bool", True),
+        ("channel_0", "Channel 1 (405nm)", "bool", True),
+        ("channel_1", "Channel 2 (488nm)", "bool", True),
+        ("channel_2", "Channel 3 (561nm)", "bool", True),
+        ("channel_3", "Channel 4 (640nm)", "bool", True),
     ],
 }
 
@@ -332,7 +332,7 @@ class PropertyPanel(QWidget):
             )
             row_layout.addWidget(spin)
 
-            group_layout.addRow(f"Ch {ch_id} ({channel_names[ch_id]})", row)
+            group_layout.addRow(f"Ch {ch_id + 1} ({channel_names[ch_id]})", row)
 
         self._config_layout.addRow(group)
 
