@@ -779,6 +779,36 @@ class SampleView(QWidget):
 
             layout.addLayout(row)
 
+            # Direction hint label for X, Y, Z (skip R)
+            if axis_id in ("x", "y", "z"):
+                if axis_id == "x":
+                    x_text = (
+                        "Right \u2190\u2500\u2500\u2500\u2192 Left"
+                        if self._invert_x
+                        else "Left \u2190\u2500\u2500\u2500\u2192 Right"
+                    )
+                    direction_texts = {"x": x_text}
+                else:
+                    direction_texts = {
+                        "y": "Top \u2190\u2500\u2500\u2500\u2192 Bottom",
+                        "z": "Near \u2190\u2500\u2500\u2500\u2192 Far",
+                    }
+                dir_label = QLabel(direction_texts[axis_id])
+                dir_label.setStyleSheet(
+                    "color: #888; font-size: 8pt; font-style: italic;"
+                )
+                dir_label.setAlignment(Qt.AlignCenter)
+                dir_row = QHBoxLayout()
+                dir_row.setContentsMargins(0, 0, 0, 0)
+                # Indent past axis label + min value (~83px)
+                dir_row.addSpacing(83)
+                dir_row.addWidget(dir_label, stretch=1)
+                # Balance right side (max label + edit + unit ~150px)
+                dir_row.addSpacing(150)
+                layout.addLayout(dir_row)
+                if axis_id == "x":
+                    slider.setProperty("direction_label", dir_label)
+
         group.setLayout(layout)
         return group
 
@@ -977,8 +1007,8 @@ class SampleView(QWidget):
         # Store widget references
         self.channel_checkboxes: Dict[int, QCheckBox] = {}
         self.channel_contrast_sliders: Dict[int, QRangeSlider] = {}
-        self.channel_min_labels: Dict[int, QLabel] = {}
-        self.channel_max_labels: Dict[int, QLabel] = {}
+        self.channel_min_spins: Dict[int, QSpinBox] = {}
+        self.channel_max_spins: Dict[int, QSpinBox] = {}
 
         for i in range(4):
             # Get channel config or use default
@@ -1053,22 +1083,30 @@ class SampleView(QWidget):
             )
             self.channel_contrast_sliders[i] = slider
 
-            # Min/max value labels flanking the slider
-            min_label = QLabel(str(min_val))
-            min_label.setFixedWidth(28)
-            min_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            min_label.setStyleSheet("color: #888; font-size: 9pt;")
-            self.channel_min_labels[i] = min_label
+            # Min/max value spinboxes flanking the slider
+            min_spin = QSpinBox()
+            min_spin.setRange(0, 65535)
+            min_spin.setValue(min_val)
+            min_spin.setFixedWidth(55)
+            min_spin.setStyleSheet("color: #888; font-size: 9pt;")
+            min_spin.valueChanged.connect(
+                lambda val, ch=i: self._on_channel_contrast_spin_changed(ch, True)
+            )
+            self.channel_min_spins[i] = min_spin
 
-            max_label = QLabel(str(max_val))
-            max_label.setFixedWidth(28)
-            max_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            max_label.setStyleSheet("color: #888; font-size: 9pt;")
-            self.channel_max_labels[i] = max_label
+            max_spin = QSpinBox()
+            max_spin.setRange(0, 65535)
+            max_spin.setValue(max_val)
+            max_spin.setFixedWidth(55)
+            max_spin.setStyleSheet("color: #888; font-size: 9pt;")
+            max_spin.valueChanged.connect(
+                lambda val, ch=i: self._on_channel_contrast_spin_changed(ch, False)
+            )
+            self.channel_max_spins[i] = max_spin
 
-            row_layout.addWidget(min_label)
+            row_layout.addWidget(min_spin)
             row_layout.addWidget(slider, stretch=1)
-            row_layout.addWidget(max_label)
+            row_layout.addWidget(max_spin)
 
             # Start channels disabled until data arrives
             checkbox.setEnabled(False)
@@ -1078,8 +1116,8 @@ class SampleView(QWidget):
                 "This channel will activate automatically when 3D volume data is received."
             )
             slider.setEnabled(False)
-            min_label.setEnabled(False)
-            max_label.setEnabled(False)
+            min_spin.setEnabled(False)
+            max_spin.setEnabled(False)
 
             layout.addLayout(row_layout)
 
@@ -1297,6 +1335,11 @@ class SampleView(QWidget):
                         # Mark slider as inverted for value display
                         slider.setProperty("inverted", True)
                         slider.setInvertedAppearance(True)
+                        dir_label = slider.property("direction_label")
+                        if dir_label:
+                            dir_label.setText(
+                                "Right \u2190\u2500\u2500\u2500\u2192 Left"
+                            )
                     else:
                         # Normal: show min on left, max on right
                         if min_label:
@@ -1304,6 +1347,12 @@ class SampleView(QWidget):
                         if max_label:
                             max_label.setText(f"{max_val:.{decimals}f}")
                         slider.setProperty("inverted", False)
+                        if axis_id == "x":
+                            dir_label = slider.property("direction_label")
+                            if dir_label:
+                                dir_label.setText(
+                                    "Left \u2190\u2500\u2500\u2500\u2192 Right"
+                                )
 
             self.logger.info(f"Stage limits initialized (X inverted: {self._invert_x})")
 
@@ -1691,11 +1740,15 @@ class SampleView(QWidget):
         self._channel_states[channel]["contrast_min"] = min_val
         self._channel_states[channel]["contrast_max"] = max_val
 
-        # Update min/max labels
-        if channel in self.channel_min_labels:
-            self.channel_min_labels[channel].setText(str(min_val))
-        if channel in self.channel_max_labels:
-            self.channel_max_labels[channel].setText(str(max_val))
+        # Update min/max spinboxes
+        if channel in self.channel_min_spins:
+            self.channel_min_spins[channel].blockSignals(True)
+            self.channel_min_spins[channel].setValue(min_val)
+            self.channel_min_spins[channel].blockSignals(False)
+        if channel in self.channel_max_spins:
+            self.channel_max_spins[channel].blockSignals(True)
+            self.channel_max_spins[channel].setValue(max_val)
+            self.channel_max_spins[channel].blockSignals(False)
 
         # Update contrast on the actual napari layer
         if self.channel_layers:
@@ -1708,16 +1761,63 @@ class SampleView(QWidget):
         # Update 2D plane views with new contrast settings
         self._update_plane_views()
 
+    def _on_channel_contrast_spin_changed(self, channel: int, is_min: bool) -> None:
+        """Handle channel contrast spinbox edit.
+
+        Args:
+            channel: Channel index (0-3)
+            is_min: True if the min spinbox changed, False if max
+        """
+        min_spin = self.channel_min_spins.get(channel)
+        max_spin = self.channel_max_spins.get(channel)
+        if min_spin is None or max_spin is None:
+            return
+
+        min_val = min_spin.value()
+        max_val = max_spin.value()
+
+        # Ensure min < max
+        if min_val >= max_val:
+            if is_min:
+                min_val = max(max_val - 1, 0)
+                min_spin.blockSignals(True)
+                min_spin.setValue(min_val)
+                min_spin.blockSignals(False)
+            else:
+                max_val = min(min_val + 1, 65535)
+                max_spin.blockSignals(True)
+                max_spin.setValue(max_val)
+                max_spin.blockSignals(False)
+
+        # Update slider
+        slider = self.channel_contrast_sliders.get(channel)
+        if slider:
+            current_max = slider.maximum()
+            if max_val > current_max:
+                slider.setRange(0, max(max_val + 100, 1000))
+            slider.blockSignals(True)
+            slider.setValue((min_val, max_val))
+            slider.blockSignals(False)
+
+        # Update channel state
+        self._channel_states[channel]["contrast_min"] = min_val
+        self._channel_states[channel]["contrast_max"] = max_val
+
+        # Update napari layer
+        if self.channel_layers:
+            layer = self.channel_layers.get(channel)
+            if layer is not None:
+                layer.contrast_limits = [min_val, max_val]
+
+        self._update_plane_views()
+
     def _auto_contrast_channels(self) -> None:
         """Calculate and apply contrast based on actual data statistics."""
         if not self.voxel_storage or not self.channel_layers:
             return
 
         for ch_id, layer in self.channel_layers.items():
-            if not self.voxel_storage.has_data(ch_id):
-                continue
-
-            volume = self.voxel_storage.get_display_volume(ch_id)
+            volume = np.asarray(layer.data)
             if volume is None or volume.size == 0:
                 continue
 
@@ -1747,10 +1847,14 @@ class SampleView(QWidget):
                 slider.setValue((min_val, max_val))
                 slider.blockSignals(False)
 
-            if ch_id in self.channel_min_labels:
-                self.channel_min_labels[ch_id].setText(str(min_val))
-            if ch_id in self.channel_max_labels:
-                self.channel_max_labels[ch_id].setText(str(max_val))
+            if ch_id in self.channel_min_spins:
+                self.channel_min_spins[ch_id].blockSignals(True)
+                self.channel_min_spins[ch_id].setValue(min_val)
+                self.channel_min_spins[ch_id].blockSignals(False)
+            if ch_id in self.channel_max_spins:
+                self.channel_max_spins[ch_id].blockSignals(True)
+                self.channel_max_spins[ch_id].setValue(max_val)
+                self.channel_max_spins[ch_id].blockSignals(False)
 
             # Update channel state
             self._channel_states[ch_id]["contrast_min"] = min_val
@@ -1769,8 +1873,8 @@ class SampleView(QWidget):
             has_data = self.voxel_storage.has_data(ch_id)
             checkbox = self.channel_checkboxes.get(ch_id)
             slider = self.channel_contrast_sliders.get(ch_id)
-            min_lbl = self.channel_min_labels.get(ch_id)
-            max_lbl = self.channel_max_labels.get(ch_id)
+            min_spin = self.channel_min_spins.get(ch_id)
+            max_spin = self.channel_max_spins.get(ch_id)
 
             if checkbox and has_data and not checkbox.isEnabled():
                 # Auto-enable on first data arrival
@@ -1778,10 +1882,10 @@ class SampleView(QWidget):
                 checkbox.setChecked(True)
                 if slider:
                     slider.setEnabled(True)
-                if min_lbl:
-                    min_lbl.setEnabled(True)
-                if max_lbl:
-                    max_lbl.setEnabled(True)
+                if min_spin:
+                    min_spin.setEnabled(True)
+                if max_spin:
+                    max_spin.setEnabled(True)
 
                 # Explicitly set layer visibility (don't rely only on signal)
                 if ch_id in self.channel_layers:
@@ -2237,10 +2341,10 @@ class SampleView(QWidget):
                 cb.setEnabled(False)
                 if ch_id in self.channel_contrast_sliders:
                     self.channel_contrast_sliders[ch_id].setEnabled(False)
-                if ch_id in self.channel_min_labels:
-                    self.channel_min_labels[ch_id].setEnabled(False)
-                if ch_id in self.channel_max_labels:
-                    self.channel_max_labels[ch_id].setEnabled(False)
+                if ch_id in self.channel_min_spins:
+                    self.channel_min_spins[ch_id].setEnabled(False)
+                if ch_id in self.channel_max_spins:
+                    self.channel_max_spins[ch_id].setEnabled(False)
             self.logger.info("Cleared visualization data for tile workflows")
 
         # Remove threshold mask layer if present
@@ -2446,8 +2550,8 @@ class SampleView(QWidget):
         for ch_id in range(4):
             cb = self.channel_checkboxes.get(ch_id)
             sl = self.channel_contrast_sliders.get(ch_id)
-            ml = self.channel_min_labels.get(ch_id)
-            xl = self.channel_max_labels.get(ch_id)
+            ml = self.channel_min_spins.get(ch_id)
+            xl = self.channel_max_spins.get(ch_id)
             if cb:
                 cb.setEnabled(False)
                 cb.setChecked(False)
