@@ -3210,9 +3210,9 @@ class SampleView(QWidget):
         # Wait for background worker to finish processing all tiles
         if hasattr(self, '_tile_worker') and self._tile_worker:
             self.logger.info("Waiting for tile processing worker to finish...")
-            idle = self._tile_worker.wait_for_idle(timeout_ms=30000)
+            idle = self._tile_worker.wait_for_idle(timeout_ms=120000)
             if not idle:
-                self.logger.warning("Tile processing worker did not finish within timeout")
+                self.logger.warning("Tile processing worker did not finish within 120s timeout")
             else:
                 self.logger.info(f"Tile processing worker idle. "
                                 f"Processed {self._tile_worker.tiles_processed} tiles.")
@@ -3403,13 +3403,20 @@ class SampleView(QWidget):
         self.logger.info("Tile processing worker thread started")
 
     def _stop_tile_worker(self):
-        """Shut down the background tile processing thread."""
+        """Shut down the background tile processing thread.
+
+        Waits for the worker to finish its current tile before destroying
+        the thread. The worker checks _shutdown between tiles, so the worst
+        case wait is one tile processing time (~3-15s).
+        """
         if hasattr(self, '_tile_worker') and self._tile_worker:
             self._tile_worker.shutdown()
         if hasattr(self, '_tile_worker_thread') and self._tile_worker_thread:
             self._tile_worker_thread.quit()
-            if not self._tile_worker_thread.wait(5000):
-                self.logger.warning("Tile worker thread did not stop within 5s")
+            if not self._tile_worker_thread.wait(60000):
+                self.logger.warning("Tile worker thread did not stop within 60s, terminating")
+                self._tile_worker_thread.terminate()
+                self._tile_worker_thread.wait(5000)
             self.logger.info("Tile processing worker thread stopped")
         self._tile_worker = None
         self._tile_worker_thread = None

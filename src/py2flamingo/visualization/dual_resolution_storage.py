@@ -613,13 +613,18 @@ class DualResolutionVoxelStorage:
                 np.max(world_coords, axis=0)
             )
 
-    @_locked
     def downsample_to_display(self, channel_id: int, force: bool = False) -> np.ndarray:
         """
         Downsample high-resolution storage to display resolution.
 
         This method intelligently downsamples the sparse high-res data
         to create a dense low-res array suitable for visualization.
+
+        Uses snapshot approach: briefly locks to copy the storage dict,
+        then does all computation without holding the lock. This prevents
+        blocking the background TileProcessingWorker for seconds during
+        dict iteration (which previously caused 111s tile processing times
+        due to lock contention with the viz thread).
 
         Args:
             channel_id: Channel to downsample
@@ -628,23 +633,26 @@ class DualResolutionVoxelStorage:
         Returns:
             Dense display array
         """
-        if not force and not self.display_dirty.get(channel_id, True):
-            return self.display_cache[channel_id]
+        # === Brief lock: check dirty flag, snapshot dict ===
+        with self._storage_lock:
+            if not force and not self.display_dirty.get(channel_id, True):
+                return self.display_cache[channel_id]
+            # Snapshot the storage dict (shallow copy: keys are tuples, values are ints)
+            # This allows the worker thread to continue writing while we iterate.
+            storage_snapshot = dict(self.storage_data[channel_id])
+            self.display_dirty[channel_id] = False
 
-        # Get sparse storage data
-        storage_sparse = self.storage_data[channel_id]
-
-        if len(storage_sparse) == 0:
+        # === No lock: all computation on snapshot ===
+        if len(storage_snapshot) == 0:
             # No data, return empty display
             self.display_cache[channel_id].fill(0)
-            self.display_dirty[channel_id] = False
             return self.display_cache[channel_id]
 
-        logger.debug(f"Downsampling channel {channel_id}: {len(storage_sparse)} voxels in storage")
+        logger.debug(f"Downsampling channel {channel_id}: {len(storage_snapshot)} voxels in storage")
 
         # Create temporary dense storage array (only for occupied region)
         # This is more memory efficient than densifying the entire storage
-        occupied_coords = np.array(list(storage_sparse.keys()))
+        occupied_coords = np.array(list(storage_snapshot.keys()))
         min_coords = np.min(occupied_coords, axis=0)
         max_coords = np.max(occupied_coords, axis=0) + 1
 
@@ -652,8 +660,8 @@ class DualResolutionVoxelStorage:
         region_shape = max_coords - min_coords
         dense_region = np.zeros(region_shape, dtype=np.uint16)
 
-        # Fill dense region
-        for (x, y, z), value in storage_sparse.items():
+        # Fill dense region from snapshot (no lock held — worker can write concurrently)
+        for (x, y, z), value in storage_snapshot.items():
             local_coords = (x - min_coords[0], y - min_coords[1], z - min_coords[2])
             dense_region[local_coords] = value
 
@@ -782,10 +790,12 @@ class DualResolutionVoxelStorage:
 
         return output.astype(data.dtype)
 
-    @_locked
     def get_display_volume(self, channel_id: Optional[int] = None) -> np.ndarray:
         """
         Get display-resolution volume for visualization.
+
+        No lock needed — downsample_to_display handles its own thread safety
+        via snapshot approach.
 
         Args:
             channel_id: Specific channel or None for all channels
@@ -887,7 +897,6 @@ class DualResolutionVoxelStorage:
             # Remove oldest blocks
             self.data_collection_positions.pop(0)
 
-    @_locked
     def get_display_volume_transformed(self, channel_id: int,
                                       current_stage_pos: dict,
                                       holder_position_voxels: np.ndarray = None) -> np.ndarray:
@@ -901,6 +910,10 @@ class DualResolutionVoxelStorage:
         Uses caching to optimize performance:
         - Only retransform if rotation changed
         - Fast translation for X,Y,Z only changes
+
+        No @_locked — downsample_to_display handles its own thread safety,
+        and all other shared state access (reference_stage_position, transform_cache)
+        uses brief locks or is GIL-safe.
 
         Args:
             channel_id: Channel to get volume for
@@ -924,26 +937,30 @@ class DualResolutionVoxelStorage:
 
         # Reference position should be set when first data is captured
         # If not set yet, return untransformed volume (data is at objective location)
-        if self.reference_stage_position is None:
-            logger.debug("Transform: Reference position not set yet, returning untransformed volume")
-            return self.get_display_volume(channel_id)
+        # Brief lock to snapshot reference (set from GUI thread in set_reference_position)
+        with self._storage_lock:
+            ref = self.reference_stage_position
+            if ref is None:
+                logger.debug("Transform: Reference position not set yet, returning untransformed volume")
+                return self.get_display_volume(channel_id)
+            ref = ref.copy()  # Snapshot under lock
 
         # Calculate DELTA from reference position (not absolute position!)
         # Voxels are stored at a fixed "objective" location, but when the stage moves,
         # the data should move in the SAME direction as the stage.
         # +Z = away from objective, -Z = toward objective
-        dx = current_stage_pos.get('x', 0) - self.reference_stage_position['x']
-        dy = current_stage_pos.get('y', 0) - self.reference_stage_position['y']
-        dz = current_stage_pos.get('z', 0) - self.reference_stage_position['z']
-        dr = current_stage_pos.get('r', 0) - self.reference_stage_position['r']
+        dx = current_stage_pos.get('x', 0) - ref['x']
+        dy = current_stage_pos.get('y', 0) - ref['y']
+        dz = current_stage_pos.get('z', 0) - ref['z']
+        dr = current_stage_pos.get('r', 0) - ref['r']
 
         # Log detailed info on first transform or significant movements
         if not hasattr(self, '_first_transform_logged') or not self._first_transform_logged:
             logger.info(f"Transform: FIRST TRANSFORM after data acquisition")
-            logger.info(f"  Reference position: X={self.reference_stage_position['x']:.3f}, "
-                       f"Y={self.reference_stage_position['y']:.3f}, "
-                       f"Z={self.reference_stage_position['z']:.3f}, "
-                       f"R={self.reference_stage_position['r']:.1f}°")
+            logger.info(f"  Reference position: X={ref['x']:.3f}, "
+                       f"Y={ref['y']:.3f}, "
+                       f"Z={ref['z']:.3f}, "
+                       f"R={ref['r']:.1f}°")
             logger.info(f"  Current position:   X={current_stage_pos.get('x', 0):.3f}, "
                        f"Y={current_stage_pos.get('y', 0):.3f}, "
                        f"Z={current_stage_pos.get('z', 0):.3f}, "
