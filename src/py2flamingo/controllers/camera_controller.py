@@ -6,19 +6,21 @@ managing state, buffering, and display parameters.
 """
 
 import logging
-import numpy as np
 from collections import deque
-from typing import Optional, Callable
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from datetime import datetime
-from PyQt5.QtCore import QObject, pyqtSignal, QTimer
+from typing import Callable, Optional
+
+import numpy as np
+from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 
 from py2flamingo.services.camera_service import CameraService, ImageHeader
 
 
 class CameraState(Enum):
     """Camera operation states."""
+
     IDLE = "idle"
     LIVE_VIEW = "live_view"
     ACQUIRING = "acquiring"
@@ -276,12 +278,13 @@ class CameraController(QObject):
         if self._workflow_tile_mode:
             self.logger.info(
                 f"CameraController: Cleared tile mode after {self._z_plane_counter} frames, "
-                f"{self._tile_transition_flush_count} stale frames flushed across all transitions")
+                f"{self._tile_transition_flush_count} stale frames flushed across all transitions"
+            )
 
-            if getattr(self, '_workflow_started_timer', False):
+            if getattr(self, "_workflow_started_timer", False):
                 self._display_timer.stop()
                 self.logger.info("Stopped display timer (was started for tile workflow)")
-            if getattr(self, '_workflow_started_streaming', False):
+            if getattr(self, "_workflow_started_streaming", False):
                 try:
                     self.camera_service.stop_data_receiver()
                     self.logger.info("Stopped data receiver (was started for tile workflow)")
@@ -310,10 +313,10 @@ class CameraController(QObject):
         # Emit signal for Sample View to catch
         # (Sample View will connect to this signal)
         self.tile_zstack_frame.emit(
-            image,                          # Frame data
-            self._current_tile_position,    # Tile position metadata
-            self._z_plane_counter,          # Z-plane index
-            header.frame_number             # Global frame number
+            image,  # Frame data
+            self._current_tile_position,  # Tile position metadata
+            self._z_plane_counter,  # Z-plane index
+            header.frame_number,  # Global frame number
         )
         self.logger.debug(f"Routed Z-plane {self._z_plane_counter} to Sample View")
 
@@ -451,13 +454,22 @@ class CameraController(QObject):
                 if self._tile_transition_pending:
                     stale = self.camera_service.drain_all_frames()
                     self._tile_transition_flush_count += len(stale)
+                    # Log header info from last drained frame to help detect stale frame leakage
+                    if stale:
+                        _, last_hdr = stale[-1]
+                        self.logger.info(
+                            f"Tile transition: flushed {len(stale)} stale frames, "
+                            f"last_frame_num={last_hdr.frame_number} last_ts={last_hdr.timestamp_ms} "
+                            f"last_scale_max={last_hdr.image_scale_max}")
                     self._z_plane_counter = 0
+                    self._transition_frame_count = 0  # Track first frames after transition
+                    self._last_drain_timestamp = stale[-1][1].timestamp_ms if stale else 0
                     self._current_tile_position = self._pending_tile_position
                     self._tile_transition_pending = False
                     self._pending_tile_position = None
                     self.logger.info(
-                        f"Tile transition: flushed {len(stale)} stale frames, "
-                        f"new tile: {self._current_tile_position.get('filename', 'unknown')}")
+                        f"Tile transition: new tile: {self._current_tile_position.get('filename', 'unknown')}"
+                    )
                     return  # Start fresh next tick
 
                 MAX_FRAMES_PER_TICK = 25
@@ -475,6 +487,19 @@ class CameraController(QObject):
                     self.logger.debug(f"Tile mode: deferred {len(remaining)} frames to next tick")
 
                 for image, header in frames_to_process:
+                    # Diagnostic: log first 5 frames after tile transition
+                    # to detect stale frames that slipped past the drain
+                    trans_count = getattr(self, '_transition_frame_count', 999)
+                    if trans_count < 5:
+                        drain_ts = getattr(self, '_last_drain_timestamp', 0)
+                        ts_delta = header.timestamp_ms - drain_ts if drain_ts else 0
+                        self.logger.info(
+                            f"POST-TRANSITION frame {trans_count}: "
+                            f"frame_num={header.frame_number} ts={header.timestamp_ms} "
+                            f"ts_delta_from_drain={ts_delta}ms "
+                            f"scale_max={header.image_scale_max} "
+                            f"exposure_us={header.exposure_us}")
+                        self._transition_frame_count = trans_count + 1
                     self._route_frame_to_sample_view(image, header)
                     self._z_plane_counter += 1
 
@@ -571,6 +596,7 @@ class CameraController(QObject):
                 self.logger.info("Connecting data socket for snapshot...")
                 self.camera_service.start_live_view_streaming()
                 import time
+
                 time.sleep(0.5)  # Give socket time to connect
 
             # Set flag to capture next frame
@@ -583,6 +609,7 @@ class CameraController(QObject):
 
             # Wait for image to arrive (via existing callback mechanism)
             import time
+
             timeout = 5.0  # 5 second timeout
             start_time = time.time()
 
@@ -654,7 +681,7 @@ class CameraController(QObject):
             for file in existing_files:
                 try:
                     # Extract number from filename: sample_20231115_005.tif -> 5
-                    parts = file.stem.split('_')
+                    parts = file.stem.split("_")
                     if len(parts) >= 3:
                         num = int(parts[-1])
                         numbers.append(num)
@@ -681,12 +708,12 @@ class CameraController(QObject):
             from PIL import Image
 
             # Convert to PIL Image and save as 16-bit TIFF
-            pil_image = Image.fromarray(image.astype(np.uint16), mode='I;16')
-            pil_image.save(filename, format='TIFF')
+            pil_image = Image.fromarray(image.astype(np.uint16), mode="I;16")
+            pil_image.save(filename, format="TIFF")
 
             self.logger.info(f"Image saved: {filename}")
 
         except ImportError:
             # Fallback to numpy save if PIL not available
             self.logger.warning("PIL not available, saving as numpy array")
-            np.save(filename.replace('.tif', '.npy'), image)
+            np.save(filename.replace(".tif", ".npy"), image)
