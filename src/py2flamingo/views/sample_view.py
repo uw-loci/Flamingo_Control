@@ -3484,7 +3484,7 @@ class SampleView(QWidget):
 
         # Create loader on a background thread
         from PyQt5.QtCore import QThread
-        from visualization.disk_tile_loader import DiskTileLoader
+        from py2flamingo.visualization.disk_tile_loader import DiskTileLoader
 
         self._disk_loader_thread = QThread()
         self._disk_loader = DiskTileLoader(
