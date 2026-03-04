@@ -193,10 +193,12 @@ class TileProcessingWorker(QObject):
             excess = total_frames - expected_total
 
             if excess > 0:
-                # Trim excess frames from the START (stale camera frames before scan)
-                logger.info(f"Tile {tile_key}: trimming {excess} excess frames from start "
+                # Trim excess frames from the END — the camera keeps running
+                # briefly after the Z-stack completes, producing garbage frames
+                # that would otherwise be assigned to the last channel
+                logger.info(f"Tile {tile_key}: trimming {excess} excess frames from end "
                             f"(got {total_frames}, expected {expected_total})")
-                buffer.frames = buffer.frames[excess:]
+                buffer.frames = buffer.frames[:expected_total]
                 total_frames = expected_total
             elif excess < 0:
                 # Fewer frames than expected (e.g., last tile cut short)
