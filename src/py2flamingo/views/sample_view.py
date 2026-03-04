@@ -3352,8 +3352,20 @@ class SampleView(QWidget):
         downsampled = self._downsample_for_storage(image)
         self._current_tile_buffer.append(downsampled, z_index)
 
-        # Update progress bar (approximate, every 5th frame)
+        # Diagnostic: log frame signal stats for first 30 frames + periodic samples
+        # to detect channel interleave pattern
         frame_count = self._current_tile_buffer.frame_count
+        if frame_count <= 30 or frame_count % 100 == 0:
+            img_max = int(image.max())
+            img_mean = float(image.mean())
+            ds_max = int(downsampled.max())
+            self.logger.info(
+                f"  FRAME {frame_count}: z_idx={z_index} frame_num={frame_num} "
+                f"raw_max={img_max} raw_mean={img_mean:.1f} ds_max={ds_max} "
+                f"tile={tile_key} channels={channels}"
+            )
+
+        # Update progress bar (approximate, every 5th frame)
         if frame_count % 5 == 0:
             estimated_total = self._estimate_frames_per_tile(position, num_channels)
             total_tiles = max(1, len(self._expected_tiles))
