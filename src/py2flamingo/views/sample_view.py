@@ -3716,9 +3716,11 @@ class SampleView(QWidget):
                 if hasattr(self, "_tile_worker") and self._tile_worker:
                     self._tile_worker.submit_tile(self._current_tile_buffer)
 
-                # Trigger visualization update for the previous tile
-                if hasattr(self, "_visualization_update_timer"):
-                    self._visualization_update_timer.start()
+                # NOTE: Do NOT trigger visualization update here.
+                # The display transform blocks the GUI thread for 3-13s,
+                # during which the camera deque overflows and frames are
+                # lost.  Visualization updates are deferred to
+                # finish_tile_workflows() after all tiles are collected.
 
             # CRITICAL: Force position update at start of each new tile
             if self.movement_controller:
