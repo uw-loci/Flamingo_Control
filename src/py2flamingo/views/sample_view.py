@@ -3884,11 +3884,17 @@ class SampleView(QWidget):
         """
         self.logger.info(f"Tile {tile_key} processed: {stats}")
 
-        # Kick visualization and channel availability timers
-        if hasattr(self, "_visualization_update_timer"):
-            self._visualization_update_timer.start()
+        # Kick channel availability timer (lightweight: just enables checkboxes)
         if hasattr(self, "_channel_availability_timer"):
             self._channel_availability_timer.start()
+
+        # Only kick visualization if tile workflow is NOT active.
+        # During tile acquisition, display transforms block the GUI thread
+        # for 3-34s (growing with accumulated data), causing the camera deque
+        # to overflow and lose frames.  Deferred to finish_tile_workflows().
+        if not getattr(self, "_tile_workflow_active", False):
+            if hasattr(self, "_visualization_update_timer"):
+                self._visualization_update_timer.start()
 
         # Auto-enable focal move mode now that data is present
         if (
