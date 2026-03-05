@@ -213,21 +213,28 @@ class TileProcessingWorker(QObject):
                 buffer.frames = buffer.frames[:expected_total]
                 total_frames = expected_total
             elif excess < 0:
-                # Fewer frames than expected (e.g., frames lost during tile
-                # transition).  Channels are acquired SEQUENTIALLY (all ch0
-                # frames, then all ch1 frames, …), so the shortfall comes
-                # from the LAST channel.  Keep frames_per_channel at the
-                # authoritative value so earlier channels get their correct
-                # frames; the loop's `end_frame = total_frames` clause
-                # naturally gives the last channel whatever remains.
-                # Falling back to total//num_channels would steal frames
-                # from ch0's tail and mis-assign them to ch1's head,
-                # creating bright artifacts in ch1.
-                logger.warning(
-                    f"Tile {tile_key}: {-excess} fewer frames than expected "
-                    f"(got {total_frames}, expected {expected_total}), "
-                    f"last channel will have fewer planes"
+                # Fewer frames than expected — frames lost during tile
+                # transition (GUI blocks for display transforms, camera deque
+                # overflows).  Lost frames can be from ANY part of the buffer
+                # (start/middle/end), so the channel boundary may have shifted.
+                # Detect the actual transition by scanning frame statistics.
+                detected = self._detect_channel_transition(
+                    buffer.frames, num_channels, frames_per_channel, tile_key
                 )
+                if detected is not None:
+                    frames_per_channel = detected
+                    logger.info(
+                        f"Tile {tile_key}: {-excess} fewer frames than expected "
+                        f"(got {total_frames}, expected {expected_total}), "
+                        f"detected channel transition at frame {detected}"
+                    )
+                else:
+                    # Detection failed — fall back to authoritative value
+                    logger.warning(
+                        f"Tile {tile_key}: {-excess} fewer frames than expected "
+                        f"(got {total_frames}, expected {expected_total}), "
+                        f"could not detect transition, using planes_per_channel={frames_per_channel}"
+                    )
         else:
             frames_per_channel = total_frames // num_channels
 
@@ -356,3 +363,82 @@ class TileProcessingWorker(QObject):
             f"Tile {tile_key} processed in {elapsed:.2f}s ({total_voxels} voxels)"
         )
         self.tile_processed.emit(tile_key, stats)
+
+    @staticmethod
+    def _detect_channel_transition(
+        frames: list,
+        num_channels: int,
+        expected_per_channel: int,
+        tile_key: tuple,
+    ) -> Optional[int]:
+        """Detect the actual channel transition point in a frame buffer.
+
+        Channels are acquired sequentially and typically have different
+        baseline intensities (e.g. 561nm ~148 mean vs 640nm ~137 mean).
+        When frames are lost from the middle of the buffer (GUI blocking
+        causes camera deque overflow), the channel boundary shifts from
+        the expected position.  This method finds the actual transition
+        by looking for the largest step-change in a smoothed mean-intensity
+        signal, searching near the expected boundary.
+
+        Args:
+            frames: List of (downsampled_image, z_index) tuples
+            num_channels: Number of channels (must be 2 for detection)
+            expected_per_channel: Expected frames per channel from workflow
+            tile_key: For logging
+
+        Returns:
+            Detected transition index, or None if detection failed/not applicable
+        """
+        if num_channels != 2 or len(frames) < 20:
+            return None
+
+        # Compute per-frame mean intensity
+        means = np.array([float(f[0].mean()) for f in frames])
+
+        # Smooth with a small window to reduce noise
+        kernel_size = min(11, len(means) // 4)
+        if kernel_size < 3:
+            return None
+        kernel = np.ones(kernel_size) / kernel_size
+        smoothed = np.convolve(means, kernel, mode="same")
+
+        # Search window: ±30% of expected_per_channel around the expected boundary
+        search_margin = max(20, int(expected_per_channel * 0.3))
+        search_lo = max(10, expected_per_channel - search_margin)
+        search_hi = min(len(frames) - 10, expected_per_channel + search_margin)
+
+        if search_lo >= search_hi:
+            return None
+
+        # Find the index with the largest absolute step change in the search window
+        diffs = np.abs(np.diff(smoothed))
+        search_diffs = diffs[search_lo:search_hi]
+        if len(search_diffs) == 0:
+            return None
+
+        best_local = int(np.argmax(search_diffs))
+        best_idx = search_lo + best_local + 1  # +1 because diff shifts by 1
+
+        # Validate: the step should be meaningful (> 2x median diff)
+        median_diff = np.median(diffs)
+        if median_diff > 0 and search_diffs[best_local] < 2 * median_diff:
+            # No clear transition found
+            logger.info(
+                f"Tile {tile_key}: no clear channel transition detected "
+                f"(best step {search_diffs[best_local]:.2f} vs median {median_diff:.2f})"
+            )
+            return None
+
+        # Log the detection
+        mean_before = float(np.mean(smoothed[max(0, best_idx - 10) : best_idx]))
+        mean_after = float(
+            np.mean(smoothed[best_idx : min(len(smoothed), best_idx + 10)])
+        )
+        logger.info(
+            f"Tile {tile_key}: channel transition detected at frame {best_idx} "
+            f"(expected {expected_per_channel}, shift={best_idx - expected_per_channel}), "
+            f"mean before={mean_before:.1f}, mean after={mean_after:.1f}"
+        )
+
+        return best_idx
