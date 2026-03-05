@@ -271,11 +271,10 @@ class TileProcessingWorker(QObject):
         camera_y = (y_indices - H / 2) * pixel_size_um
         camera_coords_2d = np.column_stack([camera_x.ravel(), camera_y.ravel()])
 
-        slice_thickness_um = 100
+        # All pixels in a single frame are from the same optical slice —
+        # use zero Z offset (Z depth comes from different frames in the stack)
         num_pixels = len(camera_coords_2d)
-        z_offsets = np.linspace(
-            -slice_thickness_um / 2, slice_thickness_um / 2, num_pixels
-        )
+        z_offsets = np.zeros(num_pixels)
 
         camera_x_offset = (
             -camera_coords_2d[:, 0] if self._invert_x else camera_coords_2d[:, 0]

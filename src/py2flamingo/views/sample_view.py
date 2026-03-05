@@ -2479,12 +2479,10 @@ class SampleView(QWidget):
                 f"Frame placed at world_center_um (Z,Y,X): ({world_center_um[0]:.1f}, {world_center_um[1]:.1f}, {world_center_um[2]:.1f})"
             )
 
-            # Create 3D coords
-            slice_thickness_um = 100
+            # All pixels in a single frame are from the same optical slice —
+            # use zero Z offset (Z depth comes from different frames in the stack)
             num_pixels = len(camera_coords_2d)
-            z_offsets = np.linspace(
-                -slice_thickness_um / 2, slice_thickness_um / 2, num_pixels
-            )
+            z_offsets = np.zeros(num_pixels)
 
             # When invert_x, camera image X is mirrored relative to world X
             # (optics flip X). Negate camera X so pixels within each tile
@@ -2953,8 +2951,11 @@ class SampleView(QWidget):
         # Update zoom
         self._update_zoom_display()
 
-        # Update data stats (memory/voxels)
-        self._update_data_stats()
+        # Skip heavy stats during tile workflows — get_memory_usage()
+        # acquires the voxel storage lock which can block the GUI thread
+        # and cause camera frame loss
+        if not getattr(self, "_tile_workflow_active", False):
+            self._update_data_stats()
 
         # Update FPS from camera controller if live
         if self._live_view_active and self.camera_controller:
