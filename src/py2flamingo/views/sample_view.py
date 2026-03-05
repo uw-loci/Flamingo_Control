@@ -2951,10 +2951,12 @@ class SampleView(QWidget):
         # Update zoom
         self._update_zoom_display()
 
-        # Skip heavy stats during tile workflows — get_memory_usage()
-        # acquires the voxel storage lock which can block the GUI thread
-        # and cause camera frame loss
-        if not getattr(self, "_tile_workflow_active", False):
+        # Skip heavy stats during tile workflows and disk loading —
+        # get_memory_usage() acquires the voxel storage lock which can
+        # block the GUI thread and cause frame loss or lock contention
+        if not getattr(self, "_tile_workflow_active", False) and not getattr(
+            self, "_disk_load_active", False
+        ):
             self._update_data_stats()
 
         # Update FPS from camera controller if live
@@ -3889,11 +3891,15 @@ class SampleView(QWidget):
         if hasattr(self, "_channel_availability_timer"):
             self._channel_availability_timer.start()
 
-        # Only kick visualization if tile workflow is NOT active.
+        # Only kick visualization if neither tile workflow NOR disk loading is active.
         # During tile acquisition, display transforms block the GUI thread
         # for 3-34s (growing with accumulated data), causing the camera deque
-        # to overflow and lose frames.  Deferred to finish_tile_workflows().
-        if not getattr(self, "_tile_workflow_active", False):
+        # to overflow and lose frames.  During disk loading, per-tile transforms
+        # cause ~4 min lock contention per tile.  Both paths call
+        # _update_visualization() once at the end.
+        if not getattr(self, "_tile_workflow_active", False) and not getattr(
+            self, "_disk_load_active", False
+        ):
             if hasattr(self, "_visualization_update_timer"):
                 self._visualization_update_timer.start()
 
@@ -3946,6 +3952,9 @@ class SampleView(QWidget):
 
         self.logger.info(f"Loading tiles from disk: {date_dir}")
 
+        # Suppress per-tile visualization updates during bulk load
+        self._disk_load_active = True
+
         # Clear existing data
         self.clear_data_for_workflows()
 
@@ -3988,6 +3997,8 @@ class SampleView(QWidget):
         from PyQt5.QtWidgets import QMessageBox
 
         self.logger.info(f"Disk load finished: success={success}, {message}")
+
+        self._disk_load_active = False
 
         # Stop tile worker
         self._stop_tile_worker()
