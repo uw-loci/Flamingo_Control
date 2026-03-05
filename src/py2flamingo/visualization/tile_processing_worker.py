@@ -213,12 +213,21 @@ class TileProcessingWorker(QObject):
                 buffer.frames = buffer.frames[:expected_total]
                 total_frames = expected_total
             elif excess < 0:
-                # Fewer frames than expected (e.g., last tile cut short)
+                # Fewer frames than expected (e.g., frames lost during tile
+                # transition).  Channels are acquired SEQUENTIALLY (all ch0
+                # frames, then all ch1 frames, …), so the shortfall comes
+                # from the LAST channel.  Keep frames_per_channel at the
+                # authoritative value so earlier channels get their correct
+                # frames; the loop's `end_frame = total_frames` clause
+                # naturally gives the last channel whatever remains.
+                # Falling back to total//num_channels would steal frames
+                # from ch0's tail and mis-assign them to ch1's head,
+                # creating bright artifacts in ch1.
                 logger.warning(
                     f"Tile {tile_key}: {-excess} fewer frames than expected "
-                    f"(got {total_frames}, expected {expected_total})"
+                    f"(got {total_frames}, expected {expected_total}), "
+                    f"last channel will have fewer planes"
                 )
-                frames_per_channel = total_frames // num_channels
         else:
             frames_per_channel = total_frames // num_channels
 

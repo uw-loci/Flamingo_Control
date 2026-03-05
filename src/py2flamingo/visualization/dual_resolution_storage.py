@@ -264,6 +264,7 @@ class DualResolutionVoxelStorage:
         self.display_dims = self.config.display_dimensions
         self.display_cache: Dict[int, np.ndarray] = {}  # Channel -> dense array
         self.display_dirty: Dict[int, bool] = {}  # Track which channels need update
+        self._display_epoch: Dict[int, int] = {}  # Incremented on each storage write
 
         # Transform caching and stage position tracking
         self.transform_cache: Dict[int, np.ndarray] = (
@@ -576,6 +577,7 @@ class DualResolutionVoxelStorage:
 
             # Mark display as needing update
             self.display_dirty[channel_id] = True
+            self._display_epoch[channel_id] = self._display_epoch.get(channel_id, 0) + 1
 
             # Invalidate transform cache
             cache_key = f"{channel_id}_rotated"
@@ -697,6 +699,7 @@ class DualResolutionVoxelStorage:
         with self._storage_lock:
             self._update_bounds(world_coords[valid_mask])
             self.display_dirty[channel_id] = True
+            self._display_epoch[channel_id] = self._display_epoch.get(channel_id, 0) + 1
             cache_key = f"{channel_id}_rotated"
             if cache_key in self.transform_cache:
                 del self.transform_cache[cache_key]
@@ -739,7 +742,10 @@ class DualResolutionVoxelStorage:
             # Snapshot the storage dict (shallow copy: keys are tuples, values are ints)
             # This allows the worker thread to continue writing while we iterate.
             storage_snapshot = dict(self.storage_data[channel_id])
-            self.display_dirty[channel_id] = False
+            # Record the write-epoch so we only clear dirty at the end if no new
+            # writes occurred while we were computing (which would mean our cache
+            # is stale and needs another pass).
+            snapshot_epoch = self._display_epoch.get(channel_id, 0)
 
         # === No lock: all computation on snapshot ===
         if len(storage_snapshot) == 0:
@@ -847,7 +853,9 @@ class DualResolutionVoxelStorage:
                 f"Y=[{self.config.chamber_origin[1]/1000:.1f}, {(self.config.chamber_origin[1] + self.config.chamber_dimensions[1])/1000:.1f}], "
                 f"X=[{self.config.chamber_origin[2]/1000:.1f}, {(self.config.chamber_origin[2] + self.config.chamber_dimensions[2])/1000:.1f}]"
             )
-            self.display_dirty[channel_id] = False
+            with self._storage_lock:
+                if self._display_epoch.get(channel_id, 0) == snapshot_epoch:
+                    self.display_dirty[channel_id] = False
             return self.display_cache[channel_id]
 
         # Calculate source region
@@ -885,7 +893,12 @@ class DualResolutionVoxelStorage:
                     f"Channel {channel_id} display max updated to {display_max}"
                 )
 
-        self.display_dirty[channel_id] = False
+        # Only mark clean if no new writes arrived since our snapshot.
+        # If the worker wrote new data in between, epoch will have advanced
+        # and we leave dirty=True so the next call recomputes.
+        with self._storage_lock:
+            if self._display_epoch.get(channel_id, 0) == snapshot_epoch:
+                self.display_dirty[channel_id] = False
         return self.display_cache[channel_id]
 
     def _block_average(
