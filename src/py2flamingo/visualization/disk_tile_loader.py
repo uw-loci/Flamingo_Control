@@ -20,7 +20,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 from PyQt5.QtCore import QObject, pyqtSignal
@@ -57,6 +57,212 @@ class DiskTileInfo:
         default_factory=dict
     )  # channel_id (0-based) -> path
     n_planes: int = 0  # Planes per channel
+
+
+# ---------------------------------------------------------------------------
+# Module-level functions (shared by DiskTileLoader and SampleView)
+# ---------------------------------------------------------------------------
+
+
+def parse_tile_folder(folder: Path) -> Optional[DiskTileInfo]:
+    """Parse a tile folder's metadata and find raw files.
+
+    Args:
+        folder: Path to a tile folder (e.g. X4.88_Y17.63/) containing
+                Workflow.txt and .raw files.
+
+    Returns:
+        DiskTileInfo with parsed metadata, or None if essential data is missing.
+
+    Raises:
+        FileNotFoundError: If Workflow.txt or .raw files are missing.
+    """
+    x, y = parse_coords_from_folder(folder.name)
+
+    workflow_file = folder / "Workflow.txt"
+    if not workflow_file.exists():
+        raise FileNotFoundError(f"No Workflow.txt in {folder.name}")
+
+    z_min, z_max = read_z_range_from_workflow(workflow_file)
+    channels = read_laser_channels_from_workflow(workflow_file)
+
+    # Find raw files
+    raw_files: Dict[int, Path] = {}
+    n_planes = 0
+
+    for f in folder.iterdir():
+        match = RAW_FILE_PATTERN.match(f.name)
+        if match:
+            ch_idx = int(match.group(1))  # C-number from filename = 0-based channel_id
+            planes = int(match.group(2))
+            raw_files[ch_idx] = f
+            n_planes = max(n_planes, planes)
+
+    if not raw_files:
+        raise FileNotFoundError(f"No .raw files in {folder.name}")
+
+    logger.info(
+        f"Tile {folder.name}: pos=({x}, {y}), z=[{z_min}, {z_max}], "
+        f"channels={channels}, raw_files={list(raw_files.keys())}, "
+        f"planes={n_planes}"
+    )
+
+    return DiskTileInfo(
+        folder_path=folder,
+        x=x,
+        y=y,
+        z_min=z_min,
+        z_max=z_max,
+        channels=channels,
+        raw_files=raw_files,
+        n_planes=n_planes,
+    )
+
+
+def load_tile_to_buffer(
+    tile_info: DiskTileInfo,
+    ref_pos: dict,
+    shutdown_check: Optional[Callable[[], bool]] = None,
+) -> Optional[TileFrameBuffer]:
+    """Load all channels from raw files into a single TileFrameBuffer.
+
+    Channels are concatenated in order (ch1 frames, then ch2, etc.) to
+    match the live interleave convention that TileProcessingWorker expects.
+
+    Args:
+        tile_info: Parsed tile metadata with raw file paths.
+        ref_pos: Reference position dict (x, y, z, r) for coordinate offsets.
+        shutdown_check: Optional callable returning True to request early stop.
+
+    Returns:
+        Populated TileFrameBuffer, or None on error.
+    """
+    z_mid = (tile_info.z_min + tile_info.z_max) / 2.0
+    position = {
+        "x": tile_info.x,
+        "y": tile_info.y,
+        "z": z_mid,
+        "r": 0.0,
+    }
+
+    buffer = TileFrameBuffer(
+        tile_key=(tile_info.x, tile_info.y),
+        position=position,
+        channels=tile_info.channels,
+        z_min=tile_info.z_min,
+        z_max=tile_info.z_max,
+        reference_position=ref_pos,
+    )
+
+    # Load each channel's raw file by direct channel_id lookup.
+    # Raw file C-numbers (C02, C03...) ARE the 0-based channel_id.
+    logger.info(
+        f"Channel mapping: channels={tile_info.channels}, "
+        f"raw_file_keys={sorted(tile_info.raw_files.keys())}"
+    )
+
+    for channel_id in tile_info.channels:
+        raw_path = tile_info.raw_files.get(channel_id)
+        if raw_path is None:
+            logger.warning(
+                f"No raw file for channel {channel_id} "
+                f"in {tile_info.folder_path.name}. "
+                f"Available: {sorted(tile_info.raw_files.keys())}"
+            )
+            continue
+
+        frames_before = buffer.frame_count
+        _read_raw_frames_to_buffer(raw_path, buffer, tile_info.n_planes, shutdown_check)
+        frames_added = buffer.frame_count - frames_before
+
+        # Diagnostic: signal statistics for this channel's frames
+        if frames_added > 0:
+            ch_frames = buffer.frames[frames_before:]
+            maxvals = [f[0].max() for f in ch_frames]
+            nonzero_counts = [np.count_nonzero(f[0]) for f in ch_frames]
+            total_pixels = ch_frames[0][0].size
+            frames_with_signal = sum(1 for m in maxvals if m > 0)
+            logger.info(
+                f"  Channel {channel_id} (C{channel_id:02d}): "
+                f"{frames_added} frames, "
+                f"{frames_with_signal}/{frames_added} have signal, "
+                f"max pixel range [{min(maxvals)}-{max(maxvals)}], "
+                f"avg nonzero pixels {sum(nonzero_counts)/len(nonzero_counts):.0f}/{total_pixels}"
+            )
+
+    return buffer
+
+
+def _read_raw_frames_to_buffer(
+    raw_path: Path,
+    buffer: TileFrameBuffer,
+    n_planes: int,
+    shutdown_check: Optional[Callable[[], bool]] = None,
+):
+    """Read raw Z-stack file frame-by-frame, downsample, and append to buffer.
+
+    Uses np.memmap to avoid loading the entire file (~3 GB) into memory.
+    Each frame is 2048x2048 uint16 (8 MB), downsampled to ~100x100.
+    """
+    file_size = raw_path.stat().st_size
+    expected_size = FRAME_WIDTH * FRAME_HEIGHT * n_planes * 2  # uint16 = 2 bytes
+    if file_size != expected_size:
+        logger.warning(
+            f"File size mismatch for {raw_path.name}: "
+            f"expected {expected_size}, got {file_size}"
+        )
+        # Recalculate planes from actual file size
+        n_planes = file_size // (FRAME_WIDTH * FRAME_HEIGHT * 2)
+        if n_planes == 0:
+            logger.error(f"File too small: {raw_path.name}")
+            return
+
+    # Memory-map the file
+    mmap = np.memmap(
+        raw_path,
+        dtype=np.uint16,
+        mode="r",
+        shape=(n_planes, FRAME_HEIGHT, FRAME_WIDTH),
+    )
+
+    factor = DOWNSAMPLE_TARGET / max(FRAME_WIDTH, FRAME_HEIGHT)
+
+    # Sample a few frames for raw-vs-downsampled signal comparison
+    sample_indices = {
+        0,
+        n_planes // 4,
+        n_planes // 2,
+        3 * n_planes // 4,
+        n_planes - 1,
+    }
+
+    for plane_idx in range(n_planes):
+        if shutdown_check and shutdown_check():
+            break
+
+        frame = mmap[plane_idx]
+        downsampled = zoom(frame, factor, order=1).astype(np.uint16)
+
+        if plane_idx in sample_indices:
+            raw_max = int(frame.max())
+            raw_nonzero = int(np.count_nonzero(frame))
+            ds_max = int(downsampled.max())
+            ds_nonzero = int(np.count_nonzero(downsampled))
+            logger.info(
+                f"    Frame {plane_idx}/{n_planes}: "
+                f"raw max={raw_max} nonzero={raw_nonzero}/{frame.size} "
+                f"→ ds max={ds_max} nonzero={ds_nonzero}/{downsampled.size}"
+            )
+
+        buffer.append(downsampled, plane_idx)
+
+    del mmap  # Release memmap
+    logger.info(f"Read {n_planes} frames from {raw_path.name}")
+
+
+# ---------------------------------------------------------------------------
+# DiskTileLoader class (used by manual "Load Tiles" button)
+# ---------------------------------------------------------------------------
 
 
 class DiskTileLoader(QObject):
@@ -97,6 +303,10 @@ class DiskTileLoader(QObject):
         """Request early termination."""
         self._shutdown = True
 
+    def _is_shutdown(self) -> bool:
+        """Check if shutdown was requested (for passing to module functions)."""
+        return self._shutdown
+
     def run(self):
         """Main entry point — runs on QThread."""
         try:
@@ -117,7 +327,7 @@ class DiskTileLoader(QObject):
         tiles: List[DiskTileInfo] = []
         for folder in tile_folders:
             try:
-                tile_info = self._parse_tile_folder(folder)
+                tile_info = parse_tile_folder(folder)
                 if tile_info is not None:
                     tiles.append(tile_info)
             except Exception as e:
@@ -155,7 +365,9 @@ class DiskTileLoader(QObject):
             )
 
             try:
-                buffer = self._load_tile_to_buffer(tile_info, ref_pos)
+                buffer = load_tile_to_buffer(
+                    tile_info, ref_pos, shutdown_check=self._is_shutdown
+                )
                 if buffer is not None and buffer.frame_count > 0:
                     self._tile_worker.submit_tile(buffer)
                     self.tile_submitted.emit(buffer.tile_key)
@@ -190,177 +402,3 @@ class DiskTileLoader(QObject):
             self.finished.emit(
                 False, f"Processing timed out ({tiles_submitted} tiles submitted)"
             )
-
-    def _parse_tile_folder(self, folder: Path) -> Optional[DiskTileInfo]:
-        """Parse a tile folder's metadata and find raw files.
-
-        Returns None if essential data is missing.
-        """
-        x, y = parse_coords_from_folder(folder.name)
-
-        workflow_file = folder / "Workflow.txt"
-        if not workflow_file.exists():
-            raise FileNotFoundError(f"No Workflow.txt in {folder.name}")
-
-        z_min, z_max = read_z_range_from_workflow(workflow_file)
-        channels = read_laser_channels_from_workflow(workflow_file)
-
-        # Find raw files
-        raw_files: Dict[int, Path] = {}
-        n_planes = 0
-
-        for f in folder.iterdir():
-            match = RAW_FILE_PATTERN.match(f.name)
-            if match:
-                ch_idx = int(
-                    match.group(1)
-                )  # C-number from filename = 0-based channel_id
-                planes = int(match.group(2))
-                raw_files[ch_idx] = f
-                n_planes = max(n_planes, planes)
-
-        if not raw_files:
-            raise FileNotFoundError(f"No .raw files in {folder.name}")
-
-        logger.info(
-            f"Tile {folder.name}: pos=({x}, {y}), z=[{z_min}, {z_max}], "
-            f"channels={channels}, raw_files={list(raw_files.keys())}, "
-            f"planes={n_planes}"
-        )
-
-        return DiskTileInfo(
-            folder_path=folder,
-            x=x,
-            y=y,
-            z_min=z_min,
-            z_max=z_max,
-            channels=channels,
-            raw_files=raw_files,
-            n_planes=n_planes,
-        )
-
-    def _load_tile_to_buffer(
-        self, tile_info: DiskTileInfo, ref_pos: dict
-    ) -> Optional[TileFrameBuffer]:
-        """Load all channels from raw files into a single TileFrameBuffer.
-
-        Channels are concatenated in order (ch1 frames, then ch2, etc.) to
-        match the live interleave convention that TileProcessingWorker expects.
-        """
-        z_mid = (tile_info.z_min + tile_info.z_max) / 2.0
-        position = {
-            "x": tile_info.x,
-            "y": tile_info.y,
-            "z": z_mid,
-            "r": 0.0,
-        }
-
-        buffer = TileFrameBuffer(
-            tile_key=(tile_info.x, tile_info.y),
-            position=position,
-            channels=tile_info.channels,
-            z_min=tile_info.z_min,
-            z_max=tile_info.z_max,
-            reference_position=ref_pos,
-        )
-
-        # Load each channel's raw file by direct channel_id lookup.
-        # Raw file C-numbers (C02, C03...) ARE the 0-based channel_id.
-        logger.info(
-            f"Channel mapping: channels={tile_info.channels}, "
-            f"raw_file_keys={sorted(tile_info.raw_files.keys())}"
-        )
-
-        for channel_id in tile_info.channels:
-            raw_path = tile_info.raw_files.get(channel_id)
-            if raw_path is None:
-                logger.warning(
-                    f"No raw file for channel {channel_id} "
-                    f"in {tile_info.folder_path.name}. "
-                    f"Available: {sorted(tile_info.raw_files.keys())}"
-                )
-                continue
-
-            frames_before = buffer.frame_count
-            self._read_raw_frames_to_buffer(raw_path, buffer, tile_info.n_planes)
-            frames_added = buffer.frame_count - frames_before
-
-            # Diagnostic: signal statistics for this channel's frames
-            if frames_added > 0:
-                ch_frames = buffer.frames[frames_before:]
-                maxvals = [f[0].max() for f in ch_frames]
-                nonzero_counts = [np.count_nonzero(f[0]) for f in ch_frames]
-                total_pixels = ch_frames[0][0].size
-                frames_with_signal = sum(1 for m in maxvals if m > 0)
-                logger.info(
-                    f"  Channel {channel_id} (C{channel_id:02d}): "
-                    f"{frames_added} frames, "
-                    f"{frames_with_signal}/{frames_added} have signal, "
-                    f"max pixel range [{min(maxvals)}-{max(maxvals)}], "
-                    f"avg nonzero pixels {sum(nonzero_counts)/len(nonzero_counts):.0f}/{total_pixels}"
-                )
-
-        return buffer
-
-    def _read_raw_frames_to_buffer(
-        self, raw_path: Path, buffer: TileFrameBuffer, n_planes: int
-    ):
-        """Read raw Z-stack file frame-by-frame, downsample, and append to buffer.
-
-        Uses np.memmap to avoid loading the entire file (~3 GB) into memory.
-        Each frame is 2048x2048 uint16 (8 MB), downsampled to ~100x100.
-        """
-        file_size = raw_path.stat().st_size
-        expected_size = FRAME_WIDTH * FRAME_HEIGHT * n_planes * 2  # uint16 = 2 bytes
-        if file_size != expected_size:
-            logger.warning(
-                f"File size mismatch for {raw_path.name}: "
-                f"expected {expected_size}, got {file_size}"
-            )
-            # Recalculate planes from actual file size
-            n_planes = file_size // (FRAME_WIDTH * FRAME_HEIGHT * 2)
-            if n_planes == 0:
-                logger.error(f"File too small: {raw_path.name}")
-                return
-
-        # Memory-map the file
-        mmap = np.memmap(
-            raw_path,
-            dtype=np.uint16,
-            mode="r",
-            shape=(n_planes, FRAME_HEIGHT, FRAME_WIDTH),
-        )
-
-        factor = DOWNSAMPLE_TARGET / max(FRAME_WIDTH, FRAME_HEIGHT)
-
-        # Sample a few frames for raw-vs-downsampled signal comparison
-        sample_indices = {
-            0,
-            n_planes // 4,
-            n_planes // 2,
-            3 * n_planes // 4,
-            n_planes - 1,
-        }
-
-        for plane_idx in range(n_planes):
-            if self._shutdown:
-                return
-
-            frame = mmap[plane_idx]
-            downsampled = zoom(frame, factor, order=1).astype(np.uint16)
-
-            if plane_idx in sample_indices:
-                raw_max = int(frame.max())
-                raw_nonzero = int(np.count_nonzero(frame))
-                ds_max = int(downsampled.max())
-                ds_nonzero = int(np.count_nonzero(downsampled))
-                logger.info(
-                    f"    Frame {plane_idx}/{n_planes}: "
-                    f"raw max={raw_max} nonzero={raw_nonzero}/{frame.size} "
-                    f"→ ds max={ds_max} nonzero={ds_nonzero}/{downsampled.size}"
-                )
-
-            buffer.append(downsampled, plane_idx)
-
-        del mmap  # Release memmap
-        logger.info(f"Read {n_planes} frames from {raw_path.name}")

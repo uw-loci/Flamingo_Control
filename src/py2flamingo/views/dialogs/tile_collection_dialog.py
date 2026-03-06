@@ -264,12 +264,12 @@ class TileCollectionDialog(PersistentDialog):
 
         # Sample View Integration checkbox
         self._add_to_sample_view_checkbox = QCheckBox(
-            "Add Z-stacks to Sample View (live)"
+            "Build 3D volume from saved tiles"
         )
         self._add_to_sample_view_checkbox.setToolTip(
-            "If checked, Z-stack frames will be added to Sample View 3D\n"
-            "visualization in real-time as each tile workflow executes.\n"
-            "Requires Sample View window to be open."
+            "If checked, each tile's saved .raw files will be loaded into\n"
+            "the Sample View 3D volume as each workflow completes.\n"
+            "Requires a local path configured in the Save Panel."
         )
         self._add_to_sample_view_checkbox.setChecked(True)  # Default enabled
         container_layout.addWidget(self._add_to_sample_view_checkbox)
@@ -1105,7 +1105,9 @@ class TileCollectionDialog(PersistentDialog):
 
         # Pass to Sample View for initialization
         if hasattr(sample_view, "prepare_for_tile_workflows"):
-            sample_view.prepare_for_tile_workflows(z_stack_info)
+            sample_view.prepare_for_tile_workflows(
+                z_stack_info, local_path=self._local_path
+            )
             logger.info(
                 f"Sample View prepared to receive {len(z_stack_info)} tile workflows"
             )
@@ -1127,10 +1129,19 @@ class TileCollectionDialog(PersistentDialog):
         add_to_sample_view = self._add_to_sample_view_checkbox.isChecked()
 
         if add_to_sample_view:
+            # Disk-based 3D building requires a local path to read .raw files
+            if not getattr(self, "_local_path", None):
+                logger.warning(
+                    "3D volume building disabled — no local path configured. "
+                    "Use 'Load Tiles' in Sample View after acquisition."
+                )
+                add_to_sample_view = False
+
+        if add_to_sample_view:
             # Get Sample View reference
             sample_view = self._get_sample_view_instance()
             if sample_view:
-                # Register workflow metadata for frame interception
+                # Register workflow metadata for tile loading
                 self._setup_sample_view_integration(workflow_files, sample_view)
             else:
                 logger.warning("Sample View not available - 3D integration disabled")
@@ -1336,6 +1347,12 @@ class TileCollectionDialog(PersistentDialog):
             else:
                 update_sample_view(f"Completing...", pct)
             logger.info(f"Workflow {index + 1}/{total} completed: {Path(path).name}")
+
+            # Trail-load this tile's data from disk into 3D volume
+            if add_to_sample_view:
+                sample_view = self._get_sample_view_instance()
+                if sample_view and hasattr(sample_view, "load_completed_tile"):
+                    sample_view.load_completed_tile(path)
 
         def on_queue_completed():
             self._queue_completed = True

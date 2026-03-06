@@ -3642,34 +3642,22 @@ class SampleView(QWidget):
 
     # ========== Tile Workflow Integration ==========
 
-    def prepare_for_tile_workflows(self, tile_info: list):
+    def prepare_for_tile_workflows(self, tile_info: list, local_path: str = None):
         """Prepare Sample View to receive tile workflow Z-stacks.
 
         Args:
             tile_info: List of dicts with tile positions and Z-ranges
                       Each dict has keys: x, y, z_min, z_max, filename
+            local_path: Local filesystem path for disk-based tile loading.
+                       If set, completed tiles are read from disk instead of
+                       intercepting live camera frames.
         """
         self._tile_workflow_active = True
         self._expected_tiles = tile_info
         self._tile_buffers_submitted = {}  # Track which tiles have been submitted
-        self._current_tile_buffer = None  # Current TileFrameBuffer being filled
         self._tile_reference_set = False  # Set reference on first tile frame
-        self._tile_reference_position = (
-            None  # Local reference (not in voxel_storage to avoid transform)
-        )
-
-        # Cache camera FPS for progress-bar estimates (display only, not data)
-        self._tile_camera_fps = 40.0  # Default matches typical Flamingo hardware
-        if self.camera_controller and self.camera_controller.camera_service:
-            try:
-                hw_fps = self.camera_controller.camera_service.get_frame_rate()
-                if hw_fps and hw_fps > 0:
-                    self._tile_camera_fps = hw_fps
-                self.logger.info(
-                    f"Sample View: Camera FPS for progress display: {self._tile_camera_fps}"
-                )
-            except Exception:
-                pass
+        self._tile_reference_position = None
+        self._tile_local_path = local_path
 
         # Disable Populate from Live during tile workflows to prevent interference
         if getattr(self, "_is_populating", False):
@@ -3705,30 +3693,122 @@ class SampleView(QWidget):
             f"Sample View: Prepared to receive {len(tile_info)} tile workflows"
         )
 
+    def load_completed_tile(self, workflow_path: str) -> None:
+        """Load a just-completed tile's data from disk into voxel storage.
+
+        Called per-tile as each workflow finishes during acquisition.
+        Reads .raw files from the save directory specified in the workflow file,
+        then submits to TileProcessingWorker for background processing.
+
+        Args:
+            workflow_path: Path to the completed workflow file.
+        """
+        from py2flamingo.utils.tile_workflow_parser import (
+            read_save_directory_from_workflow,
+        )
+        from py2flamingo.visualization.disk_tile_loader import (
+            load_tile_to_buffer,
+            parse_tile_folder,
+        )
+
+        try:
+            # 1. Parse workflow file for save directory
+            wf_path = Path(workflow_path)
+            save_drive, save_dir = read_save_directory_from_workflow(wf_path)
+
+            if not save_dir:
+                self.logger.warning(f"No save directory in workflow: {wf_path.name}")
+                return
+
+            # 2. Resolve local path
+            tile_folder = self._resolve_tile_folder(save_drive, save_dir)
+            if not tile_folder or not tile_folder.exists():
+                self.logger.warning(f"Tile folder not found: {save_drive}/{save_dir}")
+                return
+
+            # 3. Parse tile metadata and find .raw files
+            tile_info = parse_tile_folder(tile_folder)
+            if not tile_info:
+                return
+
+            # 4. Set reference position from first tile
+            if not self._tile_reference_set:
+                z_mid = (tile_info.z_min + tile_info.z_max) / 2.0
+                ref_pos = {
+                    "x": tile_info.x,
+                    "y": tile_info.y,
+                    "z": z_mid,
+                    "r": 0.0,
+                }
+                self.voxel_storage.set_reference_position(ref_pos)
+                self._tile_reference_position = ref_pos
+                self._tile_reference_set = True
+
+            # 5. Load raw files and submit to worker
+            buffer = load_tile_to_buffer(tile_info, self._tile_reference_position)
+            if buffer and buffer.frame_count > 0:
+                if hasattr(self, "_tile_worker") and self._tile_worker:
+                    self._tile_worker.submit_tile(buffer)
+                    self._tile_buffers_submitted[buffer.tile_key] = True
+                    self.logger.info(
+                        f"Submitted disk tile {buffer.tile_key} "
+                        f"({buffer.frame_count} frames)"
+                    )
+                else:
+                    self.logger.warning("Tile worker not available, cannot submit tile")
+            else:
+                self.logger.warning(f"No frames loaded from {tile_folder.name}")
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed to load completed tile from {workflow_path}: {e}",
+                exc_info=True,
+            )
+
+    def _resolve_tile_folder(self, save_drive: str, save_dir: str) -> Optional[Path]:
+        """Resolve a tile folder path from workflow save settings.
+
+        Maps the server's save drive + directory to a local filesystem path
+        using the local_path configured via the Save Panel.
+
+        Args:
+            save_drive: Server drive letter (e.g. "G:\\")
+            save_dir: Relative save directory (e.g. "CTLSM1\\Test_2026-03-06_X4.88_Y17.63")
+
+        Returns:
+            Local Path to tile folder, or None if not resolvable.
+        """
+        local_path = getattr(self, "_tile_local_path", None)
+        if not local_path:
+            self.logger.warning(
+                "No local path configured — cannot resolve tile folder from disk. "
+                "Use 'Load Tiles' button after acquisition to load manually."
+            )
+            return None
+
+        # save_dir is relative to the drive root, e.g. "CTLSM1\subdir\X4.88_Y17.63"
+        # local_path maps to the drive root, e.g. "/mnt/data" maps to "G:\"
+        # So the tile folder is local_path / save_dir
+        #
+        # Normalize Windows backslashes to forward slashes for Path
+        normalized_dir = save_dir.replace("\\", "/")
+        tile_folder = Path(local_path) / normalized_dir
+
+        self.logger.debug(
+            f"Resolved tile folder: {save_drive}/{save_dir} → {tile_folder}"
+        )
+        return tile_folder
+
     def finish_tile_workflows(self):
         """Mark tile workflows as complete and restore UI state.
 
         Call this when all tile workflows have finished to:
-        - Submit the last tile buffer to the background worker
         - Wait for all tiles to finish processing
         - Log completeness report
         - Re-enable Populate from Live button
         - Trigger final visualization update to show last tile
         """
         self._tile_workflow_active = False
-
-        # Submit the last tile buffer (no subsequent tile transition to trigger it)
-        if (
-            self._current_tile_buffer is not None
-            and self._current_tile_buffer.frame_count > 0
-        ):
-            self.logger.info(
-                f"Submitting final tile buffer: {self._current_tile_buffer.tile_key} "
-                f"({self._current_tile_buffer.frame_count} frames)"
-            )
-            if hasattr(self, "_tile_worker") and self._tile_worker:
-                self._tile_worker.submit_tile(self._current_tile_buffer)
-            self._current_tile_buffer = None
 
         # Wait for background worker to finish processing all tiles
         if hasattr(self, "_tile_worker") and self._tile_worker:
@@ -3767,9 +3847,10 @@ class SampleView(QWidget):
         # Stop the background worker thread
         self._stop_tile_worker()
 
+        tiles_submitted = len(getattr(self, "_tile_buffers_submitted", {}))
         self.logger.info(
             f"Sample View: Tile workflows finished. "
-            f"Submitted {len(self._tile_buffers_submitted)} tiles."
+            f"Submitted {tiles_submitted} tiles."
         )
 
         # Trigger final visualization update to show the last tile's data.

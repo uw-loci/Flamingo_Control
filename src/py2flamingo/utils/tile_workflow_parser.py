@@ -163,6 +163,41 @@ def read_num_planes_from_workflow(workflow_file: Path) -> Optional[int]:
     return None
 
 
+def read_save_directory_from_workflow(workflow_file: Path) -> Tuple[str, str]:
+    """Read save drive and directory from workflow file.
+
+    Parses "Save image drive = ..." and "Save image directory = ..."
+    from the Experiment Settings block.
+
+    Args:
+        workflow_file: Path to workflow file
+
+    Returns:
+        Tuple of (save_drive, save_directory)
+        e.g. ("G:\\", "CTLSM1\\Test_2026-03-06_X4.88_Y17.63")
+    """
+    try:
+        with open(workflow_file, "r") as f:
+            content = f.read()
+
+        save_drive = ""
+        save_dir = ""
+
+        drive_match = re.search(r"Save image drive\s*=\s*(.+)", content)
+        if drive_match:
+            save_drive = drive_match.group(1).strip()
+
+        dir_match = re.search(r"Save image directory\s*=\s*(.+)", content)
+        if dir_match:
+            save_dir = dir_match.group(1).strip()
+
+        return (save_drive, save_dir)
+
+    except Exception as e:
+        logger.error(f"Failed to read save directory from {workflow_file.name}: {e}")
+        return ("", "")
+
+
 def read_z_velocity_from_workflow(workflow_file: Path) -> float:
     """Read Z stage velocity from workflow file.
 
