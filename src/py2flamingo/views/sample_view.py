@@ -795,7 +795,7 @@ class SampleView(QWidget):
                     }
                 dir_label = QLabel(direction_texts[axis_id])
                 dir_label.setStyleSheet(
-                    "color: #888; font-size: 8pt; font-style: italic;"
+                    f"color: {axis_color}; font-size: 8pt; font-style: italic;"
                 )
                 dir_label.setAlignment(Qt.AlignCenter)
                 dir_row = QHBoxLayout()
