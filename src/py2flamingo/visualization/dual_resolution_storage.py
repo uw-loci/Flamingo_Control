@@ -783,7 +783,7 @@ class DualResolutionVoxelStorage:
 
         # Downsample using block averaging
         ratio = self.config.resolution_ratio
-        downsampled = self._block_average(dense_region, ratio)
+        downsampled = self._block_reduce(dense_region, ratio)
 
         # Map to display coordinates
         # Convert storage region coords to world coords
@@ -901,13 +901,15 @@ class DualResolutionVoxelStorage:
                 self.display_dirty[channel_id] = False
         return self.display_cache[channel_id]
 
-    def _block_average(
+    def _block_reduce(
         self, data: np.ndarray, block_size: Tuple[int, int, int]
     ) -> np.ndarray:
-        """Downsample by averaging blocks of voxels using vectorized NumPy operations.
+        """Downsample by taking the maximum of each block of voxels.
 
-        Much faster than triple-nested Python loops - uses reshape + mean for
-        bulk block averaging in a single vectorized operation.
+        Uses max (not mean) because storage uses update_mode="maximum" and
+        sparse gaps between downsampled pixels (5.18µm) and storage voxels
+        (5µm) leave some storage cells at zero. Mean would include these
+        zeros, creating a plaid/Moiré artifact in the display.
         """
         bz, by, bx = block_size
         dz, dy, dx = data.shape
@@ -920,7 +922,7 @@ class DualResolutionVoxelStorage:
         if pad_z or pad_y or pad_x:
             data = np.pad(data, ((0, pad_z), (0, pad_y), (0, pad_x)), mode="edge")
 
-        # Reshape to group blocks, then average
+        # Reshape to group blocks, then take max
         new_shape = (
             data.shape[0] // bz,
             bz,
@@ -930,10 +932,8 @@ class DualResolutionVoxelStorage:
             bx,
         )
 
-        # Reshape and compute mean over block axes (1, 3, 5)
-        # Use float32 for intermediate calculation to avoid overflow
-        reshaped = data.reshape(new_shape).astype(np.float32)
-        output = reshaped.mean(axis=(1, 3, 5))
+        reshaped = data.reshape(new_shape)
+        output = reshaped.max(axis=(1, 3, 5))
 
         return output.astype(data.dtype)
 
