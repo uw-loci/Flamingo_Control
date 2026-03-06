@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QPushButton,
     QSlider,
+    QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -116,12 +117,27 @@ class ViewerControlsDialog(PersistentDialog):
 
             group = QGroupBox(f"Channel {i+1}: {ch_name}")
             ch_layout = QGridLayout()
-            ch_layout.setColumnStretch(1, 1)  # Make middle column stretch
+            ch_layout.setColumnStretch(2, 1)  # Slider column stretches
 
-            # Row 0: Visibility checkbox
+            # Get actual layer and data state from viewer
+            layer = None
+            if hasattr(self.viewer_container, "channel_layers"):
+                layer = self.viewer_container.channel_layers.get(i)
+
+            has_data = False
+            if (
+                hasattr(self.viewer_container, "voxel_storage")
+                and self.viewer_container.voxel_storage
+            ):
+                has_data = self.viewer_container.voxel_storage.has_data(i)
+
+            # Row 0: Visibility checkbox — use actual layer state
             visible_cb = QCheckBox("Visible")
-            visible_cb.setChecked(ch_config.get("default_visible", True))
-            ch_layout.addWidget(visible_cb, 0, 0, 1, 3)
+            actual_visible = (
+                layer.visible if layer else ch_config.get("default_visible", True)
+            )
+            visible_cb.setChecked(actual_visible)
+            ch_layout.addWidget(visible_cb, 0, 0, 1, 4)
 
             # Row 1: Colormap selector
             ch_layout.addWidget(QLabel("Colormap:"), 1, 0)
@@ -130,29 +146,49 @@ class ViewerControlsDialog(PersistentDialog):
                 ["blue", "cyan", "green", "red", "magenta", "yellow", "gray"]
             )
             colormap_combo.setCurrentText(ch_config.get("default_colormap", "gray"))
-            ch_layout.addWidget(colormap_combo, 1, 1, 1, 2)
+            ch_layout.addWidget(colormap_combo, 1, 1, 1, 3)
 
             # Row 2: Opacity slider
             ch_layout.addWidget(QLabel("Opacity:"), 2, 0)
             opacity_slider = QSlider(Qt.Horizontal)
             opacity_slider.setRange(0, 100)
             opacity_slider.setValue(int(ch_config.get("opacity", 0.8) * 100))
-            ch_layout.addWidget(opacity_slider, 2, 1)
+            ch_layout.addWidget(opacity_slider, 2, 1, 1, 2)
             opacity_label = QLabel(f"{opacity_slider.value()}%")
             opacity_label.setMinimumWidth(40)
-            ch_layout.addWidget(opacity_label, 2, 2)
+            ch_layout.addWidget(opacity_label, 2, 3)
 
-            # Row 3: Contrast range slider
+            # Row 3: Contrast range slider with editable min/max spinboxes
             ch_layout.addWidget(QLabel("Contrast:"), 3, 0)
+
+            contrast_min_spin = QSpinBox()
+            contrast_min_spin.setRange(0, 65535)
+            contrast_min_spin.setFixedWidth(55)
+            contrast_min_spin.setStyleSheet("color: #888; font-size: 9pt;")
+
             contrast_slider = QRangeSlider(Qt.Horizontal)
             contrast_slider.setRange(0, 65535)
-            min_val = ch_config.get("default_contrast_min", 0)
-            max_val = ch_config.get("default_contrast_max", 500)
+
+            # Use actual layer contrast if available, else config defaults
+            if layer and hasattr(layer, "contrast_limits") and layer.contrast_limits:
+                min_val, max_val = int(layer.contrast_limits[0]), int(
+                    layer.contrast_limits[1]
+                )
+            else:
+                min_val = ch_config.get("default_contrast_min", 0)
+                max_val = ch_config.get("default_contrast_max", 500)
             contrast_slider.setValue((min_val, max_val))
-            ch_layout.addWidget(contrast_slider, 3, 1)
-            contrast_label = QLabel(f"{min_val} - {max_val}")
-            contrast_label.setMinimumWidth(80)
-            ch_layout.addWidget(contrast_label, 3, 2)
+            contrast_min_spin.setValue(min_val)
+
+            contrast_max_spin = QSpinBox()
+            contrast_max_spin.setRange(0, 65535)
+            contrast_max_spin.setFixedWidth(55)
+            contrast_max_spin.setStyleSheet("color: #888; font-size: 9pt;")
+            contrast_max_spin.setValue(max_val)
+
+            ch_layout.addWidget(contrast_min_spin, 3, 1)
+            ch_layout.addWidget(contrast_slider, 3, 2)
+            ch_layout.addWidget(contrast_max_spin, 3, 3)
 
             group.setLayout(ch_layout)
             layout.addWidget(group)
@@ -164,8 +200,18 @@ class ViewerControlsDialog(PersistentDialog):
                 "opacity": opacity_slider,
                 "opacity_label": opacity_label,
                 "contrast": contrast_slider,
-                "contrast_label": contrast_label,
+                "contrast_min_spin": contrast_min_spin,
+                "contrast_max_spin": contrast_max_spin,
             }
+
+            # Disable all controls for channels without data
+            if not has_data:
+                visible_cb.setEnabled(False)
+                colormap_combo.setEnabled(False)
+                opacity_slider.setEnabled(False)
+                contrast_slider.setEnabled(False)
+                contrast_min_spin.setEnabled(False)
+                contrast_max_spin.setEnabled(False)
 
             # Connect signals (live updates)
             visible_cb.toggled.connect(
@@ -178,9 +224,13 @@ class ViewerControlsDialog(PersistentDialog):
                 lambda v, ch=i, lbl=opacity_label: self._on_opacity_changed(ch, v, lbl)
             )
             contrast_slider.valueChanged.connect(
-                lambda v, ch=i, lbl=contrast_label: self._on_contrast_changed(
-                    ch, v, lbl
-                )
+                lambda v, ch=i: self._on_contrast_changed(ch, v)
+            )
+            contrast_min_spin.valueChanged.connect(
+                lambda v, ch=i: self._on_contrast_spin_changed(ch, True)
+            )
+            contrast_max_spin.valueChanged.connect(
+                lambda v, ch=i: self._on_contrast_spin_changed(ch, False)
             )
 
         layout.addStretch()
@@ -287,16 +337,61 @@ class ViewerControlsDialog(PersistentDialog):
             layer.opacity = opacity
         self.channel_opacity_changed.emit(channel_id, opacity)
 
-    def _on_contrast_changed(
-        self, channel_id: int, value: tuple, label: QLabel
-    ) -> None:
-        """Handle contrast range slider change."""
+    def _on_contrast_changed(self, channel_id: int, value: tuple) -> None:
+        """Handle contrast range slider change — sync spinboxes."""
         min_val, max_val = value
-        label.setText(f"{min_val} - {max_val}")
+        controls = self.channel_controls.get(channel_id, {})
+        min_spin = controls.get("contrast_min_spin")
+        max_spin = controls.get("contrast_max_spin")
+        if min_spin:
+            min_spin.blockSignals(True)
+            min_spin.setValue(min_val)
+            min_spin.blockSignals(False)
+        if max_spin:
+            max_spin.blockSignals(True)
+            max_spin.setValue(max_val)
+            max_spin.blockSignals(False)
         layer = self._get_channel_layer(channel_id)
         if layer:
             layer.contrast_limits = (min_val, max_val)
         self.channel_contrast_changed.emit(channel_id, value)
+        self.plane_views_update_requested.emit()
+
+    def _on_contrast_spin_changed(self, channel_id: int, is_min: bool) -> None:
+        """Handle contrast spinbox edit — sync slider and layer."""
+        controls = self.channel_controls.get(channel_id, {})
+        min_spin = controls.get("contrast_min_spin")
+        max_spin = controls.get("contrast_max_spin")
+        slider = controls.get("contrast")
+        if not min_spin or not max_spin or not slider:
+            return
+
+        min_val = min_spin.value()
+        max_val = max_spin.value()
+
+        # Enforce min < max
+        if min_val >= max_val:
+            if is_min:
+                min_val = max(max_val - 1, 0)
+                min_spin.blockSignals(True)
+                min_spin.setValue(min_val)
+                min_spin.blockSignals(False)
+            else:
+                max_val = min(min_val + 1, 65535)
+                max_spin.blockSignals(True)
+                max_spin.setValue(max_val)
+                max_spin.blockSignals(False)
+
+        # Sync slider
+        slider.blockSignals(True)
+        slider.setValue((min_val, max_val))
+        slider.blockSignals(False)
+
+        # Update layer
+        layer = self._get_channel_layer(channel_id)
+        if layer:
+            layer.contrast_limits = (min_val, max_val)
+        self.channel_contrast_changed.emit(channel_id, (min_val, max_val))
         self.plane_views_update_requested.emit()
 
     def _on_rendering_mode_changed(self, mode: str) -> None:
@@ -336,11 +431,11 @@ class ViewerControlsDialog(PersistentDialog):
             viewer.axes.visible = visible
 
     def _on_reset_view(self) -> None:
-        """Reset camera zoom (preserves orientation from 3D window)."""
+        """Reset camera orientation and zoom to defaults."""
         viewer = self._get_viewer()
         if viewer:
-            # Only set zoom - don't override camera.angles as 3D window has correct orientation
-            viewer.camera.zoom = 1.57
+            viewer.reset_view()  # Reset orientation to napari defaults
+            viewer.camera.zoom = 1.57  # Set zoom after reset
 
     def _sync_from_viewer(self) -> None:
         """Sync dialog controls with current napari viewer state."""
@@ -375,9 +470,14 @@ class ViewerControlsDialog(PersistentDialog):
                 if hasattr(layer, "contrast_limits") and layer.contrast_limits:
                     min_val, max_val = layer.contrast_limits
                     controls["contrast"].setValue((int(min_val), int(max_val)))
-                    controls["contrast_label"].setText(
-                        f"{int(min_val)} - {int(max_val)}"
-                    )
+                    if "contrast_min_spin" in controls:
+                        controls["contrast_min_spin"].blockSignals(True)
+                        controls["contrast_min_spin"].setValue(int(min_val))
+                        controls["contrast_min_spin"].blockSignals(False)
+                    if "contrast_max_spin" in controls:
+                        controls["contrast_max_spin"].blockSignals(True)
+                        controls["contrast_max_spin"].setValue(int(max_val))
+                        controls["contrast_max_spin"].blockSignals(False)
 
                 controls["visible"].blockSignals(False)
                 controls["colormap"].blockSignals(False)

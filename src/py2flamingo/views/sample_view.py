@@ -1121,13 +1121,25 @@ class SampleView(QWidget):
 
             layout.addLayout(row_layout)
 
-        # Auto Contrast button
+        # Auto Contrast button + Grayscale checkbox row
+        btn_row = QHBoxLayout()
         auto_contrast_btn = QPushButton("Auto Contrast")
         auto_contrast_btn.setToolTip(
-            "Calculate contrast from actual data (2nd-98th percentile)"
+            "Calculate contrast from actual data (5th-99.9th percentile)"
         )
         auto_contrast_btn.clicked.connect(self._auto_contrast_channels)
-        layout.addWidget(auto_contrast_btn)
+        btn_row.addWidget(auto_contrast_btn)
+
+        self._grayscale_cb = QCheckBox("Grayscale")
+        self._grayscale_cb.setToolTip("View one channel at a time in grayscale")
+        self._grayscale_cb.toggled.connect(self._on_grayscale_toggled)
+        btn_row.addWidget(self._grayscale_cb)
+        layout.addLayout(btn_row)
+
+        # Grayscale mode state
+        self._grayscale_mode = False
+        self._saved_colormaps: Dict[int, str] = {}
+        self._saved_visibility: Dict[int, bool] = {}
 
         group.setLayout(layout)
         return group
@@ -1720,6 +1732,25 @@ class SampleView(QWidget):
         self._channel_states[channel]["visible"] = visible
         self.logger.debug(f"Channel {channel} visibility: {visible}")
 
+        # In grayscale mode, only one channel can be visible at a time
+        if self._grayscale_mode and visible:
+            for ch_id, cb in self.channel_checkboxes.items():
+                if ch_id != channel and cb.isChecked():
+                    cb.blockSignals(True)
+                    cb.setChecked(False)
+                    cb.blockSignals(False)
+                    self._channel_states[ch_id]["visible"] = False
+                    layer = (
+                        self.channel_layers.get(ch_id) if self.channel_layers else None
+                    )
+                    if layer is not None:
+                        layer.visible = False
+            # Set this channel to grayscale colormap
+            if self.channel_layers:
+                layer = self.channel_layers.get(channel)
+                if layer is not None:
+                    layer.colormap = "gray"
+
         # Toggle visibility on the actual napari layer
         if self.channel_layers:
             layer = self.channel_layers.get(channel)
@@ -1727,6 +1758,89 @@ class SampleView(QWidget):
                 layer.visible = visible
 
         # Update 2D plane views with new visibility settings
+        self._update_plane_views()
+
+    def _on_grayscale_toggled(self, checked: bool) -> None:
+        """Toggle grayscale mode — show one channel at a time in gray."""
+        self._grayscale_mode = checked
+
+        if checked:
+            # Entering grayscale: save current colormaps and visibility
+            self._saved_colormaps.clear()
+            self._saved_visibility.clear()
+
+            for ch_id, cb in self.channel_checkboxes.items():
+                self._saved_visibility[ch_id] = cb.isChecked()
+                layer = self.channel_layers.get(ch_id) if self.channel_layers else None
+                if layer is not None:
+                    colormap_name = (
+                        layer.colormap.name
+                        if hasattr(layer.colormap, "name")
+                        else str(layer.colormap)
+                    )
+                    self._saved_colormaps[ch_id] = colormap_name
+
+            # Pick first visible channel (or first with data)
+            active_ch = None
+            for ch_id, cb in self.channel_checkboxes.items():
+                if cb.isChecked() and cb.isEnabled():
+                    active_ch = ch_id
+                    break
+            if active_ch is None:
+                for ch_id, cb in self.channel_checkboxes.items():
+                    if cb.isEnabled():
+                        active_ch = ch_id
+                        break
+
+            # Uncheck all others, set active to gray
+            for ch_id, cb in self.channel_checkboxes.items():
+                if ch_id == active_ch:
+                    cb.blockSignals(True)
+                    cb.setChecked(True)
+                    cb.blockSignals(False)
+                    self._channel_states[ch_id]["visible"] = True
+                    layer = (
+                        self.channel_layers.get(ch_id) if self.channel_layers else None
+                    )
+                    if layer is not None:
+                        layer.visible = True
+                        layer.colormap = "gray"
+                else:
+                    cb.blockSignals(True)
+                    cb.setChecked(False)
+                    cb.blockSignals(False)
+                    self._channel_states[ch_id]["visible"] = False
+                    layer = (
+                        self.channel_layers.get(ch_id) if self.channel_layers else None
+                    )
+                    if layer is not None:
+                        layer.visible = False
+        else:
+            # Leaving grayscale: restore colormaps and visibility
+            for ch_id, cb in self.channel_checkboxes.items():
+                # Restore colormap
+                if ch_id in self._saved_colormaps and self.channel_layers:
+                    layer = self.channel_layers.get(ch_id)
+                    if layer is not None:
+                        try:
+                            layer.colormap = self._saved_colormaps[ch_id]
+                        except Exception:
+                            pass
+
+                # Restore visibility
+                was_visible = self._saved_visibility.get(ch_id, False)
+                cb.blockSignals(True)
+                cb.setChecked(was_visible)
+                cb.blockSignals(False)
+                self._channel_states[ch_id]["visible"] = was_visible
+                if self.channel_layers:
+                    layer = self.channel_layers.get(ch_id)
+                    if layer is not None:
+                        layer.visible = was_visible
+
+            self._saved_colormaps.clear()
+            self._saved_visibility.clear()
+
         self._update_plane_views()
 
     def _on_channel_contrast_changed(self, channel: int, value: tuple) -> None:
@@ -1821,13 +1935,13 @@ class SampleView(QWidget):
             if volume is None or volume.size == 0:
                 continue
 
-            # Calculate percentile-based contrast (2nd to 98th percentile)
+            # Calculate percentile-based contrast (5th to 99.9th percentile)
             non_zero = volume[volume > 0]
             if len(non_zero) == 0:
                 continue
 
-            min_val = int(np.percentile(non_zero, 2))
-            max_val = int(np.percentile(non_zero, 98))
+            min_val = int(np.percentile(non_zero, 5))
+            max_val = int(np.percentile(non_zero, 99.9))
 
             # Ensure min < max
             if max_val <= min_val:
