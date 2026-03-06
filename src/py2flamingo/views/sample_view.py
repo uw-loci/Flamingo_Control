@@ -989,6 +989,11 @@ class SampleView(QWidget):
 
     def _create_channel_controls(self) -> QGroupBox:
         """Create channel visibility and contrast controls for 4 viewer channels."""
+        # Initialize grayscale state before any checkbox signals can fire
+        self._grayscale_mode = False
+        self._saved_colormaps: Dict[int, str] = {}
+        self._saved_visibility: Dict[int, bool] = {}
+
         group = QGroupBox("Viewer Channels")
         layout = QVBoxLayout()
         layout.setSpacing(2)
@@ -1135,11 +1140,6 @@ class SampleView(QWidget):
         self._grayscale_cb.toggled.connect(self._on_grayscale_toggled)
         btn_row.addWidget(self._grayscale_cb)
         layout.addLayout(btn_row)
-
-        # Grayscale mode state
-        self._grayscale_mode = False
-        self._saved_colormaps: Dict[int, str] = {}
-        self._saved_visibility: Dict[int, bool] = {}
 
         group.setLayout(layout)
         return group
