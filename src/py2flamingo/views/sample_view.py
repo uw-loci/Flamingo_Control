@@ -783,9 +783,9 @@ class SampleView(QWidget):
             if axis_id in ("x", "y", "z"):
                 if axis_id == "x":
                     x_text = (
-                        "Right \u2190\u2500\u2500\u2500\u2192 Left"
+                        "Left \u2190\u2500\u2500\u2500\u2192 Right"
                         if self._invert_x
-                        else "Left \u2190\u2500\u2500\u2500\u2192 Right"
+                        else "Right \u2190\u2500\u2500\u2500\u2192 Left"
                     )
                     direction_texts = {"x": x_text}
                 else:
@@ -1350,7 +1350,7 @@ class SampleView(QWidget):
                         dir_label = slider.property("direction_label")
                         if dir_label:
                             dir_label.setText(
-                                "Right \u2190\u2500\u2500\u2500\u2192 Left"
+                                "Left \u2190\u2500\u2500\u2500\u2192 Right"
                             )
                     else:
                         # Normal: show min on left, max on right
@@ -1363,7 +1363,7 @@ class SampleView(QWidget):
                             dir_label = slider.property("direction_label")
                             if dir_label:
                                 dir_label.setText(
-                                    "Left \u2190\u2500\u2500\u2500\u2192 Right"
+                                    "Right \u2190\u2500\u2500\u2500\u2192 Left"
                                 )
 
             self.logger.info(f"Stage limits initialized (X inverted: {self._invert_x})")
