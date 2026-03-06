@@ -3655,6 +3655,9 @@ class SampleView(QWidget):
         self._tile_workflow_active = True
         self._expected_tiles = tile_info
         self._tile_buffers_submitted = {}  # Track which tiles have been submitted
+        self._current_tile_buffer = (
+            None  # Not used by disk path, but kept for _on_tile_zstack_frame safety
+        )
         self._tile_reference_set = False  # Set reference on first tile frame
         self._tile_reference_position = None
         self._tile_local_path = local_path
