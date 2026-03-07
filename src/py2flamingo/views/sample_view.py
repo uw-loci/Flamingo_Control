@@ -3723,10 +3723,9 @@ class SampleView(QWidget):
                 self.logger.warning(f"No save directory in workflow: {wf_path.name}")
                 return
 
-            # 2. Resolve local path
+            # 2. Resolve local path (handles firmware timestamp prefix)
             tile_folder = self._resolve_tile_folder(save_drive, save_dir)
-            if not tile_folder or not tile_folder.exists():
-                self.logger.warning(f"Tile folder not found: {save_drive}/{save_dir}")
+            if not tile_folder:
                 return
 
             # 3. Parse tile metadata and find .raw files
@@ -3797,10 +3796,32 @@ class SampleView(QWidget):
         normalized_dir = save_dir.replace("\\", "/")
         tile_folder = Path(local_path) / normalized_dir
 
-        self.logger.debug(
-            f"Resolved tile folder: {save_drive}/{save_dir} → {tile_folder}"
+        if tile_folder.exists():
+            self.logger.debug(
+                f"Resolved tile folder: {save_drive}/{save_dir} → {tile_folder}"
+            )
+            return tile_folder
+
+        # Firmware prepends a timestamp (YYYYMMDD_HHMMSS_) to the directory name.
+        # Search for the timestamped version in the parent directory.
+        parent = tile_folder.parent
+        dir_name = tile_folder.name
+        if parent.exists():
+            candidates = sorted(
+                parent.glob(f"*_{dir_name}"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if candidates:
+                tile_folder = candidates[0]
+                self.logger.info(f"Found timestamped tile folder: {tile_folder.name}")
+                return tile_folder
+
+        self.logger.warning(
+            f"Tile folder not found: tried {tile_folder} "
+            f"and *_{dir_name} glob in {parent}"
         )
-        return tile_folder
+        return None
 
     def finish_tile_workflows(self):
         """Mark tile workflows as complete and restore UI state.
