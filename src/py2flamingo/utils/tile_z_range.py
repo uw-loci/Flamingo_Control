@@ -6,7 +6,7 @@ extracted from tile_collection_dialog.py.
 
 import logging
 import math
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -16,23 +16,26 @@ def calculate_tile_z_ranges(
     secondary_tiles: List,
     fallback_z_min: float,
     fallback_z_max: float,
+    tip_position: Optional[Tuple[float, float]] = None,
 ) -> Dict[Tuple[int, int], Tuple[float, float]]:
     """Calculate Z range for each primary tile based on secondary tile overlap.
 
-    When tiles are selected from two orthogonal views (e.g., 0° and 90°),
-    this function determines the Z range for each primary tile using the
-    Z-stack bounds from secondary tiles that spatially overlap.
+    When tiles are selected from two orthogonal views (e.g., R=15° and R=105°),
+    a 90° rotation swaps X and Z axes. The key relationship is:
 
-    Since tiles now store rotation_angle and z_stack_min/max, this function
-    uses a simplified approach: for each primary tile, find all secondary tiles
-    whose positions are reasonably close (within FOV distance) and aggregate
-    their Z-stack bounds.
+        z_primary = x_secondary + (z_tip - x_tip)
+
+    This function matches tiles by Y position (preserved across rotation),
+    then maps matched secondary X positions to primary Z ranges.
 
     Args:
         primary_tiles: Tiles from the primary view (where Z-stacks will be taken)
         secondary_tiles: Tiles from the secondary view (defines Z limits)
-        fallback_z_min: Fallback minimum Z if no secondary tiles
-        fallback_z_max: Fallback maximum Z if no secondary tiles
+        fallback_z_min: Fallback minimum Z if no secondary tiles match
+        fallback_z_max: Fallback maximum Z if no secondary tiles match
+        tip_position: (x_tip, z_tip) from "Tip of sample mount" preset.
+            Used to compute the rotation offset. If None, offset is estimated
+            from tile data midpoints.
 
     Returns:
         Dictionary mapping (tile_x_idx, tile_y_idx) to (z_min, z_max)
@@ -52,57 +55,56 @@ def calculate_tile_z_ranges(
     fov_mm = estimate_fov_from_tiles(primary_tiles, secondary_tiles)
     logger.info(f"Estimated FOV: {fov_mm*1000:.1f} µm for spatial overlap calculation")
 
-    # For each primary tile, find overlapping secondary tiles and collect Z-stack bounds
+    # Compute rotation offset: z_primary = x_secondary + offset
+    if tip_position is not None:
+        x_tip, z_tip = tip_position
+        offset = z_tip - x_tip
+        logger.info(
+            f"Rotation offset from tip position: {offset:.4f} mm "
+            f"(x_tip={x_tip:.4f}, z_tip={z_tip:.4f})"
+        )
+    else:
+        offset = _estimate_rotation_offset(primary_tiles, secondary_tiles)
+        logger.info(
+            f"Rotation offset estimated from tile data: {offset:.4f} mm "
+            f"(no tip position available)"
+        )
+
+    # For each primary tile, find secondary tiles at matching Y positions
+    # and map their X range to primary Z range
     tile_z_ranges = {}
     fallback_count = 0
 
     for p_tile in primary_tiles:
-        # Collect Z-stack bounds from all secondary tiles that could overlap
-        # Use a generous distance threshold (2x FOV) to account for rotation effects
-        overlap_threshold = 2.0 * fov_mm
-        overlapping_z_bounds = []
-
+        # Find secondary tiles with matching Y (within FOV tolerance)
+        matched_secondary_x = []
         for s_tile in secondary_tiles:
-            # Calculate 3D distance between tile centers
-            dx = p_tile.x - s_tile.x
-            dy = p_tile.y - s_tile.y
-            dz = p_tile.z - s_tile.z
-            distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+            y_distance = abs(p_tile.y - s_tile.y)
+            if y_distance < fov_mm:
+                matched_secondary_x.append(s_tile.x)
 
-            # If tiles are within overlap threshold, use secondary's Z-stack bounds
-            if distance < overlap_threshold:
-                # Use the Z-stack bounds from the secondary tile
-                # These represent the actual Z range that was scanned
-                if s_tile.z_stack_min != 0.0 or s_tile.z_stack_max != 0.0:
-                    overlapping_z_bounds.append(
-                        (s_tile.z_stack_min, s_tile.z_stack_max)
-                    )
-                    logger.debug(
-                        f"Tile ({p_tile.tile_x_idx},{p_tile.tile_y_idx}) overlaps with secondary tile at "
-                        f"({s_tile.x:.3f},{s_tile.y:.3f},{s_tile.z:.3f}), distance={distance*1000:.1f}µm, "
-                        f"Z bounds=[{s_tile.z_stack_min:.3f}, {s_tile.z_stack_max:.3f}]"
-                    )
-
-        # Determine Z range for this primary tile
-        if overlapping_z_bounds:
-            # Use the envelope (min of mins, max of maxes) from all overlapping tiles
-            all_z_mins = [bounds[0] for bounds in overlapping_z_bounds]
-            all_z_maxs = [bounds[1] for bounds in overlapping_z_bounds]
-            z_min = min(all_z_mins)
-            z_max = max(all_z_maxs)
+        if matched_secondary_x:
+            # Map secondary X range to primary Z range
+            x_min = min(matched_secondary_x)
+            x_max = max(matched_secondary_x)
+            # z_primary = x_secondary + offset, with FOV/2 margin for tile extent
+            z_min = x_min + offset - fov_mm / 2
+            z_max = x_max + offset + fov_mm / 2
             logger.debug(
-                f"Tile ({p_tile.tile_x_idx},{p_tile.tile_y_idx}) at ({p_tile.x:.3f},{p_tile.y:.3f},{p_tile.z:.3f}): "
-                f"Found {len(overlapping_z_bounds)} overlapping tiles, Z range [{z_min:.3f}, {z_max:.3f}] mm"
+                f"Tile ({p_tile.tile_x_idx},{p_tile.tile_y_idx}) at Y={p_tile.y:.3f}: "
+                f"{len(matched_secondary_x)} matched secondary tiles, "
+                f"secondary X=[{x_min:.3f}, {x_max:.3f}], "
+                f"mapped Z=[{z_min:.3f}, {z_max:.3f}] mm"
             )
         else:
-            # No overlap found - use fallback
-            # This can happen with non-contiguous selections or gaps
+            # No Y-matched secondary tiles - use fallback
             z_min = fallback_z_min
             z_max = fallback_z_max
             fallback_count += 1
             logger.warning(
-                f"Tile ({p_tile.tile_x_idx},{p_tile.tile_y_idx}) at ({p_tile.x:.3f},{p_tile.y:.3f},{p_tile.z:.3f}): "
-                f"No spatial overlap with secondary tiles. Using fallback Z range [{z_min:.3f}, {z_max:.3f}] mm"
+                f"Tile ({p_tile.tile_x_idx},{p_tile.tile_y_idx}) at Y={p_tile.y:.3f}: "
+                f"No secondary tiles at matching Y position. "
+                f"Using fallback Z range [{z_min:.3f}, {z_max:.3f}] mm"
             )
 
         # Validate Z range
@@ -122,11 +124,41 @@ def calculate_tile_z_ranges(
     # Log summary
     overlap_count = len(tile_z_ranges) - fallback_count
     logger.info(
-        f"Z range calculation complete: {overlap_count} tiles with overlap-based ranges, "
+        f"Z range calculation complete: {overlap_count} tiles with rotation-mapped ranges, "
         f"{fallback_count} tiles using fallback"
     )
 
     return tile_z_ranges
+
+
+def _estimate_rotation_offset(primary_tiles: List, secondary_tiles: List) -> float:
+    """Estimate the rotation offset from tile data when tip position is unavailable.
+
+    The offset = z_tip - x_tip can be approximated as:
+        offset = midpoint(primary Z values) - midpoint(secondary X values)
+
+    This works because primary Z and secondary X span the same physical extent
+    of the sample, just in different coordinate frames due to the 90° rotation.
+
+    Args:
+        primary_tiles: Tiles from primary view
+        secondary_tiles: Tiles from secondary view
+
+    Returns:
+        Estimated offset in mm
+    """
+    primary_z_values = [t.z for t in primary_tiles]
+    secondary_x_values = [t.x for t in secondary_tiles]
+
+    primary_z_mid = (min(primary_z_values) + max(primary_z_values)) / 2
+    secondary_x_mid = (min(secondary_x_values) + max(secondary_x_values)) / 2
+
+    offset = primary_z_mid - secondary_x_mid
+    logger.debug(
+        f"Estimated rotation offset: {offset:.4f} mm "
+        f"(primary Z midpoint={primary_z_mid:.4f}, secondary X midpoint={secondary_x_mid:.4f})"
+    )
+    return offset
 
 
 def estimate_fov_from_tiles(primary_tiles: List, secondary_tiles: List) -> float:

@@ -161,8 +161,9 @@ class MIPOverviewConfig:
 def parse_coords_from_folder(folder_name: str) -> Tuple[float, float]:
     """Parse X and Y coordinates from folder name.
 
-    Expects folder names in format 'X{x}_Y{y}' where x and y are floats.
-    Examples: 'X12.50_Y8.30', 'X-5.00_Y10.00'
+    Finds 'X{x}_Y{y}' pattern anywhere in the folder name.
+    Works with both clean names ('X12.50_Y8.30') and timestamped
+    firmware names ('20260307_041426_SmallTile3_2026-03-07_X6.43_Y18.14').
 
     Args:
         folder_name: Folder name to parse
@@ -171,9 +172,9 @@ def parse_coords_from_folder(folder_name: str) -> Tuple[float, float]:
         Tuple of (x, y) coordinates
 
     Raises:
-        ValueError: If folder name doesn't match expected pattern
+        ValueError: If folder name doesn't contain expected pattern
     """
-    match = re.match(r"X([-\d.]+)_Y([-\d.]+)", folder_name)
+    match = re.search(r"X([-\d.]+)_Y([-\d.]+)", folder_name)
     if match:
         return float(match.group(1)), float(match.group(2))
     raise ValueError(

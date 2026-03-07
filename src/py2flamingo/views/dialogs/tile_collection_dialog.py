@@ -169,10 +169,35 @@ class TileCollectionDialog(PersistentDialog):
             primary_tiles = self._right_tiles
             secondary_tiles = self._left_tiles
 
-        # Calculate Z ranges
+        # Calculate Z ranges using rotation geometry
+        tip_position = self._get_tip_position()
         self._tile_z_ranges = calculate_tile_z_ranges(
-            primary_tiles, secondary_tiles, fallback_z_min, fallback_z_max
+            primary_tiles,
+            secondary_tiles,
+            fallback_z_min,
+            fallback_z_max,
+            tip_position=tip_position,
         )
+
+    def _get_tip_position(self) -> Optional[Tuple[float, float]]:
+        """Get tip of sample mount position for rotation offset calculation.
+
+        Returns:
+            (x_tip, z_tip) in mm, or None if preset not available.
+        """
+        from py2flamingo.services.position_preset_service import PositionPresetService
+
+        try:
+            preset_service = PositionPresetService()
+            preset = preset_service.get_preset("Tip of sample mount")
+            if preset is not None:
+                logger.info(
+                    f"Loaded tip position: x={preset.x:.4f}, z={preset.z:.4f} mm"
+                )
+                return (preset.x, preset.z)
+        except Exception:
+            logger.debug("Could not load tip position preset", exc_info=True)
+        return None
 
     def _get_z_range_for_tile(self, tile) -> Tuple[float, float]:
         """Get Z range for a specific tile.
