@@ -3891,6 +3891,11 @@ class SampleView(QWidget):
         if not self._tile_workflow_active:
             return
 
+        # Skip live frame buffering when using disk-based tile loading —
+        # load_completed_tile() handles 3D volume building from saved .raw files
+        if getattr(self, "_tile_local_path", None):
+            return
+
         z_min = position["z_min"]
         z_max = position["z_max"]
         channels = position.get("channels", [0])
