@@ -283,6 +283,35 @@ class MainWindow(QMainWindow):
         self.benchmark_action.setEnabled(False)
         tools_menu.addAction(self.benchmark_action)
 
+        tools_menu.addSeparator()
+
+        # Connection Tests submenu
+        self.conn_tests_menu = tools_menu.addMenu("Connection &Tests")
+        self.conn_tests_menu.setEnabled(False)
+
+        self._debug_commands = [
+            ("SYSTEM_STATE_GET", 40967, "SYSTEM_STATE_GET"),
+            ("CAMERA_FOV_GET", 12343, "CAMERA_PIXEL_FIELD_OF_VIEW_GET"),
+            ("CAMERA_SIZE_GET", 12327, "CAMERA_IMAGE_SIZE_GET"),
+            ("STAGE_POS_GET", 24584, "STAGE_POSITION_GET"),
+        ]
+        for label, code, name in self._debug_commands:
+            action = QAction(f"Query {label}...", self)
+            action.setStatusTip(f"Send {name} command and display raw response")
+            action.triggered.connect(
+                lambda checked, c=code, n=name: self._on_debug_query(c, n)
+            )
+            self.conn_tests_menu.addAction(action)
+
+        self.conn_tests_menu.addSeparator()
+
+        self.save_settings_action = QAction("&Save Settings to Microscope...", self)
+        self.save_settings_action.setStatusTip(
+            "Send current settings file back to microscope (tests SCOPE_SETTINGS_SAVE)"
+        )
+        self.save_settings_action.triggered.connect(self._on_save_settings)
+        self.conn_tests_menu.addAction(self.save_settings_action)
+
         # Extensions menu (requires connection + Sample View open)
         extensions_menu = menubar.addMenu("&Extensions")
 
@@ -453,6 +482,7 @@ class MainWindow(QMainWindow):
         self.volume_scan_action.setEnabled(connected)
         self.calibrate_action.setEnabled(connected)
         self.benchmark_action.setEnabled(connected)
+        self.conn_tests_menu.setEnabled(connected)
 
         # Extensions menu requires connection AND Sample View open
         sample_view_open = self.app is not None and self.app.sample_view is not None
@@ -647,6 +677,14 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error opening benchmark dialog: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Could not open benchmark dialog: {e}")
+
+    def _on_debug_query(self, command_code: int, command_name: str):
+        """Handle Connection Tests → Query command menu action."""
+        self.connection_view.send_debug_query(command_code, command_name)
+
+    def _on_save_settings(self):
+        """Handle Connection Tests → Save Settings menu action."""
+        self.connection_view.save_settings_to_microscope()
 
     # ========== Extensions Menu Handlers ==========
 

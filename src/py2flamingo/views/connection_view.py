@@ -193,45 +193,6 @@ class ConnectionView(QWidget):
         sample_view_layout.addWidget(self.sample_view_btn)
         layout.addLayout(sample_view_layout)
 
-        # Debug commands section (queries and settings - tools moved to Tools menu)
-        debug_group = QGroupBox("Debug Commands")
-        debug_main_layout = QVBoxLayout()
-        debug_main_layout.setSpacing(4)
-
-        # Command selector row
-        cmd_layout = QHBoxLayout()
-        self.debug_command_combo = QComboBox()
-        self.debug_command_combo.addItem(
-            "SYSTEM_STATE_GET", (40967, "SYSTEM_STATE_GET")
-        )
-        self.debug_command_combo.addItem(
-            "CAMERA_FOV_GET", (12343, "CAMERA_PIXEL_FIELD_OF_VIEW_GET")
-        )
-        self.debug_command_combo.addItem(
-            "CAMERA_SIZE_GET", (12327, "CAMERA_IMAGE_SIZE_GET")
-        )
-        self.debug_command_combo.addItem("STAGE_POS_GET", (24584, "STAGE_POSITION_GET"))
-        self.debug_command_combo.setToolTip("Select command to send")
-        self.debug_command_combo.setEnabled(False)
-        cmd_layout.addWidget(self.debug_command_combo)
-
-        self.debug_query_btn = QPushButton("Send")
-        self.debug_query_btn.setToolTip("Send selected command")
-        self.debug_query_btn.clicked.connect(self._on_debug_query_clicked)
-        self.debug_query_btn.setEnabled(False)
-        self.debug_query_btn.setMaximumWidth(60)
-        cmd_layout.addWidget(self.debug_query_btn)
-
-        self.save_settings_btn = QPushButton("Save Settings")
-        self.save_settings_btn.setToolTip("Save settings to microscope")
-        self.save_settings_btn.clicked.connect(self._on_save_settings_clicked)
-        self.save_settings_btn.setEnabled(False)
-        cmd_layout.addWidget(self.save_settings_btn)
-        debug_main_layout.addLayout(cmd_layout)
-
-        debug_group.setLayout(debug_main_layout)
-        layout.addWidget(debug_group)
-
         # Status display
         self.status_label = QLabel("Status: Not connected")
         self.status_label.setStyleSheet("color: gray; font-weight: bold;")
@@ -339,11 +300,6 @@ class ConnectionView(QWidget):
             self.disconnect_btn.setEnabled(True)
             self.ip_input.setEnabled(False)
             self.port_input.setEnabled(False)
-            self.debug_command_combo.setEnabled(
-                True
-            )  # Enable debug commands when connected
-            self.debug_query_btn.setEnabled(True)
-            self.save_settings_btn.setEnabled(True)
             self.sample_view_btn.setEnabled(True)
         else:
             # Disconnected state
@@ -353,11 +309,6 @@ class ConnectionView(QWidget):
             self.disconnect_btn.setEnabled(False)
             self.ip_input.setEnabled(True)
             self.port_input.setEnabled(True)
-            self.debug_command_combo.setEnabled(
-                False
-            )  # Disable debug commands when disconnected
-            self.debug_query_btn.setEnabled(False)
-            self.save_settings_btn.setEnabled(False)
             self.sample_view_btn.setEnabled(False)
 
     def _update_status_error(self, error_message: str) -> None:
@@ -387,9 +338,6 @@ class ConnectionView(QWidget):
 
         # Disable features that require working microscope communication
         self.sample_view_btn.setEnabled(False)
-        self.debug_command_combo.setEnabled(False)
-        self.debug_query_btn.setEnabled(False)
-        self.save_settings_btn.setEnabled(False)
         self.test_workflow_file_btn.setEnabled(False)
         self.test_workflow_gen_btn.setEnabled(False)
 
@@ -493,11 +441,12 @@ class ConnectionView(QWidget):
         else:
             self._logger.warning(f"ConnectionView: Test failed, not loading settings")
 
-    def _on_debug_query_clicked(self) -> None:
-        """Handle debug query button click.
+    def send_debug_query(self, command_code: int, command_name: str) -> None:
+        """Send a debug query command and display the parsed response.
 
-        Sends selected command and displays the parsed response in a dialog.
-        Useful for testing which commands are implemented.
+        Args:
+            command_code: Numeric command code to send
+            command_name: Human-readable command name for display
         """
         from PyQt5.QtWidgets import (
             QDialog,
@@ -507,13 +456,6 @@ class ConnectionView(QWidget):
             QVBoxLayout,
         )
 
-        # Get selected command
-        selected_data = self.debug_command_combo.currentData()
-        if not selected_data:
-            self._show_message("No command selected", is_error=True)
-            return
-
-        command_code, command_name = selected_data
         self._logger.info(
             f"Debug query button clicked for {command_name} ({command_code})"
         )
@@ -762,11 +704,11 @@ class ConnectionView(QWidget):
         clipboard.setText(text)
         self._show_message("Copied to clipboard", is_error=False)
 
-    def _on_save_settings_clicked(self) -> None:
-        """Handle save settings button click.
+    def save_settings_to_microscope(self) -> None:
+        """Save settings to microscope (tests SCOPE_SETTINGS_SAVE command).
 
-        Tests SCOPE_SETTINGS_SAVE command by sending current settings file
-        back to microscope. This verifies the command is implemented.
+        Sends current settings file back to microscope to verify
+        the command is implemented.
         """
         from pathlib import Path
 
