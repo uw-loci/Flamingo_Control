@@ -89,6 +89,8 @@ def calculate_tile_edges(image: np.ndarray, tiles_x: int, tiles_y: int) -> np.nd
     Returns:
         2D array of edge scores [tiles_y, tiles_x]
     """
+    from scipy.ndimage import convolve
+
     # Convert to grayscale if needed
     if len(image.shape) == 3:
         gray = np.mean(image, axis=2).astype(np.float64)
@@ -102,6 +104,9 @@ def calculate_tile_edges(image: np.ndarray, tiles_x: int, tiles_y: int) -> np.nd
     # Laplacian kernel for edge detection
     kernel = np.array([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=np.float64)
 
+    # Apply Laplacian to entire image at once (vectorized, fast)
+    laplacian = convolve(gray, kernel, mode="nearest")
+
     edge_scores = np.zeros((tiles_y, tiles_x))
 
     for ty in range(tiles_y):
@@ -111,19 +116,8 @@ def calculate_tile_edges(image: np.ndarray, tiles_x: int, tiles_y: int) -> np.nd
             x_start = tx * tile_w
             x_end = (tx + 1) * tile_w
 
-            tile = gray[y_start:y_end, x_start:x_end]
-
-            # Apply Laplacian via convolution (simple version)
-            # Pad tile for convolution
-            padded = np.pad(tile, 1, mode="edge")
-            laplacian = np.zeros_like(tile)
-
-            for i in range(tile.shape[0]):
-                for j in range(tile.shape[1]):
-                    region = padded[i : i + 3, j : j + 3]
-                    laplacian[i, j] = np.sum(region * kernel)
-
-            edge_scores[ty, tx] = np.var(laplacian)
+            tile_lap = laplacian[y_start:y_end, x_start:x_end]
+            edge_scores[ty, tx] = np.var(tile_lap)
 
     return edge_scores
 
@@ -363,15 +357,26 @@ class OverviewThresholderDialog(PersistentDialog):
             f"Calculating tile metrics for {self._tiles_x}x{self._tiles_y} grid..."
         )
 
-        self._variances = calculate_tile_variance(
-            self._image, self._tiles_x, self._tiles_y
-        )
-        self._edge_scores = calculate_tile_edges(
-            self._image, self._tiles_x, self._tiles_y
-        )
-        self._intensities = calculate_tile_intensity(
-            self._image, self._tiles_x, self._tiles_y
-        )
+        try:
+            self._variances = calculate_tile_variance(
+                self._image, self._tiles_x, self._tiles_y
+            )
+        except Exception as e:
+            logger.error(f"Failed to calculate tile variance: {e}")
+
+        try:
+            self._edge_scores = calculate_tile_edges(
+                self._image, self._tiles_x, self._tiles_y
+            )
+        except Exception as e:
+            logger.error(f"Failed to calculate tile edges: {e}")
+
+        try:
+            self._intensities = calculate_tile_intensity(
+                self._image, self._tiles_x, self._tiles_y
+            )
+        except Exception as e:
+            logger.error(f"Failed to calculate tile intensity: {e}")
 
         # Update statistics display
         if self._variances is not None:
@@ -410,6 +415,8 @@ class OverviewThresholderDialog(PersistentDialog):
         selected = set()
 
         if method == "variance":
+            if self._variances is None:
+                return selected
             threshold = self._variance_slider.value()
             self._variance_value.setText(str(threshold))
 
@@ -420,6 +427,8 @@ class OverviewThresholderDialog(PersistentDialog):
                         selected.add((tx, ty))
 
         elif method == "edge":
+            if self._edge_scores is None:
+                return selected
             threshold = self._edge_slider.value()
             self._edge_value.setText(str(threshold))
 
@@ -430,6 +439,8 @@ class OverviewThresholderDialog(PersistentDialog):
                         selected.add((tx, ty))
 
         elif method == "intensity":
+            if self._intensities is None:
+                return selected
             min_int = self._intensity_min.value()
             max_int = self._intensity_max.value()
 
@@ -441,6 +452,8 @@ class OverviewThresholderDialog(PersistentDialog):
                         selected.add((tx, ty))
 
         elif method == "combined":
+            if self._variances is None or self._edge_scores is None:
+                return selected
             var_threshold = self._variance_slider.value()
             edge_threshold = self._edge_slider.value()
             self._variance_value.setText(str(var_threshold))
@@ -483,21 +496,31 @@ class OverviewThresholderDialog(PersistentDialog):
         if self._image is None:
             return
 
+        # Normalize to uint8 for display (handles uint16 camera images)
+        display_img = self._image
+        if display_img.dtype != np.uint8:
+            if display_img.max() > 0:
+                display_img = (
+                    (display_img.astype(np.float64) / display_img.max()) * 255
+                ).astype(np.uint8)
+            else:
+                display_img = np.zeros_like(display_img, dtype=np.uint8)
+
         # Convert numpy image to QPixmap
-        if len(self._image.shape) == 3:
-            h, w, c = self._image.shape
+        if len(display_img.shape) == 3:
+            h, w, c = display_img.shape
             if c == 4:
                 fmt = QImage.Format_RGBA8888
             else:
                 fmt = QImage.Format_RGB888
 
             # Ensure contiguous array
-            img_data = np.ascontiguousarray(self._image)
+            img_data = np.ascontiguousarray(display_img)
             qimg = QImage(img_data.data, w, h, img_data.strides[0], fmt)
         else:
-            h, w = self._image.shape
+            h, w = display_img.shape
             # Convert grayscale to RGB for display
-            rgb = np.stack([self._image] * 3, axis=-1).astype(np.uint8)
+            rgb = np.stack([display_img] * 3, axis=-1)
             rgb = np.ascontiguousarray(rgb)
             qimg = QImage(rgb.data, w, h, rgb.strides[0], QImage.Format_RGB888)
 

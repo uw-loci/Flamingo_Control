@@ -108,6 +108,29 @@ Alternatively, click **"Reload Last Used"** to use settings from a previous scan
 
 **Tip:** Click **"Get Current R"** to use the current stage rotation.
 
+#### Focus Stacking
+
+The **"Use focus stacking"** checkbox controls how the "Best Focus" image is computed from each tile's Z-stack:
+
+| Mode | Speed | Result |
+|------|-------|--------|
+| **Off** (default) | Fast | Selects the single Z-plane with the highest overall sharpness score |
+| **On** | Slower | Combines the sharpest regions from every Z-plane into one composite image |
+
+**How focus stacking works:**
+
+1. For each Z-plane, a per-pixel sharpness map is computed using the local variance of the Laplacian (an edge-detection measure evaluated in a 9x9 neighborhood)
+2. For each pixel position, the algorithm picks the Z-plane where that pixel is sharpest
+3. The output composite contains every part of the sample in focus, regardless of depth
+
+**When to use it:**
+
+- Samples with uneven surfaces or significant depth variation across a single tile
+- When a single "best Z-plane" leaves parts of the tile blurry
+- Not needed for flat samples or when speed is more important than image quality
+
+**Note:** The "Extended Depth of Focus" visualization type in the results window always uses focus stacking regardless of this checkbox. The checkbox only affects the "Best Focus" visualization type.
+
 ### Stage 2: Scanning
 
 After clicking **Start Scan**:

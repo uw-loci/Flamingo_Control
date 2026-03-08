@@ -1106,8 +1106,9 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
     def _on_auto_select(self):
         """Open thresholder dialog for automatic tile selection."""
-        # Get the current image from left panel (first rotation)
-        image = self.left_panel.get_image()
+        # Use the display image (downsampled to ~4096px max) for fast analysis.
+        # Per-tile variance/edge/intensity stats are equivalent at lower resolution.
+        image = self.left_panel._display_image
         if image is None:
             QMessageBox.warning(
                 self, "No Image", "No image loaded. Please wait for scan to complete."
