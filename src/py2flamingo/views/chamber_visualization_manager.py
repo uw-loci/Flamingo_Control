@@ -948,6 +948,30 @@ class ChamberVisualizationManager:
                     "default_colormap": "magenta",
                     "default_visible": False,
                 },
+                {
+                    "id": 4,
+                    "name": "405nm (DAPI) R",
+                    "default_colormap": "cyan",
+                    "default_visible": False,
+                },
+                {
+                    "id": 5,
+                    "name": "488nm (GFP) R",
+                    "default_colormap": "green",
+                    "default_visible": False,
+                },
+                {
+                    "id": 6,
+                    "name": "561nm (RFP) R",
+                    "default_colormap": "red",
+                    "default_visible": False,
+                },
+                {
+                    "id": 7,
+                    "name": "640nm (Far-Red) R",
+                    "default_colormap": "magenta",
+                    "default_visible": False,
+                },
             ],
         )
 

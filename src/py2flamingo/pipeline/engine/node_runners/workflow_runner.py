@@ -309,7 +309,7 @@ class WorkflowRunner(AbstractNodeRunner):
         if voxel_storage:
             try:
                 volumes = {}
-                for ch_id in range(4):
+                for ch_id in range(8):
                     vol = voxel_storage.get_display_volume(ch_id)
                     if vol is not None and vol.any():
                         volumes[ch_id] = vol

@@ -290,7 +290,7 @@ class DualResolutionVoxelStorage:
         self.reference_stage_position = None  # Will be set on first data capture
 
         # Initialize storage for each channel
-        self.num_channels = 4
+        self.num_channels = 8
         self._initialize_storage()
 
         # Track data bounds for optimization

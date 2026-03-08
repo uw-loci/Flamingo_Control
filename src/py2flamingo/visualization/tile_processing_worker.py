@@ -78,17 +78,25 @@ class TileProcessingWorker(QObject):
     tile_processed = pyqtSignal(tuple, dict)
     error = pyqtSignal(str)
 
-    def __init__(self, voxel_storage, config: dict, invert_x: bool = False):
+    def __init__(
+        self,
+        voxel_storage,
+        config: dict,
+        invert_x: bool = False,
+        update_mode: str = "maximum",
+    ):
         """
         Args:
             voxel_storage: DualResolutionStorage instance (thread-safe with RLock)
             config: The sample_view._config dict for coordinate calculations
             invert_x: Whether X axis is inverted in display
+            update_mode: How overlapping voxels are merged ("maximum", "average", "latest", "additive")
         """
         super().__init__()
         self._voxel_storage = voxel_storage
         self._config = config
         self._invert_x = invert_x
+        self._update_mode = update_mode
 
         # Thread-safe queue (deque with appendleft/pop is atomic in CPython)
         self._queue = collections.deque()
@@ -345,7 +353,7 @@ class TileProcessingWorker(QObject):
                     world_coords=world_coords_3d,
                     pixel_values=values,
                     timestamp=timestamp,
-                    update_mode="maximum",
+                    update_mode=self._update_mode,
                 )
 
             logger.info(f"  Channel {channel_id}: {n_frames} frames processed")

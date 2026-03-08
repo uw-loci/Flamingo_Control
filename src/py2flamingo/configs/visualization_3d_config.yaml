@@ -9,7 +9,7 @@ display:
   # Rendering settings
   fps_target: 30
   downsample_factor: 4  # Downsample live camera feed by this factor
-  max_channels: 4
+  max_channels: 8
   rendering_backend: "napari"  # future: could be "vispy", "vtk"
 
   # Visual appearance
@@ -168,6 +168,47 @@ channels:
     name: "640nm (Far-Red)"
     default_colormap: "magenta"
     default_visible: true  # Changed from false - users expect to see active laser data
+    update_strategy: "maximum"
+    blend_mode: "additive"
+    opacity: 0.8
+    default_contrast_min: 0
+    default_contrast_max: 500
+
+  # Right-side illumination channels (same lasers, opposite light path)
+  - id: 4
+    name: "405nm (DAPI) R"
+    default_colormap: "blue"
+    default_visible: false
+    update_strategy: "maximum"
+    blend_mode: "additive"
+    opacity: 0.8
+    default_contrast_min: 0
+    default_contrast_max: 500
+
+  - id: 5
+    name: "488nm (GFP) R"
+    default_colormap: "green"
+    default_visible: false
+    update_strategy: "maximum"
+    blend_mode: "additive"
+    opacity: 0.8
+    default_contrast_min: 0
+    default_contrast_max: 500
+
+  - id: 6
+    name: "561nm (RFP) R"
+    default_colormap: "red"
+    default_visible: false
+    update_strategy: "maximum"
+    blend_mode: "additive"
+    opacity: 0.8
+    default_contrast_min: 0
+    default_contrast_max: 500
+
+  - id: 7
+    name: "640nm (Far-Red) R"
+    default_colormap: "magenta"
+    default_visible: false
     update_strategy: "maximum"
     blend_mode: "additive"
     opacity: 0.8

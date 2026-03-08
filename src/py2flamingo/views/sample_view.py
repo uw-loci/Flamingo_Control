@@ -152,7 +152,12 @@ class SampleView(QWidget):
             "invert_x_default", False
         )
 
-        # Channel visibility/contrast state for 4 viewers - load from config
+        # Number of channels (from config)
+        self._num_channels = len(self._config.get("channels", []))
+        if self._num_channels == 0:
+            self._num_channels = 4
+
+        # Channel visibility/contrast state - load from config
         self._channel_states = self._load_channel_settings_from_config()
 
         # Live view state
@@ -290,7 +295,7 @@ class SampleView(QWidget):
         channel_states = {}
         channels_config = self._config.get("channels", [])
 
-        for i in range(4):
+        for i in range(self._num_channels):
             # Find channel config by id
             channel_config = None
             for ch in channels_config:
@@ -988,7 +993,7 @@ class SampleView(QWidget):
         return widget
 
     def _create_channel_controls(self) -> QGroupBox:
-        """Create channel visibility and contrast controls for 4 viewer channels."""
+        """Create channel visibility and contrast controls with Left/Right side groups."""
         # Initialize grayscale state before any checkbox signals can fire
         self._grayscale_mode = False
         self._saved_colormaps: Dict[int, str] = {}
@@ -1000,13 +1005,16 @@ class SampleView(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
 
         # Get channel names from visualization config (wavelengths)
-        # Falls back to default names if config not available
         channels_config = self._config.get("channels", [])
         default_channel_info = [
-            {"name": "405nm", "color": "#9370DB"},  # Violet
-            {"name": "488nm", "color": "#00CED1"},  # Cyan
-            {"name": "561nm", "color": "#32CD32"},  # Green
-            {"name": "640nm", "color": "#DC143C"},  # Red
+            {"name": "405nm", "color": "#9370DB"},
+            {"name": "488nm", "color": "#00CED1"},
+            {"name": "561nm", "color": "#32CD32"},
+            {"name": "640nm", "color": "#DC143C"},
+            {"name": "405nm R", "color": "#9370DB"},
+            {"name": "488nm R", "color": "#00CED1"},
+            {"name": "561nm R", "color": "#32CD32"},
+            {"name": "640nm R", "color": "#DC143C"},
         ]
 
         # Store widget references
@@ -1015,116 +1023,32 @@ class SampleView(QWidget):
         self.channel_min_spins: Dict[int, QSpinBox] = {}
         self.channel_max_spins: Dict[int, QSpinBox] = {}
 
-        for i in range(4):
-            # Get channel config or use default
-            if i < len(channels_config):
-                ch_config = channels_config[i]
-                # Extract wavelength from name like "405nm (DAPI)" -> "405nm"
-                name = ch_config.get("name", default_channel_info[i]["name"])
-                if "(" in name:
-                    name = name.split("(")[0].strip()
-            else:
-                name = default_channel_info[i]["name"]
-
-            # Get colormap color for the channel
-            colormap = (
-                channels_config[i].get("default_colormap", "gray")
-                if i < len(channels_config)
-                else "gray"
+        # Left Side group (channels 0-3) — always visible
+        left_group = QGroupBox("Left Side")
+        left_layout = QVBoxLayout()
+        left_layout.setSpacing(2)
+        left_layout.setContentsMargins(4, 4, 4, 4)
+        for i in range(min(4, self._num_channels)):
+            left_layout.addLayout(
+                self._create_channel_row(i, channels_config, default_channel_info)
             )
-            colormap_colors = {
-                "blue": "#9370DB",
-                "green": "#32CD32",
-                "red": "#DC143C",
-                "magenta": "#FF00FF",
-                "cyan": "#00CED1",
-                "gray": "#808080",
-            }
-            color = colormap_colors.get(colormap, default_channel_info[i]["color"])
+        left_group.setLayout(left_layout)
+        layout.addWidget(left_group)
 
-            row_layout = QHBoxLayout()
-            row_layout.setSpacing(4)
-
-            # Visibility checkbox with wavelength name
-            checkbox = QCheckBox(name)
-            checkbox.setChecked(self._channel_states[i].get("visible", True))
-            checkbox.setStyleSheet(
-                f"QCheckBox {{ color: {color}; font-weight: bold; }}"
-            )
-            checkbox.stateChanged.connect(
-                lambda state, ch=i: self._on_channel_visibility_changed(ch, state)
-            )
-            checkbox.setMinimumWidth(70)
-            self.channel_checkboxes[i] = checkbox
-            row_layout.addWidget(checkbox)
-
-            # Dual-handle contrast range slider
-            # Range is 0-500 for typical fluorescence/brightfield (not full 16-bit)
-            slider = QRangeSlider(Qt.Horizontal)
-            slider.setRange(0, 500)
-            # Load initial values from channel state (clamped to slider range)
-            min_val = min(self._channel_states[i].get("contrast_min", 0), 500)
-            max_val = min(self._channel_states[i].get("contrast_max", 500), 500)
-            slider.setValue((min_val, max_val))
-            slider.setToolTip(f"Adjust contrast range for {name}")
-            # Style the range slider handles to be visible
-            slider.setStyleSheet("""
-                QRangeSlider {
-                    qproperty-barColor: #2196F3;
-                }
-                QRangeSlider::handle {
-                    background: #1976D2;
-                    border: 2px solid #0D47A1;
-                    border-radius: 6px;
-                    width: 12px;
-                    height: 12px;
-                }
-                QRangeSlider::handle:hover {
-                    background: #1565C0;
-                }
-            """)
-            slider.valueChanged.connect(
-                lambda val, ch=i: self._on_channel_contrast_changed(ch, val)
-            )
-            self.channel_contrast_sliders[i] = slider
-
-            # Min/max value spinboxes flanking the slider
-            min_spin = QSpinBox()
-            min_spin.setRange(0, 65535)
-            min_spin.setValue(min_val)
-            min_spin.setFixedWidth(55)
-            min_spin.setStyleSheet("color: #888; font-size: 9pt;")
-            min_spin.valueChanged.connect(
-                lambda val, ch=i: self._on_channel_contrast_spin_changed(ch, True)
-            )
-            self.channel_min_spins[i] = min_spin
-
-            max_spin = QSpinBox()
-            max_spin.setRange(0, 65535)
-            max_spin.setValue(max_val)
-            max_spin.setFixedWidth(55)
-            max_spin.setStyleSheet("color: #888; font-size: 9pt;")
-            max_spin.valueChanged.connect(
-                lambda val, ch=i: self._on_channel_contrast_spin_changed(ch, False)
-            )
-            self.channel_max_spins[i] = max_spin
-
-            row_layout.addWidget(min_spin)
-            row_layout.addWidget(slider, stretch=1)
-            row_layout.addWidget(max_spin)
-
-            # Start channels disabled until data arrives
-            checkbox.setEnabled(False)
-            checkbox.setChecked(False)
-            checkbox.setToolTip(
-                f"{name} channel — No data loaded.\n"
-                "This channel will activate automatically when 3D volume data is received."
-            )
-            slider.setEnabled(False)
-            min_spin.setEnabled(False)
-            max_spin.setEnabled(False)
-
-            layout.addLayout(row_layout)
+        # Right Side group (channels 4-7) — collapsible, collapsed by default
+        if self._num_channels > 4:
+            self._right_side_group = QGroupBox("Right Side")
+            self._right_side_group.setCheckable(True)
+            self._right_side_group.setChecked(False)
+            right_layout = QVBoxLayout()
+            right_layout.setSpacing(2)
+            right_layout.setContentsMargins(4, 4, 4, 4)
+            for i in range(4, self._num_channels):
+                right_layout.addLayout(
+                    self._create_channel_row(i, channels_config, default_channel_info)
+                )
+            self._right_side_group.setLayout(right_layout)
+            layout.addWidget(self._right_side_group)
 
         # Auto Contrast button + Grayscale checkbox row
         btn_row = QHBoxLayout()
@@ -1143,6 +1067,125 @@ class SampleView(QWidget):
 
         group.setLayout(layout)
         return group
+
+    def _create_channel_row(
+        self, i: int, channels_config: list, default_channel_info: list
+    ) -> QHBoxLayout:
+        """Create a single channel control row (checkbox + contrast slider + spinboxes)."""
+        # Get channel config or use default
+        if i < len(channels_config):
+            ch_config = channels_config[i]
+            name = ch_config.get(
+                "name",
+                (
+                    default_channel_info[i]["name"]
+                    if i < len(default_channel_info)
+                    else f"Ch {i}"
+                ),
+            )
+            if "(" in name:
+                name = name.split("(")[0].strip()
+        else:
+            name = (
+                default_channel_info[i]["name"]
+                if i < len(default_channel_info)
+                else f"Ch {i}"
+            )
+
+        # Get colormap color for the channel
+        colormap = (
+            channels_config[i].get("default_colormap", "gray")
+            if i < len(channels_config)
+            else "gray"
+        )
+        colormap_colors = {
+            "blue": "#9370DB",
+            "green": "#32CD32",
+            "red": "#DC143C",
+            "magenta": "#FF00FF",
+            "cyan": "#00CED1",
+            "gray": "#808080",
+        }
+        color = colormap_colors.get(colormap, "#808080")
+
+        row_layout = QHBoxLayout()
+        row_layout.setSpacing(4)
+
+        # Visibility checkbox with wavelength name
+        checkbox = QCheckBox(name)
+        checkbox.setChecked(self._channel_states.get(i, {}).get("visible", True))
+        checkbox.setStyleSheet(f"QCheckBox {{ color: {color}; font-weight: bold; }}")
+        checkbox.stateChanged.connect(
+            lambda state, ch=i: self._on_channel_visibility_changed(ch, state)
+        )
+        checkbox.setMinimumWidth(70)
+        self.channel_checkboxes[i] = checkbox
+        row_layout.addWidget(checkbox)
+
+        # Dual-handle contrast range slider
+        slider = QRangeSlider(Qt.Horizontal)
+        slider.setRange(0, 500)
+        min_val = min(self._channel_states.get(i, {}).get("contrast_min", 0), 500)
+        max_val = min(self._channel_states.get(i, {}).get("contrast_max", 500), 500)
+        slider.setValue((min_val, max_val))
+        slider.setToolTip(f"Adjust contrast range for {name}")
+        slider.setStyleSheet("""
+            QRangeSlider {
+                qproperty-barColor: #2196F3;
+            }
+            QRangeSlider::handle {
+                background: #1976D2;
+                border: 2px solid #0D47A1;
+                border-radius: 6px;
+                width: 12px;
+                height: 12px;
+            }
+            QRangeSlider::handle:hover {
+                background: #1565C0;
+            }
+        """)
+        slider.valueChanged.connect(
+            lambda val, ch=i: self._on_channel_contrast_changed(ch, val)
+        )
+        self.channel_contrast_sliders[i] = slider
+
+        # Min/max value spinboxes flanking the slider
+        min_spin = QSpinBox()
+        min_spin.setRange(0, 65535)
+        min_spin.setValue(min_val)
+        min_spin.setFixedWidth(55)
+        min_spin.setStyleSheet("color: #888; font-size: 9pt;")
+        min_spin.valueChanged.connect(
+            lambda val, ch=i: self._on_channel_contrast_spin_changed(ch, True)
+        )
+        self.channel_min_spins[i] = min_spin
+
+        max_spin = QSpinBox()
+        max_spin.setRange(0, 65535)
+        max_spin.setValue(max_val)
+        max_spin.setFixedWidth(55)
+        max_spin.setStyleSheet("color: #888; font-size: 9pt;")
+        max_spin.valueChanged.connect(
+            lambda val, ch=i: self._on_channel_contrast_spin_changed(ch, False)
+        )
+        self.channel_max_spins[i] = max_spin
+
+        row_layout.addWidget(min_spin)
+        row_layout.addWidget(slider, stretch=1)
+        row_layout.addWidget(max_spin)
+
+        # Start channels disabled until data arrives
+        checkbox.setEnabled(False)
+        checkbox.setChecked(False)
+        checkbox.setToolTip(
+            f"{name} channel — No data loaded.\n"
+            "This channel will activate automatically when 3D volume data is received."
+        )
+        slider.setEnabled(False)
+        min_spin.setEnabled(False)
+        max_spin.setEnabled(False)
+
+        return row_layout
 
     def _create_workflow_progress(self) -> QWidget:
         """Create workflow progress bar (placeholder - not connected)."""
@@ -1211,6 +1254,19 @@ class SampleView(QWidget):
             "QPushButton:hover { background-color: #f57c00; }"
         )
         data_row.addWidget(self.clear_data_btn)
+
+        # Fusion mode selector
+        fusion_label = QLabel("Fusion:")
+        fusion_label.setStyleSheet("font-size: 9pt; color: #888;")
+        self._fusion_combo = QComboBox()
+        self._fusion_combo.addItems(["Maximum", "Average", "Latest", "Additive"])
+        self._fusion_combo.setToolTip(
+            "How overlapping voxels are merged (affects new data only)"
+        )
+        self._fusion_combo.setFixedWidth(100)
+        self._fusion_combo.currentTextChanged.connect(self._on_fusion_mode_changed)
+        data_row.addWidget(fusion_label)
+        data_row.addWidget(self._fusion_combo)
 
         data_row.addStretch()
         layout.addLayout(data_row)
@@ -1983,7 +2039,7 @@ class SampleView(QWidget):
 
         channels_config = self._config.get("channels", [])
 
-        for ch_id in range(4):
+        for ch_id in range(self._num_channels):
             has_data = self.voxel_storage.has_data(ch_id)
             checkbox = self.channel_checkboxes.get(ch_id)
             slider = self.channel_contrast_sliders.get(ch_id)
@@ -2015,6 +2071,11 @@ class SampleView(QWidget):
                     f"{name} — Data available. Click to toggle visibility."
                 )
                 self.logger.info(f"Channel {ch_id} auto-enabled (data received)")
+
+                # Auto-expand right side group when right-side data arrives
+                if ch_id >= 4 and hasattr(self, "_right_side_group"):
+                    if not self._right_side_group.isChecked():
+                        self._right_side_group.setChecked(True)
 
     def _get_viewer(self):
         """Get the napari viewer owned by this Sample View."""
@@ -2350,6 +2411,8 @@ class SampleView(QWidget):
         if checked:
             self.populate_btn.setText("Stop Populating")
             self.logger.info("Started populating from live view")
+            if hasattr(self, "_fusion_combo"):
+                self._fusion_combo.setEnabled(False)
             # Start populate timer if not running
             if not hasattr(self, "_populate_timer"):
                 self._populate_timer = QTimer()
@@ -2359,6 +2422,8 @@ class SampleView(QWidget):
         else:
             self.populate_btn.setText("Populate from Live")
             self.logger.info("Stopped populating from live view")
+            if hasattr(self, "_fusion_combo"):
+                self._fusion_combo.setEnabled(True)
             if hasattr(self, "_populate_timer"):
                 self._populate_timer.stop()
 
@@ -2413,6 +2478,13 @@ class SampleView(QWidget):
             return None  # No laser on (probably LED)
         except:
             return 0
+
+    def _on_fusion_mode_changed(self, text: str) -> None:
+        """Handle fusion mode dropdown change."""
+        self.logger.info(f"Fusion mode changed to: {text}")
+        # Update running tile worker if one exists
+        if hasattr(self, "_tile_worker") and self._tile_worker:
+            self._tile_worker._update_mode = text.lower()
 
     def _on_clear_data_clicked(self) -> None:
         """Clear all accumulated 3D data."""
@@ -2613,12 +2685,15 @@ class SampleView(QWidget):
             values = downsampled.ravel()
 
             # Update voxel storage
+            fusion_mode = "maximum"
+            if hasattr(self, "_fusion_combo"):
+                fusion_mode = self._fusion_combo.currentText().lower()
             self.voxel_storage.update_storage(
                 channel_id=channel_id,
                 world_coords=world_coords_3d,
                 pixel_values=values,
                 timestamp=timestamp,
-                update_mode="maximum",
+                update_mode=fusion_mode,
             )
 
             # Auto-enable focal move mode now that data is present
@@ -2659,7 +2734,7 @@ class SampleView(QWidget):
 
         # Reset channel controls to disabled
         channels_config = self._config.get("channels", [])
-        for ch_id in range(4):
+        for ch_id in range(self._num_channels):
             cb = self.channel_checkboxes.get(ch_id)
             sl = self.channel_contrast_sliders.get(ch_id)
             ml = self.channel_min_spins.get(ch_id)
@@ -3255,7 +3330,7 @@ class SampleView(QWidget):
             # Get channel settings from napari layers (if available)
             viewer = self._get_viewer()
 
-            for ch_id in range(4):
+            for ch_id in range(self._num_channels):
                 # Check if channel has data
                 if not self.voxel_storage.has_data(ch_id):
                     continue
@@ -3670,10 +3745,12 @@ class SampleView(QWidget):
         else:
             self._was_populating_before_workflow = False
 
-        # Disable the populate button during tile workflows
+        # Disable the populate button and fusion combo during tile workflows
         if hasattr(self, "populate_btn"):
             self.populate_btn.setEnabled(False)
             self.populate_btn.setToolTip("Disabled during tile workflow")
+        if hasattr(self, "_fusion_combo"):
+            self._fusion_combo.setEnabled(False)
 
         # Uncheck LED (RGB) if the workflow uses lasers, not LED.
         if hasattr(self, "laser_led_panel") and self.laser_led_panel:
@@ -3887,12 +3964,14 @@ class SampleView(QWidget):
         ):
             self._move_data_to_focus_cb.setChecked(True)
 
-        # Re-enable the populate button
+        # Re-enable the populate button and fusion combo
         if hasattr(self, "populate_btn"):
             self.populate_btn.setEnabled(True)
             self.populate_btn.setToolTip(
                 "Capture frames from Live View and accumulate into 3D volume"
             )
+        if hasattr(self, "_fusion_combo"):
+            self._fusion_combo.setEnabled(True)
 
     def _on_tile_zstack_frame(
         self, image: np.ndarray, position: dict, z_index: int, frame_num: int
@@ -4066,10 +4145,14 @@ class SampleView(QWidget):
             return
 
         self._tile_worker_thread = QThread()
+        fusion_mode = "maximum"
+        if hasattr(self, "_fusion_combo"):
+            fusion_mode = self._fusion_combo.currentText().lower()
         self._tile_worker = TileProcessingWorker(
             voxel_storage=self.voxel_storage,
             config=self._config,
             invert_x=self._invert_x,
+            update_mode=fusion_mode,
         )
         self._tile_worker.moveToThread(self._tile_worker_thread)
 
@@ -4209,6 +4292,8 @@ class SampleView(QWidget):
 
         self.load_tiles_btn.setEnabled(False)
         self.load_tiles_btn.setText("Loading...")
+        if hasattr(self, "_fusion_combo"):
+            self._fusion_combo.setEnabled(False)
         self._disk_loader_thread.start()
 
     def _on_disk_load_progress(self, current, total, description):
@@ -4241,9 +4326,11 @@ class SampleView(QWidget):
         if hasattr(self, "_move_data_to_focus_cb"):
             self._move_data_to_focus_cb.setChecked(True)
 
-        # Restore button
+        # Restore button and fusion combo
         self.load_tiles_btn.setText("Load Tiles")
         self.load_tiles_btn.setEnabled(True)
+        if hasattr(self, "_fusion_combo"):
+            self._fusion_combo.setEnabled(True)
 
         if success:
             QMessageBox.information(self, "Load Complete", message)

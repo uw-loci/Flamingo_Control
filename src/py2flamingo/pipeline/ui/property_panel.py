@@ -72,10 +72,14 @@ _CONFIG_SCHEMAS: Dict[NodeType, list] = {
         ("timeout_seconds", "Timeout (s)", "int", 300),
     ],
     NodeType.SAMPLE_VIEW_DATA: [
-        ("channel_0", "Channel 1 (405nm)", "bool", True),
-        ("channel_1", "Channel 2 (488nm)", "bool", True),
-        ("channel_2", "Channel 3 (561nm)", "bool", True),
-        ("channel_3", "Channel 4 (640nm)", "bool", True),
+        ("channel_0", "Channel 1 (405nm) L", "bool", True),
+        ("channel_1", "Channel 2 (488nm) L", "bool", True),
+        ("channel_2", "Channel 3 (561nm) L", "bool", True),
+        ("channel_3", "Channel 4 (640nm) L", "bool", True),
+        ("channel_4", "Channel 5 (405nm) R", "bool", False),
+        ("channel_5", "Channel 6 (488nm) R", "bool", False),
+        ("channel_6", "Channel 7 (561nm) R", "bool", False),
+        ("channel_7", "Channel 8 (640nm) R", "bool", False),
     ],
 }
 
@@ -305,12 +309,16 @@ class PropertyPanel(QWidget):
         enabled = node.config.get("enabled_channels", [0, 1, 2, 3])
 
         channel_names = [
-            "405nm (DAPI)",
-            "488nm (GFP)",
-            "561nm (RFP)",
-            "640nm (Far-Red)",
+            "405nm (DAPI) L",
+            "488nm (GFP) L",
+            "561nm (RFP) L",
+            "640nm (Far-Red) L",
+            "405nm (DAPI) R",
+            "488nm (GFP) R",
+            "561nm (RFP) R",
+            "640nm (Far-Red) R",
         ]
-        for ch_id in range(4):
+        for ch_id in range(8):
             row = QWidget()
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(0, 0, 0, 0)

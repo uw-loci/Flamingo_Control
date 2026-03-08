@@ -33,7 +33,7 @@ class SampleViewDataRunner(AbstractNodeRunner):
 
         # Determine selected channels
         selected_channels = []
-        for ch_id in range(4):
+        for ch_id in range(8):
             if config.get(f"channel_{ch_id}", True):
                 selected_channels.append(ch_id)
 

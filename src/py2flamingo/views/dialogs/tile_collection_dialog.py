@@ -40,6 +40,7 @@ from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.utils.tile_folder_organizer import reorganize_tile_folders
 from py2flamingo.utils.tile_workflow_parser import (
     parse_workflow_position,
+    read_illumination_path_from_workflow,
     read_laser_channels_from_workflow,
     read_num_planes_from_workflow,
     read_z_range_from_workflow,
@@ -1253,9 +1254,11 @@ class TileCollectionDialog(PersistentDialog):
                     z_min, z_max = read_z_range_from_workflow(wf_file)
                     tile_position["z_min"] = z_min
                     tile_position["z_max"] = z_max
-                    tile_position["channels"] = read_laser_channels_from_workflow(
-                        wf_file
-                    )
+                    channels = read_laser_channels_from_workflow(wf_file)
+                    left_on, right_on = read_illumination_path_from_workflow(wf_file)
+                    if right_on and not left_on:
+                        channels = [ch + 4 for ch in channels]
+                    tile_position["channels"] = channels
                     tile_position["z_velocity"] = read_z_velocity_from_workflow(wf_file)
                     tile_position["num_planes"] = read_num_planes_from_workflow(wf_file)
                     metadata = tile_position

@@ -28,6 +28,7 @@ from scipy.ndimage import zoom
 
 from py2flamingo.models.mip_overview import find_tile_folders, parse_coords_from_folder
 from py2flamingo.utils.tile_workflow_parser import (
+    read_illumination_path_from_workflow,
     read_laser_channels_from_workflow,
     read_z_range_from_workflow,
 )
@@ -52,7 +53,8 @@ class DiskTileInfo:
     y: float  # Stage Y in mm
     z_min: float  # Z sweep min in mm
     z_max: float  # Z sweep max in mm
-    channels: List[int]  # Enabled channel IDs (0-based)
+    channels: List[int]  # Enabled channel IDs (0-based, offset for right-side)
+    illumination_side: str = "left"  # "left", "right", or "both"
     raw_files: Dict[int, Path] = field(
         default_factory=dict
     )  # channel_id (0-based) -> path
@@ -85,6 +87,16 @@ def parse_tile_folder(folder: Path) -> Optional[DiskTileInfo]:
 
     z_min, z_max = read_z_range_from_workflow(workflow_file)
     channels = read_laser_channels_from_workflow(workflow_file)
+    left_enabled, right_enabled = read_illumination_path_from_workflow(workflow_file)
+
+    # Determine illumination side and offset channels for right-only
+    if left_enabled and right_enabled:
+        illumination_side = "both"
+    elif right_enabled:
+        illumination_side = "right"
+        channels = [ch + 4 for ch in channels]
+    else:
+        illumination_side = "left"
 
     # Find raw files
     raw_files: Dict[int, Path] = {}
@@ -114,6 +126,7 @@ def parse_tile_folder(folder: Path) -> Optional[DiskTileInfo]:
         z_min=z_min,
         z_max=z_max,
         channels=channels,
+        illumination_side=illumination_side,
         raw_files=raw_files,
         n_planes=n_planes,
     )

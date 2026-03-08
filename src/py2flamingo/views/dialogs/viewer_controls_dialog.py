@@ -111,7 +111,8 @@ class ViewerControlsDialog(PersistentDialog):
         # Get channel configs from visualization config
         channels_config = self.config.get("channels", [])
 
-        for i in range(4):
+        num_channels = len(channels_config) if channels_config else 4
+        for i in range(num_channels):
             ch_config = channels_config[i] if i < len(channels_config) else {}
             ch_name = ch_config.get("name", f"Channel {i+1}")
 

@@ -198,6 +198,52 @@ def read_save_directory_from_workflow(workflow_file: Path) -> Tuple[str, str]:
         return ("", "")
 
 
+def read_illumination_path_from_workflow(workflow_file: Path) -> Tuple[bool, bool]:
+    """Read left/right illumination path from workflow file.
+
+    Parses the <Illumination Path> block for "Left path = ON 1" / "Right path = ON 1".
+
+    Args:
+        workflow_file: Path to workflow file
+
+    Returns:
+        Tuple of (left_enabled, right_enabled). Defaults to (True, False).
+    """
+    try:
+        with open(workflow_file, "r") as f:
+            content = f.read()
+
+        illum_match = re.search(
+            r"<Illumination Path>(.*?)</Illumination Path>", content, re.DOTALL
+        )
+        if not illum_match:
+            logger.debug(f"No Illumination Path block in {workflow_file.name}")
+            return (True, False)
+
+        block = illum_match.group(1)
+
+        left_enabled = False
+        right_enabled = False
+
+        left_match = re.search(r"Left path\s*=\s*\w+\s+(\d+)", block)
+        if left_match:
+            left_enabled = int(left_match.group(1)) == 1
+
+        right_match = re.search(r"Right path\s*=\s*\w+\s+(\d+)", block)
+        if right_match:
+            right_enabled = int(right_match.group(1)) == 1
+
+        logger.debug(
+            f"Illumination path from {workflow_file.name}: "
+            f"left={left_enabled}, right={right_enabled}"
+        )
+        return (left_enabled, right_enabled)
+
+    except Exception as e:
+        logger.error(f"Failed to read illumination path from {workflow_file.name}: {e}")
+        return (True, False)
+
+
 def read_z_velocity_from_workflow(workflow_file: Path) -> float:
     """Read Z stage velocity from workflow file.
 
