@@ -217,7 +217,9 @@ def read_illumination_path_from_workflow(workflow_file: Path) -> Tuple[bool, boo
             r"<Illumination Path>(.*?)</Illumination Path>", content, re.DOTALL
         )
         if not illum_match:
-            logger.debug(f"No Illumination Path block in {workflow_file.name}")
+            logger.info(
+                f"No Illumination Path block in {workflow_file.name}, defaulting to left"
+            )
             return (True, False)
 
         block = illum_match.group(1)
@@ -233,7 +235,7 @@ def read_illumination_path_from_workflow(workflow_file: Path) -> Tuple[bool, boo
         if right_match:
             right_enabled = int(right_match.group(1)) == 1
 
-        logger.debug(
+        logger.info(
             f"Illumination path from {workflow_file.name}: "
             f"left={left_enabled}, right={right_enabled}"
         )

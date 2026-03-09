@@ -2907,7 +2907,7 @@ class SampleView(QWidget):
             )
 
             if ch_id in self.channel_layers:
-                self.channel_layers[ch_id].data = volume
+                self.channel_layers[ch_id].data = np.array(volume)
                 channels_updated += 1
 
                 self.logger.debug(
@@ -2968,7 +2968,9 @@ class SampleView(QWidget):
                         f"max={volume.max()}"
                     )
 
-                    self.channel_layers[ch_id].data = volume
+                    # Force new array reference so napari detects the change
+                    # (display_cache may return the same object across calls)
+                    self.channel_layers[ch_id].data = np.array(volume)
 
                     # Auto-contrast if this is first data for channel
                     layer = self.channel_layers[ch_id]
@@ -2978,6 +2980,8 @@ class SampleView(QWidget):
 
             # Update 2D plane views with MIP projections
             self._update_plane_views()
+            # Refresh overlays (holder, objective markers) in 2D views
+            self._update_plane_overlays()
 
         except Exception as e:
             self.logger.error(f"Error updating visualization: {e}", exc_info=True)
@@ -3044,7 +3048,8 @@ class SampleView(QWidget):
                         f"Channel {ch_id}: volume shape={volume.shape}, "
                         f"non-zero={np.count_nonzero(volume)}, max={volume.max()}"
                     )
-                    self.channel_layers[ch_id].data = volume
+                    # Force new array reference so napari detects the change
+                    self.channel_layers[ch_id].data = np.array(volume)
 
                     layer = self.channel_layers[ch_id]
                     if not getattr(layer, "_auto_contrast_applied", False):
@@ -3052,6 +3057,7 @@ class SampleView(QWidget):
                         layer._auto_contrast_applied = True
 
             self._update_plane_views()
+            self._update_plane_overlays()
         except Exception as e:
             self.logger.error(f"Error applying viz results: {e}", exc_info=True)
         finally:

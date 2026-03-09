@@ -1633,6 +1633,13 @@ class TileCollectionDialog(PersistentDialog):
                     z_min, z_max = read_z_range_from_workflow(workflow_file)
                     tile_position["z_min"] = z_min
                     tile_position["z_max"] = z_max
+                    channels = read_laser_channels_from_workflow(workflow_file)
+                    left_on, right_on = read_illumination_path_from_workflow(
+                        workflow_file
+                    )
+                    if right_on and not left_on:
+                        channels = [ch + 4 for ch in channels]
+                    tile_position["channels"] = channels
 
             try:
                 if hasattr(self._app, "workflow_controller"):

@@ -116,7 +116,7 @@ def parse_tile_folder(folder: Path) -> Optional[DiskTileInfo]:
     logger.info(
         f"Tile {folder.name}: pos=({x}, {y}), z=[{z_min}, {z_max}], "
         f"channels={channels}, raw_files={list(raw_files.keys())}, "
-        f"planes={n_planes}"
+        f"planes={n_planes}, illum_side={illumination_side}"
     )
 
     return DiskTileInfo(
@@ -167,18 +167,26 @@ def load_tile_to_buffer(
         reference_position=ref_pos,
     )
 
-    # Load each channel's raw file by direct channel_id lookup.
-    # Raw file C-numbers (C02, C03...) ARE the 0-based channel_id.
+    # Load each channel's raw file.
+    # For right-only illumination, channels are offset by +4 (e.g. [2,3] → [6,7])
+    # but raw file C-numbers are always the original 0-based IDs (C02, C03...).
     logger.info(
         f"Channel mapping: channels={tile_info.channels}, "
-        f"raw_file_keys={sorted(tile_info.raw_files.keys())}"
+        f"raw_file_keys={sorted(tile_info.raw_files.keys())}, "
+        f"illum_side={tile_info.illumination_side}"
     )
 
     for channel_id in tile_info.channels:
-        raw_path = tile_info.raw_files.get(channel_id)
+        # Reverse the +4 offset for right-only tiles to get the raw file C-number
+        if tile_info.illumination_side == "right":
+            file_key = channel_id - 4
+        else:
+            file_key = channel_id
+
+        raw_path = tile_info.raw_files.get(file_key)
         if raw_path is None:
             logger.warning(
-                f"No raw file for channel {channel_id} "
+                f"No raw file for channel {channel_id} (file_key={file_key}) "
                 f"in {tile_info.folder_path.name}. "
                 f"Available: {sorted(tile_info.raw_files.keys())}"
             )
@@ -196,7 +204,7 @@ def load_tile_to_buffer(
             total_pixels = ch_frames[0][0].size
             frames_with_signal = sum(1 for m in maxvals if m > 0)
             logger.info(
-                f"  Channel {channel_id} (C{channel_id:02d}): "
+                f"  Channel {channel_id} (file C{file_key:02d}): "
                 f"{frames_added} frames, "
                 f"{frames_with_signal}/{frames_added} have signal, "
                 f"max pixel range [{min(maxvals)}-{max(maxvals)}], "
