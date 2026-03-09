@@ -160,6 +160,95 @@ def calculate_tile_intensity(
     return intensities
 
 
+def calculate_tile_entropy(image: np.ndarray, tiles_x: int, tiles_y: int) -> np.ndarray:
+    """Calculate Shannon entropy for each tile using a 64-bin histogram.
+
+    Higher entropy indicates more complex/varied pixel distributions (likely sample).
+    Lower entropy indicates uniform regions (background or empty tube interior).
+
+    Args:
+        image: Input image (grayscale or RGB)
+        tiles_x: Number of tiles in X
+        tiles_y: Number of tiles in Y
+
+    Returns:
+        2D array of entropy values [tiles_y, tiles_x], range ~0-6
+    """
+    if len(image.shape) == 3:
+        gray = np.mean(image, axis=2)
+    else:
+        gray = image.astype(np.float64)
+
+    h, w = gray.shape
+    tile_h = h // tiles_y
+    tile_w = w // tiles_x
+    n_bins = 64
+
+    entropies = np.zeros((tiles_y, tiles_x))
+
+    for ty in range(tiles_y):
+        for tx in range(tiles_x):
+            y_start = ty * tile_h
+            y_end = (ty + 1) * tile_h
+            x_start = tx * tile_w
+            x_end = (tx + 1) * tile_w
+
+            tile = gray[y_start:y_end, x_start:x_end]
+            # Normalize tile to 0-1 range for consistent binning
+            t_min, t_max = tile.min(), tile.max()
+            if t_max > t_min:
+                tile_norm = (tile - t_min) / (t_max - t_min)
+            else:
+                tile_norm = np.zeros_like(tile)
+
+            hist, _ = np.histogram(tile_norm, bins=n_bins, range=(0, 1))
+            # Normalize to probability distribution
+            prob = hist / hist.sum()
+            # Shannon entropy: -sum(p * log2(p)) for p > 0
+            nonzero = prob > 0
+            entropies[ty, tx] = -np.sum(prob[nonzero] * np.log2(prob[nonzero]))
+
+    return entropies
+
+
+def calculate_tile_mad(image: np.ndarray, tiles_x: int, tiles_y: int) -> np.ndarray:
+    """Calculate median absolute deviation for each tile.
+
+    MAD is a robust measure of variability, less sensitive to outliers than variance.
+
+    Args:
+        image: Input image (grayscale or RGB)
+        tiles_x: Number of tiles in X
+        tiles_y: Number of tiles in Y
+
+    Returns:
+        2D array of MAD values [tiles_y, tiles_x]
+    """
+    if len(image.shape) == 3:
+        gray = np.mean(image, axis=2)
+    else:
+        gray = image.astype(np.float64)
+
+    h, w = gray.shape
+    tile_h = h // tiles_y
+    tile_w = w // tiles_x
+
+    mads = np.zeros((tiles_y, tiles_x))
+
+    for ty in range(tiles_y):
+        for tx in range(tiles_x):
+            y_start = ty * tile_h
+            y_end = (ty + 1) * tile_h
+            x_start = tx * tile_w
+            x_end = (tx + 1) * tile_w
+
+            tile = gray[y_start:y_end, x_start:x_end]
+            median = np.median(tile)
+            mads[ty, tx] = np.median(np.abs(tile - median))
+
+    return mads
+
+
 class OverviewThresholderDialog(PersistentDialog):
     """Dialog for automatic tile selection based on image analysis.
 
@@ -190,6 +279,9 @@ class OverviewThresholderDialog(PersistentDialog):
         self._variances: Optional[np.ndarray] = None
         self._edge_scores: Optional[np.ndarray] = None
         self._intensities: Optional[np.ndarray] = None
+        self._entropies: Optional[np.ndarray] = None
+        self._mads: Optional[np.ndarray] = None
+        self._entropies_smoothed: Optional[np.ndarray] = None
 
         # Current selection
         self._selected_tiles: Set[Tuple[int, int]] = set()
@@ -199,6 +291,7 @@ class OverviewThresholderDialog(PersistentDialog):
 
         self._setup_ui()
         self._calculate_metrics()
+        self._restore_dialog_state()
         self._update_preview()
 
     def _setup_ui(self):
@@ -236,11 +329,15 @@ class OverviewThresholderDialog(PersistentDialog):
         method_layout = QFormLayout()
 
         self._method_combo = QComboBox()
+        self._method_combo.addItem("Entropy (recommended)", "entropy")
+        self._method_combo.addItem("Band-pass (Variance + Entropy)", "bandpass")
         self._method_combo.addItem("Variance (low = background)", "variance")
         self._method_combo.addItem("Edge Detection (high = sample)", "edge")
         self._method_combo.addItem("Intensity Range", "intensity")
         self._method_combo.addItem("Combined (Variance + Edge)", "combined")
         self._method_combo.setToolTip(
+            "Entropy: select tiles by information content with spatial smoothing\n"
+            "Band-pass: exclude tube edges (high var) and background (low entropy)\n"
             "Variance: select tiles with high pixel variability (texture = sample)\n"
             "Edge Detection: select tiles with strong edges (Laplacian filter)\n"
             "Intensity Range: select tiles by mean brightness\n"
@@ -251,6 +348,68 @@ class OverviewThresholderDialog(PersistentDialog):
 
         method_group.setLayout(method_layout)
         controls_layout.addWidget(method_group)
+
+        # Entropy settings
+        self._entropy_group = QGroupBox("Entropy Threshold")
+        entropy_layout = QFormLayout()
+
+        self._entropy_threshold_spin = QDoubleSpinBox()
+        self._entropy_threshold_spin.setRange(0.0, 6.0)
+        self._entropy_threshold_spin.setDecimals(2)
+        self._entropy_threshold_spin.setSingleStep(0.05)
+        self._entropy_threshold_spin.setValue(3.0)
+        self._entropy_threshold_spin.setToolTip(
+            "Tiles with entropy above this value are selected as sample.\n"
+            "Higher entropy = more texture/information content."
+        )
+        self._entropy_threshold_spin.valueChanged.connect(self._update_preview)
+        entropy_layout.addRow("Min entropy:", self._entropy_threshold_spin)
+
+        self._smoothing_check = QCheckBox("Spatial smoothing (σ=1.5)")
+        self._smoothing_check.setToolTip(
+            "Apply Gaussian smoothing to per-tile entropy scores before thresholding.\n"
+            "Adds spatial coherence — isolated noisy tiles are suppressed."
+        )
+        self._smoothing_check.setChecked(True)
+        self._smoothing_check.stateChanged.connect(self._update_preview)
+        entropy_layout.addRow(self._smoothing_check)
+
+        self._entropy_group.setLayout(entropy_layout)
+        controls_layout.addWidget(self._entropy_group)
+
+        # Band-pass settings
+        self._bandpass_group = QGroupBox("Band-pass (Variance + Entropy)")
+        bandpass_layout = QFormLayout()
+
+        self._bp_var_min_spin = QDoubleSpinBox()
+        self._bp_var_min_spin.setDecimals(1)
+        self._bp_var_min_spin.setSingleStep(1.0)
+        self._bp_var_min_spin.setToolTip("Minimum variance — excludes dead/black tiles")
+        self._bp_var_min_spin.valueChanged.connect(self._update_preview)
+        bandpass_layout.addRow("Variance min:", self._bp_var_min_spin)
+
+        self._bp_var_max_spin = QDoubleSpinBox()
+        self._bp_var_max_spin.setDecimals(1)
+        self._bp_var_max_spin.setSingleStep(1.0)
+        self._bp_var_max_spin.setToolTip(
+            "Maximum variance — excludes capillary tube edges"
+        )
+        self._bp_var_max_spin.valueChanged.connect(self._update_preview)
+        bandpass_layout.addRow("Variance max:", self._bp_var_max_spin)
+
+        self._bp_entropy_min_spin = QDoubleSpinBox()
+        self._bp_entropy_min_spin.setRange(0.0, 6.0)
+        self._bp_entropy_min_spin.setDecimals(2)
+        self._bp_entropy_min_spin.setSingleStep(0.05)
+        self._bp_entropy_min_spin.setToolTip(
+            "Minimum entropy — excludes uniform background"
+        )
+        self._bp_entropy_min_spin.valueChanged.connect(self._update_preview)
+        bandpass_layout.addRow("Entropy min:", self._bp_entropy_min_spin)
+
+        self._bandpass_group.setLayout(bandpass_layout)
+        controls_layout.addWidget(self._bandpass_group)
+        self._bandpass_group.hide()
 
         # Variance settings
         self._variance_group = QGroupBox("Variance Threshold")
@@ -270,6 +429,7 @@ class OverviewThresholderDialog(PersistentDialog):
 
         self._variance_group.setLayout(variance_layout)
         controls_layout.addWidget(self._variance_group)
+        self._variance_group.hide()
 
         # Edge settings
         self._edge_group = QGroupBox("Edge Detection Threshold")
@@ -335,6 +495,9 @@ class OverviewThresholderDialog(PersistentDialog):
         stats_group = QGroupBox("Tile Statistics")
         stats_layout = QFormLayout()
 
+        self._stats_entropy = QLabel("-")
+        stats_layout.addRow("Entropy range:", self._stats_entropy)
+
         self._stats_variance = QLabel("-")
         stats_layout.addRow("Variance range:", self._stats_variance)
 
@@ -369,6 +532,8 @@ class OverviewThresholderDialog(PersistentDialog):
 
     def _calculate_metrics(self):
         """Pre-calculate all metrics for the tiles."""
+        from scipy.ndimage import gaussian_filter
+
         logger.info(
             f"Calculating tile metrics for {self._tiles_x}x{self._tiles_y} grid..."
         )
@@ -394,13 +559,43 @@ class OverviewThresholderDialog(PersistentDialog):
         except Exception as e:
             logger.error(f"Failed to calculate tile intensity: {e}")
 
-        # Update statistics display
+        try:
+            self._entropies = calculate_tile_entropy(
+                self._image, self._tiles_x, self._tiles_y
+            )
+            self._entropies_smoothed = gaussian_filter(self._entropies, sigma=1.5)
+        except Exception as e:
+            logger.error(f"Failed to calculate tile entropy: {e}")
+
+        try:
+            self._mads = calculate_tile_mad(self._image, self._tiles_x, self._tiles_y)
+        except Exception as e:
+            logger.error(f"Failed to calculate tile MAD: {e}")
+
+        # Update statistics display and set initial slider ranges/defaults
+        if self._entropies is not None:
+            ent_min, ent_max = self._entropies.min(), self._entropies.max()
+            self._stats_entropy.setText(f"{ent_min:.2f} - {ent_max:.2f}")
+            # Entropy default: 35th percentile
+            pct35 = float(np.percentile(self._entropies, 35))
+            self._entropy_threshold_spin.setValue(round(pct35, 2))
+            # Band-pass entropy min: 25th percentile
+            pct25_ent = float(np.percentile(self._entropies, 25))
+            self._bp_entropy_min_spin.setValue(round(pct25_ent, 2))
+
         if self._variances is not None:
             v_min, v_max = self._variances.min(), self._variances.max()
             self._stats_variance.setText(f"{v_min:.1f} - {v_max:.1f}")
             # Set slider range based on actual data
             self._variance_slider.setRange(0, int(v_max * 1.1) + 1)
             self._variance_slider.setValue(int(v_min + (v_max - v_min) * 0.2))
+            # Band-pass variance ranges
+            self._bp_var_min_spin.setRange(0.0, float(v_max * 1.1))
+            self._bp_var_max_spin.setRange(0.0, float(v_max * 1.1))
+            pct5_var = float(np.percentile(self._variances, 5))
+            pct75_var = float(np.percentile(self._variances, 75))
+            self._bp_var_min_spin.setValue(round(pct5_var, 1))
+            self._bp_var_max_spin.setValue(round(pct75_var, 1))
 
         if self._edge_scores is not None:
             e_min, e_max = self._edge_scores.min(), self._edge_scores.max()
@@ -419,6 +614,8 @@ class OverviewThresholderDialog(PersistentDialog):
         method = self._method_combo.currentData()
 
         # Show/hide relevant control groups
+        self._entropy_group.setVisible(method == "entropy")
+        self._bandpass_group.setVisible(method == "bandpass")
         self._variance_group.setVisible(method in ("variance", "combined"))
         self._edge_group.setVisible(method in ("edge", "combined"))
         self._intensity_group.setVisible(method == "intensity")
@@ -430,7 +627,35 @@ class OverviewThresholderDialog(PersistentDialog):
         method = self._method_combo.currentData()
         selected = set()
 
-        if method == "variance":
+        if method == "entropy":
+            if self._entropies is None:
+                return selected
+            threshold = self._entropy_threshold_spin.value()
+            use_smoothed = self._smoothing_check.isChecked()
+            scores = self._entropies_smoothed if use_smoothed else self._entropies
+            if scores is None:
+                scores = self._entropies
+
+            for ty in range(self._tiles_y):
+                for tx in range(self._tiles_x):
+                    if scores[ty, tx] >= threshold:
+                        selected.add((tx, ty))
+
+        elif method == "bandpass":
+            if self._variances is None or self._entropies is None:
+                return selected
+            var_min = self._bp_var_min_spin.value()
+            var_max = self._bp_var_max_spin.value()
+            ent_min = self._bp_entropy_min_spin.value()
+
+            for ty in range(self._tiles_y):
+                for tx in range(self._tiles_x):
+                    v = self._variances[ty, tx]
+                    e = self._entropies[ty, tx]
+                    if var_min <= v <= var_max and e >= ent_min:
+                        selected.add((tx, ty))
+
+        elif method == "variance":
             if self._variances is None:
                 return selected
             threshold = self._variance_slider.value()
@@ -597,3 +822,113 @@ class OverviewThresholderDialog(PersistentDialog):
             Set of (tile_x, tile_y) tuples
         """
         return self._selected_tiles.copy()
+
+    def _save_dialog_state(self) -> None:
+        """Save all dialog settings for persistence across sessions."""
+        if not self._geometry_manager:
+            return
+
+        state = {
+            "method": self._method_combo.currentData(),
+            "entropy_threshold": self._entropy_threshold_spin.value(),
+            "smoothing": self._smoothing_check.isChecked(),
+            "bp_var_min": self._bp_var_min_spin.value(),
+            "bp_var_max": self._bp_var_max_spin.value(),
+            "bp_entropy_min": self._bp_entropy_min_spin.value(),
+            "variance": self._variance_slider.value(),
+            "edge": self._edge_slider.value(),
+            "intensity_min": self._intensity_min.value(),
+            "intensity_max": self._intensity_max.value(),
+            "invert": self._invert_check.isChecked(),
+            "preview_overlay": self._preview_check.isChecked(),
+        }
+
+        try:
+            self._geometry_manager.save_dialog_state("OverviewThresholderDialog", state)
+            self._geometry_manager.save_all()
+            logger.debug("Saved OverviewThresholderDialog state")
+        except Exception as e:
+            logger.warning(f"Failed to save overview thresholder state: {e}")
+
+    def _restore_dialog_state(self) -> None:
+        """Restore dialog settings from persistence."""
+        if not self._geometry_manager:
+            return
+
+        try:
+            state = self._geometry_manager.restore_dialog_state(
+                "OverviewThresholderDialog"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to restore overview thresholder state: {e}")
+            return
+
+        if not state:
+            return
+
+        logger.debug("Restoring OverviewThresholderDialog state")
+
+        # Block signals during restore to avoid cascading updates
+        widgets = [
+            self._method_combo,
+            self._entropy_threshold_spin,
+            self._smoothing_check,
+            self._bp_var_min_spin,
+            self._bp_var_max_spin,
+            self._bp_entropy_min_spin,
+            self._variance_slider,
+            self._edge_slider,
+            self._intensity_min,
+            self._intensity_max,
+            self._invert_check,
+            self._preview_check,
+        ]
+        for w in widgets:
+            w.blockSignals(True)
+
+        try:
+            # Restore method by matching data key, not index
+            if "method" in state:
+                for i in range(self._method_combo.count()):
+                    if self._method_combo.itemData(i) == state["method"]:
+                        self._method_combo.setCurrentIndex(i)
+                        break
+
+            if "entropy_threshold" in state:
+                self._entropy_threshold_spin.setValue(state["entropy_threshold"])
+            if "smoothing" in state:
+                self._smoothing_check.setChecked(state["smoothing"])
+            if "bp_var_min" in state:
+                self._bp_var_min_spin.setValue(state["bp_var_min"])
+            if "bp_var_max" in state:
+                self._bp_var_max_spin.setValue(state["bp_var_max"])
+            if "bp_entropy_min" in state:
+                self._bp_entropy_min_spin.setValue(state["bp_entropy_min"])
+            if "variance" in state:
+                self._variance_slider.setValue(state["variance"])
+            if "edge" in state:
+                self._edge_slider.setValue(state["edge"])
+            if "intensity_min" in state:
+                self._intensity_min.setValue(state["intensity_min"])
+            if "intensity_max" in state:
+                self._intensity_max.setValue(state["intensity_max"])
+            if "invert" in state:
+                self._invert_check.setChecked(state["invert"])
+            if "preview_overlay" in state:
+                self._preview_check.setChecked(state["preview_overlay"])
+        finally:
+            for w in widgets:
+                w.blockSignals(False)
+
+        # Update visibility for restored method
+        self._on_method_changed(self._method_combo.currentIndex())
+
+    def hideEvent(self, event):
+        """Save dialog state when hiding."""
+        self._save_dialog_state()
+        super().hideEvent(event)
+
+    def closeEvent(self, event):
+        """Save dialog state when closing."""
+        self._save_dialog_state()
+        super().closeEvent(event)
