@@ -89,9 +89,13 @@ def parse_tile_folder(folder: Path) -> Optional[DiskTileInfo]:
     channels = read_laser_channels_from_workflow(workflow_file)
     left_enabled, right_enabled = read_illumination_path_from_workflow(workflow_file)
 
-    # Determine illumination side and offset channels for right-only
+    # Determine illumination side and offset channels for right-only or both
     if left_enabled and right_enabled:
         illumination_side = "both"
+        # Both sides enabled: left channels stay as-is (0-3), add right channels (4-7)
+        left_channels = list(channels)
+        right_channels = [ch + 4 for ch in channels]
+        channels = left_channels + right_channels
     elif right_enabled:
         illumination_side = "right"
         channels = [ch + 4 for ch in channels]
@@ -177,8 +181,11 @@ def load_tile_to_buffer(
     )
 
     for channel_id in tile_info.channels:
-        # Reverse the +4 offset for right-only tiles to get the raw file C-number
+        # Reverse the +4 offset for right-side channels to get the raw file C-number
+        # Both "right" and "both" modes have right-side channels 4-7 mapped from C00-C03 files
         if tile_info.illumination_side == "right":
+            file_key = channel_id - 4
+        elif tile_info.illumination_side == "both" and channel_id >= 4:
             file_key = channel_id - 4
         else:
             file_key = channel_id

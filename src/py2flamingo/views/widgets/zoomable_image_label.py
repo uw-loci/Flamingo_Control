@@ -7,7 +7,7 @@ extracted from led_2d_overview_result.py.
 import logging
 from typing import List, Optional
 
-from PyQt5.QtCore import QPoint, QSize, Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import QPoint, QRect, QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import (
     QColor,
     QFont,
@@ -18,7 +18,7 @@ from PyQt5.QtGui import (
     QPixmap,
     QWheelEvent,
 )
-from PyQt5.QtWidgets import QLabel, QScrollArea
+from PyQt5.QtWidgets import QLabel, QRubberBand, QScrollArea
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,9 @@ class ZoomableImageLabel(QLabel):
 
     # Signal emitted when user right-clicks on a tile (tile_x_idx, tile_y_idx)
     tile_right_clicked = pyqtSignal(int, int)
+
+    # Signal emitted when user Shift+drags a rectangle to select tiles
+    tiles_rect_selected = pyqtSignal(set)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -48,6 +51,9 @@ class ZoomableImageLabel(QLabel):
         self._click_start = QPoint()
         self._interactive = False  # Whether current display uses fast scaling
         self._tile_coords: List[tuple] = []  # (x, y, tile_x_idx, tile_y_idx)
+        self._rect_selecting = False  # Shift+drag rectangle selection mode
+        self._rect_start = QPoint()  # Start position for rectangle selection
+        self._rubber_band: Optional[QRubberBand] = None
 
         # Deferred smooth scaling timer (fires after interaction stops)
         self._smooth_timer = QTimer()
@@ -228,8 +234,23 @@ class ZoomableImageLabel(QLabel):
         event.accept()
 
     def mousePressEvent(self, event: QMouseEvent):
-        """Start panning on left click."""
+        """Start panning on left click, or rect selection on Shift+left click."""
         if event.button() == Qt.LeftButton:
+            if (
+                event.modifiers() & Qt.ShiftModifier
+                and self._tiles_x > 0
+                and self._tiles_y > 0
+            ):
+                # Shift+left-click: start rectangle selection
+                self._rect_selecting = True
+                self._rect_start = event.pos()
+                if self._rubber_band is None:
+                    self._rubber_band = QRubberBand(QRubberBand.Rectangle, self)
+                self._rubber_band.setGeometry(QRect(self._rect_start, QSize()))
+                self._rubber_band.show()
+                event.accept()
+                return
+
             self._panning = True
             self._pan_start = event.globalPos()
             self._click_start = event.pos()  # Track local position for click detection
@@ -240,6 +261,15 @@ class ZoomableImageLabel(QLabel):
     def mouseReleaseEvent(self, event: QMouseEvent):
         """Stop panning and detect clicks."""
         if event.button() == Qt.LeftButton:
+            if self._rect_selecting:
+                # Finish rectangle selection
+                self._rect_selecting = False
+                if self._rubber_band:
+                    self._rubber_band.hide()
+                self._handle_rect_selection(self._rect_start, event.pos())
+                event.accept()
+                return
+
             self._panning = False
             self.setCursor(Qt.OpenHandCursor)
 
@@ -319,8 +349,59 @@ class ZoomableImageLabel(QLabel):
         logger.debug(f"Tile right-clicked: ({tile_x_idx}, {tile_y_idx})")
         self.tile_right_clicked.emit(tile_x_idx, tile_y_idx)
 
+    def _handle_rect_selection(self, start: QPoint, end: QPoint):
+        """Calculate all tiles within the drag rectangle and emit signal."""
+        if self._original_pixmap is None or self._tiles_x <= 0 or self._tiles_y <= 0:
+            return
+
+        # Convert pixel positions to original image coordinates
+        img_x1 = start.x() / self._zoom
+        img_y1 = start.y() / self._zoom
+        img_x2 = end.x() / self._zoom
+        img_y2 = end.y() / self._zoom
+
+        # Normalize so (x1,y1) is top-left
+        if img_x1 > img_x2:
+            img_x1, img_x2 = img_x2, img_x1
+        if img_y1 > img_y2:
+            img_y1, img_y2 = img_y2, img_y1
+
+        # Calculate tile size in original image
+        img_w = self._original_pixmap.width()
+        img_h = self._original_pixmap.height()
+        tile_w = img_w / self._tiles_x
+        tile_h = img_h / self._tiles_y
+
+        # Find display tile index range
+        display_x_min = max(0, int(img_x1 / tile_w))
+        display_x_max = min(self._tiles_x - 1, int(img_x2 / tile_w))
+        ty_min = max(0, int(img_y1 / tile_h))
+        ty_max = min(self._tiles_y - 1, int(img_y2 / tile_h))
+
+        # Build set of selected tiles, converting display index to tile index
+        selected = set()
+        for dy in range(ty_min, ty_max + 1):
+            for dx in range(display_x_min, display_x_max + 1):
+                if self._invert_x:
+                    tx = (self._tiles_x - 1) - dx
+                else:
+                    tx = dx
+                selected.add((tx, dy))
+
+        if selected:
+            logger.debug(f"Rectangle selected {len(selected)} tiles")
+            self.tiles_rect_selected.emit(selected)
+
     def mouseMoveEvent(self, event: QMouseEvent):
         """Pan while dragging."""
+        if self._rect_selecting and self._rubber_band:
+            # Update rubber band geometry during shift+drag
+            self._rubber_band.setGeometry(
+                QRect(self._rect_start, event.pos()).normalized()
+            )
+            event.accept()
+            return
+
         if self._panning and self._scroll_area:
             delta = event.globalPos() - self._pan_start
             self._pan_start = event.globalPos()

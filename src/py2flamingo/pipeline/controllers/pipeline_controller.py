@@ -19,6 +19,9 @@ from py2flamingo.pipeline.engine.node_runners.external_command_runner import (
     ExternalCommandRunner,
 )
 from py2flamingo.pipeline.engine.node_runners.foreach_runner import ForEachRunner
+from py2flamingo.pipeline.engine.node_runners.overview_analysis_runner import (
+    OverviewAnalysisRunner,
+)
 from py2flamingo.pipeline.engine.node_runners.sample_view_data_runner import (
     SampleViewDataRunner,
 )
@@ -120,6 +123,7 @@ class PipelineController(QObject):
             NodeType.CONDITIONAL: ConditionalRunner(),
             NodeType.EXTERNAL_COMMAND: ExternalCommandRunner(),
             NodeType.SAMPLE_VIEW_DATA: SampleViewDataRunner(),
+            NodeType.OVERVIEW_ANALYSIS: OverviewAnalysisRunner(),
         }
 
         # Create executor

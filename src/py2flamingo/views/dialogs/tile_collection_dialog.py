@@ -1258,7 +1258,12 @@ class TileCollectionDialog(PersistentDialog):
                     tile_position["z_max"] = z_max
                     channels = read_laser_channels_from_workflow(wf_file)
                     left_on, right_on = read_illumination_path_from_workflow(wf_file)
-                    if right_on and not left_on:
+                    if left_on and right_on:
+                        # Both sides: left channels (0-3) + right channels (4-7)
+                        left_channels = list(channels)
+                        right_channels = [ch + 4 for ch in channels]
+                        channels = left_channels + right_channels
+                    elif right_on and not left_on:
                         channels = [ch + 4 for ch in channels]
                     tile_position["channels"] = channels
                     tile_position["z_velocity"] = read_z_velocity_from_workflow(wf_file)
@@ -1637,7 +1642,12 @@ class TileCollectionDialog(PersistentDialog):
                     left_on, right_on = read_illumination_path_from_workflow(
                         workflow_file
                     )
-                    if right_on and not left_on:
+                    if left_on and right_on:
+                        # Both sides: left channels (0-3) + right channels (4-7)
+                        left_channels = list(channels)
+                        right_channels = [ch + 4 for ch in channels]
+                        channels = left_channels + right_channels
+                    elif right_on and not left_on:
                         channels = [ch + 4 for ch in channels]
                     tile_position["channels"] = channels
 

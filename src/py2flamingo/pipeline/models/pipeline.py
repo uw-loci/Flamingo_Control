@@ -28,6 +28,7 @@ class NodeType(Enum):
     CONDITIONAL = auto()
     EXTERNAL_COMMAND = auto()
     SAMPLE_VIEW_DATA = auto()
+    OVERVIEW_ANALYSIS = auto()
 
 
 class PortDirection(Enum):
@@ -43,6 +44,7 @@ NODE_COLORS: Dict[NodeType, str] = {
     NodeType.CONDITIONAL: "#ffee58",  # Yellow
     NodeType.EXTERNAL_COMMAND: "#66bb6a",  # Green
     NodeType.SAMPLE_VIEW_DATA: "#26c6da",  # Teal
+    NodeType.OVERVIEW_ANALYSIS: "#8d6e63",  # Brown — earth tone for image analysis
 }
 
 
@@ -204,6 +206,18 @@ def create_default_ports(node_type: NodeType) -> Tuple[List[Port], List[Port]]:
             _make_port("volume", PortType.VOLUME, out),
             _make_port("position", PortType.POSITION, out),
             _make_port("config", PortType.ANY, out),
+        ]
+
+    elif node_type == NodeType.OVERVIEW_ANALYSIS:
+        inputs = [
+            _make_port("image", PortType.VOLUME, inp),
+            _make_port("image_path", PortType.FILE_PATH, inp),
+            _make_port("trigger", PortType.TRIGGER, inp),
+        ]
+        outputs = [
+            _make_port("selected_tiles", PortType.OBJECT_LIST, out),
+            _make_port("count", PortType.SCALAR, out),
+            _make_port("mask", PortType.VOLUME, out),
         ]
 
     else:

@@ -1057,6 +1057,7 @@ class SampleView(QWidget):
                     self._create_channel_row(i, channels_config, default_channel_info)
                 )
             self._right_side_group.setLayout(right_layout)
+            self._right_side_group.toggled.connect(self._on_right_side_toggled)
             layout.addWidget(self._right_side_group)
 
         # Auto Contrast button + Grayscale checkbox row
@@ -1794,6 +1795,23 @@ class SampleView(QWidget):
         self.min_intensity_spinbox.blockSignals(False)
         self.max_intensity_spinbox.blockSignals(False)
         self._update_live_display()
+
+    def _on_right_side_toggled(self, checked: bool) -> None:
+        """Handle Right Side group checkbox toggle.
+
+        When unchecked, hide all right-side channels (4-7).
+        When checked, restore their visibility based on individual checkboxes.
+        """
+        for ch_id in range(4, self._num_channels):
+            layer = self.channel_layers.get(ch_id) if self.channel_layers else None
+            if layer is not None:
+                if checked:
+                    # Restore visibility from individual checkbox state
+                    cb = self.channel_checkboxes.get(ch_id)
+                    layer.visible = cb.isChecked() if cb else False
+                else:
+                    layer.visible = False
+        self._update_plane_views()
 
     def _on_channel_visibility_changed(self, channel: int, state: int) -> None:
         """Handle channel visibility checkbox change."""
@@ -3355,13 +3373,15 @@ class SampleView(QWidget):
                     continue
 
                 # Prefer using napari layer data (already transformed with stage position)
-                # over raw voxel storage data, so 2D planes match 3D viewer position
-                if (
-                    ch_id in self.channel_layers
-                    and self.channel_layers[ch_id].data is not None
-                ):
-                    volume = self.channel_layers[ch_id].data
-                else:
+                # over raw voxel storage data, so 2D planes match 3D viewer position.
+                # Fall back to voxel storage if the layer data is all zeros (not yet
+                # updated by _update_visualization, e.g. during initial load).
+                volume = None
+                if ch_id in self.channel_layers:
+                    layer_data = self.channel_layers[ch_id].data
+                    if layer_data is not None and np.any(layer_data):
+                        volume = layer_data
+                if volume is None:
                     # Fallback to raw storage data
                     volume = self.voxel_storage.get_display_volume(ch_id)
 
@@ -3973,6 +3993,9 @@ class SampleView(QWidget):
             f"Submitted {tiles_submitted} tiles."
         )
 
+        # Enable channel controls for channels that now have data
+        self._update_channel_availability()
+
         # Trigger final visualization update to show the last tile's data.
         self._visualization_update_timer.start()
 
@@ -4337,6 +4360,21 @@ class SampleView(QWidget):
             self._disk_loader_thread.wait(5000)
             self._disk_loader_thread = None
             self._disk_loader = None
+
+        # Sync stage position with the data's reference position so that
+        # the display transform produces zero delta and data appears centered.
+        # Without this, if the hardware stage is far from where data was collected,
+        # get_display_volume_transformed() shifts data out of the visible volume.
+        if self.voxel_storage and self.voxel_storage.reference_stage_position:
+            ref = self.voxel_storage.reference_stage_position
+            self.last_stage_position = dict(ref)
+            self.logger.info(
+                f"Synced stage position to data reference: "
+                f"X={ref['x']:.3f}, Y={ref['y']:.3f}, Z={ref['z']:.3f}"
+            )
+
+        # Enable channel controls for channels that now have data
+        self._update_channel_availability()
 
         # Update visualization
         self._update_visualization()

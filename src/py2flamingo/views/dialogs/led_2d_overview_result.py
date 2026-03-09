@@ -102,7 +102,9 @@ class ImagePanel(QWidget):
         layout.addWidget(self.title_label)
 
         # Hint label for user interaction
-        self.hint_label = QLabel("Right-click tile to move to center Z")
+        self.hint_label = QLabel(
+            "Click to select, Shift+drag to select area, Right-click to move to Z"
+        )
         self.hint_label.setAlignment(Qt.AlignCenter)
         self.hint_label.setStyleSheet(
             "color: #888; font-size: 9pt; font-style: italic;"
@@ -120,6 +122,7 @@ class ImagePanel(QWidget):
         self.image_label.set_scroll_area(self.scroll_area)  # Connect for panning
         self.image_label.tile_clicked.connect(self._on_tile_clicked)
         self.image_label.tile_right_clicked.connect(self._on_tile_right_clicked)
+        self.image_label.tiles_rect_selected.connect(self._on_tiles_rect_selected)
 
         self.scroll_area.setWidget(self.image_label)
         layout.addWidget(self.scroll_area, stretch=1)
@@ -389,6 +392,15 @@ class ImagePanel(QWidget):
         """Handle tile right-click - propagate signal upward for move to center Z."""
         logger.debug(f"Tile right-clicked in panel: ({tile_x_idx}, {tile_y_idx})")
         self.tile_right_clicked.emit(tile_x_idx, tile_y_idx)
+
+    def _on_tiles_rect_selected(self, tile_set: set):
+        """Handle Shift+drag rectangle selection - add all tiles to selection."""
+        self._selected_tiles.update(tile_set)
+        logger.debug(
+            f"Rectangle selected {len(tile_set)} tiles, total now {len(self._selected_tiles)}"
+        )
+        self._redraw_overlay()
+        self.selection_changed.emit()
 
     def _redraw_overlay(self, interactive: bool = False):
         """Redraw the selection overlay using cached base pixmap (fast path).
