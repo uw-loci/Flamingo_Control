@@ -240,6 +240,12 @@ class OverviewThresholderDialog(PersistentDialog):
         self._method_combo.addItem("Edge Detection (high = sample)", "edge")
         self._method_combo.addItem("Intensity Range", "intensity")
         self._method_combo.addItem("Combined (Variance + Edge)", "combined")
+        self._method_combo.setToolTip(
+            "Variance: select tiles with high pixel variability (texture = sample)\n"
+            "Edge Detection: select tiles with strong edges (Laplacian filter)\n"
+            "Intensity Range: select tiles by mean brightness\n"
+            "Combined: select tiles passing either variance or edge threshold"
+        )
         self._method_combo.currentIndexChanged.connect(self._on_method_changed)
         method_layout.addRow("Method:", self._method_combo)
 
@@ -253,6 +259,9 @@ class OverviewThresholderDialog(PersistentDialog):
         self._variance_slider = QSlider(Qt.Horizontal)
         self._variance_slider.setRange(0, 1000)
         self._variance_slider.setValue(100)
+        self._variance_slider.setToolTip(
+            "Tiles with variance above this threshold are selected as sample"
+        )
         self._variance_slider.valueChanged.connect(self._update_preview)
         variance_layout.addRow("Min variance:", self._variance_slider)
 
@@ -269,6 +278,9 @@ class OverviewThresholderDialog(PersistentDialog):
         self._edge_slider = QSlider(Qt.Horizontal)
         self._edge_slider.setRange(0, 10000)
         self._edge_slider.setValue(500)
+        self._edge_slider.setToolTip(
+            "Tiles with edge score above this threshold are selected as sample"
+        )
         self._edge_slider.valueChanged.connect(self._update_preview)
         edge_layout.addRow("Min edge score:", self._edge_slider)
 
@@ -304,10 +316,14 @@ class OverviewThresholderDialog(PersistentDialog):
         options_layout = QVBoxLayout()
 
         self._invert_check = QCheckBox("Invert selection")
+        self._invert_check.setToolTip("Select background tiles instead of sample tiles")
         self._invert_check.stateChanged.connect(self._update_preview)
         options_layout.addWidget(self._invert_check)
 
         self._preview_check = QCheckBox("Show preview overlay")
+        self._preview_check.setToolTip(
+            "Show green outlines on selected tiles in the preview"
+        )
         self._preview_check.setChecked(True)
         self._preview_check.stateChanged.connect(self._update_preview)
         options_layout.addWidget(self._preview_check)

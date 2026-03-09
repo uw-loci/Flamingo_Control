@@ -158,6 +158,19 @@ To add a new viewer, implement `ViewerInterface` and update `__main__.py`.
 
 `embed_viewer()` uses deferred setup by default: the `napari.Viewer()` is created synchronously (~5s), but chamber geometry and data layers are deferred to the next event loop iteration via `QTimer.singleShot(0)`. This means `channel_layers` is not available until the `_on_setup_complete` callback fires. Code that accesses `channel_layers` during `__init__` must be moved to the `_on_3d_viewer_ready()` callback in `SampleView`.
 
+### Side-Aware Channels and Fusion Mode
+
+The 3D Volume View uses 8 channel slots (configured in `visualization_3d_config.yaml`):
+- Channels 0-3: Left illumination path (405nm, 488nm, 561nm, 640nm)
+- Channels 4-7: Right illumination path (same wavelengths, suffixed " R")
+
+Right-side channel = left-side channel + 4. Illumination side is parsed from `<Illumination Path>` in workflow files via `utils/tile_workflow_parser.read_illumination_path_from_workflow()`. Right-only acquisitions auto-offset channels by +4; dual-side acquisitions stay in 0-3 (merged).
+
+The **Fusion Mode** dropdown controls `update_mode` on `DualResolutionStorage.update_storage()`:
+- Maximum (default), Average, Latest, Additive
+- Disabled during active data loading; changes live-update the running `TileProcessingWorker._update_mode`
+- `self._num_channels` is derived from config length (fallback to 4); all `range(4)` loops use `range(self._num_channels)`
+
 ### LED 2D Overview Feature
 
 Extension for quick sample orientation scanning. Creates 2D overview maps at dual rotation angles (R and R+90).

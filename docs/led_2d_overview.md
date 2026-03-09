@@ -179,9 +179,18 @@ Select from dropdown to change view:
 
 **Auto-Selection (Thresholder):**
 1. Click **"Auto-Select..."**
-2. Adjust threshold slider until sample tiles are highlighted
-3. Preview shows which tiles will be selected
-4. Click **"Apply"** to confirm selection
+2. Choose a detection method:
+
+| Method | How it works | Best for |
+|--------|-------------|----------|
+| **Variance** (default) | Selects tiles with high pixel variability — background tiles are uniform (low variance) | Most samples — general-purpose |
+| **Edge Detection** | Selects tiles with strong edges (Laplacian filter) | Samples with fine structural detail |
+| **Intensity Range** | Selects tiles by mean brightness range | Samples that are clearly brighter or darker than background |
+| **Combined** | Selects tiles passing either variance or edge threshold | Difficult samples needing multiple criteria |
+
+3. Adjust threshold slider(s) until sample tiles are highlighted in the preview
+4. Use **"Invert selection"** to select background instead of sample if needed
+5. Click **"Apply"** to confirm selection
 
 #### Navigation
 

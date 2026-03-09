@@ -114,6 +114,35 @@ for frame, z_pos, rotation in load_hdf5_frames("your_data.h5"):
     window.process_frame(frame, metadata)
 ```
 
+## Fusion Mode
+
+The **Fusion** dropdown (in the button bar, next to the data buttons) controls how overlapping voxels are merged when new data arrives:
+
+| Mode | Behavior | Best for |
+|------|----------|----------|
+| **Maximum** (default) | Keep the brightest value seen so far | Fluorescence imaging — bright features are preserved |
+| **Average** | Running mean of all contributions | Reducing noise across repeated scans |
+| **Latest** | Most recent value overwrites previous | Overwriting old data with a fresh scan |
+| **Additive** | Sum all contributions | Accumulating signal from multiple passes |
+
+Changing the fusion mode only affects **new data** — previously merged voxels are not retroactively changed. The dropdown is disabled during active data loading (populate, tile workflows, disk loading).
+
+## Side-Aware Channels (Left / Right Illumination)
+
+The channel panel is split into two groups:
+
+- **Left Side** (channels 0-3): Data from the left illumination path
+- **Right Side** (channels 4-7): Data from the right illumination path
+
+The Right Side group is collapsed by default and auto-expands when right-side data arrives.
+
+**How it works:**
+- When tiles are acquired with **left-only** illumination, data maps to channels 0-3
+- When tiles are acquired with **right-only** illumination, data maps to channels 4-7 (offset by +4)
+- When tiles are acquired with **both** illumination paths, data maps to channels 0-3 (merged, same as left-only)
+
+The illumination side is detected automatically from the `<Illumination Path>` section of each tile's Workflow.txt file. Left and right channels sharing the same laser wavelength use the same colormap for easy visual comparison.
+
 ## Configuration Customization
 
 Edit `src/py2flamingo/configs/visualization_3d_config.yaml` to adjust:
@@ -121,7 +150,7 @@ Edit `src/py2flamingo/configs/visualization_3d_config.yaml` to adjust:
 - **Storage resolution**: `storage.voxel_size_um` (default: [5, 5, 5])
 - **Display resolution**: `display.voxel_size_um` (default: [15, 15, 15])
 - **Chamber dimensions**: `sample_chamber.inner_dimensions_mm`
-- **Channel settings**: Colors, update strategies, visibility
+- **Channel settings**: Colors, update strategies, visibility (8 channels: 4 left + 4 right)
 - **Memory limits**: `storage.max_memory_mb`
 
 ## Integration with Main Application

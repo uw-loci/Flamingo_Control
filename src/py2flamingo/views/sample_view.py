@@ -1025,6 +1025,10 @@ class SampleView(QWidget):
 
         # Left Side group (channels 0-3) — always visible
         left_group = QGroupBox("Left Side")
+        left_group.setToolTip(
+            "Channels 0-3: left illumination path.\n"
+            "Data from left-only or dual-side acquisitions appears here."
+        )
         left_layout = QVBoxLayout()
         left_layout.setSpacing(2)
         left_layout.setContentsMargins(4, 4, 4, 4)
@@ -1038,6 +1042,11 @@ class SampleView(QWidget):
         # Right Side group (channels 4-7) — collapsible, collapsed by default
         if self._num_channels > 4:
             self._right_side_group = QGroupBox("Right Side")
+            self._right_side_group.setToolTip(
+                "Channels 4-7: right illumination path.\n"
+                "Expands automatically when right-side data is loaded.\n"
+                "Check the box to show/hide these channels."
+            )
             self._right_side_group.setCheckable(True)
             self._right_side_group.setChecked(False)
             right_layout = QVBoxLayout()
@@ -1261,7 +1270,11 @@ class SampleView(QWidget):
         self._fusion_combo = QComboBox()
         self._fusion_combo.addItems(["Maximum", "Average", "Latest", "Additive"])
         self._fusion_combo.setToolTip(
-            "How overlapping voxels are merged (affects new data only)"
+            "How overlapping voxels are merged (affects new data only).\n"
+            "Maximum: keep brightest value (default, good for fluorescence)\n"
+            "Average: running mean of all values\n"
+            "Latest: most recent value overwrites previous\n"
+            "Additive: sum all contributions"
         )
         self._fusion_combo.setFixedWidth(100)
         self._fusion_combo.currentTextChanged.connect(self._on_fusion_mode_changed)
