@@ -14,12 +14,14 @@ from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressBar,
     QProgressDialog,
     QPushButton,
     QScrollArea,
@@ -1290,21 +1292,57 @@ class TileCollectionDialog(PersistentDialog):
 
         # Create progress dialog as a top-level window (no parent)
         # This allows the tile collection dialog to close while progress remains visible
-        # Use 0-100 range for percentage-based progress
-        progress = QProgressDialog("Executing workflows...", "Cancel", 0, 100, None)
-        progress.setWindowModality(
-            Qt.NonModal
-        )  # Non-modal so user can interact with other windows
-        progress.setMinimumDuration(0)
+        progress = QDialog(None)
         progress.setWindowTitle("Workflow Progress")
-        progress.setMinimumWidth(400)
+        progress.setMinimumWidth(420)
         progress.setWindowFlag(Qt.WindowStaysOnTopHint, True)
-        progress.setAttribute(Qt.WA_DeleteOnClose)  # Clean up when closed
+        progress.setAttribute(Qt.WA_DeleteOnClose)
+        progress.setWindowModality(Qt.NonModal)
+
+        progress_layout = QVBoxLayout(progress)
+        progress_layout.setSpacing(8)
+
+        # Current workflow label + progress bar
+        progress._current_label = QLabel("Starting...")
+        progress_layout.addWidget(progress._current_label)
+
+        progress._current_bar = QProgressBar()
+        progress._current_bar.setRange(0, 100)
+        progress._current_bar.setValue(0)
+        progress._current_bar.setTextVisible(True)
+        progress._current_bar.setFormat("%p%")
+        progress_layout.addWidget(progress._current_bar)
+
+        # Overall progress label + progress bar
+        total_workflows = len(workflow_files)
+        progress._overall_label = QLabel(f"Overall: 0 / {total_workflows} tiles")
+        progress_layout.addWidget(progress._overall_label)
+
+        progress._overall_bar = QProgressBar()
+        progress._overall_bar.setRange(0, 100)
+        progress._overall_bar.setValue(0)
+        progress._overall_bar.setTextVisible(True)
+        progress._overall_bar.setFormat("%p%")
+        progress_layout.addWidget(progress._overall_bar)
+
+        # Cancel button
+        progress._cancel_btn = QPushButton("Cancel")
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_layout.addWidget(progress._cancel_btn)
+        progress_layout.addLayout(btn_layout)
+        progress._cancelled = False
+
+        def on_cancel_clicked():
+            progress._cancelled = True
+            queue_service.cancel()
+
+        progress._cancel_btn.clicked.connect(on_cancel_clicked)
+        progress.show()
 
         # Track completion and current state
         self._queue_completed = False
         self._queue_error = None
-        total_workflows = len(workflow_files)
         current_workflow_images = [0, 0]  # [acquired, expected]
 
         def calculate_overall_progress(
@@ -1313,20 +1351,15 @@ class TileCollectionDialog(PersistentDialog):
             """Calculate overall progress 0-100 based on workflow and image progress."""
             if total_workflows == 0:
                 return 0
-            # Base progress from completed workflows
             base_progress = (workflow_idx / total_workflows) * 100
-            # Progress within current workflow
             if img_expected > 0:
                 workflow_progress = (img_acquired / img_expected) * (
                     100 / total_workflows
                 )
             else:
                 workflow_progress = 0
-            return min(
-                99, int(base_progress + workflow_progress)
-            )  # Cap at 99 until complete
+            return min(99, int(base_progress + workflow_progress))
 
-        # Connect signals for progress updates
         def update_sample_view(status, pct):
             """Update Sample View's workflow progress display."""
             if (
@@ -1339,41 +1372,57 @@ class TileCollectionDialog(PersistentDialog):
         def on_progress(current, total, message):
             if self._queue_completed:
                 return
-            # current is 1-indexed workflow number
             workflow_idx = current - 1
             pct = calculate_overall_progress(
                 workflow_idx, current_workflow_images[0], current_workflow_images[1]
             )
-            progress.setValue(pct)
-            progress.setLabelText(message)
+            progress._overall_bar.setValue(pct)
+            progress._overall_label.setText(
+                f"Overall: {workflow_idx} / {total_workflows} tiles"
+            )
+            progress._current_label.setText(
+                f"Tile {current}/{total_workflows}: starting..."
+            )
+            progress._current_bar.setValue(0)
 
         def on_image_progress(acquired, expected):
             """Handle image-level progress updates."""
             if self._queue_completed:
-                return  # Don't overwrite "Not Running" after completion
+                return
             current_workflow_images[0] = acquired
             current_workflow_images[1] = expected
-            # Calculate overall progress
             workflow_idx = queue_service.current_index
+            # Update current workflow bar
+            current_pct = int((acquired / max(1, expected)) * 100)
+            progress._current_bar.setValue(current_pct)
+            progress._current_label.setText(
+                f"Tile {workflow_idx + 1}/{total_workflows}: "
+                f"{acquired}/{expected} images"
+            )
+            # Update overall bar
             pct = calculate_overall_progress(workflow_idx, acquired, expected)
-            progress.setValue(pct)
+            progress._overall_bar.setValue(pct)
+            progress._overall_label.setText(
+                f"Overall: {workflow_idx} / {total_workflows} tiles"
+            )
             status = f"Tile {workflow_idx + 1}/{total_workflows}: {acquired}/{expected} images"
-            progress.setLabelText(status)
             update_sample_view(status, pct)
 
         def on_workflow_completed(index, total, path):
             if self._queue_completed:
                 return
-            # Reset image progress for next workflow
             current_workflow_images[0] = 0
             current_workflow_images[1] = 0
             pct = calculate_overall_progress(index + 1, 0, 0)
-            progress.setValue(pct)
-            # Update Sample View to show transition between workflows
+            progress._overall_bar.setValue(pct)
+            progress._overall_label.setText(
+                f"Overall: {index + 1} / {total_workflows} tiles"
+            )
+            progress._current_bar.setValue(100)
             if index + 1 < total:
                 update_sample_view(f"Tile {index + 2}/{total}: Starting...", pct)
             else:
-                update_sample_view(f"Completing...", pct)
+                update_sample_view("Completing...", pct)
             logger.info(f"Workflow {index + 1}/{total} completed: {Path(path).name}")
 
             # Trail-load this tile's data from disk into 3D volume
@@ -1384,8 +1433,13 @@ class TileCollectionDialog(PersistentDialog):
 
         def on_queue_completed():
             self._queue_completed = True
-            progress.setValue(100)  # 100% complete
-            update_sample_view("Complete!", 100)  # Show 100% with status
+            progress._overall_bar.setValue(100)
+            progress._overall_label.setText(
+                f"Overall: {total_workflows} / {total_workflows} tiles"
+            )
+            progress._current_label.setText("Complete!")
+            progress._current_bar.setValue(100)
+            update_sample_view("Complete!", 100)
             QTimer.singleShot(
                 1500, lambda: update_sample_view("Not Running", 0)
             )  # Delayed reset
@@ -1472,8 +1526,8 @@ class TileCollectionDialog(PersistentDialog):
         queue_service.queue_cancelled.connect(on_queue_cancelled)
         queue_service.error_occurred.connect(on_error)
 
-        # Connect cancel button
-        progress.canceled.connect(queue_service.cancel)
+        # Cancel is handled by the progress dialog's Cancel button
+        # (connected to on_cancel_clicked above which calls queue_service.cancel())
 
         try:
             # Update Sample View status at start
