@@ -1349,6 +1349,7 @@ class TileCollectionDialog(PersistentDialog):
         self._queue_completed = False
         self._queue_error = None
         current_workflow_images = [0, 0]  # [acquired, expected]
+        last_workflow_idx = [-1]  # Track to detect new-workflow vs progress-update
 
         def calculate_overall_progress(
             workflow_idx: int, img_acquired: int, img_expected: int
@@ -1378,17 +1379,26 @@ class TileCollectionDialog(PersistentDialog):
             if self._queue_completed:
                 return
             workflow_idx = current - 1
+            # Only reset the per-tile bar when a NEW workflow starts.
+            # progress_updated also fires on every gauge callback (with
+            # "Acquiring..." message), so resetting here would blink the
+            # bar between 0% and the real value on every update.
+            if workflow_idx != last_workflow_idx[0]:
+                last_workflow_idx[0] = workflow_idx
+                progress._current_bar.setValue(0)
+                progress._current_label.setText(
+                    f"Tile {current}/{total_workflows}: starting..."
+                )
+                # Reset image counters for the new tile
+                current_workflow_images[0] = 0
+                current_workflow_images[1] = 0
             pct = calculate_overall_progress(
                 workflow_idx, current_workflow_images[0], current_workflow_images[1]
             )
             progress._overall_bar.setValue(pct)
             progress._overall_label.setText(
-                f"Overall: {workflow_idx} / {total_workflows} tiles"
+                f"Overall: {current} / {total_workflows} tiles"
             )
-            progress._current_label.setText(
-                f"Tile {current}/{total_workflows}: starting..."
-            )
-            progress._current_bar.setValue(0)
 
         def on_image_progress(acquired, expected):
             """Handle image-level progress updates."""
@@ -1408,7 +1418,7 @@ class TileCollectionDialog(PersistentDialog):
             pct = calculate_overall_progress(workflow_idx, acquired, expected)
             progress._overall_bar.setValue(pct)
             progress._overall_label.setText(
-                f"Overall: {workflow_idx} / {total_workflows} tiles"
+                f"Overall: {workflow_idx + 1} / {total_workflows} tiles"
             )
             status = f"Tile {workflow_idx + 1}/{total_workflows}: {acquired}/{expected} images"
             update_sample_view(status, pct)

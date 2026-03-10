@@ -2061,7 +2061,7 @@ class SampleView(QWidget):
             self._channel_states[ch_id]["contrast_min"] = min_val
             self._channel_states[ch_id]["contrast_max"] = max_val
 
-            self.logger.debug(f"Auto-contrast channel {ch_id}: [{min_val}, {max_val}]")
+            self.logger.info(f"Auto-contrast channel {ch_id}: [{min_val}, {max_val}]")
 
     def _update_channel_availability(self) -> None:
         """Enable/disable channel controls based on whether data exists."""
@@ -2899,6 +2899,12 @@ class SampleView(QWidget):
             self.logger.info("  Skipping data transform (no voxel_storage)")
             return
 
+        # Skip expensive transforms while the first post-acquisition viz
+        # update is pending — let _update_visualization() handle it instead.
+        if getattr(self, "_viz_initial_pending", False):
+            self.logger.info("  Skipping data transform (initial viz update pending)")
+            return
+
         # Check if reference position is set (required for transform)
         if self.voxel_storage.reference_stage_position is None:
             self.logger.info(
@@ -2920,17 +2926,23 @@ class SampleView(QWidget):
             if not self.voxel_storage.has_data(ch_id):
                 continue
 
-            volume = self.voxel_storage.get_display_volume_transformed(
-                ch_id, stage_pos, holder_pos_voxels
-            )
+            try:
+                volume = self.voxel_storage.get_display_volume_transformed(
+                    ch_id, stage_pos, holder_pos_voxels
+                )
 
-            if ch_id in self.channel_layers:
-                self.channel_layers[ch_id].data = np.array(volume)
-                channels_updated += 1
+                if ch_id in self.channel_layers:
+                    self.channel_layers[ch_id].data = np.array(volume)
+                    channels_updated += 1
 
-                self.logger.debug(
-                    f"Stage update: Channel {ch_id} - "
-                    f"non-zero voxels: {np.count_nonzero(volume)}"
+                    self.logger.debug(
+                        f"Stage update: Channel {ch_id} - "
+                        f"non-zero voxels: {np.count_nonzero(volume)}"
+                    )
+            except Exception as e:
+                self.logger.error(
+                    f"Stage update: Error transforming channel {ch_id}: {e}",
+                    exc_info=True,
                 )
 
         if channels_updated > 0:
@@ -2951,7 +2963,15 @@ class SampleView(QWidget):
         if not self.viewer or not self.voxel_storage:
             return
 
+        self.logger.info(
+            f"_update_visualization: starting (synchronous path), "
+            f"num_channels={self.voxel_storage.num_channels}, "
+            f"channel_layers={sorted(self.channel_layers.keys())}, "
+            f"stage_pos={self.last_stage_position}"
+        )
+
         try:
+            channels_with_data = []
             for ch_id in range(self.voxel_storage.num_channels):
                 if ch_id in self.channel_layers:
                     if not self.voxel_storage.has_data(ch_id):
@@ -2961,6 +2981,8 @@ class SampleView(QWidget):
                             layer.data = np.zeros_like(layer.data)
                             self.logger.info(f"Cleared display for channel {ch_id}")
                         continue
+
+                    channels_with_data.append(ch_id)
 
                     # Use transformed volume if stage has moved from origin
                     if self.last_stage_position and any(
@@ -2996,13 +3018,34 @@ class SampleView(QWidget):
                         self._auto_contrast_channels()
                         layer._auto_contrast_applied = True
 
+                    self.logger.info(
+                        f"  Layer {ch_id}: visible={layer.visible}, "
+                        f"contrast_limits={layer.contrast_limits}, "
+                        f"rendering={layer.rendering}, "
+                        f"blending={layer.blending}"
+                    )
+
+            self.logger.info(
+                f"_update_visualization: updated {len(channels_with_data)} "
+                f"channels with data: {channels_with_data}"
+            )
+
             # Update 2D plane views with MIP projections
             self._update_plane_views()
             # Refresh overlays (holder, objective markers) in 2D views
             self._update_plane_overlays()
 
+            # Clear the pending flag so stage-driven transforms resume
+            if getattr(self, "_viz_initial_pending", False):
+                self._viz_initial_pending = False
+                self.logger.info(
+                    "Initial visualization complete, stage transforms enabled"
+                )
+
         except Exception as e:
             self.logger.error(f"Error updating visualization: {e}", exc_info=True)
+            # Clear the flag even on error to avoid permanently blocking stage transforms
+            self._viz_initial_pending = False
 
     def _update_visualization_async(self):
         """Run visualization transforms in a background thread during tile workflows.
@@ -3950,6 +3993,13 @@ class SampleView(QWidget):
         """
         self._tile_workflow_active = False
 
+        # Suppress stage-driven data transforms until the first viz update
+        # completes.  Without this, the 50 ms stage timer fires before the
+        # 500 ms viz timer and calls get_display_volume_transformed() on the
+        # GUI thread — with 30 tiles the downsample alone takes 3+ minutes,
+        # freezing the UI.
+        self._viz_initial_pending = True
+
         # Wait for background worker to finish processing all tiles
         if hasattr(self, "_tile_worker") and self._tile_worker:
             self.logger.info("Waiting for tile processing worker to finish...")
@@ -4303,6 +4353,8 @@ class SampleView(QWidget):
 
         # Suppress per-tile visualization updates during bulk load
         self._disk_load_active = True
+        # Block stage-driven transforms until first viz update completes
+        self._viz_initial_pending = True
 
         # Clear existing data
         self.clear_data_for_workflows()

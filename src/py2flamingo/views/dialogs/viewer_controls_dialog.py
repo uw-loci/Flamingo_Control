@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSlider,
     QSpinBox,
     QTabWidget,
@@ -104,9 +105,16 @@ class ViewerControlsDialog(PersistentDialog):
         self.setLayout(main_layout)
 
     def _create_channel_controls_tab(self) -> QWidget:
-        """Create channel control widgets for all 4 channels."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
+        """Create channel control widgets for all channels in a scrollable area."""
+        # Use a scroll area so 8 channels don't cram the dialog
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(scroll.NoFrame)
+
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+        layout.setSpacing(4)
+        layout.setContentsMargins(4, 4, 4, 4)
 
         # Get channel configs from visualization config
         channels_config = self.config.get("channels", [])
@@ -116,8 +124,10 @@ class ViewerControlsDialog(PersistentDialog):
             ch_config = channels_config[i] if i < len(channels_config) else {}
             ch_name = ch_config.get("name", f"Channel {i+1}")
 
-            group = QGroupBox(f"Channel {i+1}: {ch_name}")
+            group = QGroupBox(f"Ch {i}: {ch_name}")
             ch_layout = QGridLayout()
+            ch_layout.setSpacing(3)
+            ch_layout.setContentsMargins(4, 4, 4, 4)
             ch_layout.setColumnStretch(2, 1)  # Slider column stretches
 
             # Get actual layer and data state from viewer
@@ -132,36 +142,30 @@ class ViewerControlsDialog(PersistentDialog):
             ):
                 has_data = self.viewer_container.voxel_storage.has_data(i)
 
-            # Row 0: Visibility checkbox — use actual layer state
+            # Row 0: Visibility checkbox + colormap on the same row (compact)
             visible_cb = QCheckBox("Visible")
             actual_visible = (
                 layer.visible if layer else ch_config.get("default_visible", True)
             )
             visible_cb.setChecked(actual_visible)
-            ch_layout.addWidget(visible_cb, 0, 0, 1, 4)
+            ch_layout.addWidget(visible_cb, 0, 0)
 
-            # Row 1: Colormap selector
-            ch_layout.addWidget(QLabel("Colormap:"), 1, 0)
             colormap_combo = QComboBox()
             colormap_combo.addItems(
                 ["blue", "cyan", "green", "red", "magenta", "yellow", "gray"]
             )
             colormap_combo.setCurrentText(ch_config.get("default_colormap", "gray"))
-            ch_layout.addWidget(colormap_combo, 1, 1, 1, 3)
+            ch_layout.addWidget(colormap_combo, 0, 1, 1, 2)
 
-            # Row 2: Opacity slider
-            ch_layout.addWidget(QLabel("Opacity:"), 2, 0)
             opacity_slider = QSlider(Qt.Horizontal)
             opacity_slider.setRange(0, 100)
             opacity_slider.setValue(int(ch_config.get("opacity", 0.8) * 100))
-            ch_layout.addWidget(opacity_slider, 2, 1, 1, 2)
             opacity_label = QLabel(f"{opacity_slider.value()}%")
-            opacity_label.setMinimumWidth(40)
-            ch_layout.addWidget(opacity_label, 2, 3)
+            opacity_label.setMinimumWidth(30)
+            ch_layout.addWidget(opacity_slider, 0, 3)
+            ch_layout.addWidget(opacity_label, 0, 4)
 
-            # Row 3: Contrast range slider with editable min/max spinboxes
-            ch_layout.addWidget(QLabel("Contrast:"), 3, 0)
-
+            # Row 1: Contrast range slider with editable min/max spinboxes
             contrast_min_spin = QSpinBox()
             contrast_min_spin.setRange(0, 65535)
             contrast_min_spin.setFixedWidth(55)
@@ -187,9 +191,9 @@ class ViewerControlsDialog(PersistentDialog):
             contrast_max_spin.setStyleSheet("color: #888; font-size: 9pt;")
             contrast_max_spin.setValue(max_val)
 
-            ch_layout.addWidget(contrast_min_spin, 3, 1)
-            ch_layout.addWidget(contrast_slider, 3, 2)
-            ch_layout.addWidget(contrast_max_spin, 3, 3)
+            ch_layout.addWidget(contrast_min_spin, 1, 0)
+            ch_layout.addWidget(contrast_slider, 1, 1, 1, 3)
+            ch_layout.addWidget(contrast_max_spin, 1, 4)
 
             group.setLayout(ch_layout)
             layout.addWidget(group)
@@ -235,7 +239,8 @@ class ViewerControlsDialog(PersistentDialog):
             )
 
         layout.addStretch()
-        return widget
+        scroll.setWidget(inner)
+        return scroll
 
     def _create_display_settings_tab(self) -> QWidget:
         """Create display settings controls."""
