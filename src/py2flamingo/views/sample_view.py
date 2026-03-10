@@ -2963,6 +2963,17 @@ class SampleView(QWidget):
         if not self.viewer or not self.voxel_storage:
             return
 
+        # Ensure channel_layers is populated — the deferred 3D setup may not
+        # have called _on_3d_viewer_ready() yet, or the reference was lost.
+        if not self.channel_layers and hasattr(self, "_chamber_viz"):
+            viz_layers = self._chamber_viz.channel_layers
+            if viz_layers:
+                self.channel_layers = viz_layers
+                self.logger.info(
+                    f"Re-acquired channel_layers from chamber viz: "
+                    f"{sorted(viz_layers.keys())}"
+                )
+
         self.logger.info(
             f"_update_visualization: starting (synchronous path), "
             f"num_channels={self.voxel_storage.num_channels}, "
@@ -3059,6 +3070,15 @@ class SampleView(QWidget):
             return
         if not self.viewer or not self.voxel_storage:
             return
+
+        # Ensure channel_layers is populated
+        if not self.channel_layers and hasattr(self, "_chamber_viz"):
+            viz_layers = self._chamber_viz.channel_layers
+            if viz_layers:
+                self.channel_layers = viz_layers
+                self.logger.info(
+                    f"Re-acquired channel_layers (async): {sorted(viz_layers.keys())}"
+                )
 
         # Capture current state (immutable snapshot for the thread)
         stage_pos = dict(self.last_stage_position) if self.last_stage_position else None

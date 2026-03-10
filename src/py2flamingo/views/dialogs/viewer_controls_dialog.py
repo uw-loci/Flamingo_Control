@@ -26,6 +26,14 @@ from superqt import QRangeSlider
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
 
+# Laser wavelength names (shared by left and right sides)
+_LASER_NAMES = {
+    0: "405nm (DAPI)",
+    1: "488nm (GFP)",
+    2: "561nm (RFP)",
+    3: "640nm (Far-Red)",
+}
+
 
 class ViewerControlsDialog(PersistentDialog):
     """Dialog for controlling napari viewer settings.
@@ -63,7 +71,7 @@ class ViewerControlsDialog(PersistentDialog):
         self.setWindowTitle("Viewer Controls")
         self.setMinimumSize(450, 550)
 
-        # Store widget references for each channel
+        # Store widget references for each channel (keyed by internal ch_id 0-7)
         self.channel_controls: dict = {}
 
         self._setup_ui()
@@ -105,8 +113,11 @@ class ViewerControlsDialog(PersistentDialog):
         self.setLayout(main_layout)
 
     def _create_channel_controls_tab(self) -> QWidget:
-        """Create channel control widgets for all channels in a scrollable area."""
-        # Use a scroll area so 8 channels don't cram the dialog
+        """Create channel controls with Left/Right collapsible sections.
+
+        Channels are displayed with user-facing 1-4 numbering within each
+        illumination side, not internal 0-7 IDs.
+        """
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(scroll.NoFrame)
@@ -116,131 +127,191 @@ class ViewerControlsDialog(PersistentDialog):
         layout.setSpacing(4)
         layout.setContentsMargins(4, 4, 4, 4)
 
-        # Get channel configs from visualization config
         channels_config = self.config.get("channels", [])
 
-        num_channels = len(channels_config) if channels_config else 4
-        for i in range(num_channels):
-            ch_config = channels_config[i] if i < len(channels_config) else {}
-            ch_name = ch_config.get("name", f"Channel {i+1}")
+        # Check which sides have data
+        left_has_data = False
+        right_has_data = False
+        if (
+            hasattr(self.viewer_container, "voxel_storage")
+            and self.viewer_container.voxel_storage
+        ):
+            for ch_id in range(4):
+                if self.viewer_container.voxel_storage.has_data(ch_id):
+                    left_has_data = True
+                    break
+            for ch_id in range(4, 8):
+                if self.viewer_container.voxel_storage.has_data(ch_id):
+                    right_has_data = True
+                    break
 
-            group = QGroupBox(f"Ch {i}: {ch_name}")
-            ch_layout = QGridLayout()
-            ch_layout.setSpacing(3)
-            ch_layout.setContentsMargins(4, 4, 4, 4)
-            ch_layout.setColumnStretch(2, 1)  # Slider column stretches
+        # Left Side section
+        self._left_group = QGroupBox("Left Illumination")
+        self._left_group.setCheckable(True)
+        self._left_group.setChecked(left_has_data or not right_has_data)
+        left_layout = QVBoxLayout()
+        left_layout.setSpacing(2)
+        left_layout.setContentsMargins(4, 4, 4, 4)
 
-            # Get actual layer and data state from viewer
-            layer = None
-            if hasattr(self.viewer_container, "channel_layers"):
-                layer = self.viewer_container.channel_layers.get(i)
-
-            has_data = False
-            if (
-                hasattr(self.viewer_container, "voxel_storage")
-                and self.viewer_container.voxel_storage
-            ):
-                has_data = self.viewer_container.voxel_storage.has_data(i)
-
-            # Row 0: Visibility checkbox + colormap on the same row (compact)
-            visible_cb = QCheckBox("Visible")
-            actual_visible = (
-                layer.visible if layer else ch_config.get("default_visible", True)
+        for ch_offset in range(4):
+            ch_id = ch_offset  # Internal ID 0-3
+            ch_config = channels_config[ch_id] if ch_id < len(channels_config) else {}
+            user_num = ch_offset + 1  # User-facing 1-4
+            laser_name = _LASER_NAMES.get(ch_offset, f"Channel {user_num}")
+            self._add_channel_row(
+                left_layout, ch_id, ch_config, f"Ch {user_num}: {laser_name}"
             )
-            visible_cb.setChecked(actual_visible)
-            ch_layout.addWidget(visible_cb, 0, 0)
 
-            colormap_combo = QComboBox()
-            colormap_combo.addItems(
-                ["blue", "cyan", "green", "red", "magenta", "yellow", "gray"]
+        self._left_group.setLayout(left_layout)
+        layout.addWidget(self._left_group)
+
+        # Right Side section
+        self._right_group = QGroupBox("Right Illumination")
+        self._right_group.setCheckable(True)
+        self._right_group.setChecked(right_has_data)
+        right_layout = QVBoxLayout()
+        right_layout.setSpacing(2)
+        right_layout.setContentsMargins(4, 4, 4, 4)
+
+        for ch_offset in range(4):
+            ch_id = ch_offset + 4  # Internal ID 4-7
+            ch_config = channels_config[ch_id] if ch_id < len(channels_config) else {}
+            user_num = ch_offset + 1  # User-facing 1-4
+            laser_name = _LASER_NAMES.get(ch_offset, f"Channel {user_num}")
+            self._add_channel_row(
+                right_layout, ch_id, ch_config, f"Ch {user_num}: {laser_name}"
             )
-            colormap_combo.setCurrentText(ch_config.get("default_colormap", "gray"))
-            ch_layout.addWidget(colormap_combo, 0, 1, 1, 2)
 
-            opacity_slider = QSlider(Qt.Horizontal)
-            opacity_slider.setRange(0, 100)
-            opacity_slider.setValue(int(ch_config.get("opacity", 0.8) * 100))
-            opacity_label = QLabel(f"{opacity_slider.value()}%")
-            opacity_label.setMinimumWidth(30)
-            ch_layout.addWidget(opacity_slider, 0, 3)
-            ch_layout.addWidget(opacity_label, 0, 4)
-
-            # Row 1: Contrast range slider with editable min/max spinboxes
-            contrast_min_spin = QSpinBox()
-            contrast_min_spin.setRange(0, 65535)
-            contrast_min_spin.setFixedWidth(55)
-            contrast_min_spin.setStyleSheet("color: #888; font-size: 9pt;")
-
-            contrast_slider = QRangeSlider(Qt.Horizontal)
-            contrast_slider.setRange(0, 65535)
-
-            # Use actual layer contrast if available, else config defaults
-            if layer and hasattr(layer, "contrast_limits") and layer.contrast_limits:
-                min_val, max_val = int(layer.contrast_limits[0]), int(
-                    layer.contrast_limits[1]
-                )
-            else:
-                min_val = ch_config.get("default_contrast_min", 0)
-                max_val = ch_config.get("default_contrast_max", 500)
-            contrast_slider.setValue((min_val, max_val))
-            contrast_min_spin.setValue(min_val)
-
-            contrast_max_spin = QSpinBox()
-            contrast_max_spin.setRange(0, 65535)
-            contrast_max_spin.setFixedWidth(55)
-            contrast_max_spin.setStyleSheet("color: #888; font-size: 9pt;")
-            contrast_max_spin.setValue(max_val)
-
-            ch_layout.addWidget(contrast_min_spin, 1, 0)
-            ch_layout.addWidget(contrast_slider, 1, 1, 1, 3)
-            ch_layout.addWidget(contrast_max_spin, 1, 4)
-
-            group.setLayout(ch_layout)
-            layout.addWidget(group)
-
-            # Store references
-            self.channel_controls[i] = {
-                "visible": visible_cb,
-                "colormap": colormap_combo,
-                "opacity": opacity_slider,
-                "opacity_label": opacity_label,
-                "contrast": contrast_slider,
-                "contrast_min_spin": contrast_min_spin,
-                "contrast_max_spin": contrast_max_spin,
-            }
-
-            # Disable all controls for channels without data
-            if not has_data:
-                visible_cb.setEnabled(False)
-                colormap_combo.setEnabled(False)
-                opacity_slider.setEnabled(False)
-                contrast_slider.setEnabled(False)
-                contrast_min_spin.setEnabled(False)
-                contrast_max_spin.setEnabled(False)
-
-            # Connect signals (live updates)
-            visible_cb.toggled.connect(
-                lambda v, ch=i: self._on_visibility_changed(ch, v)
-            )
-            colormap_combo.currentTextChanged.connect(
-                lambda c, ch=i: self._on_colormap_changed(ch, c)
-            )
-            opacity_slider.valueChanged.connect(
-                lambda v, ch=i, lbl=opacity_label: self._on_opacity_changed(ch, v, lbl)
-            )
-            contrast_slider.valueChanged.connect(
-                lambda v, ch=i: self._on_contrast_changed(ch, v)
-            )
-            contrast_min_spin.valueChanged.connect(
-                lambda v, ch=i: self._on_contrast_spin_changed(ch, True)
-            )
-            contrast_max_spin.valueChanged.connect(
-                lambda v, ch=i: self._on_contrast_spin_changed(ch, False)
-            )
+        self._right_group.setLayout(right_layout)
+        layout.addWidget(self._right_group)
 
         layout.addStretch()
         scroll.setWidget(inner)
         return scroll
+
+    def _add_channel_row(
+        self, parent_layout: QVBoxLayout, ch_id: int, ch_config: dict, label: str
+    ) -> None:
+        """Add a single channel's controls to the layout.
+
+        Args:
+            parent_layout: Layout to add widgets to.
+            ch_id: Internal channel ID (0-7).
+            ch_config: Channel config dict from visualization_3d_config.yaml.
+            label: User-facing label like "Ch 3: 561nm (RFP)".
+        """
+        group = QGroupBox(label)
+        ch_layout = QGridLayout()
+        ch_layout.setSpacing(3)
+        ch_layout.setContentsMargins(4, 4, 4, 4)
+        ch_layout.setColumnStretch(2, 1)
+
+        # Get actual layer and data state from viewer
+        layer = None
+        if hasattr(self.viewer_container, "channel_layers"):
+            layer = self.viewer_container.channel_layers.get(ch_id)
+
+        has_data = False
+        if (
+            hasattr(self.viewer_container, "voxel_storage")
+            and self.viewer_container.voxel_storage
+        ):
+            has_data = self.viewer_container.voxel_storage.has_data(ch_id)
+
+        # Row 0: Visibility + colormap + opacity
+        visible_cb = QCheckBox("Visible")
+        actual_visible = (
+            layer.visible if layer else ch_config.get("default_visible", True)
+        )
+        visible_cb.setChecked(actual_visible)
+        ch_layout.addWidget(visible_cb, 0, 0)
+
+        colormap_combo = QComboBox()
+        colormap_combo.addItems(
+            ["blue", "cyan", "green", "red", "magenta", "yellow", "gray"]
+        )
+        colormap_combo.setCurrentText(ch_config.get("default_colormap", "gray"))
+        ch_layout.addWidget(colormap_combo, 0, 1, 1, 2)
+
+        opacity_slider = QSlider(Qt.Horizontal)
+        opacity_slider.setRange(0, 100)
+        opacity_slider.setValue(int(ch_config.get("opacity", 0.8) * 100))
+        opacity_label = QLabel(f"{opacity_slider.value()}%")
+        opacity_label.setMinimumWidth(30)
+        ch_layout.addWidget(opacity_slider, 0, 3)
+        ch_layout.addWidget(opacity_label, 0, 4)
+
+        # Row 1: Contrast range
+        contrast_min_spin = QSpinBox()
+        contrast_min_spin.setRange(0, 65535)
+        contrast_min_spin.setFixedWidth(55)
+        contrast_min_spin.setStyleSheet("color: #888; font-size: 9pt;")
+
+        contrast_slider = QRangeSlider(Qt.Horizontal)
+        contrast_slider.setRange(0, 65535)
+
+        if layer and hasattr(layer, "contrast_limits") and layer.contrast_limits:
+            min_val, max_val = int(layer.contrast_limits[0]), int(
+                layer.contrast_limits[1]
+            )
+        else:
+            min_val = ch_config.get("default_contrast_min", 0)
+            max_val = ch_config.get("default_contrast_max", 500)
+        contrast_slider.setValue((min_val, max_val))
+        contrast_min_spin.setValue(min_val)
+
+        contrast_max_spin = QSpinBox()
+        contrast_max_spin.setRange(0, 65535)
+        contrast_max_spin.setFixedWidth(55)
+        contrast_max_spin.setStyleSheet("color: #888; font-size: 9pt;")
+        contrast_max_spin.setValue(max_val)
+
+        ch_layout.addWidget(contrast_min_spin, 1, 0)
+        ch_layout.addWidget(contrast_slider, 1, 1, 1, 3)
+        ch_layout.addWidget(contrast_max_spin, 1, 4)
+
+        group.setLayout(ch_layout)
+        parent_layout.addWidget(group)
+
+        # Store references keyed by internal ch_id
+        self.channel_controls[ch_id] = {
+            "visible": visible_cb,
+            "colormap": colormap_combo,
+            "opacity": opacity_slider,
+            "opacity_label": opacity_label,
+            "contrast": contrast_slider,
+            "contrast_min_spin": contrast_min_spin,
+            "contrast_max_spin": contrast_max_spin,
+        }
+
+        # Disable controls for channels without data
+        if not has_data:
+            visible_cb.setEnabled(False)
+            colormap_combo.setEnabled(False)
+            opacity_slider.setEnabled(False)
+            contrast_slider.setEnabled(False)
+            contrast_min_spin.setEnabled(False)
+            contrast_max_spin.setEnabled(False)
+
+        # Connect signals (live updates)
+        visible_cb.toggled.connect(
+            lambda v, ch=ch_id: self._on_visibility_changed(ch, v)
+        )
+        colormap_combo.currentTextChanged.connect(
+            lambda c, ch=ch_id: self._on_colormap_changed(ch, c)
+        )
+        opacity_slider.valueChanged.connect(
+            lambda v, ch=ch_id, lbl=opacity_label: self._on_opacity_changed(ch, v, lbl)
+        )
+        contrast_slider.valueChanged.connect(
+            lambda v, ch=ch_id: self._on_contrast_changed(ch, v)
+        )
+        contrast_min_spin.valueChanged.connect(
+            lambda v, ch=ch_id: self._on_contrast_spin_changed(ch, True)
+        )
+        contrast_max_spin.valueChanged.connect(
+            lambda v, ch=ch_id: self._on_contrast_spin_changed(ch, False)
+        )
 
     def _create_display_settings_tab(self) -> QWidget:
         """Create display settings controls."""
