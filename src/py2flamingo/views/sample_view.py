@@ -1805,12 +1805,16 @@ class SampleView(QWidget):
         for ch_id in range(4, self._num_channels):
             layer = self.channel_layers.get(ch_id) if self.channel_layers else None
             if layer is not None:
-                if checked:
-                    # Restore visibility from individual checkbox state
-                    cb = self.channel_checkboxes.get(ch_id)
-                    layer.visible = cb.isChecked() if cb else False
-                else:
-                    layer.visible = False
+                try:
+                    if checked:
+                        cb = self.channel_checkboxes.get(ch_id)
+                        layer.visible = cb.isChecked() if cb else False
+                    else:
+                        layer.visible = False
+                except Exception as e:
+                    self.logger.warning(
+                        f"Could not set visibility for channel {ch_id}: {e}"
+                    )
         self._update_plane_views()
 
     def _on_channel_visibility_changed(self, channel: int, state: int) -> None:
@@ -1831,18 +1835,29 @@ class SampleView(QWidget):
                         self.channel_layers.get(ch_id) if self.channel_layers else None
                     )
                     if layer is not None:
-                        layer.visible = False
+                        try:
+                            layer.visible = False
+                        except Exception:
+                            pass
             # Set this channel to grayscale colormap
             if self.channel_layers:
                 layer = self.channel_layers.get(channel)
                 if layer is not None:
-                    layer.colormap = "gray"
+                    try:
+                        layer.colormap = "gray"
+                    except Exception:
+                        pass
 
         # Toggle visibility on the actual napari layer
         if self.channel_layers:
             layer = self.channel_layers.get(channel)
             if layer is not None:
-                layer.visible = visible
+                try:
+                    layer.visible = visible
+                except Exception as e:
+                    self.logger.warning(
+                        f"Could not set visibility for channel {channel}: {e}"
+                    )
 
         # Update 2D plane views with new visibility settings
         self._update_plane_views()
@@ -2068,6 +2083,10 @@ class SampleView(QWidget):
         if not self.voxel_storage:
             return
 
+        # Ensure vispy visuals exist before setting visibility
+        if hasattr(self, "_chamber_viz"):
+            self._chamber_viz.ensure_layers_registered()
+
         channels_config = self._config.get("channels", [])
 
         for ch_id in range(self._num_channels):
@@ -2090,7 +2109,10 @@ class SampleView(QWidget):
 
                 # Explicitly set layer visibility (don't rely only on signal)
                 if ch_id in self.channel_layers:
-                    self.channel_layers[ch_id].visible = True
+                    try:
+                        self.channel_layers[ch_id].visible = True
+                    except Exception as e:
+                        self.logger.warning(f"Could not set layer {ch_id} visible: {e}")
                     self._channel_states[ch_id]["visible"] = True
 
                 name = (
@@ -2974,6 +2996,11 @@ class SampleView(QWidget):
                     f"{sorted(viz_layers.keys())}"
                 )
 
+        # Ensure all layers are registered with vispy canvas (fixes KeyError
+        # when layers were added during deferred setup before canvas was ready)
+        if hasattr(self, "_chamber_viz"):
+            self._chamber_viz.ensure_layers_registered()
+
         self.logger.info(
             f"_update_visualization: starting (synchronous path), "
             f"num_channels={self.voxel_storage.num_channels}, "
@@ -2984,17 +3011,23 @@ class SampleView(QWidget):
         try:
             channels_with_data = []
             for ch_id in range(self.voxel_storage.num_channels):
-                if ch_id in self.channel_layers:
-                    if not self.voxel_storage.has_data(ch_id):
-                        # Clear the layer if storage has no data (e.g., after Clear Data)
-                        layer = self.channel_layers[ch_id]
+                if ch_id not in self.channel_layers:
+                    continue
+
+                if not self.voxel_storage.has_data(ch_id):
+                    # Clear the layer if storage has no data (e.g., after Clear Data)
+                    layer = self.channel_layers[ch_id]
+                    try:
                         if layer.data is not None and np.any(layer.data):
                             layer.data = np.zeros_like(layer.data)
                             self.logger.info(f"Cleared display for channel {ch_id}")
-                        continue
+                    except Exception:
+                        pass
+                    continue
 
-                    channels_with_data.append(ch_id)
+                channels_with_data.append(ch_id)
 
+                try:
                     # Use transformed volume if stage has moved from origin
                     if self.last_stage_position and any(
                         v != 0 for v in self.last_stage_position.values()
@@ -3012,7 +3045,6 @@ class SampleView(QWidget):
                     else:
                         volume = self.voxel_storage.get_display_volume(ch_id)
 
-                    # Diagnostic logging to help debug data display issues
                     self.logger.info(
                         f"Channel {ch_id}: volume shape={volume.shape}, "
                         f"non-zero={np.count_nonzero(volume)}, "
@@ -3020,7 +3052,6 @@ class SampleView(QWidget):
                     )
 
                     # Force new array reference so napari detects the change
-                    # (display_cache may return the same object across calls)
                     self.channel_layers[ch_id].data = np.array(volume)
 
                     # Auto-contrast if this is first data for channel
@@ -3034,6 +3065,11 @@ class SampleView(QWidget):
                         f"contrast_limits={layer.contrast_limits}, "
                         f"rendering={layer.rendering}, "
                         f"blending={layer.blending}"
+                    )
+                except Exception as e:
+                    self.logger.error(
+                        f"Error updating channel {ch_id} display: {e}",
+                        exc_info=True,
                     )
 
             self.logger.info(

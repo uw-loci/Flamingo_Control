@@ -998,6 +998,67 @@ class ChamberVisualizationManager:
 
         self.logger.info(f"Setup {len(self.channel_layers)} data layers")
 
+    def ensure_layers_registered(self) -> None:
+        """Ensure all data layers have vispy visuals registered.
+
+        napari's vispy canvas maintains a layer_to_visual mapping. If layers
+        were added during deferred setup before the canvas was fully ready,
+        some visuals may not be registered. This method detects and repairs
+        broken mappings by removing and re-adding affected layers.
+        """
+        if not self.viewer or not self.channel_layers:
+            return
+
+        canvas = getattr(self.viewer.window, "_qt_viewer", None)
+        if canvas is None:
+            return
+        layer_to_visual = getattr(canvas, "layer_to_visual", None)
+        if layer_to_visual is None:
+            return
+
+        repaired = 0
+        for ch_id, layer in list(self.channel_layers.items()):
+            if layer not in layer_to_visual:
+                self.logger.warning(
+                    f"Channel {ch_id} layer not in vispy canvas — re-adding"
+                )
+                # Save layer properties
+                data = np.array(layer.data) if layer.data is not None else None
+                colormap = layer.colormap
+                visible = layer.visible
+                blending = layer.blending
+                opacity = layer.opacity
+                rendering = layer.rendering
+                contrast_limits = layer.contrast_limits
+                name = layer.name
+
+                # Remove the broken layer
+                try:
+                    self.viewer.layers.remove(layer)
+                except Exception:
+                    pass
+
+                # Re-add with same properties
+                if data is None:
+                    data = np.zeros(self.voxel_storage.display_dims, dtype=np.uint16)
+                new_layer = self.viewer.add_image(
+                    data,
+                    name=name,
+                    colormap=colormap,
+                    visible=visible,
+                    blending=blending,
+                    opacity=opacity,
+                    rendering=rendering,
+                    contrast_limits=contrast_limits,
+                )
+                self.channel_layers[ch_id] = new_layer
+                repaired += 1
+
+        if repaired > 0:
+            self.logger.info(
+                f"Repaired {repaired} channel layers with missing vispy visuals"
+            )
+
     def reset_camera(self) -> None:
         """Reset the napari viewer camera zoom (preserves orientation from 3D window)."""
         if self.viewer and hasattr(self.viewer, "camera"):
