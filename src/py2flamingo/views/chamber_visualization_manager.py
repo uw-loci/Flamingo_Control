@@ -975,12 +975,28 @@ class ChamberVisualizationManager:
             ],
         )
 
+        display_dims = self.voxel_storage.display_dims
+        if len(display_dims) != 3 or any(d <= 0 for d in display_dims):
+            self.logger.error(
+                f"Invalid display_dims {display_dims}, cannot create data layers"
+            )
+            return
+
+        # napari 0.7 initializes new layers with ndisplay=2 internally, but
+        # the viewer's dims may already be set to ndisplay=3.  When the layer
+        # is inserted, ndisplay is updated synchronously while async slicing
+        # has not yet re-computed the data, leaving a stale 2D slice that
+        # vispy's VolumeVisual rejects.  Work around this by adding layers in
+        # 2D mode (where ImageNode and 2D data are consistent), then switching
+        # back to 3D — napari will re-slice and recreate vispy nodes correctly.
+        self.viewer.dims.ndisplay = 2
+
         for ch_config in channels_config:
             ch_id = ch_config["id"]
             ch_name = ch_config["name"]
 
             # Create empty volume
-            empty_volume = np.zeros(self.voxel_storage.display_dims, dtype=np.uint16)
+            empty_volume = np.zeros(display_dims, dtype=np.uint16)
 
             # Add layer
             layer = self.viewer.add_image(
@@ -995,6 +1011,9 @@ class ChamberVisualizationManager:
             )
 
             self.channel_layers[ch_id] = layer
+
+        # Restore 3D mode — triggers proper re-slice and VolumeNode creation
+        self.viewer.dims.ndisplay = 3
 
         self.logger.info(f"Setup {len(self.channel_layers)} data layers")
 
@@ -1017,47 +1036,60 @@ class ChamberVisualizationManager:
             return
 
         repaired = 0
-        for ch_id, layer in list(self.channel_layers.items()):
-            if layer not in layer_to_visual:
-                self.logger.warning(
-                    f"Channel {ch_id} layer not in vispy canvas — re-adding"
-                )
-                # Save layer properties
-                data = np.array(layer.data) if layer.data is not None else None
-                colormap = layer.colormap
-                visible = layer.visible
-                blending = layer.blending
-                opacity = layer.opacity
-                rendering = layer.rendering
-                contrast_limits = layer.contrast_limits
-                name = layer.name
+        layers_to_repair = [
+            (ch_id, layer)
+            for ch_id, layer in self.channel_layers.items()
+            if layer not in layer_to_visual
+        ]
 
-                # Remove the broken layer
-                try:
-                    self.viewer.layers.remove(layer)
-                except Exception:
-                    pass
+        if not layers_to_repair:
+            return
 
-                # Re-add with same properties
-                if data is None:
-                    data = np.zeros(self.voxel_storage.display_dims, dtype=np.uint16)
-                new_layer = self.viewer.add_image(
-                    data,
-                    name=name,
-                    colormap=colormap,
-                    visible=visible,
-                    blending=blending,
-                    opacity=opacity,
-                    rendering=rendering,
-                    contrast_limits=contrast_limits,
-                )
-                self.channel_layers[ch_id] = new_layer
-                repaired += 1
+        # Switch to 2D to avoid napari 0.7 async slice race (see setup_data_layers)
+        self.viewer.dims.ndisplay = 2
 
-        if repaired > 0:
-            self.logger.info(
-                f"Repaired {repaired} channel layers with missing vispy visuals"
+        for ch_id, layer in layers_to_repair:
+            self.logger.warning(
+                f"Channel {ch_id} layer not in vispy canvas — re-adding"
             )
+            # Save layer properties
+            data = np.array(layer.data) if layer.data is not None else None
+            colormap = layer.colormap
+            visible = layer.visible
+            blending = layer.blending
+            opacity = layer.opacity
+            rendering = layer.rendering
+            contrast_limits = layer.contrast_limits
+            name = layer.name
+
+            # Remove the broken layer
+            try:
+                self.viewer.layers.remove(layer)
+            except Exception:
+                pass
+
+            # Re-add with same properties
+            if data is None:
+                data = np.zeros(self.voxel_storage.display_dims, dtype=np.uint16)
+            new_layer = self.viewer.add_image(
+                data,
+                name=name,
+                colormap=colormap,
+                visible=visible,
+                blending=blending,
+                opacity=opacity,
+                rendering=rendering,
+                contrast_limits=contrast_limits,
+            )
+            self.channel_layers[ch_id] = new_layer
+            repaired += 1
+
+        # Restore 3D mode
+        self.viewer.dims.ndisplay = 3
+
+        self.logger.info(
+            f"Repaired {repaired} channel layers with missing vispy visuals"
+        )
 
     def reset_camera(self) -> None:
         """Reset the napari viewer camera zoom (preserves orientation from 3D window)."""
