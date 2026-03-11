@@ -139,6 +139,9 @@ class WorkflowQueueService(QObject):
         self._completion_data: Optional[Dict] = None
         self._workflow_running = False  # Set True when we confirm workflow is executing
 
+        # Connection health tracking for poll-based reconnection
+        self._consecutive_poll_failures = 0
+
         # Execution thread
         self._execution_thread: Optional[threading.Thread] = None
 
@@ -455,6 +458,30 @@ class WorkflowQueueService(QObject):
                     item.error = error
                     logger.error(f"Workflow {i + 1}/{total} FAILED: {error}")
                     self.error_occurred.emit(f"Workflow {item.file_path.name}: {error}")
+
+                    # If failure was connection-related, attempt reconnect before
+                    # next workflow. The existing start_workflow() → _ensure_connected()
+                    # path handles this too, but an explicit reconnect here with a
+                    # delay gives the server time to settle.
+                    error_lower = (error or "").lower()
+                    if any(
+                        kw in error_lower
+                        for kw in ("timeout", "not connected", "connection")
+                    ):
+                        logger.info(
+                            "Connection-related failure, attempting reconnect "
+                            "before next workflow..."
+                        )
+                        time.sleep(2.0)  # Brief delay for network/server to settle
+                        reconnected, msg = self._workflow_controller._ensure_connected()
+                        if reconnected:
+                            logger.info(f"Reconnected: {msg}")
+                        else:
+                            logger.warning(
+                                f"Reconnect failed: {msg} — will retry on "
+                                f"next workflow start"
+                            )
+
                     # Continue with next workflow instead of aborting entire queue
                     logger.info(f"Continuing to next workflow after failure...")
                     continue
@@ -561,6 +588,9 @@ class WorkflowQueueService(QObject):
         server has finished all acquisition and processing.
 
         Falls back to polling if callback not received within timeout.
+        If polling detects a dead connection (consecutive failures), attempts
+        reconnection and returns immediately on failure instead of waiting
+        for the full MAX_WORKFLOW_TIMEOUT.
 
         Args:
             item: Current workflow queue item
@@ -569,6 +599,7 @@ class WorkflowQueueService(QObject):
             Tuple of (success: bool, error_message: Optional[str])
         """
         start_time = time.time()
+        self._consecutive_poll_failures = 0
         logger.info(
             f"[QUEUE] Waiting for SYSTEM_STATE_IDLE callback: {item.file_path.name}"
         )
@@ -621,20 +652,26 @@ class WorkflowQueueService(QObject):
                 f"polling system state (workflow_running={self._workflow_running})..."
             )
 
-            if self._is_system_idle():
-                if self._workflow_running:
-                    # Workflow ran and is now complete
-                    logger.info(
-                        f"[QUEUE] Workflow completed (via polling fallback) after {elapsed:.1f}s"
-                    )
-                    return (True, None)
-                else:
-                    # System is idle but we haven't confirmed workflow started yet
-                    # Log warning but keep waiting - progress updates may come
-                    logger.warning(
-                        f"[QUEUE] System idle but no progress updates yet "
-                        f"(elapsed={elapsed:.1f}s) - waiting for workflow to start..."
-                    )
+            try:
+                if self._is_system_idle():
+                    if self._workflow_running:
+                        # Workflow ran and is now complete
+                        logger.info(
+                            f"[QUEUE] Workflow completed (via polling fallback) after {elapsed:.1f}s"
+                        )
+                        return (True, None)
+                    else:
+                        # System is idle but we haven't confirmed workflow started yet
+                        # Log warning but keep waiting - progress updates may come
+                        logger.warning(
+                            f"[QUEUE] System idle but no progress updates yet "
+                            f"(elapsed={elapsed:.1f}s) - waiting for workflow to start..."
+                        )
+            except ConnectionError as e:
+                # _is_system_idle raised after failed reconnect attempt —
+                # return immediately instead of waiting for MAX_WORKFLOW_TIMEOUT
+                logger.error(f"[QUEUE] Connection lost during workflow polling: {e}")
+                return (False, f"Connection lost: {e}")
 
             # Update progress
             self.progress_updated.emit(
@@ -719,14 +756,24 @@ class WorkflowQueueService(QObject):
                     f"({elapsed:.1f}s elapsed)"
                 )
 
+    # Number of consecutive poll failures before attempting reconnect
+    MAX_CONSECUTIVE_POLL_FAILURES = 3
+
     def _is_system_idle(self) -> bool:
         """
         Check if system is idle (workflow complete) - fallback method.
 
         Uses SYSTEM_STATE_GET command to query microscope state.
+        Tracks consecutive failures and attempts reconnection after
+        MAX_CONSECUTIVE_POLL_FAILURES consecutive failures (~45s at 15s intervals).
 
         Returns:
             True if system is idle, False otherwise
+
+        Raises:
+            ConnectionError: If reconnect fails after max consecutive failures,
+                re-raises so _wait_for_completion can handle it immediately
+                instead of waiting for the full 30-minute timeout.
         """
         if not self._connection_service:
             # Fall back to workflow controller's executing flag
@@ -738,7 +785,11 @@ class WorkflowQueueService(QObject):
             response = self._connection_service.query_system_state()
             if response is None:
                 logger.warning("System state query returned None - assuming busy")
-                return False
+                self._consecutive_poll_failures += 1
+                return self._handle_poll_failure("System state query returned None")
+
+            # Success — reset failure counter
+            self._consecutive_poll_failures = 0
 
             # Use the is_idle field from connection service (handles 0 and 0xa002)
             state = response.get("state", -1)
@@ -749,14 +800,51 @@ class WorkflowQueueService(QObject):
             return is_idle
 
         except TimeoutError:
-            # Timeout likely means system is busy processing workflow
-            # Don't treat this as an error - assume busy
-            logger.debug(f"System state query timed out - assuming system is busy")
-            return False
+            self._consecutive_poll_failures += 1
+            logger.warning(
+                f"System state query timed out "
+                f"({self._consecutive_poll_failures}x consecutive)"
+            )
+            return self._handle_poll_failure("System state query timed out")
 
         except Exception as e:
-            logger.warning(f"Error checking system state: {e}")
-            # Fall back to workflow controller
-            is_idle = not self._workflow_controller.is_executing
-            logger.debug(f"System idle check (fallback): is_idle={is_idle}")
-            return is_idle
+            self._consecutive_poll_failures += 1
+            logger.warning(
+                f"Error checking system state "
+                f"({self._consecutive_poll_failures}x consecutive): {e}"
+            )
+            return self._handle_poll_failure(str(e))
+
+    def _handle_poll_failure(self, reason: str) -> bool:
+        """
+        Handle a poll failure, attempting reconnect if threshold reached.
+
+        Args:
+            reason: Description of the failure for logging
+
+        Returns:
+            False (assume busy) if under threshold or reconnect succeeds
+
+        Raises:
+            ConnectionError: If reconnect fails after max consecutive failures
+        """
+        if self._consecutive_poll_failures < self.MAX_CONSECUTIVE_POLL_FAILURES:
+            # Under threshold — assume busy, will retry next poll
+            return False
+
+        # Threshold reached — connection is likely dead
+        logger.warning(
+            f"[QUEUE] {self._consecutive_poll_failures} consecutive poll failures "
+            f"(last: {reason}), attempting reconnect..."
+        )
+
+        success, msg = self._workflow_controller._ensure_connected()
+        if success:
+            logger.info(f"[QUEUE] Reconnected after poll failures: {msg}")
+            self._consecutive_poll_failures = 0
+            return False  # Assume busy, will poll again with fresh connection
+
+        # Reconnect failed — raise so _wait_for_completion exits immediately
+        # instead of waiting for the full MAX_WORKFLOW_TIMEOUT
+        logger.error(f"[QUEUE] Reconnect failed: {msg}")
+        raise ConnectionError(f"Connection lost and reconnect failed: {msg}")

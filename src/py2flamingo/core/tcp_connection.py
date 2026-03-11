@@ -13,6 +13,7 @@ Supports two modes:
 
 import logging
 import socket
+import sys
 import threading
 from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
@@ -106,6 +107,52 @@ class TCPConnection:
                 # Connect to command port
                 self.logger.info(f"Connecting to {ip}:{port} (command port)")
                 self._command_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+                # Increase receive buffer to 1MB to prevent overflow during
+                # heavy server traffic (stage callbacks + image streaming).
+                # When the default buffer fills, the server's select() write
+                # times out and it drops the connection.
+                self._command_socket.setsockopt(
+                    socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024
+                )
+
+                # Disable Nagle's algorithm for lower latency on small commands
+                self._command_socket.setsockopt(
+                    socket.IPPROTO_TCP, socket.TCP_NODELAY, 1
+                )
+
+                # Enable TCP keepalive to detect silently dead connections.
+                # Without this, a broken network link can go undetected for
+                # minutes until an application-level timeout fires.
+                self._command_socket.setsockopt(
+                    socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1
+                )
+                if sys.platform == "win32":
+                    # Windows: (onoff, keepalivetime_ms, keepaliveinterval_ms)
+                    # Start probes after 30s idle, probe every 10s
+                    self._command_socket.ioctl(
+                        socket.SIO_KEEPALIVE_VALS, (1, 30000, 10000)
+                    )
+                elif hasattr(socket, "TCP_KEEPIDLE"):
+                    # Linux: fine-grained keepalive tuning
+                    self._command_socket.setsockopt(
+                        socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30
+                    )  # Start probes after 30s idle
+                    self._command_socket.setsockopt(
+                        socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10
+                    )  # Probe every 10s
+                    self._command_socket.setsockopt(
+                        socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3
+                    )  # 3 failed probes = dead
+
+                actual_rcvbuf = self._command_socket.getsockopt(
+                    socket.SOL_SOCKET, socket.SO_RCVBUF
+                )
+                self.logger.info(
+                    f"Socket options: SO_RCVBUF={actual_rcvbuf}, "
+                    f"TCP_NODELAY=1, SO_KEEPALIVE=1"
+                )
+
                 self._command_socket.settimeout(timeout)
                 self._command_socket.connect((ip, port))
                 self._command_socket.settimeout(None)  # Clear timeout after connection
