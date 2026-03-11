@@ -82,7 +82,10 @@ class StitchingWorker(QThread):
                 f"Downsample: {self._config.downsample_factor}x\n"
                 f"Illumination fusion: {self._config.illumination_fusion}\n"
                 f"Destripe: {self._config.destripe}\n"
+                f"Deconvolution: {self._config.deconvolution_enabled}"
+                f"{' (' + self._config.deconvolution_engine + ')' if self._config.deconvolution_enabled else ''}\n"
                 f"Output format: {self._config.output_format}"
+                f"{' + .ozx' if self._config.package_ozx else ''}"
             )
 
             pipeline = StitchingPipeline(

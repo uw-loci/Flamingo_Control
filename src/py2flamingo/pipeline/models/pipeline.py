@@ -29,6 +29,7 @@ class NodeType(Enum):
     EXTERNAL_COMMAND = auto()
     SAMPLE_VIEW_DATA = auto()
     OVERVIEW_ANALYSIS = auto()
+    POST_PROCESSING = auto()
 
 
 class PortDirection(Enum):
@@ -45,6 +46,7 @@ NODE_COLORS: Dict[NodeType, str] = {
     NodeType.EXTERNAL_COMMAND: "#66bb6a",  # Green
     NodeType.SAMPLE_VIEW_DATA: "#26c6da",  # Teal
     NodeType.OVERVIEW_ANALYSIS: "#8d6e63",  # Brown — earth tone for image analysis
+    NodeType.POST_PROCESSING: "#e57373",  # Red — post-acquisition processing
 }
 
 
@@ -218,6 +220,16 @@ def create_default_ports(node_type: NodeType) -> Tuple[List[Port], List[Port]]:
             _make_port("selected_tiles", PortType.OBJECT_LIST, out),
             _make_port("count", PortType.SCALAR, out),
             _make_port("mask", PortType.VOLUME, out),
+        ]
+
+    elif node_type == NodeType.POST_PROCESSING:
+        inputs = [
+            _make_port("acquisition_dir", PortType.FILE_PATH, inp, required=True),
+            _make_port("trigger", PortType.TRIGGER, inp),
+        ]
+        outputs = [
+            _make_port("output_path", PortType.FILE_PATH, out),
+            _make_port("completed", PortType.TRIGGER, out),
         ]
 
     else:

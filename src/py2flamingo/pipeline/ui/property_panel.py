@@ -136,6 +136,50 @@ _CONFIG_SCHEMAS: Dict[NodeType, list] = {
         ("morphological_radius", "Cleanup Radius", "int", 1),
         ("invert", "Invert Selection", "bool", False),
     ],
+    NodeType.POST_PROCESSING: [
+        (
+            "acquisition_dir",
+            "Acquisition Directory",
+            "folder",
+            "",
+        ),
+        (
+            "output_dir",
+            "Output Directory",
+            "folder",
+            "",
+        ),
+        ("_voxel_header", "Voxel Geometry", "header", ""),
+        ("pixel_size_um", "Pixel Size (\u00b5m)", "float", 0.406),
+        ("z_step_um", "Z Step (\u00b5m, 0=auto)", "float", 0.0),
+        ("_preprocess_header", "Preprocessing", "header", ""),
+        ("destripe", "Destripe (PyStripe)", "bool", False),
+        (
+            "illumination_fusion",
+            "Illum. Fusion",
+            "combo",
+            "max",
+            ["max", "mean", "leonardo"],
+        ),
+        ("deconvolution_enabled", "Deconvolution", "bool", False),
+        (
+            "deconvolution_engine",
+            "Deconv. Engine",
+            "combo",
+            "pycudadecon",
+            ["pycudadecon", "redlionfish"],
+        ),
+        ("_output_header", "Output", "header", ""),
+        (
+            "output_format",
+            "Output Format",
+            "combo",
+            "ome-zarr-sharded",
+            ["ome-zarr-sharded", "ome-tiff", "both", "tiff"],
+        ),
+        ("package_ozx", "Package as .ozx", "bool", False),
+        ("channels", "Channels (empty=all)", "str", ""),
+    ],
 }
 
 

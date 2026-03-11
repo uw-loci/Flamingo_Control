@@ -139,18 +139,42 @@ class StitchingDialog(PersistentDialog):
         # Output format
         settings_layout.addWidget(QLabel("Output format:"), 2, 2)
         self._format_combo = QComboBox()
-        self._format_combo.addItem("TIFF", "tiff")
-        self._format_combo.addItem("OME-Zarr", "ome-zarr")
+        self._format_combo.addItem("OME-Zarr Sharded", "ome-zarr-sharded")
+        self._format_combo.addItem("OME-TIFF (single file)", "ome-tiff")
+        self._format_combo.addItem("Both (Zarr + TIFF)", "both")
+        self._format_combo.addItem("TIFF (flat)", "tiff")
+        self._format_combo.addItem("OME-Zarr (legacy)", "ome-zarr")
+        self._format_combo.setToolTip(
+            "OME-Zarr Sharded: ~2000 files/TB, multi-resolution pyramid, fast\n"
+            "OME-TIFF: single file, universal viewer compatibility\n"
+            "Both: write both formats"
+        )
         settings_layout.addWidget(self._format_combo, 2, 3)
 
+        # Deconvolution
+        self._deconv_cb = QCheckBox("Deconvolution")
+        self._deconv_cb.setToolTip(
+            "Apply GPU Richardson-Lucy deconvolution per tile\n"
+            "(requires pycudadecon or RedLionfish)"
+        )
+        settings_layout.addWidget(self._deconv_cb, 3, 0, 1, 2)
+
+        # Package as single file
+        self._ozx_cb = QCheckBox("Package as .ozx")
+        self._ozx_cb.setToolTip(
+            "Create a single .ozx ZIP file from the OME-Zarr output\n"
+            "for easy sharing/copying"
+        )
+        settings_layout.addWidget(self._ozx_cb, 3, 2, 1, 2)
+
         # Channels
-        settings_layout.addWidget(QLabel("Channels:"), 3, 0)
+        settings_layout.addWidget(QLabel("Channels:"), 4, 0)
         self._channels_edit = QLineEdit()
         self._channels_edit.setPlaceholderText("All (or e.g. 0,1)")
         self._channels_edit.setToolTip(
             "Leave empty for all channels, or comma-separated list (e.g. 0,1)"
         )
-        settings_layout.addWidget(self._channels_edit, 3, 1, 1, 3)
+        settings_layout.addWidget(self._channels_edit, 4, 1, 1, 3)
 
         settings_group.setLayout(settings_layout)
         layout.addWidget(settings_group)
@@ -161,15 +185,11 @@ class StitchingDialog(PersistentDialog):
         self._discover_btn = QPushButton("Discover Tiles")
         self._discover_btn.setToolTip("Scan acquisition directory for tile data")
         self._discover_btn.clicked.connect(self._on_discover)
+        self._set_btn_green(self._discover_btn)
         btn_layout.addWidget(self._discover_btn)
 
         self._run_btn = QPushButton("Run Stitching")
-        self._run_btn.setStyleSheet(
-            "QPushButton { background-color: #4CAF50; color: white; "
-            "font-weight: bold; padding: 6px 14px; }"
-            "QPushButton:hover { background-color: #45a049; }"
-            "QPushButton:disabled { background-color: #888; }"
-        )
+        self._set_btn_default(self._run_btn)
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self._on_run)
         btn_layout.addWidget(self._run_btn)
@@ -221,9 +241,11 @@ class StitchingDialog(PersistentDialog):
                 self._output_dir_edit.setText(
                     str(Path(folder).parent / "stitched_output")
                 )
-            # Reset tile discovery
+            # Reset tile discovery — Discover is next action again
             self._tiles = None
             self._run_btn.setEnabled(False)
+            self._set_btn_green(self._discover_btn)
+            self._set_btn_default(self._run_btn)
 
     def _browse_output_dir(self):
         start = self._output_dir_edit.text() or str(Path.home())
@@ -270,6 +292,9 @@ class StitchingDialog(PersistentDialog):
             self._tiles = tiles
             self._log_tile_summary(tiles)
             self._run_btn.setEnabled(True)
+            # Swap green highlight: Discover done → Run is next action
+            self._set_btn_default(self._discover_btn)
+            self._set_btn_green(self._run_btn)
 
         except Exception as e:
             self._log(f"Error discovering tiles: {e}")
@@ -312,6 +337,8 @@ class StitchingDialog(PersistentDialog):
             output_format=self._format_combo.currentData(),
             destripe=self._destripe_cb.isChecked(),
             downsample_factor=self._downsample_combo.currentData(),
+            deconvolution_enabled=self._deconv_cb.isChecked(),
+            package_ozx=self._ozx_cb.isChecked(),
         )
 
     def _parse_channels(self) -> Optional[List[int]]:
@@ -417,10 +444,34 @@ class StitchingDialog(PersistentDialog):
 
     def _on_worker_finished(self):
         """Handle worker thread completion (success, error, or cancel)."""
-        self._run_btn.setEnabled(True)
         self._discover_btn.setEnabled(True)
         self._cancel_btn.setEnabled(False)
         self._worker = None
+        if self._tiles:
+            # Tiles still valid — Run is the next action
+            self._run_btn.setEnabled(True)
+            self._set_btn_green(self._run_btn)
+            self._set_btn_default(self._discover_btn)
+        else:
+            # No tiles — Discover is the next action
+            self._run_btn.setEnabled(False)
+            self._set_btn_green(self._discover_btn)
+            self._set_btn_default(self._run_btn)
+
+    # --- Button styling helpers ---
+
+    def _set_btn_green(self, btn):
+        """Style a button with a green 'call to action' appearance."""
+        btn.setStyleSheet(
+            "QPushButton { background-color: #4CAF50; color: white; "
+            "font-weight: bold; padding: 6px 14px; }"
+            "QPushButton:hover { background-color: #45a049; }"
+            "QPushButton:disabled { background-color: #888; color: #ccc; }"
+        )
+
+    def _set_btn_default(self, btn):
+        """Reset a button to the default (platform) appearance."""
+        btn.setStyleSheet("")
 
     # --- Logging helper ---
 
@@ -441,6 +492,8 @@ class StitchingDialog(PersistentDialog):
         s.setValue("downsample_idx", self._downsample_combo.currentIndex())
         s.setValue("fusion_idx", self._fusion_combo.currentIndex())
         s.setValue("destripe", self._destripe_cb.isChecked())
+        s.setValue("deconvolution", self._deconv_cb.isChecked())
+        s.setValue("package_ozx", self._ozx_cb.isChecked())
         s.setValue("format_idx", self._format_combo.currentIndex())
         s.setValue("channels", self._channels_edit.text())
         s.endGroup()
@@ -472,6 +525,12 @@ class StitchingDialog(PersistentDialog):
 
         destripe = s.value("destripe", False, type=bool)
         self._destripe_cb.setChecked(destripe)
+
+        deconv = s.value("deconvolution", False, type=bool)
+        self._deconv_cb.setChecked(deconv)
+
+        ozx = s.value("package_ozx", False, type=bool)
+        self._ozx_cb.setChecked(ozx)
 
         format_idx = s.value("format_idx", 0, type=int)
         self._format_combo.setCurrentIndex(format_idx)

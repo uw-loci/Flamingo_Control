@@ -13,7 +13,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -56,8 +56,13 @@ class StitchingConfig:
     # Illumination fusion
     illumination_fusion: str = "max"  # "max", "mean", or "leonardo"
 
-    # Output
-    output_format: str = "tiff"  # "tiff" or "ome-zarr"
+    # Output format: "tiff", "ome-zarr", "ome-zarr-sharded", "ome-tiff", "both"
+    #   tiff            — flat TIFF (legacy, no pyramid)
+    #   ome-zarr        — OME-Zarr via multiview-stitcher (no sharding)
+    #   ome-zarr-sharded — OME-Zarr v0.5 with sharding + multi-res pyramid
+    #   ome-tiff        — Pyramidal OME-TIFF BigTIFF (single file)
+    #   both            — Write both ome-zarr-sharded and ome-tiff
+    output_format: str = "ome-zarr-sharded"
     output_chunksize: Dict[str, int] = field(
         default_factory=lambda: {"z": 128, "y": 256, "x": 256}
     )
@@ -65,11 +70,41 @@ class StitchingConfig:
         default_factory=lambda: {"z": 50, "y": 100, "x": 100}
     )
 
+    # OME-Zarr sharding options
+    zarr_chunks: Tuple = (32, 256, 256)  # Inner chunk shape (~4 MB per chunk)
+    zarr_shard_chunks: Tuple = (4, 4, 4)  # Chunks per shard per axis
+    zarr_compression: str = "zstd"  # Compression codec
+    zarr_compression_level: int = 3  # Compression level
+    zarr_use_tensorstore: bool = False  # TensorStore writing backend
+
+    # Pyramid options
+    pyramid_levels: Optional[int] = None  # None = auto
+    pyramid_method: str = "itkwasm_bin_shrink"  # Anti-alias downsampling
+
+    # TIFF options
+    tiff_compression: str = "zlib"
+    tiff_tile_size: Tuple = (256, 256)
+
+    # Package as single file after writing
+    package_ozx: bool = False  # Create .ozx (ZIP) from OME-Zarr output
+
     # Processing
     destripe: bool = False  # Run PyStripe destriping
     downsample_factor: int = (
         1  # 1 = no downsampling, 2/4/8 = downsample before stitching
     )
+
+    # Deconvolution
+    deconvolution_enabled: bool = False
+    deconvolution_engine: str = "pycudadecon"  # "pycudadecon" or "redlionfish"
+    deconvolution_iterations: int = 10
+    deconvolution_na: float = 0.4
+    deconvolution_wavelength_nm: float = 488.0
+    deconvolution_n_immersion: float = 1.33
+    deconvolution_psf_path: Optional[str] = None
+
+    # Resource constraints
+    max_memory_gb: Optional[float] = None  # None = auto (50% of system RAM)
 
 
 # ---------------------------------------------------------------------------
@@ -518,6 +553,10 @@ class StitchingPipeline:
                 if self.config.destripe:
                     volume = destripe_volume(volume)
 
+                # Deconvolution (per-tile, before stitching)
+                if self.config.deconvolution_enabled:
+                    volume = self._deconvolve_tile(volume, tile)
+
                 # Downsample
                 if self.config.downsample_factor > 1:
                     volume = downsample_volume(volume, self.config.downsample_factor)
@@ -635,7 +674,82 @@ class StitchingPipeline:
         )
 
         # --- Save output ---
-        if self.config.output_format == "ome-zarr":
+        fmt = self.config.output_format
+        out_path = self._write_output(fused, channel_id, voxel_size_um, output_dir, fmt)
+
+        self.logger.info(f"  Channel {channel_id} done → {out_path}")
+        return out_path
+
+    def _write_output(
+        self,
+        fused,
+        channel_id: int,
+        voxel_size_um: Dict[str, float],
+        output_dir: Path,
+        fmt: str,
+    ) -> Path:
+        """Write fused result in the configured output format."""
+        out_path = output_dir / f"channel_{channel_id:02d}_stitched.tif"  # fallback
+
+        if fmt == "ome-zarr-sharded" or fmt == "both":
+            out_path = output_dir / f"channel_{channel_id:02d}.ome.zarr"
+            self.logger.info(f"  Writing sharded OME-Zarr v0.5: {out_path}")
+            try:
+                from py2flamingo.stitching.writers.ome_zarr_writer import (
+                    package_as_ozx,
+                    write_ome_zarr_sharded,
+                )
+
+                write_ome_zarr_sharded(
+                    data=fused,
+                    output_path=out_path,
+                    voxel_size_um=voxel_size_um,
+                    chunks=self.config.zarr_chunks,
+                    shard_chunks=self.config.zarr_shard_chunks,
+                    compression=self.config.zarr_compression,
+                    compression_level=self.config.zarr_compression_level,
+                    pyramid_levels=self.config.pyramid_levels,
+                    pyramid_method=self.config.pyramid_method,
+                    use_tensorstore=self.config.zarr_use_tensorstore,
+                )
+
+                # Package as .ozx if requested
+                if self.config.package_ozx:
+                    ozx_path = output_dir / f"channel_{channel_id:02d}.ozx"
+                    self.logger.info(f"  Packaging as .ozx: {ozx_path}")
+                    package_as_ozx(out_path, ozx_path)
+
+            except ImportError as e:
+                self.logger.error(f"  OME-Zarr sharded write failed: {e}")
+                self.logger.info("  Falling back to OME-TIFF")
+                fmt = "ome-tiff"
+
+        if fmt in ("ome-tiff", "both"):
+            tiff_path = output_dir / f"channel_{channel_id:02d}_stitched.ome.tif"
+            self.logger.info(f"  Writing pyramidal OME-TIFF: {tiff_path}")
+            try:
+                from py2flamingo.stitching.writers.ome_tiff_writer import (
+                    write_pyramidal_ome_tiff,
+                )
+
+                write_pyramidal_ome_tiff(
+                    data=fused,
+                    output_path=tiff_path,
+                    voxel_size_um=voxel_size_um,
+                    tile_size=self.config.tiff_tile_size,
+                    compression=self.config.tiff_compression,
+                    pyramid_levels=self.config.pyramid_levels,
+                )
+                if fmt == "ome-tiff":
+                    out_path = tiff_path
+            except ImportError as e:
+                self.logger.error(f"  OME-TIFF write failed: {e}")
+                self.logger.info("  Falling back to flat TIFF")
+                tiff_path = output_dir / f"channel_{channel_id:02d}_stitched.tif"
+                self._save_as_tiff(fused, tiff_path)
+                out_path = tiff_path
+
+        elif fmt == "ome-zarr":
             out_path = output_dir / f"channel_{channel_id:02d}.zarr"
             self.logger.info(f"  Writing OME-Zarr: {out_path}")
             try:
@@ -650,12 +764,12 @@ class StitchingPipeline:
                 self.logger.error(f"  OME-Zarr write failed: {e}, falling back to TIFF")
                 out_path = output_dir / f"channel_{channel_id:02d}_stitched.tif"
                 self._save_as_tiff(fused, out_path)
-        else:
+
+        elif fmt == "tiff":
             out_path = output_dir / f"channel_{channel_id:02d}_stitched.tif"
             self.logger.info(f"  Writing TIFF: {out_path}")
             self._save_as_tiff(fused, out_path)
 
-        self.logger.info(f"  Channel {channel_id} done → {out_path}")
         return out_path
 
     def _save_as_tiff(self, sim, path: Path) -> None:
@@ -676,6 +790,42 @@ class StitchingPipeline:
             with dask.diagnostics.ProgressBar():
                 data = sim.data.compute()
             tifffile.imwrite(str(path), data)
+
+    def _deconvolve_tile(self, volume: np.ndarray, tile: RawTileInfo) -> np.ndarray:
+        """Apply GPU deconvolution to a single tile."""
+        try:
+            from py2flamingo.stitching.deconvolution import (
+                DeconvolutionConfig,
+                deconvolve_tile,
+            )
+
+            decon_config = DeconvolutionConfig(
+                enabled=True,
+                engine=self.config.deconvolution_engine,
+                num_iterations=self.config.deconvolution_iterations,
+                na=self.config.deconvolution_na,
+                wavelength_nm=self.config.deconvolution_wavelength_nm,
+                n_immersion=self.config.deconvolution_n_immersion,
+                psf_path=self.config.deconvolution_psf_path,
+            )
+
+            z_step_um = self.config.z_step_um
+            if z_step_um is None:
+                z_step_um = tile.z_step_mm * 1000.0
+
+            self.logger.info(
+                f"    Deconvolving ({self.config.deconvolution_engine}, "
+                f"{self.config.deconvolution_iterations} iterations)..."
+            )
+            return deconvolve_tile(
+                volume, decon_config, self.config.pixel_size_um, z_step_um
+            )
+        except ImportError as e:
+            self.logger.warning(f"    Deconvolution skipped: {e}")
+            return volume
+        except Exception as e:
+            self.logger.error(f"    Deconvolution failed: {e}")
+            return volume
 
     def _log_tile_summary(self, tiles: List[RawTileInfo]) -> None:
         """Log a summary of discovered tiles."""
