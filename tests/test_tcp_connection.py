@@ -137,14 +137,14 @@ class TestTCPConnectionWithMockServer(unittest.TestCase):
         except (socket.timeout, ConnectionRefusedError) as e:
             self.skipTest(f"Mock server not available: {e}")
 
-    def test_connect_creates_dual_sockets(self):
-        """Test that connect creates both command and live sockets."""
+    def test_connect_creates_command_socket(self):
+        """Test that connect creates command socket (live is deferred)."""
         try:
-            cmd_sock, live_sock = self.connection.connect("127.0.0.1", 53717)
+            cmd_sock = self.connection.connect("127.0.0.1", 53717)
 
             self.assertIsInstance(cmd_sock, socket.socket)
-            self.assertIsInstance(live_sock, socket.socket)
-            self.assertIsNot(cmd_sock, live_sock)
+            # Live socket is deferred — not connected at connect() time
+            self.assertFalse(self.connection.is_live_connected)
 
         except (socket.timeout, ConnectionRefusedError):
             self.skipTest("Mock server not available")
@@ -288,16 +288,22 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
-        self.connection = TCPConnection()
+        self.connection = TCPConnection(use_async_reader=False)
+
+    @staticmethod
+    def _make_mock_socket():
+        """Create a mock socket whose recv raises timeout (for buffer flush)."""
+        sock = MagicMock()
+        sock.recv.side_effect = socket.timeout()
+        sock.gettimeout.return_value = None
+        return sock
 
     @patch("socket.socket")
     def test_connect_clears_timeout_after_connection(self, mock_socket_class):
         """Test that timeout is cleared after successful connection."""
-        mock_cmd_socket = MagicMock()
-        mock_live_socket = MagicMock()
+        mock_cmd_socket = self._make_mock_socket()
 
-        # Return different sockets for command and live
-        mock_socket_class.side_effect = [mock_cmd_socket, mock_live_socket]
+        mock_socket_class.return_value = mock_cmd_socket
 
         self.connection.connect("127.0.0.1", 53717, timeout=2.0)
 
@@ -305,33 +311,40 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
         mock_cmd_socket.settimeout.assert_any_call(2.0)
         mock_cmd_socket.settimeout.assert_any_call(None)
 
-        # Verify timeout was set and then cleared for live socket
-        mock_live_socket.settimeout.assert_any_call(2.0)
-        mock_live_socket.settimeout.assert_any_call(None)
-
     @patch("socket.socket")
-    def test_connect_connects_to_correct_ports(self, mock_socket_class):
-        """Test that connect uses correct ports."""
-        mock_cmd_socket = MagicMock()
-        mock_live_socket = MagicMock()
-
-        mock_socket_class.side_effect = [mock_cmd_socket, mock_live_socket]
+    def test_connect_connects_to_command_port_only(self, mock_socket_class):
+        """Test that connect uses command port only (live is deferred)."""
+        mock_cmd_socket = self._make_mock_socket()
+        mock_socket_class.return_value = mock_cmd_socket
 
         self.connection.connect("127.0.0.1", 53717)
 
         # Verify command port connection
         mock_cmd_socket.connect.assert_called_once_with(("127.0.0.1", 53717))
 
+        # Live socket is deferred — not connected yet
+        self.assertFalse(self.connection.is_live_connected)
+
+    @patch("socket.socket")
+    def test_connect_live_connects_to_live_port(self, mock_socket_class):
+        """Test that connect_live connects to command port + 1."""
+        mock_cmd_socket = self._make_mock_socket()
+        mock_live_socket = self._make_mock_socket()
+
+        mock_socket_class.side_effect = [mock_cmd_socket, mock_live_socket]
+
+        self.connection.connect("127.0.0.1", 53717)
+        self.connection.connect_live()
+
         # Verify live port connection (command port + 1)
         mock_live_socket.connect.assert_called_once_with(("127.0.0.1", 53718))
+        self.assertTrue(self.connection.is_live_connected)
 
     @patch("socket.socket")
     def test_send_bytes_uses_sendall(self, mock_socket_class):
         """Test that send_bytes uses sendall."""
-        mock_cmd_socket = MagicMock()
-        mock_live_socket = MagicMock()
-
-        mock_socket_class.side_effect = [mock_cmd_socket, mock_live_socket]
+        mock_cmd_socket = self._make_mock_socket()
+        mock_socket_class.return_value = mock_cmd_socket
 
         self.connection.connect("127.0.0.1", 53717)
 
@@ -342,13 +355,14 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
 
     @patch("socket.socket")
     def test_send_bytes_to_live_socket(self, mock_socket_class):
-        """Test that send_bytes can use live socket."""
-        mock_cmd_socket = MagicMock()
-        mock_live_socket = MagicMock()
+        """Test that send_bytes can use live socket after connect_live."""
+        mock_cmd_socket = self._make_mock_socket()
+        mock_live_socket = self._make_mock_socket()
 
         mock_socket_class.side_effect = [mock_cmd_socket, mock_live_socket]
 
         self.connection.connect("127.0.0.1", 53717)
+        self.connection.connect_live()
 
         data = b"test data"
         self.connection.send_bytes(data, socket_type="live")
@@ -358,48 +372,51 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
     @patch("socket.socket")
     def test_receive_bytes_uses_recv(self, mock_socket_class):
         """Test that receive_bytes uses recv."""
-        mock_cmd_socket = MagicMock()
-        mock_live_socket = MagicMock()
-
-        mock_socket_class.side_effect = [mock_cmd_socket, mock_live_socket]
-
-        mock_cmd_socket.recv.return_value = b"response data"
+        mock_cmd_socket = self._make_mock_socket()
+        mock_socket_class.return_value = mock_cmd_socket
 
         self.connection.connect("127.0.0.1", 53717)
 
+        # Override recv for this test
+        mock_cmd_socket.recv.side_effect = None
+        mock_cmd_socket.recv.return_value = b"response data"
+
         result = self.connection.receive_bytes(128, socket_type="command")
 
-        mock_cmd_socket.recv.assert_called_once_with(128)
+        mock_cmd_socket.recv.assert_called_with(128)
         self.assertEqual(result, b"response data")
 
     @patch("socket.socket")
     def test_receive_bytes_from_live_socket(self, mock_socket_class):
-        """Test that receive_bytes can use live socket."""
-        mock_cmd_socket = MagicMock()
-        mock_live_socket = MagicMock()
+        """Test that receive_bytes can use live socket after connect_live."""
+        mock_cmd_socket = self._make_mock_socket()
+        mock_live_socket = self._make_mock_socket()
 
         mock_socket_class.side_effect = [mock_cmd_socket, mock_live_socket]
 
-        mock_live_socket.recv.return_value = b"live data"
-
         self.connection.connect("127.0.0.1", 53717)
+        self.connection.connect_live()
+
+        # Override recv for this test
+        mock_live_socket.recv.side_effect = None
+        mock_live_socket.recv.return_value = b"live data"
 
         result = self.connection.receive_bytes(128, socket_type="live")
 
-        mock_live_socket.recv.assert_called_once_with(128)
+        mock_live_socket.recv.assert_called_with(128)
         self.assertEqual(result, b"live data")
 
     @patch("socket.socket")
     def test_receive_bytes_with_timeout(self, mock_socket_class):
         """Test that receive_bytes sets and clears timeout."""
-        mock_cmd_socket = MagicMock()
-        mock_live_socket = MagicMock()
-
-        mock_socket_class.side_effect = [mock_cmd_socket, mock_live_socket]
-
-        mock_cmd_socket.recv.return_value = b"data"
+        mock_cmd_socket = self._make_mock_socket()
+        mock_socket_class.return_value = mock_cmd_socket
 
         self.connection.connect("127.0.0.1", 53717)
+
+        # Override recv for this test
+        mock_cmd_socket.recv.side_effect = None
+        mock_cmd_socket.recv.return_value = b"data"
 
         self.connection.receive_bytes(128, timeout=1.5)
 
@@ -410,12 +427,8 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
     @patch("socket.socket")
     def test_receive_bytes_timeout_clears_timeout(self, mock_socket_class):
         """Test that timeout is cleared even when recv times out."""
-        mock_cmd_socket = MagicMock()
-        mock_live_socket = MagicMock()
-
-        mock_socket_class.side_effect = [mock_cmd_socket, mock_live_socket]
-
-        mock_cmd_socket.recv.side_effect = socket.timeout()
+        mock_cmd_socket = self._make_mock_socket()
+        mock_socket_class.return_value = mock_cmd_socket
 
         self.connection.connect("127.0.0.1", 53717)
 
@@ -426,14 +439,28 @@ class TestTCPConnectionWithMocks(unittest.TestCase):
         mock_cmd_socket.settimeout.assert_any_call(None)
 
     @patch("socket.socket")
-    def test_disconnect_closes_both_sockets(self, mock_socket_class):
-        """Test that disconnect closes both sockets."""
-        mock_cmd_socket = MagicMock()
-        mock_live_socket = MagicMock()
+    def test_disconnect_closes_command_socket(self, mock_socket_class):
+        """Test that disconnect closes command socket."""
+        mock_cmd_socket = self._make_mock_socket()
+        mock_socket_class.return_value = mock_cmd_socket
+
+        self.connection.connect("127.0.0.1", 53717)
+        self.connection.disconnect()
+
+        mock_cmd_socket.close.assert_called_once()
+
+    @patch("socket.socket")
+    def test_disconnect_closes_both_sockets_when_live_connected(
+        self, mock_socket_class
+    ):
+        """Test that disconnect closes both sockets when live is connected."""
+        mock_cmd_socket = self._make_mock_socket()
+        mock_live_socket = self._make_mock_socket()
 
         mock_socket_class.side_effect = [mock_cmd_socket, mock_live_socket]
 
         self.connection.connect("127.0.0.1", 53717)
+        self.connection.connect_live()
         self.connection.disconnect()
 
         mock_cmd_socket.close.assert_called_once()

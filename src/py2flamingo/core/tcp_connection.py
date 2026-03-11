@@ -61,11 +61,14 @@ class TCPConnection:
         self._use_async_reader = use_async_reader
         self._command_client: Optional["CommandClient"] = None
 
-    def connect(
-        self, ip: str, port: int, timeout: float = 2.0
-    ) -> Tuple[socket.socket, socket.socket]:
+    def connect(self, ip: str, port: int, timeout: float = 2.0) -> socket.socket:
         """
-        Connect to microscope on both command and live imaging ports.
+        Connect to microscope command port only.
+
+        The live imaging port (port+1) is NOT connected here — it is
+        deferred to connect_live() and created on-demand when the user
+        first starts Live View.  This avoids contention with the C++ GUI
+        which may already be using the live port.
 
         Args:
             ip: Microscope IP address (e.g., "127.0.0.1" or "10.129.37.22")
@@ -73,7 +76,7 @@ class TCPConnection:
             timeout: Connection timeout in seconds (default: 2.0)
 
         Returns:
-            Tuple of (command_socket, live_socket)
+            The command socket
 
         Raises:
             ValueError: If IP address or port is invalid
@@ -84,7 +87,7 @@ class TCPConnection:
         Example:
             >>> connection = TCPConnection()
             >>> try:
-            ...     cmd_sock, live_sock = connection.connect("127.0.0.1", 53717)
+            ...     cmd_sock = connection.connect("127.0.0.1", 53717)
             ...     print("Connected successfully")
             ... except socket.timeout:
             ...     print("Connection timed out")
@@ -108,21 +111,12 @@ class TCPConnection:
                 self._command_socket.settimeout(None)  # Clear timeout after connection
                 self.logger.info("Connected to command port")
 
-                # Calculate live port (command port + 1)
-                live_port = port + 1
-
-                # Connect to live imaging port
-                self.logger.info(f"Connecting to {ip}:{live_port} (live port)")
-                self._live_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self._live_socket.settimeout(timeout)
-                self._live_socket.connect((ip, live_port))
-                self._live_socket.settimeout(None)  # Clear timeout after connection
-                self.logger.info("Connected to live imaging port")
+                # Live socket is NOT connected here — deferred to connect_live()
+                self._live_socket = None
 
                 # CRITICAL: Flush stale data from buffers
                 # Prevents first-command timeout caused by buffered responses
                 self._flush_receive_buffer(self._command_socket)
-                self._flush_receive_buffer(self._live_socket)
 
                 # Store connection info
                 self._ip = ip
@@ -133,13 +127,69 @@ class TCPConnection:
                 if self._use_async_reader:
                     self._start_async_reader()
 
-                return self._command_socket, self._live_socket
+                return self._command_socket
 
             except (socket.timeout, ConnectionRefusedError, OSError) as e:
                 self.logger.error(f"Connection failed: {e}")
                 # Clean up partial connections
                 self._disconnect_unsafe()
                 raise
+
+    def connect_live(self, timeout: float = 2.0) -> socket.socket:
+        """
+        Connect the live imaging socket (command port + 1) on demand.
+
+        Called lazily when the user first starts Live View, rather than
+        at initial connection time.  This avoids blocking when the C++
+        GUI already has the live port open.
+
+        Args:
+            timeout: Connection timeout in seconds (default: 2.0)
+
+        Returns:
+            The live imaging socket
+
+        Raises:
+            ConnectionError: If not connected (command port)
+            socket.timeout: If connection times out
+            OSError: If live port is already in use or other socket error
+        """
+        with self._lock:
+            if not self._connected:
+                raise ConnectionError("Not connected to microscope (command port)")
+
+            if self._live_socket is not None:
+                self.logger.debug("Live socket already connected")
+                return self._live_socket
+
+            live_port = self._port + 1
+
+            try:
+                self.logger.info(f"Connecting to {self._ip}:{live_port} (live port)")
+                self._live_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self._live_socket.settimeout(timeout)
+                self._live_socket.connect((self._ip, live_port))
+                self._live_socket.settimeout(None)
+                self.logger.info("Connected to live imaging port")
+
+                self._flush_receive_buffer(self._live_socket)
+                return self._live_socket
+
+            except (socket.timeout, ConnectionRefusedError, OSError) as e:
+                self.logger.error(f"Live socket connection failed: {e}")
+                if self._live_socket:
+                    try:
+                        self._live_socket.close()
+                    except Exception:
+                        pass
+                    self._live_socket = None
+                raise
+
+    @property
+    def is_live_connected(self) -> bool:
+        """Check if the live imaging socket is connected."""
+        with self._lock:
+            return self._live_socket is not None
 
     def _flush_receive_buffer(self, sock: socket.socket, timeout: float = 0.1) -> int:
         """
@@ -511,10 +561,10 @@ class TCPConnection:
 
     def is_connected(self) -> bool:
         """
-        Check if both sockets are connected.
+        Check if the command socket is connected.
 
         Returns:
-            True if both command and live sockets are connected
+            True if the command socket is connected
 
         Example:
             >>> if connection.is_connected():

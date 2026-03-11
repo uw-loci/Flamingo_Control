@@ -96,14 +96,12 @@ class ConnectionService:
             self.logger.info(f"Connecting to microscope at {self.ip}:{self.port}")
 
             self.nuc_client = self._create_socket()
-            self.live_client = self._create_socket()
-
-            port_listen = self.port + 1
+            # Live socket is deferred — connected on-demand via connect_live()
+            self.live_client = None
 
             try:
                 self.nuc_client.settimeout(2)
                 self.nuc_client.connect((self.ip, self.port))
-                self.live_client.connect((self.ip, port_listen))
                 self.nuc_client.settimeout(None)
             except (socket.timeout, ConnectionRefusedError) as e:
                 self.logger.error(f"Failed to connect: {e}")
@@ -375,22 +373,59 @@ class ConnectionService:
                 pass
             self.live_client = None
 
+    def connect_live(self) -> bool:
+        """Connect the live socket on demand (port + 1).
+
+        Returns:
+            True if live socket connected successfully, False otherwise
+        """
+        if self.live_client is not None:
+            return True  # Already connected
+        if not self._connected:
+            self.logger.error("Cannot connect live socket: not connected")
+            return False
+
+        port_listen = self.port + 1
+        try:
+            self.live_client = self._create_socket()
+            self.live_client.settimeout(2)
+            self.live_client.connect((self.ip, port_listen))
+            self.live_client.settimeout(None)
+            self.logger.info(f"Live socket connected to {self.ip}:{port_listen}")
+
+            # Update connection_data for backward compatibility
+            if self.connection_data:
+                self.connection_data[1] = self.live_client
+
+            # Start live receiver thread if thread manager exists
+            if self.thread_manager:
+                self.thread_manager.start_live_receiver(
+                    self.live_client, self.event_manager, self.queue_manager
+                )
+            return True
+        except (socket.timeout, ConnectionRefusedError, OSError) as e:
+            self.logger.error(f"Failed to connect live socket: {e}")
+            if self.live_client:
+                try:
+                    self.live_client.close()
+                except Exception:
+                    pass
+                self.live_client = None
+            return False
+
     def _start_threads(self) -> None:
-        """Start communication threads."""
-        # Import thread functions
+        """Start communication threads (command only — live is deferred)."""
         self.thread_manager = ThreadManager()
         self.thread_manager.start_receivers(
             self.nuc_client, self.event_manager, self.queue_manager
         )
-        self.thread_manager.start_live_receiver(
-            self.live_client, self.event_manager, self.queue_manager
-        )
+        # Live receiver is NOT started here — deferred to connect_live()
         self.thread_manager.start_sender(
             self.nuc_client, self.event_manager, self.queue_manager
         )
         self.thread_manager.start_processing(self.event_manager, self.queue_manager)
         self.threads = ()
-        self.logger.info("Communication threads started")
+        self.logger.info("Communication threads started (live receiver deferred)")
 
 
 # ============================================================================
@@ -490,10 +525,12 @@ class MVCConnectionService:
         )
 
         try:
-            # Use TCPConnection to establish dual sockets
-            self._command_socket, self._live_socket = self.tcp_connection.connect(
+            # Use TCPConnection to establish command socket only
+            # Live socket is deferred to connect_live() (on-demand)
+            self._command_socket = self.tcp_connection.connect(
                 config.ip_address, config.port, timeout=config.timeout
             )
+            self._live_socket = None  # Connected lazily via connect_live()
 
             # Update model to CONNECTED
             self.model.status = ConnectionStatus(
@@ -571,6 +608,32 @@ class MVCConnectionService:
                 last_error=error_msg,
             )
             raise
+
+    def connect_live(self, timeout: float = 2.0) -> socket.socket:
+        """
+        Connect the live imaging socket on demand.
+
+        Delegates to tcp_connection.connect_live() and stores the result.
+
+        Args:
+            timeout: Connection timeout in seconds
+
+        Returns:
+            The live imaging socket
+
+        Raises:
+            ConnectionError: If not connected
+            OSError: If live port is in use or unreachable
+        """
+        if not self.is_connected():
+            raise ConnectionError("Not connected to microscope")
+
+        if self._live_socket is not None:
+            return self._live_socket
+
+        self._live_socket = self.tcp_connection.connect_live(timeout=timeout)
+        self.logger.info("Live socket connected on demand")
+        return self._live_socket
 
     def reconnect(self, config: "ConnectionConfig") -> None:
         """

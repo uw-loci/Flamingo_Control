@@ -342,6 +342,24 @@ class FlamingoApplication(QObject):
             )
             self.logger.debug("Connected acquisition signals to Sample View")
 
+            # Wire connection state signals to SampleView
+            if self.connection_view:
+                self.connection_view.connection_established.connect(
+                    lambda: self.sample_view.set_connection_state(True)
+                )
+                self.connection_view.connection_closed.connect(
+                    lambda: self.sample_view.set_connection_state(False)
+                )
+                self.logger.debug("Connected connection signals to Sample View")
+
+            # Set initial connection state
+            connected = (
+                self.connection_service.is_connected()
+                if self.connection_service
+                else False
+            )
+            self.sample_view.set_connection_state(connected)
+
         self.sample_view.show()
         self.sample_view.raise_()
         self.sample_view.activateWindow()

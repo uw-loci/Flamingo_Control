@@ -47,7 +47,6 @@ class TestMicroscopeIntegration(unittest.TestCase):
 
         # ---- Arrange ----
         mock_nuc_socket = MagicMock()
-        mock_live_socket = MagicMock()
 
         event_manager = EventManager()
         queue_manager = QueueManager()
@@ -56,11 +55,11 @@ class TestMicroscopeIntegration(unittest.TestCase):
         with patch(
             "py2flamingo.services.connection_service.ThreadManager", NoOpThreadManager
         ):
-            # If your ConnectionService calls a factory like _create_socket(), stub it to avoid real sockets
+            # connect() now only creates one socket (command); live is deferred
             with patch.object(
                 ConnectionService,
                 "_create_socket",
-                side_effect=[mock_nuc_socket, mock_live_socket],
+                return_value=mock_nuc_socket,
             ):
                 conn_service = ConnectionService(
                     ip="192.168.1.100",
@@ -81,11 +80,11 @@ class TestMicroscopeIntegration(unittest.TestCase):
         )
 
     def _patch_create_socket_success(self):
-        # ConnectionService._create_socket typically called twice (nuc + live)
+        # connect() now only creates one socket (command); live is deferred
         return patch.object(
             self.conn,
             "_create_socket",
-            side_effect=[self.mock_nuc_socket, self.mock_live_socket],
+            return_value=self.mock_nuc_socket,
         )
 
     # ---------- tests ----------
@@ -195,11 +194,9 @@ if __name__ == "__main__":
             # Disconnect should clean up sockets without raising
             self.conn.disconnect()
 
-            # If ConnectionService tracks sockets, you can assert close() called:
-            # These asserts are safe only if your service stores these mocks.
+            # Command socket should be closed (live is deferred, so may be None)
             try:
                 self.mock_nuc_socket.close.assert_called()
-                self.mock_live_socket.close.assert_called()
             except AssertionError:
                 # If your ConnectionService doesn't hold the mocks, skip
                 pass

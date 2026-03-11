@@ -41,6 +41,7 @@ class ConnectionView(QWidget):
 
     # Signals
     connection_established = pyqtSignal()  # Emitted when TCP connection succeeds
+    connection_closed = pyqtSignal()  # Emitted when disconnected from microscope
     settings_loaded = (
         pyqtSignal()
     )  # Emitted after settings retrieval completes (position queries should wait for this)
@@ -182,14 +183,15 @@ class ConnectionView(QWidget):
         # Sample View launcher (prominent button when connected)
         sample_view_layout = QHBoxLayout()
         self.sample_view_btn = QPushButton("Open Sample View")
-        self.sample_view_btn.setToolTip("Open integrated sample viewing interface")
+        self.sample_view_btn.setToolTip(
+            "Open integrated sample viewing interface (works without connection)"
+        )
         self.sample_view_btn.setStyleSheet(
             "QPushButton { background-color: #2196F3; color: white; "
-            "font-weight: bold; font-size: 11pt; padding: 10px; }"
-            "QPushButton:disabled { background-color: #ccc; color: #666; }"
+            "font-weight: bold; font-size: 10pt; padding: 6px; }"
         )
         self.sample_view_btn.clicked.connect(self._on_sample_view_clicked)
-        self.sample_view_btn.setEnabled(False)  # Enable when connected
+        # Always enabled — Sample View works without connection for visualization
         sample_view_layout.addWidget(self.sample_view_btn)
         layout.addLayout(sample_view_layout)
 
@@ -300,7 +302,6 @@ class ConnectionView(QWidget):
             self.disconnect_btn.setEnabled(True)
             self.ip_input.setEnabled(False)
             self.port_input.setEnabled(False)
-            self.sample_view_btn.setEnabled(True)
         else:
             # Disconnected state
             self.status_label.setText("Status: Not connected")
@@ -309,7 +310,8 @@ class ConnectionView(QWidget):
             self.disconnect_btn.setEnabled(False)
             self.ip_input.setEnabled(True)
             self.port_input.setEnabled(True)
-            self.sample_view_btn.setEnabled(False)
+            self.connection_closed.emit()
+            self._logger.debug("ConnectionView: Emitted connection_closed signal")
 
     def _update_status_error(self, error_message: str) -> None:
         """Update UI state for communication error (TCP connected but microscope not responding).
@@ -337,7 +339,7 @@ class ConnectionView(QWidget):
         self.port_input.setEnabled(False)
 
         # Disable features that require working microscope communication
-        self.sample_view_btn.setEnabled(False)
+        # Note: sample_view_btn stays enabled — it works without connection
         self.test_workflow_file_btn.setEnabled(False)
         self.test_workflow_gen_btn.setEnabled(False)
 

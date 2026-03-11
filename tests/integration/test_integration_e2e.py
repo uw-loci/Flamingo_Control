@@ -152,10 +152,10 @@ def test_workflow_file():
 
 def test_core_connection_to_mock_server(mock_server, tcp_connection):
     """Test TCP connection can connect to mock server."""
-    cmd_sock, live_sock = tcp_connection.connect("127.0.0.1", 53717)
+    cmd_sock = tcp_connection.connect("127.0.0.1", 53717)
 
     assert cmd_sock is not None
-    assert live_sock is not None
+    # Live socket is deferred (connect_live()) — not tested here
     assert tcp_connection.is_connected() is True
 
     tcp_connection.disconnect()
@@ -164,7 +164,7 @@ def test_core_connection_to_mock_server(mock_server, tcp_connection):
 
 def test_core_send_encoded_command(mock_server, tcp_connection, protocol_encoder):
     """Test sending encoded command through TCP connection."""
-    cmd_sock, live_sock = tcp_connection.connect("127.0.0.1", 53717)
+    cmd_sock = tcp_connection.connect("127.0.0.1", 53717)
 
     # Encode a workflow stop command
     cmd_bytes = protocol_encoder.encode_command(CommandCode.CMD_WORKFLOW_STOP)
@@ -551,7 +551,7 @@ def test_empty_workflow_file(mock_server, connection_controller, workflow_contro
 def test_proper_resource_cleanup_on_disconnect(mock_server, tcp_connection):
     """Test that resources are properly cleaned up on disconnect."""
     # Connect
-    cmd_sock, live_sock = tcp_connection.connect("127.0.0.1", 53717)
+    cmd_sock = tcp_connection.connect("127.0.0.1", 53717)
     assert tcp_connection.is_connected() is True
 
     # Disconnect

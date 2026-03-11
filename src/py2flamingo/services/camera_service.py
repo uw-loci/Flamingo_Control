@@ -404,33 +404,10 @@ class CameraService(MicroscopeCommandService):
             self.logger.info("Waiting for microscope to start streaming...")
             time.sleep(0.5)
 
-            # Use the EXISTING live socket (already connected during initial connection)
+            # Get or lazily create the live socket
             try:
-                # Get the live socket from the connection service
-                if hasattr(self.connection, "tcp_connection") and hasattr(
-                    self.connection.tcp_connection, "_live_socket"
-                ):
-                    # MVCConnectionService
-                    self._data_socket = self.connection.tcp_connection._live_socket
-                    ip = self.connection.tcp_connection._ip
-                    port = 53718
-                elif hasattr(self.connection, "live_client"):
-                    # ConnectionService
-                    self._data_socket = self.connection.live_client
-                    ip = self.connection.ip
-                    port = 53718
-                else:
-                    raise RuntimeError(
-                        "Cannot access live socket from connection service"
-                    )
-
-                if self._data_socket is None:
-                    raise RuntimeError("Live socket is not connected")
-
+                self._data_socket = self._get_or_connect_live_socket()
                 self._data_socket.settimeout(5.0)
-                self.logger.info(
-                    f"Using existing live socket for image data ({ip}:{port})"
-                )
 
             except Exception as e:
                 self.logger.error(f"Failed to access live socket: {e}")
@@ -440,7 +417,10 @@ class CameraService(MicroscopeCommandService):
                     self.stop_live_view()
                 except:
                     pass
-                raise RuntimeError(f"Failed to access live socket: {e}")
+                raise RuntimeError(
+                    f"Live View failed: {e}\n\n"
+                    "Is another program (e.g. the C++ GUI) using Live View?"
+                )
 
             # Start streaming thread
             self._streaming = True
@@ -500,30 +480,10 @@ class CameraService(MicroscopeCommandService):
                 self.logger.debug("Data receiver already running, skipping")
                 return
 
-            # Use the EXISTING live socket (already connected during initial connection)
+            # Get or lazily create the live socket
             try:
-                if hasattr(self.connection, "tcp_connection") and hasattr(
-                    self.connection.tcp_connection, "_live_socket"
-                ):
-                    self._data_socket = self.connection.tcp_connection._live_socket
-                    ip = self.connection.tcp_connection._ip
-                    port = 53718
-                elif hasattr(self.connection, "live_client"):
-                    self._data_socket = self.connection.live_client
-                    ip = self.connection.ip
-                    port = 53718
-                else:
-                    raise RuntimeError(
-                        "Cannot access live socket from connection service"
-                    )
-
-                if self._data_socket is None:
-                    raise RuntimeError("Live socket is not connected")
-
+                self._data_socket = self._get_or_connect_live_socket()
                 self._data_socket.settimeout(5.0)
-                self.logger.info(
-                    f"Data receiver using existing live socket ({ip}:{port})"
-                )
 
             except Exception as e:
                 self.logger.error(
@@ -720,6 +680,52 @@ class CameraService(MicroscopeCommandService):
                 f"(tile_mode={'ON' if enabled else 'OFF'}, "
                 f"preserved {len(frames)} frames)"
             )
+
+    def _get_or_connect_live_socket(self) -> socket.socket:
+        """Get the live socket, connecting it on-demand if needed.
+
+        Tries to get an existing live socket from the connection service.
+        If it's None (deferred connection), calls connect_live() to create it.
+
+        Returns:
+            The live imaging socket
+
+        Raises:
+            RuntimeError: If socket cannot be obtained
+            OSError: If live port connection fails (e.g. port in use)
+        """
+        live_socket = None
+
+        if hasattr(self.connection, "tcp_connection") and hasattr(
+            self.connection.tcp_connection, "_live_socket"
+        ):
+            # MVCConnectionService path
+            live_socket = self.connection.tcp_connection._live_socket
+            if live_socket is None:
+                # Lazy connect
+                self.logger.info("Live socket not yet connected — connecting on demand")
+                live_socket = self.connection.connect_live()
+            ip = self.connection.tcp_connection._ip
+            self.logger.info(f"Using live socket for image data ({ip}:53718)")
+
+        elif hasattr(self.connection, "live_client"):
+            # ConnectionService path
+            live_socket = self.connection.live_client
+            if live_socket is None:
+                self.logger.info("Live socket not yet connected — connecting on demand")
+                if not self.connection.connect_live():
+                    raise RuntimeError("Failed to connect live socket")
+                live_socket = self.connection.live_client
+            ip = self.connection.ip
+            self.logger.info(f"Using live socket for image data ({ip}:53718)")
+
+        else:
+            raise RuntimeError("Cannot access live socket from connection service")
+
+        if live_socket is None:
+            raise RuntimeError("Live socket is not connected")
+
+        return live_socket
 
     def _data_receiver_loop(self) -> None:
         """

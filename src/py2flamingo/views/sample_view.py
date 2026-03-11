@@ -362,7 +362,10 @@ class SampleView(QWidget):
         # Illumination Controls
         left_column.addWidget(self._create_illumination_section())
 
-        # Live View toggle button (green when stopped, red when active) - compact
+        # Live View toggle + connection status indicator row
+        live_row = QHBoxLayout()
+        live_row.setSpacing(8)
+
         self.live_view_toggle_btn = QPushButton("Start Live")
         self.live_view_toggle_btn.setCheckable(True)
         self.live_view_toggle_btn.clicked.connect(self._on_live_view_toggle)
@@ -372,7 +375,17 @@ class SampleView(QWidget):
             f"QPushButton:checked {{ background-color: {ERROR_COLOR}; }}"
         )
         self.live_view_toggle_btn.setMaximumWidth(120)
-        left_column.addWidget(self.live_view_toggle_btn)
+        live_row.addWidget(self.live_view_toggle_btn)
+
+        # Connection status indicator
+        self._connection_status_label = QLabel("Not connected")
+        self._connection_status_label.setStyleSheet(
+            "color: gray; font-size: 9pt; font-style: italic;"
+        )
+        live_row.addWidget(self._connection_status_label)
+        live_row.addStretch()
+
+        left_column.addLayout(live_row)
 
         left_column.addStretch()
 
@@ -3852,6 +3865,49 @@ class SampleView(QWidget):
         # (acquisition controls the LED, user shouldn't change it)
         if hasattr(self, "laser_led_panel") and self.laser_led_panel:
             self.laser_led_panel.setEnabled(enabled)
+
+    def set_connection_state(self, connected: bool) -> None:
+        """Enable or disable controls based on microscope connection state.
+
+        When not connected, stage controls, illumination controls, and live view
+        are disabled. Visualization controls (3D view, channel toggles, contrast,
+        data load/save) remain enabled so users can work with saved datasets.
+
+        Args:
+            connected: True if connected to microscope, False otherwise
+        """
+        self.logger.info(
+            f"Connection state: {'connected' if connected else 'not connected'}"
+        )
+
+        # Update connection status indicator
+        if hasattr(self, "_connection_status_label"):
+            if connected:
+                self._connection_status_label.setText("Connected")
+                self._connection_status_label.setStyleSheet(
+                    f"color: {SUCCESS_COLOR}; font-size: 9pt; font-weight: bold;"
+                )
+            else:
+                self._connection_status_label.setText("Not connected")
+                self._connection_status_label.setStyleSheet(
+                    "color: gray; font-size: 9pt; font-style: italic;"
+                )
+
+        # Stage position controls
+        if hasattr(self, "position_sliders"):
+            for slider in self.position_sliders.values():
+                slider.setEnabled(connected)
+        if hasattr(self, "position_edits"):
+            for edit in self.position_edits.values():
+                edit.setEnabled(connected)
+
+        # Illumination controls
+        if hasattr(self, "laser_led_panel") and self.laser_led_panel:
+            self.laser_led_panel.setEnabled(connected)
+
+        # Live View toggle — requires connection
+        if hasattr(self, "live_view_toggle_btn"):
+            self.live_view_toggle_btn.setEnabled(connected)
 
     # ========== Tile Workflow Integration ==========
 
