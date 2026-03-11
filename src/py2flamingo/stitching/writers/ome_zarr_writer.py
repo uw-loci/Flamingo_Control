@@ -332,9 +332,13 @@ def _write_ome_zarr_metadata(
 
 
 def _to_numpy(data) -> np.ndarray:
-    """Convert various data types to numpy array."""
+    """Convert various data types to a 3D numpy array.
+
+    SpatialImage / xarray may carry extra singleton dims (e.g. channel or time).
+    We squeeze those away so the result is always (Z, Y, X).
+    """
     if isinstance(data, np.ndarray):
-        return data
+        return np.squeeze(data)
 
     # dask array
     if hasattr(data, "compute"):
@@ -342,7 +346,7 @@ def _to_numpy(data) -> np.ndarray:
         import dask.diagnostics
 
         with dask.diagnostics.ProgressBar():
-            return np.asarray(data.compute())
+            return np.squeeze(np.asarray(data.compute()))
 
     # xarray / SpatialImage
     if hasattr(data, "data"):
@@ -352,10 +356,10 @@ def _to_numpy(data) -> np.ndarray:
             import dask.diagnostics
 
             with dask.diagnostics.ProgressBar():
-                return np.asarray(inner.compute())
-        return np.asarray(inner)
+                return np.squeeze(np.asarray(inner.compute()))
+        return np.squeeze(np.asarray(inner))
 
-    return np.asarray(data)
+    return np.squeeze(np.asarray(data))
 
 
 def _log_output_stats(output_path: Path):

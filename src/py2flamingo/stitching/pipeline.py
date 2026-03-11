@@ -647,7 +647,7 @@ class StitchingPipeline:
                         msims,
                         transform_key=mvs_io.METADATA_TRANSFORM_KEY,
                         new_transform_key="registered",
-                        reg_channel_index=None,  # single-channel tiles
+                        reg_channel_index=0,
                         registration_binning=self.config.registration_binning,
                         post_registration_do_quality_filter=True,
                         post_registration_quality_threshold=self.config.quality_threshold,

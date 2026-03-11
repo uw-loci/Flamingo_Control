@@ -154,6 +154,38 @@ class StitchingDialog(PersistentDialog):
         )
         settings_layout.addWidget(self._format_combo, 2, 3)
 
+        # Format help label
+        format_help = QLabel("?")
+        format_help.setStyleSheet(
+            "QLabel { color: #1976D2; font-weight: bold; font-size: 13px; "
+            "border: 1px solid #1976D2; border-radius: 8px; "
+            "min-width: 16px; max-width: 16px; min-height: 16px; max-height: 16px; "
+            "qproperty-alignment: AlignCenter; }"
+        )
+        format_help.setToolTip(
+            "<b>Output Format Guide</b><br><br>"
+            "<b>OME-Zarr Sharded</b> — Best for large datasets. Multi-resolution "
+            "pyramid with sharding reduces file count to ~2,000/TB. "
+            "Viewable in napari.<br><br>"
+            "<b>OME-TIFF</b> — Single file per channel. Universal viewer support "
+            "(Fiji, QuPath, napari, commercial tools).<br><br>"
+            "<b>Both</b> — Write Zarr (for fast viewing) + TIFF (for sharing)."
+            "<br><br>"
+            "<hr>"
+            "<b>Need Imaris .ims format?</b><br>"
+            "The .ims format is semi-proprietary (HDF5-based) and no reliable "
+            "cross-platform Python writer exists. The format has undocumented "
+            "changes between Imaris versions, so direct writing risks producing "
+            "files that fail to open in future releases.<br><br>"
+            "<b>Recommended:</b><ol>"
+            "<li>Export as <b>OME-TIFF</b> from this dialog</li>"
+            "<li>Use Imaris <b>File &gt; Open</b> (reads OME-TIFF via Bio-Formats)</li>"
+            "<li>Or use <b>ImarisFileConverter</b> (bundled with Imaris) to "
+            "convert OME-TIFF &rarr; .ims</li></ol>"
+            "This ensures the .ims file matches your Imaris version exactly."
+        )
+        settings_layout.addWidget(format_help, 2, 4)
+
         # Deconvolution
         self._deconv_cb = QCheckBox("Deconvolution")
         self._deconv_cb.setToolTip(

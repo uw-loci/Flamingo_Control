@@ -194,16 +194,20 @@ def _downsample_bin_shrink(volume: np.ndarray, factor: int) -> np.ndarray:
 
 
 def _to_numpy(data) -> np.ndarray:
-    """Convert various data types to numpy array."""
+    """Convert various data types to a 3D numpy array.
+
+    SpatialImage / xarray may carry extra singleton dims (e.g. channel or time).
+    We squeeze those away so the result is always (Z, Y, X).
+    """
     if isinstance(data, np.ndarray):
-        return data
+        return np.squeeze(data)
 
     if hasattr(data, "compute"):
         logger.info("Computing dask array into memory for TIFF write...")
         import dask.diagnostics
 
         with dask.diagnostics.ProgressBar():
-            return np.asarray(data.compute())
+            return np.squeeze(np.asarray(data.compute()))
 
     if hasattr(data, "data"):
         inner = data.data
@@ -212,7 +216,7 @@ def _to_numpy(data) -> np.ndarray:
             import dask.diagnostics
 
             with dask.diagnostics.ProgressBar():
-                return np.asarray(inner.compute())
-        return np.asarray(inner)
+                return np.squeeze(np.asarray(inner.compute()))
+        return np.squeeze(np.asarray(inner))
 
-    return np.asarray(data)
+    return np.squeeze(np.asarray(data))
