@@ -1349,6 +1349,14 @@ class SampleView(QWidget):
         self.load_session_btn.clicked.connect(self._on_load_session_clicked)
         perf_row.addWidget(self.load_session_btn)
 
+        # Load Stitched button
+        self.load_stitched_btn = QPushButton("Load Stitched")
+        self.load_stitched_btn.setToolTip(
+            "Load stitched OME-Zarr output at correct world position"
+        )
+        self.load_stitched_btn.clicked.connect(self._on_load_stitched_clicked)
+        perf_row.addWidget(self.load_stitched_btn)
+
         # Settings button
         self.settings_btn = QPushButton("Settings")
         self.settings_btn.setToolTip("Open application settings dialog")
@@ -2414,6 +2422,74 @@ class SampleView(QWidget):
         except Exception as e:
             self.logger.exception(f"Load session failed: {e}")
             QMessageBox.critical(self, "Load Error", f"Error loading session: {e}")
+
+    def _on_load_stitched_clicked(self) -> None:
+        """Browse for a stitching output directory and load it."""
+        from PyQt5.QtWidgets import QFileDialog, QMessageBox
+
+        if not self.voxel_storage:
+            QMessageBox.warning(self, "Not Ready", "Voxel storage not initialized.")
+            return
+
+        start_path = str(Path.home())
+        dir_path = QFileDialog.getExistingDirectory(
+            self, "Select Stitching Output Directory", start_path
+        )
+        if dir_path:
+            self._load_stitched_from_path(dir_path)
+
+    def _load_stitched_from_path(self, dir_path: str) -> None:
+        """Load stitched OME-Zarr data at correct world position.
+
+        Shared by the Load Stitched button and stitching dialog completion.
+        """
+        from PyQt5.QtWidgets import QMessageBox
+
+        if not self.voxel_storage:
+            QMessageBox.warning(self, "Not Ready", "Voxel storage not initialized.")
+            return
+
+        try:
+            from py2flamingo.visualization.session_manager import load_stitched_volume
+
+            result = load_stitched_volume(Path(dir_path), self.voxel_storage)
+            channels = result["channels_loaded"]
+
+            if not channels:
+                QMessageBox.warning(
+                    self,
+                    "No Data Loaded",
+                    "No channels were loaded from the stitching output.",
+                )
+                return
+
+            # Update visualization
+            self._update_visualization()
+            self._update_data_stats()
+
+            # Enable channel controls now that data exists
+            self._update_channel_availability()
+            self._auto_contrast_channels()
+
+            QMessageBox.information(
+                self,
+                "Stitched Data Loaded",
+                f"Loaded {len(channels)} channel(s): {channels}\n" f"from: {dir_path}",
+            )
+
+        except FileNotFoundError as e:
+            self.logger.error(f"Load stitched failed: {e}")
+            QMessageBox.warning(
+                self,
+                "Metadata Not Found",
+                f"stitch_metadata.json not found in:\n{dir_path}\n\n"
+                "Make sure this is a stitching output directory.",
+            )
+        except Exception as e:
+            self.logger.exception(f"Load stitched failed: {e}")
+            QMessageBox.critical(
+                self, "Load Error", f"Error loading stitched data:\n{e}"
+            )
 
     def _on_settings_clicked(self) -> None:
         """Open the application settings dialog."""

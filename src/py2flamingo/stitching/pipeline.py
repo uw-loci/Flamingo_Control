@@ -8,6 +8,7 @@ Usage:
     python -m py2flamingo.stitching /path/to/acquisition --pixel-size-um 0.406
 """
 
+import json
 import logging
 import re
 import time
@@ -493,10 +494,15 @@ class StitchingPipeline:
                 f"Step 3: Registering + stitching channel {ch_id} "
                 f"({len(tile_data)} tiles)..."
             )
-            result_path = self._register_and_fuse(
+            result_path, origin_um = self._register_and_fuse(
                 tile_data, ch_id, voxel_size_um, output_path
             )
-            results[ch_id] = result_path
+            results[ch_id] = (result_path, origin_um)
+
+        # --- Write stitch_metadata.json sidecar ---
+        self._write_stitch_metadata(
+            output_path, results, tiles, voxel_size_um, acquisition_dir
+        )
 
         elapsed = time.time() - t0
         self.logger.info(
@@ -571,11 +577,15 @@ class StitchingPipeline:
         channel_id: int,
         voxel_size_um: Dict[str, float],
         output_dir: Path,
-    ) -> Path:
+    ) -> Tuple[Path, Dict[str, float]]:
         """Register tiles and fuse into a single stitched volume.
 
         Uses multiview-stitcher for phase-correlation registration
         and blended fusion.
+
+        Returns:
+            Tuple of (output_path, origin_um) where origin_um is
+            {"z": ..., "y": ..., "x": ...} in micrometers.
         """
         try:
             from multiview_stitcher import (
@@ -673,12 +683,23 @@ class StitchingPipeline:
             output_chunksize=self.config.output_chunksize,
         )
 
+        # --- Extract world-space origin from fused SpatialImage coords ---
+        origin_um = {
+            "z": float(fused.coords["z"].values[0]),
+            "y": float(fused.coords["y"].values[0]),
+            "x": float(fused.coords["x"].values[0]),
+        }
+        self.logger.info(
+            f"  Fused origin (µm): Z={origin_um['z']:.1f} "
+            f"Y={origin_um['y']:.1f} X={origin_um['x']:.1f}"
+        )
+
         # --- Save output ---
         fmt = self.config.output_format
         out_path = self._write_output(fused, channel_id, voxel_size_um, output_dir, fmt)
 
         self.logger.info(f"  Channel {channel_id} done → {out_path}")
-        return out_path
+        return out_path, origin_um
 
     def _write_output(
         self,
@@ -771,6 +792,35 @@ class StitchingPipeline:
             self._save_as_tiff(fused, out_path)
 
         return out_path
+
+    def _write_stitch_metadata(
+        self,
+        output_dir: Path,
+        results: Dict[int, Tuple[Path, Dict[str, float]]],
+        tiles: List[RawTileInfo],
+        voxel_size_um: Dict[str, float],
+        acquisition_dir: Path,
+    ) -> None:
+        """Write stitch_metadata.json sidecar with world origin per channel."""
+        channels_meta = {}
+        for ch_id, (ch_path, origin_um) in results.items():
+            channels_meta[str(ch_id)] = {
+                "path": ch_path.name,
+                "origin_um": [origin_um["z"], origin_um["y"], origin_um["x"]],
+            }
+
+        metadata = {
+            "source_acquisition": str(acquisition_dir),
+            "voxel_size_um": voxel_size_um,
+            "downsample_factor": self.config.downsample_factor,
+            "output_format": self.config.output_format,
+            "channels": channels_meta,
+            "tile_count": len(tiles),
+        }
+
+        meta_path = output_dir / "stitch_metadata.json"
+        meta_path.write_text(json.dumps(metadata, indent=2))
+        self.logger.info(f"  Wrote {meta_path}")
 
     def _save_as_tiff(self, sim, path: Path) -> None:
         """Save a SpatialImage to TIFF via tifffile."""

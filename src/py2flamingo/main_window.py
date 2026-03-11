@@ -915,11 +915,40 @@ class MainWindow(QMainWindow):
                 return
 
             self._stitching_dialog = StitchingDialog(parent=None)
+            self._stitching_dialog.load_stitched_requested.connect(
+                self._on_load_stitched_from_dialog
+            )
             self._stitching_dialog.show()
 
         except Exception as e:
             logger.error(f"Error opening Tile Stitching: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to open Tile Stitching:\n{e}")
+
+    def _on_load_stitched_from_dialog(self, output_path: str):
+        """Handle stitching dialog request to load output into SampleView."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        if not self.app:
+            QMessageBox.warning(self, "Error", "Application not available")
+            return
+
+        # Open SampleView if not already open
+        if self.app.sample_view is None:
+            try:
+                self.app._open_sample_view()
+            except Exception as e:
+                logger.error(f"Could not open Sample View: {e}", exc_info=True)
+                QMessageBox.critical(self, "Error", f"Could not open Sample View:\n{e}")
+                return
+
+        # Load stitched data
+        try:
+            self.app.sample_view._load_stitched_from_path(output_path)
+        except Exception as e:
+            logger.error(f"Error loading stitched data: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to load stitched data:\n{e}")
 
     def _on_tab_changed(self, index: int) -> None:
         """Handle tab change event - log which tab user switched to.

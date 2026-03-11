@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from PyQt5.QtCore import QSettings, Qt
+from PyQt5.QtCore import QSettings, Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -42,6 +42,9 @@ class StitchingDialog(PersistentDialog):
     - Pixel size, Z step, downsample factor, illumination fusion, destripe
     - Tile discovery, pipeline execution with progress/log, cancellation
     """
+
+    # Emitted when user wants to load stitched output into SampleView
+    load_stitched_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -416,15 +419,21 @@ class StitchingDialog(PersistentDialog):
         """Handle successful pipeline completion."""
         self._log(f"\nStitching complete! Output: {output_path}")
 
-        result = QMessageBox.information(
-            self,
-            "Stitching Complete",
-            f"Stitched volume saved to:\n{output_path}\n\n" "Open containing folder?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
-        )
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Stitching Complete")
+        msg.setText(f"Stitched volume saved to:\n{output_path}")
+        msg.setIcon(QMessageBox.Information)
 
-        if result == QMessageBox.Yes:
+        load_btn = msg.addButton("Load into Sample View", QMessageBox.AcceptRole)
+        open_btn = msg.addButton("Open Folder", QMessageBox.ActionRole)
+        msg.addButton(QMessageBox.Close)
+
+        msg.exec_()
+        clicked = msg.clickedButton()
+
+        if clicked == load_btn:
+            self.load_stitched_requested.emit(output_path)
+        elif clicked == open_btn:
             import subprocess
             import sys
 
