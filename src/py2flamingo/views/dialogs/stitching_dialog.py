@@ -1,0 +1,496 @@
+"""Tile Stitching Dialog.
+
+Non-modal dialog for stitching raw acquisition tile data into a single volume.
+Operates on saved acquisition data on disk — no microscope connection required.
+"""
+
+import logging
+from pathlib import Path
+from typing import List, Optional
+
+from PyQt5.QtCore import QSettings, Qt
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+)
+
+from py2flamingo.services.window_geometry_manager import PersistentDialog
+
+logger = logging.getLogger(__name__)
+
+# QSettings keys
+_SETTINGS_GROUP = "StitchingDialog"
+
+
+class StitchingDialog(PersistentDialog):
+    """Dialog for stitching raw acquisition tile data.
+
+    Provides UI for configuring and running the stitching pipeline:
+    - Acquisition/output directory selection
+    - Pixel size, Z step, downsample factor, illumination fusion, destripe
+    - Tile discovery, pipeline execution with progress/log, cancellation
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent=parent)
+        self._logger = logging.getLogger(__name__)
+        self._worker = None
+        self._tiles = None  # Cached discovered tiles
+
+        self.setWindowTitle("Tile Stitching")
+        self.setMinimumWidth(650)
+        self.setMinimumHeight(550)
+        self.setAttribute(Qt.WA_DeleteOnClose, False)
+
+        self._setup_ui()
+        self._restore_settings()
+
+    def _setup_ui(self):
+        """Create and layout UI components."""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        # --- Directory selection ---
+        dir_layout = QGridLayout()
+        dir_layout.setSpacing(6)
+
+        dir_layout.addWidget(QLabel("Acquisition Directory:"), 0, 0)
+        self._acq_dir_edit = QLineEdit()
+        self._acq_dir_edit.setPlaceholderText("Path to raw acquisition folder...")
+        dir_layout.addWidget(self._acq_dir_edit, 0, 1)
+        acq_browse_btn = QPushButton("Browse...")
+        acq_browse_btn.clicked.connect(self._browse_acq_dir)
+        dir_layout.addWidget(acq_browse_btn, 0, 2)
+
+        dir_layout.addWidget(QLabel("Output Directory:"), 1, 0)
+        self._output_dir_edit = QLineEdit()
+        self._output_dir_edit.setPlaceholderText("Where to save stitched output...")
+        dir_layout.addWidget(self._output_dir_edit, 1, 1)
+        out_browse_btn = QPushButton("Browse...")
+        out_browse_btn.clicked.connect(self._browse_output_dir)
+        dir_layout.addWidget(out_browse_btn, 1, 2)
+
+        layout.addLayout(dir_layout)
+
+        # --- Settings group ---
+        settings_group = QGroupBox("Settings")
+        settings_layout = QGridLayout()
+        settings_layout.setSpacing(6)
+
+        # Pixel size
+        settings_layout.addWidget(QLabel("Pixel size (\u00b5m):"), 0, 0)
+        self._pixel_size_spin = QDoubleSpinBox()
+        self._pixel_size_spin.setRange(0.01, 100.0)
+        self._pixel_size_spin.setDecimals(3)
+        self._pixel_size_spin.setValue(0.406)
+        self._pixel_size_spin.setSingleStep(0.001)
+        settings_layout.addWidget(self._pixel_size_spin, 0, 1)
+
+        # Z step
+        settings_layout.addWidget(QLabel("Z step (\u00b5m):"), 0, 2)
+        self._z_step_spin = QDoubleSpinBox()
+        self._z_step_spin.setRange(0.0, 1000.0)
+        self._z_step_spin.setDecimals(3)
+        self._z_step_spin.setValue(0.0)
+        self._z_step_spin.setSpecialValueText("Auto")
+        self._z_step_spin.setToolTip(
+            "0 = auto-detect from Workflow.txt Z range and plane count"
+        )
+        settings_layout.addWidget(self._z_step_spin, 0, 3)
+
+        # Downsample
+        settings_layout.addWidget(QLabel("Downsample:"), 1, 0)
+        self._downsample_combo = QComboBox()
+        for label, value in [("1x (none)", 1), ("2x", 2), ("4x", 4), ("8x", 8)]:
+            self._downsample_combo.addItem(label, value)
+        self._downsample_combo.setToolTip(
+            "Downsample tiles before registration/fusion for faster processing"
+        )
+        settings_layout.addWidget(self._downsample_combo, 1, 1)
+
+        # Illumination fusion
+        settings_layout.addWidget(QLabel("Illum. fusion:"), 1, 2)
+        self._fusion_combo = QComboBox()
+        for label, value in [
+            ("Max", "max"),
+            ("Mean", "mean"),
+            ("Leonardo FUSE", "leonardo"),
+        ]:
+            self._fusion_combo.addItem(label, value)
+        settings_layout.addWidget(self._fusion_combo, 1, 3)
+
+        # Destripe
+        self._destripe_cb = QCheckBox("Destripe (PyStripe)")
+        self._destripe_cb.setToolTip("Apply PyStripe destriping to each Z-plane")
+        settings_layout.addWidget(self._destripe_cb, 2, 0, 1, 2)
+
+        # Output format
+        settings_layout.addWidget(QLabel("Output format:"), 2, 2)
+        self._format_combo = QComboBox()
+        self._format_combo.addItem("TIFF", "tiff")
+        self._format_combo.addItem("OME-Zarr", "ome-zarr")
+        settings_layout.addWidget(self._format_combo, 2, 3)
+
+        # Channels
+        settings_layout.addWidget(QLabel("Channels:"), 3, 0)
+        self._channels_edit = QLineEdit()
+        self._channels_edit.setPlaceholderText("All (or e.g. 0,1)")
+        self._channels_edit.setToolTip(
+            "Leave empty for all channels, or comma-separated list (e.g. 0,1)"
+        )
+        settings_layout.addWidget(self._channels_edit, 3, 1, 1, 3)
+
+        settings_group.setLayout(settings_layout)
+        layout.addWidget(settings_group)
+
+        # --- Action buttons ---
+        btn_layout = QHBoxLayout()
+
+        self._discover_btn = QPushButton("Discover Tiles")
+        self._discover_btn.setToolTip("Scan acquisition directory for tile data")
+        self._discover_btn.clicked.connect(self._on_discover)
+        btn_layout.addWidget(self._discover_btn)
+
+        self._run_btn = QPushButton("Run Stitching")
+        self._run_btn.setStyleSheet(
+            "QPushButton { background-color: #4CAF50; color: white; "
+            "font-weight: bold; padding: 6px 14px; }"
+            "QPushButton:hover { background-color: #45a049; }"
+            "QPushButton:disabled { background-color: #888; }"
+        )
+        self._run_btn.setEnabled(False)
+        self._run_btn.clicked.connect(self._on_run)
+        btn_layout.addWidget(self._run_btn)
+
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setEnabled(False)
+        self._cancel_btn.clicked.connect(self._on_cancel)
+        btn_layout.addWidget(self._cancel_btn)
+
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        # --- Log area ---
+        log_group = QGroupBox("Log")
+        log_layout = QVBoxLayout()
+        self._log_text = QTextEdit()
+        self._log_text.setReadOnly(True)
+        self._log_text.setMinimumHeight(150)
+        self._log_text.setStyleSheet(
+            "QTextEdit { font-family: monospace; font-size: 11px; }"
+        )
+        log_layout.addWidget(self._log_text)
+        log_group.setLayout(log_layout)
+        layout.addWidget(log_group)
+
+        # --- Progress bar ---
+        progress_layout = QHBoxLayout()
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setRange(0, 100)
+        self._progress_bar.setValue(0)
+        progress_layout.addWidget(self._progress_bar)
+
+        self._status_label = QLabel("Ready")
+        self._status_label.setMinimumWidth(120)
+        progress_layout.addWidget(self._status_label)
+        layout.addLayout(progress_layout)
+
+    # --- Directory browsing ---
+
+    def _browse_acq_dir(self):
+        start = self._acq_dir_edit.text() or str(Path.home())
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Acquisition Directory", start
+        )
+        if folder:
+            self._acq_dir_edit.setText(folder)
+            # Auto-set output dir if empty
+            if not self._output_dir_edit.text():
+                self._output_dir_edit.setText(
+                    str(Path(folder).parent / "stitched_output")
+                )
+            # Reset tile discovery
+            self._tiles = None
+            self._run_btn.setEnabled(False)
+
+    def _browse_output_dir(self):
+        start = self._output_dir_edit.text() or str(Path.home())
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Output Directory", start
+        )
+        if folder:
+            self._output_dir_edit.setText(folder)
+
+    # --- Tile discovery ---
+
+    def _on_discover(self):
+        """Discover tiles in the acquisition directory."""
+        acq_dir = self._acq_dir_edit.text().strip()
+        if not acq_dir:
+            QMessageBox.warning(
+                self, "No Directory", "Please select an acquisition directory."
+            )
+            return
+
+        acq_path = Path(acq_dir)
+        if not acq_path.is_dir():
+            QMessageBox.warning(
+                self,
+                "Invalid Directory",
+                f"Directory does not exist:\n{acq_dir}",
+            )
+            return
+
+        self._log_text.clear()
+        self._log(f"Discovering tiles in: {acq_dir}")
+
+        try:
+            from py2flamingo.stitching.pipeline import discover_tiles
+
+            tiles = discover_tiles(acq_path)
+
+            if not tiles:
+                self._log("No tile folders found.")
+                self._tiles = None
+                self._run_btn.setEnabled(False)
+                return
+
+            self._tiles = tiles
+            self._log_tile_summary(tiles)
+            self._run_btn.setEnabled(True)
+
+        except Exception as e:
+            self._log(f"Error discovering tiles: {e}")
+            self._logger.exception("Tile discovery error")
+            self._tiles = None
+            self._run_btn.setEnabled(False)
+
+    def _log_tile_summary(self, tiles):
+        """Display a summary of discovered tiles."""
+        xs = sorted(set(t.x_mm for t in tiles))
+        ys = sorted(set(t.y_mm for t in tiles))
+        all_ch = sorted(set(ch for t in tiles for ch in t.channels))
+        all_illum = sorted(set(il for t in tiles for il in t.illumination_sides))
+
+        self._log(f"Found {len(tiles)} tiles in ~{len(xs)}x{len(ys)} grid")
+        self._log(
+            f"  X range: {min(xs):.2f} \u2013 {max(xs):.2f} mm  "
+            f"Y range: {min(ys):.2f} \u2013 {max(ys):.2f} mm"
+        )
+        self._log(f"  Channels: {all_ch}")
+        self._log(f"  Illumination sides: {all_illum}")
+        self._log(
+            f"  Planes per tile: {tiles[0].n_planes} "
+            f"(Z: {tiles[0].z_min_mm:.3f} \u2013 {tiles[0].z_max_mm:.3f} mm)"
+        )
+        self._log("")
+        self._log("Ready to stitch. Click 'Run Stitching' to begin.")
+
+    # --- Run / Cancel ---
+
+    def _build_config(self):
+        """Build a StitchingConfig from current UI settings."""
+        from py2flamingo.stitching.pipeline import StitchingConfig
+
+        z_step = self._z_step_spin.value()
+        return StitchingConfig(
+            pixel_size_um=self._pixel_size_spin.value(),
+            z_step_um=z_step if z_step > 0 else None,
+            illumination_fusion=self._fusion_combo.currentData(),
+            output_format=self._format_combo.currentData(),
+            destripe=self._destripe_cb.isChecked(),
+            downsample_factor=self._downsample_combo.currentData(),
+        )
+
+    def _parse_channels(self) -> Optional[List[int]]:
+        """Parse channels from the channels line edit. Returns None for 'all'."""
+        text = self._channels_edit.text().strip()
+        if not text:
+            return None
+        try:
+            return [int(ch.strip()) for ch in text.split(",") if ch.strip()]
+        except ValueError:
+            return None
+
+    def _on_run(self):
+        """Start the stitching pipeline."""
+        acq_dir = self._acq_dir_edit.text().strip()
+        output_dir = self._output_dir_edit.text().strip()
+
+        if not acq_dir or not Path(acq_dir).is_dir():
+            QMessageBox.warning(self, "Invalid Input", "Invalid acquisition directory.")
+            return
+
+        if not output_dir:
+            QMessageBox.warning(
+                self, "Invalid Input", "Please specify an output directory."
+            )
+            return
+
+        config = self._build_config()
+        channels = self._parse_channels()
+
+        self._log_text.clear()
+        self._log("Starting stitching pipeline...")
+
+        # Disable controls
+        self._run_btn.setEnabled(False)
+        self._discover_btn.setEnabled(False)
+        self._cancel_btn.setEnabled(True)
+
+        from py2flamingo.stitching.worker import StitchingWorker
+
+        self._worker = StitchingWorker(
+            config=config,
+            acq_dir=Path(acq_dir),
+            output_dir=Path(output_dir),
+            channels=channels,
+            parent=self,
+        )
+        self._worker.progress.connect(self._on_progress)
+        self._worker.log_message.connect(self._on_log_message)
+        self._worker.completed.connect(self._on_completed)
+        self._worker.error.connect(self._on_error)
+        self._worker.finished.connect(self._on_worker_finished)
+        self._worker.start()
+
+    def _on_cancel(self):
+        """Cancel the running pipeline."""
+        if self._worker:
+            self._worker.cancel()
+            self._status_label.setText("Cancelling...")
+            self._log("Cancellation requested...")
+
+    def _on_progress(self, percentage: int, status: str):
+        """Handle progress updates from worker."""
+        self._progress_bar.setValue(percentage)
+        self._status_label.setText(status)
+
+    def _on_log_message(self, message: str):
+        """Handle log messages from worker."""
+        self._log_text.append(message)
+        # Auto-scroll to bottom
+        scrollbar = self._log_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def _on_completed(self, output_path: str):
+        """Handle successful pipeline completion."""
+        self._log(f"\nStitching complete! Output: {output_path}")
+
+        result = QMessageBox.information(
+            self,
+            "Stitching Complete",
+            f"Stitched volume saved to:\n{output_path}\n\n" "Open containing folder?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+
+        if result == QMessageBox.Yes:
+            import subprocess
+            import sys
+
+            folder = str(Path(output_path))
+            if sys.platform == "win32":
+                subprocess.Popen(["explorer", folder])
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", folder])
+            else:
+                subprocess.Popen(["xdg-open", folder])
+
+    def _on_error(self, error_msg: str):
+        """Handle pipeline error."""
+        self._log(f"\nERROR: {error_msg}")
+        self._status_label.setText("Error")
+        QMessageBox.critical(self, "Stitching Error", f"Pipeline failed:\n{error_msg}")
+
+    def _on_worker_finished(self):
+        """Handle worker thread completion (success, error, or cancel)."""
+        self._run_btn.setEnabled(True)
+        self._discover_btn.setEnabled(True)
+        self._cancel_btn.setEnabled(False)
+        self._worker = None
+
+    # --- Logging helper ---
+
+    def _log(self, message: str):
+        """Append a message to the log area."""
+        self._log_text.append(message)
+
+    # --- Settings persistence ---
+
+    def _save_settings(self):
+        """Save dialog settings to QSettings."""
+        s = QSettings()
+        s.beginGroup(_SETTINGS_GROUP)
+        s.setValue("acq_dir", self._acq_dir_edit.text())
+        s.setValue("output_dir", self._output_dir_edit.text())
+        s.setValue("pixel_size", self._pixel_size_spin.value())
+        s.setValue("z_step", self._z_step_spin.value())
+        s.setValue("downsample_idx", self._downsample_combo.currentIndex())
+        s.setValue("fusion_idx", self._fusion_combo.currentIndex())
+        s.setValue("destripe", self._destripe_cb.isChecked())
+        s.setValue("format_idx", self._format_combo.currentIndex())
+        s.setValue("channels", self._channels_edit.text())
+        s.endGroup()
+
+    def _restore_settings(self):
+        """Restore dialog settings from QSettings."""
+        s = QSettings()
+        s.beginGroup(_SETTINGS_GROUP)
+
+        acq_dir = s.value("acq_dir", "", type=str)
+        if acq_dir:
+            self._acq_dir_edit.setText(acq_dir)
+
+        output_dir = s.value("output_dir", "", type=str)
+        if output_dir:
+            self._output_dir_edit.setText(output_dir)
+
+        pixel_size = s.value("pixel_size", 0.406, type=float)
+        self._pixel_size_spin.setValue(pixel_size)
+
+        z_step = s.value("z_step", 0.0, type=float)
+        self._z_step_spin.setValue(z_step)
+
+        ds_idx = s.value("downsample_idx", 0, type=int)
+        self._downsample_combo.setCurrentIndex(ds_idx)
+
+        fusion_idx = s.value("fusion_idx", 0, type=int)
+        self._fusion_combo.setCurrentIndex(fusion_idx)
+
+        destripe = s.value("destripe", False, type=bool)
+        self._destripe_cb.setChecked(destripe)
+
+        format_idx = s.value("format_idx", 0, type=int)
+        self._format_combo.setCurrentIndex(format_idx)
+
+        channels = s.value("channels", "", type=str)
+        if channels:
+            self._channels_edit.setText(channels)
+
+        s.endGroup()
+
+    def closeEvent(self, event):
+        """Save settings and cancel worker on close."""
+        self._save_settings()
+        if self._worker and self._worker.isRunning():
+            self._worker.cancel()
+            self._worker.wait(2000)
+        super().closeEvent(event)
+
+    def hideEvent(self, event):
+        """Save settings on hide."""
+        self._save_settings()
+        super().hideEvent(event)

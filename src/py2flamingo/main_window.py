@@ -358,6 +358,15 @@ class MainWindow(QMainWindow):
         self.pipeline_editor_action.triggered.connect(self._on_pipeline_editor)
         extensions_menu.addAction(self.pipeline_editor_action)
 
+        extensions_menu.addSeparator()
+
+        self.stitching_action = QAction("&Tile Stitching...", self)
+        self.stitching_action.setStatusTip(
+            "Stitch raw acquisition tile data into a single volume"
+        )
+        self.stitching_action.triggered.connect(self._on_stitching)
+        extensions_menu.addAction(self.stitching_action)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -884,6 +893,33 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error opening Pipeline Editor: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to open Pipeline Editor:\n{e}")
+
+    def _on_stitching(self):
+        """Handle Tile Stitching menu action."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.info("Tile Stitching menu action triggered")
+
+        try:
+            from py2flamingo.views.dialogs.stitching_dialog import StitchingDialog
+
+            # Reuse existing dialog if still open
+            if (
+                hasattr(self, "_stitching_dialog")
+                and self._stitching_dialog is not None
+            ):
+                self._stitching_dialog.show()
+                self._stitching_dialog.raise_()
+                self._stitching_dialog.activateWindow()
+                return
+
+            self._stitching_dialog = StitchingDialog(parent=None)
+            self._stitching_dialog.show()
+
+        except Exception as e:
+            logger.error(f"Error opening Tile Stitching: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to open Tile Stitching:\n{e}")
 
     def _on_tab_changed(self, index: int) -> None:
         """Handle tab change event - log which tab user switched to.
