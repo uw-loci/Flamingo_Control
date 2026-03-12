@@ -2433,21 +2433,24 @@ class SampleView(QWidget):
 
     def _on_load_stitched_clicked(self) -> None:
         """Browse for a stitching output directory and load it."""
-        from PyQt5.QtCore import QSettings
         from PyQt5.QtWidgets import QFileDialog, QMessageBox
 
         if not self.voxel_storage:
             QMessageBox.warning(self, "Not Ready", "Voxel storage not initialized.")
             return
 
-        s = QSettings()
-        start_path = s.value("SampleView/last_stitched_dir", str(Path.home()), type=str)
+        start_path = str(Path.home())
+        if self._configuration_service:
+            saved = self._configuration_service.get_stitched_data_path()
+            if saved and Path(saved).exists():
+                start_path = saved
+
         dir_path = QFileDialog.getExistingDirectory(
             self, "Select Stitching Output Directory", start_path
         )
         if dir_path:
-            # Remember this location for next time
-            s.setValue("SampleView/last_stitched_dir", dir_path)
+            if self._configuration_service:
+                self._configuration_service.set_stitched_data_path(dir_path)
             self._load_stitched_from_path(dir_path)
 
     def _load_stitched_from_path(self, dir_path: str) -> None:
@@ -2833,6 +2836,7 @@ class SampleView(QWidget):
         )
         if reply == QMessageBox.Yes:
             self.voxel_storage.clear()
+            self._remove_stitched_layers()
             self._update_visualization()
             if hasattr(self, "_move_data_to_focus_cb"):
                 self._move_data_to_focus_cb.setChecked(False)
@@ -2845,6 +2849,7 @@ class SampleView(QWidget):
         """Clear all data in preparation for tile workflows (no confirmation)."""
         if self.voxel_storage:
             self.voxel_storage.clear()
+            self._remove_stitched_layers()
             self._update_visualization()
             if hasattr(self, "_move_data_to_focus_cb"):
                 self._move_data_to_focus_cb.setChecked(False)

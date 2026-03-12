@@ -435,6 +435,7 @@ class ConfigurationService:
     MIP_SESSION_PATH_KEY = "mip_overview_session_path"
     ZARR_SESSION_PATH_KEY = "zarr_3d_session_path"
     THRESHOLDER_PRESET_PATH_KEY = "thresholder_preset_path"
+    STITCHED_DATA_PATH_KEY = "stitched_data_path"
     _SESSION_PATHS_FILE = "session_paths.json"
 
     def _session_paths_file(self) -> Path:
@@ -455,6 +456,9 @@ class ConfigurationService:
                 self.MIP_SESSION_PATH_KEY,
                 self.ZARR_SESSION_PATH_KEY,
                 self.THRESHOLDER_PRESET_PATH_KEY,
+                self.MIP_BROWSE_PATH_KEY,
+                self.SAMPLE_3D_DATA_PATH_KEY,
+                self.STITCHED_DATA_PATH_KEY,
             ]:
                 if key in data:
                     self.config[key] = data[key]
@@ -471,6 +475,9 @@ class ConfigurationService:
             self.MIP_SESSION_PATH_KEY,
             self.ZARR_SESSION_PATH_KEY,
             self.THRESHOLDER_PRESET_PATH_KEY,
+            self.MIP_BROWSE_PATH_KEY,
+            self.SAMPLE_3D_DATA_PATH_KEY,
+            self.STITCHED_DATA_PATH_KEY,
         ]:
             if key in self.config:
                 data[key] = self.config[key]
@@ -553,6 +560,7 @@ class ConfigurationService:
             path: Directory path last browsed to
         """
         self.config[self.MIP_BROWSE_PATH_KEY] = path
+        self._save_session_paths()
         self.logger.info(f"Set MIP browse path: {path}")
 
     # Sample View 3D data path (for Save/Load Data in Sample View)
@@ -573,7 +581,26 @@ class ConfigurationService:
             path: Directory path last used for save/load
         """
         self.config[self.SAMPLE_3D_DATA_PATH_KEY] = path
+        self._save_session_paths()
         self.logger.info(f"Set Sample 3D data path: {path}")
+
+    def get_stitched_data_path(self) -> Optional[str]:
+        """Get the last-used stitched data directory path.
+
+        Returns:
+            Path string if set, None otherwise
+        """
+        return self.config.get(self.STITCHED_DATA_PATH_KEY)
+
+    def set_stitched_data_path(self, path: str) -> None:
+        """Set the last-used stitched data directory path.
+
+        Args:
+            path: Directory path last browsed to
+        """
+        self.config[self.STITCHED_DATA_PATH_KEY] = path
+        self._save_session_paths()
+        self.logger.info(f"Set stitched data path: {path}")
 
     # Thresholder preset path (for Save/Load Preset in Union of Thresholders)
     def get_thresholder_preset_path(self) -> Optional[str]:
