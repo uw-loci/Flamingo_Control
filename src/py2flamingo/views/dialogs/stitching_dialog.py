@@ -198,22 +198,31 @@ class StitchingDialog(PersistentDialog):
         )
         settings_layout.addWidget(self._deconv_cb, 3, 0, 1, 2)
 
-        # Package as single file
+        # Content-based fusion (BigStitcher-inspired)
+        self._content_fusion_cb = QCheckBox("Content-based blending")
+        self._content_fusion_cb.setToolTip(
+            "Weight tile overlap regions by local sharpness\n"
+            "(Preibisch local-variance algorithm, inspired by BigStitcher).\n"
+            "Improves fusion quality but increases computation time."
+        )
+        settings_layout.addWidget(self._content_fusion_cb, 3, 2, 1, 2)
+
+        # Row 4: package + channels
         self._ozx_cb = QCheckBox("Package as .ozx")
         self._ozx_cb.setToolTip(
             "Create a single .ozx ZIP file from the OME-Zarr output\n"
             "for easy sharing/copying"
         )
-        settings_layout.addWidget(self._ozx_cb, 3, 2, 1, 2)
+        settings_layout.addWidget(self._ozx_cb, 4, 0, 1, 2)
 
         # Channels
-        settings_layout.addWidget(QLabel("Channels:"), 4, 0)
+        settings_layout.addWidget(QLabel("Channels:"), 5, 0)
         self._channels_edit = QLineEdit()
         self._channels_edit.setPlaceholderText("All (or e.g. 0,1)")
         self._channels_edit.setToolTip(
             "Leave empty for all channels, or comma-separated list (e.g. 0,1)"
         )
-        settings_layout.addWidget(self._channels_edit, 4, 1, 1, 3)
+        settings_layout.addWidget(self._channels_edit, 5, 1, 1, 3)
 
         settings_group.setLayout(settings_layout)
         layout.addWidget(settings_group)
@@ -380,6 +389,7 @@ class StitchingDialog(PersistentDialog):
             destripe=self._destripe_cb.isChecked(),
             downsample_factor=self._downsample_combo.currentData(),
             deconvolution_enabled=self._deconv_cb.isChecked(),
+            content_based_fusion=self._content_fusion_cb.isChecked(),
             package_ozx=self._ozx_cb.isChecked(),
         )
 
@@ -542,6 +552,7 @@ class StitchingDialog(PersistentDialog):
         s.setValue("fusion_idx", self._fusion_combo.currentIndex())
         s.setValue("destripe", self._destripe_cb.isChecked())
         s.setValue("deconvolution", self._deconv_cb.isChecked())
+        s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
         s.setValue("package_ozx", self._ozx_cb.isChecked())
         s.setValue("format_idx", self._format_combo.currentIndex())
         s.setValue("channels", self._channels_edit.text())
@@ -583,6 +594,9 @@ class StitchingDialog(PersistentDialog):
 
         deconv = s.value("deconvolution", False, type=bool)
         self._deconv_cb.setChecked(deconv)
+
+        content_fusion = s.value("content_based_fusion", False, type=bool)
+        self._content_fusion_cb.setChecked(content_fusion)
 
         ozx = s.value("package_ozx", False, type=bool)
         self._ozx_cb.setChecked(ozx)
@@ -702,6 +716,7 @@ class NativeStitchingDialog(StitchingDialog):
         s.setValue("fusion_idx", self._fusion_combo.currentIndex())
         s.setValue("destripe", self._destripe_cb.isChecked())
         s.setValue("deconvolution", self._deconv_cb.isChecked())
+        s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
         s.setValue("package_ozx", self._ozx_cb.isChecked())
         s.setValue("format_idx", self._format_combo.currentIndex())
         s.setValue("channels", self._channels_edit.text())
@@ -741,6 +756,9 @@ class NativeStitchingDialog(StitchingDialog):
 
         deconv = s.value("deconvolution", False, type=bool)
         self._deconv_cb.setChecked(deconv)
+
+        content_fusion = s.value("content_based_fusion", False, type=bool)
+        self._content_fusion_cb.setChecked(content_fusion)
 
         ozx = s.value("package_ozx", False, type=bool)
         self._ozx_cb.setChecked(ozx)

@@ -58,6 +58,13 @@ class StitchingConfig:
         default_factory=lambda: {"z": 2, "y": 4, "x": 4}
     )
     quality_threshold: float = 0.2  # Min phase correlation quality
+    # Global optimization residual thresholds — inspired by BigStitcher's
+    # iterative edge-pruning algorithm (Hörl et al., Nature Methods 2019).
+    # Edges with residuals exceeding abs_tol are removed (if graph stays
+    # connected) and the optimization re-runs, preventing bad pairwise
+    # registrations from corrupting the global solution.
+    global_opt_abs_tol: float = 3.5  # Max acceptable residual (pixels)
+    global_opt_rel_tol: float = 0.01  # Convergence threshold
 
     # Illumination fusion
     illumination_fusion: str = "max"  # "max", "mean", or "leonardo"
@@ -72,9 +79,20 @@ class StitchingConfig:
     output_chunksize: Dict[str, int] = field(
         default_factory=lambda: {"z": 128, "y": 256, "x": 256}
     )
+    # Cosine fade-out blending widths (µm) — controls the smooth transition
+    # zone at tile boundaries.  Inspired by BigStitcher's cosine-weighted
+    # blending (Hörl et al., Nature Methods 2019).  multiview-stitcher
+    # implements the same algorithm via its weights.get_blending_weights().
     blending_widths: Dict[str, int] = field(
         default_factory=lambda: {"z": 50, "y": 100, "x": 100}
     )
+    # Content-based tile-overlap weighting — uses Preibisch's local-variance
+    # algorithm (bandpass-filtered intensity variance) to weight each tile's
+    # contribution in overlap regions by local sharpness.  This concept
+    # originates from BigStitcher (Preibisch et al.) and is implemented in
+    # multiview-stitcher's weights.content_based().  Increases computation
+    # time but improves fusion quality in overlap regions with uneven content.
+    content_based_fusion: bool = False
 
     # OME-Zarr sharding options
     zarr_chunks: Tuple = (32, 256, 256)  # Inner chunk shape (~4 MB per chunk)
@@ -879,6 +897,15 @@ class StitchingPipeline:
                         registration_binning=self.config.registration_binning,
                         post_registration_do_quality_filter=True,
                         post_registration_quality_threshold=self.config.quality_threshold,
+                        # Global optimization with iterative edge pruning —
+                        # inspired by BigStitcher (Hörl et al., Nature Methods
+                        # 2019).  Edges with residuals above abs_tol are
+                        # removed (preserving graph connectivity) and the
+                        # optimization re-runs.
+                        groupwise_resolution_kwargs={
+                            "abs_tol": self.config.global_opt_abs_tol,
+                            "rel_tol": self.config.global_opt_rel_tol,
+                        },
                     )
 
                 # Apply transforms
@@ -902,14 +929,34 @@ class StitchingPipeline:
             fuse_transform_key = mvs_io.METADATA_TRANSFORM_KEY
 
         # --- Fusion ---
+        # Cosine blending widths + optional content-based weighting are
+        # inspired by BigStitcher's fusion algorithm (Hörl et al., Nature
+        # Methods 2019).  multiview-stitcher implements both natively.
         self.logger.info(f"  Fusing tiles (transform_key={fuse_transform_key})...")
         sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
 
-        fused = fusion.fuse(
-            sims,
+        fuse_kwargs: Dict[str, Any] = dict(
             transform_key=fuse_transform_key,
             output_chunksize=self.config.output_chunksize,
+            blending_widths=self.config.blending_widths,
         )
+
+        if self.config.content_based_fusion:
+            try:
+                from multiview_stitcher.weights import content_based
+
+                fuse_kwargs["weights_func"] = content_based
+                self.logger.info(
+                    "  Using content-based tile-overlap weighting "
+                    "(Preibisch local-variance algorithm)"
+                )
+            except ImportError:
+                self.logger.warning(
+                    "  content_based weights not available in this "
+                    "multiview-stitcher version — using default blending"
+                )
+
+        fused = fusion.fuse(sims, **fuse_kwargs)
 
         # --- Extract world-space origin from fused SpatialImage coords ---
         origin_um = {
