@@ -79,14 +79,14 @@ sample_chamber:
   sample_region_half_width_z_um: 7000   # ±7mm in Z (chamber is ~13.5mm deep)
   # The sample region center should be at the objective center (middle of visualization)
   # This is calculated as the center of the stage_control ranges below
-  sample_region_center_um: [6655, 7000, 19250]  # Center of chamber: X=(1.0+12.31)/2, Y=(0+14)/2, Z=(12.5+26)/2 mm
+  sample_region_center_um: [6655, 12500, 19250]  # Center of ranges: X=(1.0+12.31)/2, Y=(0+25)/2, Z=(12.5+26)/2 mm
 
 stage_control:
   # Visualization chamber ranges (in mm) - defines what we display in napari
   # These should be CENTERED on the objective focal plane, not the full stage range
   # The chamber is a fixed container; we visualize the region around the objective
   x_range_mm: [1.0, 12.31]    # X axis: left-right (full stage range, objective is centered)
-  y_range_mm: [0.0, 14.0]     # Y axis: chamber from 0mm (top) to 14mm (bottom), objective at 7mm (middle)
+  y_range_mm: [0.0, 25.0]     # Y axis: must cover full stage travel (stage Y 5-25mm → chamber Y 4.55-24.55mm)
   z_range_mm: [12.5, 26.0]    # Z axis: depth (toward objective)
 
   # Stage position limits (may differ from chamber bounds)

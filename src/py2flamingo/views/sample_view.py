@@ -1508,6 +1508,14 @@ class SampleView(QWidget):
                 f"Y={positions['y']:.3f}, Z={positions['z']:.3f}, R={positions['r']:.2f}"
             )
 
+            # Skip overwrite if controller returned all-zeros (disconnected/no data).
+            # Keep the center-of-range defaults so the viewer looks sensible.
+            if all(v == 0 for v in positions.values()):
+                self.logger.info(
+                    "Position is all zeros (not connected) — keeping default"
+                )
+                return
+
             # Update internal position tracking (critical for 3D viewer and transforms!)
             self.last_stage_position = positions.copy()
             self.current_rotation["ry"] = positions["r"]
