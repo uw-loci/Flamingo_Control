@@ -184,7 +184,17 @@ class SampleView(QWidget):
         self.coord_mapper = None  # Will be set from voxel_storage
 
         # Stage position tracking for dynamic 3D updates
-        self.last_stage_position = {"x": 0, "y": 0, "z": 0, "r": 0}
+        # Default to center of chamber ranges so disconnected view is sensible
+        stage_ctrl = self._config.get("stage_control", {})
+        x_range = stage_ctrl.get("x_range_mm", [1.0, 12.31])
+        y_range = stage_ctrl.get("y_range_mm", [0.0, 14.0])
+        z_range = stage_ctrl.get("z_range_mm", [12.5, 26.0])
+        self.last_stage_position = {
+            "x": (x_range[0] + x_range[1]) / 2,
+            "y": (y_range[0] + y_range[1]) / 2,
+            "z": (z_range[0] + z_range[1]) / 2,
+            "r": 0,
+        }
         self._pending_stage_update = None
 
         # Focal point for 2D plane click-to-move (set by _update_plane_overlays)
