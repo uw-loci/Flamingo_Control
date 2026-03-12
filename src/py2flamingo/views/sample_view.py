@@ -3130,6 +3130,7 @@ class SampleView(QWidget):
         on the next event loop iteration (~5s saved from blocking __init__).
         """
         self._chamber_viz._position_sliders = getattr(self, "position_sliders", None)
+        self._chamber_viz._initial_stage_position = self.last_stage_position
         placeholder = getattr(self, "viewer_placeholder", None)
 
         # Set callback so we copy channel_layers once deferred setup completes

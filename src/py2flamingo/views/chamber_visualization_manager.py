@@ -339,16 +339,27 @@ class ChamberVisualizationManager:
 
             dims = self.voxel_storage.display_dims  # (Z, Y, X)
 
-            # Get initial position from sliders
-            x_mm = 0
-            stage_y_mm = 0
-            z_mm = 0
-            if self._position_sliders and "x" in self._position_sliders:
+            # Get initial position: prefer _initial_stage_position (set by
+            # SampleView from last_stage_position, which defaults to range
+            # midpoints when disconnected), then sliders, then range midpoints.
+            stage_ctrl = self._config.get("stage_control", {})
+            x_range = stage_ctrl.get("x_range_mm", [1.0, 12.31])
+            y_range = stage_ctrl.get("y_range_mm", [0.0, 14.0])
+            z_range = stage_ctrl.get("z_range_mm", [12.5, 26.0])
+
+            init_pos = getattr(self, "_initial_stage_position", None)
+            if init_pos and any(init_pos.get(k, 0) != 0 for k in ("x", "y", "z")):
+                x_mm = init_pos.get("x", (x_range[0] + x_range[1]) / 2)
+                stage_y_mm = init_pos.get("y", (y_range[0] + y_range[1]) / 2)
+                z_mm = init_pos.get("z", (z_range[0] + z_range[1]) / 2)
+            elif self._position_sliders and "x" in self._position_sliders:
                 x_mm = self._position_sliders["x"].value() / self._slider_scale
-            if self._position_sliders and "y" in self._position_sliders:
                 stage_y_mm = self._position_sliders["y"].value() / self._slider_scale
-            if self._position_sliders and "z" in self._position_sliders:
                 z_mm = self._position_sliders["z"].value() / self._slider_scale
+            else:
+                x_mm = (x_range[0] + x_range[1]) / 2
+                stage_y_mm = (y_range[0] + y_range[1]) / 2
+                z_mm = (z_range[0] + z_range[1]) / 2
 
             # Convert stage Y to chamber Y (where extension tip is)
             chamber_y_tip_mm = self._stage_y_to_chamber_y(stage_y_mm)
