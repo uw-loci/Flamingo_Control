@@ -1312,18 +1312,24 @@ class SampleView(QWidget):
         self.export_data_btn.clicked.connect(self._on_export_data_clicked)
         nav_row.addWidget(self.export_data_btn)
 
+        # Save Session button
+        self.save_session_btn = QPushButton("Save Session")
+        self.save_session_btn.setToolTip(
+            "Save current 3D data and settings to OME-Zarr session"
+        )
+        self.save_session_btn.clicked.connect(self._on_save_session_clicked)
+        nav_row.addWidget(self.save_session_btn)
+
         nav_row.addStretch()
         layout.addLayout(nav_row)
 
-        # Row 3: Performance & Session buttons
+        # Row 3: Load & Settings buttons
         perf_row = QHBoxLayout()
         perf_row.setSpacing(8)
 
-        # Load Test Data button
-        self.load_test_data_btn = QPushButton("Load Test Data")
-        self.load_test_data_btn.setToolTip(
-            "Load .zarr, .tif, or .npy test data into viewer"
-        )
+        # Load TIFF button (load .tif/.zarr/.npy into viewer)
+        self.load_test_data_btn = QPushButton("Load TIFF")
+        self.load_test_data_btn.setToolTip("Load .tif, .zarr, or .npy data into viewer")
         self.load_test_data_btn.clicked.connect(self._on_load_test_data_clicked)
         perf_row.addWidget(self.load_test_data_btn)
 
@@ -1334,14 +1340,6 @@ class SampleView(QWidget):
         )
         self.load_tiles_btn.clicked.connect(self._on_load_tiles_from_disk_clicked)
         perf_row.addWidget(self.load_tiles_btn)
-
-        # Save Session button
-        self.save_session_btn = QPushButton("Save Session")
-        self.save_session_btn.setToolTip(
-            "Save current 3D data and settings to OME-Zarr session"
-        )
-        self.save_session_btn.clicked.connect(self._on_save_session_clicked)
-        perf_row.addWidget(self.save_session_btn)
 
         # Load Session button
         self.load_session_btn = QPushButton("Load Session")
@@ -2263,7 +2261,7 @@ class SampleView(QWidget):
 
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Load Test Data",
+            "Load TIFF / Zarr / NumPy",
             default_path,
             "All Supported (*.zarr *.tif *.tiff *.npy);;Zarr Sessions (*.zarr);;TIFF Files (*.tif *.tiff);;NumPy Arrays (*.npy)",
         )
