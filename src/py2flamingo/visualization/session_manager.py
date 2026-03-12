@@ -785,9 +785,13 @@ def load_stitched_volume(output_dir: Path, voxel_storage=None) -> dict:
     downsampling is applied — the data is displayed at whatever resolution
     it was stitched at.
 
+    Supports two metadata versions:
+      v1: Per-channel stores (channel_00.ome.zarr, channel_01.ome.zarr, ...)
+      v2: Single multi-channel store (stitched.ome.zarr) with (C,Z,Y,X) data
+
     Args:
         output_dir: Path to the stitching output directory containing
-                    stitch_metadata.json and per-channel .ome.zarr stores
+                    stitch_metadata.json and .ome.zarr stores
         voxel_storage: Optional — used only to read display_voxel_size and
                        chamber_origin for coordinate mapping.  May be None.
 
@@ -813,20 +817,95 @@ def load_stitched_volume(output_dir: Path, voxel_storage=None) -> dict:
     metadata = json.loads(meta_path.read_text())
     native_voxel = metadata["voxel_size_um"]  # {"z": ..., "y": ..., "x": ...}
 
-    channels = []
-
-    for ch_str, ch_meta in metadata["channels"].items():
-        ch_id = int(ch_str)
-
-        try:
-            vol_info = _load_stitched_channel(output_dir, ch_meta, ch_id, native_voxel)
-            channels.append(vol_info)
-        except Exception as e:
-            logger.error(f"Failed to load stitched channel {ch_id}: {e}")
+    # Version dispatch: v2 has single multi-channel store
+    version = metadata.get("version", 1)
+    if version >= 2 and "store_path" in metadata:
+        channels = _load_multichannel_store(output_dir, metadata, native_voxel)
+    else:
+        # v1: per-channel stores
+        channels = []
+        for ch_str, ch_meta in metadata["channels"].items():
+            ch_id = int(ch_str)
+            try:
+                vol_info = _load_stitched_channel(
+                    output_dir, ch_meta, ch_id, native_voxel
+                )
+                channels.append(vol_info)
+            except Exception as e:
+                logger.error(f"Failed to load stitched channel {ch_id}: {e}")
 
     ch_ids = [c["ch_id"] for c in channels]
     logger.info(f"Loaded {len(channels)} stitched channel(s): {ch_ids}")
     return {"channels": channels, "metadata": metadata}
+
+
+def _load_multichannel_store(
+    output_dir: Path,
+    metadata: dict,
+    native_voxel: dict,
+) -> List[dict]:
+    """Load a single multi-channel (C,Z,Y,X) OME-Zarr store.
+
+    Returns per-channel dicts in the same format as the v1 loader
+    so downstream code (sample_view.py) needs no changes.
+    """
+    import dask.array as da
+
+    store_path = output_dir / metadata["store_path"]
+    if not store_path.exists():
+        raise FileNotFoundError(f"Multi-channel store not found: {store_path}")
+
+    channel_ids = metadata.get("channel_ids", [])
+    origin_um_list = metadata.get("origin_um", [0, 0, 0])
+    origin_um = np.array(origin_um_list)  # [z, y, x]
+    voxel_size_um = np.array([native_voxel["z"], native_voxel["y"], native_voxel["x"]])
+
+    # Open zarr store
+    store = _create_zarr_store(str(store_path))
+    root = zarr.open_group(store=store, mode="r")
+    arr = _find_zarr_array(root, store_path)
+
+    logger.info(
+        f"  Multi-channel store: shape={arr.shape}, dtype={arr.dtype}, "
+        f"origin_um={origin_um}, voxel_size_um={voxel_size_um}"
+    )
+
+    # Read into memory
+    logger.info("  Loading multi-channel volume into memory...")
+    data = da.from_zarr(arr)
+    volume = data.compute().astype(np.uint16)
+    logger.info(f"  Loaded shape: {volume.shape}")
+
+    channels = []
+
+    if volume.ndim == 4:
+        # (C, Z, Y, X) — slice along C axis
+        n_channels = volume.shape[0]
+        for i in range(n_channels):
+            ch_id = channel_ids[i] if i < len(channel_ids) else i
+            channels.append(
+                {
+                    "ch_id": ch_id,
+                    "volume": volume[i],
+                    "origin_um": origin_um.copy(),
+                    "voxel_size_um": voxel_size_um.copy(),
+                }
+            )
+    elif volume.ndim == 3:
+        # Single channel (Z, Y, X)
+        ch_id = channel_ids[0] if channel_ids else 0
+        channels.append(
+            {
+                "ch_id": ch_id,
+                "volume": volume,
+                "origin_um": origin_um.copy(),
+                "voxel_size_um": voxel_size_um.copy(),
+            }
+        )
+    else:
+        raise ValueError(f"Unexpected volume shape: {volume.shape}")
+
+    return channels
 
 
 def _load_stitched_channel(
@@ -873,9 +952,6 @@ def _load_stitched_channel(
         "origin_um": origin_um,
         "voxel_size_um": voxel_size_um,
     }
-    voxel_storage._session_loaded_channels.add(ch_id)
-
-    logger.info(f"  Channel {ch_id}: loaded, max={max_val}")
 
 
 def load_test_data(file_path: Path, voxel_storage) -> bool:

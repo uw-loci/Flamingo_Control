@@ -656,6 +656,9 @@ class StitchingPipeline:
     ) -> Path:
         """Run the full stitching pipeline.
 
+        Produces a single multi-channel (C,Z,Y,X) OME-Zarr/TIFF store
+        with shared registration across channels.
+
         Args:
             acquisition_dir: Root directory containing tile folders
             output_path: Where to write the stitched result
@@ -715,18 +718,37 @@ class StitchingPipeline:
             return output_path
 
         self.logger.info("Step 2: Loading and preprocessing tiles...")
-        # Build per-channel tile data: {channel: [(volume, tile_info), ...]}
         channel_tile_data = self._load_and_preprocess(tiles, process_channels)
 
         if self._cancelled_fn():
             self.logger.info("Pipeline cancelled by user")
             return output_path
 
-        # --- Step 3: Register + stitch per channel ---
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        results = {}
+        # --- Step 3: Register using reference channel ---
+        # Use the first available channel that has tile data as reference
+        ref_ch = self.config.reg_channel
+        if ref_ch not in channel_tile_data or not channel_tile_data[ref_ch]:
+            ref_ch = process_channels[0]
+        ref_tile_data = channel_tile_data[ref_ch]
+
+        self.logger.info(
+            f"Step 3: Registering on reference channel {ref_ch} "
+            f"({len(ref_tile_data)} tiles)..."
+        )
+        reg_params, transform_key = self._register_tiles(ref_tile_data, voxel_size_um)
+
+        if self._cancelled_fn():
+            self.logger.info("Pipeline cancelled by user")
+            return output_path
+
+        # --- Step 4: Fuse each channel using shared registration ---
+        channel_volumes = []  # list of 3D numpy arrays
+        channel_origins = []  # list of origin dicts
+        fused_channel_ids = []
+
         for ch_id in process_channels:
             if self._cancelled_fn():
                 self.logger.info("Pipeline cancelled by user")
@@ -738,22 +760,84 @@ class StitchingPipeline:
                 continue
 
             self.logger.info(
-                f"Step 3: Registering + stitching channel {ch_id} "
-                f"({len(tile_data)} tiles)..."
+                f"Step 4: Fusing channel {ch_id} ({len(tile_data)} tiles)..."
             )
-            result_path, origin_um = self._register_and_fuse(
-                tile_data, ch_id, voxel_size_um, output_path
+            fused_sim, origin_um = self._fuse_channel(
+                tile_data, voxel_size_um, reg_params, transform_key
             )
-            results[ch_id] = (result_path, origin_um)
 
-        # --- Write stitch_metadata.json sidecar ---
-        self._write_stitch_metadata(
-            output_path, results, tiles, voxel_size_um, acquisition_dir
+            # Compute to numpy
+            import dask.diagnostics
+
+            self.logger.info(f"  Computing channel {ch_id} into memory...")
+            with dask.diagnostics.ProgressBar():
+                vol = np.asarray(fused_sim.data.compute())
+            # Squeeze singleton dims from SpatialImage
+            while vol.ndim > 3:
+                vol = vol[0]
+            vol = np.clip(vol, 0, 65535).astype(np.uint16)
+
+            channel_volumes.append(vol)
+            channel_origins.append(origin_um)
+            fused_channel_ids.append(ch_id)
+
+            self.logger.info(
+                f"  Channel {ch_id}: shape={vol.shape}, "
+                f"origin Z={origin_um['z']:.1f} Y={origin_um['y']:.1f} "
+                f"X={origin_um['x']:.1f} µm"
+            )
+
+        if not channel_volumes:
+            self.logger.error("No channels were fused successfully")
+            return output_path
+
+        # --- Step 5: Stack channels → (C, Z, Y, X) ---
+        # Pad if shapes differ slightly (rounding differences between channels)
+        if len(channel_volumes) > 1:
+            max_shape = tuple(
+                max(v.shape[d] for v in channel_volumes) for d in range(3)
+            )
+            padded = []
+            for vol in channel_volumes:
+                if vol.shape != max_shape:
+                    pad_widths = [(0, max_shape[d] - vol.shape[d]) for d in range(3)]
+                    vol = np.pad(vol, pad_widths, mode="constant", constant_values=0)
+                padded.append(vol)
+            stacked = np.stack(padded, axis=0)  # (C, Z, Y, X)
+        else:
+            stacked = channel_volumes[0]  # single channel stays 3D
+
+        self.logger.info(
+            f"Step 5: Stacked {len(fused_channel_ids)} channels → "
+            f"shape={stacked.shape}"
+        )
+
+        # --- Step 6: Write single multi-channel store ---
+        if self._cancelled_fn():
+            self.logger.info("Pipeline cancelled by user")
+            return output_path
+
+        self.logger.info("Step 6: Writing multi-channel output...")
+        channel_names = [f"Channel_{ch_id}" for ch_id in fused_channel_ids]
+        self._write_multichannel_output(
+            stacked, channel_names, voxel_size_um, output_path
+        )
+
+        # --- Step 7: Write stitch_metadata.json v2 ---
+        # Use the first channel's origin (they should be identical with shared reg)
+        origin_um = channel_origins[0]
+        self._write_stitch_metadata_v2(
+            output_path,
+            fused_channel_ids,
+            origin_um,
+            tiles,
+            voxel_size_um,
+            acquisition_dir,
         )
 
         elapsed = time.time() - t0
         self.logger.info(
-            f"=== Pipeline complete in {elapsed:.1f}s === " f"Output: {output_path}"
+            f"=== Pipeline complete in {elapsed:.1f}s === Output: {output_path}"
         )
         return output_path
 
@@ -817,6 +901,332 @@ class StitchingPipeline:
                 result[ch_id].append((volume, tile))
 
         return result
+
+    def _register_tiles(
+        self,
+        tile_data: List[Tuple[Any, RawTileInfo]],
+        voxel_size_um: Dict[str, float],
+    ) -> Tuple[list, str]:
+        """Register tiles using the reference channel's data.
+
+        Builds multiscale spatial images, runs phase-correlation registration,
+        and returns the affine parameters + transform key.
+
+        Args:
+            tile_data: [(volume, tile_info), ...] for the reference channel
+            voxel_size_um: Voxel sizes dict
+
+        Returns:
+            (reg_params, transform_key) — reg_params is a list of affine params
+            (one per tile), transform_key is the key to use for fusion.
+        """
+        try:
+            from multiview_stitcher import io as mvs_io
+            from multiview_stitcher import (
+                msi_utils,
+                registration,
+            )
+            from multiview_stitcher import spatial_image_utils as si_utils
+        except ImportError:
+            raise ImportError(
+                "multiview-stitcher is required for stitching. "
+                "Install with: pip install multiview-stitcher"
+            )
+
+        import dask.array as da
+
+        # Build SpatialImages with stage positions
+        self.logger.info("  Building tile spatial images for registration...")
+        msims = []
+        for volume, tile_info in tile_data:
+            translation_um = {
+                "z": tile_info.z_min_mm * 1000.0,
+                "y": tile_info.y_mm * 1000.0,
+                "x": tile_info.x_mm * 1000.0,
+            }
+            if not isinstance(volume, da.Array):
+                volume = da.from_array(volume, chunks=(64, 512, 512))
+
+            sim = si_utils.get_sim_from_array(
+                volume,
+                dims=["z", "y", "x"],
+                scale=voxel_size_um,
+                translation=translation_um,
+                transform_key=mvs_io.METADATA_TRANSFORM_KEY,
+            )
+            msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+            msims.append(msim)
+
+        self.logger.info(f"  Built {len(msims)} multiscale spatial images")
+
+        if len(msims) <= 1:
+            self.logger.info("  Single tile — skipping registration")
+            return [], mvs_io.METADATA_TRANSFORM_KEY
+
+        # Run registration
+        self.logger.info(
+            f"  Running phase correlation registration "
+            f"(quality threshold={self.config.quality_threshold})..."
+        )
+        try:
+            import dask.diagnostics
+
+            with dask.diagnostics.ProgressBar():
+                params = registration.register(
+                    msims,
+                    reg_channel_index=0,
+                    transform_key=mvs_io.METADATA_TRANSFORM_KEY,
+                    new_transform_key="registered",
+                    registration_binning=self.config.registration_binning,
+                    post_registration_do_quality_filter=True,
+                    post_registration_quality_threshold=self.config.quality_threshold,
+                    groupwise_resolution_kwargs={
+                        "abs_tol": self.config.global_opt_abs_tol,
+                        "rel_tol": self.config.global_opt_rel_tol,
+                    },
+                )
+            self.logger.info("  Registration complete")
+            return list(params), "registered"
+
+        except Exception as e:
+            self.logger.error(f"  Registration failed: {e}")
+            self.logger.info("  Falling back to metadata positions only")
+            return [], mvs_io.METADATA_TRANSFORM_KEY
+
+    def _fuse_channel(
+        self,
+        tile_data: List[Tuple[Any, RawTileInfo]],
+        voxel_size_um: Dict[str, float],
+        reg_params: list,
+        transform_key: str,
+    ) -> Tuple[Any, Dict[str, float]]:
+        """Fuse tiles for a single channel using pre-computed registration.
+
+        Args:
+            tile_data: [(volume, tile_info), ...] for this channel
+            voxel_size_um: Voxel sizes dict
+            reg_params: Affine params from _register_tiles (one per tile)
+            transform_key: Transform key to use for fusion
+
+        Returns:
+            (fused_sim, origin_um) — fused SpatialImage and origin dict
+        """
+        try:
+            from multiview_stitcher import (
+                fusion,
+            )
+            from multiview_stitcher import io as mvs_io
+            from multiview_stitcher import (
+                msi_utils,
+            )
+            from multiview_stitcher import spatial_image_utils as si_utils
+        except ImportError:
+            raise ImportError(
+                "multiview-stitcher is required for stitching. "
+                "Install with: pip install multiview-stitcher"
+            )
+
+        import dask.array as da
+
+        # Build SpatialImages
+        msims = []
+        for volume, tile_info in tile_data:
+            translation_um = {
+                "z": tile_info.z_min_mm * 1000.0,
+                "y": tile_info.y_mm * 1000.0,
+                "x": tile_info.x_mm * 1000.0,
+            }
+            if not isinstance(volume, da.Array):
+                volume = da.from_array(volume, chunks=(64, 512, 512))
+
+            sim = si_utils.get_sim_from_array(
+                volume,
+                dims=["z", "y", "x"],
+                scale=voxel_size_um,
+                translation=translation_um,
+                transform_key=mvs_io.METADATA_TRANSFORM_KEY,
+            )
+            msim = msi_utils.get_msim_from_sim(sim, scale_factors=[])
+            msims.append(msim)
+
+        # Apply pre-computed registration transforms
+        if reg_params and transform_key != mvs_io.METADATA_TRANSFORM_KEY:
+            for msim, param in zip(msims, reg_params):
+                msi_utils.set_affine_transform(
+                    msim,
+                    param,
+                    transform_key=transform_key,
+                    base_transform_key=mvs_io.METADATA_TRANSFORM_KEY,
+                )
+
+        # Fuse
+        sims = [msi_utils.get_sim_from_msim(msim) for msim in msims]
+
+        fuse_kwargs: Dict[str, Any] = dict(
+            transform_key=transform_key,
+            output_chunksize=self.config.output_chunksize,
+            blending_widths=self.config.blending_widths,
+        )
+
+        if self.config.content_based_fusion:
+            try:
+                from multiview_stitcher.weights import content_based
+
+                fuse_kwargs["weights_func"] = content_based
+                self.logger.info("  Using content-based tile-overlap weighting")
+            except ImportError:
+                self.logger.warning(
+                    "  content_based weights not available — using default blending"
+                )
+
+        fused = fusion.fuse(sims, **fuse_kwargs)
+
+        origin_um = {
+            "z": float(fused.coords["z"].values[0]),
+            "y": float(fused.coords["y"].values[0]),
+            "x": float(fused.coords["x"].values[0]),
+        }
+        self.logger.info(
+            f"  Fused origin (µm): Z={origin_um['z']:.1f} "
+            f"Y={origin_um['y']:.1f} X={origin_um['x']:.1f}"
+        )
+
+        return fused, origin_um
+
+    def _write_multichannel_output(
+        self,
+        stacked: np.ndarray,
+        channel_names: List[str],
+        voxel_size_um: Dict[str, float],
+        output_dir: Path,
+    ) -> None:
+        """Write multi-channel stacked volume to the configured output format.
+
+        For multi-channel data, produces a single store (e.g. stitched.ome.zarr)
+        instead of per-channel files.
+        """
+        fmt = self.config.output_format
+
+        if fmt == "ome-zarr-sharded" or fmt == "both":
+            out_path = output_dir / "stitched.ome.zarr"
+            self.logger.info(f"  Writing sharded OME-Zarr v0.5: {out_path}")
+            try:
+                from py2flamingo.stitching.writers.ome_zarr_writer import (
+                    package_as_ozx,
+                    write_ome_zarr_sharded,
+                )
+
+                write_ome_zarr_sharded(
+                    data=stacked,
+                    output_path=out_path,
+                    voxel_size_um=voxel_size_um,
+                    chunks=self.config.zarr_chunks,
+                    shard_chunks=self.config.zarr_shard_chunks,
+                    compression=self.config.zarr_compression,
+                    compression_level=self.config.zarr_compression_level,
+                    pyramid_levels=self.config.pyramid_levels,
+                    pyramid_method=self.config.pyramid_method,
+                    channel_names=channel_names,
+                    use_tensorstore=self.config.zarr_use_tensorstore,
+                )
+
+                if self.config.package_ozx:
+                    ozx_path = output_dir / "stitched.ozx"
+                    self.logger.info(f"  Packaging as .ozx: {ozx_path}")
+                    package_as_ozx(out_path, ozx_path)
+
+            except ImportError as e:
+                self.logger.error(f"  OME-Zarr sharded write failed: {e}")
+                self.logger.info("  Falling back to OME-TIFF")
+                fmt = "ome-tiff"
+
+        if fmt == "ome-zarr-v2":
+            out_path = output_dir / "stitched.ome.zarr"
+            self.logger.info(f"  Writing OME-Zarr v2 (Fiji compatible): {out_path}")
+            try:
+                from py2flamingo.stitching.writers.ome_zarr_writer import (
+                    write_ome_zarr_v2,
+                )
+
+                write_ome_zarr_v2(
+                    data=stacked,
+                    output_path=out_path,
+                    voxel_size_um=voxel_size_um,
+                    chunks=self.config.zarr_chunks,
+                    compression=self.config.zarr_compression,
+                    compression_level=self.config.zarr_compression_level,
+                    pyramid_levels=self.config.pyramid_levels,
+                )
+            except Exception as e:
+                self.logger.error(f"  OME-Zarr v2 write failed: {e}")
+                self.logger.info("  Falling back to OME-TIFF")
+                fmt = "ome-tiff"
+
+        if fmt in ("ome-tiff", "both"):
+            tiff_path = output_dir / "stitched.ome.tif"
+            self.logger.info(f"  Writing pyramidal OME-TIFF: {tiff_path}")
+            try:
+                from py2flamingo.stitching.writers.ome_tiff_writer import (
+                    write_pyramidal_ome_tiff,
+                )
+
+                write_pyramidal_ome_tiff(
+                    data=stacked,
+                    output_path=tiff_path,
+                    voxel_size_um=voxel_size_um,
+                    tile_size=self.config.tiff_tile_size,
+                    compression=self.config.tiff_compression,
+                    pyramid_levels=self.config.pyramid_levels,
+                    channel_names=channel_names,
+                )
+            except ImportError as e:
+                self.logger.error(f"  OME-TIFF write failed: {e}")
+
+    def _write_stitch_metadata_v2(
+        self,
+        output_dir: Path,
+        channel_ids: List[int],
+        origin_um: Dict[str, float],
+        tiles: List[RawTileInfo],
+        voxel_size_um: Dict[str, float],
+        acquisition_dir: Path,
+    ) -> None:
+        """Write stitch_metadata.json v2 for single multi-channel store."""
+        origin_list = [origin_um["z"], origin_um["y"], origin_um["x"]]
+
+        # Determine the store filename
+        fmt = self.config.output_format
+        if fmt in ("ome-zarr-sharded", "ome-zarr-v2", "both"):
+            store_path = "stitched.ome.zarr"
+        elif fmt == "ome-tiff":
+            store_path = "stitched.ome.tif"
+        else:
+            store_path = "stitched.ome.zarr"
+
+        # Build per-channel dict (all point to same store, for backward compat)
+        channels_meta = {}
+        for ch_id in channel_ids:
+            channels_meta[str(ch_id)] = {
+                "path": store_path,
+                "origin_um": origin_list,
+            }
+
+        metadata = {
+            "version": 2,
+            "source_acquisition": str(acquisition_dir),
+            "voxel_size_um": voxel_size_um,
+            "store_path": store_path,
+            "origin_um": origin_list,
+            "channel_ids": channel_ids,
+            "downsample_factor": self.config.downsample_factor,
+            "output_format": self.config.output_format,
+            "channels": channels_meta,
+            "tile_count": len(tiles),
+        }
+
+        meta_path = output_dir / "stitch_metadata.json"
+        meta_path.write_text(json.dumps(metadata, indent=2))
+        self.logger.info(f"  Wrote {meta_path}")
 
     def _register_and_fuse(
         self,

@@ -144,15 +144,40 @@ def _write_via_ngff_zarr(
     # Compute data if it's a dask array or SpatialImage
     np_data = _to_numpy(data)
 
-    image = to_ngff_image(
-        np_data,
-        dims=("z", "y", "x"),
-        scale={
+    # Detect 3D (Z,Y,X) vs 4D (C,Z,Y,X)
+    if np_data.ndim == 4:
+        dims = ("c", "z", "y", "x")
+        scale = {
+            "c": 1.0,
             "z": voxel_size_um["z"],
             "y": voxel_size_um["y"],
             "x": voxel_size_um["x"],
-        },
-        axes_units={"z": "micrometer", "y": "micrometer", "x": "micrometer"},
+        }
+        axes_units = {
+            "z": "micrometer",
+            "y": "micrometer",
+            "x": "micrometer",
+        }
+        spatial_shape = np_data.shape[-3:]  # (Z, Y, X) for pyramid calc
+    else:
+        dims = ("z", "y", "x")
+        scale = {
+            "z": voxel_size_um["z"],
+            "y": voxel_size_um["y"],
+            "x": voxel_size_um["x"],
+        }
+        axes_units = {
+            "z": "micrometer",
+            "y": "micrometer",
+            "x": "micrometer",
+        }
+        spatial_shape = np_data.shape
+
+    image = to_ngff_image(
+        np_data,
+        dims=dims,
+        scale=scale,
+        axes_units=axes_units,
         name="stitched",
     )
 
@@ -165,9 +190,9 @@ def _write_via_ngff_zarr(
     }
     method = method_map.get(pyramid_method, Methods.ITKWASM_BIN_SHRINK)
 
-    # Auto-compute pyramid levels if not specified
+    # Auto-compute pyramid levels if not specified (based on spatial dims)
     if pyramid_levels is None:
-        min_dim = min(np_data.shape)
+        min_dim = min(spatial_shape)
         pyramid_levels = 0
         while min_dim > 64:
             min_dim //= 2
@@ -234,12 +259,20 @@ def _write_via_zarr_direct(
 
     np_data = _to_numpy(data)
 
-    # Compute shard shape from chunks and shard_chunks
-    shard_shape = tuple(c * s for c, s in zip(chunks, shard_chunks))
+    # Handle 4D (C,Z,Y,X) vs 3D (Z,Y,X)
+    if np_data.ndim == 4:
+        n_channels = np_data.shape[0]
+        effective_chunks = (1,) + chunks  # (1, 32, 256, 256)
+        shard_shape = (n_channels,) + tuple(c * s for c, s in zip(chunks, shard_chunks))
+        z_axis = 1  # Z is axis 1 for 4D
+    else:
+        effective_chunks = chunks
+        shard_shape = tuple(c * s for c, s in zip(chunks, shard_chunks))
+        z_axis = 0  # Z is axis 0 for 3D
 
     logger.info(
         f"Writing Zarr v3 (direct) to {output_path} "
-        f"chunks={chunks}, shards={shard_shape}"
+        f"chunks={effective_chunks}, shards={shard_shape}"
     )
 
     # Build compression codec
@@ -249,19 +282,23 @@ def _write_via_zarr_direct(
         store=str(output_path / "0"),
         shape=np_data.shape,
         shards=shard_shape,
-        chunks=chunks,
+        chunks=effective_chunks,
         dtype=np_data.dtype,
         compressors=codec,
         overwrite=True,
     )
 
-    # Write data in slab chunks to bound memory
-    slab_z = shard_shape[0]
-    total_slabs = (np_data.shape[0] + slab_z - 1) // slab_z
+    # Write data in slab chunks along Z axis to bound memory
+    slab_z = shard_shape[z_axis]
+    n_z = np_data.shape[z_axis]
+    total_slabs = (n_z + slab_z - 1) // slab_z
     for i in range(total_slabs):
         z0 = i * slab_z
-        z1 = min(z0 + slab_z, np_data.shape[0])
-        arr[z0:z1] = np_data[z0:z1]
+        z1 = min(z0 + slab_z, n_z)
+        if np_data.ndim == 4:
+            arr[:, z0:z1] = np_data[:, z0:z1]
+        else:
+            arr[z0:z1] = np_data[z0:z1]
 
         if progress_callback:
             pct = 10 + int(80 * (i + 1) / total_slabs)
@@ -304,6 +341,32 @@ def _write_ome_zarr_metadata(
     """Write minimal OME-Zarr v0.5 root metadata."""
     import json
 
+    # Build axes and scale based on dimensionality
+    if len(shape) == 4:
+        axes = [
+            {"name": "c", "type": "channel"},
+            {"name": "z", "type": "space", "unit": "micrometer"},
+            {"name": "y", "type": "space", "unit": "micrometer"},
+            {"name": "x", "type": "space", "unit": "micrometer"},
+        ]
+        scale = [
+            1.0,
+            voxel_size_um["z"],
+            voxel_size_um["y"],
+            voxel_size_um["x"],
+        ]
+    else:
+        axes = [
+            {"name": "z", "type": "space", "unit": "micrometer"},
+            {"name": "y", "type": "space", "unit": "micrometer"},
+            {"name": "x", "type": "space", "unit": "micrometer"},
+        ]
+        scale = [
+            voxel_size_um["z"],
+            voxel_size_um["y"],
+            voxel_size_um["x"],
+        ]
+
     metadata = {
         "zarr_format": 3,
         "node_type": "group",
@@ -314,22 +377,14 @@ def _write_ome_zarr_metadata(
                     {
                         "version": "0.5",
                         "name": "stitched",
-                        "axes": [
-                            {"name": "z", "type": "space", "unit": "micrometer"},
-                            {"name": "y", "type": "space", "unit": "micrometer"},
-                            {"name": "x", "type": "space", "unit": "micrometer"},
-                        ],
+                        "axes": axes,
                         "datasets": [
                             {
                                 "path": "0",
                                 "coordinateTransformations": [
                                     {
                                         "type": "scale",
-                                        "scale": [
-                                            voxel_size_um["z"],
-                                            voxel_size_um["y"],
-                                            voxel_size_um["x"],
-                                        ],
+                                        "scale": scale,
                                     }
                                 ],
                             }
@@ -345,13 +400,13 @@ def _write_ome_zarr_metadata(
 
 
 def _to_numpy(data) -> np.ndarray:
-    """Convert various data types to a 3D numpy array.
+    """Convert various data types to a 3D (Z,Y,X) or 4D (C,Z,Y,X) numpy array.
 
-    SpatialImage / xarray may carry extra singleton dims (e.g. channel or time).
-    We squeeze those away and enforce exactly 3D (Z, Y, X) output.
+    SpatialImage / xarray may carry extra singleton dims (e.g. time).
+    We squeeze those away but preserve a real channel dimension.
     """
     if isinstance(data, np.ndarray):
-        arr = np.squeeze(data)
+        arr = data
     elif hasattr(data, "data"):
         # xarray / SpatialImage
         inner = data.data
@@ -360,28 +415,32 @@ def _to_numpy(data) -> np.ndarray:
             import dask.diagnostics
 
             with dask.diagnostics.ProgressBar():
-                arr = np.squeeze(np.asarray(inner.compute()))
+                arr = np.asarray(inner.compute())
         else:
-            arr = np.squeeze(np.asarray(inner))
+            arr = np.asarray(inner)
     elif hasattr(data, "compute"):
         # dask array
         logger.info("Computing dask array into memory...")
         import dask.diagnostics
 
         with dask.diagnostics.ProgressBar():
-            arr = np.squeeze(np.asarray(data.compute()))
+            arr = np.asarray(data.compute())
     else:
-        arr = np.squeeze(np.asarray(data))
+        arr = np.asarray(data)
 
-    # Enforce exactly 3D — take first index along leading extra dims
-    while arr.ndim > 3:
+    # Squeeze dims beyond 4D, but keep channel dim if present
+    while arr.ndim > 4:
         logger.warning(
-            f"Data has {arr.ndim}D shape {arr.shape}, taking first slice to reduce to 3D"
+            f"Data has {arr.ndim}D shape {arr.shape}, taking first slice to reduce"
         )
         arr = arr[0]
 
+    # Collapse singleton channel dim (1,Z,Y,X) → (Z,Y,X)
+    if arr.ndim == 4 and arr.shape[0] == 1:
+        arr = arr[0]
+
     if arr.ndim < 3:
-        logger.warning(f"Data has {arr.ndim}D shape {arr.shape}, expected 3D")
+        logger.warning(f"Data has {arr.ndim}D shape {arr.shape}, expected 3D or 4D")
 
     return arr
 
@@ -435,6 +494,7 @@ def write_ome_zarr_v2(
 
     output_path = Path(output_path)
     np_data = _to_numpy(data)
+    is_4d = np_data.ndim == 4
 
     if progress_callback:
         progress_callback(5, "Preparing Zarr v2 output...")
@@ -442,9 +502,10 @@ def write_ome_zarr_v2(
     # --- Build compressor (numcodecs for Zarr v2) ---
     compressor = _build_v2_compressor(compression, compression_level)
 
-    # --- Auto-compute pyramid levels ---
+    # --- Auto-compute pyramid levels (based on spatial dims) ---
+    spatial_shape = np_data.shape[-3:] if is_4d else np_data.shape
     if pyramid_levels is None:
-        min_dim = min(np_data.shape)
+        min_dim = min(spatial_shape)
         pyramid_levels = 0
         while min_dim > 64:
             min_dim //= 2
@@ -474,7 +535,15 @@ def write_ome_zarr_v2(
     total_levels = len(pyramid)
     for level_idx, level_data in enumerate(pyramid):
         scale_factor = 2**level_idx
-        level_chunks = tuple(min(c, s) for c, s in zip(chunks, level_data.shape))
+
+        # Compute chunks — for 4D prepend channel dim
+        if is_4d:
+            spatial_chunks = tuple(
+                min(c, s) for c, s in zip(chunks, level_data.shape[-3:])
+            )
+            level_chunks = (1,) + spatial_chunks
+        else:
+            level_chunks = tuple(min(c, s) for c, s in zip(chunks, level_data.shape))
 
         root.create_array(
             str(level_idx),
@@ -484,17 +553,24 @@ def write_ome_zarr_v2(
             compressors=compressor,
         )
 
+        # Build scale transform
+        spatial_scale = [
+            voxel_size_um["z"] * scale_factor,
+            voxel_size_um["y"] * scale_factor,
+            voxel_size_um["x"] * scale_factor,
+        ]
+        if is_4d:
+            scale_values = [1.0] + spatial_scale
+        else:
+            scale_values = spatial_scale
+
         datasets_meta.append(
             {
                 "path": str(level_idx),
                 "coordinateTransformations": [
                     {
                         "type": "scale",
-                        "scale": [
-                            voxel_size_um["z"] * scale_factor,
-                            voxel_size_um["y"] * scale_factor,
-                            voxel_size_um["x"] * scale_factor,
-                        ],
+                        "scale": scale_values,
                     }
                 ],
             }
@@ -511,15 +587,25 @@ def write_ome_zarr_v2(
 
     # --- Write OME-NGFF v0.4 metadata in .zattrs ---
     # v0.4: multiscales lives at root .zattrs (NOT under "ome" key)
+    if is_4d:
+        axes = [
+            {"name": "c", "type": "channel"},
+            {"name": "z", "type": "space", "unit": "micrometer"},
+            {"name": "y", "type": "space", "unit": "micrometer"},
+            {"name": "x", "type": "space", "unit": "micrometer"},
+        ]
+    else:
+        axes = [
+            {"name": "z", "type": "space", "unit": "micrometer"},
+            {"name": "y", "type": "space", "unit": "micrometer"},
+            {"name": "x", "type": "space", "unit": "micrometer"},
+        ]
+
     root.attrs["multiscales"] = [
         {
             "version": "0.4",
             "name": "stitched",
-            "axes": [
-                {"name": "z", "type": "space", "unit": "micrometer"},
-                {"name": "y", "type": "space", "unit": "micrometer"},
-                {"name": "x", "type": "space", "unit": "micrometer"},
-            ],
+            "axes": axes,
             "datasets": datasets_meta,
             "type": "mean",
         }
@@ -549,6 +635,14 @@ def _build_v2_compressor(compression: str, level: int):
 
 
 def _downsample_2x(arr: np.ndarray) -> np.ndarray:
+    """Downsample a 3D or 4D array by 2x using block averaging (spatial dims only)."""
+    if arr.ndim == 4:
+        # 4D (C,Z,Y,X): downsample each channel independently
+        return np.stack([_downsample_2x_3d(arr[c]) for c in range(arr.shape[0])])
+    return _downsample_2x_3d(arr)
+
+
+def _downsample_2x_3d(arr: np.ndarray) -> np.ndarray:
     """Downsample a 3D array by 2x using block averaging."""
     # Trim to even dimensions
     s = tuple(d - d % 2 for d in arr.shape)

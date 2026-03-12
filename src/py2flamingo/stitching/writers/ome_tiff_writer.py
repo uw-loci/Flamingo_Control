@@ -67,16 +67,22 @@ def write_pyramidal_ome_tiff(
 
     # Get numpy data
     np_data = _to_numpy(data)
-    z, y, x = np_data.shape
+    is_4d = np_data.ndim == 4
     dtype = np_data.dtype
+
+    if is_4d:
+        n_channels, z, y, x = np_data.shape
+    else:
+        z, y, x = np_data.shape
+        n_channels = 1
 
     logger.info(
         f"Writing pyramidal OME-TIFF: {output_path} "
-        f"shape=({z}, {y}, {x}) dtype={dtype} "
+        f"shape={np_data.shape} dtype={dtype} "
         f"tile={tile_size} compression={compression}"
     )
 
-    # Compute pyramid levels
+    # Compute pyramid levels (based on spatial dims)
     if pyramid_levels is None:
         min_xy = min(y, x)
         pyramid_levels = 0
@@ -104,7 +110,7 @@ def write_pyramidal_ome_tiff(
 
     # Build OME-XML metadata
     metadata = {
-        "axes": "ZYX",
+        "axes": "CZYX" if is_4d else "ZYX",
         "PhysicalSizeX": voxel_size_um["x"],
         "PhysicalSizeXUnit": "\u00b5m",
         "PhysicalSizeY": voxel_size_um["y"],
@@ -156,7 +162,10 @@ def write_pyramidal_ome_tiff(
     # Log output stats
     file_size = output_path.stat().st_size
     size_gb = file_size / (1024**3)
-    compression_ratio = (z * y * x * dtype.itemsize) / file_size if file_size > 0 else 0
+    total_voxels = n_channels * z * y * x
+    compression_ratio = (
+        (total_voxels * dtype.itemsize) / file_size if file_size > 0 else 0
+    )
     logger.info(
         f"OME-TIFF written: {output_path} — {size_gb:.2f} GB "
         f"(compression ratio: {compression_ratio:.1f}x)"
@@ -174,7 +183,21 @@ def _downsample_bin_shrink(volume: np.ndarray, factor: int) -> np.ndarray:
     This is equivalent to ngff-zarr's bin_shrink method — fast, correct
     anti-aliasing via box filter (local mean). No aliasing artifacts
     because every input pixel contributes equally to the output.
+
+    For 4D (C,Z,Y,X) data, downsample each channel independently.
     """
+    if volume.ndim == 4:
+        return np.stack(
+            [
+                _downsample_bin_shrink_3d(volume[c], factor)
+                for c in range(volume.shape[0])
+            ]
+        )
+    return _downsample_bin_shrink_3d(volume, factor)
+
+
+def _downsample_bin_shrink_3d(volume: np.ndarray, factor: int) -> np.ndarray:
+    """Downsample a 3D volume by integer factor using bin-shrink (local mean)."""
     z, y, x = volume.shape
 
     # Truncate to exact multiple of factor
@@ -194,29 +217,38 @@ def _downsample_bin_shrink(volume: np.ndarray, factor: int) -> np.ndarray:
 
 
 def _to_numpy(data) -> np.ndarray:
-    """Convert various data types to a 3D numpy array.
+    """Convert various data types to a 3D (Z,Y,X) or 4D (C,Z,Y,X) numpy array.
 
-    SpatialImage / xarray may carry extra singleton dims (e.g. channel or time).
-    We squeeze those away so the result is always (Z, Y, X).
+    SpatialImage / xarray may carry extra singleton dims (e.g. time).
+    We squeeze those away but preserve a real channel dimension.
     """
     if isinstance(data, np.ndarray):
-        return np.squeeze(data)
-
-    if hasattr(data, "compute"):
+        arr = data
+    elif hasattr(data, "compute"):
         logger.info("Computing dask array into memory for TIFF write...")
         import dask.diagnostics
 
         with dask.diagnostics.ProgressBar():
-            return np.squeeze(np.asarray(data.compute()))
-
-    if hasattr(data, "data"):
+            arr = np.asarray(data.compute())
+    elif hasattr(data, "data"):
         inner = data.data
         if hasattr(inner, "compute"):
             logger.info("Computing xarray/SpatialImage into memory...")
             import dask.diagnostics
 
             with dask.diagnostics.ProgressBar():
-                return np.squeeze(np.asarray(inner.compute()))
-        return np.squeeze(np.asarray(inner))
+                arr = np.asarray(inner.compute())
+        else:
+            arr = np.asarray(inner)
+    else:
+        arr = np.asarray(data)
 
-    return np.squeeze(np.asarray(data))
+    # Squeeze dims beyond 4D
+    while arr.ndim > 4:
+        arr = arr[0]
+
+    # Collapse singleton channel dim (1,Z,Y,X) → (Z,Y,X)
+    if arr.ndim == 4 and arr.shape[0] == 1:
+        arr = arr[0]
+
+    return arr
