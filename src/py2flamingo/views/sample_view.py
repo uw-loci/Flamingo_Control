@@ -2568,15 +2568,56 @@ class SampleView(QWidget):
             if restore_3d:
                 self.viewer.dims.ndisplay = 3
 
-            # Reset camera to show the stitched data
-            self.viewer.reset_view()
-
-            QMessageBox.information(
-                self,
-                "Stitched Data Loaded",
-                f"Loaded {len(ch_ids_loaded)} channel(s): {ch_ids_loaded}\n"
-                f"from: {output_dir}",
+            # Check if stitched data is outside chamber bounds
+            chamber_dims = (
+                np.array(
+                    self.voxel_storage.config.chamber_dimensions
+                    if self.voxel_storage
+                    else [13500, 14000, 11310]
+                )
+                / display_voxel_um
+            )  # in display voxels
+            out_of_bounds = any(
+                t < -10 or t > d + 10 for t, d in zip(translate, chamber_dims)
             )
+
+            if out_of_bounds:
+                # Data is outside chamber — compute origin in mm for message
+                origin_mm = origin_um / 1000.0
+                chamber_end_mm = (
+                    chamber_origin_um
+                    + np.array(
+                        self.voxel_storage.config.chamber_dimensions
+                        if self.voxel_storage
+                        else [13500, 14000, 11310]
+                    )
+                ) / 1000.0
+                self.logger.warning(
+                    f"Stitched data origin {origin_mm} mm is outside "
+                    f"chamber bounds [{chamber_origin_um/1000} - {chamber_end_mm}] mm. "
+                    f"Data will appear outside the chamber visualization."
+                )
+                QMessageBox.warning(
+                    self,
+                    "Stitched Data Loaded (Outside Chamber)",
+                    f"Loaded {len(ch_ids_loaded)} channel(s): {ch_ids_loaded}\n"
+                    f"from: {output_dir}\n\n"
+                    f"Note: The stitched data origin "
+                    f"(Z={origin_mm[0]:.1f}, Y={origin_mm[1]:.1f}, "
+                    f"X={origin_mm[2]:.1f} mm) is outside the chamber "
+                    f"visualization bounds.\n\n"
+                    f"The data may not be visible in the 3D viewer. "
+                    f"Consider adjusting y_range_mm in "
+                    f"visualization_3d_config.yaml to include the "
+                    f"acquisition region.",
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Stitched Data Loaded",
+                    f"Loaded {len(ch_ids_loaded)} channel(s): {ch_ids_loaded}\n"
+                    f"from: {output_dir}",
+                )
 
         except Exception as e:
             self.logger.exception(f"Load stitched failed: {e}")
