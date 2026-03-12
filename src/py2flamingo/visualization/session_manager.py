@@ -78,6 +78,31 @@ def _create_zarr_store(path: str):
         return zarr.DirectoryStore(path)
 
 
+def _find_zarr_array(root, zarr_path):
+    """Navigate an OME-Zarr hierarchy to find the level-0 array.
+
+    Handles both:
+      - ngff-zarr output where root/"0" is a Group containing child arrays
+      - zarr-direct output where root/"0" IS the array
+    """
+    # Try level-0 first
+    candidates = ["0"] if "0" in root else list(root.keys())
+
+    for key in candidates:
+        node = root[key]
+        # If it's already an array, use it
+        if hasattr(node, "shape"):
+            return node
+        # If it's a group, look for arrays inside (ngff-zarr nests data)
+        if hasattr(node, "keys"):
+            for sub_key in node.keys():
+                sub = node[sub_key]
+                if hasattr(sub, "shape"):
+                    return sub
+
+    raise ValueError(f"No array data found in {zarr_path}")
+
+
 @dataclass
 class SessionMetadata:
     """Metadata for a saved session."""
@@ -833,17 +858,10 @@ def _load_stitched_channel(
     store = _create_zarr_store(str(zarr_path))
     root = zarr.open_group(store=store, mode="r")
 
-    # Find the level-0 dataset path
-    # OME-Zarr stores data at "0" for level 0
-    if "0" in root:
-        arr = root["0"]
-    else:
-        # Might be a flat zarr with data at root — try the first array
-        array_keys = [k for k in root.keys()]
-        if array_keys:
-            arr = root[array_keys[0]]
-        else:
-            raise ValueError(f"No array data found in {zarr_path}")
+    # Find the level-0 array.
+    # OME-Zarr v0.5 (ngff-zarr) may nest: root/"0" can be a Group
+    # containing the sharded array, or the array itself (zarr-direct).
+    arr = _find_zarr_array(root, zarr_path)
 
     logger.info(
         f"  Channel {ch_id}: shape={arr.shape}, dtype={arr.dtype}, "

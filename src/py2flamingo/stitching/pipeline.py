@@ -873,6 +873,7 @@ class StitchingPipeline:
                 with dask.diagnostics.ProgressBar():
                     params = registration.register(
                         msims,
+                        reg_channel_index=0,
                         transform_key=mvs_io.METADATA_TRANSFORM_KEY,
                         new_transform_key="registered",
                         registration_binning=self.config.registration_binning,

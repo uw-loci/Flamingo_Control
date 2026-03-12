@@ -2425,23 +2425,30 @@ class SampleView(QWidget):
 
     def _on_load_stitched_clicked(self) -> None:
         """Browse for a stitching output directory and load it."""
+        from PyQt5.QtCore import QSettings
         from PyQt5.QtWidgets import QFileDialog, QMessageBox
 
         if not self.voxel_storage:
             QMessageBox.warning(self, "Not Ready", "Voxel storage not initialized.")
             return
 
-        start_path = str(Path.home())
+        s = QSettings()
+        start_path = s.value("SampleView/last_stitched_dir", str(Path.home()), type=str)
         dir_path = QFileDialog.getExistingDirectory(
             self, "Select Stitching Output Directory", start_path
         )
         if dir_path:
+            # Remember this location for next time
+            s.setValue("SampleView/last_stitched_dir", dir_path)
             self._load_stitched_from_path(dir_path)
 
     def _load_stitched_from_path(self, dir_path: str) -> None:
         """Load stitched OME-Zarr data at correct world position.
 
         Shared by the Load Stitched button and stitching dialog completion.
+        Searches for stitch_metadata.json in the given directory, its parent,
+        and immediate subdirectories so the user can select the stitched output
+        folder, a parent folder, or an individual .ome.zarr channel folder.
         """
         from PyQt5.QtWidgets import QMessageBox
 
@@ -2449,10 +2456,33 @@ class SampleView(QWidget):
             QMessageBox.warning(self, "Not Ready", "Voxel storage not initialized.")
             return
 
+        # Find stitch_metadata.json — check selected dir, parent, and children
+        selected = Path(dir_path)
+        output_dir = None
+        for candidate in [
+            selected,
+            selected.parent,
+            *[d for d in selected.iterdir() if d.is_dir()],
+        ]:
+            if (candidate / "stitch_metadata.json").exists():
+                output_dir = candidate
+                break
+
+        if output_dir is None:
+            self.logger.error(f"stitch_metadata.json not found in or near: {dir_path}")
+            QMessageBox.warning(
+                self,
+                "Metadata Not Found",
+                f"stitch_metadata.json not found in:\n{dir_path}\n\n"
+                "Select the stitching output folder that contains\n"
+                "stitch_metadata.json and the .ome.zarr channel folders.",
+            )
+            return
+
         try:
             from py2flamingo.visualization.session_manager import load_stitched_volume
 
-            result = load_stitched_volume(Path(dir_path), self.voxel_storage)
+            result = load_stitched_volume(output_dir, self.voxel_storage)
             channels = result["channels_loaded"]
 
             if not channels:
@@ -2474,17 +2504,10 @@ class SampleView(QWidget):
             QMessageBox.information(
                 self,
                 "Stitched Data Loaded",
-                f"Loaded {len(channels)} channel(s): {channels}\n" f"from: {dir_path}",
+                f"Loaded {len(channels)} channel(s): {channels}\n"
+                f"from: {output_dir}",
             )
 
-        except FileNotFoundError as e:
-            self.logger.error(f"Load stitched failed: {e}")
-            QMessageBox.warning(
-                self,
-                "Metadata Not Found",
-                f"stitch_metadata.json not found in:\n{dir_path}\n\n"
-                "Make sure this is a stitching output directory.",
-            )
         except Exception as e:
             self.logger.exception(f"Load stitched failed: {e}")
             QMessageBox.critical(
