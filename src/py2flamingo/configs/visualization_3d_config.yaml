@@ -46,8 +46,8 @@ sample_chamber:
   chamber_below_anchor_mm: 10.0  # 1cm below Y minimum
 
   # Chamber extends above the anchor point (in mm)
-  chamber_above_anchor_mm: 5.0  # 5mm above Y minimum
-  # Total chamber height = 10mm + 5mm = 15mm
+  chamber_above_anchor_mm: 4.0  # 4mm above Y minimum
+  # Total chamber height = 10mm + 4mm = 14mm (matches original wireframe)
 
   # Chamber dimensions based on stage travel ranges
   # X: 1.0mm to 12.31mm = 11.31mm width

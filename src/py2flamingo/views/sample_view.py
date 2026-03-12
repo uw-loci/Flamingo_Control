@@ -184,19 +184,24 @@ class SampleView(QWidget):
         self.coord_mapper = None  # Will be set from voxel_storage
 
         # Stage position tracking for dynamic 3D updates
-        # Default: center X/Z, Y places holder tip at chamber top (chamber_y=0).
-        # chamber_y = stage_y - (STAGE_Y_AT_OBJECTIVE - OBJECTIVE_CHAMBER_Y_MM)
-        # For tip at chamber_y=0: stage_y = STAGE_Y_AT_OBJECTIVE - OBJECTIVE_CHAMBER_Y_MM
+        # Default: center X/Z, Y places holder tip at the visual top of the
+        # chamber wireframe.  Y is inverted in napari (Y=0 = visual top),
+        # so the visual top of the wireframe is at chamber_y = chamber_height.
+        # stage_y = chamber_y + (STAGE_Y_AT_OBJECTIVE - OBJECTIVE_CHAMBER_Y_MM)
         stage_ctrl = self._config.get("stage_control", {})
         x_range = stage_ctrl.get("x_range_mm", [1.0, 12.31])
         z_range = stage_ctrl.get("z_range_mm", [12.5, 26.0])
-        stage_y_for_chamber_top = (
+        chamber_cfg = self._config.get("sample_chamber", {})
+        chamber_height_mm = chamber_cfg.get(
+            "chamber_below_anchor_mm", 10.0
+        ) + chamber_cfg.get("chamber_above_anchor_mm", 4.0)
+        stage_y_offset = (
             self._chamber_viz.STAGE_Y_AT_OBJECTIVE
             - self._chamber_viz.OBJECTIVE_CHAMBER_Y_MM
-        )  # 7.45 - 7.0 = 0.45mm
+        )  # 0.45mm
         self.last_stage_position = {
             "x": (x_range[0] + x_range[1]) / 2,
-            "y": stage_y_for_chamber_top,
+            "y": chamber_height_mm + stage_y_offset,  # tip at visual top of chamber
             "z": (z_range[0] + z_range[1]) / 2,
             "r": 0,
         }
