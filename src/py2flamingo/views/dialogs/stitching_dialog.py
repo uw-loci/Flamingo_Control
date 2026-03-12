@@ -274,11 +274,14 @@ class StitchingDialog(PersistentDialog):
             self, "Select Acquisition Directory", start
         )
         if folder:
+            # Normalize to native separators (Qt returns forward slashes)
+            folder = str(Path(folder))
             self._acq_dir_edit.setText(folder)
-            # Auto-set output dir if empty
+            # Auto-set output dir if empty — name it after the acquisition folder
             if not self._output_dir_edit.text():
+                acq_name = Path(folder).name
                 self._output_dir_edit.setText(
-                    str(Path(folder).parent / "stitched_output")
+                    str(Path(folder).parent / f"{acq_name}_stitched")
                 )
             # Reset tile discovery — Discover is next action again
             self._tiles = None
@@ -292,7 +295,7 @@ class StitchingDialog(PersistentDialog):
             self, "Select Output Directory", start
         )
         if folder:
-            self._output_dir_edit.setText(folder)
+            self._output_dir_edit.setText(str(Path(folder)))
 
     # --- Tile discovery ---
 

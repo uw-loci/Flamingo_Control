@@ -619,7 +619,7 @@ class StitchingPipeline:
         pipeline = StitchingPipeline(config)
         pipeline.run(
             acquisition_dir=Path("/data/20260310_acquisition"),
-            output_path=Path("/data/stitched_output"),
+            output_path=Path("/data/20260310_acquisition_stitched"),
         )
     """
 
