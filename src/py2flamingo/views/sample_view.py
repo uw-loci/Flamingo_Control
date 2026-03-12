@@ -2441,7 +2441,11 @@ class SampleView(QWidget):
             self._load_stitched_from_path(dir_path)
 
     def _load_stitched_from_path(self, dir_path: str) -> None:
-        """Load stitched OME-Zarr data at correct world position.
+        """Load stitched OME-Zarr data as direct napari layers.
+
+        Adds stitched volumes at their native resolution with correct
+        scale/translate so they appear at the right world position in the
+        viewer — independent of the display-cache chamber bounds.
 
         Shared by the Load Stitched button and stitching dialog completion.
         Searches for stitch_metadata.json in the given directory, its parent,
@@ -2450,8 +2454,8 @@ class SampleView(QWidget):
         """
         from PyQt5.QtWidgets import QMessageBox
 
-        if not self.voxel_storage:
-            QMessageBox.warning(self, "Not Ready", "Voxel storage not initialized.")
+        if not self.viewer:
+            QMessageBox.warning(self, "Not Ready", "3D viewer not initialized.")
             return
 
         # Find stitch_metadata.json — check selected dir, parent, and children
@@ -2478,23 +2482,10 @@ class SampleView(QWidget):
             return
 
         try:
-            import json
-
             from py2flamingo.visualization.session_manager import load_stitched_volume
 
-            # If disconnected, center the virtual stage on the stitched data
-            # so it falls within the display volume
-            is_disconnected = (
-                self.last_stage_position.get("x", 0) == 0
-                and self.last_stage_position.get("y", 0) == 0
-                and self.last_stage_position.get("z", 0) == 0
-                and not self.movement_controller
-            )
-            if is_disconnected:
-                self._center_stage_on_stitched(output_dir)
-
-            result = load_stitched_volume(output_dir, self.voxel_storage)
-            channels = result["channels_loaded"]
+            result = load_stitched_volume(output_dir)
+            channels = result["channels"]
 
             if not channels:
                 QMessageBox.warning(
@@ -2504,18 +2495,86 @@ class SampleView(QWidget):
                 )
                 return
 
-            # Update visualization
-            self._update_visualization()
-            self._update_data_stats()
+            # Remove any previously loaded stitched layers
+            self._remove_stitched_layers()
 
-            # Enable channel controls now that data exists
-            self._update_channel_availability()
-            self._auto_contrast_channels()
+            # Coordinate mapping: existing channel layers use display-voxel
+            # units where 1 napari unit = display_voxel_size µm.
+            # Chamber origin is the (0,0,0) corner of the display cache.
+            display_voxel_um = np.array(
+                self.voxel_storage.config.display_voxel_size
+                if self.voxel_storage
+                else [50, 50, 50]
+            )
+            chamber_origin_um = np.array(
+                self.voxel_storage.config.chamber_origin
+                if self.voxel_storage
+                else [0, 0, 0]
+            )
+
+            channels_config = self._config.get("channels", [])
+            ch_ids_loaded = []
+
+            # Temporarily switch to 2D to avoid napari async slice race
+            if self.viewer.dims.ndisplay == 3:
+                self.viewer.dims.ndisplay = 2
+                restore_3d = True
+            else:
+                restore_3d = False
+
+            for ch_info in channels:
+                ch_id = ch_info["ch_id"]
+                volume = ch_info["volume"]
+                origin_um = ch_info["origin_um"]  # [z, y, x]
+                voxel_um = ch_info["voxel_size_um"]  # [z, y, x]
+
+                # Scale: convert stitched voxels to display-voxel units
+                scale = voxel_um / display_voxel_um  # per-axis
+
+                # Translate: position origin in display-voxel coordinate space
+                translate = (origin_um - chamber_origin_um) / display_voxel_um
+
+                # Look up channel colormap from config
+                colormap = "gray"
+                ch_name = f"Stitched ch{ch_id}"
+                for ch_cfg in channels_config:
+                    if ch_cfg.get("id") == ch_id:
+                        colormap = ch_cfg.get("default_colormap", "gray")
+                        ch_name = f"{ch_cfg.get('name', f'ch{ch_id}')} (stitched)"
+                        break
+
+                self.logger.info(
+                    f"Adding stitched layer '{ch_name}': shape={volume.shape}, "
+                    f"scale={scale}, translate={translate}"
+                )
+
+                layer = self.viewer.add_image(
+                    volume,
+                    name=ch_name,
+                    colormap=colormap,
+                    visible=True,
+                    blending="additive",
+                    opacity=0.8,
+                    rendering="mip",
+                    scale=list(scale),
+                    translate=list(translate),
+                )
+
+                # Tag so we can find/remove these layers later
+                layer.metadata["stitched"] = True
+                layer.metadata["ch_id"] = ch_id
+                ch_ids_loaded.append(ch_id)
+
+            if restore_3d:
+                self.viewer.dims.ndisplay = 3
+
+            # Reset camera to show the stitched data
+            self.viewer.reset_view()
 
             QMessageBox.information(
                 self,
                 "Stitched Data Loaded",
-                f"Loaded {len(channels)} channel(s): {channels}\n"
+                f"Loaded {len(ch_ids_loaded)} channel(s): {ch_ids_loaded}\n"
                 f"from: {output_dir}",
             )
 
@@ -2525,51 +2584,18 @@ class SampleView(QWidget):
                 self, "Load Error", f"Error loading stitched data:\n{e}"
             )
 
-    def _center_stage_on_stitched(self, output_dir: Path) -> None:
-        """Move virtual stage position to center stitched data in the display.
-
-        Reads stitch_metadata.json to find the world-coordinate center of the
-        stitched volume, converts to stage coordinates (mm), and updates
-        the position sliders + internal state. Only useful when disconnected.
-        """
-        import json
-
-        meta_path = output_dir / "stitch_metadata.json"
-        if not meta_path.exists():
+    def _remove_stitched_layers(self) -> None:
+        """Remove any previously loaded stitched layers from the viewer."""
+        if not self.viewer:
             return
-
-        try:
-            metadata = json.loads(meta_path.read_text())
-            voxel_um = metadata["voxel_size_um"]
-
-            # Collect origins from all channels to find bounding box center
-            origins = []
-            for ch_meta in metadata["channels"].values():
-                origins.append(ch_meta["origin_um"])  # [z, y, x] in µm
-
-            if not origins:
-                return
-
-            # Use the first channel origin as representative (all channels
-            # share the same tile grid, so origins are nearly identical)
-            origin_um = origins[0]  # [z, y, x]
-
-            # Convert to stage coordinates (mm): stage uses (x, y, z) in mm
-            # origin_um is [z_um, y_um, x_um]
-            stage_x = origin_um[2] / 1000.0  # x
-            stage_y = origin_um[1] / 1000.0  # y
-            stage_z = origin_um[0] / 1000.0  # z
-
-            self.logger.info(
-                f"Centering virtual stage on stitched data: "
-                f"X={stage_x:.3f}, Y={stage_y:.3f}, Z={stage_z:.3f} mm"
-            )
-
-            # Update internal position and sliders
-            self._on_position_changed(stage_x, stage_y, stage_z, 0.0)
-
-        except Exception as e:
-            self.logger.warning(f"Could not center stage on stitched data: {e}")
+        to_remove = [
+            layer
+            for layer in self.viewer.layers
+            if getattr(layer, "metadata", {}).get("stitched")
+        ]
+        for layer in to_remove:
+            self.logger.info(f"Removing previous stitched layer: {layer.name}")
+            self.viewer.layers.remove(layer)
 
     def _on_settings_clicked(self) -> None:
         """Open the application settings dialog."""

@@ -777,20 +777,26 @@ class SessionManager:
         return total
 
 
-def load_stitched_volume(output_dir: Path, voxel_storage) -> dict:
-    """Load stitched OME-Zarr output into voxel storage at the correct world position.
+def load_stitched_volume(output_dir: Path, voxel_storage=None) -> dict:
+    """Load stitched OME-Zarr output at native resolution for direct napari display.
 
-    Reads stitch_metadata.json for per-channel origin and voxel size,
-    downsamples from native resolution to display resolution using dask
-    coarsen (out-of-core), and places the result into the display cache.
+    Returns volume data + world coordinates for each channel so the caller
+    can add them as napari layers with correct scale/translate.  No
+    downsampling is applied — the data is displayed at whatever resolution
+    it was stitched at.
 
     Args:
         output_dir: Path to the stitching output directory containing
                     stitch_metadata.json and per-channel .ome.zarr stores
-        voxel_storage: DualResolutionVoxelStorage instance
+        voxel_storage: Optional — used only to read display_voxel_size and
+                       chamber_origin for coordinate mapping.  May be None.
 
     Returns:
-        dict with keys: channels_loaded (list[int]), metadata (dict)
+        dict with keys:
+            channels (list[dict]): Per-channel info with keys:
+                ch_id (int), volume (np.ndarray), origin_um (np.ndarray),
+                voxel_size_um (np.ndarray)
+            metadata (dict): Raw stitch_metadata.json content
 
     Raises:
         FileNotFoundError: If stitch_metadata.json not found
@@ -805,35 +811,22 @@ def load_stitched_volume(output_dir: Path, voxel_storage) -> dict:
         raise FileNotFoundError(f"stitch_metadata.json not found in {output_dir}")
 
     metadata = json.loads(meta_path.read_text())
-
     native_voxel = metadata["voxel_size_um"]  # {"z": ..., "y": ..., "x": ...}
-    display_voxel = np.array(voxel_storage.config.display_voxel_size)  # (z, y, x)
-    display_dims = voxel_storage.display_dims  # (Z, Y, X)
 
-    channels_loaded = []
+    channels = []
 
     for ch_str, ch_meta in metadata["channels"].items():
         ch_id = int(ch_str)
-        if ch_id >= voxel_storage.num_channels:
-            logger.warning(f"Channel {ch_id} exceeds storage channels, skipping")
-            continue
 
         try:
-            _load_stitched_channel(
-                output_dir,
-                ch_meta,
-                ch_id,
-                native_voxel,
-                display_voxel,
-                display_dims,
-                voxel_storage,
-            )
-            channels_loaded.append(ch_id)
+            vol_info = _load_stitched_channel(output_dir, ch_meta, ch_id, native_voxel)
+            channels.append(vol_info)
         except Exception as e:
             logger.error(f"Failed to load stitched channel {ch_id}: {e}")
 
-    logger.info(f"Loaded {len(channels_loaded)} stitched channel(s): {channels_loaded}")
-    return {"channels_loaded": channels_loaded, "metadata": metadata}
+    ch_ids = [c["ch_id"] for c in channels]
+    logger.info(f"Loaded {len(channels)} stitched channel(s): {ch_ids}")
+    return {"channels": channels, "metadata": metadata}
 
 
 def _load_stitched_channel(
@@ -841,11 +834,12 @@ def _load_stitched_channel(
     ch_meta: dict,
     ch_id: int,
     native_voxel: dict,
-    display_voxel: np.ndarray,
-    display_dims: tuple,
-    voxel_storage,
-) -> None:
-    """Load and downsample a single stitched channel into the display cache."""
+) -> dict:
+    """Load a single stitched channel at native resolution.
+
+    Returns:
+        dict with ch_id, volume (np.ndarray), origin_um, voxel_size_um
+    """
     import dask.array as da
 
     zarr_path = output_dir / ch_meta["path"]
@@ -853,100 +847,32 @@ def _load_stitched_channel(
         raise FileNotFoundError(f"Channel zarr not found: {zarr_path}")
 
     origin_um = np.array(ch_meta["origin_um"])  # [z, y, x] in µm
+    voxel_size_um = np.array([native_voxel["z"], native_voxel["y"], native_voxel["x"]])
 
     # Open zarr store at level 0 (full resolution)
     store = _create_zarr_store(str(zarr_path))
     root = zarr.open_group(store=store, mode="r")
 
-    # Find the level-0 array.
-    # OME-Zarr v0.5 (ngff-zarr) may nest: root/"0" can be a Group
-    # containing the sharded array, or the array itself (zarr-direct).
+    # Find the level-0 array (OME-Zarr v0.5 may nest Groups)
     arr = _find_zarr_array(root, zarr_path)
 
     logger.info(
         f"  Channel {ch_id}: shape={arr.shape}, dtype={arr.dtype}, "
-        f"origin_um={origin_um}"
+        f"origin_um={origin_um}, voxel_size_um={voxel_size_um}"
     )
 
-    # Compute downsample factors per axis
-    native_vs = np.array([native_voxel["z"], native_voxel["y"], native_voxel["x"]])
-    ds_factors = native_vs / display_voxel  # < 1 means native is finer
-    # Integer downsample factor for coarsen (minimum 1)
-    coarsen_factors = np.maximum(1, np.round(display_voxel / native_vs).astype(int))
-
-    logger.info(
-        f"  Downsample factors: {coarsen_factors} "
-        f"(native {native_vs} → display {display_voxel})"
-    )
-
-    # Read data via dask for out-of-core processing
+    # Read into memory via dask (handles chunked/sharded stores)
+    logger.info(f"  Loading volume into memory...")
     data = da.from_zarr(arr)
-
-    # Downsample using coarsen (block reduce with mean)
-    cz, cy, cx = (
-        int(coarsen_factors[0]),
-        int(coarsen_factors[1]),
-        int(coarsen_factors[2]),
-    )
-    if cz > 1 or cy > 1 or cx > 1:
-        # Trim to multiple of coarsen factors
-        trim_z = (data.shape[0] // cz) * cz
-        trim_y = (data.shape[1] // cy) * cy
-        trim_x = (data.shape[2] // cx) * cx
-        data = data[:trim_z, :trim_y, :trim_x]
-
-        data = da.coarsen(np.mean, data, {0: cz, 1: cy, 2: cx})
-
-    # Compute into memory
-    logger.info(f"  Computing downsampled volume...")
     volume = data.compute().astype(np.uint16)
-    logger.info(f"  Downsampled shape: {volume.shape}")
+    logger.info(f"  Loaded shape: {volume.shape}")
 
-    # Compute display voxel position for the origin
-    display_pos = voxel_storage.world_to_display_voxel(origin_um)
-    logger.info(f"  Display voxel position: {display_pos}")
-
-    # Clip to display bounds
-    src_start = np.zeros(3, dtype=int)
-    dst_start = display_pos.copy()
-    src_end = np.array(volume.shape)
-
-    for ax in range(3):
-        if dst_start[ax] < 0:
-            src_start[ax] = -dst_start[ax]
-            dst_start[ax] = 0
-        if dst_start[ax] + (src_end[ax] - src_start[ax]) > display_dims[ax]:
-            src_end[ax] = src_start[ax] + (display_dims[ax] - dst_start[ax])
-
-    # Check if anything is within bounds
-    copy_shape = src_end - src_start
-    if np.any(copy_shape <= 0):
-        logger.warning(f"  Channel {ch_id}: stitched data falls outside display bounds")
-        return
-
-    dst_end = dst_start + copy_shape
-
-    logger.info(
-        f"  Placing in display cache: dst[{dst_start[0]}:{dst_end[0]}, "
-        f"{dst_start[1]}:{dst_end[1]}, {dst_start[2]}:{dst_end[2]}]"
-    )
-
-    # Copy into display cache
-    region = volume[
-        src_start[0] : src_end[0],
-        src_start[1] : src_end[1],
-        src_start[2] : src_end[2],
-    ]
-    voxel_storage.display_cache[ch_id][
-        dst_start[0] : dst_end[0],
-        dst_start[1] : dst_end[1],
-        dst_start[2] : dst_end[2],
-    ] = region
-
-    voxel_storage.display_dirty[ch_id] = False
-    max_val = int(np.max(region))
-    if max_val > voxel_storage.channel_max_values.get(ch_id, 0):
-        voxel_storage.channel_max_values[ch_id] = max_val
+    return {
+        "ch_id": ch_id,
+        "volume": volume,
+        "origin_um": origin_um,
+        "voxel_size_um": voxel_size_um,
+    }
     voxel_storage._session_loaded_channels.add(ch_id)
 
     logger.info(f"  Channel {ch_id}: loaded, max={max_val}")
