@@ -178,24 +178,54 @@ class ChamberVisualizationManager:
         QTimer.singleShot(100, self.reset_camera)
 
     def _setup_chamber(self) -> None:
-        """Setup the fixed chamber wireframe as visual guide."""
+        """Setup the fixed chamber wireframe as visual guide.
+
+        The wireframe represents the physical sample chamber, which may be
+        smaller than the full display volume (y_range covers full stage travel
+        but the glass cuvette is only ~14mm tall).
+        """
         if not self.viewer or not self.voxel_storage:
             return
 
         try:
             dims = self.voxel_storage.display_dims  # (Z, Y, X) order
 
-            # Define the 8 corners of the box in napari (Z, Y, X) order
+            # Physical chamber bounds in napari voxel coordinates.
+            # The chamber is 14mm tall (chamber Y 0-14mm), positioned within
+            # the larger display volume that covers the full stage Y range.
+            stage_ctrl = self._config.get("stage_control", {})
+            y_range = stage_ctrl.get("y_range_mm", [0.0, 25.0])
+            voxel_size_mm = (
+                self._config.get("display", {}).get("voxel_size_um", [50, 50, 50])[0]
+                / 1000.0
+            )
+            chamber_height_mm = self._config.get("sample_chamber", {}).get(
+                "chamber_below_anchor_mm", 10.0
+            ) + self._config.get("sample_chamber", {}).get(
+                "chamber_above_anchor_mm", 5.0
+            )  # default 15mm
+            # Chamber top is at chamber_y=0, bottom at chamber_y=chamber_height
+            chamber_y_top = int(
+                (y_range[1] - 0) / voxel_size_mm
+            )  # napari Y for chamber_y=0
+            chamber_y_bot = int(
+                (y_range[1] - chamber_height_mm) / voxel_size_mm
+            )  # napari Y for chamber bottom
+            # Clamp to display bounds
+            chamber_y_top = min(chamber_y_top, dims[1] - 1)
+            chamber_y_bot = max(chamber_y_bot, 0)
+
+            # Define the 8 corners of the CHAMBER box in napari (Z, Y, X) order
             corners = np.array(
                 [
-                    [0, 0, 0],
-                    [dims[0] - 1, 0, 0],
-                    [dims[0] - 1, 0, dims[2] - 1],
-                    [0, 0, dims[2] - 1],
-                    [0, dims[1] - 1, 0],
-                    [dims[0] - 1, dims[1] - 1, 0],
-                    [dims[0] - 1, dims[1] - 1, dims[2] - 1],
-                    [0, dims[1] - 1, dims[2] - 1],
+                    [0, chamber_y_bot, 0],
+                    [dims[0] - 1, chamber_y_bot, 0],
+                    [dims[0] - 1, chamber_y_bot, dims[2] - 1],
+                    [0, chamber_y_bot, dims[2] - 1],
+                    [0, chamber_y_top, 0],
+                    [dims[0] - 1, chamber_y_top, 0],
+                    [dims[0] - 1, chamber_y_top, dims[2] - 1],
+                    [0, chamber_y_top, dims[2] - 1],
                 ]
             )
 
@@ -236,7 +266,7 @@ class ChamberVisualizationManager:
             )
 
             # Add reference walls (subtle fill for orientation when rotating)
-            self._add_reference_walls(dims)
+            self._add_reference_walls(dims, chamber_y_top, chamber_y_bot)
 
             # Add additional visualization elements
             self._add_sample_holder()
@@ -248,33 +278,34 @@ class ChamberVisualizationManager:
         except Exception as e:
             self.logger.warning(f"Failed to setup chamber visualization: {e}")
 
-    def _add_reference_walls(self, dims) -> None:
+    def _add_reference_walls(self, dims, chamber_y_top, chamber_y_bot) -> None:
         """Add subtle filled walls for orientation when rotating the 3D view.
 
-        Two walls are drawn:
+        Two walls are drawn within the physical chamber bounds:
         - Back wall at Z=0 (where the objective is located)
-        - Bottom wall at Y=dims[1]-1 (physical bottom of the chamber)
+        - Bottom wall at chamber_y_top (physical bottom of the chamber)
 
         Args:
             dims: Display dimensions tuple (Z, Y, X) in voxels
+            chamber_y_top: napari Y for physical top of chamber (high Y = low chamber_y)
+            chamber_y_bot: napari Y for physical bottom of chamber (low Y = high chamber_y)
         """
         if not self.viewer:
             return
 
         try:
             z_max = dims[0] - 1
-            y_max = dims[1] - 1
             x_max = dims[2] - 1
 
             wall_opacity = 0.04
 
-            # --- Back wall (Z=0 plane, where objective is) ---
+            # --- Back wall (Z=0 plane, within chamber Y bounds) ---
             back_verts = np.array(
                 [
-                    [0, 0, 0],  # top-left
-                    [0, 0, x_max],  # top-right
-                    [0, y_max, x_max],  # bottom-right
-                    [0, y_max, 0],  # bottom-left
+                    [0, chamber_y_bot, 0],
+                    [0, chamber_y_bot, x_max],
+                    [0, chamber_y_top, x_max],
+                    [0, chamber_y_top, 0],
                 ],
                 dtype=np.float32,
             )
@@ -289,13 +320,13 @@ class ChamberVisualizationManager:
                 shading="none",
             )
 
-            # --- Bottom wall (Y=max plane, physical bottom of chamber) ---
+            # --- Bottom wall (physical bottom of chamber) ---
             bottom_verts = np.array(
                 [
-                    [0, y_max, 0],  # back-left
-                    [0, y_max, x_max],  # back-right
-                    [z_max, y_max, x_max],  # front-right
-                    [z_max, y_max, 0],  # front-left
+                    [0, chamber_y_top, 0],
+                    [0, chamber_y_top, x_max],
+                    [z_max, chamber_y_top, x_max],
+                    [z_max, chamber_y_top, 0],
                 ],
                 dtype=np.float32,
             )
@@ -311,7 +342,7 @@ class ChamberVisualizationManager:
             )
 
             self.logger.info(
-                f"Added reference walls (back Z=0, bottom Y={y_max}) at {wall_opacity:.0%} opacity"
+                f"Added reference walls (back Z=0, bottom Y={chamber_y_top}) at {wall_opacity:.0%} opacity"
             )
 
         except Exception as e:

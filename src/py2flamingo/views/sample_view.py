@@ -184,14 +184,19 @@ class SampleView(QWidget):
         self.coord_mapper = None  # Will be set from voxel_storage
 
         # Stage position tracking for dynamic 3D updates
-        # Default to center of chamber ranges so disconnected view is sensible
+        # Default: center X/Z, Y places holder tip at chamber top (chamber_y=0).
+        # chamber_y = stage_y - (STAGE_Y_AT_OBJECTIVE - OBJECTIVE_CHAMBER_Y_MM)
+        # For tip at chamber_y=0: stage_y = STAGE_Y_AT_OBJECTIVE - OBJECTIVE_CHAMBER_Y_MM
         stage_ctrl = self._config.get("stage_control", {})
         x_range = stage_ctrl.get("x_range_mm", [1.0, 12.31])
-        y_range = stage_ctrl.get("y_range_mm", [0.0, 14.0])
         z_range = stage_ctrl.get("z_range_mm", [12.5, 26.0])
+        stage_y_for_chamber_top = (
+            self._chamber_viz.STAGE_Y_AT_OBJECTIVE
+            - self._chamber_viz.OBJECTIVE_CHAMBER_Y_MM
+        )  # 7.45 - 7.0 = 0.45mm
         self.last_stage_position = {
             "x": (x_range[0] + x_range[1]) / 2,
-            "y": (y_range[0] + y_range[1]) / 2,
+            "y": stage_y_for_chamber_top,
             "z": (z_range[0] + z_range[1]) / 2,
             "r": 0,
         }
