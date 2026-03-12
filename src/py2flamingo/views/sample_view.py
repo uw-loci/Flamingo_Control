@@ -2498,19 +2498,28 @@ class SampleView(QWidget):
             # Remove any previously loaded stitched layers
             self._remove_stitched_layers()
 
-            # Coordinate mapping: existing channel layers use display-voxel
-            # units where 1 napari unit = display_voxel_size µm.
-            # Chamber origin is the (0,0,0) corner of the display cache.
+            # Coordinate mapping: stitched data origin is in stage coordinates
+            # [z, y, x] in µm.  The display cache + chamber visualization use
+            # napari coordinates where:
+            #   Z: napari_z = (z - z_range_min) / display_voxel  (not inverted)
+            #   Y: napari_y = (y_range_max - chamber_y) / display_voxel  (inverted)
+            #   X: napari_x = (x_range_max - x) / display_voxel  (inverted when invert_x)
+            # Stage Y → chamber Y offset: chamber_y = stage_y - 0.45mm
             display_voxel_um = np.array(
                 self.voxel_storage.config.display_voxel_size
                 if self.voxel_storage
                 else [50, 50, 50]
             )
-            chamber_origin_um = np.array(
-                self.voxel_storage.config.chamber_origin
-                if self.voxel_storage
-                else [0, 0, 0]
-            )
+            stage_ctrl = self._config.get("stage_control", {})
+            z_range_min_um = stage_ctrl.get("z_range_mm", [12.5, 26.0])[0] * 1000
+            y_range_max_um = stage_ctrl.get("y_range_mm", [0.0, 14.0])[1] * 1000
+            x_range_min_um = stage_ctrl.get("x_range_mm", [1.0, 12.31])[0] * 1000
+            x_range_max_um = stage_ctrl.get("x_range_mm", [1.0, 12.31])[1] * 1000
+            # Stage-to-chamber Y offset (mm → µm)
+            stage_y_offset_um = (
+                self._chamber_viz.STAGE_Y_AT_OBJECTIVE
+                - self._chamber_viz.OBJECTIVE_CHAMBER_Y_MM
+            ) * 1000  # 0.45mm = 450µm
 
             channels_config = self._config.get("channels", [])
             ch_ids_loaded = []
@@ -2528,11 +2537,37 @@ class SampleView(QWidget):
                 origin_um = ch_info["origin_um"]  # [z, y, x]
                 voxel_um = ch_info["voxel_size_um"]  # [z, y, x]
 
-                # Scale: convert stitched voxels to display-voxel units
-                scale = voxel_um / display_voxel_um  # per-axis
+                # Scale & translate: map stitched voxels into the same napari
+                # coordinate frame as the display cache / chamber visualization.
+                # Axis conventions match chamber_visualization_manager:
+                #   Z: forward (not inverted)
+                #   Y: inverted (napari Y=0 = physical Y max)
+                #   X: inverted when invert_x is True
+                origin_z, origin_y_stage, origin_x = origin_um
+                voxel_z, voxel_y, voxel_x = voxel_um
+                dv_z, dv_y, dv_x = display_voxel_um
 
-                # Translate: position origin in display-voxel coordinate space
-                translate = (origin_um - chamber_origin_um) / display_voxel_um
+                # Convert stage Y to chamber Y
+                origin_y_chamber = origin_y_stage - stage_y_offset_um
+
+                # Z: not inverted — offset from range minimum
+                scale_z = voxel_z / dv_z
+                translate_z = (origin_z - z_range_min_um) / dv_z
+
+                # Y: inverted — napari_y = (y_max - chamber_y) / voxel
+                scale_y = -voxel_y / dv_y
+                translate_y = (y_range_max_um - origin_y_chamber) / dv_y
+
+                # X: depends on invert_x setting
+                if self._invert_x:
+                    scale_x = -voxel_x / dv_x
+                    translate_x = (x_range_max_um - origin_x) / dv_x
+                else:
+                    scale_x = voxel_x / dv_x
+                    translate_x = (origin_x - x_range_min_um) / dv_x
+
+                scale = np.array([scale_z, scale_y, scale_x])
+                translate = np.array([translate_z, translate_y, translate_x])
 
                 # Look up channel colormap from config
                 colormap = "gray"
@@ -2568,46 +2603,42 @@ class SampleView(QWidget):
             if restore_3d:
                 self.viewer.dims.ndisplay = 3
 
-            # Check if stitched data is outside chamber bounds
-            chamber_dims = (
+            # Check if stitched data is outside chamber bounds.
+            # With negative scales the volume extends from translate toward
+            # lower napari coords, so compute the full bounding box.
+            chamber_dims_vox = (
                 np.array(
                     self.voxel_storage.config.chamber_dimensions
                     if self.voxel_storage
                     else [13500, 14000, 11310]
                 )
                 / display_voxel_um
-            )  # in display voxels
-            out_of_bounds = any(
-                t < -10 or t > d + 10 for t, d in zip(translate, chamber_dims)
+            )
+            # Bounding box of last channel (representative)
+            vol_shape = np.array(volume.shape, dtype=float)
+            corner_a = translate
+            corner_b = translate + vol_shape * scale
+            bbox_min = np.minimum(corner_a, corner_b)
+            bbox_max = np.maximum(corner_a, corner_b)
+            out_of_bounds = np.any(bbox_max < -10) or np.any(
+                bbox_min > chamber_dims_vox + 10
             )
 
             if out_of_bounds:
-                # Data is outside chamber — compute origin in mm for message
                 origin_mm = origin_um / 1000.0
-                chamber_end_mm = (
-                    chamber_origin_um
-                    + np.array(
-                        self.voxel_storage.config.chamber_dimensions
-                        if self.voxel_storage
-                        else [13500, 14000, 11310]
-                    )
-                ) / 1000.0
                 self.logger.warning(
-                    f"Stitched data origin {origin_mm} mm is outside "
-                    f"chamber bounds [{chamber_origin_um/1000} - {chamber_end_mm}] mm. "
-                    f"Data will appear outside the chamber visualization."
+                    f"Stitched data bbox [{bbox_min} - {bbox_max}] display voxels "
+                    f"is outside chamber bounds [0 - {chamber_dims_vox}]. "
+                    f"Stage origin: {origin_mm} mm"
                 )
                 QMessageBox.warning(
                     self,
                     "Stitched Data Loaded (Outside Chamber)",
                     f"Loaded {len(ch_ids_loaded)} channel(s): {ch_ids_loaded}\n"
                     f"from: {output_dir}\n\n"
-                    f"Note: The stitched data origin "
-                    f"(Z={origin_mm[0]:.1f}, Y={origin_mm[1]:.1f}, "
-                    f"X={origin_mm[2]:.1f} mm) is outside the chamber "
+                    f"Note: The stitched data may be outside the chamber "
                     f"visualization bounds.\n\n"
-                    f"The data may not be visible in the 3D viewer. "
-                    f"Consider adjusting y_range_mm in "
+                    f"Consider adjusting range settings in "
                     f"visualization_3d_config.yaml to include the "
                     f"acquisition region.",
                 )

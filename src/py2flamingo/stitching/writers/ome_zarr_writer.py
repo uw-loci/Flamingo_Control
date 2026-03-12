@@ -1,21 +1,33 @@
-"""OME-Zarr v0.5 writer with sharding and multi-resolution pyramids.
+"""OME-Zarr writers with multi-resolution pyramids.
 
-Produces a sharded Zarr v3 store with ~2000-4000 files per TB instead of
-~250,000+ files without sharding. Uses ngff-zarr for multi-resolution
-pyramid generation with proper anti-alias filtering.
+Two output modes:
 
-Output structure:
-    output.ome.zarr/
-        zarr.json                    # Root group metadata
-        0/                           # Full resolution (sharded)
-            zarr.json
-            c/0/0/0 ... c/N/N/N     # Shard files (~256 MB each)
-        1/                           # 2x downsampled
-        2/                           # 4x downsampled
-        ...
+  v3 sharded (OME-NGFF v0.5 + Zarr v3)
+    - ~2000-4000 files/TB via sharding
+    - Viewable in napari (zarr-python 3.x)
+    - NOT readable by Fiji, QuPath, BigDataViewer
+
+  v2 compatible (OME-NGFF v0.4 + Zarr v2)
+    - ~250k files/TB (no sharding)
+    - Readable by Fiji (N5 plugin), QuPath, BigDataViewer, napari, MATLAB
+    - Uses .zgroup/.zarray/.zattrs layout
+
+Output structures:
+    v3: output.ome.zarr/
+        zarr.json                    # Root group (Zarr v3)
+        0/zarr.json                  # Array metadata
+        0/c/0/0/0 ... c/N/N/N       # Shard files (~256 MB each)
+        1/ ...                       # 2x downsampled
+    v2: output.ome.zarr/
+        .zgroup                      # Root group (Zarr v2)
+        .zattrs                      # OME-NGFF v0.4 multiscales metadata
+        0/.zarray                    # Array metadata (chunks, compressor)
+        0/0.0.0 ... N.N.N           # Chunk files (~4 MB each)
+        1/ ...                       # 2x downsampled
 
 Requirements:
-    pip install "zarr>=3.1.4" ngff-zarr
+    v3: pip install "zarr>=3.1.4" ngff-zarr
+    v2: pip install "zarr>=3.1.4" numcodecs
 """
 
 import logging
@@ -385,6 +397,167 @@ def _log_output_stats(output_path: Path):
     total_gb = total_bytes / (1024**3)
 
     logger.info(f"Output: {output_path} — {file_count} files, {total_gb:.2f} GB")
+
+
+def write_ome_zarr_v2(
+    data: Any,
+    output_path: Path,
+    voxel_size_um: Dict[str, float],
+    chunks: Tuple[int, ...] = DEFAULT_CHUNKS,
+    compression: str = DEFAULT_COMPRESSION,
+    compression_level: int = DEFAULT_COMPRESSION_LEVEL,
+    pyramid_levels: Optional[int] = None,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+) -> Path:
+    """Write OME-Zarr v0.4 (Zarr v2) with multi-resolution pyramid.
+
+    Produces a Zarr v2 store readable by Fiji (N5 plugin), QuPath,
+    BigDataViewer, napari, and most bio-imaging tools.  No sharding —
+    each chunk is a separate file — so file counts are higher, but
+    compatibility is universal.
+
+    Args:
+        data: 3D numpy array (Z, Y, X), dask array, or SpatialImage.
+        output_path: Where to write the .ome.zarr directory.
+        voxel_size_um: Dict with 'z', 'y', 'x' voxel sizes in micrometers.
+        chunks: Chunk shape for compression units.
+        compression: Compression codec ('zstd', 'lz4', 'zlib', 'none').
+        compression_level: Compression level (codec-dependent).
+        pyramid_levels: Number of downsampled levels (None = auto).
+        progress_callback: Optional (percentage, message) callback.
+
+    Returns:
+        Path to the written .ome.zarr directory.
+    """
+    import json
+
+    import zarr
+
+    output_path = Path(output_path)
+    np_data = _to_numpy(data)
+
+    if progress_callback:
+        progress_callback(5, "Preparing Zarr v2 output...")
+
+    # --- Build compressor (numcodecs for Zarr v2) ---
+    compressor = _build_v2_compressor(compression, compression_level)
+
+    # --- Auto-compute pyramid levels ---
+    if pyramid_levels is None:
+        min_dim = min(np_data.shape)
+        pyramid_levels = 0
+        while min_dim > 64:
+            min_dim //= 2
+            pyramid_levels += 1
+        pyramid_levels = max(1, min(pyramid_levels, 6))
+
+    if progress_callback:
+        progress_callback(10, f"Generating {pyramid_levels}-level pyramid...")
+
+    logger.info(
+        f"Generating pyramid: {pyramid_levels} levels, "
+        f"chunks={chunks}, compression={compression}"
+    )
+
+    # --- Generate pyramid via block averaging ---
+    pyramid = [np_data]
+    for i in range(pyramid_levels):
+        pyramid.append(_downsample_2x(pyramid[-1]))
+
+    if progress_callback:
+        progress_callback(30, "Writing Zarr v2 store...")
+
+    # --- Write Zarr v2 store ---
+    root = zarr.open_group(str(output_path), mode="w", zarr_format=2)
+
+    datasets_meta = []
+    total_levels = len(pyramid)
+    for level_idx, level_data in enumerate(pyramid):
+        scale_factor = 2**level_idx
+        level_chunks = tuple(min(c, s) for c, s in zip(chunks, level_data.shape))
+
+        root.create_array(
+            str(level_idx),
+            data=level_data,
+            chunks=level_chunks,
+            dtype=level_data.dtype,
+            compressors=compressor,
+        )
+
+        datasets_meta.append(
+            {
+                "path": str(level_idx),
+                "coordinateTransformations": [
+                    {
+                        "type": "scale",
+                        "scale": [
+                            voxel_size_um["z"] * scale_factor,
+                            voxel_size_um["y"] * scale_factor,
+                            voxel_size_um["x"] * scale_factor,
+                        ],
+                    }
+                ],
+            }
+        )
+
+        if progress_callback:
+            pct = 30 + int(60 * (level_idx + 1) / total_levels)
+            progress_callback(pct, f"Wrote level {level_idx}/{total_levels - 1}...")
+
+        logger.info(
+            f"  Level {level_idx}: shape={level_data.shape}, "
+            f"chunks={level_chunks}, scale={scale_factor}x"
+        )
+
+    # --- Write OME-NGFF v0.4 metadata in .zattrs ---
+    # v0.4: multiscales lives at root .zattrs (NOT under "ome" key)
+    root.attrs["multiscales"] = [
+        {
+            "version": "0.4",
+            "name": "stitched",
+            "axes": [
+                {"name": "z", "type": "space", "unit": "micrometer"},
+                {"name": "y", "type": "space", "unit": "micrometer"},
+                {"name": "x", "type": "space", "unit": "micrometer"},
+            ],
+            "datasets": datasets_meta,
+            "type": "mean",
+        }
+    ]
+
+    if progress_callback:
+        progress_callback(100, "OME-Zarr v2 write complete")
+
+    _log_output_stats(output_path)
+    return output_path
+
+
+def _build_v2_compressor(compression: str, level: int):
+    """Build a numcodecs compressor for Zarr v2 stores."""
+    if compression == "none":
+        return None
+    try:
+        import numcodecs
+
+        cname = (
+            compression if compression in ("zstd", "lz4", "snappy", "zlib") else "zstd"
+        )
+        return numcodecs.Blosc(cname=cname, clevel=level)
+    except ImportError:
+        logger.warning("numcodecs not available, writing uncompressed Zarr v2")
+        return None
+
+
+def _downsample_2x(arr: np.ndarray) -> np.ndarray:
+    """Downsample a 3D array by 2x using block averaging."""
+    # Trim to even dimensions
+    s = tuple(d - d % 2 for d in arr.shape)
+    trimmed = arr[: s[0], : s[1], : s[2]]
+    return (
+        trimmed.reshape(s[0] // 2, 2, s[1] // 2, 2, s[2] // 2, 2)
+        .mean(axis=(1, 3, 5))
+        .astype(arr.dtype)
+    )
 
 
 def package_as_ozx(zarr_path: Path, ozx_path: Path) -> Path:

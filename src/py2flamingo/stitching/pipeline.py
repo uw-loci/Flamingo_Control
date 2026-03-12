@@ -69,12 +69,13 @@ class StitchingConfig:
     # Illumination fusion
     illumination_fusion: str = "max"  # "max", "mean", or "leonardo"
 
-    # Output format: "tiff", "ome-zarr", "ome-zarr-sharded", "ome-tiff", "both"
-    #   tiff            — flat TIFF (legacy, no pyramid)
-    #   ome-zarr        — OME-Zarr via multiview-stitcher (no sharding)
-    #   ome-zarr-sharded — OME-Zarr v0.5 with sharding + multi-res pyramid
-    #   ome-tiff        — Pyramidal OME-TIFF BigTIFF (single file)
-    #   both            — Write both ome-zarr-sharded and ome-tiff
+    # Output format:
+    #   ome-zarr-sharded — Zarr v3, OME-NGFF v0.5, sharded (napari only)
+    #   ome-zarr-v2      — Zarr v2, OME-NGFF v0.4 (Fiji/QuPath/BDV/napari)
+    #   ome-tiff         — Pyramidal OME-TIFF BigTIFF (single file, universal)
+    #   both             — Write ome-zarr-sharded + ome-tiff
+    #   tiff             — Flat TIFF (legacy, no pyramid)
+    #   ome-zarr         — OME-Zarr via multiview-stitcher (legacy)
     output_format: str = "ome-zarr-sharded"
     output_chunksize: Dict[str, int] = field(
         default_factory=lambda: {"z": 128, "y": 256, "x": 256}
@@ -1017,6 +1018,28 @@ class StitchingPipeline:
 
             except ImportError as e:
                 self.logger.error(f"  OME-Zarr sharded write failed: {e}")
+                self.logger.info("  Falling back to OME-TIFF")
+                fmt = "ome-tiff"
+
+        if fmt == "ome-zarr-v2":
+            out_path = output_dir / f"channel_{channel_id:02d}.ome.zarr"
+            self.logger.info(f"  Writing OME-Zarr v2 (Fiji compatible): {out_path}")
+            try:
+                from py2flamingo.stitching.writers.ome_zarr_writer import (
+                    write_ome_zarr_v2,
+                )
+
+                write_ome_zarr_v2(
+                    data=fused,
+                    output_path=out_path,
+                    voxel_size_um=voxel_size_um,
+                    chunks=self.config.zarr_chunks,
+                    compression=self.config.zarr_compression,
+                    compression_level=self.config.zarr_compression_level,
+                    pyramid_levels=self.config.pyramid_levels,
+                )
+            except Exception as e:
+                self.logger.error(f"  OME-Zarr v2 write failed: {e}")
                 self.logger.info("  Falling back to OME-TIFF")
                 fmt = "ome-tiff"
 

@@ -146,47 +146,51 @@ class StitchingDialog(PersistentDialog):
         # Output format
         settings_layout.addWidget(QLabel("Output format:"), 2, 2)
         self._format_combo = QComboBox()
+        self._format_combo.addItem("OME-Zarr (Fiji compatible)", "ome-zarr-v2")
         self._format_combo.addItem("OME-Zarr Sharded", "ome-zarr-sharded")
         self._format_combo.addItem("OME-TIFF (single file)", "ome-tiff")
-        self._format_combo.addItem("Both (Zarr + TIFF)", "both")
-        self._format_combo.addItem("TIFF (flat)", "tiff")
-        self._format_combo.addItem("OME-Zarr (legacy)", "ome-zarr")
+        self._format_combo.addItem("Both (Sharded + TIFF)", "both")
         self._format_combo.setToolTip(
-            "OME-Zarr Sharded: ~2000 files/TB, multi-resolution pyramid, fast\n"
-            "OME-TIFF: single file, universal viewer compatibility\n"
-            "Both: write both formats"
+            "OME-Zarr (Fiji compatible): opens in Fiji, QuPath, BigDataViewer, napari\n"
+            "OME-Zarr Sharded: fewest files, napari only (Fiji cannot open)\n"
+            "OME-TIFF: single file, universal viewer support\n"
+            "Both: write Zarr Sharded + TIFF"
         )
         settings_layout.addWidget(self._format_combo, 2, 3)
 
         # Format help label
-        format_help = QLabel("?")
+        format_help = QLabel("Zarr?")
         format_help.setStyleSheet(
-            "QLabel { color: #1976D2; font-weight: bold; font-size: 13px; "
+            "QLabel { color: #1976D2; font-weight: bold; font-size: 11px; "
             "border: 1px solid #1976D2; border-radius: 8px; "
-            "min-width: 16px; max-width: 16px; min-height: 16px; max-height: 16px; "
+            "padding: 0px 4px; "
             "qproperty-alignment: AlignCenter; }"
         )
         format_help.setToolTip(
-            "<b>Output Format Guide</b><br><br>"
-            "<b>OME-Zarr Sharded</b> — Best for large datasets. Multi-resolution "
-            "pyramid with sharding reduces file count to ~2,000/TB. "
-            "Viewable in napari.<br><br>"
-            "<b>OME-TIFF</b> — Single file per channel. Universal viewer support "
-            "(Fiji, QuPath, napari, commercial tools).<br><br>"
-            "<b>Both</b> — Write Zarr (for fast viewing) + TIFF (for sharing)."
-            "<br><br>"
+            "<b>Zarr Format Guide</b><br><br>"
+            "<b>OME-Zarr (Fiji compatible)</b> &mdash; Zarr v2 + OME-NGFF v0.4<br>"
+            "Opens in <b>Fiji</b> (N5 plugin), <b>QuPath</b>, <b>BigDataViewer</b>, "
+            "<b>napari</b>, and most bio-imaging tools. More files on disk "
+            "(~250k/TB) but universal reader support.<br><br>"
+            "<b>OME-Zarr Sharded</b> &mdash; Zarr v3 + OME-NGFF v0.5<br>"
+            "Fewest files (~2,000/TB) via sharding. Only readable by "
+            "<b>napari</b> and zarr-python 3.x. Fiji, QuPath, and "
+            "BigDataViewer <b>cannot open this format</b>.<br><br>"
+            "<b>OME-TIFF</b> &mdash; Single file per channel<br>"
+            "Universally readable. Best for sharing and archiving. "
+            "Larger files, slower random access than Zarr.<br><br>"
+            "<hr>"
+            "<b>Which should I choose?</b><br>"
+            "<ul>"
+            "<li><b>Need Fiji/QuPath?</b> &rarr; OME-Zarr (Fiji compatible) "
+            "or OME-TIFF</li>"
+            "<li><b>napari only, large data?</b> &rarr; OME-Zarr Sharded</li>"
+            "<li><b>Sharing with collaborators?</b> &rarr; OME-TIFF</li>"
+            "</ul>"
             "<hr>"
             "<b>Need Imaris .ims format?</b><br>"
-            "The .ims format is semi-proprietary (HDF5-based) and no reliable "
-            "cross-platform Python writer exists. The format has undocumented "
-            "changes between Imaris versions, so direct writing risks producing "
-            "files that fail to open in future releases.<br><br>"
-            "<b>Recommended:</b><ol>"
-            "<li>Export as <b>OME-TIFF</b> from this dialog</li>"
-            "<li>Use Imaris <b>File &gt; Open</b> (reads OME-TIFF via Bio-Formats)</li>"
-            "<li>Or use <b>ImarisFileConverter</b> (bundled with Imaris) to "
-            "convert OME-TIFF &rarr; .ims</li></ol>"
-            "This ensures the .ims file matches your Imaris version exactly."
+            "Export as <b>OME-TIFF</b>, then use <b>ImarisFileConverter</b> "
+            "(bundled with Imaris) to convert OME-TIFF &rarr; .ims."
         )
         settings_layout.addWidget(format_help, 2, 4)
 
