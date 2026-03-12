@@ -2478,7 +2478,20 @@ class SampleView(QWidget):
             return
 
         try:
+            import json
+
             from py2flamingo.visualization.session_manager import load_stitched_volume
+
+            # If disconnected, center the virtual stage on the stitched data
+            # so it falls within the display volume
+            is_disconnected = (
+                self.last_stage_position.get("x", 0) == 0
+                and self.last_stage_position.get("y", 0) == 0
+                and self.last_stage_position.get("z", 0) == 0
+                and not self.movement_controller
+            )
+            if is_disconnected:
+                self._center_stage_on_stitched(output_dir)
 
             result = load_stitched_volume(output_dir, self.voxel_storage)
             channels = result["channels_loaded"]
@@ -2511,6 +2524,52 @@ class SampleView(QWidget):
             QMessageBox.critical(
                 self, "Load Error", f"Error loading stitched data:\n{e}"
             )
+
+    def _center_stage_on_stitched(self, output_dir: Path) -> None:
+        """Move virtual stage position to center stitched data in the display.
+
+        Reads stitch_metadata.json to find the world-coordinate center of the
+        stitched volume, converts to stage coordinates (mm), and updates
+        the position sliders + internal state. Only useful when disconnected.
+        """
+        import json
+
+        meta_path = output_dir / "stitch_metadata.json"
+        if not meta_path.exists():
+            return
+
+        try:
+            metadata = json.loads(meta_path.read_text())
+            voxel_um = metadata["voxel_size_um"]
+
+            # Collect origins from all channels to find bounding box center
+            origins = []
+            for ch_meta in metadata["channels"].values():
+                origins.append(ch_meta["origin_um"])  # [z, y, x] in µm
+
+            if not origins:
+                return
+
+            # Use the first channel origin as representative (all channels
+            # share the same tile grid, so origins are nearly identical)
+            origin_um = origins[0]  # [z, y, x]
+
+            # Convert to stage coordinates (mm): stage uses (x, y, z) in mm
+            # origin_um is [z_um, y_um, x_um]
+            stage_x = origin_um[2] / 1000.0  # x
+            stage_y = origin_um[1] / 1000.0  # y
+            stage_z = origin_um[0] / 1000.0  # z
+
+            self.logger.info(
+                f"Centering virtual stage on stitched data: "
+                f"X={stage_x:.3f}, Y={stage_y:.3f}, Z={stage_z:.3f} mm"
+            )
+
+            # Update internal position and sliders
+            self._on_position_changed(stage_x, stage_y, stage_z, 0.0)
+
+        except Exception as e:
+            self.logger.warning(f"Could not center stage on stitched data: {e}")
 
     def _on_settings_clicked(self) -> None:
         """Open the application settings dialog."""
