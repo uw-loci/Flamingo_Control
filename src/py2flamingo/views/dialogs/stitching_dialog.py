@@ -419,6 +419,7 @@ class StitchingDialog(PersistentDialog):
             acq_dir=Path(acq_dir),
             output_dir=Path(output_dir),
             channels=channels,
+            tiles=self._tiles,
             parent=self,
         )
         self._worker.progress.connect(self._on_progress)
@@ -594,3 +595,141 @@ class StitchingDialog(PersistentDialog):
         """Save settings on hide."""
         self._save_settings()
         super().hideEvent(event)
+
+
+# QSettings keys for native dialog (independent persistence)
+_NATIVE_SETTINGS_GROUP = "NativeStitchingDialog"
+
+
+class NativeStitchingDialog(StitchingDialog):
+    """Stitching dialog for C++ server native flat-layout acquisitions.
+
+    Overrides tile discovery to use discover_flat_tiles() which scans for
+    .raw files with integer tile indices (X000_Y000) in a flat directory,
+    rather than the subfolder-per-tile layout.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent=parent)
+        self.setWindowTitle("Tile Stitching (Native Acquisition)")
+
+    def _on_discover(self):
+        """Discover tiles using flat-layout scanner."""
+        acq_dir = self._acq_dir_edit.text().strip()
+        if not acq_dir:
+            QMessageBox.warning(
+                self, "No Directory", "Please select an acquisition directory."
+            )
+            return
+
+        acq_path = Path(acq_dir)
+        if not acq_path.is_dir():
+            QMessageBox.warning(
+                self,
+                "Invalid Directory",
+                f"Directory does not exist:\n{acq_dir}",
+            )
+            return
+
+        self._log_text.clear()
+        self._log(f"Discovering flat-layout tiles in: {acq_dir}")
+
+        try:
+            from py2flamingo.stitching.pipeline import (
+                _read_plane_spacing,
+                discover_flat_tiles,
+            )
+
+            tiles = discover_flat_tiles(acq_path)
+
+            if not tiles:
+                self._log("No flat-layout tiles found.")
+                self._tiles = None
+                self._run_btn.setEnabled(False)
+                return
+
+            self._tiles = tiles
+
+            # Auto-set Z step from root Workflow.txt if currently "Auto"
+            if self._z_step_spin.value() == 0.0:
+                for wf_candidate in [
+                    acq_path / "Workflow.txt",
+                    tiles[0].folder / "Workflow.txt",
+                ]:
+                    if wf_candidate.exists():
+                        spacing = _read_plane_spacing(wf_candidate)
+                        if spacing:
+                            self._z_step_spin.setValue(spacing)
+                            self._log(f"Auto-detected Z step: {spacing} \u00b5m")
+                        break
+
+            self._log_tile_summary(tiles)
+            self._run_btn.setEnabled(True)
+            self._set_btn_default(self._discover_btn)
+            self._set_btn_green(self._run_btn)
+
+        except Exception as e:
+            self._log(f"Error discovering tiles: {e}")
+            self._logger.exception("Flat tile discovery error")
+            self._tiles = None
+            self._run_btn.setEnabled(False)
+
+    def _save_settings(self):
+        """Save dialog settings to QSettings (independent group)."""
+        s = QSettings()
+        s.beginGroup(_NATIVE_SETTINGS_GROUP)
+        s.setValue("acq_dir", self._acq_dir_edit.text())
+        s.setValue("output_dir", self._output_dir_edit.text())
+        s.setValue("pixel_size", self._pixel_size_spin.value())
+        s.setValue("z_step", self._z_step_spin.value())
+        s.setValue("downsample_idx", self._downsample_combo.currentIndex())
+        s.setValue("fusion_idx", self._fusion_combo.currentIndex())
+        s.setValue("destripe", self._destripe_cb.isChecked())
+        s.setValue("deconvolution", self._deconv_cb.isChecked())
+        s.setValue("package_ozx", self._ozx_cb.isChecked())
+        s.setValue("format_idx", self._format_combo.currentIndex())
+        s.setValue("channels", self._channels_edit.text())
+        s.endGroup()
+
+    def _restore_settings(self):
+        """Restore dialog settings from QSettings (independent group)."""
+        s = QSettings()
+        s.beginGroup(_NATIVE_SETTINGS_GROUP)
+
+        acq_dir = s.value("acq_dir", "", type=str)
+        if acq_dir:
+            self._acq_dir_edit.setText(acq_dir)
+
+        output_dir = s.value("output_dir", "", type=str)
+        if output_dir:
+            self._output_dir_edit.setText(output_dir)
+
+        pixel_size = s.value("pixel_size", 0.406, type=float)
+        self._pixel_size_spin.setValue(pixel_size)
+
+        z_step = s.value("z_step", 0.0, type=float)
+        self._z_step_spin.setValue(z_step)
+
+        ds_idx = s.value("downsample_idx", 0, type=int)
+        self._downsample_combo.setCurrentIndex(ds_idx)
+
+        fusion_idx = s.value("fusion_idx", 0, type=int)
+        self._fusion_combo.setCurrentIndex(fusion_idx)
+
+        destripe = s.value("destripe", False, type=bool)
+        self._destripe_cb.setChecked(destripe)
+
+        deconv = s.value("deconvolution", False, type=bool)
+        self._deconv_cb.setChecked(deconv)
+
+        ozx = s.value("package_ozx", False, type=bool)
+        self._ozx_cb.setChecked(ozx)
+
+        format_idx = s.value("format_idx", 0, type=int)
+        self._format_combo.setCurrentIndex(format_idx)
+
+        channels = s.value("channels", "", type=str)
+        if channels:
+            self._channels_edit.setText(channels)
+
+        s.endGroup()

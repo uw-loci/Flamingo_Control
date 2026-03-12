@@ -367,6 +367,13 @@ class MainWindow(QMainWindow):
         self.stitching_action.triggered.connect(self._on_stitching)
         extensions_menu.addAction(self.stitching_action)
 
+        self.stitching_native_action = QAction("Tile Stitching (&Native)...", self)
+        self.stitching_native_action.setStatusTip(
+            "Stitch native C++ server flat-layout tile acquisitions"
+        )
+        self.stitching_native_action.triggered.connect(self._on_stitching_native)
+        extensions_menu.addAction(self.stitching_native_action)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -923,6 +930,40 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error opening Tile Stitching: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to open Tile Stitching:\n{e}")
+
+    def _on_stitching_native(self):
+        """Handle Tile Stitching (Native) menu action."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.info("Tile Stitching (Native) menu action triggered")
+
+        try:
+            from py2flamingo.views.dialogs.stitching_dialog import (
+                NativeStitchingDialog,
+            )
+
+            # Reuse existing dialog if still open
+            if (
+                hasattr(self, "_stitching_native_dialog")
+                and self._stitching_native_dialog is not None
+            ):
+                self._stitching_native_dialog.show()
+                self._stitching_native_dialog.raise_()
+                self._stitching_native_dialog.activateWindow()
+                return
+
+            self._stitching_native_dialog = NativeStitchingDialog(parent=None)
+            self._stitching_native_dialog.load_stitched_requested.connect(
+                self._on_load_stitched_from_dialog
+            )
+            self._stitching_native_dialog.show()
+
+        except Exception as e:
+            logger.error(f"Error opening Native Tile Stitching: {e}", exc_info=True)
+            QMessageBox.critical(
+                self, "Error", f"Failed to open Native Tile Stitching:\n{e}"
+            )
 
     def _on_load_stitched_from_dialog(self, output_path: str):
         """Handle stitching dialog request to load output into SampleView."""

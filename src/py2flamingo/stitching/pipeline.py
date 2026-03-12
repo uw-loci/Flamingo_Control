@@ -31,6 +31,11 @@ RAW_FILE_PATTERN = re.compile(
     r"S\d+_t\d+_V\d+_R\d+_X\d+_Y\d+_C(\d+)_I(\d+)_D(\d+)_P(\d+)\.raw$"
 )
 
+# Flat-layout raw filename: captures X_idx, Y_idx, channel, illumination, detector, planes
+FLAT_RAW_PATTERN = re.compile(
+    r"S\d+_t\d+_V\d+_R\d+_X(\d+)_Y(\d+)_C(\d+)_I(\d+)_D(\d+)_P(\d+)\.raw$"
+)
+
 # Folder coordinate pattern: X{float}_Y{float} anywhere in name
 FOLDER_COORD_PATTERN = re.compile(r"X([-\d.]+)_Y([-\d.]+)")
 
@@ -251,6 +256,224 @@ def _read_z_range(folder: Path) -> Tuple[float, float]:
     return (z_min, z_max)
 
 
+def _read_position_from_settings(settings_file: Path) -> Dict[str, float]:
+    """Read stage position from a _Settings.txt companion file.
+
+    Parses <Start Position> for X, Y, Z and <End Position> for Z end.
+
+    Returns:
+        Dict with keys: x_mm, y_mm, z_min_mm, z_max_mm
+    """
+    content = settings_file.read_text(errors="replace")
+
+    result = {"x_mm": 0.0, "y_mm": 0.0, "z_min_mm": 0.0, "z_max_mm": 1.0}
+
+    start = re.search(r"<Start Position>.*?X \(mm\) = ([-\d.]+)", content, re.DOTALL)
+    if start:
+        result["x_mm"] = float(start.group(1))
+
+    start_y = re.search(r"<Start Position>.*?Y \(mm\) = ([-\d.]+)", content, re.DOTALL)
+    if start_y:
+        result["y_mm"] = float(start_y.group(1))
+
+    start_z = re.search(r"<Start Position>.*?Z \(mm\) = ([-\d.]+)", content, re.DOTALL)
+    if start_z:
+        result["z_min_mm"] = float(start_z.group(1))
+
+    end_z = re.search(r"<End Position>.*?Z \(mm\) = ([-\d.]+)", content, re.DOTALL)
+    if end_z:
+        result["z_max_mm"] = float(end_z.group(1))
+
+    return result
+
+
+def _read_plane_spacing(workflow_file: Path) -> Optional[float]:
+    """Read plane spacing from a Workflow.txt file.
+
+    Returns:
+        Plane spacing in µm, or None if not found.
+    """
+    if not workflow_file.exists():
+        return None
+
+    content = workflow_file.read_text(errors="replace")
+    match = re.search(r"Plane spacing \(um\) = ([\d.]+)", content)
+    if match:
+        return float(match.group(1))
+    return None
+
+
+def discover_flat_tiles(acquisition_dir: Path) -> List[RawTileInfo]:
+    """Discover tiles in a flat-layout acquisition (C++ server native format).
+
+    In flat layout, all .raw files live in a single directory with integer
+    tile indices (X000_Y000, X001_Y000, etc.) rather than subfolder-per-tile.
+    Each .raw file may have a companion _Settings.txt with stage positions.
+
+    Handles two layouts:
+      1. Flat: acquisition_dir/ contains .raw files directly
+      2. Dated: acquisition_dir/{date}/ contains .raw files
+
+    Returns list of RawTileInfo sorted by (Y, X).
+    """
+    # Find the directory containing .raw files
+    raw_dir = None
+    raw_files_found = list(acquisition_dir.glob("*.raw"))
+    if raw_files_found:
+        raw_dir = acquisition_dir
+    else:
+        # Check one level deeper (date subdirectories)
+        for sub in sorted(acquisition_dir.iterdir()):
+            if sub.is_dir() and list(sub.glob("*.raw")):
+                raw_dir = sub
+                break
+
+    if raw_dir is None:
+        logger.warning(f"No .raw files found in {acquisition_dir}")
+        return []
+
+    # Group raw files by (X_idx, Y_idx)
+    tile_groups: Dict[Tuple[int, int], List[Path]] = {}
+    for f in sorted(raw_dir.iterdir()):
+        m = FLAT_RAW_PATTERN.search(f.name)
+        if m:
+            x_idx, y_idx = int(m.group(1)), int(m.group(2))
+            tile_groups.setdefault((x_idx, y_idx), []).append(f)
+
+    if not tile_groups:
+        logger.warning(f"No files matching flat raw pattern in {raw_dir}")
+        return []
+
+    # Try to read plane spacing from root Workflow.txt for fallback position calc
+    root_wf = acquisition_dir / "Workflow.txt"
+    if not root_wf.exists():
+        root_wf = raw_dir / "Workflow.txt"
+
+    tiles = []
+    for (x_idx, y_idx), files in sorted(tile_groups.items()):
+        # Find a _Settings.txt companion (from first raw file in group)
+        settings_file = None
+        for f in files:
+            candidate = f.with_name(f.stem + "_Settings.txt")
+            if candidate.exists():
+                settings_file = candidate
+                break
+
+        # Parse position from _Settings.txt or fall back to root Workflow.txt
+        if settings_file:
+            pos = _read_position_from_settings(settings_file)
+        elif root_wf.exists():
+            # Fallback: compute from root Workflow.txt grid
+            pos = _compute_grid_position(root_wf, x_idx, y_idx)
+        else:
+            logger.warning(
+                f"No _Settings.txt or Workflow.txt for tile X{x_idx}_Y{y_idx}, "
+                f"using default positions"
+            )
+            pos = {"x_mm": 0.0, "y_mm": 0.0, "z_min_mm": 0.0, "z_max_mm": 1.0}
+
+        # Parse raw files for channel/illumination/planes metadata
+        raw_files_dict: Dict[int, Dict[int, Path]] = {}
+        channels = set()
+        illum_sides = set()
+        n_planes = 0
+
+        for f in files:
+            m = FLAT_RAW_PATTERN.search(f.name)
+            if m:
+                ch = int(m.group(3))
+                illum = int(m.group(4))
+                planes = int(m.group(6))
+
+                channels.add(ch)
+                illum_sides.add(illum)
+                n_planes = max(n_planes, planes)
+
+                if ch not in raw_files_dict:
+                    raw_files_dict[ch] = {}
+                raw_files_dict[ch][illum] = f
+
+        if not raw_files_dict:
+            continue
+
+        tiles.append(
+            RawTileInfo(
+                folder=raw_dir,
+                x_mm=pos["x_mm"],
+                y_mm=pos["y_mm"],
+                z_min_mm=pos["z_min_mm"],
+                z_max_mm=pos["z_max_mm"],
+                n_planes=n_planes,
+                raw_files=raw_files_dict,
+                channels=sorted(channels),
+                illumination_sides=sorted(illum_sides),
+            )
+        )
+
+    tiles.sort(key=lambda t: (t.y_mm, t.x_mm))
+    logger.info(f"Discovered {len(tiles)} flat-layout tiles in {acquisition_dir}")
+    return tiles
+
+
+def _compute_grid_position(
+    workflow_file: Path, x_idx: int, y_idx: int
+) -> Dict[str, float]:
+    """Compute tile position from root Workflow.txt grid parameters.
+
+    Uses Start/End Position and Overlap % to compute the position of
+    tile (x_idx, y_idx) in the grid.
+    """
+    content = workflow_file.read_text(errors="replace")
+
+    # Read start position
+    start_x = start_y = start_z = 0.0
+    end_z = 1.0
+
+    sx = re.search(r"<Start Position>.*?X \(mm\) = ([-\d.]+)", content, re.DOTALL)
+    if sx:
+        start_x = float(sx.group(1))
+    sy = re.search(r"<Start Position>.*?Y \(mm\) = ([-\d.]+)", content, re.DOTALL)
+    if sy:
+        start_y = float(sy.group(1))
+    sz = re.search(r"<Start Position>.*?Z \(mm\) = ([-\d.]+)", content, re.DOTALL)
+    if sz:
+        start_z = float(sz.group(1))
+    ez = re.search(r"<End Position>.*?Z \(mm\) = ([-\d.]+)", content, re.DOTALL)
+    if ez:
+        end_z = float(ez.group(1))
+
+    # Read end position for X/Y extent to compute tile step
+    end_x = start_x
+    end_y = start_y
+    ex = re.search(r"<End Position>.*?X \(mm\) = ([-\d.]+)", content, re.DOTALL)
+    if ex:
+        end_x = float(ex.group(1))
+    ey = re.search(r"<End Position>.*?Y \(mm\) = ([-\d.]+)", content, re.DOTALL)
+    if ey:
+        end_y = float(ey.group(1))
+
+    # Read number of tiles in each direction
+    n_tiles_x = 1
+    n_tiles_y = 1
+    ntx = re.search(r"Number of tiles X\s*=\s*(\d+)", content)
+    if ntx:
+        n_tiles_x = max(1, int(ntx.group(1)))
+    nty = re.search(r"Number of tiles Y\s*=\s*(\d+)", content)
+    if nty:
+        n_tiles_y = max(1, int(nty.group(1)))
+
+    # Compute step per tile
+    step_x = (end_x - start_x) / max(1, n_tiles_x - 1) if n_tiles_x > 1 else 0.0
+    step_y = (end_y - start_y) / max(1, n_tiles_y - 1) if n_tiles_y > 1 else 0.0
+
+    return {
+        "x_mm": start_x + x_idx * step_x,
+        "y_mm": start_y + y_idx * step_y,
+        "z_min_mm": start_z,
+        "z_max_mm": end_z,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
@@ -410,6 +633,7 @@ class StitchingPipeline:
         acquisition_dir: Path,
         output_path: Path,
         channels: Optional[List[int]] = None,
+        tiles: Optional[List[RawTileInfo]] = None,
     ) -> Path:
         """Run the full stitching pipeline.
 
@@ -417,6 +641,7 @@ class StitchingPipeline:
             acquisition_dir: Root directory containing tile folders
             output_path: Where to write the stitched result
             channels: Which channels to process (None = all found)
+            tiles: Pre-discovered tiles (skips discover_tiles if provided)
 
         Returns:
             Path to the stitched output
@@ -427,8 +652,11 @@ class StitchingPipeline:
         self.logger.info(f"Output: {output_path}")
 
         # --- Step 1: Discover tiles ---
-        self.logger.info("Step 1: Discovering tiles...")
-        tiles = discover_tiles(acquisition_dir)
+        if tiles is None:
+            self.logger.info("Step 1: Discovering tiles...")
+            tiles = discover_tiles(acquisition_dir)
+        else:
+            self.logger.info(f"Step 1: Using {len(tiles)} pre-discovered tiles")
         if not tiles:
             raise FileNotFoundError(f"No tile folders found in {acquisition_dir}")
 

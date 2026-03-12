@@ -10,7 +10,11 @@ from typing import List, Optional
 
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from py2flamingo.stitching.pipeline import StitchingConfig, StitchingPipeline
+from py2flamingo.stitching.pipeline import (
+    RawTileInfo,
+    StitchingConfig,
+    StitchingPipeline,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +56,7 @@ class StitchingWorker(QThread):
         acq_dir: Path,
         output_dir: Path,
         channels: Optional[List[int]] = None,
+        tiles: Optional[List[RawTileInfo]] = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -59,6 +64,7 @@ class StitchingWorker(QThread):
         self._acq_dir = Path(acq_dir)
         self._output_dir = Path(output_dir)
         self._channels = channels
+        self._tiles = tiles
         self._cancelled = False
 
     def cancel(self):
@@ -99,6 +105,7 @@ class StitchingWorker(QThread):
                 acquisition_dir=self._acq_dir,
                 output_path=self._output_dir,
                 channels=self._channels,
+                tiles=self._tiles,
             )
 
             if self._cancelled:
