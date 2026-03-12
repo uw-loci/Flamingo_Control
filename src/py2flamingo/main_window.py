@@ -367,9 +367,11 @@ class MainWindow(QMainWindow):
         self.stitching_action.triggered.connect(self._on_stitching)
         extensions_menu.addAction(self.stitching_action)
 
-        self.stitching_native_action = QAction("Tile Stitching (&Native)...", self)
+        self.stitching_native_action = QAction(
+            "Tile Stitching (&Single Workflow)...", self
+        )
         self.stitching_native_action.setStatusTip(
-            "Stitch native C++ server flat-layout tile acquisitions"
+            "Stitch flat-layout tile acquisitions (single Workflow.txt)"
         )
         self.stitching_native_action.triggered.connect(self._on_stitching_native)
         extensions_menu.addAction(self.stitching_native_action)
@@ -936,7 +938,7 @@ class MainWindow(QMainWindow):
         import logging
 
         logger = logging.getLogger(__name__)
-        logger.info("Tile Stitching (Native) menu action triggered")
+        logger.info("Tile Stitching (Single Workflow) menu action triggered")
 
         try:
             from py2flamingo.views.dialogs.stitching_dialog import (
@@ -960,9 +962,11 @@ class MainWindow(QMainWindow):
             self._stitching_native_dialog.show()
 
         except Exception as e:
-            logger.error(f"Error opening Native Tile Stitching: {e}", exc_info=True)
+            logger.error(
+                f"Error opening Tile Stitching (Single Workflow): {e}", exc_info=True
+            )
             QMessageBox.critical(
-                self, "Error", f"Failed to open Native Tile Stitching:\n{e}"
+                self, "Error", f"Failed to open Tile Stitching (Single Workflow):\n{e}"
             )
 
     def _on_load_stitched_from_dialog(self, output_path: str):

@@ -46,6 +46,10 @@ class StitchingDialog(PersistentDialog):
     # Emitted when user wants to load stitched output into SampleView
     load_stitched_requested = pyqtSignal(str)
 
+    # How many directory levels to go up when restoring the acq dir path.
+    # Subfolder-per-tile layout: grandparent (2 levels up).
+    _acq_dir_restore_levels_up = 2
+
     def __init__(self, parent=None):
         super().__init__(parent=parent)
         self._logger = logging.getLogger(__name__)
@@ -547,7 +551,13 @@ class StitchingDialog(PersistentDialog):
 
         acq_dir = s.value("acq_dir", "", type=str)
         if acq_dir:
-            self._acq_dir_edit.setText(acq_dir)
+            # Navigate up N levels so the user starts near (not inside)
+            # their last acquisition — easier to pick a new one nearby.
+            restored = Path(acq_dir)
+            for _ in range(self._acq_dir_restore_levels_up):
+                if restored.parent != restored:  # not at filesystem root
+                    restored = restored.parent
+            self._acq_dir_edit.setText(str(restored))
 
         output_dir = s.value("output_dir", "", type=str)
         if output_dir:
@@ -609,9 +619,12 @@ class NativeStitchingDialog(StitchingDialog):
     rather than the subfolder-per-tile layout.
     """
 
+    # Flat layout: parent only (1 level up).
+    _acq_dir_restore_levels_up = 1
+
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        self.setWindowTitle("Tile Stitching (Native Acquisition)")
+        self.setWindowTitle("Tile Stitching (Single Workflow)")
 
     def _on_discover(self):
         """Discover tiles using flat-layout scanner."""
@@ -698,7 +711,11 @@ class NativeStitchingDialog(StitchingDialog):
 
         acq_dir = s.value("acq_dir", "", type=str)
         if acq_dir:
-            self._acq_dir_edit.setText(acq_dir)
+            restored = Path(acq_dir)
+            for _ in range(self._acq_dir_restore_levels_up):
+                if restored.parent != restored:
+                    restored = restored.parent
+            self._acq_dir_edit.setText(str(restored))
 
         output_dir = s.value("output_dir", "", type=str)
         if output_dir:
