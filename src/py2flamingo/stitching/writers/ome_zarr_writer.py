@@ -177,6 +177,7 @@ def _write_via_ngff_zarr(
         scale_factors=scale_factors,
         method=method,
         chunks=chunks[0],  # ngff-zarr takes a single int or per-dim
+        cache=False,  # Data already in memory; avoids memory_usage() ndim bug
     )
 
     if progress_callback:
@@ -335,31 +336,42 @@ def _to_numpy(data) -> np.ndarray:
     """Convert various data types to a 3D numpy array.
 
     SpatialImage / xarray may carry extra singleton dims (e.g. channel or time).
-    We squeeze those away so the result is always (Z, Y, X).
+    We squeeze those away and enforce exactly 3D (Z, Y, X) output.
     """
     if isinstance(data, np.ndarray):
-        return np.squeeze(data)
-
-    # dask array
-    if hasattr(data, "compute"):
-        logger.info("Computing dask array into memory...")
-        import dask.diagnostics
-
-        with dask.diagnostics.ProgressBar():
-            return np.squeeze(np.asarray(data.compute()))
-
-    # xarray / SpatialImage
-    if hasattr(data, "data"):
+        arr = np.squeeze(data)
+    elif hasattr(data, "data"):
+        # xarray / SpatialImage
         inner = data.data
         if hasattr(inner, "compute"):
             logger.info("Computing xarray/SpatialImage into memory...")
             import dask.diagnostics
 
             with dask.diagnostics.ProgressBar():
-                return np.squeeze(np.asarray(inner.compute()))
-        return np.squeeze(np.asarray(inner))
+                arr = np.squeeze(np.asarray(inner.compute()))
+        else:
+            arr = np.squeeze(np.asarray(inner))
+    elif hasattr(data, "compute"):
+        # dask array
+        logger.info("Computing dask array into memory...")
+        import dask.diagnostics
 
-    return np.squeeze(np.asarray(data))
+        with dask.diagnostics.ProgressBar():
+            arr = np.squeeze(np.asarray(data.compute()))
+    else:
+        arr = np.squeeze(np.asarray(data))
+
+    # Enforce exactly 3D — take first index along leading extra dims
+    while arr.ndim > 3:
+        logger.warning(
+            f"Data has {arr.ndim}D shape {arr.shape}, taking first slice to reduce to 3D"
+        )
+        arr = arr[0]
+
+    if arr.ndim < 3:
+        logger.warning(f"Data has {arr.ndim}D shape {arr.shape}, expected 3D")
+
+    return arr
 
 
 def _log_output_stats(output_path: Path):
