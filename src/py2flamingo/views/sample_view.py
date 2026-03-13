@@ -2528,28 +2528,36 @@ class SampleView(QWidget):
             # Remove any previously loaded stitched layers
             self._remove_stitched_layers()
 
-            # Coordinate mapping: stitched data origin is in stage coordinates
-            # [z, y, x] in µm.  The display cache + chamber visualization use
-            # napari coordinates where:
-            #   Z: napari_z = (z - z_range_min) / display_voxel  (not inverted)
-            #   Y: napari_y = (y_range_max - chamber_y) / display_voxel  (inverted)
-            #   X: napari_x = (x_range_max - x) / display_voxel  (inverted when invert_x)
-            # Stage Y → chamber Y offset: chamber_y = stage_y - 0.45mm
+            # Coordinate mapping: center stitched data in the display cache
+            # coordinate system so it always appears within the chamber.
+            #
+            # The display cache uses world_to_display_voxel():
+            #   display = (world - chamber_origin) / display_voxel
+            # where world coords come from tile_processing_worker:
+            #   world_z = sample_center_z - (stage_z - ref_z) * 1000  (Z inverted)
+            #   world_y = sample_center_y + (stage_y - ref_y) * 1000  (Y direct)
+            #   world_x = sample_center_x + sign_x * (stage_x - ref_x) * 1000
+            #
+            # We use the stitch center as virtual reference so the data is
+            # always centered at sample_region_center in the display.
             display_voxel_um = np.array(
                 self.voxel_storage.config.display_voxel_size
                 if self.voxel_storage
                 else [50, 50, 50]
             )
+            dv_z, dv_y, dv_x = display_voxel_um
+
             stage_ctrl = self._config.get("stage_control", {})
-            z_range_min_um = stage_ctrl.get("z_range_mm", [12.5, 26.0])[0] * 1000
-            y_range_max_um = stage_ctrl.get("y_range_mm", [0.0, 14.0])[1] * 1000
-            x_range_min_um = stage_ctrl.get("x_range_mm", [1.0, 12.31])[0] * 1000
-            x_range_max_um = stage_ctrl.get("x_range_mm", [1.0, 12.31])[1] * 1000
-            # Stage-to-chamber Y offset (mm → µm)
-            stage_y_offset_um = (
-                self._chamber_viz.STAGE_Y_AT_OBJECTIVE
-                - self._chamber_viz.OBJECTIVE_CHAMBER_Y_MM
-            ) * 1000  # 0.45mm = 450µm
+            # Chamber origin (Z, Y, X) in µm — matches voxel_storage_factory
+            co_z = stage_ctrl.get("z_range_mm", [12.5, 26.0])[0] * 1000
+            co_y = stage_ctrl.get("y_range_mm", [0.0, 14.0])[0] * 1000
+            co_x = stage_ctrl.get("x_range_mm", [1.0, 12.31])[0] * 1000
+
+            # Sample region center from config ([X, Y, Z] order)
+            sample_region = self._config.get("sample_chamber", {}).get(
+                "sample_region_center_um", [6655, 7000, 19250]
+            )
+            sc_x, sc_y, sc_z = sample_region[0], sample_region[1], sample_region[2]
 
             channels_config = self._config.get("channels", [])
             ch_ids_loaded = []
@@ -2564,37 +2572,43 @@ class SampleView(QWidget):
             for ch_info in channels:
                 ch_id = ch_info["ch_id"]
                 volume = ch_info["volume"]
-                origin_um = ch_info["origin_um"]  # [z, y, x]
+                origin_um = ch_info["origin_um"]  # [z, y, x] stage µm
                 voxel_um = ch_info["voxel_size_um"]  # [z, y, x]
 
-                # Scale & translate: map stitched voxels into the same napari
-                # coordinate frame as the display cache / chamber visualization.
-                # Axis conventions match chamber_visualization_manager:
-                #   Z: forward (not inverted)
-                #   Y: inverted (napari Y=0 = physical Y max)
-                #   X: inverted when invert_x is True
                 origin_z, origin_y_stage, origin_x = origin_um
                 voxel_z, voxel_y, voxel_x = voxel_um
-                dv_z, dv_y, dv_x = display_voxel_um
 
-                # Convert stage Y to chamber Y
-                origin_y_chamber = origin_y_stage - stage_y_offset_um
+                # Stitch center = midpoint of fused volume in stage coords
+                extent_z = volume.shape[0] * voxel_z
+                extent_y = volume.shape[1] * voxel_y
+                extent_x = volume.shape[2] * voxel_x
+                center_z = origin_z + extent_z / 2
+                center_y = origin_y_stage + extent_y / 2
+                center_x = origin_x + extent_x / 2
 
-                # Z: not inverted — offset from range minimum
-                scale_z = voxel_z / dv_z
-                translate_z = (origin_z - z_range_min_um) / dv_z
+                # Map origin to world coords using tile_processing_worker
+                # convention (stitch center → sample_region_center)
+                delta_z_mm = (origin_z - center_z) / 1000
+                delta_y_mm = (origin_y_stage - center_y) / 1000
+                delta_x_mm = (origin_x - center_x) / 1000
+                delta_x_stor = delta_x_mm if self._invert_x else -delta_x_mm
 
-                # Y: inverted — napari_y = (y_max - chamber_y) / voxel
-                scale_y = -voxel_y / dv_y
-                translate_y = (y_range_max_um - origin_y_chamber) / dv_y
+                world_z = sc_z - delta_z_mm * 1000
+                world_y = sc_y + delta_y_mm * 1000
+                world_x = sc_x + delta_x_stor * 1000
 
-                # X: depends on invert_x setting
-                if self._invert_x:
-                    scale_x = -voxel_x / dv_x
-                    translate_x = (x_range_max_um - origin_x) / dv_x
-                else:
-                    scale_x = voxel_x / dv_x
-                    translate_x = (origin_x - x_range_min_um) / dv_x
+                # Display coordinates (= napari translate)
+                translate_z = (world_z - co_z) / dv_z
+                translate_y = (world_y - co_y) / dv_y
+                translate_x = (world_x - co_x) / dv_x
+
+                # Scale: stitched voxel → display voxel direction
+                # Z: stage Z↑ → world Z↓ → display Z↓ (inverted)
+                # Y: stage Y↑ → world Y↑ → display Y↑ (direct)
+                # X: depends on invert_x (invert→direct, normal→inverted)
+                scale_z = -voxel_z / dv_z
+                scale_y = voxel_y / dv_y
+                scale_x = (voxel_x / dv_x) if self._invert_x else (-voxel_x / dv_x)
 
                 scale = np.array([scale_z, scale_y, scale_x])
                 translate = np.array([translate_z, translate_y, translate_x])
@@ -2633,9 +2647,48 @@ class SampleView(QWidget):
             if restore_3d:
                 self.viewer.dims.ndisplay = 3
 
-            # Check if stitched data is outside chamber bounds.
-            # With negative scales the volume extends from translate toward
-            # lower napari coords, so compute the full bounding box.
+            # --- Update virtual stage position to stitch center ---
+            # This moves the holder and sliders to match the acquisition
+            # position, completing the "load centered, then position" flow.
+            if channels:
+                first = channels[0]
+                o_z, o_y, o_x = first["origin_um"]
+                v_z, v_y, v_x = first["voxel_size_um"]
+                sh = first["volume"].shape
+                stitch_center_x_mm = (o_x + sh[2] * v_x / 2) / 1000
+                stitch_center_y_mm = (o_y + sh[1] * v_y / 2) / 1000
+                stitch_center_z_mm = (o_z + sh[0] * v_z / 2) / 1000
+
+                self.last_stage_position = {
+                    "x": stitch_center_x_mm,
+                    "y": stitch_center_y_mm,
+                    "z": stitch_center_z_mm,
+                    "r": 0,
+                }
+                self.logger.info(
+                    f"Updated virtual stage to stitch center: "
+                    f"X={stitch_center_x_mm:.3f} Y={stitch_center_y_mm:.3f} "
+                    f"Z={stitch_center_z_mm:.3f}"
+                )
+
+                # Update holder position and sliders
+                self._update_sample_holder_position(
+                    stitch_center_x_mm, stitch_center_y_mm, stitch_center_z_mm
+                )
+                for axis_id, value in self.last_stage_position.items():
+                    if axis_id in self.position_sliders:
+                        slider = self.position_sliders[axis_id]
+                        edit = self.position_edits[axis_id]
+                        slider.blockSignals(True)
+                        slider.setValue(int(value * self._slider_scale))
+                        slider.blockSignals(False)
+                        decimals = slider.property("decimals") or 3
+                        edit.blockSignals(True)
+                        edit.setText(f"{value:.{decimals}f}")
+                        edit.blockSignals(False)
+
+            # Bounds check: with centering the data should always be within
+            # the chamber, but warn if the volume is larger than the display.
             chamber_dims_vox = (
                 np.array(
                     self.voxel_storage.config.chamber_dimensions
@@ -2644,7 +2697,6 @@ class SampleView(QWidget):
                 )
                 / display_voxel_um
             )
-            # Bounding box of last channel (representative)
             vol_shape = np.array(volume.shape, dtype=float)
             corner_a = translate
             corner_b = translate + vol_shape * scale
@@ -2655,22 +2707,18 @@ class SampleView(QWidget):
             )
 
             if out_of_bounds:
-                origin_mm = origin_um / 1000.0
                 self.logger.warning(
                     f"Stitched data bbox [{bbox_min} - {bbox_max}] display voxels "
-                    f"is outside chamber bounds [0 - {chamber_dims_vox}]. "
-                    f"Stage origin: {origin_mm} mm"
+                    f"exceeds chamber bounds [0 - {chamber_dims_vox}]. "
+                    f"Volume may be larger than the display area."
                 )
                 QMessageBox.warning(
                     self,
-                    "Stitched Data Loaded (Outside Chamber)",
+                    "Stitched Data Loaded (Partially Outside Chamber)",
                     f"Loaded {len(ch_ids_loaded)} channel(s): {ch_ids_loaded}\n"
                     f"from: {output_dir}\n\n"
-                    f"Note: The stitched data may be outside the chamber "
-                    f"visualization bounds.\n\n"
-                    f"Consider adjusting range settings in "
-                    f"visualization_3d_config.yaml to include the "
-                    f"acquisition region.",
+                    f"Note: The stitched volume is larger than the chamber "
+                    f"display area — some data extends beyond the wireframe.",
                 )
             else:
                 QMessageBox.information(
