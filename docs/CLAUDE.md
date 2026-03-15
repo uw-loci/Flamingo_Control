@@ -69,6 +69,24 @@ Reports are stored **outside** this git repository at `/home/msnelson/LSControl/
 - **Do NOT** delete or modify existing files in the claude-reports directory without explicit user request
 - Existing reports in that directory serve as examples of the expected format
 
+## Critical Reference Documents
+
+**Before modifying coordinate-related code, stitched data loading, display transforms, or tile processing**, read the relevant reference documents:
+
+| When you're changing... | Read this first |
+|-------------------------|-----------------|
+| `views/sample_view.py` (`_load_stitched_from_path`, coordinate mapping) | `claude-reports/coordinate_system_reference.md` — definitive stage→world→display→napari mapping |
+| `visualization/dual_resolution_storage.py` (transforms, `world_to_display_voxel`) | `claude-reports/coordinate_system_reference.md` sections 2, 4 |
+| `visualization/tile_processing_worker.py` (world coords, camera offsets) | `claude-reports/coordinate_system_reference.md` sections 1, 3 |
+| `views/chamber_visualization_manager.py` (wireframe, holder, Y inversion) | `claude-reports/coordinate_system_reference.md` section 6 |
+| `stitching/pipeline.py` (tile positions, origin_um, metadata) | `claude-reports/coordinate_system_reference.md` section 5; `claude-reports/lightsheet_stitching_options.md` |
+| `configs/visualization_3d_config.yaml` (ranges, centers, voxel sizes) | `claude-reports/coordinate_system_reference.md` section 8 (key constants) |
+| Pipeline nodes or `pipeline/` package | `claude-reports/pipeline-system.md` |
+| Workflow.txt format or generation | `claude-reports/workflow_file_format.md` |
+| Left/right illumination, dual-side channels | `claude-reports/dual_side_illumination.md` |
+
+**Memory system**: The `memory/MEMORY.md` file (in `.claude/projects/`) is auto-loaded and contains architectural decisions, conventions, and known issues. The `memory/reference_index.md` provides a keyword→document lookup — **check it first** when a query involves coordinates, illumination, workflows, tiles, pipelines, stitching, or session persistence.
+
 ## Architecture
 
 ### Modular Design (Post-Refactor)
