@@ -94,6 +94,8 @@ def write_pyramidal_ome_tiff(
     logger.info(f"Pyramid levels: {pyramid_levels} (plus full resolution)")
 
     # Generate downsampled pyramid data
+    # OME-TIFF SubIFDs must have the same number of Z pages as full resolution,
+    # so we only downsample Y and X (not Z).
     pyramid_data = []
     if pyramid_levels > 0:
         if progress_callback:
@@ -101,11 +103,11 @@ def write_pyramidal_ome_tiff(
 
         for level in range(pyramid_levels):
             factor = 2 ** (level + 1)
-            downsampled = _downsample_bin_shrink(np_data, factor)
+            downsampled = _downsample_yx(np_data, factor)
             pyramid_data.append(downsampled)
             logger.info(
                 f"  Pyramid level {level + 1}: {downsampled.shape} "
-                f"({factor}x downsample)"
+                f"({factor}x YX downsample)"
             )
 
     # Build OME-XML metadata
@@ -175,6 +177,36 @@ def write_pyramidal_ome_tiff(
         progress_callback(100, "OME-TIFF write complete")
 
     return output_path
+
+
+def _downsample_yx(volume: np.ndarray, factor: int) -> np.ndarray:
+    """Downsample only Y and X axes by integer factor (bin-shrink).
+
+    Z (and C for 4D) dimensions are preserved. This is required for
+    OME-TIFF pyramids where SubIFDs must have the same page count as
+    the full-resolution data.
+    """
+    if volume.ndim == 4:
+        return np.stack(
+            [_downsample_yx_3d(volume[c], factor) for c in range(volume.shape[0])]
+        )
+    return _downsample_yx_3d(volume, factor)
+
+
+def _downsample_yx_3d(volume: np.ndarray, factor: int) -> np.ndarray:
+    """Downsample Y and X of a 3D (Z,Y,X) volume, keeping Z unchanged."""
+    z, y, x = volume.shape
+
+    y_trunc = (y // factor) * factor
+    x_trunc = (x // factor) * factor
+
+    truncated = volume[:, :y_trunc, :x_trunc]
+
+    new_y = y_trunc // factor
+    new_x = x_trunc // factor
+
+    reshaped = truncated.reshape(z, new_y, factor, new_x, factor)
+    return reshaped.mean(axis=(2, 4)).astype(volume.dtype)
 
 
 def _downsample_bin_shrink(volume: np.ndarray, factor: int) -> np.ndarray:
