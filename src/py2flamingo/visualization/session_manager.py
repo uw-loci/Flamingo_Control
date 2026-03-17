@@ -103,6 +103,33 @@ def _find_zarr_array(root, zarr_path):
     raise ValueError(f"No array data found in {zarr_path}")
 
 
+def _load_ome_tiff(tiff_path: Path) -> np.ndarray:
+    """Load a pyramidal OME-TIFF into memory as a numpy array.
+
+    Reads the full-resolution (level 0) series and returns it as
+    uint16.  Handles 3D (Z,Y,X) and 4D (C,Z,Y,X) data.
+    """
+    try:
+        import tifffile
+    except ImportError:
+        raise ImportError(
+            "tifffile is required to load OME-TIFF. "
+            "Install with: pip install tifffile"
+        )
+
+    logger.info(f"  Loading OME-TIFF: {tiff_path}")
+    with tifffile.TiffFile(str(tiff_path)) as tif:
+        # OME-TIFF: read the first (full-resolution) series
+        if tif.series:
+            volume = tif.series[0].asarray()
+        else:
+            volume = tif.asarray()
+
+    volume = volume.astype(np.uint16)
+    logger.info(f"  OME-TIFF loaded: shape={volume.shape}, dtype={volume.dtype}")
+    return volume
+
+
 @dataclass
 class SessionMetadata:
     """Metadata for a saved session."""
@@ -860,20 +887,26 @@ def _load_multichannel_store(
     origin_um = np.array(origin_um_list)  # [z, y, x]
     voxel_size_um = np.array([native_voxel["z"], native_voxel["y"], native_voxel["x"]])
 
-    # Open zarr store
-    store = _create_zarr_store(str(store_path))
-    root = zarr.open_group(store=store, mode="r")
-    arr = _find_zarr_array(root, store_path)
+    # Dispatch on file type
+    suffix = store_path.suffix.lower()
+    if suffix in (".tif", ".tiff"):
+        volume = _load_ome_tiff(store_path)
+    else:
+        # Open zarr store
+        store = _create_zarr_store(str(store_path))
+        root = zarr.open_group(store=store, mode="r")
+        arr = _find_zarr_array(root, store_path)
 
-    logger.info(
-        f"  Multi-channel store: shape={arr.shape}, dtype={arr.dtype}, "
-        f"origin_um={origin_um}, voxel_size_um={voxel_size_um}"
-    )
+        logger.info(
+            f"  Multi-channel store: shape={arr.shape}, dtype={arr.dtype}, "
+            f"origin_um={origin_um}, voxel_size_um={voxel_size_um}"
+        )
 
-    # Read into memory
-    logger.info("  Loading multi-channel volume into memory...")
-    data = da.from_zarr(arr)
-    volume = data.compute().astype(np.uint16)
+        # Read into memory
+        logger.info("  Loading multi-channel volume into memory...")
+        data = da.from_zarr(arr)
+        volume = data.compute().astype(np.uint16)
+
     logger.info(f"  Loaded shape: {volume.shape}")
 
     channels = []
