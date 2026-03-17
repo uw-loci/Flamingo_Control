@@ -282,7 +282,16 @@ class StitchingDialog(PersistentDialog):
     # --- Directory browsing ---
 
     def _browse_acq_dir(self):
-        start = self._acq_dir_edit.text() or str(Path.home())
+        current = self._acq_dir_edit.text() or ""
+        if current:
+            # Start Browse near sibling acquisitions (go up N levels)
+            start = Path(current)
+            for _ in range(self._acq_dir_restore_levels_up):
+                if start.parent != start:
+                    start = start.parent
+            start = str(start)
+        else:
+            start = str(Path.home())
         folder = QFileDialog.getExistingDirectory(
             self, "Select Acquisition Directory", start
         )
@@ -569,13 +578,7 @@ class StitchingDialog(PersistentDialog):
 
         acq_dir = s.value("acq_dir", "", type=str)
         if acq_dir:
-            # Navigate up N levels so the user starts near (not inside)
-            # their last acquisition — easier to pick a new one nearby.
-            restored = Path(acq_dir)
-            for _ in range(self._acq_dir_restore_levels_up):
-                if restored.parent != restored:  # not at filesystem root
-                    restored = restored.parent
-            self._acq_dir_edit.setText(str(restored))
+            self._acq_dir_edit.setText(acq_dir)
 
         output_dir = s.value("output_dir", "", type=str)
         if output_dir:
@@ -733,11 +736,7 @@ class NativeStitchingDialog(StitchingDialog):
 
         acq_dir = s.value("acq_dir", "", type=str)
         if acq_dir:
-            restored = Path(acq_dir)
-            for _ in range(self._acq_dir_restore_levels_up):
-                if restored.parent != restored:
-                    restored = restored.parent
-            self._acq_dir_edit.setText(str(restored))
+            self._acq_dir_edit.setText(acq_dir)
 
         output_dir = s.value("output_dir", "", type=str)
         if output_dir:
