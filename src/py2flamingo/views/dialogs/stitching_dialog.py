@@ -156,6 +156,7 @@ class StitchingDialog(PersistentDialog):
             "OME-TIFF: single file, universal viewer support\n"
             "Both: write Zarr Sharded + TIFF"
         )
+        self._format_combo.currentIndexChanged.connect(self._on_format_changed)
         settings_layout.addWidget(self._format_combo, 2, 3)
 
         # Format help label
@@ -278,6 +279,9 @@ class StitchingDialog(PersistentDialog):
         self._status_label.setMinimumWidth(120)
         progress_layout.addWidget(self._status_label)
         layout.addLayout(progress_layout)
+
+        # Sync .ozx checkbox enabled state with initial format
+        self._on_format_changed()
 
     # --- Directory browsing ---
 
@@ -529,6 +533,16 @@ class StitchingDialog(PersistentDialog):
             self._run_btn.setEnabled(False)
             self._set_btn_green(self._discover_btn)
             self._set_btn_default(self._run_btn)
+
+    # --- Format-dependent UI ---
+
+    def _on_format_changed(self, _index=None):
+        """Enable/disable .ozx checkbox based on selected output format."""
+        fmt = self._format_combo.currentData()
+        has_zarr = fmt in ("ome-zarr-sharded", "ome-zarr-v2", "both")
+        self._ozx_cb.setEnabled(has_zarr)
+        if not has_zarr:
+            self._ozx_cb.setChecked(False)
 
     # --- Button styling helpers ---
 
