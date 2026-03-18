@@ -2644,6 +2644,19 @@ class SampleView(QWidget):
                 layer.metadata["ch_id"] = ch_id
                 ch_ids_loaded.append(ch_id)
 
+                # Point channel controls at the stitched layer so Viewer
+                # Channels (visibility, colormap, contrast) work on it.
+                if ch_id in self.channel_layers:
+                    original = self.channel_layers[ch_id]
+                    if not hasattr(self, "_original_channel_layers"):
+                        self._original_channel_layers = {}
+                    self._original_channel_layers[ch_id] = original
+                    original.visible = False
+                    self.channel_layers[ch_id] = layer
+
+            # Apply auto-contrast so sliders reflect actual stitched data
+            self._auto_contrast_channels()
+
             if restore_3d:
                 self.viewer.dims.ndisplay = 3
 
@@ -2738,6 +2751,13 @@ class SampleView(QWidget):
         """Remove any previously loaded stitched layers from the viewer."""
         if not self.viewer:
             return
+
+        # Restore original channel_layers before removing stitched layers
+        if hasattr(self, "_original_channel_layers"):
+            for ch_id, original_layer in self._original_channel_layers.items():
+                self.channel_layers[ch_id] = original_layer
+            self._original_channel_layers.clear()
+
         to_remove = [
             layer
             for layer in self.viewer.layers
