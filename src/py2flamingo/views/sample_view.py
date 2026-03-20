@@ -2124,6 +2124,28 @@ class SampleView(QWidget):
 
             self.logger.info(f"Auto-contrast channel {ch_id}: [{min_val}, {max_val}]")
 
+    def _enable_channel_controls(self, ch_id: int, enabled: bool) -> None:
+        """Enable or disable the UI controls for a single channel."""
+        checkbox = self.channel_checkboxes.get(ch_id)
+        slider = self.channel_contrast_sliders.get(ch_id)
+        min_spin = self.channel_min_spins.get(ch_id)
+        max_spin = self.channel_max_spins.get(ch_id)
+
+        if checkbox:
+            checkbox.setEnabled(enabled)
+            if enabled:
+                checkbox.setChecked(True)
+                self._channel_states[ch_id]["visible"] = True
+            else:
+                checkbox.setChecked(False)
+                self._channel_states[ch_id]["visible"] = False
+        if slider:
+            slider.setEnabled(enabled)
+        if min_spin:
+            min_spin.setEnabled(enabled)
+        if max_spin:
+            max_spin.setEnabled(enabled)
+
     def _update_channel_availability(self) -> None:
         """Enable/disable channel controls based on whether data exists."""
         if not self.voxel_storage:
@@ -2654,6 +2676,9 @@ class SampleView(QWidget):
                     original.visible = False
                     self.channel_layers[ch_id] = layer
 
+                # Enable channel controls (they start disabled until data)
+                self._enable_channel_controls(ch_id, True)
+
             # Apply auto-contrast so sliders reflect actual stitched data
             self._auto_contrast_channels()
 
@@ -2752,10 +2777,11 @@ class SampleView(QWidget):
         if not self.viewer:
             return
 
-        # Restore original channel_layers before removing stitched layers
+        # Restore original channel_layers and disable controls
         if hasattr(self, "_original_channel_layers"):
             for ch_id, original_layer in self._original_channel_layers.items():
                 self.channel_layers[ch_id] = original_layer
+                self._enable_channel_controls(ch_id, False)
             self._original_channel_layers.clear()
 
         to_remove = [
