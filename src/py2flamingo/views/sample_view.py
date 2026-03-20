@@ -2075,7 +2075,7 @@ class SampleView(QWidget):
 
     def _auto_contrast_channels(self) -> None:
         """Calculate and apply contrast based on actual data statistics."""
-        if not self.voxel_storage or not self.channel_layers:
+        if not self.channel_layers:
             return
 
         for ch_id, layer in self.channel_layers.items():
@@ -2083,8 +2083,19 @@ class SampleView(QWidget):
             if volume is None or volume.size == 0:
                 continue
 
+            # Subsample large volumes to avoid locking up on stitched data
+            # (~6 GB per channel). Sample ~1M voxels max.
+            max_sample = 1_000_000
+            if volume.size > max_sample:
+                step = max(1, int((volume.size / max_sample) ** (1.0 / volume.ndim)))
+                sample = volume[
+                    tuple(slice(None, None, step) for _ in range(volume.ndim))
+                ]
+            else:
+                sample = volume
+
             # Calculate percentile-based contrast (5th to 99.9th percentile)
-            non_zero = volume[volume > 0]
+            non_zero = sample[sample > 0]
             if len(non_zero) == 0:
                 continue
 
@@ -2504,7 +2515,7 @@ class SampleView(QWidget):
         and immediate subdirectories so the user can select the stitched output
         folder, a parent folder, or an individual .ome.zarr channel folder.
         """
-        from PyQt5.QtWidgets import QMessageBox
+        from PyQt5.QtWidgets import QApplication, QMessageBox, QProgressDialog
 
         if not self.viewer:
             QMessageBox.warning(self, "Not Ready", "3D viewer not initialized.")
@@ -2533,6 +2544,28 @@ class SampleView(QWidget):
             )
             return
 
+        # Show progress dialog — volume loading can take 10+ seconds
+        progress = QProgressDialog(
+            "Reading stitched volume into memory...", None, 0, 0, self
+        )
+        progress.setWindowTitle("Loading Stitched Data")
+        progress.setMinimumDuration(0)
+        progress.setWindowModality(Qt.WindowModal)
+
+        # Estimate file size for the status message
+        import json
+
+        meta_path = output_dir / "stitch_metadata.json"
+        metadata = json.loads(meta_path.read_text())
+        store_name = metadata.get("store_path", "")
+        store_file = output_dir / store_name
+        if store_file.exists() and store_file.is_file():
+            size_gb = store_file.stat().st_size / (1024**3)
+            progress.setLabelText(
+                f"Reading {store_name} ({size_gb:.1f} GB) into memory..."
+            )
+        QApplication.processEvents()
+
         try:
             from py2flamingo.visualization.session_manager import load_stitched_volume
 
@@ -2540,12 +2573,21 @@ class SampleView(QWidget):
             channels = result["channels"]
 
             if not channels:
+                progress.close()
                 QMessageBox.warning(
                     self,
                     "No Data Loaded",
                     "No channels were loaded from the stitching output.",
                 )
                 return
+
+            n_ch = len(channels)
+            ch_shape = channels[0]["volume"].shape
+            progress.setLabelText(
+                f"Adding {n_ch} channel(s) to viewer "
+                f"({ch_shape[0]}x{ch_shape[1]}x{ch_shape[2]} voxels)..."
+            )
+            QApplication.processEvents()
 
             # Remove any previously loaded stitched layers
             self._remove_stitched_layers()
@@ -2744,6 +2786,8 @@ class SampleView(QWidget):
                 bbox_min > chamber_dims_vox + 10
             )
 
+            progress.close()
+
             if out_of_bounds:
                 self.logger.warning(
                     f"Stitched data bbox [{bbox_min} - {bbox_max}] display voxels "
@@ -2767,6 +2811,7 @@ class SampleView(QWidget):
                 )
 
         except Exception as e:
+            progress.close()
             self.logger.exception(f"Load stitched failed: {e}")
             QMessageBox.critical(
                 self, "Load Error", f"Error loading stitched data:\n{e}"
