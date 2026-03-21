@@ -114,6 +114,7 @@ class StitchingConfig:
     package_ozx: bool = False  # Create .ozx (ZIP) from OME-Zarr output
 
     # Processing
+    flat_field_correction: bool = False  # BaSiCPy flat-field correction
     destripe: bool = False  # Run PyStripe destriping
     downsample_factor: int = (
         1  # 1 = no downsampling, 2/4/8 = downsample before stitching
@@ -723,6 +724,21 @@ class StitchingPipeline:
         if self._cancelled_fn():
             self.logger.info("Pipeline cancelled by user")
             return output_path
+
+        # --- Flat-field correction (between load and register) ---
+        if self.config.flat_field_correction:
+            self.logger.info("Step 2b: Estimating flat-field profiles (BaSiCPy)...")
+            from py2flamingo.stitching.flat_field import (
+                apply_flat_field,
+                estimate_flat_fields,
+            )
+
+            models = estimate_flat_fields(channel_tile_data)
+            if models:
+                self.logger.info("  Applying flat-field correction...")
+                apply_flat_field(channel_tile_data, models)
+            else:
+                self.logger.warning("  No flat-field models — skipping correction")
 
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)

@@ -75,6 +75,11 @@ def main():
         help="Dual-illumination fusion method (default: max)",
     )
     preproc_group.add_argument(
+        "--flat-field",
+        action="store_true",
+        help="Apply BaSiC flat-field correction (requires basicpy)",
+    )
+    preproc_group.add_argument(
         "--destripe",
         action="store_true",
         help="Apply PyStripe destriping (requires pystripe)",
@@ -221,6 +226,7 @@ def main():
         pixel_size_um=args.pixel_size_um,
         z_step_um=args.z_step_um,
         illumination_fusion=args.illumination_fusion,
+        flat_field_correction=args.flat_field,
         destripe=args.destripe,
         reg_channel=args.reg_channel,
         quality_threshold=args.quality_threshold,

@@ -87,6 +87,7 @@ class StitchingWorker(QThread):
                 f"Output dir: {self._output_dir}\n"
                 f"Downsample: {self._config.downsample_factor}x\n"
                 f"Illumination fusion: {self._config.illumination_fusion}\n"
+                f"Flat-field correction: {self._config.flat_field_correction}\n"
                 f"Destripe: {self._config.destripe}\n"
                 f"Deconvolution: {self._config.deconvolution_enabled}"
                 f"{' (' + self._config.deconvolution_engine + ')' if self._config.deconvolution_enabled else ''}\n"

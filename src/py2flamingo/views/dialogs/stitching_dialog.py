@@ -212,22 +212,32 @@ class StitchingDialog(PersistentDialog):
         )
         settings_layout.addWidget(self._content_fusion_cb, 3, 2, 1, 2)
 
-        # Row 4: package + channels
+        # Flat-field correction
+        self._flat_field_cb = QCheckBox("Flat-field correction")
+        self._flat_field_cb.setToolTip(
+            "Estimate and correct illumination non-uniformity\n"
+            "from tile data (BaSiC algorithm, no calibration needed).\n"
+            "Improves tile intensity consistency and reduces seams.\n"
+            "(requires basicpy: pip install basicpy)"
+        )
+        settings_layout.addWidget(self._flat_field_cb, 4, 0, 1, 2)
+
+        # Row 5: package + channels
         self._ozx_cb = QCheckBox("Package as .ozx")
         self._ozx_cb.setToolTip(
             "Create a single .ozx ZIP file from the OME-Zarr output\n"
             "for easy sharing/copying"
         )
-        settings_layout.addWidget(self._ozx_cb, 4, 0, 1, 2)
+        settings_layout.addWidget(self._ozx_cb, 5, 0, 1, 2)
 
         # Channels
-        settings_layout.addWidget(QLabel("Channels:"), 5, 0)
+        settings_layout.addWidget(QLabel("Channels:"), 6, 0)
         self._channels_edit = QLineEdit()
         self._channels_edit.setPlaceholderText("All (or e.g. 0,1)")
         self._channels_edit.setToolTip(
             "Leave empty for all channels, or comma-separated list (e.g. 0,1)"
         )
-        settings_layout.addWidget(self._channels_edit, 5, 1, 1, 3)
+        settings_layout.addWidget(self._channels_edit, 6, 1, 1, 3)
 
         settings_group.setLayout(settings_layout)
         layout.addWidget(settings_group)
@@ -403,6 +413,7 @@ class StitchingDialog(PersistentDialog):
             z_step_um=z_step if z_step > 0 else None,
             illumination_fusion=self._fusion_combo.currentData(),
             output_format=self._format_combo.currentData(),
+            flat_field_correction=self._flat_field_cb.isChecked(),
             destripe=self._destripe_cb.isChecked(),
             downsample_factor=self._downsample_combo.currentData(),
             deconvolution_enabled=self._deconv_cb.isChecked(),
@@ -577,6 +588,7 @@ class StitchingDialog(PersistentDialog):
         s.setValue("z_step", self._z_step_spin.value())
         s.setValue("downsample_idx", self._downsample_combo.currentIndex())
         s.setValue("fusion_idx", self._fusion_combo.currentIndex())
+        s.setValue("flat_field", self._flat_field_cb.isChecked())
         s.setValue("destripe", self._destripe_cb.isChecked())
         s.setValue("deconvolution", self._deconv_cb.isChecked())
         s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
@@ -609,6 +621,9 @@ class StitchingDialog(PersistentDialog):
 
         fusion_idx = s.value("fusion_idx", 0, type=int)
         self._fusion_combo.setCurrentIndex(fusion_idx)
+
+        flat_field = s.value("flat_field", False, type=bool)
+        self._flat_field_cb.setChecked(flat_field)
 
         destripe = s.value("destripe", False, type=bool)
         self._destripe_cb.setChecked(destripe)
@@ -735,6 +750,7 @@ class NativeStitchingDialog(StitchingDialog):
         s.setValue("z_step", self._z_step_spin.value())
         s.setValue("downsample_idx", self._downsample_combo.currentIndex())
         s.setValue("fusion_idx", self._fusion_combo.currentIndex())
+        s.setValue("flat_field", self._flat_field_cb.isChecked())
         s.setValue("destripe", self._destripe_cb.isChecked())
         s.setValue("deconvolution", self._deconv_cb.isChecked())
         s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
@@ -767,6 +783,9 @@ class NativeStitchingDialog(StitchingDialog):
 
         fusion_idx = s.value("fusion_idx", 0, type=int)
         self._fusion_combo.setCurrentIndex(fusion_idx)
+
+        flat_field = s.value("flat_field", False, type=bool)
+        self._flat_field_cb.setChecked(flat_field)
 
         destripe = s.value("destripe", False, type=bool)
         self._destripe_cb.setChecked(destripe)
