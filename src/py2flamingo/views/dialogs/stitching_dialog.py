@@ -449,6 +449,24 @@ class StitchingDialog(PersistentDialog):
         config = self._build_config()
         channels = self._parse_channels()
 
+        # Pre-flight: warn if flat-field is requested but basicpy missing
+        if config.flat_field_correction:
+            from py2flamingo.stitching.flat_field import is_available
+
+            if not is_available():
+                reply = QMessageBox.question(
+                    self,
+                    "basicpy Not Installed",
+                    "Flat-field correction requires basicpy which is not installed.\n\n"
+                    "Install with:  pip install basicpy\n\n"
+                    "Continue without flat-field correction?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if reply == QMessageBox.No:
+                    return
+                config.flat_field_correction = False
+
         self._log_text.clear()
         self._log("Starting stitching pipeline...")
 

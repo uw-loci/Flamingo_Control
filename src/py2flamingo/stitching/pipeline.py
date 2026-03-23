@@ -727,18 +727,38 @@ class StitchingPipeline:
 
         # --- Flat-field correction (between load and register) ---
         if self.config.flat_field_correction:
-            self.logger.info("Step 2b: Estimating flat-field profiles (BaSiCPy)...")
             from py2flamingo.stitching.flat_field import (
                 apply_flat_field,
                 estimate_flat_fields,
+                is_available,
             )
 
-            models = estimate_flat_fields(channel_tile_data)
-            if models:
-                self.logger.info("  Applying flat-field correction...")
-                apply_flat_field(channel_tile_data, models)
+            if not is_available():
+                self.logger.warning(
+                    "Flat-field correction requested but basicpy is not installed. "
+                    "Skipping. Install with: pip install basicpy"
+                )
             else:
-                self.logger.warning("  No flat-field models — skipping correction")
+                self.logger.info("Step 2b: Estimating flat-field profiles (BaSiCPy)...")
+
+                def _ff_progress(msg: str) -> None:
+                    self._progress_fn(35, msg)
+
+                models = estimate_flat_fields(
+                    channel_tile_data, progress_fn=_ff_progress
+                )
+
+                if self._cancelled_fn():
+                    self.logger.info("Pipeline cancelled by user")
+                    return output_path
+
+                if models:
+                    self._progress_fn(38, "Applying flat-field correction...")
+                    apply_flat_field(
+                        channel_tile_data, models, progress_fn=_ff_progress
+                    )
+                else:
+                    self.logger.warning("  No flat-field models — skipping correction")
 
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)

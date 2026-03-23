@@ -16,7 +16,7 @@ Requirements:
 """
 
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -31,8 +31,14 @@ except ImportError:
     pass
 
 
+def is_available() -> bool:
+    """Return True if basicpy is installed and importable."""
+    return BASICPY_AVAILABLE
+
+
 def estimate_flat_fields(
     channel_tile_data: Dict[int, List[Tuple[Any, Any]]],
+    progress_fn: Optional[Callable[[str], None]] = None,
 ) -> Dict[int, Any]:
     """Estimate a flat-field profile per channel from tile data.
 
@@ -41,6 +47,7 @@ def estimate_flat_fields(
 
     Args:
         channel_tile_data: {ch_id: [(volume, tile_info), ...]}
+        progress_fn: Optional callback for status messages.
 
     Returns:
         {ch_id: BaSiC model} — empty dict if basicpy is not available.
@@ -53,8 +60,10 @@ def estimate_flat_fields(
         return {}
 
     models = {}
+    ch_ids = list(channel_tile_data.keys())
 
-    for ch_id, tile_list in channel_tile_data.items():
+    for i, ch_id in enumerate(ch_ids):
+        tile_list = channel_tile_data[ch_id]
         if not tile_list:
             continue
 
@@ -66,10 +75,13 @@ def estimate_flat_fields(
             sample_planes.append(vol[mid_z])
 
         stack = np.stack(sample_planes)  # (N_tiles, H, W)
-        logger.info(
-            f"  Channel {ch_id}: fitting flat-field from {len(sample_planes)} "
-            f"tiles ({stack.shape[1]}x{stack.shape[2]} px)"
+        msg = (
+            f"Fitting flat-field for channel {ch_id} "
+            f"({i + 1}/{len(ch_ids)}, {len(sample_planes)} tiles)..."
         )
+        logger.info(f"  {msg}")
+        if progress_fn:
+            progress_fn(msg)
 
         try:
             basic = BaSiC(fitting_mode="approximate")
@@ -88,6 +100,7 @@ def estimate_flat_fields(
 def apply_flat_field(
     channel_tile_data: Dict[int, List[Tuple[Any, Any]]],
     models: Dict[int, Any],
+    progress_fn: Optional[Callable[[str], None]] = None,
 ) -> None:
     """Apply flat-field correction to all tiles in-place.
 
@@ -100,6 +113,7 @@ def apply_flat_field(
     Args:
         channel_tile_data: {ch_id: [(volume, tile_info), ...]}
         models: {ch_id: BaSiC model} from estimate_flat_fields()
+        progress_fn: Optional callback for status messages.
     """
     for ch_id, tile_list in channel_tile_data.items():
         model = models.get(ch_id)
@@ -123,4 +137,7 @@ def apply_flat_field(
             corrected = np.clip(vol, 0, 65535).astype(np.uint16)
             tile_list[tile_idx] = (corrected, tile_info)
 
-        logger.info(f"  Channel {ch_id}: corrected {n_tiles} tiles")
+        msg = f"Channel {ch_id}: corrected {n_tiles} tiles"
+        logger.info(f"  {msg}")
+        if progress_fn:
+            progress_fn(msg)
