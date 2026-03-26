@@ -13,7 +13,7 @@ scikit-learn>=1.0.0
 
 # 3D Visualization dependencies
 napari>=0.7.0  # Stable 0.7; use bare napari (not [all]) to avoid PyQt6 default
-vispy>=0.16.2,<0.17  # napari 0.7 requires >0.16.1
+vispy>=0.16.0  # napari 0.7 requires >=0.16; 0.16.2 not yet on PyPI for all Python versions
 sparse>=0.13.0  # Sparse array support for efficient voxel storage
 PyYAML>=6.0  # YAML configuration file support
 h5py>=3.8.0  # HDF5 file format support (optional, for data export)
