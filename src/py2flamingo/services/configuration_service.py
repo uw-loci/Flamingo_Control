@@ -436,6 +436,7 @@ class ConfigurationService:
     ZARR_SESSION_PATH_KEY = "zarr_3d_session_path"
     THRESHOLDER_PRESET_PATH_KEY = "thresholder_preset_path"
     STITCHED_DATA_PATH_KEY = "stitched_data_path"
+    WEBCAM_SESSION_PATH_KEY = "webcam_overview_session_path"
     _SESSION_PATHS_FILE = "session_paths.json"
 
     def _session_paths_file(self) -> Path:
@@ -459,6 +460,7 @@ class ConfigurationService:
                 self.MIP_BROWSE_PATH_KEY,
                 self.SAMPLE_3D_DATA_PATH_KEY,
                 self.STITCHED_DATA_PATH_KEY,
+                self.WEBCAM_SESSION_PATH_KEY,
             ]:
                 if key in data:
                     self.config[key] = data[key]
@@ -478,6 +480,7 @@ class ConfigurationService:
             self.MIP_BROWSE_PATH_KEY,
             self.SAMPLE_3D_DATA_PATH_KEY,
             self.STITCHED_DATA_PATH_KEY,
+            self.WEBCAM_SESSION_PATH_KEY,
         ]:
             if key in self.config:
                 data[key] = self.config[key]
@@ -601,6 +604,25 @@ class ConfigurationService:
         self.config[self.STITCHED_DATA_PATH_KEY] = path
         self._save_session_paths()
         self.logger.info(f"Set stitched data path: {path}")
+
+    # Webcam overview session path
+    def get_webcam_session_path(self) -> Optional[str]:
+        """Get the last-used Webcam Overview session browse path.
+
+        Returns:
+            Path string if set, None otherwise
+        """
+        return self.config.get(self.WEBCAM_SESSION_PATH_KEY)
+
+    def set_webcam_session_path(self, path: str) -> None:
+        """Set the Webcam Overview session browse path.
+
+        Args:
+            path: Directory path last browsed to
+        """
+        self.config[self.WEBCAM_SESSION_PATH_KEY] = path
+        self._save_session_paths()
+        self.logger.info(f"Set webcam session path: {path}")
 
     # Thresholder preset path (for Save/Load Preset in Union of Thresholders)
     def get_thresholder_preset_path(self) -> Optional[str]:

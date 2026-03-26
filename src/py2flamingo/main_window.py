@@ -376,6 +376,26 @@ class MainWindow(QMainWindow):
         self.stitching_native_action.triggered.connect(self._on_stitching_native)
         extensions_menu.addAction(self.stitching_native_action)
 
+        extensions_menu.addSeparator()
+
+        self.webcam_overview_action = QAction("&Webcam Overview...", self)
+        self.webcam_overview_action.setStatusTip(
+            "Capture webcam overview images, calibrate, and select tile regions"
+        )
+        self.webcam_overview_action.triggered.connect(self._on_webcam_overview)
+        extensions_menu.addAction(self.webcam_overview_action)
+
+        self.load_webcam_overview_action = QAction(
+            "Load Webcam O&verview Session...", self
+        )
+        self.load_webcam_overview_action.setStatusTip(
+            "Load a saved Webcam Overview session for tile selection"
+        )
+        self.load_webcam_overview_action.triggered.connect(
+            self._on_load_webcam_overview
+        )
+        extensions_menu.addAction(self.load_webcam_overview_action)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -968,6 +988,96 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self, "Error", f"Failed to open Tile Stitching (Single Workflow):\n{e}"
             )
+
+    def _on_webcam_overview(self):
+        """Handle Webcam Overview menu action."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.info("Webcam Overview menu action triggered")
+
+        try:
+            from py2flamingo.views.dialogs.webcam_overview_dialog import (
+                WebcamOverviewDialog,
+            )
+
+            # Reuse existing dialog if still open
+            if (
+                hasattr(self, "_webcam_overview_dialog")
+                and self._webcam_overview_dialog is not None
+            ):
+                self._webcam_overview_dialog.show()
+                self._webcam_overview_dialog.raise_()
+                self._webcam_overview_dialog.activateWindow()
+                return
+
+            self._webcam_overview_dialog = WebcamOverviewDialog(
+                app=self.app, parent=None
+            )
+            self._webcam_overview_dialog.show()
+
+        except Exception as e:
+            logger.error(f"Error opening Webcam Overview: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to open Webcam Overview:\n{e}")
+
+    def _on_load_webcam_overview(self):
+        """Handle Load Webcam Overview Session menu action."""
+        import logging
+        from pathlib import Path
+
+        from PyQt5.QtWidgets import QFileDialog
+
+        logger = logging.getLogger(__name__)
+        logger.info("Load Webcam Overview Session menu action triggered")
+
+        # Get last-used path
+        start_path = str(Path.home())
+        if self.app and hasattr(self.app, "config_service") and self.app.config_service:
+            saved_path = self.app.config_service.get_webcam_session_path()
+            if saved_path:
+                start_path = saved_path
+
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select Webcam Overview Session Folder",
+            start_path,
+            QFileDialog.ShowDirsOnly,
+        )
+
+        if not folder:
+            return
+
+        # Save parent for next time
+        if self.app and hasattr(self.app, "config_service") and self.app.config_service:
+            self.app.config_service.set_webcam_session_path(str(Path(folder).parent))
+
+        try:
+            from py2flamingo.views.dialogs.webcam_overview_result import (
+                WebcamOverviewResultWindow,
+            )
+
+            folder_path = Path(folder)
+            window = WebcamOverviewResultWindow.load_from_folder(
+                folder_path, app=self.app
+            )
+
+            if window:
+                if not hasattr(self, "_loaded_webcam_windows"):
+                    self._loaded_webcam_windows = []
+                self._loaded_webcam_windows.append(window)
+                window.show()
+                logger.info(f"Loaded Webcam Overview session from: {folder}")
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Load Failed",
+                    f"Could not load Webcam Overview session from:\n{folder}\n\n"
+                    "Make sure this is a valid webcam session .zarr folder.",
+                )
+
+        except Exception as e:
+            logger.error(f"Error loading Webcam Overview session: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to load session:\n{e}")
 
     def _on_load_stitched_from_dialog(self, output_path: str):
         """Handle stitching dialog request to load output into SampleView."""
