@@ -2,16 +2,18 @@
 # Install with: pip install -r requirements.txt
 
 # Core GUI and imaging
-PyQt5>=5.15.0
+PyQt5>=5.15.8  # napari 0.7 requires >=5.15.8; do NOT use napari[all] (pulls PyQt6)
 numpy>=2.0.0  # NumPy 2.x now supported by scipy/napari/zarr ecosystem
 Pillow>=9.0.0
+opencv-python>=4.5.0  # Webcam capture for Webcam Overview extension
 
 # Scientific computing (required for image processing and analysis)
 scipy>=1.14.0  # 1.14+ supports numpy 2.x
 scikit-learn>=1.0.0
 
 # 3D Visualization dependencies
-napari[all]>=0.7.0a3  # 0.7+ requires vispy 0.16.1+ (fixes arcball crash)
+napari>=0.7.0  # Stable 0.7; use bare napari (not [all]) to avoid PyQt6 default
+vispy>=0.16.2,<0.17  # napari 0.7 requires >0.16.1
 sparse>=0.13.0  # Sparse array support for efficient voxel storage
 PyYAML>=6.0  # YAML configuration file support
 h5py>=3.8.0  # HDF5 file format support (optional, for data export)
