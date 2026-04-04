@@ -257,6 +257,29 @@ class WorkflowView(QWidget):
         camera_settings = self._camera_panel.get_settings()
         self._zstack_panel.set_frame_rate(camera_settings["frame_rate"])
 
+        # Wire panels to size estimate updates
+        self._illumination_panel.settings_changed.connect(
+            lambda _: self._update_size_estimate()
+        )
+        self._camera_panel.settings_changed.connect(
+            lambda _: self._update_size_estimate()
+        )
+        self._zstack_panel.settings_changed.connect(
+            lambda _: self._update_size_estimate()
+        )
+        self._tiling_panel.settings_changed.connect(
+            lambda _: self._update_size_estimate()
+        )
+        self._timelapse_panel.settings_changed.connect(
+            lambda _: self._update_size_estimate()
+        )
+        self._multiangle_panel.settings_changed.connect(
+            lambda _: self._update_size_estimate()
+        )
+        self._save_panel.settings_changed.connect(
+            lambda _: self._update_size_estimate()
+        )
+
         # Apply initial visibility matrix (Snapshot mode by default)
         self._apply_visibility_matrix(WorkflowType.SNAPSHOT)
 
@@ -399,6 +422,9 @@ class WorkflowView(QWidget):
         # Persist selection
         self._save_workflow_type(index)
 
+        # Update size estimate for new workflow type
+        self._update_size_estimate()
+
     def _save_workflow_type(self, index: int) -> None:
         """Persist workflow type selection."""
         gm = _default_geometry_manager
@@ -528,6 +554,63 @@ class WorkflowView(QWidget):
         """Handle camera settings change - update Z velocity calculation."""
         frame_rate = settings.get("frame_rate", 100.0)
         self._zstack_panel.set_frame_rate(frame_rate)
+
+    def _update_size_estimate(self) -> None:
+        """Recalculate and display the estimated raw data size."""
+        try:
+            camera = self._camera_panel.get_settings()
+            aoi_w = camera.get("aoi_width", 2048)
+            aoi_h = camera.get("aoi_height", 2048)
+
+            illum = self._illumination_panel.get_settings()
+            num_channels = max(1, len(illum))
+
+            illum_state = self._illumination_panel.get_ui_state()
+            num_sides = sum(
+                [
+                    illum_state.get("left_path", True),
+                    illum_state.get("right_path", False),
+                ]
+            )
+            num_sides = max(1, num_sides)
+
+            wtype = self._current_type
+            num_planes = 1
+            num_tiles = 1
+            num_timepoints = 1
+            num_angles = 1
+
+            if wtype in (WorkflowType.ZSTACK, WorkflowType.TILE):
+                stack = self._zstack_panel.get_settings()
+                num_planes = max(1, stack.num_planes)
+
+            if wtype == WorkflowType.TILE:
+                tile = self._tiling_panel.get_settings()
+                num_tiles = max(1, tile.num_tiles_x * tile.num_tiles_y)
+
+            if wtype == WorkflowType.TIME_LAPSE:
+                tl = self._timelapse_panel.get_settings()
+                num_timepoints = max(1, tl.num_timepoints)
+
+            if wtype == WorkflowType.MULTI_ANGLE:
+                ma = self._multiangle_panel.get_settings()
+                num_angles = max(1, ma.num_angles)
+
+            bytes_per_pixel = 2
+            total_bytes = (
+                num_tiles
+                * num_planes
+                * num_channels
+                * num_sides
+                * num_timepoints
+                * num_angles
+                * aoi_w
+                * aoi_h
+                * bytes_per_pixel
+            )
+            self._save_panel.update_size_estimate(total_bytes)
+        except Exception as e:
+            self._logger.debug(f"Size estimate failed: {e}")
 
     def _on_start_clicked(self) -> None:
         """Handle start button click."""

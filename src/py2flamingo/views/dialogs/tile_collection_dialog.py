@@ -290,6 +290,22 @@ class TileCollectionDialog(PersistentDialog):
         )
         container_layout.addWidget(self._save_panel)
 
+        # Wire panels to size estimate updates
+        self._illumination_panel.settings_changed.connect(
+            lambda _: self._update_size_estimate()
+        )
+        self._camera_panel.settings_changed.connect(
+            lambda _: self._update_size_estimate()
+        )
+        self._zstack_panel.settings_changed.connect(
+            lambda _: self._update_size_estimate()
+        )
+        self._save_panel.settings_changed.connect(
+            lambda _: self._update_size_estimate()
+        )
+        # Initial estimate
+        QTimer.singleShot(0, self._update_size_estimate)
+
         # Sample View Integration checkbox
         self._add_to_sample_view_checkbox = QCheckBox(
             "Build 3D volume from saved tiles"
@@ -571,6 +587,51 @@ class TileCollectionDialog(PersistentDialog):
         """Handle camera settings change - update Z velocity calculation."""
         frame_rate = settings.get("frame_rate", 100.0)
         self._zstack_panel.set_frame_rate(frame_rate)
+
+    def _update_size_estimate(self) -> None:
+        """Recalculate and display the estimated raw data size."""
+        try:
+            num_tiles = len(self._left_tiles) + len(self._right_tiles)
+            camera = self._camera_panel.get_settings()
+            aoi_w = camera.get("aoi_width", 2048)
+            aoi_h = camera.get("aoi_height", 2048)
+
+            # Channels = number of enabled illumination sources
+            illum = self._illumination_panel.get_settings()
+            num_channels = max(1, len(illum))
+
+            # Illumination sides (left, right, or both)
+            illum_state = self._illumination_panel.get_ui_state()
+            num_sides = sum(
+                [
+                    illum_state.get("left_path", True),
+                    illum_state.get("right_path", False),
+                ]
+            )
+            num_sides = max(1, num_sides)
+
+            # Planes per tile
+            if self._workflow_type == WorkflowType.ZSTACK:
+                stack = self._zstack_panel.get_settings()
+                z_min, z_max = self._get_representative_z_range()
+                z_range_mm = z_max - z_min
+                num_planes = max(1, int(z_range_mm / (stack.z_step_um / 1000.0)) + 1)
+            else:
+                num_planes = 1
+
+            bytes_per_pixel = 2  # uint16
+            total_bytes = (
+                num_tiles
+                * num_planes
+                * num_channels
+                * num_sides
+                * aoi_w
+                * aoi_h
+                * bytes_per_pixel
+            )
+            self._save_panel.update_size_estimate(total_bytes)
+        except Exception as e:
+            logger.debug(f"Size estimate failed: {e}")
 
     def _on_create_workflows(self):
         """Create and execute workflows for selected tiles."""

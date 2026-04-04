@@ -305,6 +305,12 @@ class SavePanel(QWidget):
         format_row.addStretch()
         settings_layout.addLayout(format_row, 6, 0, 1, 2)
 
+        # Size estimate label (updated externally via update_size_estimate)
+        self._size_estimate_label = QLabel()
+        self._size_estimate_label.setStyleSheet("color: #7f8c8d; font-size: 9pt;")
+        self._size_estimate_label.hide()
+        settings_layout.addWidget(self._size_estimate_label, 7, 0, 1, 2)
+
         group_layout.addWidget(self._settings_widget)
 
         group.setLayout(group_layout)
@@ -805,3 +811,81 @@ class SavePanel(QWidget):
             self._logger.info(f"Set last used drive from app: {self._last_used_drive}")
         # Try auto-refresh if connected
         self._try_auto_refresh_drives()
+
+    # --- Size estimation ---
+
+    def update_size_estimate(self, estimated_bytes: int) -> None:
+        """Update the size estimate label with estimated raw data size and disk space.
+
+        Call this from the parent dialog/view whenever acquisition parameters
+        change (tiles, planes, channels, illumination sides, AOI).
+
+        Args:
+            estimated_bytes: Total estimated raw data size in bytes.
+        """
+        if estimated_bytes <= 0:
+            self._size_estimate_label.hide()
+            return
+
+        est_text = self._format_size(estimated_bytes)
+        disk_text = self._get_disk_space_text()
+
+        if disk_text:
+            label = f"Estimated: {est_text} (raw) | {disk_text}"
+            # Warn if estimate exceeds 80% of available space
+            avail = self._get_disk_available_bytes()
+            if avail and estimated_bytes > avail * 0.8:
+                self._size_estimate_label.setStyleSheet(
+                    "color: #e74c3c; font-size: 9pt; font-weight: bold;"
+                )
+            else:
+                self._size_estimate_label.setStyleSheet(
+                    "color: #7f8c8d; font-size: 9pt;"
+                )
+        else:
+            label = f"Estimated: {est_text} (raw)"
+            self._size_estimate_label.setStyleSheet("color: #7f8c8d; font-size: 9pt;")
+
+        self._size_estimate_label.setText(label)
+        self._size_estimate_label.show()
+
+    def _get_disk_space_text(self) -> str:
+        """Get formatted disk space string for the current save drive."""
+        avail = self._get_disk_available_bytes()
+        if avail is None:
+            return ""
+        return f"Available: {self._format_size(avail)}"
+
+    def _get_disk_available_bytes(self) -> Optional[int]:
+        """Get available disk space in bytes for the current save drive.
+
+        Checks the local mapped path for the server drive.
+        Returns None if the path is not accessible.
+        """
+        import shutil
+
+        local_path = self._get_local_save_path()
+        if not local_path:
+            return None
+        try:
+            usage = shutil.disk_usage(local_path)
+            return usage.free
+        except (OSError, ValueError):
+            return None
+
+    def _get_local_save_path(self) -> Optional[str]:
+        """Get the local filesystem path for the current save drive."""
+        config_service = self._get_config_service()
+        if config_service and self._save_drive:
+            return config_service.get_local_path_for_drive(self._save_drive)
+        return None
+
+    @staticmethod
+    def _format_size(size_bytes: int) -> str:
+        """Format byte count as human-readable string (GB or TB)."""
+        gb = size_bytes / (1024**3)
+        if gb >= 1024:
+            return f"{gb / 1024:.1f} TB"
+        if gb >= 10:
+            return f"{gb:.0f} GB"
+        return f"{gb:.1f} GB"
