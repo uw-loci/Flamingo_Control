@@ -214,12 +214,24 @@ class TCPConnection:
             try:
                 self.logger.info(f"Connecting to {self._ip}:{live_port} (live port)")
                 self._live_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+                # Match command socket tuning — large receive buffer is critical
+                # for high-bandwidth frame data (8+ MB/frame at 30 fps).
+                self._live_socket.setsockopt(
+                    socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024
+                )
+                self._live_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
                 self._live_socket.settimeout(timeout)
                 self._live_socket.connect((self._ip, live_port))
                 self._live_socket.settimeout(None)
                 self.logger.info("Connected to live imaging port")
 
-                self._flush_receive_buffer(self._live_socket)
+                # NOTE: No _flush_receive_buffer() here — the live socket is
+                # always freshly created and the microscope may already be
+                # streaming frames (START sent before connect_live).  Flushing
+                # would loop forever consuming the continuous frame data.
+
                 return self._live_socket
 
             except (socket.timeout, ConnectionRefusedError, OSError) as e:
