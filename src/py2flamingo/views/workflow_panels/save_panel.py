@@ -882,10 +882,8 @@ class SavePanel(QWidget):
 
     @staticmethod
     def _format_size(size_bytes: int) -> str:
-        """Format byte count as human-readable string (GB or TB)."""
-        gb = size_bytes / (1024**3)
-        if gb >= 1024:
-            return f"{gb / 1024:.1f} TB"
-        if gb >= 10:
-            return f"{gb:.0f} GB"
-        return f"{gb:.1f} GB"
+        """Format byte count as TB for consistent display."""
+        tb = size_bytes / (1024**4)
+        if tb >= 10:
+            return f"{tb:.1f} TB"
+        return f"{tb:.2f} TB"
