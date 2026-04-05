@@ -2739,16 +2739,17 @@ class SampleView(QWidget):
                 stitch_center_y_mm = (o_y + sh[1] * v_y / 2) / 1000
                 stitch_center_z_mm = (o_z + sh[0] * v_z / 2) / 1000
 
+                current_r = self.last_stage_position.get("r", 0.0)
                 self.last_stage_position = {
                     "x": stitch_center_x_mm,
                     "y": stitch_center_y_mm,
                     "z": stitch_center_z_mm,
-                    "r": 0,
+                    "r": current_r,
                 }
                 self.logger.info(
                     f"Updated virtual stage to stitch center: "
                     f"X={stitch_center_x_mm:.3f} Y={stitch_center_y_mm:.3f} "
-                    f"Z={stitch_center_z_mm:.3f}"
+                    f"Z={stitch_center_z_mm:.3f} R={current_r:.1f}"
                 )
 
                 # Update holder position and sliders
@@ -2947,8 +2948,13 @@ class SampleView(QWidget):
             if channel_id is None:
                 return
 
-            # Add frame to volume
-            stage_pos = {"x": position.x, "y": position.y, "z": position.z}
+            # Add frame to volume (include rotation for correct reference position)
+            stage_pos = {
+                "x": position.x,
+                "y": position.y,
+                "z": position.z,
+                "r": position.r,
+            }
             self.add_frame_to_volume(image, stage_pos, channel_id)
 
         except Exception as e:
@@ -3112,8 +3118,10 @@ class SampleView(QWidget):
             else:
                 # First frame in live view - set reference in voxel_storage
                 self.voxel_storage.set_reference_position(stage_position_mm)
+                pos_r = stage_position_mm.get("r", 0.0)
                 self.logger.info(
-                    f"First frame - set reference position to ({pos_x:.3f}, {pos_y:.3f}, {pos_z:.3f})"
+                    f"First frame - set reference position to "
+                    f"({pos_x:.3f}, {pos_y:.3f}, {pos_z:.3f}, R={pos_r:.1f}°)"
                 )
                 ref_x = pos_x
                 ref_y = pos_y
@@ -4404,6 +4412,7 @@ class SampleView(QWidget):
             workflow_path: Path to the completed workflow file.
         """
         from py2flamingo.utils.tile_workflow_parser import (
+            parse_workflow_position,
             read_save_directory_from_workflow,
         )
         from py2flamingo.visualization.disk_tile_loader import (
@@ -4433,11 +4442,16 @@ class SampleView(QWidget):
             # 4. Set reference position from first tile
             if not self._tile_reference_set:
                 z_mid = (tile_info.z_min + tile_info.z_max) / 2.0
+                # Extract rotation from workflow filename (e.g. R-186)
+                wf_pos = parse_workflow_position(wf_path)
+                ref_r = (
+                    wf_pos["r"] if wf_pos else self.last_stage_position.get("r", 0.0)
+                )
                 ref_pos = {
                     "x": tile_info.x,
                     "y": tile_info.y,
                     "z": z_mid,
-                    "r": 0.0,
+                    "r": ref_r,
                 }
                 self.voxel_storage.set_reference_position(ref_pos)
                 self._tile_reference_position = ref_pos
@@ -4911,6 +4925,7 @@ class SampleView(QWidget):
             tile_worker=self._tile_worker,
             voxel_storage=self.voxel_storage,
             invert_x=self._invert_x,
+            reference_rotation=self.last_stage_position.get("r", 0.0),
         )
         self._disk_loader.moveToThread(self._disk_loader_thread)
 
@@ -4960,7 +4975,8 @@ class SampleView(QWidget):
             self.last_stage_position = dict(ref)
             self.logger.info(
                 f"Synced stage position to data reference: "
-                f"X={ref['x']:.3f}, Y={ref['y']:.3f}, Z={ref['z']:.3f}"
+                f"X={ref['x']:.3f}, Y={ref['y']:.3f}, Z={ref['z']:.3f}, "
+                f"R={ref.get('r', 0.0):.1f}°"
             )
 
         # Enable channel controls for channels that now have data

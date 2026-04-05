@@ -311,7 +311,12 @@ class DiskTileLoader(QObject):
     error = pyqtSignal(str)
 
     def __init__(
-        self, date_dir: str, tile_worker, voxel_storage, invert_x: bool = False
+        self,
+        date_dir: str,
+        tile_worker,
+        voxel_storage,
+        invert_x: bool = False,
+        reference_rotation: float = 0.0,
     ):
         """
         Args:
@@ -319,12 +324,14 @@ class DiskTileLoader(QObject):
             tile_worker: TileProcessingWorker instance (already running on its thread).
             voxel_storage: DualResolutionStorage for setting reference position.
             invert_x: Whether X axis is inverted in display.
+            reference_rotation: Stage rotation (degrees) when data was acquired.
         """
         super().__init__()
         self._date_dir = Path(date_dir)
         self._tile_worker = tile_worker
         self._voxel_storage = voxel_storage
         self._invert_x = invert_x
+        self._reference_rotation = reference_rotation
         self._shutdown = False
 
     def shutdown(self):
@@ -373,7 +380,12 @@ class DiskTileLoader(QObject):
         # 3. Set reference position from first tile
         first = tiles[0]
         z_mid = (first.z_min + first.z_max) / 2.0
-        ref_pos = {"x": first.x, "y": first.y, "z": z_mid, "r": 0.0}
+        ref_pos = {
+            "x": first.x,
+            "y": first.y,
+            "z": z_mid,
+            "r": self._reference_rotation,
+        }
         self._voxel_storage.set_reference_position(ref_pos)
         logger.info(f"Reference position set from first tile: {ref_pos}")
 
