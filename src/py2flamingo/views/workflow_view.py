@@ -157,13 +157,15 @@ class WorkflowView(QWidget):
         illumination_scroll.setWidget(self._illumination_panel)
         self._settings_tabs.addTab(illumination_scroll, "Illumination")
 
+        # Create Save panel early — _create_acquisition_tab() wires signals to it
+        connection_service = getattr(self._controller, "_connection_service", None)
+        self._save_panel = SavePanel(connection_service=connection_service)
+
         # Tab 2: Acquisition (contains type-specific panels)
         acquisition_widget = self._create_acquisition_tab()
         self._settings_tabs.addTab(acquisition_widget, "Acquisition")
 
-        # Tab 3: Save/Output (pass connection service for drive querying)
-        connection_service = getattr(self._controller, "_connection_service", None)
-        self._save_panel = SavePanel(connection_service=connection_service)
+        # Tab 3: Save/Output
         save_scroll = QScrollArea()
         save_scroll.setWidgetResizable(True)
         save_scroll.setFrameShape(QFrame.NoFrame)
