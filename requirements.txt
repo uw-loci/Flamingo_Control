@@ -27,10 +27,11 @@ numcodecs>=0.14.0  # Updated codecs for zarr 3.x
 multiview-stitcher>=0.1.37  # Tile registration and fusion
 dask[array]>=2024.1.0  # Out-of-core parallel processing
 
-# Stitching pipeline — optional but recommended
-# Install separately if needed:
-#   pip install ngff-zarr[all]        # Multi-resolution pyramid + sharding + tensorstore
-#   pip install pystripe              # Destriping
+# Stitching pipeline — preprocessing
+basicpy>=1.0.0  # BaSiC flat-field correction (Peng et al. 2017)
+pystripe>=0.3.0  # Destriping for light-sheet data
+
+# Stitching pipeline — optional (install separately if needed)
 #   pip install leonardo-toolset      # Dual-illumination fusion (Python >= 3.10)
 #   conda install -c conda-forge pycudadecon  # GPU deconvolution (NVIDIA)
 #   pip install RedLionfish           # GPU deconvolution (any GPU, OpenCL)
