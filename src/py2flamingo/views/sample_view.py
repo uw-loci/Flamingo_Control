@@ -512,7 +512,7 @@ class SampleView(QWidget):
         )
         self.colormap_combo.setCurrentText("Grayscale")
         self.colormap_combo.currentTextChanged.connect(self._on_colormap_changed)
-        self.colormap_combo.setMaximumWidth(90)
+        self.colormap_combo.setMinimumWidth(100)
         row1.addWidget(self.colormap_combo)
 
         self.auto_scale_checkbox = QCheckBox("Auto")
