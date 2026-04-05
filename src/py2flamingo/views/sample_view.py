@@ -4780,6 +4780,39 @@ class SampleView(QWidget):
             return single_sweep_frames * num_channels
         return 500  # Rough fallback
 
+    def _start_loading_pulse(self):
+        """Start a pulsing orange animation on the Load Tiles button."""
+        self._pulse_on = False
+        if not hasattr(self, "_pulse_timer"):
+            self._pulse_timer = QTimer(self)
+            self._pulse_timer.timeout.connect(self._toggle_loading_pulse)
+        self._pulse_timer.start(600)  # Toggle every 600ms
+        # Set initial orange style
+        self.load_tiles_btn.setStyleSheet(
+            "QPushButton { background-color: #FF8C00; color: white; "
+            "font-weight: bold; }"
+        )
+
+    def _toggle_loading_pulse(self):
+        """Toggle button between orange and dark orange for pulsing effect."""
+        self._pulse_on = not self._pulse_on
+        if self._pulse_on:
+            self.load_tiles_btn.setStyleSheet(
+                "QPushButton { background-color: #CC6600; color: white; "
+                "font-weight: bold; }"
+            )
+        else:
+            self.load_tiles_btn.setStyleSheet(
+                "QPushButton { background-color: #FF8C00; color: white; "
+                "font-weight: bold; }"
+            )
+
+    def _stop_loading_pulse(self):
+        """Stop the pulsing animation and restore default button style."""
+        if hasattr(self, "_pulse_timer"):
+            self._pulse_timer.stop()
+        self.load_tiles_btn.setStyleSheet("")
+
     def _start_tile_worker(self):
         """Create and start the background tile processing thread."""
         from PyQt5.QtCore import QThread
@@ -4841,6 +4874,18 @@ class SampleView(QWidget):
         # Kick channel availability timer (lightweight: just enables checkboxes)
         if hasattr(self, "_channel_availability_timer"):
             self._channel_availability_timer.start()
+
+        # Track progress during disk loading
+        if getattr(self, "_disk_load_active", False):
+            self._disk_tiles_processed = getattr(self, "_disk_tiles_processed", 0) + 1
+            total = getattr(self, "_disk_tiles_total", 0)
+            processed = self._disk_tiles_processed
+            if total > 0:
+                self.load_tiles_btn.setText(f"Processing {processed}/{total}...")
+            # Check if all tiles are processed and reading is done
+            if getattr(self, "_disk_reading_done", False) and processed >= total:
+                self._finalize_disk_load()
+                return
 
         # Only kick visualization if neither tile workflow NOR disk loading is active.
         # During tile acquisition, display transforms block the GUI thread
@@ -4937,8 +4982,17 @@ class SampleView(QWidget):
             lambda msg: self.logger.warning(f"Disk loader: {msg}")
         )
 
+        # Track tile counts for two-phase progress
+        self._disk_tiles_submitted = 0
+        self._disk_tiles_total = 0
+        self._disk_tiles_processed = 0
+        self._disk_reading_done = False
+
+        # Start pulsing animation on the button
+        self._start_loading_pulse()
+
         self.load_tiles_btn.setEnabled(False)
-        self.load_tiles_btn.setText("Loading...")
+        self.load_tiles_btn.setText("Reading tiles...")
         if hasattr(self, "_fusion_combo"):
             self._fusion_combo.setEnabled(False)
         self._disk_loader_thread.start()
@@ -4946,30 +5000,56 @@ class SampleView(QWidget):
     def _on_disk_load_progress(self, current, total, description):
         """Update UI with disk loading progress."""
         self.logger.info(description)
-        self.load_tiles_btn.setText(f"Loading {current}/{total}")
+        self._disk_tiles_submitted = current
+        self._disk_tiles_total = total
+        self.load_tiles_btn.setText(f"Reading {current}/{total} tiles...")
 
     def _on_disk_load_finished(self, success, message):
-        """Clean up after disk tile loading completes."""
-        from PyQt5.QtWidgets import QMessageBox
+        """Handle disk tile READING completion.
 
-        self.logger.info(f"Disk load finished: success={success}, {message}")
+        The DiskTileLoader has finished reading and submitting tiles,
+        but the TileProcessingWorker may still be processing them.
+        Switch to phase 2 (processing) and wait for the worker to finish.
+        """
+        self.logger.info(f"Disk read finished: success={success}, {message}")
+        self._disk_read_success = success
+        self._disk_read_message = message
+        self._disk_reading_done = True
 
-        self._disk_load_active = False
-
-        # Stop tile worker
-        self._stop_tile_worker()
-
-        # Clean up loader thread
+        # Clean up loader thread (reading is done)
         if hasattr(self, "_disk_loader_thread") and self._disk_loader_thread:
             self._disk_loader_thread.quit()
             self._disk_loader_thread.wait(5000)
             self._disk_loader_thread = None
             self._disk_loader = None
 
+        # Check if worker is already done (small datasets)
+        if self._disk_tiles_processed >= self._disk_tiles_total:
+            self._finalize_disk_load()
+        else:
+            # Update button to show processing phase
+            remaining = self._disk_tiles_total - self._disk_tiles_processed
+            self.load_tiles_btn.setText(
+                f"Processing {self._disk_tiles_processed}/{self._disk_tiles_total}..."
+            )
+            self.logger.info(
+                f"Waiting for tile worker to process {remaining} remaining tiles"
+            )
+
+    def _finalize_disk_load(self):
+        """Final cleanup after all tiles are read AND processed."""
+        from PyQt5.QtWidgets import QMessageBox
+
+        self.logger.info("All tiles processed, finalizing disk load")
+
+        self._disk_load_active = False
+        self._stop_loading_pulse()
+
+        # Stop tile worker
+        self._stop_tile_worker()
+
         # Sync stage position with the data's reference position so that
         # the display transform produces zero delta and data appears centered.
-        # Without this, if the hardware stage is far from where data was collected,
-        # get_display_volume_transformed() shifts data out of the visible volume.
         if self.voxel_storage and self.voxel_storage.reference_stage_position:
             ref = self.voxel_storage.reference_stage_position
             self.last_stage_position = dict(ref)
@@ -4995,6 +5075,8 @@ class SampleView(QWidget):
         if hasattr(self, "_fusion_combo"):
             self._fusion_combo.setEnabled(True)
 
+        success = getattr(self, "_disk_read_success", True)
+        message = getattr(self, "_disk_read_message", "Load complete")
         if success:
             QMessageBox.information(self, "Load Complete", message)
         else:
