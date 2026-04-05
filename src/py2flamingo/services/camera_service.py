@@ -435,8 +435,8 @@ class CameraService(MicroscopeCommandService):
         """
         Stop live view streaming.
 
-        Sends LIVE_VIEW_STOP command and stops background thread.
-        Note: Does NOT close the live socket as it's owned by tcp_connection.
+        Sends LIVE_VIEW_STOP command, stops background thread, and closes
+        the live socket so a fresh connection is made on the next Start Live.
 
         Example:
             >>> camera.stop_live_view_streaming()
@@ -459,10 +459,27 @@ class CameraService(MicroscopeCommandService):
         if self._data_thread and self._data_thread.is_alive():
             self._data_thread.join(timeout=2.0)
 
-        # Clear socket reference (but don't close it - tcp_connection owns it)
+        # Clear local socket reference
         self._data_socket = None
 
+        # Close the live socket so connect_live() creates a fresh one next time.
+        # Without this, the socket goes stale after idle periods and the
+        # microscope resets the connection on the next Start Live.
+        self._close_live_socket()
+
         self.logger.info("Live view streaming stopped")
+
+    def _close_live_socket(self) -> None:
+        """Close the live socket via tcp_connection."""
+        try:
+            if hasattr(self.connection, "tcp_connection") and hasattr(
+                self.connection.tcp_connection, "disconnect_live"
+            ):
+                self.connection.tcp_connection.disconnect_live()
+            elif hasattr(self.connection, "disconnect_live"):
+                self.connection.disconnect_live()
+        except Exception as e:
+            self.logger.warning(f"Error closing live socket: {e}")
 
     def ensure_data_receiver_running(self) -> None:
         """

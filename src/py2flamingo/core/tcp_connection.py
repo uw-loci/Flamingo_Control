@@ -250,6 +250,22 @@ class TCPConnection:
         with self._lock:
             return self._live_socket is not None
 
+    def disconnect_live(self) -> None:
+        """Close the live imaging socket so a fresh one is created next time.
+
+        Called when stopping live view to avoid stale sockets after idle
+        periods (the microscope may drop the TCP connection after inactivity).
+        """
+        with self._lock:
+            if self._live_socket is not None:
+                try:
+                    self._live_socket.close()
+                    self.logger.info("Closed live imaging socket")
+                except Exception as e:
+                    self.logger.warning(f"Error closing live socket: {e}")
+                finally:
+                    self._live_socket = None
+
     def _flush_receive_buffer(self, sock: socket.socket, timeout: float = 0.1) -> int:
         """
         Drain stale data from socket receive buffer.
