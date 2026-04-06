@@ -175,6 +175,5 @@ logs/
 MIPOverviewSession/
 codemap/
 
-# Runtime state (user-specific, not code)
-saved_configurations.json
+# Runtime state (generated files, not code)
 codezoom.html
