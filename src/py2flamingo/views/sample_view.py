@@ -1056,7 +1056,8 @@ class SampleView(QWidget):
         self.channel_max_spins: Dict[int, QSpinBox] = {}
 
         # Left Side group (channels 0-3) — always visible
-        left_group = QGroupBox("Left Side")
+        self._left_side_group = QGroupBox("Left Side")
+        left_group = self._left_side_group
         left_group.setToolTip(
             "Channels 0-3: left illumination path.\n"
             "Data from left-only or dual-side acquisitions appears here."
@@ -1092,7 +1093,7 @@ class SampleView(QWidget):
             self._right_side_group.toggled.connect(self._on_right_side_toggled)
             layout.addWidget(self._right_side_group)
 
-        # Auto Contrast button + Grayscale checkbox row
+        # Auto Contrast button + Grayscale + Link Sides row
         btn_row = QHBoxLayout()
         auto_contrast_btn = QPushButton("Auto Contrast")
         auto_contrast_btn.setToolTip(
@@ -1105,6 +1106,15 @@ class SampleView(QWidget):
         self._grayscale_cb.setToolTip("View one channel at a time in grayscale")
         self._grayscale_cb.toggled.connect(self._on_grayscale_toggled)
         btn_row.addWidget(self._grayscale_cb)
+
+        self._link_sides_cb = QCheckBox("Link Sides")
+        self._link_sides_cb.setToolTip(
+            "Control both illumination sides with a single set of controls"
+        )
+        self._link_sides_cb.toggled.connect(self._on_link_sides_toggled)
+        self._link_sides = False
+        btn_row.addWidget(self._link_sides_cb)
+
         layout.addLayout(btn_row)
 
         group.setLayout(layout)
@@ -1905,6 +1915,10 @@ class SampleView(QWidget):
                         f"Could not set visibility for channel {channel}: {e}"
                     )
 
+        # Mirror to paired channel when sides are linked
+        if self._link_sides and channel < 4:
+            self._mirror_to_right(channel, visibility=visible)
+
         # Update 2D plane views with new visibility settings
         self._update_plane_views()
 
@@ -1991,6 +2005,121 @@ class SampleView(QWidget):
 
         self._update_plane_views()
 
+    def _on_link_sides_toggled(self, checked: bool) -> None:
+        """Toggle linked Left/Right side channel controls."""
+        self._link_sides = checked
+
+        if checked:
+            # Rename Left Side → Both Sides, disable Right Side
+            self._left_side_group.setTitle("Both Sides")
+            if hasattr(self, "_right_side_group"):
+                self._right_side_group.setEnabled(False)
+                # Sync right channels to match left channels now
+                self._sync_right_to_left()
+        else:
+            # Restore labels and enable Right Side
+            self._left_side_group.setTitle("Left Side")
+            if hasattr(self, "_right_side_group"):
+                self._right_side_group.setEnabled(True)
+
+    def _sync_right_to_left(self) -> None:
+        """Copy left channel (0-3) visibility and contrast to right channels (4-7)."""
+        for left_ch in range(min(4, self._num_channels)):
+            right_ch = left_ch + 4
+            if right_ch >= self._num_channels:
+                break
+
+            # Sync visibility
+            left_cb = self.channel_checkboxes.get(left_ch)
+            right_cb = self.channel_checkboxes.get(right_ch)
+            if left_cb and right_cb:
+                right_cb.blockSignals(True)
+                right_cb.setChecked(left_cb.isChecked())
+                right_cb.blockSignals(False)
+                self._channel_states[right_ch]["visible"] = left_cb.isChecked()
+                if self.channel_layers:
+                    layer = self.channel_layers.get(right_ch)
+                    if layer is not None:
+                        layer.visible = left_cb.isChecked()
+
+            # Sync contrast
+            left_slider = self.channel_contrast_sliders.get(left_ch)
+            right_slider = self.channel_contrast_sliders.get(right_ch)
+            if left_slider and right_slider:
+                val = left_slider.value()
+                right_slider.blockSignals(True)
+                right_slider.setValue(val)
+                right_slider.blockSignals(False)
+                self._channel_states[right_ch]["contrast_min"] = val[0]
+                self._channel_states[right_ch]["contrast_max"] = val[1]
+                if self.channel_layers:
+                    layer = self.channel_layers.get(right_ch)
+                    if layer is not None:
+                        layer.contrast_limits = [val[0], val[1]]
+
+            # Sync spinboxes
+            left_min = self.channel_min_spins.get(left_ch)
+            right_min = self.channel_min_spins.get(right_ch)
+            if left_min and right_min:
+                right_min.blockSignals(True)
+                right_min.setValue(left_min.value())
+                right_min.blockSignals(False)
+            left_max = self.channel_max_spins.get(left_ch)
+            right_max = self.channel_max_spins.get(right_ch)
+            if left_max and right_max:
+                right_max.blockSignals(True)
+                right_max.setValue(left_max.value())
+                right_max.blockSignals(False)
+
+        self._update_plane_views()
+
+    def _mirror_to_right(
+        self,
+        left_ch: int,
+        visibility: bool = None,
+        contrast: tuple = None,
+    ) -> None:
+        """Mirror a single left channel change to its right-side pair."""
+        right_ch = left_ch + 4
+        if right_ch >= self._num_channels:
+            return
+
+        if visibility is not None:
+            right_cb = self.channel_checkboxes.get(right_ch)
+            if right_cb:
+                right_cb.blockSignals(True)
+                right_cb.setChecked(visibility)
+                right_cb.blockSignals(False)
+                self._channel_states[right_ch]["visible"] = visibility
+                if self.channel_layers:
+                    layer = self.channel_layers.get(right_ch)
+                    if layer is not None:
+                        layer.visible = visibility
+
+        if contrast is not None:
+            min_val, max_val = contrast
+            self._channel_states[right_ch]["contrast_min"] = min_val
+            self._channel_states[right_ch]["contrast_max"] = max_val
+            right_slider = self.channel_contrast_sliders.get(right_ch)
+            if right_slider:
+                right_slider.blockSignals(True)
+                right_slider.setValue((min_val, max_val))
+                right_slider.blockSignals(False)
+            right_min = self.channel_min_spins.get(right_ch)
+            if right_min:
+                right_min.blockSignals(True)
+                right_min.setValue(min_val)
+                right_min.blockSignals(False)
+            right_max = self.channel_max_spins.get(right_ch)
+            if right_max:
+                right_max.blockSignals(True)
+                right_max.setValue(max_val)
+                right_max.blockSignals(False)
+            if self.channel_layers:
+                layer = self.channel_layers.get(right_ch)
+                if layer is not None:
+                    layer.contrast_limits = [min_val, max_val]
+
     def _on_channel_contrast_changed(self, channel: int, value: tuple) -> None:
         """Handle channel contrast range slider change.
 
@@ -2019,6 +2148,10 @@ class SampleView(QWidget):
                 layer.contrast_limits = [min_val, max_val]
 
         self.logger.debug(f"Channel {channel} contrast range: [{min_val}, {max_val}]")
+
+        # Mirror to paired channel when sides are linked
+        if self._link_sides and channel < 4:
+            self._mirror_to_right(channel, contrast=(min_val, max_val))
 
         # Update 2D plane views with new contrast settings
         self._update_plane_views()
@@ -2070,6 +2203,10 @@ class SampleView(QWidget):
             layer = self.channel_layers.get(channel)
             if layer is not None:
                 layer.contrast_limits = [min_val, max_val]
+
+        # Mirror to paired channel when sides are linked
+        if self._link_sides and channel < 4:
+            self._mirror_to_right(channel, contrast=(min_val, max_val))
 
         self._update_plane_views()
 
