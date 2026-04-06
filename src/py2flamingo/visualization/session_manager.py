@@ -897,8 +897,25 @@ def _load_multichannel_store(
     import dask.array as da
 
     store_path = output_dir / metadata["store_path"]
+
+    # If the referenced store doesn't exist, search for any loadable file
     if not store_path.exists():
-        raise FileNotFoundError(f"Multi-channel store not found: {store_path}")
+        logger.warning(f"  Store not found: {store_path}")
+        # Try any .ome.zarr directory
+        zarr_dirs = list(output_dir.glob("*.ome.zarr"))
+        # Try any .ome.tif file
+        tiff_files = list(output_dir.glob("*.ome.tif"))
+        if zarr_dirs:
+            store_path = zarr_dirs[0]
+            logger.info(f"  Found alternative zarr store: {store_path}")
+        elif tiff_files:
+            store_path = tiff_files[0]
+            logger.info(f"  Found alternative TIFF: {store_path}")
+        else:
+            raise FileNotFoundError(
+                f"No stitched data found in {output_dir}\n"
+                f"(metadata referenced: {metadata['store_path']})"
+            )
 
     channel_ids = metadata.get("channel_ids", [])
     origin_um_list = metadata.get("origin_um", [0, 0, 0])
