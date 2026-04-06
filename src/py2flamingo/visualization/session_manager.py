@@ -905,25 +905,39 @@ def _load_multichannel_store(
     origin_um = np.array(origin_um_list)  # [z, y, x]
     voxel_size_um = np.array([native_voxel["z"], native_voxel["y"], native_voxel["x"]])
 
-    # Dispatch on file type
+    # Dispatch on file type, with fallback to TIFF if zarr fails
     suffix = store_path.suffix.lower()
+    volume = None
+
     if suffix in (".tif", ".tiff"):
         volume = _load_ome_tiff(store_path)
     else:
-        # Open zarr store
-        store = _create_zarr_store(str(store_path))
-        root = zarr.open_group(store=store, mode="r")
-        arr = _find_zarr_array(root, store_path)
+        try:
+            # Open zarr store
+            store = _create_zarr_store(str(store_path))
+            root = zarr.open_group(store=store, mode="r")
+            arr = _find_zarr_array(root, store_path)
 
-        logger.info(
-            f"  Multi-channel store: shape={arr.shape}, dtype={arr.dtype}, "
-            f"origin_um={origin_um}, voxel_size_um={voxel_size_um}"
-        )
+            logger.info(
+                f"  Multi-channel store: shape={arr.shape}, dtype={arr.dtype}, "
+                f"origin_um={origin_um}, voxel_size_um={voxel_size_um}"
+            )
 
-        # Read into memory
-        logger.info("  Loading multi-channel volume into memory...")
-        data = da.from_zarr(arr)
-        volume = data.compute().astype(np.uint16)
+            # Read into memory
+            logger.info("  Loading multi-channel volume into memory...")
+            data = da.from_zarr(arr)
+            volume = data.compute().astype(np.uint16)
+        except (ValueError, KeyError, Exception) as e:
+            # Zarr failed — try falling back to OME-TIFF in same directory
+            tiff_fallback = store_path.parent / "stitched.ome.tif"
+            if tiff_fallback.exists():
+                logger.warning(
+                    f"  Zarr loading failed ({e}), "
+                    f"falling back to OME-TIFF: {tiff_fallback}"
+                )
+                volume = _load_ome_tiff(tiff_fallback)
+            else:
+                raise
 
     logger.info(f"  Loaded shape: {volume.shape}")
 
