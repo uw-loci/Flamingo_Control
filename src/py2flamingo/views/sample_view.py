@@ -2705,9 +2705,57 @@ class SampleView(QWidget):
         QApplication.processEvents()
 
         try:
-            from py2flamingo.visualization.session_manager import load_stitched_volume
+            from py2flamingo.visualization.session_manager import (
+                find_stitched_stores,
+                load_stitched_volume,
+            )
 
-            result = load_stitched_volume(output_dir)
+            # Check if the metadata's store_path exists; if not, let user choose
+            store_override = None
+            meta_path = output_dir / "stitch_metadata.json"
+            if meta_path.exists():
+                import json as _json
+
+                _meta = _json.loads(meta_path.read_text())
+                ref_store = output_dir / _meta.get("store_path", "")
+                if not ref_store.exists():
+                    candidates = find_stitched_stores(output_dir)
+                    if not candidates:
+                        progress.close()
+                        QMessageBox.warning(
+                            self,
+                            "No Data Found",
+                            f"No .ome.zarr or .ome.tif files found in:\n{output_dir}",
+                        )
+                        return
+                    elif len(candidates) == 1:
+                        store_override = candidates[0]
+                    else:
+                        # Multiple files — let the user choose
+                        progress.close()
+                        items = [c.name for c in candidates]
+                        from PyQt5.QtWidgets import QInputDialog
+
+                        choice, ok = QInputDialog.getItem(
+                            self,
+                            "Choose Stitched Data",
+                            f"Multiple stitched files found in:\n"
+                            f"{output_dir.name}/\n\n"
+                            f"Select which to load:",
+                            items,
+                            0,
+                            False,
+                        )
+                        if not ok:
+                            return
+                        idx = items.index(choice)
+                        store_override = candidates[idx]
+                        # Re-show progress
+                        progress.setLabelText(f"Loading {choice}...")
+                        progress.show()
+                        QApplication.processEvents()
+
+            result = load_stitched_volume(output_dir, store_override=store_override)
             channels = result["channels"]
 
             if not channels:

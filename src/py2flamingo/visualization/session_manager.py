@@ -822,7 +822,22 @@ class SessionManager:
         return total
 
 
-def load_stitched_volume(output_dir: Path, voxel_storage=None) -> dict:
+def find_stitched_stores(output_dir: Path) -> List[Path]:
+    """Find all loadable stitched data files in an output directory.
+
+    Returns paths sorted by modification time (newest first).
+    Useful for presenting a choice dialog when multiple stitch runs exist.
+    """
+    output_dir = Path(output_dir)
+    candidates = list(output_dir.glob("*.ome.zarr")) + list(
+        output_dir.glob("*.ome.tif")
+    )
+    return sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def load_stitched_volume(
+    output_dir: Path, voxel_storage=None, store_override: Path = None
+) -> dict:
     """Load stitched OME-Zarr output at native resolution for direct napari display.
 
     Returns volume data + world coordinates for each channel so the caller
@@ -839,6 +854,8 @@ def load_stitched_volume(output_dir: Path, voxel_storage=None) -> dict:
                     stitch_metadata.json and .ome.zarr stores
         voxel_storage: Optional — used only to read display_voxel_size and
                        chamber_origin for coordinate mapping.  May be None.
+        store_override: If provided, use this file instead of the one
+                        referenced in stitch_metadata.json.
 
     Returns:
         dict with keys:
@@ -861,6 +878,12 @@ def load_stitched_volume(output_dir: Path, voxel_storage=None) -> dict:
 
     metadata = json.loads(meta_path.read_text())
     native_voxel = metadata["voxel_size_um"]  # {"z": ..., "y": ..., "x": ...}
+
+    # Allow caller to override the store path (e.g. from a choice dialog)
+    if store_override is not None:
+        metadata = dict(metadata)  # Don't mutate the original
+        metadata["store_path"] = str(Path(store_override).name)
+        logger.info(f"  Using store override: {metadata['store_path']}")
 
     # Version dispatch: v2 has single multi-channel store
     version = metadata.get("version", 1)
@@ -899,30 +922,18 @@ def _load_multichannel_store(
     store_path = output_dir / metadata["store_path"]
 
     # If the referenced store doesn't exist, search for loadable alternatives.
-    # When multiple files exist (e.g. different stitch runs, or both zarr+tiff),
-    # prefer the most recently modified file so the user gets their latest result.
     if not store_path.exists():
         logger.warning(f"  Store not found: {store_path}")
-        candidates = sorted(
-            list(output_dir.glob("*.ome.zarr")) + list(output_dir.glob("*.ome.tif")),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,  # newest first
-        )
-        if candidates:
-            store_path = candidates[0]
-            logger.info(
-                f"  Using newest available store: {store_path.name}"
-                + (
-                    f" (also found: {', '.join(c.name for c in candidates[1:])})"
-                    if len(candidates) > 1
-                    else ""
-                )
-            )
-        else:
+        candidates = find_stitched_stores(output_dir)
+        if not candidates:
             raise FileNotFoundError(
                 f"No stitched data found in {output_dir}\n"
                 f"(metadata referenced: {metadata['store_path']})"
             )
+        # If caller pre-resolved via store_override, this path shouldn't
+        # be hit, but as a safe fallback use the newest file.
+        store_path = candidates[0]
+        logger.info(f"  Falling back to: {store_path.name}")
 
     channel_ids = metadata.get("channel_ids", [])
     origin_um_list = metadata.get("origin_um", [0, 0, 0])
