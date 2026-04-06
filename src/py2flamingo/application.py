@@ -431,6 +431,7 @@ class FlamingoApplication(QObject):
 
         # Create Qt application
         self.qt_app = QApplication(sys.argv)
+        self.qt_app.setOrganizationName("UW-LOCI")
         self.qt_app.setApplicationName("Flamingo Microscope Control")
 
         # Setup all dependencies

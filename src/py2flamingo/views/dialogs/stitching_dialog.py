@@ -222,6 +222,28 @@ class StitchingDialog(PersistentDialog):
         )
         settings_layout.addWidget(self._flat_field_cb, 4, 0, 1, 2)
 
+        # Depth-dependent attenuation correction
+        self._depth_atten_cb = QCheckBox("Depth attenuation")
+        self._depth_atten_cb.setToolTip(
+            "Correct exponential Z-intensity falloff\n"
+            "(Beer-Lambert scattering/absorption compensation).\n"
+            "Auto-fits decay coefficient from data unless overridden."
+        )
+        settings_layout.addWidget(self._depth_atten_cb, 4, 2)
+
+        self._depth_atten_mu_spin = QDoubleSpinBox()
+        self._depth_atten_mu_spin.setRange(0.0, 1.0)
+        self._depth_atten_mu_spin.setDecimals(5)
+        self._depth_atten_mu_spin.setValue(0.0)
+        self._depth_atten_mu_spin.setSingleStep(0.0001)
+        self._depth_atten_mu_spin.setSpecialValueText("Auto")
+        self._depth_atten_mu_spin.setToolTip(
+            "Decay coefficient \u00b5 (1/\u00b5m). 0 = auto-fit from data."
+        )
+        self._depth_atten_mu_spin.setEnabled(False)
+        self._depth_atten_cb.toggled.connect(self._depth_atten_mu_spin.setEnabled)
+        settings_layout.addWidget(self._depth_atten_mu_spin, 4, 3)
+
         # Row 5: package + channels
         self._ozx_cb = QCheckBox("Package as .ozx")
         self._ozx_cb.setToolTip(
@@ -305,7 +327,12 @@ class StitchingDialog(PersistentDialog):
                     start = start.parent
             start = str(start)
         else:
-            start = str(Path.home())
+            # Fall back to output dir parent, then mapped drives, then home
+            output = self._output_dir_edit.text()
+            if output and Path(output).parent.exists():
+                start = str(Path(output).parent)
+            else:
+                start = str(Path.home())
         folder = QFileDialog.getExistingDirectory(
             self, "Select Acquisition Directory", start
         )
@@ -415,6 +442,12 @@ class StitchingDialog(PersistentDialog):
             output_format=self._format_combo.currentData(),
             flat_field_correction=self._flat_field_cb.isChecked(),
             destripe=self._destripe_cb.isChecked(),
+            depth_attenuation=self._depth_atten_cb.isChecked(),
+            depth_attenuation_mu=(
+                self._depth_atten_mu_spin.value()
+                if self._depth_atten_mu_spin.value() > 0
+                else None
+            ),
             downsample_factor=self._downsample_combo.currentData(),
             deconvolution_enabled=self._deconv_cb.isChecked(),
             content_based_fusion=self._content_fusion_cb.isChecked(),
@@ -608,6 +641,8 @@ class StitchingDialog(PersistentDialog):
         s.setValue("fusion_idx", self._fusion_combo.currentIndex())
         s.setValue("flat_field", self._flat_field_cb.isChecked())
         s.setValue("destripe", self._destripe_cb.isChecked())
+        s.setValue("depth_attenuation", self._depth_atten_cb.isChecked())
+        s.setValue("depth_attenuation_mu", self._depth_atten_mu_spin.value())
         s.setValue("deconvolution", self._deconv_cb.isChecked())
         s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
         s.setValue("package_ozx", self._ozx_cb.isChecked())
@@ -645,6 +680,12 @@ class StitchingDialog(PersistentDialog):
 
         destripe = s.value("destripe", False, type=bool)
         self._destripe_cb.setChecked(destripe)
+
+        depth_atten = s.value("depth_attenuation", False, type=bool)
+        self._depth_atten_cb.setChecked(depth_atten)
+
+        depth_atten_mu = s.value("depth_attenuation_mu", 0.0, type=float)
+        self._depth_atten_mu_spin.setValue(depth_atten_mu)
 
         deconv = s.value("deconvolution", False, type=bool)
         self._deconv_cb.setChecked(deconv)
@@ -770,6 +811,8 @@ class NativeStitchingDialog(StitchingDialog):
         s.setValue("fusion_idx", self._fusion_combo.currentIndex())
         s.setValue("flat_field", self._flat_field_cb.isChecked())
         s.setValue("destripe", self._destripe_cb.isChecked())
+        s.setValue("depth_attenuation", self._depth_atten_cb.isChecked())
+        s.setValue("depth_attenuation_mu", self._depth_atten_mu_spin.value())
         s.setValue("deconvolution", self._deconv_cb.isChecked())
         s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
         s.setValue("package_ozx", self._ozx_cb.isChecked())
@@ -807,6 +850,12 @@ class NativeStitchingDialog(StitchingDialog):
 
         destripe = s.value("destripe", False, type=bool)
         self._destripe_cb.setChecked(destripe)
+
+        depth_atten = s.value("depth_attenuation", False, type=bool)
+        self._depth_atten_cb.setChecked(depth_atten)
+
+        depth_atten_mu = s.value("depth_attenuation_mu", 0.0, type=float)
+        self._depth_atten_mu_spin.setValue(depth_atten_mu)
 
         deconv = s.value("deconvolution", False, type=bool)
         self._deconv_cb.setChecked(deconv)
