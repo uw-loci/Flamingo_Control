@@ -173,3 +173,8 @@ logs/
 # Overview session save folders (user data, not code)
 2DOverviewSession/
 MIPOverviewSession/
+codemap/
+
+# Runtime state (user-specific, not code)
+saved_configurations.json
+codezoom.html
