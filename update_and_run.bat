@@ -17,15 +17,18 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo Installing/updating Python packages...
-REM No --upgrade flag: only installs missing packages, doesn't
-REM re-resolve the entire dependency tree (avoids pip backtracking).
+echo Installing Python packages...
 .venv\Scripts\pip install -r requirements.txt
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: pip install failed
     pause
     exit /b 1
 )
+
+REM Install packages that cause pip resolver backtracking when mixed
+REM with the main requirements file. These are installed separately
+REM with --no-deps to skip dependency resolution entirely.
+.venv\Scripts\pip install pystripe==1.3.1 --no-deps 2>nul
 
 echo.
 echo === Update complete ===
