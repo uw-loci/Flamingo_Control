@@ -78,27 +78,45 @@ def _create_zarr_store(path: str):
         return zarr.DirectoryStore(path)
 
 
-def _find_zarr_array(root, zarr_path):
+def _find_zarr_array(root, zarr_path, max_depth=5):
     """Navigate an OME-Zarr hierarchy to find the level-0 array.
 
-    Handles both:
-      - ngff-zarr output where root/"0" is a Group containing child arrays
-      - zarr-direct output where root/"0" IS the array
+    Handles various nesting patterns from ngff-zarr, ome-zarr-py,
+    and direct zarr writes. Searches breadth-first up to max_depth
+    levels, preferring nodes named "0" (the full-resolution level).
     """
-    # Try level-0 first
-    candidates = ["0"] if "0" in root else list(root.keys())
 
-    for key in candidates:
-        node = root[key]
-        # If it's already an array, use it
+    def _search(node, depth, path=""):
+        """Recursively search for an array node."""
+        if depth > max_depth:
+            return None
+        # If it's an array, return it
         if hasattr(node, "shape"):
+            logger.debug(f"  Found array at '{path}': shape={node.shape}")
             return node
-        # If it's a group, look for arrays inside (ngff-zarr nests data)
+        # If it's a group, search children
         if hasattr(node, "keys"):
-            for sub_key in node.keys():
-                sub = node[sub_key]
-                if hasattr(sub, "shape"):
-                    return sub
+            keys = list(node.keys())
+            logger.debug(f"  Group at '{path}': keys={keys}")
+            # Prefer "0" (level-0 in multi-resolution pyramids)
+            if "0" in keys:
+                keys = ["0"] + [k for k in keys if k != "0"]
+            for key in keys:
+                try:
+                    result = _search(node[key], depth + 1, f"{path}/{key}")
+                    if result is not None:
+                        return result
+                except Exception:
+                    continue
+        return None
+
+    logger.info(f"Searching for array in {zarr_path}")
+    root_keys = list(root.keys()) if hasattr(root, "keys") else []
+    logger.info(f"  Root keys: {root_keys}")
+
+    result = _search(root, 0)
+    if result is not None:
+        return result
 
     raise ValueError(f"No array data found in {zarr_path}")
 
