@@ -1028,6 +1028,7 @@ class SampleView(QWidget):
         """Create channel visibility and contrast controls with Left/Right side groups."""
         # Initialize grayscale state before any checkbox signals can fire
         self._grayscale_mode = False
+        self._link_sides = False
         self._saved_colormaps: Dict[int, str] = {}
         self._saved_visibility: Dict[int, bool] = {}
 
