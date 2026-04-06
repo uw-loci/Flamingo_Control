@@ -214,12 +214,23 @@ class StitchingDialog(PersistentDialog):
 
         # Flat-field correction
         self._flat_field_cb = QCheckBox("Flat-field correction")
-        self._flat_field_cb.setToolTip(
-            "Estimate and correct illumination non-uniformity\n"
-            "from tile data (BaSiC algorithm, no calibration needed).\n"
-            "Improves tile intensity consistency and reduces seams.\n"
-            "(requires basicpy: pip install basicpy)"
-        )
+        # Disable until basicpy dependency issues are resolved (see TODO)
+        from py2flamingo.stitching.flat_field import is_available as _ff_available
+
+        if _ff_available():
+            self._flat_field_cb.setToolTip(
+                "Estimate and correct illumination non-uniformity\n"
+                "from tile data (BaSiC algorithm, no calibration needed).\n"
+                "Improves tile intensity consistency and reduces seams."
+            )
+        else:
+            self._flat_field_cb.setEnabled(False)
+            self._flat_field_cb.setToolTip(
+                "Flat-field correction is not available.\n"
+                "Requires basicpy + PyTorch which have dependency\n"
+                "conflicts with the current environment.\n"
+                "This will be resolved in a future update."
+            )
         settings_layout.addWidget(self._flat_field_cb, 4, 0, 1, 2)
 
         # Depth-dependent attenuation correction
