@@ -928,9 +928,10 @@ def _load_multichannel_store(
             data = da.from_zarr(arr)
             volume = data.compute().astype(np.uint16)
         except (ValueError, KeyError, Exception) as e:
-            # Zarr failed — try falling back to OME-TIFF in same directory
-            tiff_fallback = store_path.parent / "stitched.ome.tif"
-            if tiff_fallback.exists():
+            # Zarr failed — try falling back to any OME-TIFF in same directory
+            tiff_files = list(store_path.parent.glob("*.ome.tif"))
+            if tiff_files:
+                tiff_fallback = tiff_files[0]
                 logger.warning(
                     f"  Zarr loading failed ({e}), "
                     f"falling back to OME-TIFF: {tiff_fallback}"

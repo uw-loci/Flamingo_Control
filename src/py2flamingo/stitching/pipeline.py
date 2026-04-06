@@ -651,6 +651,50 @@ class StitchingPipeline:
         self.logger = logging.getLogger(__name__)
         self._cancelled_fn = cancelled_fn or (lambda: False)
 
+    def _build_output_basename(self, acquisition_dir: Path) -> str:
+        """Build a descriptive base filename from acquisition path and settings.
+
+        Combines the sample name (parent folder) and date (acquisition folder)
+        with short tags for enabled preprocessing steps, so multiple stitch
+        runs with different settings produce distinct filenames.
+
+        Examples:
+            OrganoidV2_2026-04-05
+            OrganoidV2_2026-04-05_destripe
+            OrganoidV2_2026-04-05_destripe_atten
+        """
+        # Derive sample + date from path: .../OrganoidV2/2026-04-05
+        acq_name = acquisition_dir.name  # e.g. "2026-04-05"
+        parent_name = acquisition_dir.parent.name  # e.g. "OrganoidV2"
+
+        # Avoid redundancy if parent is a drive root or generic name
+        if parent_name and parent_name not in (".", "/", "\\"):
+            base = f"{parent_name}_{acq_name}"
+        else:
+            base = acq_name
+
+        # Append short preprocessing tags
+        tags = []
+        if self.config.illumination_fusion != "max":
+            tags.append(self.config.illumination_fusion)
+        if self.config.flat_field_correction:
+            tags.append("flatfield")
+        if self.config.destripe:
+            tags.append("destripe")
+        if self.config.depth_attenuation:
+            tags.append("atten")
+        if self.config.deconvolution_enabled:
+            tags.append("deconv")
+        if self.config.downsample_factor > 1:
+            tags.append(f"{self.config.downsample_factor}x")
+        if self.config.content_based_fusion:
+            tags.append("cbf")
+
+        if tags:
+            base = base + "_" + "_".join(tags)
+
+        return base
+
     def run(
         self,
         acquisition_dir: Path,
@@ -860,9 +904,11 @@ class StitchingPipeline:
             return output_path
 
         self.logger.info("Step 6: Writing multi-channel output...")
+        basename = self._build_output_basename(acquisition_dir)
+        self.logger.info(f"  Output basename: {basename}")
         channel_names = [f"Channel_{ch_id}" for ch_id in fused_channel_ids]
         self._write_multichannel_output(
-            stacked, channel_names, voxel_size_um, output_path
+            stacked, channel_names, voxel_size_um, output_path, basename
         )
 
         # --- Step 7: Write stitch_metadata.json v2 ---
@@ -875,6 +921,7 @@ class StitchingPipeline:
             tiles,
             voxel_size_um,
             acquisition_dir,
+            basename,
         )
 
         elapsed = time.time() - t0
@@ -1154,16 +1201,17 @@ class StitchingPipeline:
         channel_names: List[str],
         voxel_size_um: Dict[str, float],
         output_dir: Path,
+        basename: str = "stitched",
     ) -> None:
         """Write multi-channel stacked volume to the configured output format.
 
-        For multi-channel data, produces a single store (e.g. stitched.ome.zarr)
+        For multi-channel data, produces a single store (e.g. {basename}.ome.zarr)
         instead of per-channel files.
         """
         fmt = self.config.output_format
 
         if fmt == "ome-zarr-sharded" or fmt == "both":
-            out_path = output_dir / "stitched.ome.zarr"
+            out_path = output_dir / f"{basename}.ome.zarr"
             self.logger.info(f"  Writing sharded OME-Zarr v0.5: {out_path}")
             try:
                 from py2flamingo.stitching.writers.ome_zarr_writer import (
@@ -1186,7 +1234,7 @@ class StitchingPipeline:
                 )
 
                 if self.config.package_ozx:
-                    ozx_path = output_dir / "stitched.ozx"
+                    ozx_path = output_dir / f"{basename}.ozx"
                     self.logger.info(f"  Packaging as .ozx: {ozx_path}")
                     package_as_ozx(out_path, ozx_path)
 
@@ -1196,7 +1244,7 @@ class StitchingPipeline:
                 fmt = "ome-tiff"
 
         if fmt == "ome-zarr-v2":
-            out_path = output_dir / "stitched.ome.zarr"
+            out_path = output_dir / f"{basename}.ome.zarr"
             self.logger.info(f"  Writing OME-Zarr v2 (Fiji compatible): {out_path}")
             try:
                 from py2flamingo.stitching.writers.ome_zarr_writer import (
@@ -1218,7 +1266,7 @@ class StitchingPipeline:
                 fmt = "ome-tiff"
 
         if fmt in ("ome-tiff", "both"):
-            tiff_path = output_dir / "stitched.ome.tif"
+            tiff_path = output_dir / f"{basename}.ome.tif"
             self.logger.info(f"  Writing pyramidal OME-TIFF: {tiff_path}")
             try:
                 from py2flamingo.stitching.writers.ome_tiff_writer import (
@@ -1245,6 +1293,7 @@ class StitchingPipeline:
         tiles: List[RawTileInfo],
         voxel_size_um: Dict[str, float],
         acquisition_dir: Path,
+        basename: str = "stitched",
     ) -> None:
         """Write stitch_metadata.json v2 for single multi-channel store."""
         origin_list = [origin_um["z"], origin_um["y"], origin_um["x"]]
@@ -1252,11 +1301,11 @@ class StitchingPipeline:
         # Determine the store filename
         fmt = self.config.output_format
         if fmt in ("ome-zarr-sharded", "ome-zarr-v2", "both"):
-            store_path = "stitched.ome.zarr"
+            store_path = f"{basename}.ome.zarr"
         elif fmt == "ome-tiff":
-            store_path = "stitched.ome.tif"
+            store_path = f"{basename}.ome.tif"
         else:
-            store_path = "stitched.ome.zarr"
+            store_path = f"{basename}.ome.zarr"
 
         # Build per-channel dict (all point to same store, for backward compat)
         channels_meta = {}
