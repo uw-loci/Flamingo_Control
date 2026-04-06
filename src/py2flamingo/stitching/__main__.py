@@ -85,6 +85,17 @@ def main():
         help="Apply PyStripe destriping (requires pystripe)",
     )
     preproc_group.add_argument(
+        "--depth-attenuation",
+        action="store_true",
+        help="Correct exponential Z-intensity falloff (Beer-Lambert model)",
+    )
+    preproc_group.add_argument(
+        "--depth-attenuation-mu",
+        type=float,
+        default=None,
+        help="Decay coefficient mu (1/um); omit for auto-fit from data",
+    )
+    preproc_group.add_argument(
         "--deconvolution",
         action="store_true",
         help="Apply GPU deconvolution (requires pycudadecon or RedLionfish)",
@@ -228,6 +239,8 @@ def main():
         illumination_fusion=args.illumination_fusion,
         flat_field_correction=args.flat_field,
         destripe=args.destripe,
+        depth_attenuation=args.depth_attenuation,
+        depth_attenuation_mu=args.depth_attenuation_mu,
         reg_channel=args.reg_channel,
         quality_threshold=args.quality_threshold,
         output_format=args.output_format,

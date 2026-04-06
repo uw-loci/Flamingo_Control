@@ -89,6 +89,8 @@ class StitchingWorker(QThread):
                 f"Illumination fusion: {self._config.illumination_fusion}\n"
                 f"Flat-field correction: {self._config.flat_field_correction}\n"
                 f"Destripe: {self._config.destripe}\n"
+                f"Depth attenuation: {self._config.depth_attenuation}"
+                f"{' (\u00b5=' + str(self._config.depth_attenuation_mu) + '/\u00b5m)' if self._config.depth_attenuation and self._config.depth_attenuation_mu else ''}\n"
                 f"Deconvolution: {self._config.deconvolution_enabled}"
                 f"{' (' + self._config.deconvolution_engine + ')' if self._config.deconvolution_enabled else ''}\n"
                 f"Output format: {self._config.output_format}"

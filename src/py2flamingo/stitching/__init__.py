@@ -5,8 +5,8 @@ Converts raw acquisition folders into stitched volumes using
 multiview-stitcher for registration and fusion.
 
 Pipeline:
-    Raw uint16 → [destripe] → [dual-illum fusion] → [deconvolution]
-    → register → stitch → output (OME-Zarr sharded / OME-TIFF / both)
+    Raw uint16 → [dual-illum fusion] → [depth attenuation] → [destripe]
+    → [deconvolution] → register → stitch → output (OME-Zarr / OME-TIFF / both)
 
 Dependencies (install separately):
     pip install multiview-stitcher
