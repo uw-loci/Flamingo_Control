@@ -470,14 +470,22 @@ class CameraService(MicroscopeCommandService):
         self.logger.info("Live view streaming stopped")
 
     def _close_live_socket(self) -> None:
-        """Close the live socket via tcp_connection."""
+        """Close the live socket and clear all cached references.
+
+        Both tcp_connection and the connection service cache the live socket,
+        so both must be cleared to force a fresh connection on next Start Live.
+        """
         try:
+            # Close the actual socket via tcp_connection
             if hasattr(self.connection, "tcp_connection") and hasattr(
                 self.connection.tcp_connection, "disconnect_live"
             ):
                 self.connection.tcp_connection.disconnect_live()
-            elif hasattr(self.connection, "disconnect_live"):
-                self.connection.disconnect_live()
+            # Clear connection service's cached reference(s) too
+            if hasattr(self.connection, "_live_socket"):
+                self.connection._live_socket = None
+            if hasattr(self.connection, "live_client"):
+                self.connection.live_client = None
         except Exception as e:
             self.logger.warning(f"Error closing live socket: {e}")
 
