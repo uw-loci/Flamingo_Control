@@ -1,5 +1,8 @@
 # Runtime dependencies for Py2Flamingo
 # Install with: pip install -r requirements.txt
+#
+# PyTorch CPU-only builds (avoids downloading ~2GB CUDA version)
+--extra-index-url https://download.pytorch.org/whl/cpu
 
 # Core GUI and imaging
 PyQt5>=5.15.8  # napari 0.7 requires >=5.15.8; do NOT use napari[all] (pulls PyQt6)
@@ -28,7 +31,8 @@ multiview-stitcher>=0.1.37  # Tile registration and fusion
 dask[array]>=2024.1.0  # Out-of-core parallel processing
 
 # Stitching pipeline — preprocessing
-basicpy>=1.0.0  # BaSiC flat-field correction (Peng et al. 2017)
+torch>=2.0.0  # PyTorch CPU backend (pulled from --extra-index-url above)
+basicpy>=2.0.0  # BaSiC flat-field correction (Peng et al. 2017) — uses PyTorch backend
 pystripe>=0.3.0  # Destriping for light-sheet data
 
 # Stitching pipeline — optional (install separately if needed)
