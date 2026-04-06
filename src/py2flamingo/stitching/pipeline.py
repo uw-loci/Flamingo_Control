@@ -116,6 +116,9 @@ class StitchingConfig:
     # Processing
     flat_field_correction: bool = False  # BaSiCPy flat-field correction
     destripe: bool = False  # Run PyStripe destriping
+    # Depth-dependent attenuation correction (Beer-Lambert Z-falloff)
+    depth_attenuation: bool = False
+    depth_attenuation_mu: Optional[float] = None  # 1/µm; None = auto-fit
     downsample_factor: int = (
         1  # 1 = no downsampling, 2/4/8 = downsample before stitching
     )
@@ -736,7 +739,10 @@ class StitchingPipeline:
             if not is_available():
                 self.logger.warning(
                     "Flat-field correction requested but basicpy is not installed. "
-                    "Skipping. Install with: pip install basicpy"
+                    "Skipping. Install with:\n"
+                    "  pip install torch --extra-index-url "
+                    "https://download.pytorch.org/whl/cpu\n"
+                    "  pip install basicpy>=2.0.0"
                 )
             else:
                 self.logger.info("Step 2b: Estimating flat-field profiles (BaSiCPy)...")
@@ -921,6 +927,19 @@ class StitchingPipeline:
                     )
                 else:
                     volume = np.asarray(list(illum_volumes.values())[0])
+
+                # Depth-dependent attenuation correction
+                if self.config.depth_attenuation:
+                    from .depth_attenuation import correct_depth_attenuation
+
+                    z_step = self.config.z_step_um
+                    if z_step is None:
+                        z_step = tile.z_step_mm * 1000.0 if tile.z_step_mm else 10.0
+                    volume = correct_depth_attenuation(
+                        volume,
+                        mu=self.config.depth_attenuation_mu,
+                        z_step_um=z_step,
+                    )
 
                 # Destripe
                 if self.config.destripe:

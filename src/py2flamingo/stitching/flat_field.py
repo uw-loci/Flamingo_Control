@@ -55,7 +55,9 @@ def estimate_flat_fields(
     if not BASICPY_AVAILABLE:
         logger.warning(
             "basicpy not installed, skipping flat-field correction. "
-            "Install with: pip install basicpy"
+            "Install with:\n"
+            "  pip install torch --extra-index-url https://download.pytorch.org/whl/cpu\n"
+            "  pip install basicpy>=2.0.0"
         )
         return {}
 
