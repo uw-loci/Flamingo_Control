@@ -898,19 +898,26 @@ def _load_multichannel_store(
 
     store_path = output_dir / metadata["store_path"]
 
-    # If the referenced store doesn't exist, search for any loadable file
+    # If the referenced store doesn't exist, search for loadable alternatives.
+    # When multiple files exist (e.g. different stitch runs, or both zarr+tiff),
+    # prefer the most recently modified file so the user gets their latest result.
     if not store_path.exists():
         logger.warning(f"  Store not found: {store_path}")
-        # Try any .ome.zarr directory
-        zarr_dirs = list(output_dir.glob("*.ome.zarr"))
-        # Try any .ome.tif file
-        tiff_files = list(output_dir.glob("*.ome.tif"))
-        if zarr_dirs:
-            store_path = zarr_dirs[0]
-            logger.info(f"  Found alternative zarr store: {store_path}")
-        elif tiff_files:
-            store_path = tiff_files[0]
-            logger.info(f"  Found alternative TIFF: {store_path}")
+        candidates = sorted(
+            list(output_dir.glob("*.ome.zarr")) + list(output_dir.glob("*.ome.tif")),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,  # newest first
+        )
+        if candidates:
+            store_path = candidates[0]
+            logger.info(
+                f"  Using newest available store: {store_path.name}"
+                + (
+                    f" (also found: {', '.join(c.name for c in candidates[1:])})"
+                    if len(candidates) > 1
+                    else ""
+                )
+            )
         else:
             raise FileNotFoundError(
                 f"No stitched data found in {output_dir}\n"
