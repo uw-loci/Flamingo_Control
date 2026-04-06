@@ -1,34 +1,37 @@
 # Runtime dependencies for Py2Flamingo
 # Install with: pip install -r requirements.txt
+#
+# Versions pinned to avoid pip resolver backtracking with --upgrade.
+# To upgrade a specific package: pip install <package>==<new_version>
 
 # Core GUI and imaging
-PyQt5>=5.15.8  # napari 0.7 requires >=5.15.8; do NOT use napari[all] (pulls PyQt6)
-numpy>=2.0.0  # NumPy 2.x now supported by scipy/napari/zarr ecosystem
-Pillow>=9.0.0
-opencv-python>=4.5.0  # Webcam capture for Webcam Overview extension
+PyQt5>=5.15.8,<6  # napari 0.7 requires >=5.15.8; do NOT use napari[all] (pulls PyQt6)
+numpy>=2.0.0,<3
+Pillow>=9.0.0,<13
+opencv-python>=4.5.0,<5
 
 # Scientific computing (required for image processing and analysis)
-scipy>=1.14.0  # 1.14+ supports numpy 2.x
-scikit-learn>=1.0.0
+scipy>=1.14.0,<2
+scikit-learn>=1.7.0,<2
 
 # 3D Visualization dependencies
-napari>=0.7.0  # Stable 0.7; use bare napari (not [all]) to avoid PyQt6 default
-vispy>=0.16.0  # napari 0.7 requires >=0.16; 0.16.2 not yet on PyPI for all Python versions
-sparse>=0.13.0  # Sparse array support for efficient voxel storage
-PyYAML>=6.0  # YAML configuration file support
-h5py>=3.8.0  # HDF5 file format support (optional, for data export)
-tifffile>=2023.2.0  # TIFF/OME-TIFF read/write
+napari>=0.7.0,<0.8  # Stable 0.7; use bare napari (not [all]) to avoid PyQt6 default
+vispy>=0.16.0,<0.17
+sparse>=0.13.0,<1
+PyYAML>=6.0,<7
+h5py>=3.8.0,<4
+tifffile>=2023.2.0,<2027
 
 # Zarr 3.x with async I/O and V3 spec support
-zarr>=3.1.4  # Zarr 3.x - sharding perf fixes in 3.1.4+
-numcodecs>=0.14.0  # Updated codecs for zarr 3.x
+zarr>=3.1.4,<4
+numcodecs>=0.14.0,<1
 
 # Stitching pipeline
-multiview-stitcher>=0.1.37  # Tile registration and fusion
-dask[array]>=2024.1.0  # Out-of-core parallel processing
+multiview-stitcher>=0.1.37,<0.2
+dask[array]>=2024.1.0,<2027
 
 # Stitching pipeline — preprocessing
-pystripe>=1.3.1  # Destriping for light-sheet data (1.3.1+ fixes NumPy 2 compat)
+pystripe>=1.3.1,<2  # 1.3.1+ fixes NumPy 2 compat
 
 # Stitching pipeline — optional (install separately if needed)
 #   Flat-field correction (BaSiCPy 2.0 + PyTorch CPU):
@@ -39,4 +42,4 @@ pystripe>=1.3.1  # Destriping for light-sheet data (1.3.1+ fixes NumPy 2 compat)
 #   pip install RedLionfish           # GPU deconvolution (any GPU, OpenCL)
 
 # OpenGL acceleration (optional but recommended for faster 3D viewer startup)
-PyOpenGL-accelerate>=3.1.0  # C-accelerated OpenGL bindings
+PyOpenGL-accelerate>=3.1.0,<4
