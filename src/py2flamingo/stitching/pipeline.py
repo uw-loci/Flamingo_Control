@@ -113,6 +113,10 @@ class StitchingConfig:
     # Package as single file after writing
     package_ozx: bool = False  # Create .ozx (ZIP) from OME-Zarr output
 
+    # Camera orientation — flip tile data in X before stitching if camera
+    # X axis is inverted relative to stage X (common in lightsheet systems).
+    camera_x_inverted: bool = True
+
     # Processing
     flat_field_correction: bool = False  # BaSiCPy flat-field correction
     destripe: bool = False  # Run PyStripe destriping
@@ -999,6 +1003,11 @@ class StitchingPipeline:
                 # Downsample
                 if self.config.downsample_factor > 1:
                     volume = downsample_volume(volume, self.config.downsample_factor)
+
+                # Flip X axis if camera is inverted relative to stage
+                # so tile image data aligns with stage-coordinate translations
+                if self.config.camera_x_inverted:
+                    volume = volume[:, :, ::-1].copy()
 
                 result[ch_id].append((volume, tile))
 

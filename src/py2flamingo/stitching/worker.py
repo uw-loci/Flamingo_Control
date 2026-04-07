@@ -88,6 +88,7 @@ class StitchingWorker(QThread):
                 f"Downsample: {self._config.downsample_factor}x\n"
                 f"Illumination fusion: {self._config.illumination_fusion}\n"
                 f"Flat-field correction: {self._config.flat_field_correction}\n"
+                f"Camera X inverted: {self._config.camera_x_inverted}\n"
                 f"Destripe: {self._config.destripe}\n"
                 f"Depth attenuation: {self._config.depth_attenuation}"
                 f"{' (\u00b5=' + str(self._config.depth_attenuation_mu) + '/\u00b5m)' if self._config.depth_attenuation and self._config.depth_attenuation_mu else ''}\n"
