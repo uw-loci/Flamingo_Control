@@ -4,6 +4,9 @@ ThresholdAnalysisService — programmatic threshold + connected-component analys
 Extracted from UnionThresholderDialog._recompute_mask() so that the same
 pipeline (smooth → threshold → union → opening → size filter → object extraction)
 can be used both by the interactive dialog and by pipeline ThresholdRunner nodes.
+
+GPU-accelerated when CuPy is available (gaussian filter, morphological opening,
+connected component labeling).  Falls back transparently to CPU (scipy.ndimage).
 """
 
 import logging
@@ -14,6 +17,12 @@ import numpy as np
 from scipy import ndimage
 
 from py2flamingo.pipeline.models.detected_object import DetectedObject
+from py2flamingo.visualization.gpu_transforms import (
+    binary_opening_auto,
+    gaussian_filter_auto,
+    generate_binary_structure_auto,
+    label_auto,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,14 +67,15 @@ class ThresholdAnalysisService:
     """Runs the threshold + analysis pipeline on 3D volumes.
 
     The pipeline per channel:
-      1. Gaussian smooth (if sigma > 0)
+      1. Gaussian smooth (if sigma > 0)  — GPU-accelerated
       2. Threshold → boolean mask
       3. Assign per-channel label (ch_id + 1)
 
     Post-union:
-      4. Morphological opening (if enabled)
-      5. Remove small objects (if min_size > 0)
+      4. Morphological opening (if enabled)  — GPU-accelerated
+      5. Remove small objects (if min_size > 0)  — GPU-accelerated labeling
       6. Connected component extraction → DetectedObject instances
+         with intensity stats, surface area, sphericity, elongation
     """
 
     def analyze(
@@ -91,6 +101,9 @@ class ThresholdAnalysisService:
         combined: Optional[np.ndarray] = None
         labels: Optional[np.ndarray] = None
 
+        # Keep original (pre-smoothing) volumes for intensity feature extraction
+        original_volumes = volumes
+
         # --- Per-channel threshold ---
         for ch_id, threshold in settings.channel_thresholds.items():
             if threshold <= 0:
@@ -100,10 +113,10 @@ class ThresholdAnalysisService:
                 logger.warning(f"No volume for channel {ch_id}, skipping")
                 continue
 
-            # Gaussian smoothing
+            # Gaussian smoothing (GPU-accelerated)
             if settings.gauss_sigma > 0:
-                vol = ndimage.gaussian_filter(
-                    vol.astype(np.float32), sigma=settings.gauss_sigma, truncate=3.0
+                vol = gaussian_filter_auto(
+                    vol.astype(np.float32), sigma=settings.gauss_sigma
                 )
 
             ch_mask = vol >= threshold
@@ -126,15 +139,15 @@ class ThresholdAnalysisService:
         if combined is None or not combined.any():
             return ThresholdResult()
 
-        # Morphological opening
+        # Morphological opening (GPU-accelerated)
         if settings.opening_enabled:
-            struct = ndimage.generate_binary_structure(3, 1)
+            struct = generate_binary_structure_auto(3, 1)
             struct = ndimage.iterate_structure(struct, settings.opening_radius)
-            combined = ndimage.binary_opening(combined, structure=struct)
+            combined = binary_opening_auto(combined, structure=struct)
 
-        # Remove small objects
+        # Remove small objects (GPU-accelerated labeling)
         if settings.min_object_size > 0:
-            labeled_arr, num_features = ndimage.label(combined)
+            labeled_arr, num_features = label_auto(combined)
             if num_features > 0:
                 comp_sizes = np.bincount(labeled_arr.ravel())
                 small_labels = np.where(comp_sizes < settings.min_object_size)[0]
@@ -147,9 +160,9 @@ class ThresholdAnalysisService:
         if labels is not None:
             labels[~combined] = 0
 
-        # --- Connected component extraction ---
+        # --- Connected component extraction with feature extraction ---
         objects = self._extract_objects(
-            combined, labels, voxel_size_um, voxel_to_stage_fn
+            combined, labels, voxel_size_um, voxel_to_stage_fn, original_volumes
         )
 
         return ThresholdResult(
@@ -165,14 +178,16 @@ class ThresholdAnalysisService:
         labels: np.ndarray,
         voxel_size_um: Tuple[float, float, float],
         voxel_to_stage_fn: Optional[Callable],
+        volumes: Optional[Dict[int, np.ndarray]] = None,
     ) -> List[DetectedObject]:
         """Extract per-component DetectedObject instances from the mask.
 
-        Uses ndimage.label() to identify connected components, then
-        ndimage.find_objects() to get bounding boxes and ndimage.center_of_mass()
-        for centroids.
+        Uses GPU-accelerated labeling where beneficial, then extracts per-object
+        features including intensity statistics, surface area, sphericity, and
+        elongation via principal axis analysis.
         """
-        labeled_arr, num_features = ndimage.label(mask)
+        # GPU-accelerated connected component labeling
+        labeled_arr, num_features = label_auto(mask)
         if num_features == 0:
             return []
 
@@ -185,6 +200,15 @@ class ThresholdAnalysisService:
         vz, vy, vx = voxel_size_um
         voxel_vol_mm3 = (vz / 1000.0) * (vy / 1000.0) * (vx / 1000.0)
 
+        # Pick a reference volume for intensity features
+        ref_volume = None
+        if volumes:
+            # Use the first available channel volume
+            for vol in volumes.values():
+                if vol is not None:
+                    ref_volume = vol
+                    break
+
         objects: List[DetectedObject] = []
         for i in range(num_features):
             label_id = i + 1
@@ -193,7 +217,8 @@ class ThresholdAnalysisService:
                 continue
 
             centroid_voxel = centroids[i]  # (z, y, x)
-            volume_voxels = int(np.sum(labeled_arr[bb] == label_id))
+            region_mask = labeled_arr[bb] == label_id
+            volume_voxels = int(np.sum(region_mask))
 
             # Convert centroid to stage coordinates
             if voxel_to_stage_fn:
@@ -204,11 +229,39 @@ class ThresholdAnalysisService:
             # Determine which channel contributed most voxels
             source_channel = None
             if labels is not None:
-                region_labels = labels[bb][labeled_arr[bb] == label_id]
+                region_labels = labels[bb][region_mask]
                 if region_labels.size > 0:
                     counts = np.bincount(region_labels[region_labels > 0])
                     if counts.size > 0:
                         source_channel = int(np.argmax(counts))
+
+            # --- Intensity features ---
+            mean_intensity = None
+            max_intensity = None
+            min_intensity = None
+            std_intensity = None
+
+            if ref_volume is not None and ref_volume.shape == mask.shape:
+                region_intensities = ref_volume[bb][region_mask]
+                if region_intensities.size > 0:
+                    mean_intensity = float(np.mean(region_intensities))
+                    max_intensity = float(np.max(region_intensities))
+                    min_intensity = float(np.min(region_intensities))
+                    std_intensity = float(np.std(region_intensities))
+
+            # --- Morphology features ---
+            surface_area_voxels = None
+            sphericity = None
+            elongation = None
+            principal_axis_lengths = None
+
+            if volume_voxels >= 8:  # Need minimum size for meaningful features
+                surface_area_voxels, sphericity = _compute_surface_sphericity(
+                    region_mask, volume_voxels
+                )
+                principal_axis_lengths, elongation = _compute_principal_axes(
+                    region_mask, voxel_size_um
+                )
 
             obj = DetectedObject(
                 label_id=label_id,
@@ -218,8 +271,89 @@ class ThresholdAnalysisService:
                 volume_voxels=volume_voxels,
                 volume_mm3=volume_voxels * voxel_vol_mm3,
                 source_channel=source_channel,
+                mean_intensity=mean_intensity,
+                max_intensity=max_intensity,
+                min_intensity=min_intensity,
+                std_intensity=std_intensity,
+                surface_area_voxels=surface_area_voxels,
+                sphericity=sphericity,
+                elongation=elongation,
+                principal_axis_lengths=principal_axis_lengths,
             )
             objects.append(obj)
 
         logger.info(f"Extracted {len(objects)} objects from threshold mask")
         return objects
+
+
+def _compute_surface_sphericity(
+    region_mask: np.ndarray, volume_voxels: int
+) -> Tuple[int, float]:
+    """Compute surface area (boundary voxels) and sphericity.
+
+    Surface voxels = mask voxels that have at least one non-mask neighbor
+    (6-connectivity).  Sphericity = ratio of equivalent-sphere surface area
+    to actual surface area.
+
+    Returns:
+        (surface_area_voxels, sphericity)
+    """
+    # Erode by 1 voxel (6-connectivity), boundary = mask minus interior
+    eroded = ndimage.binary_erosion(region_mask)
+    boundary = region_mask & ~eroded
+    surface_voxels = int(np.sum(boundary))
+
+    if surface_voxels == 0:
+        return volume_voxels, 0.0
+
+    # Sphericity: SA_sphere / SA_actual where SA_sphere corresponds to same volume
+    # SA_sphere = (pi^(1/3)) * (6V)^(2/3)
+    # For voxelized: use face-count approximation = 6V - 2*adjacencies, but
+    # boundary voxel count is a reasonable proxy for our resolution.
+    v = float(volume_voxels)
+    sa_equiv_sphere = (np.pi ** (1.0 / 3.0)) * ((6.0 * v) ** (2.0 / 3.0))
+    sphericity = min(sa_equiv_sphere / float(surface_voxels), 1.0)
+
+    return surface_voxels, float(sphericity)
+
+
+def _compute_principal_axes(
+    region_mask: np.ndarray,
+    voxel_size_um: Tuple[float, float, float],
+) -> Tuple[Optional[Tuple[float, float, float]], Optional[float]]:
+    """Compute principal axis lengths and elongation from inertia tensor.
+
+    Uses eigenvalues of the covariance matrix of voxel positions (scaled by
+    voxel size) to determine 3D shape orientation and elongation.
+
+    Returns:
+        (principal_axis_lengths, elongation)  or  (None, None) if degenerate.
+    """
+    coords = np.argwhere(region_mask)  # (N, 3) in (z, y, x) voxel indices
+    if coords.shape[0] < 4:
+        return None, None
+
+    # Scale to physical units (micrometers)
+    vz, vy, vx = voxel_size_um
+    scaled = coords.astype(np.float64)
+    scaled[:, 0] *= vz
+    scaled[:, 1] *= vy
+    scaled[:, 2] *= vx
+
+    # Covariance matrix → eigenvalues = variance along principal axes
+    cov = np.cov(scaled, rowvar=False)
+    try:
+        eigenvalues = np.linalg.eigvalsh(cov)
+    except np.linalg.LinAlgError:
+        return None, None
+
+    # Eigenvalues are in ascending order; convert variance → "length" (2*sqrt)
+    eigenvalues = np.maximum(eigenvalues, 0.0)
+    axis_lengths = 2.0 * np.sqrt(eigenvalues)  # ascending: minor, mid, major
+
+    # Return in descending order: (major, mid, minor)
+    major, mid, minor = axis_lengths[2], axis_lengths[1], axis_lengths[0]
+
+    elongation = float(major / minor) if minor > 1e-6 else float("inf")
+
+    return (float(major), float(mid), float(minor)), elongation

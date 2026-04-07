@@ -30,6 +30,7 @@ class NodeType(Enum):
     SAMPLE_VIEW_DATA = auto()
     OVERVIEW_ANALYSIS = auto()
     POST_PROCESSING = auto()
+    TIMED_LOOP = auto()
 
 
 class PortDirection(Enum):
@@ -47,6 +48,7 @@ NODE_COLORS: Dict[NodeType, str] = {
     NodeType.SAMPLE_VIEW_DATA: "#26c6da",  # Teal
     NodeType.OVERVIEW_ANALYSIS: "#8d6e63",  # Brown — earth tone for image analysis
     NodeType.POST_PROCESSING: "#e57373",  # Red — post-acquisition processing
+    NodeType.TIMED_LOOP: "#7e57c2",  # Deep purple — time-based iteration
 }
 
 
@@ -229,6 +231,16 @@ def create_default_ports(node_type: NodeType) -> Tuple[List[Port], List[Port]]:
         ]
         outputs = [
             _make_port("output_path", PortType.FILE_PATH, out),
+            _make_port("completed", PortType.TRIGGER, out),
+        ]
+
+    elif node_type == NodeType.TIMED_LOOP:
+        inputs = [
+            _make_port("trigger", PortType.TRIGGER, inp),
+        ]
+        outputs = [
+            _make_port("iteration", PortType.SCALAR, out),
+            _make_port("elapsed_seconds", PortType.SCALAR, out),
             _make_port("completed", PortType.TRIGGER, out),
         ]
 

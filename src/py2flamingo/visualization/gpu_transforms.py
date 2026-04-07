@@ -1,9 +1,11 @@
-"""GPU-accelerated transforms using CuPy.
+"""GPU-accelerated transforms and analysis using CuPy.
 
 Provides optional GPU acceleration for expensive 3D operations:
 - Affine transforms (10-100x faster for >256³ volumes)
 - Gaussian smoothing (biggest bottleneck, massive speedup)
 - Translation shifts
+- Connected component labeling (for segmentation pipelines)
+- Morphological operations (binary opening)
 
 Falls back to CPU (scipy.ndimage) if GPU unavailable.
 
@@ -35,6 +37,9 @@ cp = None
 gpu_affine_transform = None
 gpu_gaussian_filter = None
 gpu_shift = None
+gpu_label = None
+gpu_binary_opening = None
+gpu_generate_binary_structure = None
 GPU_AVAILABLE = False
 GPU_DEVICE_NAME = None
 GPU_MEMORY_TOTAL = 0
@@ -48,6 +53,7 @@ def _init_gpu():
     """
     global _gpu_initialized, _cupy_import_attempted
     global cp, gpu_affine_transform, gpu_gaussian_filter, gpu_shift
+    global gpu_label, gpu_binary_opening, gpu_generate_binary_structure
     global GPU_AVAILABLE, GPU_DEVICE_NAME, GPU_MEMORY_TOTAL
 
     if _gpu_initialized or _cupy_import_attempted:
@@ -58,7 +64,10 @@ def _init_gpu():
     try:
         import cupy as _cp
         from cupyx.scipy.ndimage import affine_transform as _gpu_affine
+        from cupyx.scipy.ndimage import binary_opening as _gpu_binary_opening
         from cupyx.scipy.ndimage import gaussian_filter as _gpu_gaussian
+        from cupyx.scipy.ndimage import generate_binary_structure as _gpu_gen_struct
+        from cupyx.scipy.ndimage import label as _gpu_label
         from cupyx.scipy.ndimage import shift as _gpu_shift
 
         # These can be slow on first call (CUDA initialization)
@@ -70,6 +79,9 @@ def _init_gpu():
         gpu_affine_transform = _gpu_affine
         gpu_gaussian_filter = _gpu_gaussian
         gpu_shift = _gpu_shift
+        gpu_label = _gpu_label
+        gpu_binary_opening = _gpu_binary_opening
+        gpu_generate_binary_structure = _gpu_gen_struct
         GPU_AVAILABLE = True
         GPU_DEVICE_NAME = _device_name
         GPU_MEMORY_TOTAL = _mem_info[1] / (1024**3)  # GB
@@ -95,7 +107,10 @@ def _init_gpu():
 
 # CPU fallbacks (always available)
 from scipy.ndimage import affine_transform as cpu_affine_transform
+from scipy.ndimage import binary_opening as cpu_binary_opening
 from scipy.ndimage import gaussian_filter as cpu_gaussian_filter
+from scipy.ndimage import generate_binary_structure as cpu_generate_binary_structure
+from scipy.ndimage import label as cpu_label
 from scipy.ndimage import shift as cpu_shift
 
 # Threshold for using GPU (overhead only worth it for larger volumes)
@@ -422,3 +437,78 @@ def clear_gpu_memory():
         cp.get_default_memory_pool().free_all_blocks()
         cp.get_default_pinned_memory_pool().free_all_blocks()
         logger.debug("GPU memory pools cleared")
+
+
+# ---------------------------------------------------------------------------
+# Analysis operations (segmentation / morphology)
+# ---------------------------------------------------------------------------
+
+
+def label_auto(
+    mask: np.ndarray,
+    structure: np.ndarray = None,
+) -> Tuple[np.ndarray, int]:
+    """Connected-component labeling with GPU/CPU auto-dispatch.
+
+    Args:
+        mask: Boolean or integer array to label.
+        structure: Structuring element defining connectivity.
+            None → full connectivity (default from scipy/cupy).
+
+    Returns:
+        (labels, num_features) — labelled array and count of objects.
+    """
+    if is_gpu_beneficial(mask):
+        try:
+            mask_gpu = cp.asarray(mask)
+            struct_gpu = cp.asarray(structure) if structure is not None else None
+            labels_gpu, n = gpu_label(mask_gpu, structure=struct_gpu)
+            labels = cp.asnumpy(labels_gpu)
+            del mask_gpu, labels_gpu
+            if struct_gpu is not None:
+                del struct_gpu
+            cp.get_default_memory_pool().free_all_blocks()
+            return labels, int(n)
+        except Exception as e:
+            logger.warning(f"GPU label failed, falling back to CPU: {e}")
+
+    return cpu_label(mask, structure=structure)
+
+
+def binary_opening_auto(
+    mask: np.ndarray,
+    structure: np.ndarray = None,
+    iterations: int = 1,
+) -> np.ndarray:
+    """Morphological binary opening with GPU/CPU auto-dispatch.
+
+    Args:
+        mask: Boolean array.
+        structure: Structuring element. None → cross-shaped.
+        iterations: Number of erosion+dilation passes.
+
+    Returns:
+        Opened boolean array.
+    """
+    if is_gpu_beneficial(mask):
+        try:
+            mask_gpu = cp.asarray(mask)
+            struct_gpu = cp.asarray(structure) if structure is not None else None
+            result_gpu = gpu_binary_opening(
+                mask_gpu, structure=struct_gpu, iterations=iterations
+            )
+            result = cp.asnumpy(result_gpu)
+            del mask_gpu, result_gpu
+            if struct_gpu is not None:
+                del struct_gpu
+            cp.get_default_memory_pool().free_all_blocks()
+            return result
+        except Exception as e:
+            logger.warning(f"GPU binary_opening failed, falling back to CPU: {e}")
+
+    return cpu_binary_opening(mask, structure=structure, iterations=iterations)
+
+
+def generate_binary_structure_auto(rank: int, connectivity: int) -> np.ndarray:
+    """Generate a binary structuring element (always CPU — tiny array)."""
+    return cpu_generate_binary_structure(rank, connectivity)

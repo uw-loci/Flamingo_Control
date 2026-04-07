@@ -29,6 +29,7 @@ from py2flamingo.pipeline.engine.node_runners.sample_view_data_runner import (
     SampleViewDataRunner,
 )
 from py2flamingo.pipeline.engine.node_runners.threshold_runner import ThresholdRunner
+from py2flamingo.pipeline.engine.node_runners.timed_loop_runner import TimedLoopRunner
 from py2flamingo.pipeline.engine.node_runners.workflow_runner import WorkflowRunner
 from py2flamingo.pipeline.models.pipeline import NodeType, Pipeline
 from py2flamingo.pipeline.services.pipeline_service import PipelineService
@@ -128,6 +129,7 @@ class PipelineController(QObject):
             NodeType.SAMPLE_VIEW_DATA: SampleViewDataRunner(),
             NodeType.OVERVIEW_ANALYSIS: OverviewAnalysisRunner(),
             NodeType.POST_PROCESSING: PostProcessingRunner(),
+            NodeType.TIMED_LOOP: TimedLoopRunner(),
         }
 
         # Create executor

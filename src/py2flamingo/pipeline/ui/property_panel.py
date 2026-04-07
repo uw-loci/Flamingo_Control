@@ -136,6 +136,17 @@ _CONFIG_SCHEMAS: Dict[NodeType, list] = {
         ("morphological_radius", "Cleanup Radius", "int", 1),
         ("invert", "Invert Selection", "bool", False),
     ],
+    NodeType.TIMED_LOOP: [
+        ("iterations", "Iterations (0=indefinite)", "int", 10),
+        ("interval_seconds", "Interval (seconds)", "float", 60.0),
+        (
+            "timing_mode",
+            "Timing Mode",
+            "combo",
+            "sequential",
+            ["sequential", "clock_aligned"],
+        ),
+    ],
     NodeType.POST_PROCESSING: [
         (
             "acquisition_dir",

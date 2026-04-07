@@ -25,6 +25,7 @@ _NODE_DESCRIPTIONS = {
     NodeType.SAMPLE_VIEW_DATA: "Read current 3D viewer data (volumes, position)",
     NodeType.OVERVIEW_ANALYSIS: "Analyze 2D overview image to detect sample tiles",
     NodeType.POST_PROCESSING: "Stitch + process raw tiles (destripe, fuse, deconvolve, stitch)",
+    NodeType.TIMED_LOOP: "Repeat body N times on a timed schedule (timelapse, monitoring)",
 }
 
 MIME_TYPE = "application/x-pipeline-node-type"

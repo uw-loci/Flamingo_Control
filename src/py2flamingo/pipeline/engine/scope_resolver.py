@@ -1,10 +1,10 @@
 """
-ScopeResolver — identifies ForEach body nodes and Conditional branch subgraphs.
+ScopeResolver — identifies ForEach/TimedLoop body nodes and Conditional branch subgraphs.
 
-ForEach and Conditional nodes own subgraphs that should not run as part of
-the top-level DAG walk. The ScopeResolver identifies which nodes belong to
-each scope so the executor can skip them at the top level and hand them to
-the appropriate runner for scoped execution.
+ForEach, TimedLoop, and Conditional nodes own subgraphs that should not run
+as part of the top-level DAG walk.  The ScopeResolver identifies which nodes
+belong to each scope so the executor can skip them at the top level and hand
+them to the appropriate runner for scoped execution.
 """
 
 import logging
@@ -16,12 +16,12 @@ logger = logging.getLogger(__name__)
 
 
 class ScopeInfo:
-    """Describes the scope owned by a ForEach or Conditional node."""
+    """Describes the scope owned by a ForEach, TimedLoop, or Conditional node."""
 
     def __init__(self, owner_node_id: str, owner_type: NodeType):
         self.owner_node_id = owner_node_id
         self.owner_type = owner_type
-        # For ForEach: body_nodes = set of node IDs executed each iteration
+        # For ForEach/TimedLoop: body_nodes = set of node IDs executed each iteration
         self.body_nodes: Set[str] = set()
         # For Conditional: branch -> set of node IDs
         self.branches: Dict[str, Set[str]] = {}
@@ -53,6 +53,8 @@ class ScopeResolver:
         for node in self._pipeline.nodes.values():
             if node.node_type == NodeType.FOR_EACH:
                 self._resolve_foreach(node.id)
+            elif node.node_type == NodeType.TIMED_LOOP:
+                self._resolve_timed_loop(node.id)
             elif node.node_type == NodeType.CONDITIONAL:
                 self._resolve_conditional(node.id)
 
@@ -81,6 +83,32 @@ class ScopeResolver:
 
         logger.debug(
             f"ForEach {node.name} ({node_id}): body contains "
+            f"{len(scope.body_nodes)} nodes"
+        )
+
+    def _resolve_timed_loop(self, node_id: str) -> None:
+        """Identify body nodes of a TimedLoop node.
+
+        Body = all nodes reachable from the "iteration" and "elapsed_seconds"
+        output ports.
+        """
+        node = self._pipeline.get_node(node_id)
+        if not node:
+            return
+
+        scope = ScopeInfo(node_id, NodeType.TIMED_LOOP)
+
+        for port_name in ("iteration", "elapsed_seconds"):
+            port = node.get_output(port_name)
+            if port:
+                downstream = self._pipeline.get_downstream_from_port(node_id, port.id)
+                scope.body_nodes |= downstream
+
+        self._scoped_node_ids |= scope.body_nodes
+        self._scopes[node_id] = scope
+
+        logger.debug(
+            f"TimedLoop {node.name} ({node_id}): body contains "
             f"{len(scope.body_nodes)} nodes"
         )
 
@@ -145,7 +173,7 @@ class ScopeResolver:
         if not scope:
             return []
 
-        if scope.owner_type == NodeType.FOR_EACH:
+        if scope.owner_type in (NodeType.FOR_EACH, NodeType.TIMED_LOOP):
             target_ids = scope.body_nodes
         else:
             target_ids = set()
