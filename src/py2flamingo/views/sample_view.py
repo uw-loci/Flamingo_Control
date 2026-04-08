@@ -2938,7 +2938,7 @@ class SampleView(QWidget):
                     f"Z={stitch_center_z_mm:.3f} R={current_r:.1f}"
                 )
 
-                # Update holder position and sliders
+                # Update holder position, sliders, and retransform existing data
                 self._update_sample_holder_position(
                     stitch_center_x_mm, stitch_center_y_mm, stitch_center_z_mm
                 )
@@ -2953,6 +2953,12 @@ class SampleView(QWidget):
                         edit.blockSignals(True)
                         edit.setText(f"{value:.{decimals}f}")
                         edit.blockSignals(False)
+
+                # Trigger a stage update so existing raw data layers are
+                # retransformed to align with the new virtual stage position
+                self._pending_stage_update = dict(self.last_stage_position)
+                if not self._stage_update_timer.isActive():
+                    self._stage_update_timer.start()
 
             # Bounds check: with centering the data should always be within
             # the chamber, but warn if the volume is larger than the display.
