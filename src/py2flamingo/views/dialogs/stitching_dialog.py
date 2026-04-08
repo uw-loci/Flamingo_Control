@@ -139,8 +139,12 @@ class StitchingDialog(PersistentDialog):
         settings_layout.addWidget(self._fusion_combo, 1, 3)
 
         # Destripe
-        self._destripe_cb = QCheckBox("Destripe (PyStripe)")
-        self._destripe_cb.setToolTip("Apply PyStripe destriping to each Z-plane")
+        self._destripe_cb = QCheckBox("Destripe (PyStripe) \u2731")
+        self._destripe_cb.setToolTip(
+            "\u2731 SLOW: Processes every Z-plane at full resolution\n"
+            "before downsampling. Expect ~10 min per tile per channel.\n\n"
+            "Removes horizontal stripe artifacts from light-sheet data."
+        )
         settings_layout.addWidget(self._destripe_cb, 2, 0, 1, 2)
 
         # Output format
@@ -196,19 +200,20 @@ class StitchingDialog(PersistentDialog):
         settings_layout.addWidget(format_help, 2, 4)
 
         # Deconvolution
-        self._deconv_cb = QCheckBox("Deconvolution")
+        self._deconv_cb = QCheckBox("Deconvolution \u2731")
         self._deconv_cb.setToolTip(
-            "Apply GPU Richardson-Lucy deconvolution per tile\n"
-            "(requires pycudadecon or RedLionfish)"
+            "\u2731 SLOW: GPU Richardson-Lucy deconvolution per tile.\n"
+            "Requires pycudadecon or RedLionfish.\n\n"
+            "Significantly improves resolution but adds minutes per tile."
         )
         settings_layout.addWidget(self._deconv_cb, 3, 0, 1, 2)
 
         # Content-based fusion (BigStitcher-inspired)
-        self._content_fusion_cb = QCheckBox("Content-based blending")
+        self._content_fusion_cb = QCheckBox("Content-based blending \u2731")
         self._content_fusion_cb.setToolTip(
-            "Weight tile overlap regions by local sharpness\n"
-            "(Preibisch local-variance algorithm, inspired by BigStitcher).\n"
-            "Improves fusion quality but increases computation time."
+            "\u2731 SLOW: Weights tile overlaps by local sharpness\n"
+            "(Preibisch local-variance, inspired by BigStitcher).\n\n"
+            "Improves fusion quality in overlap regions."
         )
         settings_layout.addWidget(self._content_fusion_cb, 3, 2, 1, 2)
 
@@ -271,6 +276,11 @@ class StitchingDialog(PersistentDialog):
             "Leave empty for all channels, or comma-separated list (e.g. 0,1)"
         )
         settings_layout.addWidget(self._channels_edit, 6, 1, 1, 3)
+
+        # Timing legend
+        legend = QLabel("\u2731 = significantly increases processing time")
+        legend.setStyleSheet("color: #FF8C00; font-style: italic; font-size: 11px;")
+        settings_layout.addWidget(legend, 7, 0, 1, 4)
 
         settings_group.setLayout(settings_layout)
         layout.addWidget(settings_group)
