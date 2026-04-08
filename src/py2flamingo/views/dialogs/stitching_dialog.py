@@ -141,8 +141,8 @@ class StitchingDialog(PersistentDialog):
         # Destripe
         self._destripe_cb = QCheckBox("Destripe (PyStripe) \u2731")
         self._destripe_cb.setToolTip(
-            "\u2731 SLOW: Processes every Z-plane at full resolution\n"
-            "before downsampling. Expect ~10 min per tile per channel.\n\n"
+            "\u2731 Processes every Z-plane at full resolution\n"
+            "before downsampling.\n\n"
             "Removes horizontal stripe artifacts from light-sheet data."
         )
         settings_layout.addWidget(self._destripe_cb, 2, 0, 1, 2)
@@ -202,16 +202,16 @@ class StitchingDialog(PersistentDialog):
         # Deconvolution
         self._deconv_cb = QCheckBox("Deconvolution \u2731")
         self._deconv_cb.setToolTip(
-            "\u2731 SLOW: GPU Richardson-Lucy deconvolution per tile.\n"
+            "\u2731 GPU Richardson-Lucy deconvolution per tile.\n"
             "Requires pycudadecon or RedLionfish.\n\n"
-            "Significantly improves resolution but adds minutes per tile."
+            "Significantly improves resolution."
         )
         settings_layout.addWidget(self._deconv_cb, 3, 0, 1, 2)
 
         # Content-based fusion (BigStitcher-inspired)
         self._content_fusion_cb = QCheckBox("Content-based blending \u2731")
         self._content_fusion_cb.setToolTip(
-            "\u2731 SLOW: Weights tile overlaps by local sharpness\n"
+            "\u2731 Weights tile overlaps by local sharpness\n"
             "(Preibisch local-variance, inspired by BigStitcher).\n\n"
             "Improves fusion quality in overlap regions."
         )
