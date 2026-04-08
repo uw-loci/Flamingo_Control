@@ -4112,11 +4112,14 @@ class SampleView(QWidget):
 
                 # Prefer using napari layer data (already transformed with stage position)
                 # over raw voxel storage data, so 2D planes match 3D viewer position.
-                # Fall back to voxel storage if the layer data is all zeros (not yet
-                # updated by _update_visualization, e.g. during initial load).
+                # Skip stitched layers — they have different dimensions than the
+                # display cache and use their own scale/translate in napari.
                 volume = None
                 if ch_id in self.channel_layers:
-                    layer_data = self.channel_layers[ch_id].data
+                    layer = self.channel_layers[ch_id]
+                    if layer.metadata.get("stitched"):
+                        continue  # Stitched layers don't fit display cache grid
+                    layer_data = layer.data
                     if layer_data is not None and np.any(layer_data):
                         volume = layer_data
                 if volume is None:

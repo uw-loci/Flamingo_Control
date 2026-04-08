@@ -1082,6 +1082,11 @@ class StitchingPipeline:
         try:
             import dask.diagnostics
 
+            # Suppress per-tile-pair registration spam from multiview_stitcher
+            reg_logger = logging.getLogger("multiview_stitcher.registration")
+            _saved_level = reg_logger.level
+            reg_logger.setLevel(logging.WARNING)
+
             with dask.diagnostics.ProgressBar():
                 params = registration.register(
                     msims,
@@ -1103,6 +1108,9 @@ class StitchingPipeline:
             self.logger.error(f"  Registration failed: {e}")
             self.logger.info("  Falling back to metadata positions only")
             return [], mvs_io.METADATA_TRANSFORM_KEY
+
+        finally:
+            reg_logger.setLevel(_saved_level)
 
     def _fuse_channel(
         self,

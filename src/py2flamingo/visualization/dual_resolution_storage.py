@@ -1219,11 +1219,17 @@ class DualResolutionVoxelStorage:
             self.last_stage_position = current_stage_pos.copy()
             return rotated
 
-        # Log offset being applied (INFO for visibility during debugging)
-        logger.info(
-            f"Transform: Applying offset {offset_voxels.astype(int)} voxels (ZYX) "
-            f"= ({dz*1000:.0f}, {-dy*1000:.0f}, {dx_display*1000:.0f}) µm"
-        )
+        # Log offset once per update cycle (not per channel)
+        offset_key = tuple(offset_voxels.astype(int))
+        if (
+            not hasattr(self, "_last_logged_offset")
+            or self._last_logged_offset != offset_key
+        ):
+            logger.info(
+                f"Transform: Applying offset {offset_voxels.astype(int)} voxels (ZYX) "
+                f"= ({dz*1000:.0f}, {-dy*1000:.0f}, {dx_display*1000:.0f}) µm"
+            )
+            self._last_logged_offset = offset_key
 
         # Apply translation using optimized shift (numpy.roll for integer, scipy for fractional)
         translated = self._fast_shift(rotated, offset_voxels)

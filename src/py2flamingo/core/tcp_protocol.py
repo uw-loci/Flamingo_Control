@@ -270,41 +270,45 @@ class ProtocolEncoder:
                 axis = axis_names.get(params[3], f"?{params[3]}")
                 logger.info(f"[TX] POSITION_GET: Axis={axis}")
             else:
-                # Full logging for other debug commands
-                logger.info(f"[TX] ========== SENDING COMMAND ==========")
-                logger.info(f"[TX] Command: {cmd_name}")
-                logger.info(f"[TX] Command Code: {code} (0x{code:04X})")
-                logger.info(f"[TX] Status: {status}")
-                logger.info(f"[TX] Parameters:")
+                # Summary at INFO, full dump at DEBUG
                 logger.info(
+                    f"[TX] {cmd_name} (0x{code:04X})"
+                    f" data0={params[3]} value={value}"
+                )
+                logger.debug(f"[TX] ========== SENDING COMMAND ==========")
+                logger.debug(f"[TX] Command: {cmd_name}")
+                logger.debug(f"[TX] Command Code: {code} (0x{code:04X})")
+                logger.debug(f"[TX] Status: {status}")
+                logger.debug(f"[TX] Parameters:")
+                logger.debug(
                     f"[TX]   params[0] (hardwareID): {params[0]} (0x{params[0]:08X}) [bytes 12-15]"
                 )
-                logger.info(
+                logger.debug(
                     f"[TX]   params[1] (subsystemID): {params[1]} (0x{params[1]:08X}) [bytes 16-19]"
                 )
-                logger.info(
+                logger.debug(
                     f"[TX]   params[2] (clientID): {params[2]} (0x{params[2]:08X}) [bytes 20-23]"
                 )
-                logger.info(
+                logger.debug(
                     f"[TX]   params[3] (int32Data0): {params[3]} (0x{params[3]:08X}) [bytes 24-27] ← AXIS/LASER"
                 )
-                logger.info(
+                logger.debug(
                     f"[TX]   params[4] (int32Data1): {params[4]} (0x{params[4]:08X}) [bytes 28-31]"
                 )
-                logger.info(
+                logger.debug(
                     f"[TX]   params[5] (int32Data2): {params[5]} (0x{params[5]:08X}) [bytes 32-35]"
                 )
-                logger.info(
+                logger.debug(
                     f"[TX]   params[6] (cmdDataBits0): {params[6]} (0x{params[6]:08X}) [bytes 36-39]"
                 )
-                logger.info(f"[TX] Value (double): {value}")
-                logger.info(f"[TX] Additional Data Size: {additional_data_size}")
+                logger.debug(f"[TX] Value (double): {value}")
+                logger.debug(f"[TX] Additional Data Size: {additional_data_size}")
                 # Show first 32 bytes of data field if non-zero
                 data_preview = data[:32] if len(data) >= 32 else data
                 data_str = " ".join(f"{b:02X}" for b in data_preview)
-                logger.info(f"[TX] Data (first 32 bytes): {data_str}")
-                logger.info(f"[TX] Start Marker: 0x{self.START_MARKER:08X}")
-                logger.info(f"[TX] End Marker: 0x{self.END_MARKER:08X}")
+                logger.debug(f"[TX] Data (first 32 bytes): {data_str}")
+                logger.debug(f"[TX] Start Marker: 0x{self.START_MARKER:08X}")
+                logger.debug(f"[TX] End Marker: 0x{self.END_MARKER:08X}")
 
         # Pack command structure
         # C++ SCommand struct field order (bytes 0-127):
@@ -339,49 +343,49 @@ class ProtocolEncoder:
         except struct.error as e:
             raise ValueError(f"Failed to pack command structure: {e}")
 
-        # DEBUG: Log packed bytes verification for debug commands (skip position commands)
+        # Packed bytes verification — only at DEBUG level
         if code in debug_commands and code not in (24580, 24584):
-            logger.info(f"[TX] --- Packed Bytes Verification ---")
-            logger.info(
+            logger.debug(f"[TX] --- Packed Bytes Verification ---")
+            logger.debug(
                 f"[TX] Bytes 0-3 (Start): 0x{struct.unpack('I', command_bytes[0:4])[0]:08X}"
             )
-            logger.info(
+            logger.debug(
                 f"[TX] Bytes 4-7 (Code): {struct.unpack('I', command_bytes[4:8])[0]} (0x{struct.unpack('I', command_bytes[4:8])[0]:04X})"
             )
-            logger.info(
+            logger.debug(
                 f"[TX] Bytes 8-11 (Status): {struct.unpack('I', command_bytes[8:12])[0]}"
             )
-            logger.info(
+            logger.debug(
                 f"[TX] Bytes 12-15 (hardwareID): {struct.unpack('I', command_bytes[12:16])[0]} (0x{struct.unpack('I', command_bytes[12:16])[0]:08X})"
             )
-            logger.info(
+            logger.debug(
                 f"[TX] Bytes 16-19 (subsystemID): {struct.unpack('I', command_bytes[16:20])[0]} (0x{struct.unpack('I', command_bytes[16:20])[0]:08X})"
             )
-            logger.info(
+            logger.debug(
                 f"[TX] Bytes 20-23 (clientID): {struct.unpack('I', command_bytes[20:24])[0]} (0x{struct.unpack('I', command_bytes[20:24])[0]:08X})"
             )
-            logger.info(
+            logger.debug(
                 f"[TX] Bytes 24-27 (int32Data0): {struct.unpack('I', command_bytes[24:28])[0]} (0x{struct.unpack('I', command_bytes[24:28])[0]:08X})"
             )
-            logger.info(
+            logger.debug(
                 f"[TX] Bytes 28-31 (int32Data1): {struct.unpack('I', command_bytes[28:32])[0]} (0x{struct.unpack('I', command_bytes[28:32])[0]:08X})"
             )
-            logger.info(
+            logger.debug(
                 f"[TX] Bytes 32-35 (int32Data2): {struct.unpack('I', command_bytes[32:36])[0]} (0x{struct.unpack('I', command_bytes[32:36])[0]:08X})"
             )
-            logger.info(
+            logger.debug(
                 f"[TX] Bytes 36-39 (cmdDataBits0): {struct.unpack('I', command_bytes[36:40])[0]} (0x{struct.unpack('I', command_bytes[36:40])[0]:08X})"
             )
-            logger.info(
+            logger.debug(
                 f"[TX] Bytes 40-47 (Value): {struct.unpack('d', command_bytes[40:48])[0]}"
             )
-            logger.info(
+            logger.debug(
                 f"[TX] Bytes 48-51 (addDataBytes): {struct.unpack('I', command_bytes[48:52])[0]}"
             )
-            logger.info(
+            logger.debug(
                 f"[TX] Bytes 124-127 (End): 0x{struct.unpack('I', command_bytes[124:128])[0]:08X}"
             )
-            logger.info(f"[TX] ======================================")
+            logger.debug(f"[TX] ======================================")
 
         # Verify size
         if len(command_bytes) != self.COMMAND_SIZE:
