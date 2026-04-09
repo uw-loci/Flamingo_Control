@@ -2960,6 +2960,10 @@ class SampleView(QWidget):
                 if not self._stage_update_timer.isActive():
                     self._stage_update_timer.start()
 
+                # Immediately refresh the 2D plane views so the stitched data
+                # is visible without waiting for a stage movement.
+                self._update_plane_views()
+
             # Bounds check: with centering the data should always be within
             # the chamber, but warn if the volume is larger than the display.
             chamber_dims_vox = (
@@ -3566,11 +3570,19 @@ class SampleView(QWidget):
             self.logger.info("  Skipping data transform (initial viz update pending)")
             return
 
-        # Check if reference position is set (required for transform)
+        # Check if reference position is set (required for raw-data transform)
         if self.voxel_storage.reference_stage_position is None:
-            self.logger.info(
-                "  Skipping data transform (reference_stage_position not set)"
+            # If stitched layers are present, still refresh the 2D plane views
+            # so the stitched MIPs are rendered even without a reference position.
+            has_stitched = any(
+                layer.metadata.get("stitched") for layer in self.channel_layers.values()
             )
+            if has_stitched:
+                self._update_plane_views()
+            else:
+                self.logger.info(
+                    "  Skipping data transform (reference_stage_position not set)"
+                )
             return
 
         # Get holder position for rotation center
@@ -4091,40 +4103,46 @@ class SampleView(QWidget):
         Supports multi-channel display with colormaps from Viewer Controls settings.
         Uses the transformed data from napari layers (if available) so that 2D planes
         show the same data position as the 3D viewer when the stage moves.
+        Also handles stitched layers — their MIPs are resampled to display cache
+        dimensions so they composite correctly with tile data MIPs.
         """
         if not self.voxel_storage:
             return
 
         try:
+            # Determine target MIP dimensions from display cache (Z, Y, X)
+            display_dims = tuple(self.voxel_storage.display_dims)
+            target_xz = (display_dims[0], display_dims[2])  # (Z, X)
+            target_xy = (display_dims[1], display_dims[2])  # (Y, X)
+            target_yz = (display_dims[1], display_dims[0])  # (Y, Z) after transpose
+
             # Collect MIP data and settings for each channel
             xz_channel_mips: Dict[int, np.ndarray] = {}
             xy_channel_mips: Dict[int, np.ndarray] = {}
             yz_channel_mips: Dict[int, np.ndarray] = {}
             channel_settings: Dict[int, dict] = {}
 
-            # Get channel settings from napari layers (if available)
-            viewer = self._get_viewer()
-
             for ch_id in range(self._num_channels):
-                # Check if channel has data
-                if not self.voxel_storage.has_data(ch_id):
-                    continue
-
                 # Prefer using napari layer data (already transformed with stage position)
                 # over raw voxel storage data, so 2D planes match 3D viewer position.
-                # Skip stitched layers — they have different dimensions than the
-                # display cache and use their own scale/translate in napari.
                 volume = None
+                is_stitched = False
                 if ch_id in self.channel_layers:
                     layer = self.channel_layers[ch_id]
                     if layer.metadata.get("stitched"):
-                        continue  # Stitched layers don't fit display cache grid
-                    layer_data = layer.data
-                    if layer_data is not None and np.any(layer_data):
-                        volume = layer_data
-                if volume is None:
-                    # Fallback to raw storage data
-                    volume = self.voxel_storage.get_display_volume(ch_id)
+                        is_stitched = True
+                        layer_data = layer.data
+                        if layer_data is not None and layer_data.size > 0:
+                            volume = layer_data
+                    else:
+                        layer_data = layer.data
+                        if layer_data is not None and np.any(layer_data):
+                            volume = layer_data
+
+                if volume is None and not is_stitched:
+                    # Fallback to raw storage data (only for tile data)
+                    if self.voxel_storage.has_data(ch_id):
+                        volume = self.voxel_storage.get_display_volume(ch_id)
 
                 if volume is None or volume.size == 0:
                     continue
@@ -4134,16 +4152,22 @@ class SampleView(QWidget):
                 # Y label inversion handled by v_axis_inverted=True on viewers.
 
                 # XZ plane (top-down) - project along Y axis (axis 1)
-                # Result shape: (Z, X) where Z=rows(vertical), X=cols(horizontal)
-                xz_channel_mips[ch_id] = np.max(volume, axis=1)
-
+                xz_mip = np.max(volume, axis=1)  # (Z, X)
                 # XY plane (front view) - project along Z axis (axis 0)
-                # Result shape: (Y, X) where Y=rows(vertical), X=cols(horizontal)
-                xy_channel_mips[ch_id] = np.max(volume, axis=0)
-
+                xy_mip = np.max(volume, axis=0)  # (Y, X)
                 # YZ plane (side view) - project along X axis (axis 2)
-                # Result shape: (Z, Y) -> transpose to (Y, Z)
-                yz_channel_mips[ch_id] = np.max(volume, axis=2).T
+                yz_mip = np.max(volume, axis=2).T  # (Y, Z)
+
+                # For stitched data, resize MIPs to display cache dimensions so
+                # they composite with tile data and fit the plane viewers.
+                if is_stitched:
+                    xz_mip = self._resize_mip_to_target(xz_mip, target_xz)
+                    xy_mip = self._resize_mip_to_target(xy_mip, target_xy)
+                    yz_mip = self._resize_mip_to_target(yz_mip, target_yz)
+
+                xz_channel_mips[ch_id] = xz_mip
+                xy_channel_mips[ch_id] = xy_mip
+                yz_channel_mips[ch_id] = yz_mip
 
                 # Get channel settings from napari layer or use defaults
                 settings = {
@@ -4153,7 +4177,6 @@ class SampleView(QWidget):
                     "contrast_max": 65535,
                 }
 
-                # Try to get settings from napari layer
                 if ch_id in self.channel_layers:
                     layer = self.channel_layers[ch_id]
                     if hasattr(layer, "visible"):
@@ -4179,7 +4202,25 @@ class SampleView(QWidget):
             )
 
         except Exception as e:
-            self.logger.error(f"Error updating plane views: {e}")
+            self.logger.error(f"Error updating plane views: {e}", exc_info=True)
+
+    def _resize_mip_to_target(
+        self, mip: np.ndarray, target_shape: Tuple[int, int]
+    ) -> np.ndarray:
+        """Resize a 2D MIP to target dimensions using scipy.ndimage.zoom.
+
+        Preserves dtype and intensity range. Used to bring stitched-layer
+        MIPs down to the display cache grid so they composite with tile MIPs.
+        """
+        if mip.shape == target_shape:
+            return mip
+        from scipy.ndimage import zoom
+
+        zoom_factors = (
+            target_shape[0] / mip.shape[0],
+            target_shape[1] / mip.shape[1],
+        )
+        return zoom(mip, zoom_factors, order=1).astype(mip.dtype)
 
     def _stage_y_to_viz_y(self, stage_y: float) -> float:
         """Convert stage Y coordinate to visualization/chamber Y coordinate."""
