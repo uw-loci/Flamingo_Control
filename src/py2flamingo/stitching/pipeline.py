@@ -120,6 +120,8 @@ class StitchingConfig:
     # Processing
     flat_field_correction: bool = False  # BaSiCPy flat-field correction
     destripe: bool = False  # Run PyStripe destriping
+    destripe_fast: bool = False  # Destripe after downsample (faster, lower quality)
+    destripe_workers: Optional[int] = None  # Max parallel threads; None = auto
     # Depth-dependent attenuation correction (Beer-Lambert Z-falloff)
     depth_attenuation: bool = False
     depth_attenuation_mu: Optional[float] = None  # 1/µm; None = auto-fit
@@ -562,50 +564,164 @@ def fuse_illumination_sides(
 
 
 def _fuse_leonardo(left: np.ndarray, right: np.ndarray) -> np.ndarray:
-    """Dual-illumination fusion using Leonardo FUSE.
+    """Dual-illumination fusion using Leonardo FUSE_illu.
 
     Handles ghost artifacts from tissue refraction that naive max/min misses.
-    Falls back to max fusion if leonardo-toolset is not installed.
+    Tries direct import first, then isolated environment, then falls back to max.
     """
+    # Try direct import (if user installed leonardo-toolset locally)
     try:
-        from leonardo_toolset.fuse import fuse_lr
+        from leonardo_toolset.fusion.fuse_illu import FUSE_illu
 
-        logger.info("Using Leonardo FUSE for dual-illumination fusion")
-        # leonardo expects (Z, Y, X) float arrays
-        fused = fuse_lr(
+        logger.info("Using Leonardo FUSE_illu for dual-illumination fusion")
+        fuser = FUSE_illu()
+        fused = fuser.fuse(
             left.astype(np.float32),
             right.astype(np.float32),
         )
         return np.clip(fused, 0, 65535).astype(np.uint16)
     except ImportError:
-        logger.warning(
-            "leonardo-toolset not installed, falling back to max fusion. "
-            "Install with: pip install leonardo-toolset"
-        )
-        return np.maximum(left, right)
+        pass
+
+    # Try isolated environment
+    try:
+        from .isolated_service import IsolatedPreprocessingService
+
+        service = IsolatedPreprocessingService()
+        if service.has_leonardo():
+            return service.fuse_illumination_leonardo(left, right)
+    except Exception as e:
+        logger.warning(f"Leonardo fusion via isolated env failed: {e}")
+
+    logger.warning(
+        "leonardo-toolset not available, falling back to max fusion. "
+        "Use 'Setup Preprocessing...' in the stitching dialog to install."
+    )
+    return np.maximum(left, right)
 
 
-def destripe_volume(volume: np.ndarray) -> np.ndarray:
-    """Apply PyStripe destriping to each Z-plane.
+def _estimate_destripe_workers(
+    plane_shape: tuple, max_workers: Optional[int] = None
+) -> int:
+    """Estimate safe number of parallel destripe threads based on available RAM."""
+    import os
+
+    import psutil
+
+    # Per-worker memory: float32 copy + wavelet decomposition buffers (~4x uint16 plane)
+    plane_bytes = plane_shape[0] * plane_shape[1] * 2  # uint16
+    working_mem_per_worker = plane_bytes * 4
+
+    available = psutil.virtual_memory().available
+    reserved = 2 * 1024**3  # 2 GB for OS + app headroom
+    usable = max(available - reserved, working_mem_per_worker)
+
+    max_by_memory = max(1, int(usable / working_mem_per_worker))
+    max_by_cpu = os.cpu_count() or 4
+
+    n = min(max_by_memory, max_by_cpu)
+    if max_workers is not None:
+        n = min(n, max_workers)
+    return max(1, n)
+
+
+def destripe_volume(
+    volume: np.ndarray, max_workers: Optional[int] = None
+) -> np.ndarray:
+    """Apply PyStripe destriping to each Z-plane using parallel threads.
+
+    Uses ThreadPoolExecutor for parallelism — pystripe's C extensions
+    (pywt, scipy.fftpack, numpy) release the GIL.  Falls back to fewer
+    workers on MemoryError, and to sequential processing as a last resort.
 
     Falls back to identity if pystripe is not installed.
     """
     try:
         from pystripe.core import filter_streaks
-
-        logger.info(f"Destriping volume with {volume.shape[0]} planes...")
-        result = np.empty_like(volume)
-        for z in range(volume.shape[0]):
-            result[z] = filter_streaks(
-                volume[z].astype(np.float32), sigma=[128, 256], level=7, wavelet="db2"
-            ).astype(np.uint16)
-        return result
     except ImportError:
         logger.warning(
             "pystripe not installed, skipping destriping. "
             "Install with: pip install pystripe"
         )
         return volume
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    n_planes = volume.shape[0]
+    result = np.empty_like(volume)
+
+    def _process_plane(z: int) -> int:
+        result[z] = filter_streaks(
+            volume[z].astype(np.float32), sigma=[128, 256], level=7, wavelet="db2"
+        ).astype(np.uint16)
+        return z
+
+    n_workers = _estimate_destripe_workers(volume.shape[1:], max_workers)
+    logger.info(
+        f"Destriping {n_planes} planes ({volume.shape[1]}x{volume.shape[2]}) "
+        f"with {n_workers} threads..."
+    )
+
+    remaining = set(range(n_planes))
+    done: set = set()
+    t0 = time.time()
+    milestone = max(1, n_planes // 10)
+    completed = 0
+
+    while remaining and n_workers >= 1:
+        batch = list(remaining)
+        failed: list = []
+        try:
+            with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                futures = {executor.submit(_process_plane, z): z for z in batch}
+                for future in as_completed(futures):
+                    z = futures[future]
+                    try:
+                        future.result()
+                        done.add(z)
+                        completed += 1
+                        if completed % milestone == 0 or completed == n_planes:
+                            elapsed = time.time() - t0
+                            rate = completed / elapsed if elapsed > 0 else 0
+                            logger.info(
+                                f"  Destripe progress: {completed}/{n_planes} "
+                                f"({100 * completed // n_planes}%, "
+                                f"{rate:.1f} planes/s)"
+                            )
+                    except MemoryError:
+                        failed.append(z)
+        except MemoryError:
+            # Pool-level OOM — retry everything not yet done
+            failed = [z for z in batch if z not in done]
+
+        remaining = set(failed)
+        if not remaining:
+            break
+
+        # Reduce workers and retry failed planes
+        old_workers = n_workers
+        n_workers = max(1, n_workers // 2)
+        logger.warning(
+            f"Memory pressure during destripe — reducing threads from "
+            f"{old_workers} to {n_workers}, retrying {len(remaining)} planes"
+        )
+
+        if n_workers == 1:
+            # Last resort: sequential, one plane at a time
+            logger.warning("Falling back to sequential destriping")
+            for z in sorted(remaining):
+                _process_plane(z)
+                completed += 1
+            remaining = set()
+            break
+
+    elapsed = time.time() - t0
+    rate = n_planes / elapsed if elapsed > 0 else 0
+    logger.info(
+        f"Destripe complete: {n_planes} planes in {elapsed:.1f}s "
+        f"({rate:.1f} planes/s)"
+    )
+    return result
 
 
 def downsample_volume(volume: np.ndarray, factor: int) -> np.ndarray:
@@ -684,7 +800,7 @@ class StitchingPipeline:
         if self.config.flat_field_correction:
             tags.append("flatfield")
         if self.config.destripe:
-            tags.append("destripe")
+            tags.append("destripe-fast" if self.config.destripe_fast else "destripe")
         if self.config.depth_attenuation:
             tags.append("atten")
         if self.config.deconvolution_enabled:
@@ -992,9 +1108,11 @@ class StitchingPipeline:
                         z_step_um=z_step,
                     )
 
-                # Destripe
-                if self.config.destripe:
-                    volume = destripe_volume(volume)
+                # Destripe (before downsample — full resolution)
+                if self.config.destripe and not self.config.destripe_fast:
+                    volume = destripe_volume(
+                        volume, max_workers=self.config.destripe_workers
+                    )
 
                 # Deconvolution (per-tile, before stitching)
                 if self.config.deconvolution_enabled:
@@ -1003,6 +1121,12 @@ class StitchingPipeline:
                 # Downsample
                 if self.config.downsample_factor > 1:
                     volume = downsample_volume(volume, self.config.downsample_factor)
+
+                # Destripe (after downsample — fast mode)
+                if self.config.destripe and self.config.destripe_fast:
+                    volume = destripe_volume(
+                        volume, max_workers=self.config.destripe_workers
+                    )
 
                 # Flip X axis if camera is inverted relative to stage
                 # so tile image data aligns with stage-coordinate translations

@@ -85,6 +85,17 @@ def main():
         help="Apply PyStripe destriping (requires pystripe)",
     )
     preproc_group.add_argument(
+        "--destripe-fast",
+        action="store_true",
+        help="Destripe after downsample (faster, slightly lower quality)",
+    )
+    preproc_group.add_argument(
+        "--destripe-workers",
+        type=int,
+        default=None,
+        help="Max parallel destripe threads (default: auto based on available memory)",
+    )
+    preproc_group.add_argument(
         "--depth-attenuation",
         action="store_true",
         help="Correct exponential Z-intensity falloff (Beer-Lambert model)",
@@ -239,6 +250,8 @@ def main():
         illumination_fusion=args.illumination_fusion,
         flat_field_correction=args.flat_field,
         destripe=args.destripe,
+        destripe_fast=args.destripe_fast,
+        destripe_workers=args.destripe_workers,
         depth_attenuation=args.depth_attenuation,
         depth_attenuation_mu=args.depth_attenuation_mu,
         reg_channel=args.reg_channel,

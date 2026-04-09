@@ -9,6 +9,7 @@ PyQt5>=5.15.8,<6  # napari 0.7 requires >=5.15.8; do NOT use napari[all] (pulls 
 numpy>=2.0.0,<3
 Pillow>=9.0.0,<13
 opencv-python>=4.5.0,<5
+psutil>=5.9.0,<7
 
 # Scientific computing (required for image processing and analysis)
 scipy>=1.14.0,<2

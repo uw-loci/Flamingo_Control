@@ -32,8 +32,15 @@ except ImportError:
 
 
 def is_available() -> bool:
-    """Return True if basicpy is installed and importable."""
-    return BASICPY_AVAILABLE
+    """Return True if basicpy is available (direct import or isolated env)."""
+    if BASICPY_AVAILABLE:
+        return True
+    try:
+        from .isolated_service import IsolatedPreprocessingService
+
+        return IsolatedPreprocessingService().has_basicpy()
+    except Exception:
+        return False
 
 
 def estimate_flat_fields(
@@ -53,14 +60,23 @@ def estimate_flat_fields(
         {ch_id: BaSiC model} — empty dict if basicpy is not available.
     """
     if not BASICPY_AVAILABLE:
+        # Try isolated environment
+        try:
+            from .isolated_service import IsolatedPreprocessingService
+
+            service = IsolatedPreprocessingService()
+            if service.has_basicpy():
+                return _estimate_via_isolated(channel_tile_data, service, progress_fn)
+        except Exception as e:
+            logger.warning(f"Isolated env flat-field failed: {e}")
+
         logger.warning(
-            "basicpy not installed, skipping flat-field correction. "
-            "Install with:\n"
-            "  pip install torch --extra-index-url https://download.pytorch.org/whl/cpu\n"
-            "  pip install basicpy>=2.0.0"
+            "basicpy not available (direct or isolated). "
+            "Use 'Setup Preprocessing...' in the stitching dialog to install."
         )
         return {}
 
+    # Direct basicpy import available
     models = {}
     ch_ids = list(channel_tile_data.keys())
 
@@ -97,6 +113,54 @@ def estimate_flat_fields(
             logger.error(f"  Channel {ch_id}: flat-field estimation failed: {e}")
 
     return models
+
+
+def _estimate_via_isolated(
+    channel_tile_data: Dict[int, List[Tuple[Any, Any]]],
+    service: Any,
+    progress_fn: Optional[Callable[[str], None]] = None,
+) -> Dict[int, Any]:
+    """Estimate flat-fields using the isolated preprocessing environment.
+
+    Returns {ch_id: _IsolatedModel(flatfield, darkfield)} objects that
+    are compatible with apply_flat_field() — they have .flatfield and
+    .darkfield attributes like a BaSiC model.
+    """
+    sample_stacks: Dict[int, np.ndarray] = {}
+    for ch_id, tile_list in channel_tile_data.items():
+        if not tile_list:
+            continue
+        planes = []
+        for volume, _tile_info in tile_list:
+            vol = np.asarray(volume)
+            planes.append(vol[vol.shape[0] // 2])
+        sample_stacks[ch_id] = np.stack(planes)
+
+    msg = f"Estimating flat-fields via isolated environment..."
+    logger.info(f"  {msg}")
+    if progress_fn:
+        progress_fn(msg)
+
+    results = service.flat_field_estimate(sample_stacks)
+
+    # Wrap (flatfield, darkfield) tuples in model-like objects
+    models = {}
+    for ch_id, (flatfield, darkfield) in results.items():
+        models[ch_id] = _IsolatedModel(flatfield, darkfield)
+
+    return models
+
+
+class _IsolatedModel:
+    """Minimal model-like wrapper for isolated flat-field results.
+
+    Has .flatfield and .darkfield attributes like a BaSiC model,
+    so apply_flat_field() can use it transparently.
+    """
+
+    def __init__(self, flatfield: np.ndarray, darkfield: np.ndarray):
+        self.flatfield = flatfield
+        self.darkfield = darkfield
 
 
 def apply_flat_field(

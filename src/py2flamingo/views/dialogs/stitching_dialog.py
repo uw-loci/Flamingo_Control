@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from PyQt5.QtCore import QSettings, Qt, pyqtSignal
+from PyQt5.QtCore import QProcess, QSettings, Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -143,9 +143,20 @@ class StitchingDialog(PersistentDialog):
         self._destripe_cb.setToolTip(
             "\u2731 Processes every Z-plane at full resolution\n"
             "before downsampling.\n\n"
-            "Removes horizontal stripe artifacts from light-sheet data."
+            "Removes horizontal stripe artifacts from light-sheet data.\n"
+            "Uses multiple CPU cores automatically."
         )
-        settings_layout.addWidget(self._destripe_cb, 2, 0, 1, 2)
+        settings_layout.addWidget(self._destripe_cb, 2, 0)
+
+        self._destripe_fast_cb = QCheckBox("Fast")
+        self._destripe_fast_cb.setToolTip(
+            "Destripe after downsampling instead of before.\n"
+            "Much faster but slightly lower quality.\n\n"
+            "Only effective when downsample factor > 1."
+        )
+        self._destripe_fast_cb.setEnabled(False)
+        self._destripe_cb.toggled.connect(self._destripe_fast_cb.setEnabled)
+        settings_layout.addWidget(self._destripe_fast_cb, 2, 1)
 
         # Output format
         settings_layout.addWidget(QLabel("Output format:"), 2, 2)
@@ -219,23 +230,7 @@ class StitchingDialog(PersistentDialog):
 
         # Flat-field correction
         self._flat_field_cb = QCheckBox("Flat-field correction")
-        # Disable until basicpy dependency issues are resolved (see TODO)
-        from py2flamingo.stitching.flat_field import is_available as _ff_available
-
-        if _ff_available():
-            self._flat_field_cb.setToolTip(
-                "Estimate and correct illumination non-uniformity\n"
-                "from tile data (BaSiC algorithm, no calibration needed).\n"
-                "Improves tile intensity consistency and reduces seams."
-            )
-        else:
-            self._flat_field_cb.setEnabled(False)
-            self._flat_field_cb.setToolTip(
-                "Flat-field correction is not available.\n"
-                "Requires basicpy + PyTorch which have dependency\n"
-                "conflicts with the current environment.\n"
-                "This will be resolved in a future update."
-            )
+        self._update_preprocessing_availability()
         settings_layout.addWidget(self._flat_field_cb, 4, 0, 1, 2)
 
         # Depth-dependent attenuation correction
@@ -306,6 +301,16 @@ class StitchingDialog(PersistentDialog):
         btn_layout.addWidget(self._cancel_btn)
 
         btn_layout.addStretch()
+
+        self._setup_env_btn = QPushButton("Setup Preprocessing...")
+        self._setup_env_btn.setToolTip(
+            "Install isolated environment for flat-field correction\n"
+            "and Leonardo dual-illumination fusion.\n\n"
+            "Downloads ~3 GB (torch, basicpy, leonardo-toolset).\n"
+            "Only needed once."
+        )
+        self._setup_env_btn.clicked.connect(self._on_setup_env)
+        btn_layout.addWidget(self._setup_env_btn)
         layout.addLayout(btn_layout)
 
         # --- Log area ---
@@ -461,6 +466,7 @@ class StitchingDialog(PersistentDialog):
             output_format=self._format_combo.currentData(),
             flat_field_correction=self._flat_field_cb.isChecked(),
             destripe=self._destripe_cb.isChecked(),
+            destripe_fast=self._destripe_fast_cb.isChecked(),
             depth_attenuation=self._depth_atten_cb.isChecked(),
             depth_attenuation_mu=(
                 self._depth_atten_mu_spin.value()
@@ -646,6 +652,156 @@ class StitchingDialog(PersistentDialog):
         """Append a message to the log area."""
         self._log_text.append(message)
 
+    # --- Preprocessing environment ---
+
+    def _update_preprocessing_availability(self):
+        """Update flat-field/leonardo availability based on env status."""
+        from py2flamingo.stitching.flat_field import is_available as _ff_available
+
+        if _ff_available():
+            self._flat_field_cb.setEnabled(True)
+            self._flat_field_cb.setToolTip(
+                "Estimate and correct illumination non-uniformity\n"
+                "from tile data (BaSiC algorithm, no calibration needed).\n"
+                "Improves tile intensity consistency and reduces seams."
+            )
+        else:
+            self._flat_field_cb.setEnabled(False)
+            self._flat_field_cb.setToolTip(
+                "Flat-field correction requires basicpy.\n"
+                "Click 'Setup Preprocessing...' to install it\n"
+                "in an isolated environment."
+            )
+
+    def _on_setup_env(self):
+        """Run the preprocessing environment setup script."""
+        import sys
+
+        from py2flamingo.stitching.isolated_service import (
+            IsolatedPreprocessingService,
+        )
+
+        service = IsolatedPreprocessingService()
+        if service.is_available():
+            status_parts = []
+            if service.has_basicpy():
+                status_parts.append("basicpy")
+            if service.has_leonardo():
+                status_parts.append("leonardo-toolset")
+            if status_parts:
+                reply = QMessageBox.question(
+                    self,
+                    "Environment Exists",
+                    f"Preprocessing environment already exists with: "
+                    f"{', '.join(status_parts)}.\n\n"
+                    f"Reinstall? (This will recreate the environment.)",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if reply != QMessageBox.Yes:
+                    return
+                # Delete existing env so script recreates it
+                import shutil
+
+                env_path = service.env_path()
+                self._log(f"Removing existing environment: {env_path}")
+                try:
+                    shutil.rmtree(env_path)
+                except Exception as e:
+                    self._log(f"ERROR: Could not remove environment: {e}")
+                    return
+
+        reply = QMessageBox.question(
+            self,
+            "Setup Preprocessing Environment",
+            "This will download and install ~3 GB of packages:\n"
+            "  - PyTorch (CPU)\n"
+            "  - basicpy (flat-field correction)\n"
+            "  - leonardo-toolset (dual-illumination fusion)\n\n"
+            "This only needs to be done once. Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        # Find the setup script
+        script_dir = Path(__file__).resolve().parents[2] / "scripts"
+        if sys.platform == "win32":
+            script = script_dir / "create_preprocessing_env.bat"
+        else:
+            script = script_dir / "create_preprocessing_env.sh"
+
+        if not script.is_file():
+            # Try relative to package root
+            from importlib import resources
+
+            script_dir = Path(__file__).resolve().parents[3] / "scripts"
+            if sys.platform == "win32":
+                script = script_dir / "create_preprocessing_env.bat"
+            else:
+                script = script_dir / "create_preprocessing_env.sh"
+
+        if not script.is_file():
+            QMessageBox.warning(
+                self,
+                "Script Not Found",
+                f"Could not find setup script.\n"
+                f"Expected at: {script}\n\n"
+                f"Run it manually from the scripts/ directory.",
+            )
+            return
+
+        self._log(f"\n=== Setting up preprocessing environment ===")
+        self._log(f"Script: {script}")
+        self._setup_env_btn.setEnabled(False)
+        self._setup_env_btn.setText("Setting up...")
+
+        self._env_process = QProcess(self)
+        self._env_process.setProcessChannelMode(QProcess.MergedChannels)
+        self._env_process.readyReadStandardOutput.connect(self._on_env_process_output)
+        self._env_process.finished.connect(self._on_env_process_finished)
+
+        if sys.platform == "win32":
+            self._env_process.start("cmd.exe", ["/c", str(script)])
+        else:
+            self._env_process.start("bash", [str(script)])
+
+    def _on_env_process_output(self):
+        """Read and display output from the setup process."""
+        data = self._env_process.readAllStandardOutput()
+        text = bytes(data).decode("utf-8", errors="replace").strip()
+        if text:
+            for line in text.splitlines():
+                self._log(line)
+
+    def _on_env_process_finished(self, exit_code, _exit_status):
+        """Handle setup process completion."""
+        self._setup_env_btn.setEnabled(True)
+        self._setup_env_btn.setText("Setup Preprocessing...")
+
+        if exit_code == 0:
+            self._log("\n=== Preprocessing environment setup complete ===")
+            # Clear cached availability checks
+            from py2flamingo.stitching.isolated_service import (
+                IsolatedPreprocessingService,
+            )
+
+            service = IsolatedPreprocessingService()
+            service.clear_cache()
+
+            # Refresh UI availability
+            self._update_preprocessing_availability()
+            self._log(
+                f"  basicpy: {'available' if service.has_basicpy() else 'not found'}"
+            )
+            self._log(
+                f"  leonardo: {'available' if service.has_leonardo() else 'not found'}"
+            )
+        else:
+            self._log(f"\n=== Setup failed (exit code {exit_code}) ===")
+            self._log("Check the log above for errors.")
+
     # --- Settings persistence ---
 
     def _save_settings(self):
@@ -656,16 +812,17 @@ class StitchingDialog(PersistentDialog):
         s.setValue("output_dir", self._output_dir_edit.text())
         s.setValue("pixel_size", self._pixel_size_spin.value())
         s.setValue("z_step", self._z_step_spin.value())
-        s.setValue("downsample_idx", self._downsample_combo.currentIndex())
-        s.setValue("fusion_idx", self._fusion_combo.currentIndex())
+        s.setValue("downsample", self._downsample_combo.currentData())
+        s.setValue("fusion", self._fusion_combo.currentData())
         s.setValue("flat_field", self._flat_field_cb.isChecked())
         s.setValue("destripe", self._destripe_cb.isChecked())
+        s.setValue("destripe_fast", self._destripe_fast_cb.isChecked())
         s.setValue("depth_attenuation", self._depth_atten_cb.isChecked())
         s.setValue("depth_attenuation_mu", self._depth_atten_mu_spin.value())
         s.setValue("deconvolution", self._deconv_cb.isChecked())
         s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
         s.setValue("package_ozx", self._ozx_cb.isChecked())
-        s.setValue("format_idx", self._format_combo.currentIndex())
+        s.setValue("output_format", self._format_combo.currentData())
         s.setValue("channels", self._channels_edit.text())
         s.endGroup()
 
@@ -688,17 +845,26 @@ class StitchingDialog(PersistentDialog):
         z_step = s.value("z_step", 0.0, type=float)
         self._z_step_spin.setValue(z_step)
 
-        ds_idx = s.value("downsample_idx", 0, type=int)
-        self._downsample_combo.setCurrentIndex(ds_idx)
+        downsample = s.value("downsample", 0, type=int)
+        if downsample:
+            idx = self._downsample_combo.findData(downsample)
+            if idx >= 0:
+                self._downsample_combo.setCurrentIndex(idx)
 
-        fusion_idx = s.value("fusion_idx", 0, type=int)
-        self._fusion_combo.setCurrentIndex(fusion_idx)
+        fusion = s.value("fusion", "", type=str)
+        if fusion:
+            idx = self._fusion_combo.findData(fusion)
+            if idx >= 0:
+                self._fusion_combo.setCurrentIndex(idx)
 
         flat_field = s.value("flat_field", False, type=bool)
         self._flat_field_cb.setChecked(flat_field)
 
         destripe = s.value("destripe", False, type=bool)
         self._destripe_cb.setChecked(destripe)
+
+        destripe_fast = s.value("destripe_fast", False, type=bool)
+        self._destripe_fast_cb.setChecked(destripe_fast)
 
         depth_atten = s.value("depth_attenuation", False, type=bool)
         self._depth_atten_cb.setChecked(depth_atten)
@@ -715,8 +881,11 @@ class StitchingDialog(PersistentDialog):
         ozx = s.value("package_ozx", False, type=bool)
         self._ozx_cb.setChecked(ozx)
 
-        format_idx = s.value("format_idx", 0, type=int)
-        self._format_combo.setCurrentIndex(format_idx)
+        output_format = s.value("output_format", "", type=str)
+        if output_format:
+            idx = self._format_combo.findData(output_format)
+            if idx >= 0:
+                self._format_combo.setCurrentIndex(idx)
 
         channels = s.value("channels", "", type=str)
         if channels:
@@ -826,16 +995,17 @@ class NativeStitchingDialog(StitchingDialog):
         s.setValue("output_dir", self._output_dir_edit.text())
         s.setValue("pixel_size", self._pixel_size_spin.value())
         s.setValue("z_step", self._z_step_spin.value())
-        s.setValue("downsample_idx", self._downsample_combo.currentIndex())
-        s.setValue("fusion_idx", self._fusion_combo.currentIndex())
+        s.setValue("downsample", self._downsample_combo.currentData())
+        s.setValue("fusion", self._fusion_combo.currentData())
         s.setValue("flat_field", self._flat_field_cb.isChecked())
         s.setValue("destripe", self._destripe_cb.isChecked())
+        s.setValue("destripe_fast", self._destripe_fast_cb.isChecked())
         s.setValue("depth_attenuation", self._depth_atten_cb.isChecked())
         s.setValue("depth_attenuation_mu", self._depth_atten_mu_spin.value())
         s.setValue("deconvolution", self._deconv_cb.isChecked())
         s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
         s.setValue("package_ozx", self._ozx_cb.isChecked())
-        s.setValue("format_idx", self._format_combo.currentIndex())
+        s.setValue("output_format", self._format_combo.currentData())
         s.setValue("channels", self._channels_edit.text())
         s.endGroup()
 
@@ -858,17 +1028,26 @@ class NativeStitchingDialog(StitchingDialog):
         z_step = s.value("z_step", 0.0, type=float)
         self._z_step_spin.setValue(z_step)
 
-        ds_idx = s.value("downsample_idx", 0, type=int)
-        self._downsample_combo.setCurrentIndex(ds_idx)
+        downsample = s.value("downsample", 0, type=int)
+        if downsample:
+            idx = self._downsample_combo.findData(downsample)
+            if idx >= 0:
+                self._downsample_combo.setCurrentIndex(idx)
 
-        fusion_idx = s.value("fusion_idx", 0, type=int)
-        self._fusion_combo.setCurrentIndex(fusion_idx)
+        fusion = s.value("fusion", "", type=str)
+        if fusion:
+            idx = self._fusion_combo.findData(fusion)
+            if idx >= 0:
+                self._fusion_combo.setCurrentIndex(idx)
 
         flat_field = s.value("flat_field", False, type=bool)
         self._flat_field_cb.setChecked(flat_field)
 
         destripe = s.value("destripe", False, type=bool)
         self._destripe_cb.setChecked(destripe)
+
+        destripe_fast = s.value("destripe_fast", False, type=bool)
+        self._destripe_fast_cb.setChecked(destripe_fast)
 
         depth_atten = s.value("depth_attenuation", False, type=bool)
         self._depth_atten_cb.setChecked(depth_atten)
@@ -885,8 +1064,11 @@ class NativeStitchingDialog(StitchingDialog):
         ozx = s.value("package_ozx", False, type=bool)
         self._ozx_cb.setChecked(ozx)
 
-        format_idx = s.value("format_idx", 0, type=int)
-        self._format_combo.setCurrentIndex(format_idx)
+        output_format = s.value("output_format", "", type=str)
+        if output_format:
+            idx = self._format_combo.findData(output_format)
+            if idx >= 0:
+                self._format_combo.setCurrentIndex(idx)
 
         channels = s.value("channels", "", type=str)
         if channels:
