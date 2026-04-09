@@ -490,6 +490,18 @@ class MVCConnectionService:
         # Note: We pass 'self' as the connection to provide access to encoder and sockets
         self._command_service = MicroscopeCommandService(self)
 
+        # Reactive connection-loss support —
+        # We remember the last-used config so reconnect_last() can restore
+        # the connection without the caller having to supply it again, and
+        # maintain a list of listeners to notify when the background reader
+        # detects the socket has died. Listeners run on the reader thread,
+        # so PyQt listeners should use Qt.QueuedConnection to marshal to GUI.
+        self._last_config: Optional["ConnectionConfig"] = None
+        self._connection_lost_listeners: List[Callable[[str], None]] = []
+        self._connection_restored_listeners: List[Callable[[], None]] = []
+        # Register with tcp_connection so we get notified on socket death.
+        self.tcp_connection.add_connection_lost_listener(self._on_tcp_connection_lost)
+
     def connect(self, config: "ConnectionConfig") -> None:
         """
         Establish TCP connection to microscope.
@@ -540,6 +552,10 @@ class MVCConnectionService:
                 connected_at=datetime.now(),
                 last_error=None,
             )
+
+            # Remember the config so reconnect_last() can restore the
+            # connection without the caller having to supply it again.
+            self._last_config = config
 
             self.logger.info(f"Connected to {config.ip_address}:{config.port}")
 
@@ -656,6 +672,113 @@ class MVCConnectionService:
 
         # Connect with new config
         self.connect(config)
+
+    # ------------------------------------------------------------------
+    # Reactive connection-loss + auto-reconnect
+    # ------------------------------------------------------------------
+
+    def reconnect_last(self) -> bool:
+        """Attempt to reconnect using the last-used config.
+
+        Called on demand when a command detects a stale socket, or by
+        the UI when the user clicks "Reconnect" after a connection-loss
+        notification. Returns True on success, False on failure.
+        """
+        if self._last_config is None:
+            self.logger.error(
+                "reconnect_last() called but no previous config is stored"
+            )
+            return False
+
+        config = self._last_config
+        self.logger.info(
+            f"Reconnecting to {config.ip_address}:{config.port} (last-known config)..."
+        )
+
+        # Tear down any lingering state without raising if already dead.
+        try:
+            self.tcp_connection.disconnect()
+        except Exception as e:
+            self.logger.debug(f"Ignoring error during safe disconnect: {e}")
+        self._command_socket = None
+        self._live_socket = None
+
+        try:
+            self.connect(config)
+        except Exception as e:
+            self.logger.error(f"Reconnect failed: {e}")
+            return False
+
+        self.logger.info("Reconnect successful")
+        # Notify listeners so the UI can re-enable controls.
+        for listener in list(self._connection_restored_listeners):
+            try:
+                listener()
+            except Exception as e:
+                self.logger.error(
+                    f"connection_restored listener raised: {e}", exc_info=True
+                )
+        return True
+
+    def add_connection_lost_listener(self, listener: Callable[[str], None]) -> None:
+        """Register a callback for unexpected connection loss.
+
+        The callback receives a string reason. It may be called from the
+        background reader thread — listeners that touch Qt objects should
+        marshal to the GUI thread.
+        """
+        if listener not in self._connection_lost_listeners:
+            self._connection_lost_listeners.append(listener)
+
+    def remove_connection_lost_listener(self, listener: Callable[[str], None]) -> None:
+        """Unregister a previously-registered connection_lost listener."""
+        if listener in self._connection_lost_listeners:
+            self._connection_lost_listeners.remove(listener)
+
+    def add_connection_restored_listener(self, listener: Callable[[], None]) -> None:
+        """Register a callback invoked after a successful reconnect."""
+        if listener not in self._connection_restored_listeners:
+            self._connection_restored_listeners.append(listener)
+
+    def remove_connection_restored_listener(self, listener: Callable[[], None]) -> None:
+        """Unregister a previously-registered connection_restored listener."""
+        if listener in self._connection_restored_listeners:
+            self._connection_restored_listeners.remove(listener)
+
+    def _on_tcp_connection_lost(self, reason: str) -> None:
+        """Invoked from the background reader when the socket dies.
+
+        Runs in the reader thread — must be quick and thread-safe.
+        Updates the connection model, then fans out to listeners.
+        """
+        from py2flamingo.models.connection import ConnectionState, ConnectionStatus
+
+        self.logger.warning(f"Command socket lost unexpectedly: {reason}")
+
+        # Snapshot last known address/port before wiping them.
+        prior_ip = self.model.status.ip
+        prior_port = self.model.status.port
+
+        self._command_socket = None
+        self._live_socket = None
+
+        # Update model to ERROR state (we don't have a distinct LOST state;
+        # last_error message disambiguates from a connect-time error).
+        self.model.status = ConnectionStatus(
+            state=ConnectionState.ERROR,
+            ip=prior_ip,
+            port=prior_port,
+            connected_at=None,
+            last_error=f"Connection lost: {reason}",
+        )
+
+        for listener in list(self._connection_lost_listeners):
+            try:
+                listener(reason)
+            except Exception as e:
+                self.logger.error(
+                    f"connection_lost listener raised: {e}", exc_info=True
+                )
 
     def is_connected(self) -> bool:
         """

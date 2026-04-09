@@ -62,6 +62,12 @@ class TCPConnection:
         self._use_async_reader = use_async_reader
         self._command_client: Optional["CommandClient"] = None
 
+        # Reactive connection loss — fired when the background reader
+        # detects the command socket has been closed (by remote, network,
+        # or fatal socket error). Higher layers (ConnectionService) register
+        # a listener to update UI state and trigger reconnect flows.
+        self._connection_lost_listeners: list = []
+
     def connect(self, ip: str, port: int, timeout: float = 2.0) -> socket.socket:
         """
         Connect to microscope command port only.
@@ -674,9 +680,52 @@ class TCPConnection:
         """
         from .socket_reader import CommandClient
 
-        self._command_client = CommandClient(self._command_socket)
+        self._command_client = CommandClient(
+            self._command_socket, on_closed=self._on_reader_closed
+        )
         self._command_client.start()
         self.logger.info("Started async socket reader")
+
+    def _on_reader_closed(self, reason: str) -> None:
+        """Called from the reader thread when the socket is detected closed.
+
+        Runs in the reader thread — must be thread-safe. Updates the
+        internal connection flag and notifies any registered listeners.
+        Listeners are responsible for marshaling to the GUI thread if
+        they need to update UI state.
+        """
+        self.logger.warning(f"Command socket closed unexpectedly: {reason}")
+        self._connected = False
+        # Snapshot the listener list under lock so notifications
+        # aren't racing with add/remove.
+        with self._lock:
+            listeners = list(self._connection_lost_listeners)
+        for listener in listeners:
+            try:
+                listener(reason)
+            except Exception as e:
+                self.logger.error(
+                    f"connection_lost listener raised: {e}", exc_info=True
+                )
+
+    def add_connection_lost_listener(self, listener: "Callable[[str], None]") -> None:
+        """Register a callback to be invoked when the command socket dies.
+
+        The callback receives a string reason and may be called from the
+        background reader thread. It must be thread-safe or use a queued
+        connection to marshal to the GUI thread.
+        """
+        with self._lock:
+            if listener not in self._connection_lost_listeners:
+                self._connection_lost_listeners.append(listener)
+
+    def remove_connection_lost_listener(
+        self, listener: "Callable[[str], None]"
+    ) -> None:
+        """Unregister a previously-registered listener."""
+        with self._lock:
+            if listener in self._connection_lost_listeners:
+                self._connection_lost_listeners.remove(listener)
 
     @property
     def has_async_reader(self) -> bool:

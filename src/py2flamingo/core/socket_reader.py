@@ -330,16 +330,28 @@ class SocketReader:
     START_MARKER = 0xF321E654
     END_MARKER = 0xFEDC4321
 
-    def __init__(self, command_socket: socket.socket, dispatcher: MessageDispatcher):
+    def __init__(
+        self,
+        command_socket: socket.socket,
+        dispatcher: MessageDispatcher,
+        on_closed: Optional[Callable[[str], None]] = None,
+    ):
         """
         Initialize the socket reader.
 
         Args:
             command_socket: The command socket to read from
             dispatcher: MessageDispatcher to route messages
+            on_closed: Optional callback invoked (with a reason string)
+                when the reader detects the socket has been closed or
+                encounters a fatal socket error. Fires once per reader
+                lifetime. Allows higher layers to update connection
+                state reactively without polling.
         """
         self._socket = command_socket
         self._dispatcher = dispatcher
+        self._on_closed = on_closed
+        self._closed_notified = False
         self._running = False
         self._paused = False
         self._pause_event = threading.Event()
@@ -356,6 +368,17 @@ class SocketReader:
             "socket_errors": 0,
             "bytes_read": 0,
         }
+
+    def _notify_closed(self, reason: str):
+        """Invoke the on_closed callback once, swallowing any errors."""
+        if self._closed_notified:
+            return
+        self._closed_notified = True
+        if self._on_closed is not None:
+            try:
+                self._on_closed(reason)
+            except Exception as e:
+                logger.error(f"on_closed callback raised: {e}", exc_info=True)
 
     def start(self):
         """Start the background reader thread."""
@@ -471,8 +494,12 @@ class SocketReader:
                         continue
 
                     if len(data) == 0:
-                        # Socket closed
-                        logger.error("Socket closed - reader stopping")
+                        # Socket closed by remote (OS keepalive detected dead peer,
+                        # or server-initiated close)
+                        logger.warning(
+                            "SocketReader: connection closed by remote - reader stopping"
+                        )
+                        self._notify_closed("remote closed connection")
                         break
 
                     # Parse and dispatch
@@ -532,11 +559,13 @@ class SocketReader:
                     if self._running:
                         logger.error(f"Socket error in reader: {e}")
                         self._stats["socket_errors"] += 1
+                        self._notify_closed(f"socket error: {e}")
                     break
 
                 except Exception as e:
                     if self._running:
                         logger.error(f"Unexpected error in reader: {e}", exc_info=True)
+                        self._notify_closed(f"unexpected error: {e}")
                     break
 
         finally:
@@ -748,16 +777,22 @@ class CommandClient:
     non-blocking command-response handling.
     """
 
-    def __init__(self, command_socket: socket.socket):
+    def __init__(
+        self,
+        command_socket: socket.socket,
+        on_closed: Optional[Callable[[str], None]] = None,
+    ):
         """
         Initialize the command client.
 
         Args:
             command_socket: Socket connected to microscope command port
+            on_closed: Optional callback invoked (with a reason string) when
+                the background reader detects the socket has been closed.
         """
         self._socket = command_socket
         self._dispatcher = MessageDispatcher()
-        self._reader = SocketReader(command_socket, self._dispatcher)
+        self._reader = SocketReader(command_socket, self._dispatcher, on_closed)
         self._send_lock = threading.Lock()  # Serialize command sends
 
     def start(self):

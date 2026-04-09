@@ -43,6 +43,92 @@ class MicroscopeCommandService:
         self.connection = connection
         self.logger = logging.getLogger(self.__class__.__name__)
 
+    def _ensure_connected_for_command(self, command_name: str) -> bool:
+        """Verify the command socket is alive; reconnect once if not.
+
+        Returns True if the caller can proceed with the command, False
+        if the connection is permanently down. Called as the pre-flight
+        check inside _query_command() and _send_command() so every
+        hardware command benefits from automatic reconnect.
+        """
+        try:
+            if self.connection.is_connected():
+                return True
+        except Exception as e:
+            self.logger.warning(
+                f"is_connected() raised during pre-flight for {command_name}: {e}"
+            )
+
+        # Only try reconnect if the service supports it (MVCConnectionService).
+        reconnect = getattr(self.connection, "reconnect_last", None)
+        if not callable(reconnect):
+            self.logger.error(
+                f"Cannot execute {command_name}: connection is down and "
+                f"service does not support reconnect_last()"
+            )
+            return False
+
+        self.logger.warning(
+            f"Connection down before {command_name} — attempting reconnect..."
+        )
+        try:
+            if reconnect():
+                self.logger.info(
+                    f"Reconnect successful, proceeding with {command_name}"
+                )
+                return True
+        except Exception as e:
+            self.logger.error(
+                f"reconnect_last() raised while preparing for {command_name}: {e}",
+                exc_info=True,
+            )
+            return False
+
+        self.logger.error(
+            f"Reconnect failed — cannot execute {command_name}. "
+            f"User must reconnect manually."
+        )
+        return False
+
+    def _handle_socket_error_retry(self, command_name: str, error: Exception) -> bool:
+        """Mark the connection lost and attempt a single reconnect.
+
+        Called from the except block of _query_command/_send_command
+        when a socket-level error is caught mid-send. Returns True if
+        the connection was successfully re-established and the caller
+        should retry the command once.
+        """
+        self.logger.warning(
+            f"{command_name} failed with socket error "
+            f"({type(error).__name__}: {error}) — attempting reconnect + retry"
+        )
+
+        # Notify the connection service so its listeners (UI, etc.) know.
+        handler = getattr(self.connection, "_on_tcp_connection_lost", None)
+        if callable(handler):
+            try:
+                handler(f"caught {type(error).__name__} in {command_name}")
+            except Exception as handler_e:
+                self.logger.debug(
+                    f"Ignoring error from _on_tcp_connection_lost handler: "
+                    f"{handler_e}"
+                )
+
+        reconnect = getattr(self.connection, "reconnect_last", None)
+        if not callable(reconnect):
+            return False
+
+        try:
+            if reconnect():
+                self.logger.info(f"Reconnect successful, retrying {command_name}")
+                return True
+        except Exception as reconnect_e:
+            self.logger.error(
+                f"reconnect_last() raised during retry of {command_name}: "
+                f"{reconnect_e}"
+            )
+        return False
+
     def _query_command(
         self,
         command_code: int,
@@ -65,29 +151,26 @@ class MicroscopeCommandService:
         Returns:
             Dict with 'success', 'parsed', 'raw_response', etc.
         """
-        if not self.connection.is_connected():
+        if not self._ensure_connected_for_command(command_name):
             return {"success": False, "error": "Not connected to microscope"}
 
-        try:
-            # Ensure params[6] has TRIGGER_CALL_BACK flag
-            if params is None:
-                params = [0] * 7
-            elif len(params) < 7:
-                params = list(params) + [0] * (7 - len(params))
-            else:
-                params = list(params)
+        # Resolve the display name once — used for logs and the retry.
+        if command_name == str(command_code) or "COMMAND" in command_name.upper():
+            command_name = get_command_name(command_code)
 
-            # Always set TRIGGER_CALL_BACK flag in params[6]
-            params[6] = CommandDataBits.TRIGGER_CALL_BACK
+        # Pre-encode params once so retry sees the same bytes.
+        if params is None:
+            params = [0] * 7
+        elif len(params) < 7:
+            params = list(params) + [0] * (7 - len(params))
+        else:
+            params = list(params)
+        params[6] = CommandDataBits.TRIGGER_CALL_BACK
 
-            # Encode command
+        def _do_query() -> Dict[str, Any]:
             cmd_bytes = self.connection.encoder.encode_command(
                 code=command_code, status=0, params=params, value=value, data=b""
             )
-
-            # Use get_command_name for better logging if command_name is generic
-            if command_name == str(command_code) or "COMMAND" in command_name.upper():
-                command_name = get_command_name(command_code)
 
             # Check if async reader is available
             if (
@@ -99,22 +182,16 @@ class MicroscopeCommandService:
                 )
 
             # Fall back to synchronous mode
-            # Get command socket
             command_socket = self.connection._command_socket
             if command_socket is None:
                 return {"success": False, "error": "Command socket not available"}
 
-            # Send command
             command_socket.sendall(cmd_bytes)
             self.logger.debug(f"Sent {command_name} (code {command_code:#06x})")
 
-            # Read 128-byte response
             ack_response = self._receive_full_bytes(command_socket, 128, timeout=3.0)
-
-            # Parse response
             parsed = self._parse_response(ack_response)
 
-            # Read additional data if present (CRITICAL for buffer management)
             add_data_bytes = parsed["reserved"]
             if add_data_bytes > 0:
                 self.logger.debug(f"Reading {add_data_bytes} additional bytes...")
@@ -125,9 +202,24 @@ class MicroscopeCommandService:
 
             return {"success": True, "parsed": parsed, "raw_response": ack_response}
 
+        try:
+            return _do_query()
         except (socket.timeout, TimeoutError) as e:
             self.logger.error(f"Timeout waiting for {command_name} response")
             return {"success": False, "error": "timeout"}
+        except (OSError, BrokenPipeError, ConnectionResetError) as e:
+            # Stale socket — reconnect + retry once
+            if self._handle_socket_error_retry(command_name, e):
+                try:
+                    return _do_query()
+                except Exception as retry_e:
+                    self.logger.error(
+                        f"Retry of {command_name} after reconnect also failed: "
+                        f"{retry_e}",
+                        exc_info=True,
+                    )
+                    return {"success": False, "error": str(retry_e)}
+            return {"success": False, "error": str(e)}
         except Exception as e:
             self.logger.error(f"Error in {command_name}: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
@@ -161,26 +253,26 @@ class MicroscopeCommandService:
         Returns:
             Dict with 'success' and optional 'error'
         """
-        if not self.connection.is_connected():
+        if not self._ensure_connected_for_command(command_name):
             return {"success": False, "error": "Not connected to microscope"}
 
-        try:
-            # Ensure params[6] has TRIGGER_CALL_BACK flag
-            if params is None:
-                params = [0] * 7
-            elif len(params) < 7:
-                params = list(params) + [0] * (7 - len(params))
-            else:
-                params = list(params)
+        # Resolve display name and normalize params up-front so retries
+        # see the exact same state.
+        if command_name == str(command_code) or "COMMAND" in command_name.upper():
+            command_name = get_command_name(command_code)
 
-            # Always set TRIGGER_CALL_BACK flag in params[6]
-            params[6] = CommandDataBits.TRIGGER_CALL_BACK
+        if params is None:
+            params = [0] * 7
+        elif len(params) < 7:
+            params = list(params) + [0] * (7 - len(params))
+        else:
+            params = list(params)
+        params[6] = CommandDataBits.TRIGGER_CALL_BACK
 
-            # Convert string data to bytes if needed
-            if isinstance(data, str):
-                data = data.encode("utf-8")
+        if isinstance(data, str):
+            data = data.encode("utf-8")
 
-            # Encode command with data
+        def _do_send() -> Dict[str, Any]:
             cmd_bytes = self.connection.encoder.encode_command(
                 code=command_code,
                 status=0,
@@ -189,10 +281,6 @@ class MicroscopeCommandService:
                 data=data,
                 additional_data_size=additional_data_size,
             )
-
-            # Use get_command_name for better logging if command_name is generic
-            if command_name == str(command_code) or "COMMAND" in command_name.upper():
-                command_name = get_command_name(command_code)
 
             # Check if async reader is available
             if (
@@ -208,30 +296,23 @@ class MicroscopeCommandService:
                 )
 
             # Fall back to synchronous mode
-            # Get command socket
             command_socket = self.connection._command_socket
             if command_socket is None:
                 return {"success": False, "error": "Command socket not available"}
 
-            # Send command
             command_socket.sendall(cmd_bytes)
             self.logger.debug(f"Sent {command_name} (code {command_code:#06x})")
 
             # Fire-and-forget mode: don't wait for response
-            # Used for laser commands (0x20xx) that never send ACK responses
             if not wait_for_response:
                 self.logger.debug(
                     f"{command_name} sent (fire-and-forget, no response expected)"
                 )
                 return {"success": True, "fire_and_forget": True}
 
-            # Read 128-byte response
             ack_response = self._receive_full_bytes(command_socket, 128, timeout=3.0)
-
-            # Parse response
             parsed = self._parse_response(ack_response)
 
-            # Read additional data if present
             add_data_bytes = parsed["reserved"]
             if add_data_bytes > 0:
                 self.logger.debug(f"Reading {add_data_bytes} additional bytes...")
@@ -240,11 +321,30 @@ class MicroscopeCommandService:
                 )
                 parsed["additional_data"] = additional_data
 
-            return {"success": True, "parsed": parsed, "raw_response": ack_response}
+            return {
+                "success": True,
+                "parsed": parsed,
+                "raw_response": ack_response,
+            }
 
+        try:
+            return _do_send()
         except (socket.timeout, TimeoutError) as e:
             self.logger.error(f"Timeout waiting for {command_name} response")
             return {"success": False, "error": "timeout"}
+        except (OSError, BrokenPipeError, ConnectionResetError) as e:
+            # Stale socket — reconnect + retry once
+            if self._handle_socket_error_retry(command_name, e):
+                try:
+                    return _do_send()
+                except Exception as retry_e:
+                    self.logger.error(
+                        f"Retry of {command_name} after reconnect also failed: "
+                        f"{retry_e}",
+                        exc_info=True,
+                    )
+                    return {"success": False, "error": str(retry_e)}
+            return {"success": False, "error": str(e)}
         except Exception as e:
             self.logger.error(f"Error in {command_name}: {e}", exc_info=True)
             return {"success": False, "error": str(e)}

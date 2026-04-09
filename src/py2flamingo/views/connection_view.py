@@ -42,6 +42,11 @@ class ConnectionView(QWidget):
     # Signals
     connection_established = pyqtSignal()  # Emitted when TCP connection succeeds
     connection_closed = pyqtSignal()  # Emitted when disconnected from microscope
+    # Fired when the background reader detects the socket has died. Carries
+    # a reason string. Used internally to marshal the callback from the
+    # reader thread onto the GUI thread via a queued signal.
+    _connection_lost_detected = pyqtSignal(str)
+    _connection_restored_detected = pyqtSignal()
     settings_loaded = (
         pyqtSignal()
     )  # Emitted after settings retrieval completes (position queries should wait for this)
@@ -77,6 +82,21 @@ class ConnectionView(QWidget):
         # Load configurations if manager provided
         if self._config_manager:
             self._load_configurations()
+
+        # Register for reactive connection-loss notifications. The
+        # listener is called from the background reader thread, so we
+        # route it through a Qt signal (emit is thread-safe) to marshal
+        # the handling back onto the GUI thread.
+        self._connection_lost_detected.connect(self._on_connection_lost_ui)
+        self._connection_restored_detected.connect(self._on_connection_restored_ui)
+        if hasattr(self._controller, "add_connection_lost_listener"):
+            self._controller.add_connection_lost_listener(
+                lambda reason: self._connection_lost_detected.emit(reason)
+            )
+        if hasattr(self._controller, "add_connection_restored_listener"):
+            self._controller.add_connection_restored_listener(
+                lambda: self._connection_restored_detected.emit()
+            )
 
     def setup_ui(self) -> None:
         """Create and layout UI components."""
@@ -312,6 +332,35 @@ class ConnectionView(QWidget):
             self.port_input.setEnabled(True)
             self.connection_closed.emit()
             self._logger.debug("ConnectionView: Emitted connection_closed signal")
+
+    def _on_connection_lost_ui(self, reason: str) -> None:
+        """React to a detected unexpected connection loss (GUI thread)."""
+        self._logger.warning(f"ConnectionView: connection lost detected — {reason}")
+        self.status_label.setText(f"Status: Connection lost ({reason})")
+        self.status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-weight: bold;")
+        # Re-enable Connect so the user can reconnect manually.
+        self.connect_btn.setEnabled(True)
+        self.connect_btn.setText("Reconnect")
+        self.disconnect_btn.setEnabled(False)
+        self.ip_input.setEnabled(True)
+        self.port_input.setEnabled(True)
+        # Propagate to views (SampleView etc.) so they disable controls.
+        self.connection_closed.emit()
+        self._logger.debug(
+            "ConnectionView: emitted connection_closed after detected loss"
+        )
+
+    def _on_connection_restored_ui(self) -> None:
+        """React to a successful auto-reconnect (GUI thread)."""
+        self._logger.info("ConnectionView: connection restored after reconnect")
+        self.status_label.setText("Status: Connected")
+        self.status_label.setStyleSheet(f"color: {SUCCESS_COLOR}; font-weight: bold;")
+        self.connect_btn.setEnabled(False)
+        self.connect_btn.setText("Connect")
+        self.disconnect_btn.setEnabled(True)
+        self.ip_input.setEnabled(False)
+        self.port_input.setEnabled(False)
+        self.connection_established.emit()
 
     def _update_status_error(self, error_message: str) -> None:
         """Update UI state for communication error (TCP connected but microscope not responding).

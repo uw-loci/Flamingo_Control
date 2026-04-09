@@ -48,6 +48,32 @@ class ConnectionController:
         self._config_manager = config_manager
         self._logger = logging.getLogger(__name__)
 
+    def add_connection_lost_listener(self, listener) -> None:
+        """Register a callback invoked when the command socket dies.
+
+        Thin passthrough to the underlying service so views can react
+        to unexpected disconnects without reaching into service internals.
+        The callback receives a string reason and may be invoked from the
+        background reader thread.
+        """
+        if hasattr(self._service, "add_connection_lost_listener"):
+            self._service.add_connection_lost_listener(listener)
+
+    def add_connection_restored_listener(self, listener) -> None:
+        """Register a callback invoked after a successful auto-reconnect."""
+        if hasattr(self._service, "add_connection_restored_listener"):
+            self._service.add_connection_restored_listener(listener)
+
+    def reconnect_last(self) -> bool:
+        """Attempt to reconnect using the last-used config.
+
+        Returns True on success. Thin passthrough so views can offer a
+        "Reconnect" button after a detected loss.
+        """
+        if hasattr(self._service, "reconnect_last"):
+            return self._service.reconnect_last()
+        return False
+
     def connect(self, ip: str, port: int) -> Tuple[bool, str]:
         """
         Attempt to connect to microscope.
