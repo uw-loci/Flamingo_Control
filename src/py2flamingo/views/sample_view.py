@@ -2775,255 +2775,36 @@ class SampleView(QWidget):
             )
             QApplication.processEvents()
 
-            # Remove any previously loaded stitched layers
+            # Remove any legacy stitched napari layers from earlier versions
             self._remove_stitched_layers()
 
-            # Coordinate mapping: center stitched data in the display cache
-            # coordinate system so it always appears within the chamber.
-            #
-            # The display cache uses world_to_display_voxel():
-            #   display = (world - chamber_origin) / display_voxel
-            # where world coords come from tile_processing_worker:
-            #   world_z = sample_center_z - (stage_z - ref_z) * 1000  (Z inverted)
-            #   world_y = sample_center_y + (stage_y - ref_y) * 1000  (Y direct)
-            #   world_x = sample_center_x + sign_x * (stage_x - ref_x) * 1000
-            #
-            # We use the stitch center as virtual reference so the data is
-            # always centered at sample_region_center in the display.
-            display_voxel_um = np.array(
-                self.voxel_storage.config.display_voxel_size
-                if self.voxel_storage
-                else [50, 50, 50]
-            )
-            dv_z, dv_y, dv_x = display_voxel_um
+            # Load stitched volumes into voxel_storage so they flow through the
+            # same transform pipeline (rotation + translation) as tile data and
+            # save sessions.  This is the unified data path — all three sources
+            # populate voxel_storage and render via get_display_volume_transformed.
+            # The loader also updates last_stage_position, holder, and sliders
+            # to the stitch center.
+            ch_ids_loaded = self._load_stitched_into_voxel_storage(channels)
 
-            stage_ctrl = self._config.get("stage_control", {})
-            # Chamber origin (Z, Y, X) in µm — matches voxel_storage_factory
-            co_z = stage_ctrl.get("z_range_mm", [12.5, 26.0])[0] * 1000
-            co_y = stage_ctrl.get("y_range_mm", [0.0, 14.0])[0] * 1000
-            co_x = stage_ctrl.get("x_range_mm", [1.0, 12.31])[0] * 1000
+            if ch_ids_loaded:
+                for ch_id in ch_ids_loaded:
+                    self._enable_channel_controls(ch_id, True)
 
-            # Sample region center from config ([X, Y, Z] order)
-            sample_region = self._config.get("sample_chamber", {}).get(
-                "sample_region_center_um", [6655, 7000, 19250]
-            )
-            sc_x, sc_y, sc_z = sample_region[0], sample_region[1], sample_region[2]
-
-            channels_config = self._config.get("channels", [])
-            ch_ids_loaded = []
-
-            # Temporarily switch to 2D to avoid napari async slice race
-            if self.viewer.dims.ndisplay == 3:
-                self.viewer.dims.ndisplay = 2
-                restore_3d = True
-            else:
-                restore_3d = False
-
-            for ch_info in channels:
-                ch_id = ch_info["ch_id"]
-                volume = ch_info["volume"]
-                origin_um = ch_info["origin_um"]  # [z, y, x] stage µm
-                voxel_um = ch_info["voxel_size_um"]  # [z, y, x]
-
-                origin_z, origin_y_stage, origin_x = origin_um
-                voxel_z, voxel_y, voxel_x = voxel_um
-
-                # Stitch center = midpoint of fused volume in stage coords
-                extent_z = volume.shape[0] * voxel_z
-                extent_y = volume.shape[1] * voxel_y
-                extent_x = volume.shape[2] * voxel_x
-                center_z = origin_z + extent_z / 2
-                center_y = origin_y_stage + extent_y / 2
-                center_x = origin_x + extent_x / 2
-
-                # Map origin to world coords using tile_processing_worker
-                # convention (stitch center → sample_region_center)
-                delta_z_mm = (origin_z - center_z) / 1000
-                delta_y_mm = (origin_y_stage - center_y) / 1000
-                delta_x_mm = (origin_x - center_x) / 1000
-                delta_x_stor = delta_x_mm if self._invert_x else -delta_x_mm
-
-                world_z = sc_z - delta_z_mm * 1000
-                world_y = sc_y + delta_y_mm * 1000
-                world_x = sc_x + delta_x_stor * 1000
-
-                # Display coordinates (= napari translate)
-                translate_z = (world_z - co_z) / dv_z
-                translate_y = (world_y - co_y) / dv_y
-                translate_x = (world_x - co_x) / dv_x
-
-                # Scale: stitched voxel → display voxel direction
-                # Z: stage Z↑ → world Z↓ → display Z↓ (inverted)
-                # Y: stage Y↑ → world Y↑ → display Y↑ (direct)
-                # X: depends on invert_x (invert→direct, normal→inverted)
-                scale_z = -voxel_z / dv_z
-                scale_y = voxel_y / dv_y
-                scale_x = (voxel_x / dv_x) if self._invert_x else (-voxel_x / dv_x)
-
-                scale = np.array([scale_z, scale_y, scale_x])
-                translate = np.array([translate_z, translate_y, translate_x])
-
-                # Look up channel colormap from config
-                colormap = "gray"
-                ch_name = f"Stitched ch{ch_id}"
-                for ch_cfg in channels_config:
-                    if ch_cfg.get("id") == ch_id:
-                        colormap = ch_cfg.get("default_colormap", "gray")
-                        ch_name = f"{ch_cfg.get('name', f'ch{ch_id}')} (stitched)"
-                        break
-
-                self.logger.info(
-                    f"Adding stitched layer '{ch_name}': shape={volume.shape}, "
-                    f"scale={scale}, translate={translate}"
-                )
-
-                layer = self.viewer.add_image(
-                    volume,
-                    name=ch_name,
-                    colormap=colormap,
-                    visible=True,
-                    blending="additive",
-                    opacity=0.8,
-                    rendering="mip",
-                    scale=list(scale),
-                    translate=list(translate),
-                )
-
-                # Tag so we can find/remove these layers later
-                layer.metadata["stitched"] = True
-                layer.metadata["ch_id"] = ch_id
-                # Store base translate and reference stage position so the
-                # layer can rigid-body-follow stage moves in
-                # _update_stitched_layer_translates().  Reference = stitch
-                # center in stage coords (where the virtual stage is set to
-                # after load).
-                stitch_center_x_mm = center_x / 1000
-                stitch_center_y_mm = center_y / 1000
-                stitch_center_z_mm = center_z / 1000
-                layer.metadata["stitched_base_translate"] = [
-                    float(translate[0]),
-                    float(translate[1]),
-                    float(translate[2]),
-                ]
-                layer.metadata["stitched_ref_stage_mm"] = {
-                    "x": stitch_center_x_mm,
-                    "y": stitch_center_y_mm,
-                    "z": stitch_center_z_mm,
-                }
-                ch_ids_loaded.append(ch_id)
-
-                # Point channel controls at the stitched layer so Viewer
-                # Channels (visibility, colormap, contrast) work on it.
-                if ch_id in self.channel_layers:
-                    original = self.channel_layers[ch_id]
-                    if not hasattr(self, "_original_channel_layers"):
-                        self._original_channel_layers = {}
-                    self._original_channel_layers[ch_id] = original
-                    original.visible = False
-                    self.channel_layers[ch_id] = layer
-
-                # Enable channel controls (they start disabled until data)
-                self._enable_channel_controls(ch_id, True)
-
-            # Apply auto-contrast so sliders reflect actual stitched data
-            self._auto_contrast_channels()
-
-            if restore_3d:
-                self.viewer.dims.ndisplay = 3
-
-            # --- Update virtual stage position to stitch center ---
-            # This moves the holder and sliders to match the acquisition
-            # position, completing the "load centered, then position" flow.
-            if channels:
-                first = channels[0]
-                o_z, o_y, o_x = first["origin_um"]
-                v_z, v_y, v_x = first["voxel_size_um"]
-                sh = first["volume"].shape
-                stitch_center_x_mm = (o_x + sh[2] * v_x / 2) / 1000
-                stitch_center_y_mm = (o_y + sh[1] * v_y / 2) / 1000
-                stitch_center_z_mm = (o_z + sh[0] * v_z / 2) / 1000
-
-                current_r = self.last_stage_position.get("r", 0.0)
-                self.last_stage_position = {
-                    "x": stitch_center_x_mm,
-                    "y": stitch_center_y_mm,
-                    "z": stitch_center_z_mm,
-                    "r": current_r,
-                }
-                self.logger.info(
-                    f"Updated virtual stage to stitch center: "
-                    f"X={stitch_center_x_mm:.3f} Y={stitch_center_y_mm:.3f} "
-                    f"Z={stitch_center_z_mm:.3f} R={current_r:.1f}"
-                )
-
-                # Update holder position, sliders, and retransform existing data
-                self._update_sample_holder_position(
-                    stitch_center_x_mm, stitch_center_y_mm, stitch_center_z_mm
-                )
-                for axis_id, value in self.last_stage_position.items():
-                    if axis_id in self.position_sliders:
-                        slider = self.position_sliders[axis_id]
-                        edit = self.position_edits[axis_id]
-                        slider.blockSignals(True)
-                        slider.setValue(int(value * self._slider_scale))
-                        slider.blockSignals(False)
-                        decimals = slider.property("decimals") or 3
-                        edit.blockSignals(True)
-                        edit.setText(f"{value:.{decimals}f}")
-                        edit.blockSignals(False)
-
-                # Trigger a stage update so existing raw data layers are
-                # retransformed to align with the new virtual stage position
-                self._pending_stage_update = dict(self.last_stage_position)
-                if not self._stage_update_timer.isActive():
-                    self._stage_update_timer.start()
-
-                # Immediately refresh the 2D plane views so the stitched data
-                # is visible without waiting for a stage movement.
+                # Render through the normal voxel_storage pipeline
+                self._update_visualization()
+                self._update_data_stats()
+                self._update_channel_availability()
+                self._auto_contrast_channels()
                 self._update_plane_views()
-
-            # Bounds check: with centering the data should always be within
-            # the chamber, but warn if the volume is larger than the display.
-            chamber_dims_vox = (
-                np.array(
-                    self.voxel_storage.config.chamber_dimensions
-                    if self.voxel_storage
-                    else [13500, 14000, 11310]
-                )
-                / display_voxel_um
-            )
-            vol_shape = np.array(volume.shape, dtype=float)
-            corner_a = translate
-            corner_b = translate + vol_shape * scale
-            bbox_min = np.minimum(corner_a, corner_b)
-            bbox_max = np.maximum(corner_a, corner_b)
-            out_of_bounds = np.any(bbox_max < -10) or np.any(
-                bbox_min > chamber_dims_vox + 10
-            )
 
             progress.close()
 
-            if out_of_bounds:
-                self.logger.warning(
-                    f"Stitched data bbox [{bbox_min} - {bbox_max}] display voxels "
-                    f"exceeds chamber bounds [0 - {chamber_dims_vox}]. "
-                    f"Volume may be larger than the display area."
-                )
-                QMessageBox.warning(
-                    self,
-                    "Stitched Data Loaded (Partially Outside Chamber)",
-                    f"Loaded {len(ch_ids_loaded)} channel(s): {ch_ids_loaded}\n"
-                    f"from: {output_dir}\n\n"
-                    f"Note: The stitched volume is larger than the chamber "
-                    f"display area — some data extends beyond the wireframe.",
-                )
-            else:
-                QMessageBox.information(
-                    self,
-                    "Stitched Data Loaded",
-                    f"Loaded {len(ch_ids_loaded)} channel(s): {ch_ids_loaded}\n"
-                    f"from: {output_dir}",
-                )
+            QMessageBox.information(
+                self,
+                "Stitched Data Loaded",
+                f"Loaded {len(ch_ids_loaded)} channel(s): {ch_ids_loaded}\n"
+                f"from: {output_dir}",
+            )
 
         except Exception as e:
             progress.close()
@@ -3031,6 +2812,208 @@ class SampleView(QWidget):
             QMessageBox.critical(
                 self, "Load Error", f"Error loading stitched data:\n{e}"
             )
+
+    def _load_stitched_into_voxel_storage(self, channels: list) -> list:
+        """Populate voxel_storage display cache with stitched volumes.
+
+        Uses the same code path as save-session restore, so rotation and
+        translation are handled by the existing
+        voxel_storage.get_display_volume_transformed() pipeline.  Data is
+        placed in the chamber centered at ``sample_region_center_um`` and
+        the reference stage position is set to the stitch center so the
+        virtual stage "matches" the acquisition position.
+
+        Args:
+            channels: List of dicts with keys ``ch_id``, ``volume``,
+                ``origin_um`` (stage ZYX µm), ``voxel_size_um`` (ZYX µm).
+
+        Returns:
+            List of channel IDs that were successfully loaded.
+        """
+        import scipy.ndimage as ndi
+
+        if not self.voxel_storage or not channels:
+            return []
+
+        display_voxel_um = np.array(self.voxel_storage.config.display_voxel_size)
+        dv_z, dv_y, dv_x = display_voxel_um
+        display_dims = np.array(self.voxel_storage.display_dims)  # (Z, Y, X)
+
+        # Sample region center ([X, Y, Z] order in config)
+        sample_region = self._config.get("sample_chamber", {}).get(
+            "sample_region_center_um", [6655, 7000, 19250]
+        )
+        sc_x, sc_y, sc_z = sample_region[0], sample_region[1], sample_region[2]
+        chamber_origin = np.array(self.voxel_storage.config.chamber_origin)
+
+        # Use channel 0 to compute the stitch center in stage mm
+        first = channels[0]
+        o_z0, o_y0, o_x0 = first["origin_um"]
+        v_z0, v_y0, v_x0 = first["voxel_size_um"]
+        sh0 = first["volume"].shape
+        stitch_center_x_mm = (o_x0 + sh0[2] * v_x0 / 2) / 1000
+        stitch_center_y_mm = (o_y0 + sh0[1] * v_y0 / 2) / 1000
+        stitch_center_z_mm = (o_z0 + sh0[0] * v_z0 / 2) / 1000
+
+        current_r = self.current_rotation.get("ry", 0.0)
+
+        # Clear voxel_storage and set the reference to the stitch center so
+        # get_display_volume_transformed() puts data at sample_region_center
+        # when the stage is at the stitch center.
+        self.voxel_storage.clear()
+        self.voxel_storage.set_reference_position(
+            {
+                "x": stitch_center_x_mm,
+                "y": stitch_center_y_mm,
+                "z": stitch_center_z_mm,
+                "r": current_r,
+            }
+        )
+
+        ch_ids_loaded: list = []
+        world_bbox_min = np.array([np.inf, np.inf, np.inf])
+        world_bbox_max = np.array([-np.inf, -np.inf, -np.inf])
+
+        for ch_info in channels:
+            ch_id = ch_info["ch_id"]
+            volume = np.asarray(ch_info["volume"])
+            voxel_um = np.asarray(ch_info["voxel_size_um"], dtype=float)
+
+            if volume.size == 0:
+                continue
+            if ch_id not in self.voxel_storage.display_cache:
+                self.logger.warning(
+                    f"Stitched channel {ch_id} has no matching voxel_storage "
+                    f"slot (num_channels={self.voxel_storage.num_channels}) — "
+                    f"skipping"
+                )
+                continue
+
+            # Resample to display voxel size.  Zoom factors < 1 downsample.
+            zoom_factors = voxel_um / display_voxel_um
+            resampled = ndi.zoom(
+                volume.astype(np.float32), zoom_factors, order=1, mode="constant"
+            )
+            resampled = np.clip(resampled, 0, 65535).astype(np.uint16)
+
+            # Axis direction: voxel_storage display_cache is indexed such that
+            # increasing index = increasing world coordinate.  Stitched data is
+            # indexed in acquisition order (stage Z increasing = world Z
+            # decreasing, so Z must be flipped; X must be flipped when
+            # invert_x is False).
+            resampled = resampled[::-1]  # Z flip (always)
+            if not self._invert_x:
+                resampled = resampled[:, :, ::-1]  # X flip
+
+            # Compute world bbox of the stitched volume (centered at
+            # sample_region_center when stage is at stitch center)
+            extent_z_um = (
+                sh0[0] * v_z0
+            )  # use channel-0 extent (all channels share geometry)
+            extent_y_um = sh0[1] * v_y0
+            extent_x_um = sh0[2] * v_x0
+            # Channels may in theory have different geometry; use this ch's
+            extent_z_um = volume.shape[0] * voxel_um[0]
+            extent_y_um = volume.shape[1] * voxel_um[1]
+            extent_x_um = volume.shape[2] * voxel_um[2]
+
+            world_min = np.array(
+                [
+                    sc_z - extent_z_um / 2,
+                    sc_y - extent_y_um / 2,
+                    sc_x - extent_x_um / 2,
+                ]
+            )
+            world_max = np.array(
+                [
+                    sc_z + extent_z_um / 2,
+                    sc_y + extent_y_um / 2,
+                    sc_x + extent_x_um / 2,
+                ]
+            )
+
+            # Corner in display voxel coordinates (lowest indices)
+            corner = np.round((world_min - chamber_origin) / display_voxel_um).astype(
+                int
+            )
+
+            # Clip against display_dims
+            rs = np.array(resampled.shape)
+            dst_start = np.maximum(corner, 0)
+            dst_end = np.minimum(corner + rs, display_dims)
+            src_start = dst_start - corner
+            src_end = src_start + (dst_end - dst_start)
+
+            if np.any(dst_end <= dst_start):
+                self.logger.warning(
+                    f"Stitched channel {ch_id} bbox entirely outside chamber "
+                    f"({world_min} - {world_max}); skipping"
+                )
+                continue
+
+            cache = self.voxel_storage.display_cache[ch_id]
+            cache.fill(0)
+            cache[
+                dst_start[0] : dst_end[0],
+                dst_start[1] : dst_end[1],
+                dst_start[2] : dst_end[2],
+            ] = resampled[
+                src_start[0] : src_end[0],
+                src_start[1] : src_end[1],
+                src_start[2] : src_end[2],
+            ]
+
+            # Mark as session-loaded so has_data() returns True and
+            # display_dirty=False so the downsampler won't overwrite us.
+            self.voxel_storage.display_dirty[ch_id] = False
+            self.voxel_storage.channel_max_values[ch_id] = int(cache.max())
+            self.voxel_storage._session_loaded_channels.add(ch_id)
+
+            # Expand data_bounds to include this channel's world bbox
+            world_bbox_min = np.minimum(world_bbox_min, world_min)
+            world_bbox_max = np.maximum(world_bbox_max, world_max)
+
+            ch_ids_loaded.append(ch_id)
+            self.logger.info(
+                f"Stitched channel {ch_id}: resampled to {resampled.shape}, "
+                f"placed at display voxel corner {dst_start.tolist()}"
+            )
+
+        # Record overall data bounds
+        if ch_ids_loaded and np.all(np.isfinite(world_bbox_min)):
+            self.voxel_storage.data_bounds["min"] = world_bbox_min
+            self.voxel_storage.data_bounds["max"] = world_bbox_max
+
+        # Update the virtual stage/holder to match the stitch center so the
+        # UI sliders and chamber visualization reflect the loaded data.
+        self.last_stage_position = {
+            "x": stitch_center_x_mm,
+            "y": stitch_center_y_mm,
+            "z": stitch_center_z_mm,
+            "r": current_r,
+        }
+        self._update_sample_holder_position(
+            stitch_center_x_mm, stitch_center_y_mm, stitch_center_z_mm
+        )
+        for axis_id, value in self.last_stage_position.items():
+            if axis_id in self.position_sliders:
+                slider = self.position_sliders[axis_id]
+                edit = self.position_edits[axis_id]
+                slider.blockSignals(True)
+                slider.setValue(int(value * self._slider_scale))
+                slider.blockSignals(False)
+                decimals = slider.property("decimals") or 3
+                edit.blockSignals(True)
+                edit.setText(f"{value:.{decimals}f}")
+                edit.blockSignals(False)
+
+        self.logger.info(
+            f"Loaded {len(ch_ids_loaded)} stitched channel(s) into voxel_storage; "
+            f"reference stage = stitch center "
+            f"X={stitch_center_x_mm:.3f} Y={stitch_center_y_mm:.3f} "
+            f"Z={stitch_center_z_mm:.3f} R={current_r:.1f}"
+        )
+        return ch_ids_loaded
 
     def _remove_stitched_layers(self) -> None:
         """Remove any previously loaded stitched layers from the viewer."""
@@ -3535,59 +3518,6 @@ class SampleView(QWidget):
         """Update XY focus frame (delegated to manager)."""
         self._chamber_viz.update_focus_frame()
 
-    def _update_stitched_layer_translates(self, stage_pos: dict) -> None:
-        """Rigid-body update stitched napari layer translates on stage move.
-
-        Stitched layers are positioned in display voxel coordinates at load
-        time using the stitch center as a virtual reference position.  When
-        the physical stage moves, the data should appear to shift in the
-        opposite direction (stage up = data down in world), matching the
-        tile data's rigid-body behaviour.
-
-        Sign convention (must match tile_processing_worker):
-            world_z = sc_z - (stage_z - ref_z) * 1000   (Z inverted)
-            world_y = sc_y + (stage_y - ref_y) * 1000   (Y direct)
-            world_x = sc_x + sign_x * (stage_x - ref_x) * 1000
-        where sign_x = +1 if invert_x else -1.
-        """
-        if not self.channel_layers:
-            return
-
-        display_voxel_um = (
-            self.voxel_storage.config.display_voxel_size
-            if self.voxel_storage
-            else [50, 50, 50]
-        )
-        dv_z, dv_y, dv_x = display_voxel_um
-        sign_x = 1.0 if self._invert_x else -1.0
-
-        for layer in self.channel_layers.values():
-            meta = getattr(layer, "metadata", {}) or {}
-            if not meta.get("stitched"):
-                continue
-            base_translate = meta.get("stitched_base_translate")
-            ref_mm = meta.get("stitched_ref_stage_mm")
-            if base_translate is None or ref_mm is None:
-                continue
-
-            dx_mm = stage_pos["x"] - ref_mm["x"]
-            dy_mm = stage_pos["y"] - ref_mm["y"]
-            dz_mm = stage_pos["z"] - ref_mm["z"]
-
-            delta_translate_z = -dz_mm * 1000.0 / dv_z
-            delta_translate_y = dy_mm * 1000.0 / dv_y
-            delta_translate_x = sign_x * dx_mm * 1000.0 / dv_x
-
-            new_translate = [
-                base_translate[0] + delta_translate_z,
-                base_translate[1] + delta_translate_y,
-                base_translate[2] + delta_translate_x,
-            ]
-            try:
-                layer.translate = new_translate
-            except Exception as e:
-                self.logger.debug(f"Failed to update stitched layer translate: {e}")
-
     def _process_pending_stage_update(self):
         """Process pending stage position update for 3D visualization.
 
@@ -3629,9 +3559,6 @@ class SampleView(QWidget):
         self._update_sample_holder_position(
             stage_pos["x"], stage_pos["y"], stage_pos["z"]
         )
-
-        # Rigid-body: stitched layers follow stage moves via .translate update
-        self._update_stitched_layer_translates(stage_pos)
 
         # Update data layers with transformed volumes (data moves with stage)
         if not self.voxel_storage:
