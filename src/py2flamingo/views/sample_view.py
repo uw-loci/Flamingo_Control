@@ -2892,6 +2892,24 @@ class SampleView(QWidget):
                 # Tag so we can find/remove these layers later
                 layer.metadata["stitched"] = True
                 layer.metadata["ch_id"] = ch_id
+                # Store base translate and reference stage position so the
+                # layer can rigid-body-follow stage moves in
+                # _update_stitched_layer_translates().  Reference = stitch
+                # center in stage coords (where the virtual stage is set to
+                # after load).
+                stitch_center_x_mm = center_x / 1000
+                stitch_center_y_mm = center_y / 1000
+                stitch_center_z_mm = center_z / 1000
+                layer.metadata["stitched_base_translate"] = [
+                    float(translate[0]),
+                    float(translate[1]),
+                    float(translate[2]),
+                ]
+                layer.metadata["stitched_ref_stage_mm"] = {
+                    "x": stitch_center_x_mm,
+                    "y": stitch_center_y_mm,
+                    "z": stitch_center_z_mm,
+                }
                 ch_ids_loaded.append(ch_id)
 
                 # Point channel controls at the stitched layer so Viewer
@@ -3517,6 +3535,59 @@ class SampleView(QWidget):
         """Update XY focus frame (delegated to manager)."""
         self._chamber_viz.update_focus_frame()
 
+    def _update_stitched_layer_translates(self, stage_pos: dict) -> None:
+        """Rigid-body update stitched napari layer translates on stage move.
+
+        Stitched layers are positioned in display voxel coordinates at load
+        time using the stitch center as a virtual reference position.  When
+        the physical stage moves, the data should appear to shift in the
+        opposite direction (stage up = data down in world), matching the
+        tile data's rigid-body behaviour.
+
+        Sign convention (must match tile_processing_worker):
+            world_z = sc_z - (stage_z - ref_z) * 1000   (Z inverted)
+            world_y = sc_y + (stage_y - ref_y) * 1000   (Y direct)
+            world_x = sc_x + sign_x * (stage_x - ref_x) * 1000
+        where sign_x = +1 if invert_x else -1.
+        """
+        if not self.channel_layers:
+            return
+
+        display_voxel_um = (
+            self.voxel_storage.config.display_voxel_size
+            if self.voxel_storage
+            else [50, 50, 50]
+        )
+        dv_z, dv_y, dv_x = display_voxel_um
+        sign_x = 1.0 if self._invert_x else -1.0
+
+        for layer in self.channel_layers.values():
+            meta = getattr(layer, "metadata", {}) or {}
+            if not meta.get("stitched"):
+                continue
+            base_translate = meta.get("stitched_base_translate")
+            ref_mm = meta.get("stitched_ref_stage_mm")
+            if base_translate is None or ref_mm is None:
+                continue
+
+            dx_mm = stage_pos["x"] - ref_mm["x"]
+            dy_mm = stage_pos["y"] - ref_mm["y"]
+            dz_mm = stage_pos["z"] - ref_mm["z"]
+
+            delta_translate_z = -dz_mm * 1000.0 / dv_z
+            delta_translate_y = dy_mm * 1000.0 / dv_y
+            delta_translate_x = sign_x * dx_mm * 1000.0 / dv_x
+
+            new_translate = [
+                base_translate[0] + delta_translate_z,
+                base_translate[1] + delta_translate_y,
+                base_translate[2] + delta_translate_x,
+            ]
+            try:
+                layer.translate = new_translate
+            except Exception as e:
+                self.logger.debug(f"Failed to update stitched layer translate: {e}")
+
     def _process_pending_stage_update(self):
         """Process pending stage position update for 3D visualization.
 
@@ -3558,6 +3629,9 @@ class SampleView(QWidget):
         self._update_sample_holder_position(
             stage_pos["x"], stage_pos["y"], stage_pos["z"]
         )
+
+        # Rigid-body: stitched layers follow stage moves via .translate update
+        self._update_stitched_layer_translates(stage_pos)
 
         # Update data layers with transformed volumes (data moves with stage)
         if not self.voxel_storage:
