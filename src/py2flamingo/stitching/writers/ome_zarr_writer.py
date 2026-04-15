@@ -614,6 +614,27 @@ def write_ome_zarr_v2(
     if progress_callback:
         progress_callback(100, "OME-Zarr v2 write complete")
 
+    # Post-write validation: confirm we actually produced Zarr v2 (not v3).
+    # Zarr v2 stores have .zgroup/.zarray files; v3 stores have zarr.json.
+    # This guards against a known ngff-zarr+dask bug (forum.image.sc topic
+    # 120480) where version="0.4" can silently write v3 — and protects
+    # against similar regressions in the direct zarr path if dask/zarr
+    # change behaviour.  TODO: remove once the ecosystem stabilises.
+    zgroup = output_path / ".zgroup"
+    zarr_json = output_path / "zarr.json"
+    if zarr_json.exists() and not zgroup.exists():
+        raise RuntimeError(
+            f"Expected OME-Zarr v0.4 (Zarr v2) at {output_path} but got "
+            f"Zarr v3 output (found zarr.json, no .zgroup).  This breaks "
+            f"Fiji/QuPath/BigDataViewer compatibility.  Likely cause: "
+            f"incompatible dask version (see forum.image.sc topic 120480)."
+        )
+    if not zgroup.exists():
+        logger.warning(
+            f"OME-Zarr v0.4 output at {output_path} is missing .zgroup — "
+            f"store may be invalid"
+        )
+
     _log_output_stats(output_path)
     return output_path
 

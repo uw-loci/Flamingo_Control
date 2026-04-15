@@ -29,7 +29,11 @@ numcodecs>=0.14.0,<1
 
 # Stitching pipeline
 multiview-stitcher>=0.1.37,<0.2
-dask[array]>=2024.1.0,<2027
+# dask versions 2025.12.0 - 2026.3.0 break ngff-zarr's zarr_format selection,
+# causing version="0.4" writes to silently produce zarr v3 output (zarr.json
+# instead of .zgroup) that Fiji cannot open.  See forum.image.sc topic 120480
+# and ngff-zarr PR #480.  TODO: relax pin once ngff-zarr releases the fix.
+dask[array]>=2024.1.0,!=2025.12.0,!=2026.1.0,!=2026.1.1,!=2026.2.0,!=2026.3.0,<2027
 
 # Stitching pipeline — preprocessing
 # pystripe installed separately (see update_and_run.bat) to avoid resolver backtracking
