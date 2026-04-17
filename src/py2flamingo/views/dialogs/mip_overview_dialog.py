@@ -36,6 +36,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QProgressDialog,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QVBoxLayout,
 )
@@ -236,6 +237,18 @@ class MIPOverviewDialog(PersistentDialog):
 
         button_layout.addStretch()
 
+        overlap_label = QLabel("Overlap:")
+        overlap_label.setStyleSheet("color: gray; font-size: 9pt;")
+        button_layout.addWidget(overlap_label)
+
+        self._overlap_spin = QSpinBox()
+        self._overlap_spin.setRange(0, 50)
+        self._overlap_spin.setValue(5)
+        self._overlap_spin.setSuffix("%")
+        self._overlap_spin.setToolTip("Tile overlap percentage for exported overview")
+        self._overlap_spin.setFixedWidth(65)
+        button_layout.addWidget(self._overlap_spin)
+
         self._export_btn = QPushButton("Export Overview...")
         self._export_btn.setToolTip(
             "Export downsampled overview with grid lines and\n"
@@ -321,7 +334,7 @@ class MIPOverviewDialog(PersistentDialog):
                 self._detected_layout = "subfolder"
                 self._load_btn.setEnabled(True)
             elif layout == "flat":
-                self._date_combo.addItem("(flat layout)")
+                self._date_combo.addItem("(current folder)")
                 self._detected_layout = "flat"
                 self._load_btn.setEnabled(True)
             else:
@@ -350,7 +363,7 @@ class MIPOverviewDialog(PersistentDialog):
         base_path = Path(self._folder_edit.text())
         date_text = self._date_combo.currentText()
 
-        if date_text in ("(current folder)", "(flat layout)"):
+        if date_text == "(current folder)":
             load_path = base_path
             date_folder = ""
         elif date_text.endswith(" (flat)"):
@@ -362,11 +375,7 @@ class MIPOverviewDialog(PersistentDialog):
 
         # Determine layout type for this specific load path
         layout = detect_layout_type(load_path)
-        if (
-            layout == "flat"
-            or date_text in ("(flat layout)",)
-            or date_text.endswith(" (flat)")
-        ):
+        if layout == "flat" or date_text.endswith(" (flat)"):
             self._on_load_flat(load_path, base_path, date_folder)
             return
 
@@ -680,6 +689,7 @@ class MIPOverviewDialog(PersistentDialog):
             return
 
         try:
+            overlap_pct = self._overlap_spin.value() / 100.0
             export_overview_with_labels(
                 tiles=self._tiles,
                 config=self._config,
@@ -687,6 +697,7 @@ class MIPOverviewDialog(PersistentDialog):
                 flat_tile_infos=(
                     self._flat_tile_infos if self._flat_tile_infos else None
                 ),
+                overlap_pct=overlap_pct,
             )
             QMessageBox.information(
                 self,
