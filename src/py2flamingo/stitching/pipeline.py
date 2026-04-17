@@ -74,6 +74,7 @@ class StitchingConfig:
     z_step_um: Optional[float] = None
 
     # Registration
+    skip_registration: bool = False  # Use stage positions only (no phase correlation)
     reg_channel: int = 0  # Channel index to use for registration
     registration_binning: Dict[str, int] = field(
         default_factory=lambda: {"z": 2, "y": 4, "x": 4}
@@ -1076,18 +1077,32 @@ class StitchingPipeline:
         output_path.mkdir(parents=True, exist_ok=True)
 
         # --- Step 3: Register using reference channel ---
-        # Use the first available channel that has tile data as reference
-        ref_ch = self.config.reg_channel
-        if ref_ch not in channel_tile_data or not channel_tile_data[ref_ch]:
-            ref_ch = process_channels[0]
-        ref_tile_data = channel_tile_data[ref_ch]
+        if self.config.skip_registration:
+            self._progress_fn(45, "Skipping registration (using stage positions)...")
+            self.logger.info(
+                "Step 3: Skipping registration — using stage positions only"
+            )
+            reg_params = []
+            try:
+                from multiview_stitcher import io as mvs_io
 
-        self._progress_fn(45, f"Registering tiles (channel {ref_ch})...")
-        self.logger.info(
-            f"Step 3: Registering on reference channel {ref_ch} "
-            f"({len(ref_tile_data)} tiles)..."
-        )
-        reg_params, transform_key = self._register_tiles(ref_tile_data, voxel_size_um)
+                transform_key = mvs_io.METADATA_TRANSFORM_KEY
+            except ImportError:
+                transform_key = "affine_metadata"
+        else:
+            ref_ch = self.config.reg_channel
+            if ref_ch not in channel_tile_data or not channel_tile_data[ref_ch]:
+                ref_ch = process_channels[0]
+            ref_tile_data = channel_tile_data[ref_ch]
+
+            self._progress_fn(45, f"Registering tiles (channel {ref_ch})...")
+            self.logger.info(
+                f"Step 3: Registering on reference channel {ref_ch} "
+                f"({len(ref_tile_data)} tiles)..."
+            )
+            reg_params, transform_key = self._register_tiles(
+                ref_tile_data, voxel_size_um
+            )
 
         if self._cancelled_fn():
             self.logger.info("Pipeline cancelled by user")

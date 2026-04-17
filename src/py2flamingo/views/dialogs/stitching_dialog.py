@@ -228,10 +228,25 @@ class StitchingDialog(PersistentDialog):
         )
         settings_layout.addWidget(self._content_fusion_cb, 3, 2, 1, 2)
 
+        # Skip registration
+        self._skip_reg_cb = QCheckBox("Skip registration")
+        self._skip_reg_cb.setToolTip(
+            "Use stage positions only — skip phase-correlation registration.\n\n"
+            "CHECK this when:\n"
+            "  \u2022 Tiles have no overlap (registration needs overlap to work)\n"
+            "  \u2022 Stage positions are precise (e.g. single-workflow tiling)\n"
+            "  \u2022 You want faster processing on large tile grids\n\n"
+            "UNCHECK (default) when:\n"
+            "  \u2022 Tiles were acquired across multiple sessions with drift\n"
+            "  \u2022 You need sub-pixel alignment at tile boundaries\n"
+            "  \u2022 Tiles have sufficient overlap for correlation (~10-25%)"
+        )
+        settings_layout.addWidget(self._skip_reg_cb, 4, 0, 1, 2)
+
         # Flat-field correction
         self._flat_field_cb = QCheckBox("Flat-field correction")
         self._update_preprocessing_availability()
-        settings_layout.addWidget(self._flat_field_cb, 4, 0, 1, 2)
+        settings_layout.addWidget(self._flat_field_cb, 4, 2, 1, 2)
 
         # Depth-dependent attenuation correction
         self._depth_atten_cb = QCheckBox("Depth attenuation")
@@ -240,7 +255,7 @@ class StitchingDialog(PersistentDialog):
             "(Beer-Lambert scattering/absorption compensation).\n"
             "Auto-fits decay coefficient from data unless overridden."
         )
-        settings_layout.addWidget(self._depth_atten_cb, 4, 2)
+        settings_layout.addWidget(self._depth_atten_cb, 5, 0)
 
         self._depth_atten_mu_spin = QDoubleSpinBox()
         self._depth_atten_mu_spin.setRange(0.0, 1.0)
@@ -253,17 +268,17 @@ class StitchingDialog(PersistentDialog):
         )
         self._depth_atten_mu_spin.setEnabled(False)
         self._depth_atten_cb.toggled.connect(self._depth_atten_mu_spin.setEnabled)
-        settings_layout.addWidget(self._depth_atten_mu_spin, 4, 3)
+        settings_layout.addWidget(self._depth_atten_mu_spin, 5, 1)
 
-        # Row 5: package + memory mode
+        # Row 6: package + memory mode
         self._ozx_cb = QCheckBox("Package as .ozx")
         self._ozx_cb.setToolTip(
             "Create a single .ozx ZIP file from the OME-Zarr output\n"
             "for easy sharing/copying"
         )
-        settings_layout.addWidget(self._ozx_cb, 5, 0, 1, 2)
+        settings_layout.addWidget(self._ozx_cb, 6, 0, 1, 2)
 
-        settings_layout.addWidget(QLabel("Memory mode:"), 5, 2)
+        settings_layout.addWidget(QLabel("Memory mode:"), 6, 2)
         self._streaming_combo = QComboBox()
         self._streaming_combo.addItem("Auto", None)
         self._streaming_combo.addItem("In-memory (fast)", False)
@@ -275,28 +290,28 @@ class StitchingDialog(PersistentDialog):
             "Streaming: writes output chunk-by-chunk directly from the fusion\n"
             "graph. Uses minimal RAM (~2 tile volumes), required for TB-scale data."
         )
-        settings_layout.addWidget(self._streaming_combo, 5, 3)
+        settings_layout.addWidget(self._streaming_combo, 6, 3)
 
         # Channels
-        settings_layout.addWidget(QLabel("Channels:"), 6, 0)
+        settings_layout.addWidget(QLabel("Channels:"), 7, 0)
         self._channels_edit = QLineEdit()
         self._channels_edit.setPlaceholderText("All (or e.g. 0,1)")
         self._channels_edit.setToolTip(
             "Leave empty for all channels, or comma-separated list (e.g. 0,1)"
         )
-        settings_layout.addWidget(self._channels_edit, 6, 1, 1, 3)
+        settings_layout.addWidget(self._channels_edit, 7, 1, 1, 3)
 
         # Memory estimate label (updated after tile discovery)
         self._memory_label = QLabel("")
         self._memory_label.setStyleSheet(
             "color: #888; font-style: italic; font-size: 11px;"
         )
-        settings_layout.addWidget(self._memory_label, 7, 0, 1, 5)
+        settings_layout.addWidget(self._memory_label, 8, 0, 1, 5)
 
         # Timing legend
         legend = QLabel("\u2731 = significantly increases processing time")
         legend.setStyleSheet("color: #FF8C00; font-style: italic; font-size: 11px;")
-        settings_layout.addWidget(legend, 8, 0, 1, 4)
+        settings_layout.addWidget(legend, 9, 0, 1, 4)
 
         settings_group.setLayout(settings_layout)
         layout.addWidget(settings_group)
@@ -530,6 +545,7 @@ class StitchingDialog(PersistentDialog):
             downsample_factor=self._downsample_combo.currentData(),
             deconvolution_enabled=self._deconv_cb.isChecked(),
             content_based_fusion=self._content_fusion_cb.isChecked(),
+            skip_registration=self._skip_reg_cb.isChecked(),
             package_ozx=self._ozx_cb.isChecked(),
             streaming_mode=self._streaming_combo.currentData(),
         )
@@ -880,6 +896,7 @@ class StitchingDialog(PersistentDialog):
         s.setValue("output_format", self._format_combo.currentData())
         s.setValue("channels", self._channels_edit.text())
         s.setValue("streaming_mode", self._streaming_combo.currentIndex())
+        s.setValue("skip_registration", self._skip_reg_cb.isChecked())
         s.endGroup()
 
     def _restore_settings(self):
@@ -950,6 +967,9 @@ class StitchingDialog(PersistentDialog):
         streaming_idx = s.value("streaming_mode", 0, type=int)
         if 0 <= streaming_idx < self._streaming_combo.count():
             self._streaming_combo.setCurrentIndex(streaming_idx)
+
+        skip_reg = s.value("skip_registration", False, type=bool)
+        self._skip_reg_cb.setChecked(skip_reg)
 
         s.endGroup()
 
