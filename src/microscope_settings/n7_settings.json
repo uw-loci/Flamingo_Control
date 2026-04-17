@@ -1,0 +1,35 @@
+{
+  "microscope_name": "n7",
+  "position_history": {
+    "max_size": 100,
+    "display_count": 20
+  },
+  "stage_limits": {
+    "x": {
+      "min": 1.0,
+      "max": 12.5,
+      "unit": "mm"
+    },
+    "y": {
+      "min": 5.0,
+      "max": 25.0,
+      "unit": "mm"
+    },
+    "z": {
+      "min": 12.5,
+      "max": 26.0,
+      "unit": "mm"
+    },
+    "r": {
+      "min": -720.0,
+      "max": 720.0,
+      "unit": "degrees"
+    }
+  },
+  "version": "1.0",
+  "display": {
+    "downsample_factor": 2,
+    "storage_voxel_size_um": 5
+  },
+  "last_updated": "2026-02-15"
+}

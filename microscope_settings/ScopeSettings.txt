@@ -49,7 +49,7 @@
   Hard limit min z-axis = 11.000
   Hard limit min r-axis = -720.000
   Soft limit max x-axis = 14.999998
-  Soft limit max y-axis = 15.000
+  Soft limit max y-axis = 25.000
   Soft limit max z-axis = 25.000
   Soft limit max r-axis = 720.000
   Soft limit min x-axis = 1.000

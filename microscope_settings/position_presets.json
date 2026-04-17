@@ -1,34 +1,50 @@
 {
-  "Initial sample position": {
-    "name": "Initial sample position",
-    "x": 6.5659998,
-    "y": 11.807,
-    "z": 18.1740028,
-    "r": -87.848,
+  "CalibrationInsert": {
+    "name": "CalibrationInsert",
+    "x": 6.7789904,
+    "y": 8.5040019,
+    "z": 18.5110016,
+    "r": 115.158,
     "description": ""
   },
-  "Stem tip": {
-    "name": "Stem tip",
-    "x": 7.9699843,
-    "y": 11.1249894,
-    "z": 19.7730152,
-    "r": 67.998,
+  "CalibrationInsertFlip": {
+    "name": "CalibrationInsertFlip",
+    "x": 6.7789904,
+    "y": 8.5040019,
+    "z": 18.5110016,
+    "r": -64.842,
     "description": ""
   },
-  "OT side": {
-    "name": "OT side",
-    "x": 9.4720207,
-    "y": 13.4870088,
-    "z": 20.4209954,
-    "r": 67.998,
+  "CalibrationLowerEdge": {
+    "name": "CalibrationLowerEdge",
+    "x": 6.7789904,
+    "y": 12.0069997,
+    "z": 18.5110016,
+    "r": 115.16,
     "description": ""
   },
-  "TE middle": {
-    "name": "TE middle",
-    "x": 8.9709895,
-    "y": 14.557002,
-    "z": 20.5199891,
-    "r": 67.998,
+  "Tip of sample mount": {
+    "name": "Tip of sample mount",
+    "x": 6.7789904,
+    "y": 8.5040019,
+    "z": 18.5110016,
+    "r": 115.16,
+    "description": "Calibrated objective center position"
+  },
+  "LEDSearchA": {
+    "name": "LEDSearchA",
+    "x": 4.8799966,
+    "y": 18.868998,
+    "z": 14.4709997,
+    "r": 14.998,
+    "description": ""
+  },
+  "LEDSearchB": {
+    "name": "LEDSearchB",
+    "x": 8.5120013,
+    "y": 12.4449971,
+    "z": 19.4960018,
+    "r": 14.998,
     "description": ""
   }
 }

@@ -1,0 +1,267 @@
+{
+  "version": "1.0",
+  "windows": {
+    "ImageControlsWindow": {
+      "geometry": "AdnQywADAAAAAALFAAAA9QAABFYAAAKgAAACxgAAARQAAARVAAACnwAAAAAAAAAAB4AAAALGAAABFAAABFUAAAKf",
+      "state": null,
+      "splitters": {}
+    },
+    "MainWindow": {
+      "geometry": "AdnQywADAAAAAAABAAAAJQAAAgcAAAPvAAAAAgAAAEQAAAIGAAAD7gAAAAAAAAAAB4AAAAACAAAARAAAAgYAAAPu",
+      "state": "AAAA/wAAAAD9AAAAAAAAAgUAAAOCAAAABAAAAAQAAAAIAAAACPwAAAAA",
+      "splitters": {}
+    },
+    "StageChamberVisualizationWindow": {
+      "geometry": "AdnQywADAAD/////////9QAAAuYAAALyAAAAAAAAABQAAALlAAAC8QAAAAAAAAAAB4AAAAAAAAAAFAAAAuUAAALx",
+      "state": null,
+      "splitters": {}
+    },
+    "Sample3DVisualizationWindow": {
+      "geometry": "AdnQywADAAAAAAAAAAAAAAAABK8AAAMfAAAAAAAAAAAAAASvAAADHwAAAAAAAAAAB4AAAAAAAAAAAAAABK8AAAMf",
+      "state": null,
+      "splitters": {
+        "main_splitter": [
+          317,
+          317
+        ]
+      }
+    },
+    "SampleView": {
+      "geometry": "AdnQywADAAAAAAIFAAAAJAAAB3wAAAPxAAACBgAAAEMAAAd7AAAD8AAAAAAAAAAAB4AAAAIGAAAAQwAAB3sAAAPw",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {
+        "colormap": "Grayscale",
+        "auto_scale": true,
+        "intensity_min": 360,
+        "intensity_max": 1080,
+        "illumination": {
+          "selected_lasers": [],
+          "led_selected": false,
+          "led_color": 3,
+          "led_intensity": 50,
+          "light_path": "left"
+        }
+      }
+    },
+    "LED2DOverviewDialog": {
+      "geometry": "AdnQywADAAAAAAAUAAAA1wAAAlkAAAOJAAAAFQAAAPYAAAJYAAADiAAAAAAAAAAAB4AAAAAVAAAA9gAAAlgAAAOI",
+      "state": null,
+      "splitters": {}
+    },
+    "TileCollectionDialog": {
+      "geometry": "AdnQywADAAAAAAO8AAAAPgAABnQAAAOaAAADvQAAAF0AAAZzAAADmQAAAAAAAAAAB4AAAAO9AAAAXQAABnMAAAOZ",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {
+        "workflow_type": 1,
+        "name_prefix": "tile_collection",
+        "add_to_sample_view": true,
+        "illumination": {
+          "lasers": [
+            {
+              "workflow_key": "Laser 1 405 nm",
+              "enabled": false,
+              "power": 3.0
+            },
+            {
+              "workflow_key": "Laser 2 488 nm",
+              "enabled": false,
+              "power": 4.0
+            },
+            {
+              "workflow_key": "Laser 3 561 nm",
+              "enabled": true,
+              "power": 3.0
+            },
+            {
+              "workflow_key": "Laser 4 640 nm",
+              "enabled": true,
+              "power": 3.0
+            }
+          ],
+          "led_enabled": false,
+          "led_intensity": 50.0,
+          "left_path": true,
+          "right_path": true,
+          "multi_laser_mode": false,
+          "led_color_index": 3,
+          "led_dac_percent": 50.0
+        },
+        "camera": {
+          "exposure_us": 0.0,
+          "frame_rate": 40.0,
+          "aoi_width": 2048,
+          "aoi_height": 2048,
+          "cam1_capture_percentage": 100,
+          "cam1_capture_mode": 0,
+          "cam2_capture_percentage": 100,
+          "cam2_capture_mode": 0
+        },
+        "zstack": {
+          "z_step_um": 10.0,
+          "num_planes": 105,
+          "z_velocity_mm_s": 0.4,
+          "auto_velocity": true,
+          "return_to_start": true,
+          "stack_option": "None"
+        },
+        "save": {
+          "save_enabled": true,
+          "save_drive": "/media/deploy/ctlsm1",
+          "save_directory": "OrganoidV4",
+          "sample_name": "Neural organoid",
+          "region": "",
+          "save_format": "Raw",
+          "save_mip": true,
+          "display_mip": true,
+          "save_subfolders": false,
+          "live_view": true,
+          "comments": "",
+          "local_access_enabled": true,
+          "local_path": "D:/CTLSM1"
+        },
+        "primary_is_left": true
+      }
+    },
+    "LED2DOverviewResultWindow": {
+      "geometry": "AdnQywADAAAAAAA4AAAASwAAA9oAAAJ2AAAAOQAAAGoAAAPZAAACdQAAAAAAAAAAB4AAAAA5AAAAagAAA9kAAAJ1",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {}
+    },
+    "PerformanceBenchmarkDialog": {
+      "geometry": "AdnQywADAAAAAANPAAAA9wAABgwAAAMdAAADUAAAARYAAAYLAAADHAAAAAAAAAAAB4AAAANQAAABFgAABgsAAAMc",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {}
+    },
+    "ViewerControlsDialog": {
+      "geometry": "AdnQywADAAAAAAHhAAAAhAAAA6QAAANgAAAB4gAAAKMAAAOjAAADXwAAAAAAAAAAB4AAAAHiAAAAowAAA6MAAANf",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {}
+    },
+    "UnionThresholderDialog": {
+      "geometry": "AdnQywADAAAAAABWAAAAoAAAAfsAAAM2AAAAVwAAAL8AAAH6AAADNQAAAAAAAAAAB4AAAABXAAAAvwAAAfoAAAM1",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {
+        "channels": {
+          "0": {
+            "enabled": false,
+            "threshold": 0
+          },
+          "1": {
+            "enabled": true,
+            "threshold": 56
+          },
+          "2": {
+            "enabled": false,
+            "threshold": 0
+          },
+          "3": {
+            "enabled": true,
+            "threshold": 55
+          }
+        },
+        "opacity": 97,
+        "show_mask": true,
+        "buffer_fraction": 0.25,
+        "angles": "90",
+        "gauss_sigma": 1.5,
+        "min_object_size": 40,
+        "opening_enabled": true,
+        "opening_radius": 3
+      }
+    },
+    "SettingsDialog": {
+      "geometry": "AdnQywADAAAAAAAAAAABMwAAAmsAAALiAAAAAQAAAVIAAAJqAAAC4QAAAAAAAAAAB4AAAAABAAABUgAAAmoAAALh",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {}
+    },
+    "AdvancedIlluminationDialog": {
+      "geometry": "AdnQywADAAAAAAA4AAABZQAAAckAAAKxAAAAOQAAAYQAAAHIAAACsAAAAAAAAAAAB4AAAAA5AAABhAAAAcgAAAKw",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {}
+    },
+    "SaveTemplateDialog": {
+      "geometry": "AdnQywADAAAAAAA4AAABrQAAAckAAAJpAAAAOQAAAcwAAAHIAAACaAAAAAAAAAAAB4AAAAA5AAABzAAAAcgAAAJo",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {}
+    },
+    "PipelineEditor": {
+      "geometry": "AdnQywADAAAAAACbAAABkwAABIQAAAQKAAAAnAAAAbIAAASDAAAECQAAAAAAAAAAB4AAAACcAAABsgAABIMAAAQJ",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {}
+    },
+    "AdvancedCameraDialog": {
+      "geometry": "AdnQywADAAAAAAGbAAAAugAAAywAAAL0AAABnAAAANkAAAMrAAAC8wAAAAAAAAAAB4AAAAGcAAAA2QAAAysAAALz",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {}
+    },
+    "OverviewThresholderDialog": {
+      "geometry": "AdnQywADAAAAAAH+AAAA2wAABR8AAANSAAAB/wAAAPoAAAUeAAADUQAAAAAAAAAAB4AAAAH/AAAA+gAABR4AAANR",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {
+        "method": "variance",
+        "entropy_threshold": 4.54,
+        "smoothing": true,
+        "bp_var_min": 45.0,
+        "bp_var_max": 58.4,
+        "bp_entropy_min": 4.49,
+        "gradient_threshold": 0.5,
+        "dog_sigma1": 1.0,
+        "dog_sigma2": 4.0,
+        "dog_threshold": 2.8,
+        "tube_interior_method": "entropy",
+        "tube_interior_threshold": 3.0,
+        "tube_sensitivity": 0.5,
+        "variance": 49,
+        "edge": 823,
+        "intensity_min": 103,
+        "intensity_max": 255,
+        "invert": false,
+        "preview_overlay": true,
+        "morphological_cleanup": false,
+        "morphological_radius": 1
+      }
+    },
+    "AdvancedSaveDialog": {
+      "geometry": "AdnQywADAAAAAAHaAAABCwAAA88AAAMRAAAB2wAAASoAAAPOAAADEAAAAAAAAAAAB4AAAAHbAAABKgAAA84AAAMQ",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {}
+    },
+    "StitchingDialog": {
+      "geometry": "AdnQywADAAAAAAL/AAAAkAAABYoAAALVAAADAAAAAK8AAAWJAAAC1AAAAAAAAAAAB4AAAAMAAAAArwAABYkAAALU",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {}
+    },
+    "WebcamOverview": {
+      "geometry": "AdnQywADAAAAAAOEAAAAPAAABwkAAALoAAADhQAAAFsAAAcIAAAC5wAAAAAAAAAAB4AAAAOFAAAAWwAABwgAAALn",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {}
+    },
+    "NativeStitchingDialog": {
+      "geometry": "AdnQywADAAAAAAMUAAAArQAABZ8AAAMXAAADFQAAAMwAAAWeAAADFgAAAAAAAAAAB4AAAAMVAAAAzAAABZ4AAAMW",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {}
+    },
+    "MIPOverviewDialog": {
+      "geometry": "AdnQywADAAAAAAB8AAAAbgAABS0AAAOtAAAAfQAAAI0AAAUsAAADrAAAAAAAAAAAB4AAAAB9AAAAjQAABSwAAAOs",
+      "state": null,
+      "splitters": {},
+      "dialog_state": {}
+    }
+  }
+}
