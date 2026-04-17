@@ -334,7 +334,8 @@ class MainWindow(QMainWindow):
 
         self.mip_overview_action = QAction("&MIP Overview...", self)
         self.mip_overview_action.setStatusTip(
-            "Load MIP files from tile acquisitions to view and select tiles for re-acquisition"
+            "Load MIP files from tile acquisitions (subfolder or flat layout) "
+            "to view, select tiles, and export labeled overviews"
         )
         self.mip_overview_action.triggered.connect(self._on_mip_overview)
         extensions_menu.addAction(self.mip_overview_action)

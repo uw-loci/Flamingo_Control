@@ -5,11 +5,13 @@ Loads and displays Maximum Intensity Projection (MIP) images from saved
 tile acquisitions, allowing users to select tiles for re-acquisition.
 
 The dialog supports:
-- Loading MIP files from folder structure: base/date/X{x}_Y{y}/*_MP.tif
+- Loading MIP files from subfolder layout: base/date/X{x}_Y{y}/*_MP.tif
+- Loading MIP files from flat layout: directory/*_X###_Y###_C##*_MP.tif
 - Dual panel display: original MIPs (left) and new acquisition results (right)
-- Click-to-select tile interface
+- Click-to-select tile interface with channel switching (flat layout)
 - Auto-select using variance/edge detection
 - Integration with TileCollectionDialog for re-acquisition
+- Export overview with grid lines and coordinate labels
 - Session save/load for persistence
 """
 
@@ -40,9 +42,13 @@ from PyQt5.QtWidgets import (
 
 from py2flamingo.models.data.overview_results import TileResult
 from py2flamingo.models.mip_overview import (
+    FlatMIPTileInfo,
     MIPOverviewConfig,
     MIPTileResult,
     calculate_grid_indices,
+    detect_layout_type,
+    discover_flat_mip_tiles,
+    export_overview_with_labels,
     find_date_folders,
     find_tile_folders,
     load_invert_x_setting,
@@ -92,6 +98,10 @@ class MIPOverviewDialog(PersistentDialog):
         self._results_image: Optional[np.ndarray] = None
         self._results_tiles: List[MIPTileResult] = []
         self._first_show = True
+        # Flat-layout state
+        self._detected_layout: str = "subfolder"
+        self._flat_tile_infos: List[FlatMIPTileInfo] = []
+        self._channel_cache: Dict[int, List[np.ndarray]] = {}  # ch_id -> [images]
 
         self.setWindowTitle("MIP Overview")
         self.setMinimumSize(1200, 800)
@@ -109,14 +119,16 @@ class MIPOverviewDialog(PersistentDialog):
         folder_layout.addWidget(QLabel("Folder:"))
         self._folder_edit = QLineEdit()
         self._folder_edit.setPlaceholderText(
-            "Select folder containing tile acquisitions (X*_Y*/*_MP.tif)..."
+            "Select folder containing tile acquisitions (subfolder or flat layout)..."
         )
         self._folder_edit.setReadOnly(True)
         folder_layout.addWidget(self._folder_edit, stretch=1)
 
         self._browse_btn = QPushButton("Browse...")
         self._browse_btn.setToolTip(
-            "Browse for a folder containing raw tile acquisition data (X*_Y* subfolders with *_MP.tif files)"
+            "Browse for a folder containing tile acquisition data.\n"
+            "Supports subfolder layout (X*_Y*/*_MP.tif) and\n"
+            "flat layout (*_X###_Y###_C##*_MP.tif or *_X###_Y###_C##.tif)"
         )
         self._browse_btn.clicked.connect(self._on_browse)
         folder_layout.addWidget(self._browse_btn)
@@ -127,9 +139,19 @@ class MIPOverviewDialog(PersistentDialog):
         self._date_combo.currentIndexChanged.connect(self._on_date_changed)
         folder_layout.addWidget(self._date_combo)
 
+        # Channel selector (visible for flat layout only)
+        self._channel_label = QLabel("Channel:")
+        self._channel_label.setVisible(False)
+        folder_layout.addWidget(self._channel_label)
+        self._channel_combo = QComboBox()
+        self._channel_combo.setMinimumWidth(80)
+        self._channel_combo.setVisible(False)
+        self._channel_combo.currentIndexChanged.connect(self._on_channel_changed)
+        folder_layout.addWidget(self._channel_combo)
+
         self._load_btn = QPushButton("Load")
         self._load_btn.setEnabled(False)
-        self._load_btn.setToolTip("Load MIP images from raw acquisition folders")
+        self._load_btn.setToolTip("Load MIP images from acquisition folders")
         self._load_btn.clicked.connect(self._on_load)
         folder_layout.addWidget(self._load_btn)
 
@@ -214,6 +236,15 @@ class MIPOverviewDialog(PersistentDialog):
 
         button_layout.addStretch()
 
+        self._export_btn = QPushButton("Export Overview...")
+        self._export_btn.setToolTip(
+            "Export downsampled overview with grid lines and\n"
+            "coordinate labels as a multi-channel TIFF"
+        )
+        self._export_btn.clicked.connect(self._on_export_overview)
+        self._export_btn.setEnabled(False)
+        button_layout.addWidget(self._export_btn)
+
         self._save_btn = QPushButton("Save Session")
         self._save_btn.setToolTip(
             "Save current overview as a session (can be loaded later without original files)"
@@ -269,20 +300,42 @@ class MIPOverviewDialog(PersistentDialog):
     def _update_date_combo(self, base_path: Path):
         """Update date combo box with available date folders."""
         self._date_combo.clear()
+        self._detected_layout = "subfolder"
+
         date_folders = find_date_folders(base_path)
 
         if date_folders:
-            self._date_combo.addItems(date_folders)
+            # Check each date folder for subfolder or flat layout
+            for df in date_folders:
+                layout = detect_layout_type(base_path / df)
+                if layout == "flat":
+                    self._date_combo.addItem(f"{df} (flat)")
+                else:
+                    self._date_combo.addItem(df)
             self._load_btn.setEnabled(True)
         else:
-            # Check if current folder has X_Y subfolders directly
-            tile_folders = find_tile_folders(base_path)
-            if tile_folders:
+            # Check current folder directly
+            layout = detect_layout_type(base_path)
+            if layout == "subfolder":
                 self._date_combo.addItem("(current folder)")
+                self._detected_layout = "subfolder"
+                self._load_btn.setEnabled(True)
+            elif layout == "flat":
+                self._date_combo.addItem("(flat layout)")
+                self._detected_layout = "flat"
                 self._load_btn.setEnabled(True)
             else:
-                self._date_combo.addItem("(no tiles found)")
-                self._load_btn.setEnabled(False)
+                # Check if current folder has X_Y subfolders directly
+                tile_folders = find_tile_folders(base_path)
+                if tile_folders:
+                    self._date_combo.addItem("(current folder)")
+                    self._load_btn.setEnabled(True)
+                else:
+                    self._date_combo.addItem("(no tiles found)")
+                    self._load_btn.setEnabled(False)
+
+        # Update channel combo visibility
+        self._update_channel_visibility()
 
     def _on_date_changed(self, index: int):
         """Handle date selection change."""
@@ -297,14 +350,31 @@ class MIPOverviewDialog(PersistentDialog):
         base_path = Path(self._folder_edit.text())
         date_text = self._date_combo.currentText()
 
-        if date_text == "(current folder)":
+        if date_text in ("(current folder)", "(flat layout)"):
             load_path = base_path
             date_folder = ""
+        elif date_text.endswith(" (flat)"):
+            date_folder = date_text.replace(" (flat)", "")
+            load_path = base_path / date_folder
         else:
             load_path = base_path / date_text
             date_folder = date_text
 
-        # Find tile folders
+        # Determine layout type for this specific load path
+        layout = detect_layout_type(load_path)
+        if (
+            layout == "flat"
+            or date_text in ("(flat layout)",)
+            or date_text.endswith(" (flat)")
+        ):
+            self._on_load_flat(load_path, base_path, date_folder)
+            return
+
+        # Subfolder layout: existing code path
+        self._on_load_subfolder(load_path, base_path, date_folder)
+
+    def _on_load_subfolder(self, load_path: Path, base_path: Path, date_folder: str):
+        """Load MIP files from subfolder-per-tile layout."""
         tile_folders = find_tile_folders(load_path)
         if not tile_folders:
             QMessageBox.warning(
@@ -314,7 +384,6 @@ class MIPOverviewDialog(PersistentDialog):
             )
             return
 
-        # Load tiles with progress dialog
         progress = QProgressDialog(
             "Loading MIP files...", "Cancel", 0, len(tile_folders), self
         )
@@ -331,7 +400,6 @@ class MIPOverviewDialog(PersistentDialog):
             progress.setValue(i)
             progress.setLabelText(f"Loading {tile_folder.name}...")
 
-            # Parse coordinates from folder name
             try:
                 x, y = parse_coords_from_folder(tile_folder.name)
             except ValueError as e:
@@ -339,14 +407,12 @@ class MIPOverviewDialog(PersistentDialog):
                 skipped += 1
                 continue
 
-            # Find MIP file
             mip_files = list(tile_folder.glob("*_MP.tif"))
             if not mip_files:
                 logger.warning(f"No *_MP.tif file in {tile_folder}")
                 skipped += 1
                 continue
 
-            # Load first MIP file found
             mip_file = mip_files[0]
             try:
                 image = tifffile.imread(str(mip_file))
@@ -363,7 +429,7 @@ class MIPOverviewDialog(PersistentDialog):
                 y=y,
                 z=0.0,
                 tile_x_idx=0,
-                tile_y_idx=0,  # Will be calculated later
+                tile_y_idx=0,
                 image=image,
                 folder_path=tile_folder,
             )
@@ -383,14 +449,10 @@ class MIPOverviewDialog(PersistentDialog):
         # Calculate grid indices
         calculate_grid_indices(tiles)
 
-        # Get grid dimensions
         tiles_x = max(t.tile_x_idx for t in tiles) + 1
         tiles_y = max(t.tile_y_idx for t in tiles) + 1
+        tile_size = tiles[0].image.shape[0]
 
-        # Get tile size from first image
-        tile_size = tiles[0].image.shape[0]  # Assume square tiles
-
-        # Create config (load axis inversion setting from visualization config)
         self._config = MIPOverviewConfig(
             base_folder=base_path,
             date_folder=date_folder,
@@ -399,24 +461,244 @@ class MIPOverviewDialog(PersistentDialog):
             tile_size_pixels=tile_size,
             downsample_factor=4,
             invert_x=load_invert_x_setting(),
+            layout_type="subfolder",
         )
 
         self._tiles = tiles
+        self._flat_tile_infos = []
+        self._channel_cache.clear()
+        self._detected_layout = "subfolder"
 
-        # Stitch overview
         self._stitch_and_display()
-
-        # Update UI
         self._update_status()
         self._enable_controls(True)
+        self._update_channel_visibility()
 
-        # Show load summary
         if skipped > 0:
             QMessageBox.information(
                 self,
                 "Load Complete",
                 f"Loaded {len(tiles)} tiles ({tiles_x}x{tiles_y} grid).\n"
                 f"Skipped {skipped} folders (no MIP or invalid name).",
+            )
+
+    def _on_load_flat(self, load_path: Path, base_path: Path, date_folder: str):
+        """Load MIP files from flat-layout directory."""
+        flat_infos = discover_flat_mip_tiles(load_path)
+        if not flat_infos:
+            QMessageBox.warning(
+                self,
+                "No Tiles Found",
+                f"No flat-layout MIP tiles found in:\n{load_path}",
+            )
+            return
+
+        self._flat_tile_infos = flat_infos
+        self._channel_cache.clear()
+        self._detected_layout = "flat"
+
+        # Determine available channels
+        all_channels = sorted(set(ch for t in flat_infos for ch in t.channel_files))
+
+        # Populate channel combo (block signals to avoid premature reload)
+        self._channel_combo.blockSignals(True)
+        self._channel_combo.clear()
+        for ch in all_channels:
+            self._channel_combo.addItem(f"C{ch:02d}", ch)
+        self._channel_combo.blockSignals(False)
+
+        # Pick the first channel to display
+        display_channel = all_channels[0] if all_channels else 0
+
+        # Load tiles for the selected channel
+        tiles = self._load_flat_channel(flat_infos, display_channel)
+        if not tiles:
+            QMessageBox.warning(
+                self,
+                "Load Failed",
+                "Failed to load any MIP images for the selected channel.",
+            )
+            return
+
+        calculate_grid_indices(tiles)
+
+        tiles_x = max(t.tile_x_idx for t in tiles) + 1
+        tiles_y = max(t.tile_y_idx for t in tiles) + 1
+        tile_size = tiles[0].image.shape[0]
+
+        self._config = MIPOverviewConfig(
+            base_folder=base_path,
+            date_folder=date_folder,
+            tiles_x=tiles_x,
+            tiles_y=tiles_y,
+            tile_size_pixels=tile_size,
+            downsample_factor=4,
+            invert_x=load_invert_x_setting(),
+            layout_type="flat",
+            display_channel=display_channel,
+            available_channels=all_channels,
+        )
+
+        self._tiles = tiles
+
+        self._stitch_and_display()
+        self._update_status()
+        self._enable_controls(True)
+        self._update_channel_visibility()
+
+        logger.info(
+            f"Loaded flat MIP overview: {len(tiles)} tiles "
+            f"({tiles_x}x{tiles_y}), {len(all_channels)} channels"
+        )
+
+    def _load_flat_channel(
+        self,
+        flat_infos: List[FlatMIPTileInfo],
+        channel_id: int,
+    ) -> List[MIPTileResult]:
+        """Load MIP images for a specific channel from flat tile infos.
+
+        Uses a cache to avoid re-reading previously loaded channels.
+
+        Returns:
+            List of MIPTileResult objects with images for the requested channel.
+        """
+        tiles = []
+        for fi in flat_infos:
+            if channel_id not in fi.channel_files:
+                continue
+
+            # Check cache first
+            cache_key = (id(fi), channel_id)
+            if channel_id in self._channel_cache:
+                cached = self._channel_cache[channel_id]
+                idx = next(
+                    (i for i, f2 in enumerate(self._flat_tile_infos) if f2 is fi),
+                    None,
+                )
+                if idx is not None and idx < len(cached):
+                    image = cached[idx]
+                    tiles.append(
+                        MIPTileResult(
+                            x=fi.x_mm,
+                            y=fi.y_mm,
+                            z=(fi.z_min_mm + fi.z_max_mm) / 2,
+                            tile_x_idx=fi.x_idx,
+                            tile_y_idx=fi.y_idx,
+                            image=image,
+                            folder_path=fi.channel_files[channel_id].parent,
+                            z_stack_min=fi.z_min_mm,
+                            z_stack_max=fi.z_max_mm,
+                        )
+                    )
+                    continue
+
+            # Read from disk
+            try:
+                image = tifffile.imread(str(fi.channel_files[channel_id]))
+                if image.ndim == 3:
+                    image = (
+                        image[0] if image.shape[0] < image.shape[-1] else image[:, :, 0]
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load MIP for tile X{fi.x_idx}_Y{fi.y_idx} "
+                    f"C{channel_id}: {e}"
+                )
+                continue
+
+            tiles.append(
+                MIPTileResult(
+                    x=fi.x_mm,
+                    y=fi.y_mm,
+                    z=(fi.z_min_mm + fi.z_max_mm) / 2,
+                    tile_x_idx=fi.x_idx,
+                    tile_y_idx=fi.y_idx,
+                    image=image,
+                    folder_path=fi.channel_files[channel_id].parent,
+                    z_stack_min=fi.z_min_mm,
+                    z_stack_max=fi.z_max_mm,
+                )
+            )
+
+        # Cache the loaded images for this channel
+        if tiles and channel_id not in self._channel_cache:
+            self._channel_cache[channel_id] = [t.image for t in tiles]
+
+        return tiles
+
+    def _update_channel_visibility(self):
+        """Show/hide the channel combo based on detected layout type."""
+        is_flat = self._detected_layout == "flat"
+        self._channel_label.setVisible(is_flat)
+        self._channel_combo.setVisible(is_flat)
+
+    def _on_channel_changed(self, index: int):
+        """Handle channel selection change - reload tiles for the new channel."""
+        if index < 0 or not self._flat_tile_infos or not self._config:
+            return
+
+        channel_id = self._channel_combo.currentData()
+        if channel_id is None:
+            return
+
+        self._config.display_channel = channel_id
+
+        # Reload tiles for the selected channel
+        tiles = self._load_flat_channel(self._flat_tile_infos, channel_id)
+        if not tiles:
+            logger.warning(f"No tiles loaded for channel C{channel_id:02d}")
+            return
+
+        calculate_grid_indices(tiles)
+        self._tiles = tiles
+
+        # Re-stitch and display
+        self._stitch_and_display()
+        self._update_status()
+
+        logger.info(f"Switched to channel C{channel_id:02d}")
+
+    def _on_export_overview(self):
+        """Export overview with grid lines and coordinate labels as TIFF."""
+        if not self._tiles or not self._config:
+            QMessageBox.warning(self, "Nothing to Export", "No tiles loaded.")
+            return
+
+        # Default filename based on folder name
+        default_name = "mip_overview_labeled.tif"
+        if self._config.base_folder:
+            default_name = f"{self._config.base_folder.name}_overview.tif"
+
+        output_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Overview with Labels",
+            str(Path.home() / default_name),
+            "TIFF Files (*.tif *.tiff)",
+        )
+        if not output_path:
+            return
+
+        try:
+            export_overview_with_labels(
+                tiles=self._tiles,
+                config=self._config,
+                output_path=Path(output_path),
+                flat_tile_infos=(
+                    self._flat_tile_infos if self._flat_tile_infos else None
+                ),
+            )
+            QMessageBox.information(
+                self,
+                "Export Complete",
+                f"Overview exported to:\n{output_path}",
+            )
+        except Exception as e:
+            logger.exception("Failed to export overview")
+            QMessageBox.critical(
+                self,
+                "Export Failed",
+                f"Failed to export overview:\n{e}",
             )
 
     def _stitch_and_display(self):
@@ -529,10 +811,13 @@ class MIPOverviewDialog(PersistentDialog):
         self._status_label.setText(f"Selected: {selected}/{total} tiles")
 
         if self._config:
-            self._info_label.setText(
+            info = (
                 f"Grid: {self._config.tiles_x}x{self._config.tiles_y} | "
                 f"Tile size: {self._config.tile_size_pixels}px"
             )
+            if self._config.layout_type == "flat":
+                info += f" | Layout: flat | Channels: {len(self._config.available_channels)}"
+            self._info_label.setText(info)
 
     def _enable_controls(self, enabled: bool):
         """Enable or disable controls based on load state."""
@@ -542,6 +827,7 @@ class MIPOverviewDialog(PersistentDialog):
         self._collect_btn.setEnabled(enabled)
         self._fit_btn.setEnabled(enabled)
         self._one_to_one_btn.setEnabled(enabled)
+        self._export_btn.setEnabled(enabled)
         self._save_btn.setEnabled(enabled)
 
     def _on_selection_changed(self):

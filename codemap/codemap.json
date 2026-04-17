@@ -73,6 +73,7 @@
         "py2flamingo.models.hardware.objectives",
         "py2flamingo.models.hardware.stage",
         "py2flamingo.models.image_display",
+        "py2flamingo.models.mip_overview",
         "py2flamingo.models.sample",
         "py2flamingo.models.settings",
         "py2flamingo.models.workflow",
@@ -623,6 +624,7 @@
         "py2flamingo.services.config_migration_service",
         "py2flamingo.services.configuration_manager",
         "py2flamingo.services.configuration_service",
+        "py2flamingo.services.connection_helpers",
         "py2flamingo.services.connection_manager",
         "py2flamingo.services.connection_service",
         "py2flamingo.services.ellipse_tracing_service",
@@ -1255,6 +1257,9 @@
         "py2flamingo.workflows.workflow_validator"
       ],
       "imports_to": [
+        "py2flamingo",
+        "py2flamingo.stitching",
+        "py2flamingo.stitching.pipeline",
         "py2flamingo.utils",
         "py2flamingo.utils.image_transforms"
       ],
@@ -2557,7 +2562,11 @@
         "py2flamingo.views.dialogs.mip_overview_dialog",
         "py2flamingo.visualization.disk_tile_loader"
       ],
-      "imports_to": []
+      "imports_to": [
+        "py2flamingo",
+        "py2flamingo.stitching",
+        "py2flamingo.stitching.pipeline"
+      ]
     },
     "py2flamingo.models.workflow_template": {
       "children": [],
@@ -2955,6 +2964,65 @@
         "py2flamingo.views.live_feed_view"
       ],
       "imports_to": []
+    },
+    "py2flamingo.stitching": {
+      "children": [
+        "py2flamingo.stitching.__main__",
+        "py2flamingo.stitching.deconvolution",
+        "py2flamingo.stitching.depth_attenuation",
+        "py2flamingo.stitching.flat_field",
+        "py2flamingo.stitching.isolated_service",
+        "py2flamingo.stitching.isolated_worker",
+        "py2flamingo.stitching.pipeline",
+        "py2flamingo.stitching.worker",
+        "py2flamingo.stitching.writers"
+      ],
+      "imports_from": [
+        "py2flamingo.models.mip_overview",
+        "py2flamingo.pipeline.engine.node_runners.post_processing_runner",
+        "py2flamingo.stitching",
+        "py2flamingo.stitching.__main__",
+        "py2flamingo.stitching.flat_field",
+        "py2flamingo.stitching.pipeline",
+        "py2flamingo.stitching.worker",
+        "py2flamingo.stitching.writers",
+        "py2flamingo.views.dialogs.stitching_dialog"
+      ],
+      "imports_to": [
+        "py2flamingo"
+      ]
+    },
+    "py2flamingo.stitching.pipeline": {
+      "children": [],
+      "imports_from": [
+        "py2flamingo.models.mip_overview",
+        "py2flamingo.pipeline.engine.node_runners.post_processing_runner",
+        "py2flamingo.stitching",
+        "py2flamingo.stitching.__main__",
+        "py2flamingo.stitching.worker",
+        "py2flamingo.views.dialogs.stitching_dialog"
+      ],
+      "imports_to": [
+        "py2flamingo",
+        "py2flamingo.stitching",
+        "py2flamingo.stitching.deconvolution",
+        "py2flamingo.stitching.depth_attenuation",
+        "py2flamingo.stitching.flat_field",
+        "py2flamingo.stitching.isolated_service",
+        "py2flamingo.stitching.writers",
+        "py2flamingo.stitching.writers.ome_tiff_writer",
+        "py2flamingo.stitching.writers.ome_zarr_writer"
+      ],
+      "class_deps": {
+        "StitchingPipeline": [
+          "StitchingConfig",
+          "destripe_volume",
+          "discover_tiles",
+          "downsample_volume",
+          "fuse_illumination_sides",
+          "load_raw_volume"
+        ]
+      }
     },
     "py2flamingo.models.protocol": {
       "children": [],
@@ -3523,63 +3591,6 @@
         ]
       }
     },
-    "py2flamingo.stitching": {
-      "children": [
-        "py2flamingo.stitching.__main__",
-        "py2flamingo.stitching.deconvolution",
-        "py2flamingo.stitching.depth_attenuation",
-        "py2flamingo.stitching.flat_field",
-        "py2flamingo.stitching.isolated_service",
-        "py2flamingo.stitching.isolated_worker",
-        "py2flamingo.stitching.pipeline",
-        "py2flamingo.stitching.worker",
-        "py2flamingo.stitching.writers"
-      ],
-      "imports_from": [
-        "py2flamingo.pipeline.engine.node_runners.post_processing_runner",
-        "py2flamingo.stitching",
-        "py2flamingo.stitching.__main__",
-        "py2flamingo.stitching.flat_field",
-        "py2flamingo.stitching.pipeline",
-        "py2flamingo.stitching.worker",
-        "py2flamingo.stitching.writers",
-        "py2flamingo.views.dialogs.stitching_dialog"
-      ],
-      "imports_to": [
-        "py2flamingo"
-      ]
-    },
-    "py2flamingo.stitching.pipeline": {
-      "children": [],
-      "imports_from": [
-        "py2flamingo.pipeline.engine.node_runners.post_processing_runner",
-        "py2flamingo.stitching",
-        "py2flamingo.stitching.__main__",
-        "py2flamingo.stitching.worker",
-        "py2flamingo.views.dialogs.stitching_dialog"
-      ],
-      "imports_to": [
-        "py2flamingo",
-        "py2flamingo.stitching",
-        "py2flamingo.stitching.deconvolution",
-        "py2flamingo.stitching.depth_attenuation",
-        "py2flamingo.stitching.flat_field",
-        "py2flamingo.stitching.isolated_service",
-        "py2flamingo.stitching.writers",
-        "py2flamingo.stitching.writers.ome_tiff_writer",
-        "py2flamingo.stitching.writers.ome_zarr_writer"
-      ],
-      "class_deps": {
-        "StitchingPipeline": [
-          "StitchingConfig",
-          "destripe_volume",
-          "discover_tiles",
-          "downsample_volume",
-          "fuse_illumination_sides",
-          "load_raw_volume"
-        ]
-      }
-    },
     "py2flamingo.pipeline.services.threshold_analysis_service": {
       "children": [],
       "imports_from": [
@@ -3998,6 +4009,11 @@
         "py2flamingo.utils",
         "py2flamingo.utils.file_handlers"
       ]
+    },
+    "py2flamingo.services.connection_helpers": {
+      "children": [],
+      "imports_from": [],
+      "imports_to": []
     },
     "py2flamingo.services.connection_manager": {
       "children": [],
@@ -6107,10 +6123,37 @@
             ],
             "visibility": "public"
           },
+          "add_connection_lost_listener": {
+            "name": "add_connection_lost_listener",
+            "type": "method",
+            "lineno": 51,
+            "calls": [
+              "hasattr"
+            ],
+            "visibility": "public"
+          },
+          "add_connection_restored_listener": {
+            "name": "add_connection_restored_listener",
+            "type": "method",
+            "lineno": 62,
+            "calls": [
+              "hasattr"
+            ],
+            "visibility": "public"
+          },
+          "reconnect_last": {
+            "name": "reconnect_last",
+            "type": "method",
+            "lineno": 67,
+            "calls": [
+              "hasattr"
+            ],
+            "visibility": "public"
+          },
           "connect": {
             "name": "connect",
             "type": "method",
-            "lineno": 51,
+            "lineno": 77,
             "calls": [
               "ConnectionConfig",
               "_validate_ip",
@@ -6124,7 +6167,7 @@
           "disconnect": {
             "name": "disconnect",
             "type": "method",
-            "lineno": 138,
+            "lineno": 164,
             "calls": [
               "str"
             ],
@@ -6133,7 +6176,7 @@
           "reconnect": {
             "name": "reconnect",
             "type": "method",
-            "lineno": 161,
+            "lineno": 187,
             "calls": [
               "disconnect",
               "str"
@@ -6143,13 +6186,13 @@
           "get_connection_status": {
             "name": "get_connection_status",
             "type": "method",
-            "lineno": 203,
+            "lineno": 229,
             "visibility": "public"
           },
           "handle_connection_error": {
             "name": "handle_connection_error",
             "type": "method",
-            "lineno": 227,
+            "lineno": 253,
             "calls": [
               "isinstance",
               "str",
@@ -6160,7 +6203,7 @@
           "test_connection": {
             "name": "test_connection",
             "type": "method",
-            "lineno": 268,
+            "lineno": 294,
             "calls": [
               "_validate_ip",
               "close",
@@ -6175,7 +6218,7 @@
           "_validate_ip": {
             "name": "_validate_ip",
             "type": "method",
-            "lineno": 349,
+            "lineno": 375,
             "calls": [
               "all",
               "int",
@@ -6187,7 +6230,7 @@
           "save_configuration": {
             "name": "save_configuration",
             "type": "method",
-            "lineno": 372,
+            "lineno": 398,
             "calls": [
               "_validate_ip",
               "isinstance",
@@ -6199,7 +6242,7 @@
           "delete_configuration": {
             "name": "delete_configuration",
             "type": "method",
-            "lineno": 429,
+            "lineno": 455,
             "calls": [
               "str",
               "strip"
@@ -6209,7 +6252,7 @@
           "get_microscope_settings": {
             "name": "get_microscope_settings",
             "type": "method",
-            "lineno": 472,
+            "lineno": 498,
             "calls": [
               "hasattr",
               "len",
@@ -7956,7 +7999,7 @@
           "connect": {
             "name": "connect",
             "type": "method",
-            "lineno": 493,
+            "lineno": 505,
             "calls": [
               "ConnectionError",
               "ConnectionStatus",
@@ -7971,7 +8014,7 @@
           "disconnect": {
             "name": "disconnect",
             "type": "method",
-            "lineno": 570,
+            "lineno": 586,
             "calls": [
               "ConnectionStatus",
               "RuntimeError",
@@ -7982,7 +8025,7 @@
           "connect_live": {
             "name": "connect_live",
             "type": "method",
-            "lineno": 612,
+            "lineno": 628,
             "calls": [
               "ConnectionError",
               "is_connected"
@@ -7992,7 +8035,7 @@
           "reconnect": {
             "name": "reconnect",
             "type": "method",
-            "lineno": 638,
+            "lineno": 654,
             "calls": [
               "connect",
               "disconnect",
@@ -8000,16 +8043,62 @@
             ],
             "visibility": "public"
           },
+          "reconnect_last": {
+            "name": "reconnect_last",
+            "type": "method",
+            "lineno": 680,
+            "calls": [
+              "connect",
+              "list",
+              "listener"
+            ],
+            "visibility": "public"
+          },
+          "add_connection_lost_listener": {
+            "name": "add_connection_lost_listener",
+            "type": "method",
+            "lineno": 723,
+            "visibility": "public"
+          },
+          "remove_connection_lost_listener": {
+            "name": "remove_connection_lost_listener",
+            "type": "method",
+            "lineno": 733,
+            "visibility": "public"
+          },
+          "add_connection_restored_listener": {
+            "name": "add_connection_restored_listener",
+            "type": "method",
+            "lineno": 738,
+            "visibility": "public"
+          },
+          "remove_connection_restored_listener": {
+            "name": "remove_connection_restored_listener",
+            "type": "method",
+            "lineno": 743,
+            "visibility": "public"
+          },
+          "_on_tcp_connection_lost": {
+            "name": "_on_tcp_connection_lost",
+            "type": "method",
+            "lineno": 748,
+            "calls": [
+              "ConnectionStatus",
+              "list",
+              "listener"
+            ],
+            "visibility": "private"
+          },
           "is_connected": {
             "name": "is_connected",
             "type": "method",
-            "lineno": 660,
+            "lineno": 783,
             "visibility": "public"
           },
           "query_available_drives": {
             "name": "query_available_drives",
             "type": "method",
-            "lineno": 671,
+            "lineno": 794,
             "calls": [
               "Command",
               "RuntimeError",
@@ -8026,7 +8115,7 @@
           "query_system_state": {
             "name": "query_system_state",
             "type": "method",
-            "lineno": 781,
+            "lineno": 904,
             "calls": [
               "Command",
               "RuntimeError",
@@ -8040,7 +8129,7 @@
           "has_async_reader": {
             "name": "has_async_reader",
             "type": "method",
-            "lineno": 854,
+            "lineno": 977,
             "calls": [
               "hasattr"
             ],
@@ -8049,7 +8138,7 @@
           "pause_async_reader": {
             "name": "pause_async_reader",
             "type": "method",
-            "lineno": 862,
+            "lineno": 985,
             "calls": [
               "hasattr"
             ],
@@ -8058,7 +8147,7 @@
           "resume_async_reader": {
             "name": "resume_async_reader",
             "type": "method",
-            "lineno": 868,
+            "lineno": 991,
             "calls": [
               "hasattr"
             ],
@@ -8067,7 +8156,7 @@
           "register_callback": {
             "name": "register_callback",
             "type": "method",
-            "lineno": 874,
+            "lineno": 997,
             "calls": [
               "hasattr"
             ],
@@ -8076,7 +8165,7 @@
           "unregister_callback": {
             "name": "unregister_callback",
             "type": "method",
-            "lineno": 888,
+            "lineno": 1011,
             "calls": [
               "hasattr"
             ],
@@ -8085,7 +8174,7 @@
           "send_command_async": {
             "name": "send_command_async",
             "type": "method",
-            "lineno": 900,
+            "lineno": 1023,
             "calls": [
               "hasattr"
             ],
@@ -8094,7 +8183,7 @@
           "send_command": {
             "name": "send_command",
             "type": "method",
-            "lineno": 910,
+            "lineno": 1033,
             "calls": [
               "_update_error_state",
               "isinstance",
@@ -8105,7 +8194,7 @@
           "_receive_full_response": {
             "name": "_receive_full_response",
             "type": "method",
-            "lineno": 940,
+            "lineno": 1063,
             "calls": [
               "ConnectionError",
               "gettimeout",
@@ -8121,7 +8210,7 @@
           "_update_error_state": {
             "name": "_update_error_state",
             "type": "method",
-            "lineno": 1002,
+            "lineno": 1125,
             "calls": [
               "ConnectionStatus"
             ],
@@ -8130,13 +8219,13 @@
           "get_status": {
             "name": "get_status",
             "type": "method",
-            "lineno": 1017,
+            "lineno": 1140,
             "visibility": "public"
           },
           "_send_command_with_text_response": {
             "name": "_send_command_with_text_response",
             "type": "method",
-            "lineno": 1026,
+            "lineno": 1149,
             "calls": [
               "ConnectionError",
               "RuntimeError",
@@ -8156,7 +8245,7 @@
           "get_microscope_settings": {
             "name": "get_microscope_settings",
             "type": "method",
-            "lineno": 1153,
+            "lineno": 1276,
             "calls": [
               "Command",
               "ConnectionError",
@@ -9550,7 +9639,7 @@
           "_on_settings": {
             "name": "_on_settings",
             "type": "method",
-            "lineno": 438,
+            "lineno": 439,
             "calls": [
               "MicroscopeSettingsService",
               "Path",
@@ -9565,7 +9654,7 @@
           "_open_url": {
             "name": "_open_url",
             "type": "method",
-            "lineno": 474,
+            "lineno": 475,
             "calls": [
               "QUrl",
               "openUrl"
@@ -9575,7 +9664,7 @@
           "_show_about": {
             "name": "_show_about",
             "type": "method",
-            "lineno": 481,
+            "lineno": 482,
             "calls": [
               "about"
             ],
@@ -9584,25 +9673,25 @@
           "_show_camera_viewer": {
             "name": "_show_camera_viewer",
             "type": "method",
-            "lineno": 496,
+            "lineno": 497,
             "visibility": "private"
           },
           "_show_image_controls": {
             "name": "_show_image_controls",
             "type": "method",
-            "lineno": 503,
+            "lineno": 504,
             "visibility": "private"
           },
           "update_menu_states": {
             "name": "update_menu_states",
             "type": "method",
-            "lineno": 512,
+            "lineno": 513,
             "visibility": "public"
           },
           "_on_voxel_test": {
             "name": "_on_voxel_test",
             "type": "method",
-            "lineno": 530,
+            "lineno": 531,
             "calls": [
               "_reset_voxel_test_action",
               "critical",
@@ -9618,13 +9707,13 @@
           "_reset_voxel_test_action": {
             "name": "_reset_voxel_test_action",
             "type": "method",
-            "lineno": 569,
+            "lineno": 570,
             "visibility": "private"
           },
           "_on_volume_scan": {
             "name": "_on_volume_scan",
             "type": "method",
-            "lineno": 574,
+            "lineno": 575,
             "calls": [
               "RuntimeError",
               "_reset_volume_scan_action",
@@ -9642,13 +9731,13 @@
           "_reset_volume_scan_action": {
             "name": "_reset_volume_scan_action",
             "type": "method",
-            "lineno": 618,
+            "lineno": 619,
             "visibility": "private"
           },
           "_on_calibrate_objective": {
             "name": "_on_calibrate_objective",
             "type": "method",
-            "lineno": 623,
+            "lineno": 624,
             "calls": [
               "PositionPresetService",
               "QMessageBox",
@@ -9675,7 +9764,7 @@
           "_on_benchmark_3d": {
             "name": "_on_benchmark_3d",
             "type": "method",
-            "lineno": 695,
+            "lineno": 696,
             "calls": [
               "PerformanceBenchmarkDialog",
               "critical",
@@ -9690,19 +9779,19 @@
           "_on_debug_query": {
             "name": "_on_debug_query",
             "type": "method",
-            "lineno": 719,
+            "lineno": 720,
             "visibility": "private"
           },
           "_on_save_settings": {
             "name": "_on_save_settings",
             "type": "method",
-            "lineno": 723,
+            "lineno": 724,
             "visibility": "private"
           },
           "_on_led_2d_overview": {
             "name": "_on_led_2d_overview",
             "type": "method",
-            "lineno": 729,
+            "lineno": 730,
             "calls": [
               "LED2DOverviewDialog",
               "critical",
@@ -9716,7 +9805,7 @@
           "_on_load_2d_overview": {
             "name": "_on_load_2d_overview",
             "type": "method",
-            "lineno": 768,
+            "lineno": 769,
             "calls": [
               "Path",
               "critical",
@@ -9736,7 +9825,7 @@
           "_on_mip_overview": {
             "name": "_on_mip_overview",
             "type": "method",
-            "lineno": 831,
+            "lineno": 832,
             "calls": [
               "MIPOverviewDialog",
               "critical",
@@ -9751,7 +9840,7 @@
           "_on_union_thresholder": {
             "name": "_on_union_thresholder",
             "type": "method",
-            "lineno": 855,
+            "lineno": 856,
             "calls": [
               "UnionThresholderDialog",
               "critical",
@@ -9765,7 +9854,7 @@
           "_on_pipeline_editor": {
             "name": "_on_pipeline_editor",
             "type": "method",
-            "lineno": 892,
+            "lineno": 893,
             "calls": [
               "PipelineController",
               "PipelineService",
@@ -9782,7 +9871,7 @@
           "_on_stitching": {
             "name": "_on_stitching",
             "type": "method",
-            "lineno": 926,
+            "lineno": 927,
             "calls": [
               "StitchingDialog",
               "critical",
@@ -9796,7 +9885,7 @@
           "_on_stitching_native": {
             "name": "_on_stitching_native",
             "type": "method",
-            "lineno": 956,
+            "lineno": 957,
             "calls": [
               "NativeStitchingDialog",
               "critical",
@@ -9810,7 +9899,7 @@
           "_on_webcam_overview": {
             "name": "_on_webcam_overview",
             "type": "method",
-            "lineno": 992,
+            "lineno": 993,
             "calls": [
               "WebcamOverviewDialog",
               "critical",
@@ -9824,7 +9913,7 @@
           "_on_load_webcam_overview": {
             "name": "_on_load_webcam_overview",
             "type": "method",
-            "lineno": 1023,
+            "lineno": 1024,
             "calls": [
               "Path",
               "critical",
@@ -9844,7 +9933,7 @@
           "_on_load_stitched_from_dialog": {
             "name": "_on_load_stitched_from_dialog",
             "type": "method",
-            "lineno": 1082,
+            "lineno": 1083,
             "calls": [
               "critical",
               "error",
@@ -9856,7 +9945,7 @@
           "_on_tab_changed": {
             "name": "_on_tab_changed",
             "type": "method",
-            "lineno": 1108,
+            "lineno": 1109,
             "calls": [
               "getLogger",
               "info"
@@ -9866,7 +9955,7 @@
           "showEvent": {
             "name": "showEvent",
             "type": "method",
-            "lineno": 1120,
+            "lineno": 1121,
             "calls": [
               "getLogger",
               "super"
@@ -9876,7 +9965,7 @@
           "closeEvent": {
             "name": "closeEvent",
             "type": "method",
-            "lineno": 1139,
+            "lineno": 1140,
             "calls": [
               "accept",
               "error",
@@ -10183,10 +10272,11 @@
           "__init__": {
             "name": "__init__",
             "type": "method",
-            "lineno": 53,
+            "lineno": 58,
             "calls": [
               "_load_configurations",
               "getLogger",
+              "hasattr",
               "setup_ui",
               "super"
             ],
@@ -10195,7 +10285,7 @@
           "setup_ui": {
             "name": "setup_ui",
             "type": "method",
-            "lineno": 81,
+            "lineno": 101,
             "calls": [
               "QComboBox",
               "QGroupBox",
@@ -10217,7 +10307,7 @@
           "_on_connect_clicked": {
             "name": "_on_connect_clicked",
             "type": "method",
-            "lineno": 240,
+            "lineno": 260,
             "calls": [
               "_load_and_display_settings",
               "_show_message",
@@ -10228,7 +10318,7 @@
           "_on_disconnect_clicked": {
             "name": "_on_disconnect_clicked",
             "type": "method",
-            "lineno": 276,
+            "lineno": 296,
             "calls": [
               "_show_message",
               "_update_status"
@@ -10238,25 +10328,37 @@
           "_update_status": {
             "name": "_update_status",
             "type": "method",
-            "lineno": 286,
+            "lineno": 306,
+            "visibility": "private"
+          },
+          "_on_connection_lost_ui": {
+            "name": "_on_connection_lost_ui",
+            "type": "method",
+            "lineno": 336,
+            "visibility": "private"
+          },
+          "_on_connection_restored_ui": {
+            "name": "_on_connection_restored_ui",
+            "type": "method",
+            "lineno": 353,
             "visibility": "private"
           },
           "_update_status_error": {
             "name": "_update_status_error",
             "type": "method",
-            "lineno": 316,
+            "lineno": 365,
             "visibility": "private"
           },
           "_on_sample_view_clicked": {
             "name": "_on_sample_view_clicked",
             "type": "method",
-            "lineno": 346,
+            "lineno": 395,
             "visibility": "private"
           },
           "_create_topmost_messagebox": {
             "name": "_create_topmost_messagebox",
             "type": "method",
-            "lineno": 351,
+            "lineno": 400,
             "calls": [
               "QMessageBox",
               "setDefaultButton",
@@ -10273,31 +10375,31 @@
           "_show_message": {
             "name": "_show_message",
             "type": "method",
-            "lineno": 385,
+            "lineno": 434,
             "visibility": "private"
           },
           "get_connection_info": {
             "name": "get_connection_info",
             "type": "method",
-            "lineno": 398,
+            "lineno": 447,
             "visibility": "public"
           },
           "set_connection_info": {
             "name": "set_connection_info",
             "type": "method",
-            "lineno": 406,
+            "lineno": 455,
             "visibility": "public"
           },
           "clear_message": {
             "name": "clear_message",
             "type": "method",
-            "lineno": 416,
+            "lineno": 465,
             "visibility": "public"
           },
           "_on_test_clicked": {
             "name": "_on_test_clicked",
             "type": "method",
-            "lineno": 420,
+            "lineno": 469,
             "calls": [
               "_load_and_display_settings",
               "_show_message"
@@ -10307,7 +10409,7 @@
           "send_debug_query": {
             "name": "send_debug_query",
             "type": "method",
-            "lineno": 446,
+            "lineno": 495,
             "calls": [
               "QDialog",
               "QDialogButtonBox",
@@ -10345,7 +10447,7 @@
           "_copy_to_clipboard": {
             "name": "_copy_to_clipboard",
             "type": "method",
-            "lineno": 701,
+            "lineno": 750,
             "calls": [
               "_show_message",
               "clipboard",
@@ -10356,7 +10458,7 @@
           "save_settings_to_microscope": {
             "name": "save_settings_to_microscope",
             "type": "method",
-            "lineno": 709,
+            "lineno": 758,
             "calls": [
               "Path",
               "QMessageBox",
@@ -10378,7 +10480,7 @@
           "_on_config_selected": {
             "name": "_on_config_selected",
             "type": "method",
-            "lineno": 792,
+            "lineno": 841,
             "calls": [
               "_show_message",
               "hasattr"
@@ -10388,7 +10490,7 @@
           "_on_refresh_clicked": {
             "name": "_on_refresh_clicked",
             "type": "method",
-            "lineno": 818,
+            "lineno": 867,
             "calls": [
               "_load_configurations",
               "_show_message"
@@ -10398,7 +10500,7 @@
           "_on_delete_clicked": {
             "name": "_on_delete_clicked",
             "type": "method",
-            "lineno": 823,
+            "lineno": 872,
             "calls": [
               "_load_configurations",
               "_show_message",
@@ -10409,7 +10511,7 @@
           "_on_save_config_clicked": {
             "name": "_on_save_config_clicked",
             "type": "method",
-            "lineno": 859,
+            "lineno": 908,
             "calls": [
               "_load_configurations",
               "_show_message",
@@ -10420,7 +10522,7 @@
           "_load_configurations": {
             "name": "_load_configurations",
             "type": "method",
-            "lineno": 894,
+            "lineno": 943,
             "calls": [
               "_show_message",
               "hasattr",
@@ -10431,7 +10533,7 @@
           "set_enabled": {
             "name": "set_enabled",
             "type": "method",
-            "lineno": 928,
+            "lineno": 977,
             "calls": [
               "hasattr"
             ],
@@ -10440,7 +10542,7 @@
           "_load_and_display_settings": {
             "name": "_load_and_display_settings",
             "type": "method",
-            "lineno": 957,
+            "lineno": 1006,
             "calls": [
               "_format_settings",
               "_update_status_error",
@@ -10453,7 +10555,7 @@
           "_format_settings": {
             "name": "_format_settings",
             "type": "method",
-            "lineno": 1029,
+            "lineno": 1078,
             "calls": [
               "append",
               "extend",
@@ -10467,7 +10569,7 @@
           "update_settings_display": {
             "name": "update_settings_display",
             "type": "method",
-            "lineno": 1076,
+            "lineno": 1125,
             "calls": [
               "_format_settings"
             ],
@@ -10476,7 +10578,7 @@
           "clear_settings_display": {
             "name": "clear_settings_display",
             "type": "method",
-            "lineno": 1085,
+            "lineno": 1134,
             "visibility": "public"
           }
         },
@@ -11803,39 +11905,30 @@
               "QProgressDialog",
               "_auto_contrast_channels",
               "_enable_channel_controls",
+              "_load_stitched_into_voxel_storage",
               "_remove_stitched_layers",
-              "_update_sample_holder_position",
-              "any",
-              "append",
-              "array",
-              "blockSignals",
+              "_update_channel_availability",
+              "_update_data_stats",
+              "_update_plane_views",
+              "_update_visualization",
               "close",
               "critical",
-              "dict",
               "exists",
               "find_stitched_stores",
               "get",
               "getItem",
-              "hasattr",
               "index",
               "information",
-              "int",
               "is_dir",
               "is_file",
               "iterdir",
               "len",
-              "list",
               "load_stitched_volume",
               "loads",
-              "maximum",
-              "minimum",
               "processEvents",
-              "property",
               "read_text",
               "setLabelText",
               "setMinimumDuration",
-              "setText",
-              "setValue",
               "setWindowModality",
               "setWindowTitle",
               "show",
@@ -11844,10 +11937,40 @@
             ],
             "visibility": "private"
           },
+          "_load_stitched_into_voxel_storage": {
+            "name": "_load_stitched_into_voxel_storage",
+            "type": "method",
+            "lineno": 2816,
+            "calls": [
+              "_update_sample_holder_position",
+              "all",
+              "any",
+              "append",
+              "array",
+              "asarray",
+              "astype",
+              "blockSignals",
+              "clip",
+              "fill",
+              "int",
+              "isfinite",
+              "len",
+              "max",
+              "maximum",
+              "minimum",
+              "property",
+              "round",
+              "setText",
+              "setValue",
+              "tolist",
+              "zoom"
+            ],
+            "visibility": "private"
+          },
           "_remove_stitched_layers": {
             "name": "_remove_stitched_layers",
             "type": "method",
-            "lineno": 3013,
+            "lineno": 3018,
             "calls": [
               "_enable_channel_controls",
               "getattr",
@@ -11858,7 +11981,7 @@
           "_on_settings_clicked": {
             "name": "_on_settings_clicked",
             "type": "method",
-            "lineno": 3034,
+            "lineno": 3039,
             "calls": [
               "MicroscopeSettingsService",
               "Path",
@@ -11875,7 +11998,7 @@
           "_on_populate_toggled": {
             "name": "_on_populate_toggled",
             "type": "method",
-            "lineno": 3085,
+            "lineno": 3090,
             "calls": [
               "QTimer",
               "hasattr"
@@ -11885,7 +12008,7 @@
           "_on_populate_tick": {
             "name": "_on_populate_tick",
             "type": "method",
-            "lineno": 3112,
+            "lineno": 3117,
             "calls": [
               "_detect_active_channel",
               "add_frame_to_volume",
@@ -11896,7 +12019,7 @@
           "_detect_active_channel": {
             "name": "_detect_active_channel",
             "type": "method",
-            "lineno": 3155,
+            "lineno": 3160,
             "calls": [
               "enumerate"
             ],
@@ -11905,7 +12028,7 @@
           "_on_fusion_mode_changed": {
             "name": "_on_fusion_mode_changed",
             "type": "method",
-            "lineno": 3169,
+            "lineno": 3174,
             "calls": [
               "hasattr",
               "lower"
@@ -11915,7 +12038,7 @@
           "_on_clear_data_clicked": {
             "name": "_on_clear_data_clicked",
             "type": "method",
-            "lineno": 3176,
+            "lineno": 3181,
             "calls": [
               "_remove_stitched_layers",
               "_update_visualization",
@@ -11928,7 +12051,7 @@
           "clear_data_for_workflows": {
             "name": "clear_data_for_workflows",
             "type": "method",
-            "lineno": 3202,
+            "lineno": 3207,
             "calls": [
               "_remove_stitched_layers",
               "_update_visualization",
@@ -11942,7 +12065,7 @@
           "add_frame_to_volume": {
             "name": "add_frame_to_volume",
             "type": "method",
-            "lineno": 3233,
+            "lineno": 3238,
             "calls": [
               "_downsample_for_storage",
               "arange",
@@ -11962,7 +12085,7 @@
           "_downsample_for_storage": {
             "name": "_downsample_for_storage",
             "type": "method",
-            "lineno": 3410,
+            "lineno": 3415,
             "calls": [
               "astype",
               "len",
@@ -11978,25 +12101,25 @@
           "holder_position": {
             "name": "holder_position",
             "type": "method",
-            "lineno": 3460,
+            "lineno": 3465,
             "visibility": "public"
           },
           "current_rotation": {
             "name": "current_rotation",
             "type": "method",
-            "lineno": 3469,
+            "lineno": 3474,
             "visibility": "public"
           },
           "objective_xy_calibration": {
             "name": "objective_xy_calibration",
             "type": "method",
-            "lineno": 3478,
+            "lineno": 3483,
             "visibility": "public"
           },
           "_embed_3d_viewer": {
             "name": "_embed_3d_viewer",
             "type": "method",
-            "lineno": 3481,
+            "lineno": 3486,
             "calls": [
               "getattr"
             ],
@@ -12005,7 +12128,7 @@
           "_on_3d_viewer_ready": {
             "name": "_on_3d_viewer_ready",
             "type": "method",
-            "lineno": 3501,
+            "lineno": 3506,
             "calls": [
               "_update_plane_overlays"
             ],
@@ -12014,22 +12137,23 @@
           "_update_sample_holder_position": {
             "name": "_update_sample_holder_position",
             "type": "method",
-            "lineno": 3508,
+            "lineno": 3513,
             "visibility": "private"
           },
           "_update_xy_focus_frame": {
             "name": "_update_xy_focus_frame",
             "type": "method",
-            "lineno": 3512,
+            "lineno": 3517,
             "visibility": "private"
           },
           "_process_pending_stage_update": {
             "name": "_process_pending_stage_update",
             "type": "method",
-            "lineno": 3516,
+            "lineno": 3521,
             "calls": [
               "_update_plane_views",
               "_update_sample_holder_position",
+              "any",
               "array",
               "count_nonzero",
               "get",
@@ -12041,7 +12165,7 @@
           "_update_visualization": {
             "name": "_update_visualization",
             "type": "method",
-            "lineno": 3616,
+            "lineno": 3629,
             "calls": [
               "_auto_contrast_channels",
               "_update_plane_overlays",
@@ -12065,7 +12189,7 @@
           "_update_visualization_async": {
             "name": "_update_visualization_async",
             "type": "method",
-            "lineno": 3736,
+            "lineno": 3749,
             "calls": [
               "Thread",
               "any",
@@ -12083,7 +12207,7 @@
           "_apply_visualization_results": {
             "name": "_apply_visualization_results",
             "type": "method",
-            "lineno": 3798,
+            "lineno": 3811,
             "calls": [
               "_auto_contrast_channels",
               "_update_plane_overlays",
@@ -12099,13 +12223,13 @@
           "_reset_viewer_camera": {
             "name": "_reset_viewer_camera",
             "type": "method",
-            "lineno": 3822,
+            "lineno": 3835,
             "visibility": "private"
           },
           "_on_live_view_toggle": {
             "name": "_on_live_view_toggle",
             "type": "method",
-            "lineno": 3828,
+            "lineno": 3841,
             "calls": [
               "hasattr"
             ],
@@ -12114,13 +12238,13 @@
           "_update_live_view_state": {
             "name": "_update_live_view_state",
             "type": "method",
-            "lineno": 3867,
+            "lineno": 3880,
             "visibility": "private"
           },
           "_update_zoom_display": {
             "name": "_update_zoom_display",
             "type": "method",
-            "lineno": 3895,
+            "lineno": 3908,
             "calls": [
               "_get_viewer",
               "hasattr"
@@ -12130,7 +12254,7 @@
           "_on_reset_zoom_clicked": {
             "name": "_on_reset_zoom_clicked",
             "type": "method",
-            "lineno": 3904,
+            "lineno": 3917,
             "calls": [
               "_get_viewer",
               "_update_zoom_display",
@@ -12142,7 +12266,7 @@
           "_update_info_displays": {
             "name": "_update_info_displays",
             "type": "method",
-            "lineno": 3913,
+            "lineno": 3926,
             "calls": [
               "_update_data_stats",
               "_update_zoom_display",
@@ -12153,13 +12277,13 @@
           "_update_data_stats": {
             "name": "_update_data_stats",
             "type": "method",
-            "lineno": 3936,
+            "lineno": 3949,
             "visibility": "private"
           },
           "_on_transform_quality_changed": {
             "name": "_on_transform_quality_changed",
             "type": "method",
-            "lineno": 3954,
+            "lineno": 3967,
             "calls": [
               "_update_visualization"
             ],
@@ -12168,13 +12292,13 @@
           "_on_live_settings_clicked": {
             "name": "_on_live_settings_clicked",
             "type": "method",
-            "lineno": 3968,
+            "lineno": 3981,
             "visibility": "private"
           },
           "_on_plane_click": {
             "name": "_on_plane_click",
             "type": "method",
-            "lineno": 3976,
+            "lineno": 3989,
             "calls": [
               "Position",
               "_viz_y_to_stage_y"
@@ -12184,33 +12308,43 @@
           "_update_plane_views": {
             "name": "_update_plane_views",
             "type": "method",
-            "lineno": 4088,
+            "lineno": 4101,
             "calls": [
-              "_get_viewer",
+              "_resize_mip_to_target",
               "any",
               "hasattr",
               "int",
               "max",
-              "range"
+              "range",
+              "tuple"
+            ],
+            "visibility": "private"
+          },
+          "_resize_mip_to_target": {
+            "name": "_resize_mip_to_target",
+            "type": "method",
+            "lineno": 4208,
+            "calls": [
+              "zoom"
             ],
             "visibility": "private"
           },
           "_stage_y_to_viz_y": {
             "name": "_stage_y_to_viz_y",
             "type": "method",
-            "lineno": 4184,
+            "lineno": 4226,
             "visibility": "private"
           },
           "_viz_y_to_stage_y": {
             "name": "_viz_y_to_stage_y",
             "type": "method",
-            "lineno": 4192,
+            "lineno": 4234,
             "visibility": "private"
           },
           "_update_plane_overlays": {
             "name": "_update_plane_overlays",
             "type": "method",
-            "lineno": 4200,
+            "lineno": 4242,
             "calls": [
               "_stage_y_to_viz_y",
               "get"
@@ -12220,7 +12354,7 @@
           "_check_and_mark_targets_stale": {
             "name": "_check_and_mark_targets_stale",
             "type": "method",
-            "lineno": 4261,
+            "lineno": 4303,
             "calls": [
               "abs",
               "set_target_stale"
@@ -12230,13 +12364,13 @@
           "update_workflow_progress": {
             "name": "update_workflow_progress",
             "type": "method",
-            "lineno": 4293,
+            "lineno": 4335,
             "visibility": "public"
           },
           "showEvent": {
             "name": "showEvent",
             "type": "method",
-            "lineno": 4310,
+            "lineno": 4352,
             "calls": [
               "_restore_dialog_state",
               "super"
@@ -12246,7 +12380,7 @@
           "hideEvent": {
             "name": "hideEvent",
             "type": "method",
-            "lineno": 4330,
+            "lineno": 4372,
             "calls": [
               "_save_dialog_state",
               "super"
@@ -12256,7 +12390,7 @@
           "closeEvent": {
             "name": "closeEvent",
             "type": "method",
-            "lineno": 4341,
+            "lineno": 4383,
             "calls": [
               "_save_dialog_state",
               "_stop_tile_worker",
@@ -12267,7 +12401,7 @@
           "_save_dialog_state": {
             "name": "_save_dialog_state",
             "type": "method",
-            "lineno": 4357,
+            "lineno": 4399,
             "calls": [
               "hasattr"
             ],
@@ -12276,7 +12410,7 @@
           "_restore_dialog_state": {
             "name": "_restore_dialog_state",
             "type": "method",
-            "lineno": 4394,
+            "lineno": 4436,
             "calls": [
               "get",
               "hasattr"
@@ -12286,7 +12420,7 @@
           "set_stage_controls_enabled": {
             "name": "set_stage_controls_enabled",
             "type": "method",
-            "lineno": 4467,
+            "lineno": 4509,
             "calls": [
               "hasattr",
               "setEnabled"
@@ -12296,7 +12430,7 @@
           "set_connection_state": {
             "name": "set_connection_state",
             "type": "method",
-            "lineno": 4498,
+            "lineno": 4540,
             "calls": [
               "hasattr",
               "setEnabled"
@@ -12306,7 +12440,7 @@
           "prepare_for_tile_workflows": {
             "name": "prepare_for_tile_workflows",
             "type": "method",
-            "lineno": 4543,
+            "lineno": 4585,
             "calls": [
               "_start_tile_worker",
               "add",
@@ -12323,7 +12457,7 @@
           "load_completed_tile": {
             "name": "load_completed_tile",
             "type": "method",
-            "lineno": 4599,
+            "lineno": 4641,
             "calls": [
               "Path",
               "_resolve_tile_folder",
@@ -12338,7 +12472,7 @@
           "_resolve_tile_folder": {
             "name": "_resolve_tile_folder",
             "type": "method",
-            "lineno": 4676,
+            "lineno": 4718,
             "calls": [
               "Path",
               "exists",
@@ -12353,7 +12487,7 @@
           "finish_tile_workflows": {
             "name": "finish_tile_workflows",
             "type": "method",
-            "lineno": 4732,
+            "lineno": 4774,
             "calls": [
               "_stop_tile_worker",
               "_update_channel_availability",
@@ -12371,7 +12505,7 @@
           "_on_tile_zstack_frame": {
             "name": "_on_tile_zstack_frame",
             "type": "method",
-            "lineno": 4815,
+            "lineno": 4857,
             "calls": [
               "TileFrameBuffer",
               "_downsample_for_storage",
@@ -12393,7 +12527,7 @@
           "_estimate_frames_per_tile": {
             "name": "_estimate_frames_per_tile",
             "type": "method",
-            "lineno": 4962,
+            "lineno": 5004,
             "calls": [
               "get",
               "getattr",
@@ -12404,7 +12538,7 @@
           "_start_loading_pulse": {
             "name": "_start_loading_pulse",
             "type": "method",
-            "lineno": 4978,
+            "lineno": 5020,
             "calls": [
               "QTimer",
               "hasattr"
@@ -12414,13 +12548,13 @@
           "_toggle_loading_pulse": {
             "name": "_toggle_loading_pulse",
             "type": "method",
-            "lineno": 4991,
+            "lineno": 5033,
             "visibility": "private"
           },
           "_stop_loading_pulse": {
             "name": "_stop_loading_pulse",
             "type": "method",
-            "lineno": 5005,
+            "lineno": 5047,
             "calls": [
               "hasattr"
             ],
@@ -12429,7 +12563,7 @@
           "_start_tile_worker": {
             "name": "_start_tile_worker",
             "type": "method",
-            "lineno": 5011,
+            "lineno": 5053,
             "calls": [
               "QThread",
               "TileProcessingWorker",
@@ -12440,7 +12574,7 @@
           "_stop_tile_worker": {
             "name": "_stop_tile_worker",
             "type": "method",
-            "lineno": 5041,
+            "lineno": 5083,
             "calls": [
               "hasattr"
             ],
@@ -12449,7 +12583,7 @@
           "_on_tile_processed": {
             "name": "_on_tile_processed",
             "type": "method",
-            "lineno": 5062,
+            "lineno": 5104,
             "calls": [
               "_finalize_disk_load",
               "getattr",
@@ -12460,7 +12594,7 @@
           "_on_load_tiles_from_disk_clicked": {
             "name": "_on_load_tiles_from_disk_clicked",
             "type": "method",
-            "lineno": 5106,
+            "lineno": 5148,
             "calls": [
               "DiskTileLoader",
               "Path",
@@ -12477,13 +12611,13 @@
           "_on_disk_load_progress": {
             "name": "_on_disk_load_progress",
             "type": "method",
-            "lineno": 5195,
+            "lineno": 5237,
             "visibility": "private"
           },
           "_on_disk_load_finished": {
             "name": "_on_disk_load_finished",
             "type": "method",
-            "lineno": 5202,
+            "lineno": 5244,
             "calls": [
               "_finalize_disk_load",
               "hasattr"
@@ -12493,7 +12627,7 @@
           "_finalize_disk_load": {
             "name": "_finalize_disk_load",
             "type": "method",
-            "lineno": 5234,
+            "lineno": 5276,
             "calls": [
               "_stop_loading_pulse",
               "_stop_tile_worker",
@@ -15087,10 +15221,37 @@
             ],
             "visibility": "public"
           },
+          "add_connection_lost_listener": {
+            "name": "add_connection_lost_listener",
+            "type": "method",
+            "lineno": 51,
+            "calls": [
+              "hasattr"
+            ],
+            "visibility": "public"
+          },
+          "add_connection_restored_listener": {
+            "name": "add_connection_restored_listener",
+            "type": "method",
+            "lineno": 62,
+            "calls": [
+              "hasattr"
+            ],
+            "visibility": "public"
+          },
+          "reconnect_last": {
+            "name": "reconnect_last",
+            "type": "method",
+            "lineno": 67,
+            "calls": [
+              "hasattr"
+            ],
+            "visibility": "public"
+          },
           "connect": {
             "name": "connect",
             "type": "method",
-            "lineno": 51,
+            "lineno": 77,
             "calls": [
               "ConnectionConfig",
               "_validate_ip",
@@ -15104,7 +15265,7 @@
           "disconnect": {
             "name": "disconnect",
             "type": "method",
-            "lineno": 138,
+            "lineno": 164,
             "calls": [
               "str"
             ],
@@ -15113,7 +15274,7 @@
           "reconnect": {
             "name": "reconnect",
             "type": "method",
-            "lineno": 161,
+            "lineno": 187,
             "calls": [
               "disconnect",
               "str"
@@ -15123,13 +15284,13 @@
           "get_connection_status": {
             "name": "get_connection_status",
             "type": "method",
-            "lineno": 203,
+            "lineno": 229,
             "visibility": "public"
           },
           "handle_connection_error": {
             "name": "handle_connection_error",
             "type": "method",
-            "lineno": 227,
+            "lineno": 253,
             "calls": [
               "isinstance",
               "str",
@@ -15140,7 +15301,7 @@
           "test_connection": {
             "name": "test_connection",
             "type": "method",
-            "lineno": 268,
+            "lineno": 294,
             "calls": [
               "_validate_ip",
               "close",
@@ -15155,7 +15316,7 @@
           "_validate_ip": {
             "name": "_validate_ip",
             "type": "method",
-            "lineno": 349,
+            "lineno": 375,
             "calls": [
               "all",
               "int",
@@ -15167,7 +15328,7 @@
           "save_configuration": {
             "name": "save_configuration",
             "type": "method",
-            "lineno": 372,
+            "lineno": 398,
             "calls": [
               "_validate_ip",
               "isinstance",
@@ -15179,7 +15340,7 @@
           "delete_configuration": {
             "name": "delete_configuration",
             "type": "method",
-            "lineno": 429,
+            "lineno": 455,
             "calls": [
               "str",
               "strip"
@@ -15189,7 +15350,7 @@
           "get_microscope_settings": {
             "name": "get_microscope_settings",
             "type": "method",
-            "lineno": 472,
+            "lineno": 498,
             "calls": [
               "hasattr",
               "len",
@@ -16683,12 +16844,15 @@
       "MIPOverviewConfig": {
         "name": "MIPOverviewConfig",
         "type": "class",
-        "lineno": 96,
+        "lineno": 137,
+        "calls": [
+          "field"
+        ],
         "methods": {
           "to_dict": {
             "name": "to_dict",
             "type": "method",
-            "lineno": 122,
+            "lineno": 169,
             "calls": [
               "str"
             ],
@@ -16697,7 +16861,7 @@
           "from_dict": {
             "name": "from_dict",
             "type": "method",
-            "lineno": 140,
+            "lineno": 190,
             "calls": [
               "Path",
               "cls",
@@ -16712,7 +16876,7 @@
       "MIPTileResult": {
         "name": "MIPTileResult",
         "type": "class",
-        "lineno": 18,
+        "lineno": 33,
         "calls": [
           "field",
           "zeros"
@@ -16721,7 +16885,7 @@
           "to_dict": {
             "name": "to_dict",
             "type": "method",
-            "lineno": 50,
+            "lineno": 65,
             "calls": [
               "str"
             ],
@@ -16730,7 +16894,7 @@
           "from_dict": {
             "name": "from_dict",
             "type": "method",
-            "lineno": 69,
+            "lineno": 84,
             "calls": [
               "Path",
               "cls",
@@ -17395,7 +17559,7 @@
       "calculate_grid_indices": {
         "name": "calculate_grid_indices",
         "type": "function",
-        "lineno": 185,
+        "lineno": 238,
         "calls": [
           "enumerate",
           "set",
@@ -17407,7 +17571,7 @@
       "find_date_folders": {
         "name": "find_date_folders",
         "type": "function",
-        "lineno": 211,
+        "lineno": 264,
         "calls": [
           "append",
           "compile",
@@ -17422,7 +17586,7 @@
       "find_tile_folders": {
         "name": "find_tile_folders",
         "type": "function",
-        "lineno": 234,
+        "lineno": 287,
         "calls": [
           "append",
           "compile",
@@ -17436,7 +17600,7 @@
       "parse_coords_from_folder": {
         "name": "parse_coords_from_folder",
         "type": "function",
-        "lineno": 161,
+        "lineno": 214,
         "calls": [
           "ValueError",
           "float",
@@ -18299,12 +18463,12 @@
       "CommandClient": {
         "name": "CommandClient",
         "type": "class",
-        "lineno": 743,
+        "lineno": 772,
         "methods": {
           "__init__": {
             "name": "__init__",
             "type": "method",
-            "lineno": 751,
+            "lineno": 780,
             "calls": [
               "Lock",
               "MessageDispatcher",
@@ -18315,43 +18479,43 @@
           "start": {
             "name": "start",
             "type": "method",
-            "lineno": 763,
+            "lineno": 798,
             "visibility": "public"
           },
           "stop": {
             "name": "stop",
             "type": "method",
-            "lineno": 767,
+            "lineno": 802,
             "visibility": "public"
           },
           "is_running": {
             "name": "is_running",
             "type": "method",
-            "lineno": 771,
+            "lineno": 806,
             "visibility": "public"
           },
           "pause": {
             "name": "pause",
             "type": "method",
-            "lineno": 775,
+            "lineno": 810,
             "visibility": "public"
           },
           "resume": {
             "name": "resume",
             "type": "method",
-            "lineno": 779,
+            "lineno": 814,
             "visibility": "public"
           },
           "is_paused": {
             "name": "is_paused",
             "type": "method",
-            "lineno": 783,
+            "lineno": 818,
             "visibility": "public"
           },
           "send_command": {
             "name": "send_command",
             "type": "method",
-            "lineno": 787,
+            "lineno": 822,
             "calls": [
               "get",
               "warning"
@@ -18361,25 +18525,25 @@
           "register_callback": {
             "name": "register_callback",
             "type": "method",
-            "lineno": 825,
+            "lineno": 860,
             "visibility": "public"
           },
           "unregister_callback": {
             "name": "unregister_callback",
             "type": "method",
-            "lineno": 837,
+            "lineno": 872,
             "visibility": "public"
           },
           "dispatcher": {
             "name": "dispatcher",
             "type": "method",
-            "lineno": 844,
+            "lineno": 879,
             "visibility": "public"
           },
           "get_stats": {
             "name": "get_stats",
             "type": "method",
-            "lineno": 848,
+            "lineno": 883,
             "visibility": "public"
           }
         },
@@ -18690,10 +18854,20 @@
             ],
             "visibility": "public"
           },
+          "_notify_closed": {
+            "name": "_notify_closed",
+            "type": "method",
+            "lineno": 372,
+            "calls": [
+              "_on_closed",
+              "error"
+            ],
+            "visibility": "private"
+          },
           "start": {
             "name": "start",
             "type": "method",
-            "lineno": 360,
+            "lineno": 383,
             "calls": [
               "Thread",
               "info",
@@ -18704,7 +18878,7 @@
           "stop": {
             "name": "stop",
             "type": "method",
-            "lineno": 374,
+            "lineno": 397,
             "calls": [
               "info",
               "warning"
@@ -18714,13 +18888,13 @@
           "is_running": {
             "name": "is_running",
             "type": "method",
-            "lineno": 393,
+            "lineno": 416,
             "visibility": "public"
           },
           "pause": {
             "name": "pause",
             "type": "method",
-            "lineno": 397,
+            "lineno": 420,
             "calls": [
               "info",
               "warning"
@@ -18730,7 +18904,7 @@
           "resume": {
             "name": "resume",
             "type": "method",
-            "lineno": 422,
+            "lineno": 445,
             "calls": [
               "info"
             ],
@@ -18739,14 +18913,15 @@
           "is_paused": {
             "name": "is_paused",
             "type": "method",
-            "lineno": 436,
+            "lineno": 459,
             "visibility": "public"
           },
           "_read_loop": {
             "name": "_read_loop",
             "type": "method",
-            "lineno": 440,
+            "lineno": 463,
             "calls": [
+              "_notify_closed",
               "_parse_message",
               "_read_additional_data",
               "_receive_message",
@@ -18762,7 +18937,7 @@
           "_try_resync": {
             "name": "_try_resync",
             "type": "method",
-            "lineno": 550,
+            "lineno": 579,
             "calls": [
               "_parse_message",
               "debug",
@@ -18776,7 +18951,7 @@
           "_receive_message": {
             "name": "_receive_message",
             "type": "method",
-            "lineno": 612,
+            "lineno": 641,
             "calls": [
               "len"
             ],
@@ -18785,7 +18960,7 @@
           "_read_additional_data": {
             "name": "_read_additional_data",
             "type": "method",
-            "lineno": 641,
+            "lineno": 670,
             "calls": [
               "error",
               "len",
@@ -18796,7 +18971,7 @@
           "_parse_message": {
             "name": "_parse_message",
             "type": "method",
-            "lineno": 681,
+            "lineno": 710,
             "calls": [
               "ParsedMessage",
               "ValueError",
@@ -18808,7 +18983,7 @@
           "get_stats": {
             "name": "get_stats",
             "type": "method",
-            "lineno": 738,
+            "lineno": 767,
             "visibility": "public"
           }
         },
@@ -18833,7 +19008,7 @@
           "connect": {
             "name": "connect",
             "type": "method",
-            "lineno": 65,
+            "lineno": 71,
             "calls": [
               "_disconnect_unsafe",
               "_flush_receive_buffer",
@@ -18848,7 +19023,7 @@
           "connect_live": {
             "name": "connect_live",
             "type": "method",
-            "lineno": 185,
+            "lineno": 191,
             "calls": [
               "ConnectionError",
               "socket"
@@ -18858,19 +19033,19 @@
           "is_live_connected": {
             "name": "is_live_connected",
             "type": "method",
-            "lineno": 248,
+            "lineno": 254,
             "visibility": "public"
           },
           "disconnect_live": {
             "name": "disconnect_live",
             "type": "method",
-            "lineno": 253,
+            "lineno": 259,
             "visibility": "public"
           },
           "_flush_receive_buffer": {
             "name": "_flush_receive_buffer",
             "type": "method",
-            "lineno": 269,
+            "lineno": 275,
             "calls": [
               "gettimeout",
               "len",
@@ -18882,7 +19057,7 @@
           "disconnect": {
             "name": "disconnect",
             "type": "method",
-            "lineno": 313,
+            "lineno": 319,
             "calls": [
               "_disconnect_unsafe"
             ],
@@ -18891,13 +19066,13 @@
           "_disconnect_unsafe": {
             "name": "_disconnect_unsafe",
             "type": "method",
-            "lineno": 325,
+            "lineno": 331,
             "visibility": "private"
           },
           "send_bytes": {
             "name": "send_bytes",
             "type": "method",
-            "lineno": 366,
+            "lineno": 372,
             "calls": [
               "ConnectionError",
               "ValueError",
@@ -18911,7 +19086,7 @@
           "receive_bytes": {
             "name": "receive_bytes",
             "type": "method",
-            "lineno": 411,
+            "lineno": 417,
             "calls": [
               "ConnectionError",
               "ValueError",
@@ -18925,7 +19100,7 @@
           "receive_all_bytes": {
             "name": "receive_all_bytes",
             "type": "method",
-            "lineno": 483,
+            "lineno": 489,
             "calls": [
               "ConnectionError",
               "ValueError",
@@ -18939,7 +19114,7 @@
           "check_for_unsolicited_message": {
             "name": "check_for_unsolicited_message",
             "type": "method",
-            "lineno": 582,
+            "lineno": 588,
             "calls": [
               "receive_bytes"
             ],
@@ -18948,52 +19123,74 @@
           "is_connected": {
             "name": "is_connected",
             "type": "method",
-            "lineno": 637,
+            "lineno": 643,
             "visibility": "public"
           },
           "get_connection_info": {
             "name": "get_connection_info",
             "type": "method",
-            "lineno": 651,
+            "lineno": 657,
             "visibility": "public"
           },
           "_start_async_reader": {
             "name": "_start_async_reader",
             "type": "method",
-            "lineno": 668,
+            "lineno": 674,
             "calls": [
               "CommandClient"
             ],
             "visibility": "private"
           },
+          "_on_reader_closed": {
+            "name": "_on_reader_closed",
+            "type": "method",
+            "lineno": 689,
+            "calls": [
+              "list",
+              "listener"
+            ],
+            "visibility": "private"
+          },
+          "add_connection_lost_listener": {
+            "name": "add_connection_lost_listener",
+            "type": "method",
+            "lineno": 711,
+            "visibility": "public"
+          },
+          "remove_connection_lost_listener": {
+            "name": "remove_connection_lost_listener",
+            "type": "method",
+            "lineno": 722,
+            "visibility": "public"
+          },
           "has_async_reader": {
             "name": "has_async_reader",
             "type": "method",
-            "lineno": 682,
+            "lineno": 731,
             "visibility": "public"
           },
           "pause_async_reader": {
             "name": "pause_async_reader",
             "type": "method",
-            "lineno": 686,
+            "lineno": 735,
             "visibility": "public"
           },
           "resume_async_reader": {
             "name": "resume_async_reader",
             "type": "method",
-            "lineno": 701,
+            "lineno": 750,
             "visibility": "public"
           },
           "dispatcher": {
             "name": "dispatcher",
             "type": "method",
-            "lineno": 714,
+            "lineno": 763,
             "visibility": "public"
           },
           "send_command_async": {
             "name": "send_command_async",
             "type": "method",
-            "lineno": 725,
+            "lineno": 774,
             "calls": [
               "ConnectionError",
               "RuntimeError"
@@ -19003,7 +19200,7 @@
           "register_callback": {
             "name": "register_callback",
             "type": "method",
-            "lineno": 759,
+            "lineno": 808,
             "calls": [
               "RuntimeError"
             ],
@@ -19012,19 +19209,19 @@
           "unregister_callback": {
             "name": "unregister_callback",
             "type": "method",
-            "lineno": 780,
+            "lineno": 829,
             "visibility": "public"
           },
           "get_async_stats": {
             "name": "get_async_stats",
             "type": "method",
-            "lineno": 787,
+            "lineno": 836,
             "visibility": "public"
           },
           "_validate_ip": {
             "name": "_validate_ip",
             "type": "method",
-            "lineno": 799,
+            "lineno": 848,
             "calls": [
               "ValueError",
               "int",
@@ -19037,7 +19234,7 @@
           "_validate_port": {
             "name": "_validate_port",
             "type": "method",
-            "lineno": 826,
+            "lineno": 875,
             "calls": [
               "ValueError",
               "isinstance",
@@ -19176,10 +19373,20 @@
             ],
             "visibility": "public"
           },
+          "_notify_closed": {
+            "name": "_notify_closed",
+            "type": "method",
+            "lineno": 372,
+            "calls": [
+              "_on_closed",
+              "error"
+            ],
+            "visibility": "private"
+          },
           "start": {
             "name": "start",
             "type": "method",
-            "lineno": 360,
+            "lineno": 383,
             "calls": [
               "Thread",
               "info",
@@ -19190,7 +19397,7 @@
           "stop": {
             "name": "stop",
             "type": "method",
-            "lineno": 374,
+            "lineno": 397,
             "calls": [
               "info",
               "warning"
@@ -19200,13 +19407,13 @@
           "is_running": {
             "name": "is_running",
             "type": "method",
-            "lineno": 393,
+            "lineno": 416,
             "visibility": "public"
           },
           "pause": {
             "name": "pause",
             "type": "method",
-            "lineno": 397,
+            "lineno": 420,
             "calls": [
               "info",
               "warning"
@@ -19216,7 +19423,7 @@
           "resume": {
             "name": "resume",
             "type": "method",
-            "lineno": 422,
+            "lineno": 445,
             "calls": [
               "info"
             ],
@@ -19225,14 +19432,15 @@
           "is_paused": {
             "name": "is_paused",
             "type": "method",
-            "lineno": 436,
+            "lineno": 459,
             "visibility": "public"
           },
           "_read_loop": {
             "name": "_read_loop",
             "type": "method",
-            "lineno": 440,
+            "lineno": 463,
             "calls": [
+              "_notify_closed",
               "_parse_message",
               "_read_additional_data",
               "_receive_message",
@@ -19248,7 +19456,7 @@
           "_try_resync": {
             "name": "_try_resync",
             "type": "method",
-            "lineno": 550,
+            "lineno": 579,
             "calls": [
               "_parse_message",
               "debug",
@@ -19262,7 +19470,7 @@
           "_receive_message": {
             "name": "_receive_message",
             "type": "method",
-            "lineno": 612,
+            "lineno": 641,
             "calls": [
               "len"
             ],
@@ -19271,7 +19479,7 @@
           "_read_additional_data": {
             "name": "_read_additional_data",
             "type": "method",
-            "lineno": 641,
+            "lineno": 670,
             "calls": [
               "error",
               "len",
@@ -19282,7 +19490,7 @@
           "_parse_message": {
             "name": "_parse_message",
             "type": "method",
-            "lineno": 681,
+            "lineno": 710,
             "calls": [
               "ParsedMessage",
               "ValueError",
@@ -19294,7 +19502,7 @@
           "get_stats": {
             "name": "get_stats",
             "type": "method",
-            "lineno": 738,
+            "lineno": 767,
             "visibility": "public"
           }
         },
@@ -19303,12 +19511,12 @@
       "CommandClient": {
         "name": "CommandClient",
         "type": "class",
-        "lineno": 743,
+        "lineno": 772,
         "methods": {
           "__init__": {
             "name": "__init__",
             "type": "method",
-            "lineno": 751,
+            "lineno": 780,
             "calls": [
               "Lock",
               "MessageDispatcher",
@@ -19319,43 +19527,43 @@
           "start": {
             "name": "start",
             "type": "method",
-            "lineno": 763,
+            "lineno": 798,
             "visibility": "public"
           },
           "stop": {
             "name": "stop",
             "type": "method",
-            "lineno": 767,
+            "lineno": 802,
             "visibility": "public"
           },
           "is_running": {
             "name": "is_running",
             "type": "method",
-            "lineno": 771,
+            "lineno": 806,
             "visibility": "public"
           },
           "pause": {
             "name": "pause",
             "type": "method",
-            "lineno": 775,
+            "lineno": 810,
             "visibility": "public"
           },
           "resume": {
             "name": "resume",
             "type": "method",
-            "lineno": 779,
+            "lineno": 814,
             "visibility": "public"
           },
           "is_paused": {
             "name": "is_paused",
             "type": "method",
-            "lineno": 783,
+            "lineno": 818,
             "visibility": "public"
           },
           "send_command": {
             "name": "send_command",
             "type": "method",
-            "lineno": 787,
+            "lineno": 822,
             "calls": [
               "get",
               "warning"
@@ -19365,25 +19573,25 @@
           "register_callback": {
             "name": "register_callback",
             "type": "method",
-            "lineno": 825,
+            "lineno": 860,
             "visibility": "public"
           },
           "unregister_callback": {
             "name": "unregister_callback",
             "type": "method",
-            "lineno": 837,
+            "lineno": 872,
             "visibility": "public"
           },
           "dispatcher": {
             "name": "dispatcher",
             "type": "method",
-            "lineno": 844,
+            "lineno": 879,
             "visibility": "public"
           },
           "get_stats": {
             "name": "get_stats",
             "type": "method",
-            "lineno": 848,
+            "lineno": 883,
             "visibility": "public"
           }
         },
@@ -19409,7 +19617,7 @@
           "connect": {
             "name": "connect",
             "type": "method",
-            "lineno": 65,
+            "lineno": 71,
             "calls": [
               "_disconnect_unsafe",
               "_flush_receive_buffer",
@@ -19424,7 +19632,7 @@
           "connect_live": {
             "name": "connect_live",
             "type": "method",
-            "lineno": 185,
+            "lineno": 191,
             "calls": [
               "ConnectionError",
               "socket"
@@ -19434,19 +19642,19 @@
           "is_live_connected": {
             "name": "is_live_connected",
             "type": "method",
-            "lineno": 248,
+            "lineno": 254,
             "visibility": "public"
           },
           "disconnect_live": {
             "name": "disconnect_live",
             "type": "method",
-            "lineno": 253,
+            "lineno": 259,
             "visibility": "public"
           },
           "_flush_receive_buffer": {
             "name": "_flush_receive_buffer",
             "type": "method",
-            "lineno": 269,
+            "lineno": 275,
             "calls": [
               "gettimeout",
               "len",
@@ -19458,7 +19666,7 @@
           "disconnect": {
             "name": "disconnect",
             "type": "method",
-            "lineno": 313,
+            "lineno": 319,
             "calls": [
               "_disconnect_unsafe"
             ],
@@ -19467,13 +19675,13 @@
           "_disconnect_unsafe": {
             "name": "_disconnect_unsafe",
             "type": "method",
-            "lineno": 325,
+            "lineno": 331,
             "visibility": "private"
           },
           "send_bytes": {
             "name": "send_bytes",
             "type": "method",
-            "lineno": 366,
+            "lineno": 372,
             "calls": [
               "ConnectionError",
               "ValueError",
@@ -19487,7 +19695,7 @@
           "receive_bytes": {
             "name": "receive_bytes",
             "type": "method",
-            "lineno": 411,
+            "lineno": 417,
             "calls": [
               "ConnectionError",
               "ValueError",
@@ -19501,7 +19709,7 @@
           "receive_all_bytes": {
             "name": "receive_all_bytes",
             "type": "method",
-            "lineno": 483,
+            "lineno": 489,
             "calls": [
               "ConnectionError",
               "ValueError",
@@ -19515,7 +19723,7 @@
           "check_for_unsolicited_message": {
             "name": "check_for_unsolicited_message",
             "type": "method",
-            "lineno": 582,
+            "lineno": 588,
             "calls": [
               "receive_bytes"
             ],
@@ -19524,52 +19732,74 @@
           "is_connected": {
             "name": "is_connected",
             "type": "method",
-            "lineno": 637,
+            "lineno": 643,
             "visibility": "public"
           },
           "get_connection_info": {
             "name": "get_connection_info",
             "type": "method",
-            "lineno": 651,
+            "lineno": 657,
             "visibility": "public"
           },
           "_start_async_reader": {
             "name": "_start_async_reader",
             "type": "method",
-            "lineno": 668,
+            "lineno": 674,
             "calls": [
               "CommandClient"
             ],
             "visibility": "private"
           },
+          "_on_reader_closed": {
+            "name": "_on_reader_closed",
+            "type": "method",
+            "lineno": 689,
+            "calls": [
+              "list",
+              "listener"
+            ],
+            "visibility": "private"
+          },
+          "add_connection_lost_listener": {
+            "name": "add_connection_lost_listener",
+            "type": "method",
+            "lineno": 711,
+            "visibility": "public"
+          },
+          "remove_connection_lost_listener": {
+            "name": "remove_connection_lost_listener",
+            "type": "method",
+            "lineno": 722,
+            "visibility": "public"
+          },
           "has_async_reader": {
             "name": "has_async_reader",
             "type": "method",
-            "lineno": 682,
+            "lineno": 731,
             "visibility": "public"
           },
           "pause_async_reader": {
             "name": "pause_async_reader",
             "type": "method",
-            "lineno": 686,
+            "lineno": 735,
             "visibility": "public"
           },
           "resume_async_reader": {
             "name": "resume_async_reader",
             "type": "method",
-            "lineno": 701,
+            "lineno": 750,
             "visibility": "public"
           },
           "dispatcher": {
             "name": "dispatcher",
             "type": "method",
-            "lineno": 714,
+            "lineno": 763,
             "visibility": "public"
           },
           "send_command_async": {
             "name": "send_command_async",
             "type": "method",
-            "lineno": 725,
+            "lineno": 774,
             "calls": [
               "ConnectionError",
               "RuntimeError"
@@ -19579,7 +19809,7 @@
           "register_callback": {
             "name": "register_callback",
             "type": "method",
-            "lineno": 759,
+            "lineno": 808,
             "calls": [
               "RuntimeError"
             ],
@@ -19588,19 +19818,19 @@
           "unregister_callback": {
             "name": "unregister_callback",
             "type": "method",
-            "lineno": 780,
+            "lineno": 829,
             "visibility": "public"
           },
           "get_async_stats": {
             "name": "get_async_stats",
             "type": "method",
-            "lineno": 787,
+            "lineno": 836,
             "visibility": "public"
           },
           "_validate_ip": {
             "name": "_validate_ip",
             "type": "method",
-            "lineno": 799,
+            "lineno": 848,
             "calls": [
               "ValueError",
               "int",
@@ -19613,7 +19843,7 @@
           "_validate_port": {
             "name": "_validate_port",
             "type": "method",
-            "lineno": 826,
+            "lineno": 875,
             "calls": [
               "ValueError",
               "isinstance",
@@ -20042,7 +20272,7 @@
           "connect": {
             "name": "connect",
             "type": "method",
-            "lineno": 493,
+            "lineno": 505,
             "calls": [
               "ConnectionError",
               "ConnectionStatus",
@@ -20057,7 +20287,7 @@
           "disconnect": {
             "name": "disconnect",
             "type": "method",
-            "lineno": 570,
+            "lineno": 586,
             "calls": [
               "ConnectionStatus",
               "RuntimeError",
@@ -20068,7 +20298,7 @@
           "connect_live": {
             "name": "connect_live",
             "type": "method",
-            "lineno": 612,
+            "lineno": 628,
             "calls": [
               "ConnectionError",
               "is_connected"
@@ -20078,7 +20308,7 @@
           "reconnect": {
             "name": "reconnect",
             "type": "method",
-            "lineno": 638,
+            "lineno": 654,
             "calls": [
               "connect",
               "disconnect",
@@ -20086,16 +20316,62 @@
             ],
             "visibility": "public"
           },
+          "reconnect_last": {
+            "name": "reconnect_last",
+            "type": "method",
+            "lineno": 680,
+            "calls": [
+              "connect",
+              "list",
+              "listener"
+            ],
+            "visibility": "public"
+          },
+          "add_connection_lost_listener": {
+            "name": "add_connection_lost_listener",
+            "type": "method",
+            "lineno": 723,
+            "visibility": "public"
+          },
+          "remove_connection_lost_listener": {
+            "name": "remove_connection_lost_listener",
+            "type": "method",
+            "lineno": 733,
+            "visibility": "public"
+          },
+          "add_connection_restored_listener": {
+            "name": "add_connection_restored_listener",
+            "type": "method",
+            "lineno": 738,
+            "visibility": "public"
+          },
+          "remove_connection_restored_listener": {
+            "name": "remove_connection_restored_listener",
+            "type": "method",
+            "lineno": 743,
+            "visibility": "public"
+          },
+          "_on_tcp_connection_lost": {
+            "name": "_on_tcp_connection_lost",
+            "type": "method",
+            "lineno": 748,
+            "calls": [
+              "ConnectionStatus",
+              "list",
+              "listener"
+            ],
+            "visibility": "private"
+          },
           "is_connected": {
             "name": "is_connected",
             "type": "method",
-            "lineno": 660,
+            "lineno": 783,
             "visibility": "public"
           },
           "query_available_drives": {
             "name": "query_available_drives",
             "type": "method",
-            "lineno": 671,
+            "lineno": 794,
             "calls": [
               "Command",
               "RuntimeError",
@@ -20112,7 +20388,7 @@
           "query_system_state": {
             "name": "query_system_state",
             "type": "method",
-            "lineno": 781,
+            "lineno": 904,
             "calls": [
               "Command",
               "RuntimeError",
@@ -20126,7 +20402,7 @@
           "has_async_reader": {
             "name": "has_async_reader",
             "type": "method",
-            "lineno": 854,
+            "lineno": 977,
             "calls": [
               "hasattr"
             ],
@@ -20135,7 +20411,7 @@
           "pause_async_reader": {
             "name": "pause_async_reader",
             "type": "method",
-            "lineno": 862,
+            "lineno": 985,
             "calls": [
               "hasattr"
             ],
@@ -20144,7 +20420,7 @@
           "resume_async_reader": {
             "name": "resume_async_reader",
             "type": "method",
-            "lineno": 868,
+            "lineno": 991,
             "calls": [
               "hasattr"
             ],
@@ -20153,7 +20429,7 @@
           "register_callback": {
             "name": "register_callback",
             "type": "method",
-            "lineno": 874,
+            "lineno": 997,
             "calls": [
               "hasattr"
             ],
@@ -20162,7 +20438,7 @@
           "unregister_callback": {
             "name": "unregister_callback",
             "type": "method",
-            "lineno": 888,
+            "lineno": 1011,
             "calls": [
               "hasattr"
             ],
@@ -20171,7 +20447,7 @@
           "send_command_async": {
             "name": "send_command_async",
             "type": "method",
-            "lineno": 900,
+            "lineno": 1023,
             "calls": [
               "hasattr"
             ],
@@ -20180,7 +20456,7 @@
           "send_command": {
             "name": "send_command",
             "type": "method",
-            "lineno": 910,
+            "lineno": 1033,
             "calls": [
               "_update_error_state",
               "isinstance",
@@ -20191,7 +20467,7 @@
           "_receive_full_response": {
             "name": "_receive_full_response",
             "type": "method",
-            "lineno": 940,
+            "lineno": 1063,
             "calls": [
               "ConnectionError",
               "gettimeout",
@@ -20207,7 +20483,7 @@
           "_update_error_state": {
             "name": "_update_error_state",
             "type": "method",
-            "lineno": 1002,
+            "lineno": 1125,
             "calls": [
               "ConnectionStatus"
             ],
@@ -20216,13 +20492,13 @@
           "get_status": {
             "name": "get_status",
             "type": "method",
-            "lineno": 1017,
+            "lineno": 1140,
             "visibility": "public"
           },
           "_send_command_with_text_response": {
             "name": "_send_command_with_text_response",
             "type": "method",
-            "lineno": 1026,
+            "lineno": 1149,
             "calls": [
               "ConnectionError",
               "RuntimeError",
@@ -20242,7 +20518,7 @@
           "get_microscope_settings": {
             "name": "get_microscope_settings",
             "type": "method",
-            "lineno": 1153,
+            "lineno": 1276,
             "calls": [
               "Command",
               "ConnectionError",
@@ -25280,7 +25556,7 @@
       "MIPOverviewDialog": {
         "name": "MIPOverviewDialog",
         "type": "class",
-        "lineno": 66,
+        "lineno": 72,
         "calls": [
           "pyqtSignal"
         ],
@@ -25291,7 +25567,7 @@
           "__init__": {
             "name": "__init__",
             "type": "method",
-            "lineno": 80,
+            "lineno": 86,
             "calls": [
               "_setup_ui",
               "setMinimumSize",
@@ -25303,7 +25579,7 @@
           "_setup_ui": {
             "name": "_setup_ui",
             "type": "method",
-            "lineno": 100,
+            "lineno": 110,
             "calls": [
               "ImagePanel",
               "QComboBox",
@@ -25328,7 +25604,7 @@
           "showEvent": {
             "name": "showEvent",
             "type": "method",
-            "lineno": 240,
+            "lineno": 271,
             "calls": [
               "singleShot",
               "super"
@@ -25338,7 +25614,7 @@
           "_on_browse": {
             "name": "_on_browse",
             "type": "method",
-            "lineno": 250,
+            "lineno": 281,
             "calls": [
               "Path",
               "_update_date_combo",
@@ -25352,8 +25628,10 @@
           "_update_date_combo": {
             "name": "_update_date_combo",
             "type": "method",
-            "lineno": 269,
+            "lineno": 300,
             "calls": [
+              "_update_channel_visibility",
+              "detect_layout_type",
               "find_date_folders",
               "find_tile_folders"
             ],
@@ -25362,20 +25640,34 @@
           "_on_date_changed": {
             "name": "_on_date_changed",
             "type": "method",
-            "lineno": 287,
+            "lineno": 340,
             "visibility": "private"
           },
           "_on_load": {
             "name": "_on_load",
             "type": "method",
-            "lineno": 295,
+            "lineno": 348,
+            "calls": [
+              "Path",
+              "_on_load_flat",
+              "_on_load_subfolder",
+              "detect_layout_type",
+              "endswith",
+              "replace"
+            ],
+            "visibility": "private"
+          },
+          "_on_load_subfolder": {
+            "name": "_on_load_subfolder",
+            "type": "method",
+            "lineno": 372,
             "calls": [
               "MIPOverviewConfig",
               "MIPTileResult",
-              "Path",
               "QProgressDialog",
               "_enable_controls",
               "_stitch_and_display",
+              "_update_channel_visibility",
               "_update_status",
               "append",
               "calculate_grid_indices",
@@ -25401,10 +25693,87 @@
             ],
             "visibility": "private"
           },
+          "_on_load_flat": {
+            "name": "_on_load_flat",
+            "type": "method",
+            "lineno": 481,
+            "calls": [
+              "MIPOverviewConfig",
+              "_enable_controls",
+              "_load_flat_channel",
+              "_stitch_and_display",
+              "_update_channel_visibility",
+              "_update_status",
+              "calculate_grid_indices",
+              "discover_flat_mip_tiles",
+              "info",
+              "len",
+              "load_invert_x_setting",
+              "max",
+              "set",
+              "sorted",
+              "warning"
+            ],
+            "visibility": "private"
+          },
+          "_load_flat_channel": {
+            "name": "_load_flat_channel",
+            "type": "method",
+            "lineno": 552,
+            "calls": [
+              "MIPTileResult",
+              "append",
+              "enumerate",
+              "id",
+              "imread",
+              "len",
+              "next",
+              "str",
+              "warning"
+            ],
+            "visibility": "private"
+          },
+          "_update_channel_visibility": {
+            "name": "_update_channel_visibility",
+            "type": "method",
+            "lineno": 626,
+            "visibility": "private"
+          },
+          "_on_channel_changed": {
+            "name": "_on_channel_changed",
+            "type": "method",
+            "lineno": 632,
+            "calls": [
+              "_load_flat_channel",
+              "_stitch_and_display",
+              "_update_status",
+              "calculate_grid_indices",
+              "info",
+              "warning"
+            ],
+            "visibility": "private"
+          },
+          "_on_export_overview": {
+            "name": "_on_export_overview",
+            "type": "method",
+            "lineno": 658,
+            "calls": [
+              "Path",
+              "critical",
+              "exception",
+              "export_overview_with_labels",
+              "getSaveFileName",
+              "home",
+              "information",
+              "str",
+              "warning"
+            ],
+            "visibility": "private"
+          },
           "_stitch_and_display": {
             "name": "_stitch_and_display",
             "type": "method",
-            "lineno": 422,
+            "lineno": 698,
             "calls": [
               "_mip_tiles_to_tile_results",
               "info",
@@ -25418,7 +25787,7 @@
           "_mip_tiles_to_tile_results": {
             "name": "_mip_tiles_to_tile_results",
             "type": "method",
-            "lineno": 500,
+            "lineno": 776,
             "calls": [
               "TileResult",
               "append"
@@ -25428,7 +25797,7 @@
           "_update_status": {
             "name": "_update_status",
             "type": "method",
-            "lineno": 520,
+            "lineno": 796,
             "calls": [
               "len"
             ],
@@ -25437,13 +25806,13 @@
           "_enable_controls": {
             "name": "_enable_controls",
             "type": "method",
-            "lineno": 537,
+            "lineno": 816,
             "visibility": "private"
           },
           "_on_selection_changed": {
             "name": "_on_selection_changed",
             "type": "method",
-            "lineno": 547,
+            "lineno": 827,
             "calls": [
               "_update_status"
             ],
@@ -25452,7 +25821,7 @@
           "_on_tile_right_clicked": {
             "name": "_on_tile_right_clicked",
             "type": "method",
-            "lineno": 551,
+            "lineno": 831,
             "calls": [
               "error",
               "hasattr",
@@ -25464,7 +25833,7 @@
           "_on_select_all": {
             "name": "_on_select_all",
             "type": "method",
-            "lineno": 613,
+            "lineno": 893,
             "calls": [
               "_update_status"
             ],
@@ -25473,7 +25842,7 @@
           "_on_clear_selection": {
             "name": "_on_clear_selection",
             "type": "method",
-            "lineno": 618,
+            "lineno": 898,
             "calls": [
               "_update_status"
             ],
@@ -25482,7 +25851,7 @@
           "_on_auto_select": {
             "name": "_on_auto_select",
             "type": "method",
-            "lineno": 623,
+            "lineno": 903,
             "calls": [
               "OverviewThresholderDialog",
               "_update_status",
@@ -25496,7 +25865,7 @@
           "_on_collect_tiles": {
             "name": "_on_collect_tiles",
             "type": "method",
-            "lineno": 655,
+            "lineno": 935,
             "calls": [
               "TileCollectionDialog",
               "exec_",
@@ -25511,7 +25880,7 @@
           "_on_collection_complete": {
             "name": "_on_collection_complete",
             "type": "method",
-            "lineno": 693,
+            "lineno": 973,
             "calls": [
               "info"
             ],
@@ -25520,19 +25889,19 @@
           "_on_fit": {
             "name": "_on_fit",
             "type": "method",
-            "lineno": 699,
+            "lineno": 979,
             "visibility": "private"
           },
           "_on_one_to_one": {
             "name": "_on_one_to_one",
             "type": "method",
-            "lineno": 704,
+            "lineno": 984,
             "visibility": "private"
           },
           "_on_save_session": {
             "name": "_on_save_session",
             "type": "method",
-            "lineno": 709,
+            "lineno": 989,
             "calls": [
               "Path",
               "_save_session_tiff",
@@ -25554,7 +25923,7 @@
           "_save_session_tiff": {
             "name": "_save_session_tiff",
             "type": "method",
-            "lineno": 781,
+            "lineno": 1061,
             "calls": [
               "critical",
               "dump",
@@ -25569,7 +25938,7 @@
           "_on_load_session": {
             "name": "_on_load_session",
             "type": "method",
-            "lineno": 804,
+            "lineno": 1084,
             "calls": [
               "Path",
               "_enable_controls",
@@ -25600,7 +25969,7 @@
           "load_from_folder": {
             "name": "load_from_folder",
             "type": "method",
-            "lineno": 919,
+            "lineno": 1199,
             "calls": [
               "Path",
               "_enable_controls",
@@ -28180,7 +28549,7 @@
       "MIPTileResult": {
         "name": "MIPTileResult",
         "type": "class",
-        "lineno": 18,
+        "lineno": 33,
         "calls": [
           "field",
           "zeros"
@@ -28189,7 +28558,7 @@
           "to_dict": {
             "name": "to_dict",
             "type": "method",
-            "lineno": 50,
+            "lineno": 65,
             "calls": [
               "str"
             ],
@@ -28198,7 +28567,7 @@
           "from_dict": {
             "name": "from_dict",
             "type": "method",
-            "lineno": 69,
+            "lineno": 84,
             "calls": [
               "Path",
               "cls",
@@ -28210,15 +28579,27 @@
         },
         "visibility": "public"
       },
+      "FlatMIPTileInfo": {
+        "name": "FlatMIPTileInfo",
+        "type": "class",
+        "lineno": 111,
+        "calls": [
+          "field"
+        ],
+        "visibility": "public"
+      },
       "MIPOverviewConfig": {
         "name": "MIPOverviewConfig",
         "type": "class",
-        "lineno": 96,
+        "lineno": 137,
+        "calls": [
+          "field"
+        ],
         "methods": {
           "to_dict": {
             "name": "to_dict",
             "type": "method",
-            "lineno": 122,
+            "lineno": 169,
             "calls": [
               "str"
             ],
@@ -28227,7 +28608,7 @@
           "from_dict": {
             "name": "from_dict",
             "type": "method",
-            "lineno": 140,
+            "lineno": 190,
             "calls": [
               "Path",
               "cls",
@@ -28241,7 +28622,7 @@
       "parse_coords_from_folder": {
         "name": "parse_coords_from_folder",
         "type": "function",
-        "lineno": 161,
+        "lineno": 214,
         "calls": [
           "ValueError",
           "float",
@@ -28253,7 +28634,7 @@
       "calculate_grid_indices": {
         "name": "calculate_grid_indices",
         "type": "function",
-        "lineno": 185,
+        "lineno": 238,
         "calls": [
           "enumerate",
           "set",
@@ -28264,7 +28645,7 @@
       "find_date_folders": {
         "name": "find_date_folders",
         "type": "function",
-        "lineno": 211,
+        "lineno": 264,
         "calls": [
           "append",
           "compile",
@@ -28278,7 +28659,7 @@
       "find_tile_folders": {
         "name": "find_tile_folders",
         "type": "function",
-        "lineno": 234,
+        "lineno": 287,
         "calls": [
           "append",
           "compile",
@@ -28291,17 +28672,114 @@
       "load_invert_x_setting": {
         "name": "load_invert_x_setting",
         "type": "function",
-        "lineno": 256,
+        "lineno": 309,
         "calls": [
           "Path",
           "cwd",
           "exists",
           "get",
-          "getLogger",
           "info",
           "open",
           "safe_load",
           "warning"
+        ],
+        "visibility": "public"
+      },
+      "_parse_flat_mip_filename": {
+        "name": "_parse_flat_mip_filename",
+        "type": "function",
+        "lineno": 351,
+        "calls": [
+          "group",
+          "int",
+          "search"
+        ],
+        "visibility": "private"
+      },
+      "detect_layout_type": {
+        "name": "detect_layout_type",
+        "type": "function",
+        "lineno": 368,
+        "calls": [
+          "_parse_flat_mip_filename",
+          "compile",
+          "glob",
+          "is_dir",
+          "is_file",
+          "iterdir",
+          "list",
+          "match"
+        ],
+        "visibility": "public"
+      },
+      "discover_flat_mip_tiles": {
+        "name": "discover_flat_mip_tiles",
+        "type": "function",
+        "lineno": 397,
+        "calls": [
+          "FlatMIPTileInfo",
+          "_parse_flat_mip_filename",
+          "_resolve_flat_tile_position",
+          "append",
+          "info",
+          "is_dir",
+          "is_file",
+          "items",
+          "iterdir",
+          "len",
+          "set",
+          "sort",
+          "sorted",
+          "warning"
+        ],
+        "visibility": "public"
+      },
+      "_resolve_flat_tile_position": {
+        "name": "_resolve_flat_tile_position",
+        "type": "function",
+        "lineno": 456,
+        "calls": [
+          "_compute_grid_position",
+          "_read_position_from_settings",
+          "debug",
+          "endswith",
+          "exists",
+          "float",
+          "values",
+          "warning"
+        ],
+        "visibility": "private"
+      },
+      "export_overview_with_labels": {
+        "name": "export_overview_with_labels",
+        "type": "function",
+        "lineno": 510,
+        "calls": [
+          "Draw",
+          "abs",
+          "array",
+          "astype",
+          "block_reduce",
+          "enumerate",
+          "imread",
+          "imwrite",
+          "info",
+          "int",
+          "len",
+          "line",
+          "load_default",
+          "max",
+          "min",
+          "new",
+          "range",
+          "set",
+          "sorted",
+          "str",
+          "text",
+          "textbbox",
+          "truetype",
+          "warning",
+          "zeros"
         ],
         "visibility": "public"
       }
@@ -30983,6 +31461,489 @@
         "visibility": "public"
       }
     },
+    "py2flamingo.stitching.pipeline": {
+      "StitchingConfig": {
+        "name": "StitchingConfig",
+        "type": "class",
+        "lineno": 47,
+        "calls": [
+          "field"
+        ],
+        "visibility": "public"
+      },
+      "RawTileInfo": {
+        "name": "RawTileInfo",
+        "type": "class",
+        "lineno": 149,
+        "calls": [
+          "field"
+        ],
+        "methods": {
+          "z_step_mm": {
+            "name": "z_step_mm",
+            "type": "method",
+            "lineno": 164,
+            "visibility": "public"
+          }
+        },
+        "visibility": "public"
+      },
+      "discover_tiles": {
+        "name": "discover_tiles",
+        "type": "function",
+        "lineno": 173,
+        "calls": [
+          "_parse_tile_folder",
+          "append",
+          "info",
+          "is_dir",
+          "iterdir",
+          "len",
+          "search",
+          "sort",
+          "sorted",
+          "warning"
+        ],
+        "visibility": "public"
+      },
+      "_parse_tile_folder": {
+        "name": "_parse_tile_folder",
+        "type": "function",
+        "lineno": 215,
+        "calls": [
+          "RawTileInfo",
+          "_read_z_range",
+          "add",
+          "float",
+          "group",
+          "int",
+          "iterdir",
+          "match",
+          "max",
+          "search",
+          "set",
+          "sorted",
+          "warning"
+        ],
+        "visibility": "private"
+      },
+      "_read_z_range": {
+        "name": "_read_z_range",
+        "type": "function",
+        "lineno": 265,
+        "calls": [
+          "exists",
+          "float",
+          "group",
+          "read_text",
+          "search",
+          "warning"
+        ],
+        "visibility": "private"
+      },
+      "_read_position_from_settings": {
+        "name": "_read_position_from_settings",
+        "type": "function",
+        "lineno": 288,
+        "calls": [
+          "float",
+          "group",
+          "read_text",
+          "search"
+        ],
+        "visibility": "private"
+      },
+      "_read_plane_spacing": {
+        "name": "_read_plane_spacing",
+        "type": "function",
+        "lineno": 319,
+        "calls": [
+          "exists",
+          "float",
+          "group",
+          "read_text",
+          "search"
+        ],
+        "visibility": "private"
+      },
+      "discover_flat_tiles": {
+        "name": "discover_flat_tiles",
+        "type": "function",
+        "lineno": 335,
+        "calls": [
+          "RawTileInfo",
+          "_compute_grid_position",
+          "_read_position_from_settings",
+          "add",
+          "append",
+          "exists",
+          "glob",
+          "group",
+          "info",
+          "int",
+          "is_dir",
+          "items",
+          "iterdir",
+          "len",
+          "list",
+          "max",
+          "search",
+          "set",
+          "setdefault",
+          "sort",
+          "sorted",
+          "warning",
+          "with_name"
+        ],
+        "visibility": "public"
+      },
+      "_compute_grid_position": {
+        "name": "_compute_grid_position",
+        "type": "function",
+        "lineno": 447,
+        "calls": [
+          "float",
+          "group",
+          "int",
+          "max",
+          "read_text",
+          "search"
+        ],
+        "visibility": "private"
+      },
+      "load_raw_volume": {
+        "name": "load_raw_volume",
+        "type": "function",
+        "lineno": 509,
+        "calls": [
+          "memmap",
+          "stat",
+          "warning"
+        ],
+        "visibility": "public"
+      },
+      "fuse_illumination_sides": {
+        "name": "fuse_illumination_sides",
+        "type": "function",
+        "lineno": 531,
+        "calls": [
+          "ValueError",
+          "_fuse_leonardo",
+          "asarray",
+          "astype",
+          "keys",
+          "len",
+          "maximum",
+          "sorted"
+        ],
+        "visibility": "public"
+      },
+      "_fuse_leonardo": {
+        "name": "_fuse_leonardo",
+        "type": "function",
+        "lineno": 566,
+        "calls": [
+          "FUSE_illu",
+          "IsolatedPreprocessingService",
+          "astype",
+          "clip",
+          "fuse",
+          "fuse_illumination_leonardo",
+          "has_leonardo",
+          "info",
+          "maximum",
+          "warning"
+        ],
+        "visibility": "private"
+      },
+      "_estimate_destripe_workers": {
+        "name": "_estimate_destripe_workers",
+        "type": "function",
+        "lineno": 603,
+        "calls": [
+          "cpu_count",
+          "int",
+          "max",
+          "min",
+          "virtual_memory"
+        ],
+        "visibility": "private"
+      },
+      "destripe_volume": {
+        "name": "destripe_volume",
+        "type": "function",
+        "lineno": 628,
+        "calls": [
+          "ThreadPoolExecutor",
+          "_estimate_destripe_workers",
+          "_process_plane",
+          "add",
+          "append",
+          "as_completed",
+          "empty_like",
+          "filter_streaks",
+          "info",
+          "len",
+          "list",
+          "max",
+          "range",
+          "result",
+          "set",
+          "sorted",
+          "submit",
+          "time",
+          "warning"
+        ],
+        "visibility": "public"
+      },
+      "downsample_volume": {
+        "name": "downsample_volume",
+        "type": "function",
+        "lineno": 727,
+        "calls": [
+          "astype",
+          "clip",
+          "info",
+          "zoom"
+        ],
+        "visibility": "public"
+      },
+      "StitchingPipeline": {
+        "name": "StitchingPipeline",
+        "type": "class",
+        "lineno": 757,
+        "methods": {
+          "__init__": {
+            "name": "__init__",
+            "type": "method",
+            "lineno": 769,
+            "calls": [
+              "StitchingConfig",
+              "getLogger"
+            ],
+            "visibility": "public"
+          },
+          "_build_output_basename": {
+            "name": "_build_output_basename",
+            "type": "method",
+            "lineno": 774,
+            "calls": [
+              "append"
+            ],
+            "visibility": "private"
+          },
+          "run": {
+            "name": "run",
+            "type": "method",
+            "lineno": 818,
+            "calls": [
+              "FileNotFoundError",
+              "Path",
+              "_build_output_basename",
+              "_cancelled_fn",
+              "_fuse_channel",
+              "_load_and_preprocess",
+              "_log_tile_summary",
+              "_progress_fn",
+              "_register_tiles",
+              "_write_multichannel_output",
+              "_write_stitch_metadata_v2",
+              "append",
+              "apply_flat_field",
+              "asarray",
+              "clip",
+              "discover_tiles",
+              "estimate_flat_fields",
+              "get",
+              "is_available",
+              "len",
+              "max",
+              "mkdir",
+              "pad",
+              "range",
+              "set",
+              "sorted",
+              "stack",
+              "time",
+              "tuple"
+            ],
+            "visibility": "public"
+          },
+          "_load_and_preprocess": {
+            "name": "_load_and_preprocess",
+            "type": "method",
+            "lineno": 1053,
+            "calls": [
+              "_cancelled_fn",
+              "_deconvolve_tile",
+              "array",
+              "asarray",
+              "correct_depth_attenuation",
+              "destripe_volume",
+              "downsample_volume",
+              "enumerate",
+              "fuse_illumination_sides",
+              "items",
+              "len",
+              "list",
+              "load_raw_volume",
+              "range",
+              "values"
+            ],
+            "visibility": "private"
+          },
+          "_register_tiles": {
+            "name": "_register_tiles",
+            "type": "method",
+            "lineno": 1145,
+            "calls": [
+              "ImportError",
+              "append",
+              "from_array",
+              "getLogger",
+              "get_msim_from_sim",
+              "get_sim_from_array",
+              "isinstance",
+              "len",
+              "list",
+              "register",
+              "setLevel"
+            ],
+            "visibility": "private"
+          },
+          "_fuse_channel": {
+            "name": "_fuse_channel",
+            "type": "method",
+            "lineno": 1244,
+            "calls": [
+              "ImportError",
+              "append",
+              "dict",
+              "float",
+              "from_array",
+              "fuse",
+              "get_msim_from_sim",
+              "get_sim_from_array",
+              "get_sim_from_msim",
+              "isinstance",
+              "set_affine_transform",
+              "zip"
+            ],
+            "visibility": "private"
+          },
+          "_write_multichannel_output": {
+            "name": "_write_multichannel_output",
+            "type": "method",
+            "lineno": 1344,
+            "calls": [
+              "package_as_ozx",
+              "write_ome_zarr_sharded",
+              "write_ome_zarr_v2",
+              "write_pyramidal_ome_tiff"
+            ],
+            "visibility": "private"
+          },
+          "_write_stitch_metadata_v2": {
+            "name": "_write_stitch_metadata_v2",
+            "type": "method",
+            "lineno": 1434,
+            "calls": [
+              "dumps",
+              "len",
+              "str",
+              "write_text"
+            ],
+            "visibility": "private"
+          },
+          "_register_and_fuse": {
+            "name": "_register_and_fuse",
+            "type": "method",
+            "lineno": 1481,
+            "calls": [
+              "ImportError",
+              "_write_output",
+              "append",
+              "dict",
+              "float",
+              "from_array",
+              "fuse",
+              "get_msim_from_sim",
+              "get_sim_from_array",
+              "get_sim_from_msim",
+              "isinstance",
+              "len",
+              "register",
+              "set_affine_transform",
+              "zip"
+            ],
+            "visibility": "private"
+          },
+          "_write_output": {
+            "name": "_write_output",
+            "type": "method",
+            "lineno": 1640,
+            "calls": [
+              "_save_as_tiff",
+              "package_as_ozx",
+              "str",
+              "write_ome_zarr_sharded",
+              "write_ome_zarr_v2",
+              "write_pyramidal_ome_tiff",
+              "write_sim_to_ome_zarr"
+            ],
+            "visibility": "private"
+          },
+          "_write_stitch_metadata": {
+            "name": "_write_stitch_metadata",
+            "type": "method",
+            "lineno": 1754,
+            "calls": [
+              "dumps",
+              "items",
+              "len",
+              "str",
+              "write_text"
+            ],
+            "visibility": "private"
+          },
+          "_save_as_tiff": {
+            "name": "_save_as_tiff",
+            "type": "method",
+            "lineno": 1783,
+            "calls": [
+              "imwrite",
+              "save_sim_as_tif",
+              "str"
+            ],
+            "visibility": "private"
+          },
+          "_deconvolve_tile": {
+            "name": "_deconvolve_tile",
+            "type": "method",
+            "lineno": 1802,
+            "calls": [
+              "DeconvolutionConfig",
+              "deconvolve_tile"
+            ],
+            "visibility": "private"
+          },
+          "_log_tile_summary": {
+            "name": "_log_tile_summary",
+            "type": "method",
+            "lineno": 1838,
+            "calls": [
+              "len",
+              "max",
+              "min",
+              "set",
+              "sorted"
+            ],
+            "visibility": "private"
+          }
+        },
+        "visibility": "public"
+      }
+    },
     "py2flamingo.napari": {
       "NapariFlamingoGui": {
         "name": "NapariFlamingoGui",
@@ -32696,487 +33657,6 @@
               "range",
               "set",
               "zeros"
-            ],
-            "visibility": "private"
-          }
-        },
-        "visibility": "public"
-      }
-    },
-    "py2flamingo.stitching.pipeline": {
-      "StitchingConfig": {
-        "name": "StitchingConfig",
-        "type": "class",
-        "lineno": 47,
-        "calls": [
-          "field"
-        ],
-        "visibility": "public"
-      },
-      "RawTileInfo": {
-        "name": "RawTileInfo",
-        "type": "class",
-        "lineno": 149,
-        "calls": [
-          "field"
-        ],
-        "methods": {
-          "z_step_mm": {
-            "name": "z_step_mm",
-            "type": "method",
-            "lineno": 164,
-            "visibility": "public"
-          }
-        },
-        "visibility": "public"
-      },
-      "discover_tiles": {
-        "name": "discover_tiles",
-        "type": "function",
-        "lineno": 173,
-        "calls": [
-          "_parse_tile_folder",
-          "append",
-          "info",
-          "is_dir",
-          "iterdir",
-          "len",
-          "search",
-          "sort",
-          "sorted",
-          "warning"
-        ],
-        "visibility": "public"
-      },
-      "_parse_tile_folder": {
-        "name": "_parse_tile_folder",
-        "type": "function",
-        "lineno": 215,
-        "calls": [
-          "RawTileInfo",
-          "_read_z_range",
-          "add",
-          "float",
-          "group",
-          "int",
-          "iterdir",
-          "match",
-          "max",
-          "search",
-          "set",
-          "sorted",
-          "warning"
-        ],
-        "visibility": "private"
-      },
-      "_read_z_range": {
-        "name": "_read_z_range",
-        "type": "function",
-        "lineno": 265,
-        "calls": [
-          "exists",
-          "float",
-          "group",
-          "read_text",
-          "search",
-          "warning"
-        ],
-        "visibility": "private"
-      },
-      "_read_position_from_settings": {
-        "name": "_read_position_from_settings",
-        "type": "function",
-        "lineno": 288,
-        "calls": [
-          "float",
-          "group",
-          "read_text",
-          "search"
-        ],
-        "visibility": "private"
-      },
-      "_read_plane_spacing": {
-        "name": "_read_plane_spacing",
-        "type": "function",
-        "lineno": 319,
-        "calls": [
-          "exists",
-          "float",
-          "group",
-          "read_text",
-          "search"
-        ],
-        "visibility": "private"
-      },
-      "discover_flat_tiles": {
-        "name": "discover_flat_tiles",
-        "type": "function",
-        "lineno": 335,
-        "calls": [
-          "RawTileInfo",
-          "_compute_grid_position",
-          "_read_position_from_settings",
-          "add",
-          "append",
-          "exists",
-          "glob",
-          "group",
-          "info",
-          "int",
-          "is_dir",
-          "items",
-          "iterdir",
-          "len",
-          "list",
-          "max",
-          "search",
-          "set",
-          "setdefault",
-          "sort",
-          "sorted",
-          "warning",
-          "with_name"
-        ],
-        "visibility": "public"
-      },
-      "_compute_grid_position": {
-        "name": "_compute_grid_position",
-        "type": "function",
-        "lineno": 447,
-        "calls": [
-          "float",
-          "group",
-          "int",
-          "max",
-          "read_text",
-          "search"
-        ],
-        "visibility": "private"
-      },
-      "load_raw_volume": {
-        "name": "load_raw_volume",
-        "type": "function",
-        "lineno": 509,
-        "calls": [
-          "memmap",
-          "stat",
-          "warning"
-        ],
-        "visibility": "public"
-      },
-      "fuse_illumination_sides": {
-        "name": "fuse_illumination_sides",
-        "type": "function",
-        "lineno": 531,
-        "calls": [
-          "ValueError",
-          "_fuse_leonardo",
-          "asarray",
-          "astype",
-          "keys",
-          "len",
-          "maximum",
-          "sorted"
-        ],
-        "visibility": "public"
-      },
-      "_fuse_leonardo": {
-        "name": "_fuse_leonardo",
-        "type": "function",
-        "lineno": 566,
-        "calls": [
-          "FUSE_illu",
-          "IsolatedPreprocessingService",
-          "astype",
-          "clip",
-          "fuse",
-          "fuse_illumination_leonardo",
-          "has_leonardo",
-          "info",
-          "maximum",
-          "warning"
-        ],
-        "visibility": "private"
-      },
-      "_estimate_destripe_workers": {
-        "name": "_estimate_destripe_workers",
-        "type": "function",
-        "lineno": 603,
-        "calls": [
-          "cpu_count",
-          "int",
-          "max",
-          "min",
-          "virtual_memory"
-        ],
-        "visibility": "private"
-      },
-      "destripe_volume": {
-        "name": "destripe_volume",
-        "type": "function",
-        "lineno": 628,
-        "calls": [
-          "ThreadPoolExecutor",
-          "_estimate_destripe_workers",
-          "_process_plane",
-          "add",
-          "append",
-          "as_completed",
-          "empty_like",
-          "filter_streaks",
-          "info",
-          "len",
-          "list",
-          "max",
-          "range",
-          "result",
-          "set",
-          "sorted",
-          "submit",
-          "time",
-          "warning"
-        ],
-        "visibility": "public"
-      },
-      "downsample_volume": {
-        "name": "downsample_volume",
-        "type": "function",
-        "lineno": 727,
-        "calls": [
-          "astype",
-          "clip",
-          "info",
-          "zoom"
-        ],
-        "visibility": "public"
-      },
-      "StitchingPipeline": {
-        "name": "StitchingPipeline",
-        "type": "class",
-        "lineno": 757,
-        "methods": {
-          "__init__": {
-            "name": "__init__",
-            "type": "method",
-            "lineno": 769,
-            "calls": [
-              "StitchingConfig",
-              "getLogger"
-            ],
-            "visibility": "public"
-          },
-          "_build_output_basename": {
-            "name": "_build_output_basename",
-            "type": "method",
-            "lineno": 774,
-            "calls": [
-              "append"
-            ],
-            "visibility": "private"
-          },
-          "run": {
-            "name": "run",
-            "type": "method",
-            "lineno": 818,
-            "calls": [
-              "FileNotFoundError",
-              "Path",
-              "_build_output_basename",
-              "_cancelled_fn",
-              "_fuse_channel",
-              "_load_and_preprocess",
-              "_log_tile_summary",
-              "_progress_fn",
-              "_register_tiles",
-              "_write_multichannel_output",
-              "_write_stitch_metadata_v2",
-              "append",
-              "apply_flat_field",
-              "asarray",
-              "clip",
-              "discover_tiles",
-              "estimate_flat_fields",
-              "get",
-              "is_available",
-              "len",
-              "max",
-              "mkdir",
-              "pad",
-              "range",
-              "set",
-              "sorted",
-              "stack",
-              "time",
-              "tuple"
-            ],
-            "visibility": "public"
-          },
-          "_load_and_preprocess": {
-            "name": "_load_and_preprocess",
-            "type": "method",
-            "lineno": 1053,
-            "calls": [
-              "_cancelled_fn",
-              "_deconvolve_tile",
-              "asarray",
-              "correct_depth_attenuation",
-              "destripe_volume",
-              "downsample_volume",
-              "enumerate",
-              "fuse_illumination_sides",
-              "items",
-              "len",
-              "list",
-              "load_raw_volume",
-              "values"
-            ],
-            "visibility": "private"
-          },
-          "_register_tiles": {
-            "name": "_register_tiles",
-            "type": "method",
-            "lineno": 1140,
-            "calls": [
-              "ImportError",
-              "append",
-              "from_array",
-              "getLogger",
-              "get_msim_from_sim",
-              "get_sim_from_array",
-              "isinstance",
-              "len",
-              "list",
-              "register",
-              "setLevel"
-            ],
-            "visibility": "private"
-          },
-          "_fuse_channel": {
-            "name": "_fuse_channel",
-            "type": "method",
-            "lineno": 1239,
-            "calls": [
-              "ImportError",
-              "append",
-              "dict",
-              "float",
-              "from_array",
-              "fuse",
-              "get_msim_from_sim",
-              "get_sim_from_array",
-              "get_sim_from_msim",
-              "isinstance",
-              "set_affine_transform",
-              "zip"
-            ],
-            "visibility": "private"
-          },
-          "_write_multichannel_output": {
-            "name": "_write_multichannel_output",
-            "type": "method",
-            "lineno": 1339,
-            "calls": [
-              "package_as_ozx",
-              "write_ome_zarr_sharded",
-              "write_ome_zarr_v2",
-              "write_pyramidal_ome_tiff"
-            ],
-            "visibility": "private"
-          },
-          "_write_stitch_metadata_v2": {
-            "name": "_write_stitch_metadata_v2",
-            "type": "method",
-            "lineno": 1429,
-            "calls": [
-              "dumps",
-              "len",
-              "str",
-              "write_text"
-            ],
-            "visibility": "private"
-          },
-          "_register_and_fuse": {
-            "name": "_register_and_fuse",
-            "type": "method",
-            "lineno": 1476,
-            "calls": [
-              "ImportError",
-              "_write_output",
-              "append",
-              "dict",
-              "float",
-              "from_array",
-              "fuse",
-              "get_msim_from_sim",
-              "get_sim_from_array",
-              "get_sim_from_msim",
-              "isinstance",
-              "len",
-              "register",
-              "set_affine_transform",
-              "zip"
-            ],
-            "visibility": "private"
-          },
-          "_write_output": {
-            "name": "_write_output",
-            "type": "method",
-            "lineno": 1635,
-            "calls": [
-              "_save_as_tiff",
-              "package_as_ozx",
-              "str",
-              "write_ome_zarr_sharded",
-              "write_ome_zarr_v2",
-              "write_pyramidal_ome_tiff",
-              "write_sim_to_ome_zarr"
-            ],
-            "visibility": "private"
-          },
-          "_write_stitch_metadata": {
-            "name": "_write_stitch_metadata",
-            "type": "method",
-            "lineno": 1749,
-            "calls": [
-              "dumps",
-              "items",
-              "len",
-              "str",
-              "write_text"
-            ],
-            "visibility": "private"
-          },
-          "_save_as_tiff": {
-            "name": "_save_as_tiff",
-            "type": "method",
-            "lineno": 1778,
-            "calls": [
-              "imwrite",
-              "save_sim_as_tif",
-              "str"
-            ],
-            "visibility": "private"
-          },
-          "_deconvolve_tile": {
-            "name": "_deconvolve_tile",
-            "type": "method",
-            "lineno": 1797,
-            "calls": [
-              "DeconvolutionConfig",
-              "deconvolve_tile"
-            ],
-            "visibility": "private"
-          },
-          "_log_tile_summary": {
-            "name": "_log_tile_summary",
-            "type": "method",
-            "lineno": 1833,
-            "calls": [
-              "len",
-              "max",
-              "min",
-              "set",
-              "sorted"
             ],
             "visibility": "private"
           }
@@ -38004,11 +38484,38 @@
             ],
             "visibility": "public"
           },
-          "_query_command": {
-            "name": "_query_command",
+          "_ensure_connected_for_command": {
+            "name": "_ensure_connected_for_command",
             "type": "method",
             "lineno": 46,
             "calls": [
+              "callable",
+              "getattr",
+              "reconnect"
+            ],
+            "visibility": "private"
+          },
+          "_handle_socket_error_retry": {
+            "name": "_handle_socket_error_retry",
+            "type": "method",
+            "lineno": 93,
+            "calls": [
+              "callable",
+              "getattr",
+              "handler",
+              "reconnect",
+              "type"
+            ],
+            "visibility": "private"
+          },
+          "_query_command": {
+            "name": "_query_command",
+            "type": "method",
+            "lineno": 132,
+            "calls": [
+              "_do_query",
+              "_ensure_connected_for_command",
+              "_handle_socket_error_retry",
               "_parse_response",
               "_receive_full_bytes",
               "_send_via_async_reader",
@@ -38025,8 +38532,11 @@
           "_send_command": {
             "name": "_send_command",
             "type": "method",
-            "lineno": 135,
+            "lineno": 227,
             "calls": [
+              "_do_send",
+              "_ensure_connected_for_command",
+              "_handle_socket_error_retry",
               "_parse_response",
               "_receive_full_bytes",
               "_send_via_async_reader",
@@ -38045,7 +38555,7 @@
           "_send_workflow_command": {
             "name": "_send_workflow_command",
             "type": "method",
-            "lineno": 252,
+            "lineno": 352,
             "calls": [
               "RuntimeError",
               "_parse_workflow_flags",
@@ -38058,7 +38568,7 @@
           "_parse_workflow_flags": {
             "name": "_parse_workflow_flags",
             "type": "method",
-            "lineno": 347,
+            "lineno": 447,
             "calls": [
               "decode",
               "group",
@@ -38069,7 +38579,7 @@
           "_send_workflow_stop_command": {
             "name": "_send_workflow_stop_command",
             "type": "method",
-            "lineno": 429,
+            "lineno": 529,
             "calls": [
               "RuntimeError",
               "TimeoutError",
@@ -38084,7 +38594,7 @@
           "_receive_full_bytes": {
             "name": "_receive_full_bytes",
             "type": "method",
-            "lineno": 506,
+            "lineno": 606,
             "calls": [
               "RuntimeError",
               "len",
@@ -38096,7 +38606,7 @@
           "_parse_response": {
             "name": "_parse_response",
             "type": "method",
-            "lineno": 536,
+            "lineno": 636,
             "calls": [
               "ValueError",
               "append",
@@ -38109,7 +38619,7 @@
           "_send_via_async_reader": {
             "name": "_send_via_async_reader",
             "type": "method",
-            "lineno": 606,
+            "lineno": 706,
             "calls": [
               "_convert_parsed_message",
               "len",
@@ -38121,7 +38631,7 @@
           "_convert_parsed_message": {
             "name": "_convert_parsed_message",
             "type": "method",
-            "lineno": 680,
+            "lineno": 780,
             "calls": [
               "hasattr"
             ],
@@ -38130,7 +38640,7 @@
           "send_command_raw": {
             "name": "send_command_raw",
             "type": "method",
-            "lineno": 722,
+            "lineno": 822,
             "calls": [
               "_send_command",
               "encode",
@@ -38145,7 +38655,7 @@
           "send_command": {
             "name": "send_command",
             "type": "method",
-            "lineno": 819,
+            "lineno": 919,
             "calls": [
               "RuntimeError",
               "TimeoutError",
@@ -38166,7 +38676,7 @@
           "send_command_queued": {
             "name": "send_command_queued",
             "type": "method",
-            "lineno": 928,
+            "lineno": 1028,
             "calls": [
               "get_command_name",
               "get_event",
@@ -38612,6 +39122,40 @@
             "visibility": "public"
           }
         },
+        "visibility": "public"
+      }
+    },
+    "py2flamingo.services.connection_helpers": {
+      "ensure_connected": {
+        "name": "ensure_connected",
+        "type": "function",
+        "lineno": 43,
+        "calls": [
+          "error",
+          "info",
+          "is_connected",
+          "reconnect_last",
+          "warning"
+        ],
+        "visibility": "public"
+      },
+      "with_connection_retry": {
+        "name": "with_connection_retry",
+        "type": "function",
+        "lineno": 88,
+        "calls": [
+          "ConnectionError",
+          "action",
+          "callable",
+          "debug",
+          "ensure_connected",
+          "getattr",
+          "handler",
+          "info",
+          "reconnect_last",
+          "type",
+          "warning"
+        ],
         "visibility": "public"
       }
     },
@@ -39975,6 +40519,7 @@
         "lineno": 461,
         "calls": [
           "Path",
+          "RuntimeError",
           "_build_v2_compressor",
           "_downsample_2x",
           "_log_output_stats",
@@ -39982,6 +40527,7 @@
           "append",
           "create_array",
           "enumerate",
+          "exists",
           "info",
           "int",
           "len",
@@ -39992,6 +40538,7 @@
           "range",
           "str",
           "tuple",
+          "warning",
           "zip"
         ],
         "visibility": "public"
@@ -39999,7 +40546,7 @@
       "_build_v2_compressor": {
         "name": "_build_v2_compressor",
         "type": "function",
-        "lineno": 621,
+        "lineno": 642,
         "calls": [
           "Blosc",
           "warning"
@@ -40009,7 +40556,7 @@
       "_downsample_2x": {
         "name": "_downsample_2x",
         "type": "function",
-        "lineno": 637,
+        "lineno": 658,
         "calls": [
           "_downsample_2x_3d",
           "range",
@@ -40020,7 +40567,7 @@
       "_downsample_2x_3d": {
         "name": "_downsample_2x_3d",
         "type": "function",
-        "lineno": 645,
+        "lineno": 666,
         "calls": [
           "reshape",
           "tuple"
@@ -40030,7 +40577,7 @@
       "package_as_ozx": {
         "name": "package_as_ozx",
         "type": "function",
-        "lineno": 657,
+        "lineno": 678,
         "calls": [
           "Path",
           "from_ngff_zarr",
@@ -40727,10 +41274,11 @@
           "__init__": {
             "name": "__init__",
             "type": "method",
-            "lineno": 53,
+            "lineno": 58,
             "calls": [
               "_load_configurations",
               "getLogger",
+              "hasattr",
               "setup_ui",
               "super"
             ],
@@ -40739,7 +41287,7 @@
           "setup_ui": {
             "name": "setup_ui",
             "type": "method",
-            "lineno": 81,
+            "lineno": 101,
             "calls": [
               "QComboBox",
               "QGroupBox",
@@ -40761,7 +41309,7 @@
           "_on_connect_clicked": {
             "name": "_on_connect_clicked",
             "type": "method",
-            "lineno": 240,
+            "lineno": 260,
             "calls": [
               "_load_and_display_settings",
               "_show_message",
@@ -40772,7 +41320,7 @@
           "_on_disconnect_clicked": {
             "name": "_on_disconnect_clicked",
             "type": "method",
-            "lineno": 276,
+            "lineno": 296,
             "calls": [
               "_show_message",
               "_update_status"
@@ -40782,25 +41330,37 @@
           "_update_status": {
             "name": "_update_status",
             "type": "method",
-            "lineno": 286,
+            "lineno": 306,
+            "visibility": "private"
+          },
+          "_on_connection_lost_ui": {
+            "name": "_on_connection_lost_ui",
+            "type": "method",
+            "lineno": 336,
+            "visibility": "private"
+          },
+          "_on_connection_restored_ui": {
+            "name": "_on_connection_restored_ui",
+            "type": "method",
+            "lineno": 353,
             "visibility": "private"
           },
           "_update_status_error": {
             "name": "_update_status_error",
             "type": "method",
-            "lineno": 316,
+            "lineno": 365,
             "visibility": "private"
           },
           "_on_sample_view_clicked": {
             "name": "_on_sample_view_clicked",
             "type": "method",
-            "lineno": 346,
+            "lineno": 395,
             "visibility": "private"
           },
           "_create_topmost_messagebox": {
             "name": "_create_topmost_messagebox",
             "type": "method",
-            "lineno": 351,
+            "lineno": 400,
             "calls": [
               "QMessageBox",
               "setDefaultButton",
@@ -40817,31 +41377,31 @@
           "_show_message": {
             "name": "_show_message",
             "type": "method",
-            "lineno": 385,
+            "lineno": 434,
             "visibility": "private"
           },
           "get_connection_info": {
             "name": "get_connection_info",
             "type": "method",
-            "lineno": 398,
+            "lineno": 447,
             "visibility": "public"
           },
           "set_connection_info": {
             "name": "set_connection_info",
             "type": "method",
-            "lineno": 406,
+            "lineno": 455,
             "visibility": "public"
           },
           "clear_message": {
             "name": "clear_message",
             "type": "method",
-            "lineno": 416,
+            "lineno": 465,
             "visibility": "public"
           },
           "_on_test_clicked": {
             "name": "_on_test_clicked",
             "type": "method",
-            "lineno": 420,
+            "lineno": 469,
             "calls": [
               "_load_and_display_settings",
               "_show_message"
@@ -40851,7 +41411,7 @@
           "send_debug_query": {
             "name": "send_debug_query",
             "type": "method",
-            "lineno": 446,
+            "lineno": 495,
             "calls": [
               "QDialog",
               "QDialogButtonBox",
@@ -40889,7 +41449,7 @@
           "_copy_to_clipboard": {
             "name": "_copy_to_clipboard",
             "type": "method",
-            "lineno": 701,
+            "lineno": 750,
             "calls": [
               "_show_message",
               "clipboard",
@@ -40900,7 +41460,7 @@
           "save_settings_to_microscope": {
             "name": "save_settings_to_microscope",
             "type": "method",
-            "lineno": 709,
+            "lineno": 758,
             "calls": [
               "Path",
               "QMessageBox",
@@ -40922,7 +41482,7 @@
           "_on_config_selected": {
             "name": "_on_config_selected",
             "type": "method",
-            "lineno": 792,
+            "lineno": 841,
             "calls": [
               "_show_message",
               "hasattr"
@@ -40932,7 +41492,7 @@
           "_on_refresh_clicked": {
             "name": "_on_refresh_clicked",
             "type": "method",
-            "lineno": 818,
+            "lineno": 867,
             "calls": [
               "_load_configurations",
               "_show_message"
@@ -40942,7 +41502,7 @@
           "_on_delete_clicked": {
             "name": "_on_delete_clicked",
             "type": "method",
-            "lineno": 823,
+            "lineno": 872,
             "calls": [
               "_load_configurations",
               "_show_message",
@@ -40953,7 +41513,7 @@
           "_on_save_config_clicked": {
             "name": "_on_save_config_clicked",
             "type": "method",
-            "lineno": 859,
+            "lineno": 908,
             "calls": [
               "_load_configurations",
               "_show_message",
@@ -40964,7 +41524,7 @@
           "_load_configurations": {
             "name": "_load_configurations",
             "type": "method",
-            "lineno": 894,
+            "lineno": 943,
             "calls": [
               "_show_message",
               "hasattr",
@@ -40975,7 +41535,7 @@
           "set_enabled": {
             "name": "set_enabled",
             "type": "method",
-            "lineno": 928,
+            "lineno": 977,
             "calls": [
               "hasattr"
             ],
@@ -40984,7 +41544,7 @@
           "_load_and_display_settings": {
             "name": "_load_and_display_settings",
             "type": "method",
-            "lineno": 957,
+            "lineno": 1006,
             "calls": [
               "_format_settings",
               "_update_status_error",
@@ -40997,7 +41557,7 @@
           "_format_settings": {
             "name": "_format_settings",
             "type": "method",
-            "lineno": 1029,
+            "lineno": 1078,
             "calls": [
               "append",
               "extend",
@@ -41011,7 +41571,7 @@
           "update_settings_display": {
             "name": "update_settings_display",
             "type": "method",
-            "lineno": 1076,
+            "lineno": 1125,
             "calls": [
               "_format_settings"
             ],
@@ -41020,7 +41580,7 @@
           "clear_settings_display": {
             "name": "clear_settings_display",
             "type": "method",
-            "lineno": 1085,
+            "lineno": 1134,
             "visibility": "public"
           }
         },
@@ -42350,39 +42910,30 @@
               "QProgressDialog",
               "_auto_contrast_channels",
               "_enable_channel_controls",
+              "_load_stitched_into_voxel_storage",
               "_remove_stitched_layers",
-              "_update_sample_holder_position",
-              "any",
-              "append",
-              "array",
-              "blockSignals",
+              "_update_channel_availability",
+              "_update_data_stats",
+              "_update_plane_views",
+              "_update_visualization",
               "close",
               "critical",
-              "dict",
               "exists",
               "find_stitched_stores",
               "get",
               "getItem",
-              "hasattr",
               "index",
               "information",
-              "int",
               "is_dir",
               "is_file",
               "iterdir",
               "len",
-              "list",
               "load_stitched_volume",
               "loads",
-              "maximum",
-              "minimum",
               "processEvents",
-              "property",
               "read_text",
               "setLabelText",
               "setMinimumDuration",
-              "setText",
-              "setValue",
               "setWindowModality",
               "setWindowTitle",
               "show",
@@ -42391,10 +42942,40 @@
             ],
             "visibility": "private"
           },
+          "_load_stitched_into_voxel_storage": {
+            "name": "_load_stitched_into_voxel_storage",
+            "type": "method",
+            "lineno": 2816,
+            "calls": [
+              "_update_sample_holder_position",
+              "all",
+              "any",
+              "append",
+              "array",
+              "asarray",
+              "astype",
+              "blockSignals",
+              "clip",
+              "fill",
+              "int",
+              "isfinite",
+              "len",
+              "max",
+              "maximum",
+              "minimum",
+              "property",
+              "round",
+              "setText",
+              "setValue",
+              "tolist",
+              "zoom"
+            ],
+            "visibility": "private"
+          },
           "_remove_stitched_layers": {
             "name": "_remove_stitched_layers",
             "type": "method",
-            "lineno": 3013,
+            "lineno": 3018,
             "calls": [
               "_enable_channel_controls",
               "getattr",
@@ -42405,7 +42986,7 @@
           "_on_settings_clicked": {
             "name": "_on_settings_clicked",
             "type": "method",
-            "lineno": 3034,
+            "lineno": 3039,
             "calls": [
               "MicroscopeSettingsService",
               "Path",
@@ -42422,7 +43003,7 @@
           "_on_populate_toggled": {
             "name": "_on_populate_toggled",
             "type": "method",
-            "lineno": 3085,
+            "lineno": 3090,
             "calls": [
               "QTimer",
               "hasattr"
@@ -42432,7 +43013,7 @@
           "_on_populate_tick": {
             "name": "_on_populate_tick",
             "type": "method",
-            "lineno": 3112,
+            "lineno": 3117,
             "calls": [
               "_detect_active_channel",
               "add_frame_to_volume",
@@ -42443,7 +43024,7 @@
           "_detect_active_channel": {
             "name": "_detect_active_channel",
             "type": "method",
-            "lineno": 3155,
+            "lineno": 3160,
             "calls": [
               "enumerate"
             ],
@@ -42452,7 +43033,7 @@
           "_on_fusion_mode_changed": {
             "name": "_on_fusion_mode_changed",
             "type": "method",
-            "lineno": 3169,
+            "lineno": 3174,
             "calls": [
               "hasattr",
               "lower"
@@ -42462,7 +43043,7 @@
           "_on_clear_data_clicked": {
             "name": "_on_clear_data_clicked",
             "type": "method",
-            "lineno": 3176,
+            "lineno": 3181,
             "calls": [
               "_remove_stitched_layers",
               "_update_visualization",
@@ -42475,7 +43056,7 @@
           "clear_data_for_workflows": {
             "name": "clear_data_for_workflows",
             "type": "method",
-            "lineno": 3202,
+            "lineno": 3207,
             "calls": [
               "_remove_stitched_layers",
               "_update_visualization",
@@ -42489,7 +43070,7 @@
           "add_frame_to_volume": {
             "name": "add_frame_to_volume",
             "type": "method",
-            "lineno": 3233,
+            "lineno": 3238,
             "calls": [
               "_downsample_for_storage",
               "arange",
@@ -42509,7 +43090,7 @@
           "_downsample_for_storage": {
             "name": "_downsample_for_storage",
             "type": "method",
-            "lineno": 3410,
+            "lineno": 3415,
             "calls": [
               "astype",
               "len",
@@ -42525,25 +43106,25 @@
           "holder_position": {
             "name": "holder_position",
             "type": "method",
-            "lineno": 3460,
+            "lineno": 3465,
             "visibility": "public"
           },
           "current_rotation": {
             "name": "current_rotation",
             "type": "method",
-            "lineno": 3469,
+            "lineno": 3474,
             "visibility": "public"
           },
           "objective_xy_calibration": {
             "name": "objective_xy_calibration",
             "type": "method",
-            "lineno": 3478,
+            "lineno": 3483,
             "visibility": "public"
           },
           "_embed_3d_viewer": {
             "name": "_embed_3d_viewer",
             "type": "method",
-            "lineno": 3481,
+            "lineno": 3486,
             "calls": [
               "getattr"
             ],
@@ -42552,7 +43133,7 @@
           "_on_3d_viewer_ready": {
             "name": "_on_3d_viewer_ready",
             "type": "method",
-            "lineno": 3501,
+            "lineno": 3506,
             "calls": [
               "_update_plane_overlays"
             ],
@@ -42561,22 +43142,23 @@
           "_update_sample_holder_position": {
             "name": "_update_sample_holder_position",
             "type": "method",
-            "lineno": 3508,
+            "lineno": 3513,
             "visibility": "private"
           },
           "_update_xy_focus_frame": {
             "name": "_update_xy_focus_frame",
             "type": "method",
-            "lineno": 3512,
+            "lineno": 3517,
             "visibility": "private"
           },
           "_process_pending_stage_update": {
             "name": "_process_pending_stage_update",
             "type": "method",
-            "lineno": 3516,
+            "lineno": 3521,
             "calls": [
               "_update_plane_views",
               "_update_sample_holder_position",
+              "any",
               "array",
               "count_nonzero",
               "get",
@@ -42588,7 +43170,7 @@
           "_update_visualization": {
             "name": "_update_visualization",
             "type": "method",
-            "lineno": 3616,
+            "lineno": 3629,
             "calls": [
               "_auto_contrast_channels",
               "_update_plane_overlays",
@@ -42612,7 +43194,7 @@
           "_update_visualization_async": {
             "name": "_update_visualization_async",
             "type": "method",
-            "lineno": 3736,
+            "lineno": 3749,
             "calls": [
               "Thread",
               "any",
@@ -42630,7 +43212,7 @@
           "_apply_visualization_results": {
             "name": "_apply_visualization_results",
             "type": "method",
-            "lineno": 3798,
+            "lineno": 3811,
             "calls": [
               "_auto_contrast_channels",
               "_update_plane_overlays",
@@ -42646,13 +43228,13 @@
           "_reset_viewer_camera": {
             "name": "_reset_viewer_camera",
             "type": "method",
-            "lineno": 3822,
+            "lineno": 3835,
             "visibility": "private"
           },
           "_on_live_view_toggle": {
             "name": "_on_live_view_toggle",
             "type": "method",
-            "lineno": 3828,
+            "lineno": 3841,
             "calls": [
               "hasattr"
             ],
@@ -42661,13 +43243,13 @@
           "_update_live_view_state": {
             "name": "_update_live_view_state",
             "type": "method",
-            "lineno": 3867,
+            "lineno": 3880,
             "visibility": "private"
           },
           "_update_zoom_display": {
             "name": "_update_zoom_display",
             "type": "method",
-            "lineno": 3895,
+            "lineno": 3908,
             "calls": [
               "_get_viewer",
               "hasattr"
@@ -42677,7 +43259,7 @@
           "_on_reset_zoom_clicked": {
             "name": "_on_reset_zoom_clicked",
             "type": "method",
-            "lineno": 3904,
+            "lineno": 3917,
             "calls": [
               "_get_viewer",
               "_update_zoom_display",
@@ -42689,7 +43271,7 @@
           "_update_info_displays": {
             "name": "_update_info_displays",
             "type": "method",
-            "lineno": 3913,
+            "lineno": 3926,
             "calls": [
               "_update_data_stats",
               "_update_zoom_display",
@@ -42700,13 +43282,13 @@
           "_update_data_stats": {
             "name": "_update_data_stats",
             "type": "method",
-            "lineno": 3936,
+            "lineno": 3949,
             "visibility": "private"
           },
           "_on_transform_quality_changed": {
             "name": "_on_transform_quality_changed",
             "type": "method",
-            "lineno": 3954,
+            "lineno": 3967,
             "calls": [
               "_update_visualization"
             ],
@@ -42715,13 +43297,13 @@
           "_on_live_settings_clicked": {
             "name": "_on_live_settings_clicked",
             "type": "method",
-            "lineno": 3968,
+            "lineno": 3981,
             "visibility": "private"
           },
           "_on_plane_click": {
             "name": "_on_plane_click",
             "type": "method",
-            "lineno": 3976,
+            "lineno": 3989,
             "calls": [
               "Position",
               "_viz_y_to_stage_y"
@@ -42731,33 +43313,43 @@
           "_update_plane_views": {
             "name": "_update_plane_views",
             "type": "method",
-            "lineno": 4088,
+            "lineno": 4101,
             "calls": [
-              "_get_viewer",
+              "_resize_mip_to_target",
               "any",
               "hasattr",
               "int",
               "max",
-              "range"
+              "range",
+              "tuple"
+            ],
+            "visibility": "private"
+          },
+          "_resize_mip_to_target": {
+            "name": "_resize_mip_to_target",
+            "type": "method",
+            "lineno": 4208,
+            "calls": [
+              "zoom"
             ],
             "visibility": "private"
           },
           "_stage_y_to_viz_y": {
             "name": "_stage_y_to_viz_y",
             "type": "method",
-            "lineno": 4184,
+            "lineno": 4226,
             "visibility": "private"
           },
           "_viz_y_to_stage_y": {
             "name": "_viz_y_to_stage_y",
             "type": "method",
-            "lineno": 4192,
+            "lineno": 4234,
             "visibility": "private"
           },
           "_update_plane_overlays": {
             "name": "_update_plane_overlays",
             "type": "method",
-            "lineno": 4200,
+            "lineno": 4242,
             "calls": [
               "_stage_y_to_viz_y",
               "get"
@@ -42767,7 +43359,7 @@
           "_check_and_mark_targets_stale": {
             "name": "_check_and_mark_targets_stale",
             "type": "method",
-            "lineno": 4261,
+            "lineno": 4303,
             "calls": [
               "abs",
               "set_target_stale"
@@ -42777,13 +43369,13 @@
           "update_workflow_progress": {
             "name": "update_workflow_progress",
             "type": "method",
-            "lineno": 4293,
+            "lineno": 4335,
             "visibility": "public"
           },
           "showEvent": {
             "name": "showEvent",
             "type": "method",
-            "lineno": 4310,
+            "lineno": 4352,
             "calls": [
               "_restore_dialog_state",
               "super"
@@ -42793,7 +43385,7 @@
           "hideEvent": {
             "name": "hideEvent",
             "type": "method",
-            "lineno": 4330,
+            "lineno": 4372,
             "calls": [
               "_save_dialog_state",
               "super"
@@ -42803,7 +43395,7 @@
           "closeEvent": {
             "name": "closeEvent",
             "type": "method",
-            "lineno": 4341,
+            "lineno": 4383,
             "calls": [
               "_save_dialog_state",
               "_stop_tile_worker",
@@ -42814,7 +43406,7 @@
           "_save_dialog_state": {
             "name": "_save_dialog_state",
             "type": "method",
-            "lineno": 4357,
+            "lineno": 4399,
             "calls": [
               "hasattr"
             ],
@@ -42823,7 +43415,7 @@
           "_restore_dialog_state": {
             "name": "_restore_dialog_state",
             "type": "method",
-            "lineno": 4394,
+            "lineno": 4436,
             "calls": [
               "get",
               "hasattr"
@@ -42833,7 +43425,7 @@
           "set_stage_controls_enabled": {
             "name": "set_stage_controls_enabled",
             "type": "method",
-            "lineno": 4467,
+            "lineno": 4509,
             "calls": [
               "hasattr",
               "setEnabled"
@@ -42843,7 +43435,7 @@
           "set_connection_state": {
             "name": "set_connection_state",
             "type": "method",
-            "lineno": 4498,
+            "lineno": 4540,
             "calls": [
               "hasattr",
               "setEnabled"
@@ -42853,7 +43445,7 @@
           "prepare_for_tile_workflows": {
             "name": "prepare_for_tile_workflows",
             "type": "method",
-            "lineno": 4543,
+            "lineno": 4585,
             "calls": [
               "_start_tile_worker",
               "add",
@@ -42870,7 +43462,7 @@
           "load_completed_tile": {
             "name": "load_completed_tile",
             "type": "method",
-            "lineno": 4599,
+            "lineno": 4641,
             "calls": [
               "Path",
               "_resolve_tile_folder",
@@ -42885,7 +43477,7 @@
           "_resolve_tile_folder": {
             "name": "_resolve_tile_folder",
             "type": "method",
-            "lineno": 4676,
+            "lineno": 4718,
             "calls": [
               "Path",
               "exists",
@@ -42900,7 +43492,7 @@
           "finish_tile_workflows": {
             "name": "finish_tile_workflows",
             "type": "method",
-            "lineno": 4732,
+            "lineno": 4774,
             "calls": [
               "_stop_tile_worker",
               "_update_channel_availability",
@@ -42918,7 +43510,7 @@
           "_on_tile_zstack_frame": {
             "name": "_on_tile_zstack_frame",
             "type": "method",
-            "lineno": 4815,
+            "lineno": 4857,
             "calls": [
               "TileFrameBuffer",
               "_downsample_for_storage",
@@ -42940,7 +43532,7 @@
           "_estimate_frames_per_tile": {
             "name": "_estimate_frames_per_tile",
             "type": "method",
-            "lineno": 4962,
+            "lineno": 5004,
             "calls": [
               "get",
               "getattr",
@@ -42951,7 +43543,7 @@
           "_start_loading_pulse": {
             "name": "_start_loading_pulse",
             "type": "method",
-            "lineno": 4978,
+            "lineno": 5020,
             "calls": [
               "QTimer",
               "hasattr"
@@ -42961,13 +43553,13 @@
           "_toggle_loading_pulse": {
             "name": "_toggle_loading_pulse",
             "type": "method",
-            "lineno": 4991,
+            "lineno": 5033,
             "visibility": "private"
           },
           "_stop_loading_pulse": {
             "name": "_stop_loading_pulse",
             "type": "method",
-            "lineno": 5005,
+            "lineno": 5047,
             "calls": [
               "hasattr"
             ],
@@ -42976,7 +43568,7 @@
           "_start_tile_worker": {
             "name": "_start_tile_worker",
             "type": "method",
-            "lineno": 5011,
+            "lineno": 5053,
             "calls": [
               "QThread",
               "TileProcessingWorker",
@@ -42987,7 +43579,7 @@
           "_stop_tile_worker": {
             "name": "_stop_tile_worker",
             "type": "method",
-            "lineno": 5041,
+            "lineno": 5083,
             "calls": [
               "hasattr"
             ],
@@ -42996,7 +43588,7 @@
           "_on_tile_processed": {
             "name": "_on_tile_processed",
             "type": "method",
-            "lineno": 5062,
+            "lineno": 5104,
             "calls": [
               "_finalize_disk_load",
               "getattr",
@@ -43007,7 +43599,7 @@
           "_on_load_tiles_from_disk_clicked": {
             "name": "_on_load_tiles_from_disk_clicked",
             "type": "method",
-            "lineno": 5106,
+            "lineno": 5148,
             "calls": [
               "DiskTileLoader",
               "Path",
@@ -43024,13 +43616,13 @@
           "_on_disk_load_progress": {
             "name": "_on_disk_load_progress",
             "type": "method",
-            "lineno": 5195,
+            "lineno": 5237,
             "visibility": "private"
           },
           "_on_disk_load_finished": {
             "name": "_on_disk_load_finished",
             "type": "method",
-            "lineno": 5202,
+            "lineno": 5244,
             "calls": [
               "_finalize_disk_load",
               "hasattr"
@@ -43040,7 +43632,7 @@
           "_finalize_disk_load": {
             "name": "_finalize_disk_load",
             "type": "method",
-            "lineno": 5234,
+            "lineno": 5276,
             "calls": [
               "_stop_loading_pulse",
               "_stop_tile_worker",
