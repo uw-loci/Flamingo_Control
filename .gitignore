@@ -177,3 +177,17 @@ codemap/
 
 # Runtime state (generated files, not code)
 codezoom.html
+window_geometry.json
+session_paths.json
+drive_mappings.json
+saved_configurations.json
+
+# Workflow files generated at runtime (keep only templates)
+workflows/*
+!workflows/PipelineZStack.txt
+!workflows/Snapshot.txt
+!workflows/WorkflowZstack.txt
+!workflows/ZStack.txt
+
+# Test output data (generated at runtime)
+tests/voxel_test_results/
