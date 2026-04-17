@@ -10,6 +10,17 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+# Load default optics values from hardware config
+try:
+    from py2flamingo.configs.config_loader import get_hardware_config as _get_hw
+
+    _hw = _get_hw()
+    _DEFAULT_MAGNIFICATION = _hw.objective_magnification
+    _DEFAULT_PIXEL_SIZE_MM = _hw.effective_pixel_size_um / 1000.0
+except Exception:
+    _DEFAULT_MAGNIFICATION = 16.0
+    _DEFAULT_PIXEL_SIZE_MM = 0.000488
+
 
 class MicroscopeState(Enum):
     """
@@ -192,8 +203,8 @@ class MicroscopeModel:
     lasers: List[str] = field(default_factory=list)
     selected_laser: Optional[str] = None
     laser_power: float = 0.0
-    objective_magnification: float = 16.0
-    pixel_size_mm: float = 0.000488
+    objective_magnification: float = _DEFAULT_MAGNIFICATION
+    pixel_size_mm: float = _DEFAULT_PIXEL_SIZE_MM
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def is_connected(self) -> bool:

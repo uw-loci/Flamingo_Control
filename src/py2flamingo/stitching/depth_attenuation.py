@@ -29,7 +29,19 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-MIN_PLANES_FOR_FIT = 5
+# Load from stitching config, fallback to built-in defaults
+try:
+    from py2flamingo.configs.config_loader import get_stitching_value as _get_sv
+
+    MIN_PLANES_FOR_FIT = int(
+        _get_sv("depth_attenuation", "min_planes_for_fit", default=5)
+    )
+    _SIGNAL_THRESHOLD = float(
+        _get_sv("depth_attenuation", "signal_threshold", default=1.0)
+    )
+except Exception:
+    MIN_PLANES_FOR_FIT = 5
+    _SIGNAL_THRESHOLD = 1.0
 
 
 def correct_depth_attenuation(
@@ -65,7 +77,7 @@ def correct_depth_attenuation(
 
     if mu is None:
         # Auto-fit: log-linear regression on planes with signal
-        valid = means > 1.0
+        valid = means > _SIGNAL_THRESHOLD
         if valid.sum() < MIN_PLANES_FOR_FIT:
             logger.warning(
                 "Depth attenuation: only %d planes with signal > 1, skipping",

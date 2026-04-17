@@ -1,0 +1,69 @@
+# Microscope Hardware Configuration
+# Single source of truth for camera, optics, and stage parameters.
+# All code that needs sensor dimensions, pixel sizes, or FOV should
+# read from this file rather than using local hardcoded constants.
+#
+# --- IMPORTANT ---
+# If you change cameras or objectives, update this file and restart.
+# All derived values (effective_pixel_size_um, fov_mm) are computed
+# from these base parameters at load time.
+
+camera:
+  # Physical sensor pixel size (manufacturer spec, independent of optics)
+  sensor_pixel_size_um: 6.5
+
+  # Sensor dimensions in pixels (active area)
+  sensor_width_px: 2048
+  sensor_height_px: 2048
+
+optics:
+  # Nominal objective magnification (engraved on the objective barrel)
+  objective_magnification: 16.0
+
+  # Tube lens design focal length in mm.
+  # Standard microscope tube lenses are 200mm, but light-sheet systems
+  # often use non-standard tube lenses. The Flamingo uses a ~321mm
+  # tube lens, giving a system magnification of 16 * (321/200) = 25.68x.
+  #
+  # Set to 200.0 if your system uses a standard tube lens.
+  tube_lens_focal_length_mm: 321.0
+
+  # Reference tube lens focal length (mm) for magnification calculation.
+  # System magnification = objective_mag * (tube_lens / reference_tube_lens)
+  # For most microscope objectives, this is 200mm.
+  reference_tube_lens_mm: 200.0
+
+  # Numerical aperture of the detection objective.
+  # Used for deconvolution PSF generation and depth-of-field calculations.
+  numerical_aperture: 0.4
+
+  # Refractive index of the immersion medium.
+  # Common values: 1.0 (air), 1.33 (water), 1.52 (oil)
+  immersion_refractive_index: 1.33
+
+  # Camera X axis is inverted relative to stage X axis.
+  # Common in light-sheet systems where the camera sees a mirror image.
+  # If True, tile data is flipped in X before stitching.
+  camera_x_inverted: true
+
+# Laser / illumination channels
+# Channel wavelengths used as defaults for per-channel deconvolution.
+# The first matching channel wavelength is used if no explicit override.
+channel_wavelengths_nm:
+  0: 405.0    # DAPI
+  1: 488.0    # GFP
+  2: 561.0    # RFP
+  3: 640.0    # Far-Red
+
+# Stage travel limits (mm and degrees)
+# These are safety limits — positions outside these ranges are rejected.
+# Set conservatively to prevent hardware collisions.
+stage_limits:
+  x_min_mm: 0.0
+  x_max_mm: 26.0
+  y_min_mm: 0.0
+  y_max_mm: 26.0
+  z_min_mm: 0.0
+  z_max_mm: 26.0
+  r_min_deg: -720.0
+  r_max_deg: 720.0

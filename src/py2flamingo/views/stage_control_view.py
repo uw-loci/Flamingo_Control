@@ -202,8 +202,15 @@ class StageControlView(QWidget):
 
         # Load camera and magnification parameters
         self.magnification = self._load_magnification()
-        self.sensor_pixels = 2048  # Default sensor size
-        self.pixel_size_um = 6.5  # Default pixel size in micrometers
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            _hw = get_hardware_config()
+            self.sensor_pixels = _hw.sensor_width_px
+            self.pixel_size_um = _hw.sensor_pixel_size_um
+        except Exception:
+            self.sensor_pixels = 2048
+            self.pixel_size_um = 6.5
         self.fov_mm = self._calculate_fov()
 
         # Track jog button references for dynamic updates

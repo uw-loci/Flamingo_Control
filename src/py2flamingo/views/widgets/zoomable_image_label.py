@@ -51,6 +51,11 @@ class ZoomableImageLabel(QLabel):
         self._click_start = QPoint()
         self._interactive = False  # Whether current display uses fast scaling
         self._tile_coords: List[tuple] = []  # (x, y, tile_x_idx, tile_y_idx)
+        # Stride info for overlapping tiles (None = equal grid)
+        self._stride_x: Optional[int] = None
+        self._stride_y: Optional[int] = None
+        self._tile_pixel_w: Optional[int] = None
+        self._tile_pixel_h: Optional[int] = None
         self._rect_selecting = False  # Shift+drag rectangle selection mode
         self._rect_start = QPoint()  # Start position for rectangle selection
         self._rubber_band: Optional[QRubberBand] = None
@@ -73,6 +78,23 @@ class ZoomableImageLabel(QLabel):
         self._tiles_x = tiles_x
         self._tiles_y = tiles_y
         self._invert_x = invert_x
+        # Reset stride (caller may set it via set_tile_stride after)
+        self._stride_x = None
+        self._stride_y = None
+        self._tile_pixel_w = None
+        self._tile_pixel_h = None
+
+    def set_tile_stride(self, stride_x: int, stride_y: int, tile_w: int, tile_h: int):
+        """Set tile stride for overlapping tiles.
+
+        When tiles overlap, the stride (distance between tile origins) is
+        less than the tile size. This allows correct click-to-tile mapping
+        and coordinate label positioning.
+        """
+        self._stride_x = stride_x
+        self._stride_y = stride_y
+        self._tile_pixel_w = tile_w
+        self._tile_pixel_h = tile_h
 
     def set_tile_coordinates(self, coords: List[tuple], invert_x: bool = False):
         """Set tile coordinate labels for on-demand rendering when zoomed in.
@@ -149,8 +171,31 @@ class ZoomableImageLabel(QLabel):
         # Only draw labels when tiles are large enough on screen to read
         display_w = self.width()
         display_h = self.height()
-        tile_display_w = display_w / self._tiles_x
-        tile_display_h = display_h / self._tiles_y
+
+        # Use stride-based tile size if available
+        if self._stride_x is not None and self._stride_y is not None:
+            orig_w = self._original_pixmap.width()
+            orig_h = self._original_pixmap.height()
+            scale_x = display_w / orig_w if orig_w else 1
+            scale_y = display_h / orig_h if orig_h else 1
+            tile_display_stride_x = self._stride_x * scale_x
+            tile_display_stride_y = self._stride_y * scale_y
+            tile_display_w = (
+                self._tile_pixel_w * scale_x
+                if self._tile_pixel_w
+                else tile_display_stride_x
+            )
+            tile_display_h = (
+                self._tile_pixel_h * scale_y
+                if self._tile_pixel_h
+                else tile_display_stride_y
+            )
+        else:
+            tile_display_stride_x = display_w / self._tiles_x
+            tile_display_stride_y = display_h / self._tiles_y
+            tile_display_w = tile_display_stride_x
+            tile_display_h = tile_display_stride_y
+
         if min(tile_display_w, tile_display_h) < self._LABEL_MIN_TILE_PX:
             return
 
@@ -189,8 +234,8 @@ class ZoomableImageLabel(QLabel):
             else:
                 display_x_idx = tile_x_idx
 
-            tile_left = display_x_idx * tile_display_w
-            tile_top = tile_y_idx * tile_display_h
+            tile_left = display_x_idx * tile_display_stride_x
+            tile_top = tile_y_idx * tile_display_stride_y
             tile_cx = tile_left + tile_display_w / 2
             tile_cy = tile_top + tile_display_h / 2
 
@@ -285,24 +330,35 @@ class ZoomableImageLabel(QLabel):
                 self._handle_tile_right_click(event.pos())
             event.accept()
 
-    def _handle_tile_click(self, pos: QPoint):
-        """Calculate which tile was clicked and emit signal."""
+    def _pos_to_tile_index(self, pos: QPoint):
+        """Convert a widget position to (tile_x_idx, tile_y_idx).
+
+        Uses stride-based mapping when tiles overlap, otherwise
+        equal-division of the pixmap.
+
+        Returns:
+            (tile_x_idx, tile_y_idx) or None if outside valid range.
+        """
         if self._original_pixmap is None:
-            return
+            return None
 
         # Convert click position to original image coordinates
         img_x = pos.x() / self._zoom
         img_y = pos.y() / self._zoom
 
-        # Calculate tile size in original image
-        img_w = self._original_pixmap.width()
-        img_h = self._original_pixmap.height()
-        tile_w = img_w / self._tiles_x
-        tile_h = img_h / self._tiles_y
+        # Use stride if available, else equal-division
+        if self._stride_x is not None and self._stride_y is not None:
+            stride_x = float(self._stride_x)
+            stride_y = float(self._stride_y)
+        else:
+            img_w = self._original_pixmap.width()
+            img_h = self._original_pixmap.height()
+            stride_x = img_w / self._tiles_x
+            stride_y = img_h / self._tiles_y
 
-        # Calculate display tile index
-        display_x_idx = int(img_x / tile_w)
-        tile_y_idx = int(img_y / tile_h)
+        # Calculate display tile index from stride
+        display_x_idx = int(img_x / stride_x)
+        tile_y_idx = int(img_y / stride_y)
 
         # Clamp to valid range
         display_x_idx = max(0, min(display_x_idx, self._tiles_x - 1))
@@ -314,38 +370,23 @@ class ZoomableImageLabel(QLabel):
         else:
             tile_x_idx = display_x_idx
 
+        return tile_x_idx, tile_y_idx
+
+    def _handle_tile_click(self, pos: QPoint):
+        """Calculate which tile was clicked and emit signal."""
+        result = self._pos_to_tile_index(pos)
+        if result is None:
+            return
+        tile_x_idx, tile_y_idx = result
         logger.debug(f"Tile clicked: ({tile_x_idx}, {tile_y_idx})")
         self.tile_clicked.emit(tile_x_idx, tile_y_idx)
 
     def _handle_tile_right_click(self, pos: QPoint):
         """Calculate which tile was right-clicked and emit signal for move to center Z."""
-        if self._original_pixmap is None:
+        result = self._pos_to_tile_index(pos)
+        if result is None:
             return
-
-        # Convert click position to original image coordinates
-        img_x = pos.x() / self._zoom
-        img_y = pos.y() / self._zoom
-
-        # Calculate tile size in original image
-        img_w = self._original_pixmap.width()
-        img_h = self._original_pixmap.height()
-        tile_w = img_w / self._tiles_x
-        tile_h = img_h / self._tiles_y
-
-        # Calculate display tile index
-        display_x_idx = int(img_x / tile_w)
-        tile_y_idx = int(img_y / tile_h)
-
-        # Clamp to valid range
-        display_x_idx = max(0, min(display_x_idx, self._tiles_x - 1))
-        tile_y_idx = max(0, min(tile_y_idx, self._tiles_y - 1))
-
-        # Convert display index back to tile index if inverted
-        if self._invert_x:
-            tile_x_idx = (self._tiles_x - 1) - display_x_idx
-        else:
-            tile_x_idx = display_x_idx
-
+        tile_x_idx, tile_y_idx = result
         logger.debug(f"Tile right-clicked: ({tile_x_idx}, {tile_y_idx})")
         self.tile_right_clicked.emit(tile_x_idx, tile_y_idx)
 
@@ -366,17 +407,21 @@ class ZoomableImageLabel(QLabel):
         if img_y1 > img_y2:
             img_y1, img_y2 = img_y2, img_y1
 
-        # Calculate tile size in original image
-        img_w = self._original_pixmap.width()
-        img_h = self._original_pixmap.height()
-        tile_w = img_w / self._tiles_x
-        tile_h = img_h / self._tiles_y
+        # Use stride if available, else equal-division
+        if self._stride_x is not None and self._stride_y is not None:
+            stride_x = float(self._stride_x)
+            stride_y = float(self._stride_y)
+        else:
+            img_w = self._original_pixmap.width()
+            img_h = self._original_pixmap.height()
+            stride_x = img_w / self._tiles_x
+            stride_y = img_h / self._tiles_y
 
         # Find display tile index range
-        display_x_min = max(0, int(img_x1 / tile_w))
-        display_x_max = min(self._tiles_x - 1, int(img_x2 / tile_w))
-        ty_min = max(0, int(img_y1 / tile_h))
-        ty_max = min(self._tiles_y - 1, int(img_y2 / tile_h))
+        display_x_min = max(0, int(img_x1 / stride_x))
+        display_x_max = min(self._tiles_x - 1, int(img_x2 / stride_x))
+        ty_min = max(0, int(img_y1 / stride_y))
+        ty_max = min(self._tiles_y - 1, int(img_y2 / stride_y))
 
         # Build set of selected tiles, converting display index to tile index
         selected = set()

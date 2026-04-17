@@ -80,6 +80,11 @@ class ImagePanel(QWidget):
         self._invert_x = False  # Whether X-axis is inverted for display
         self._selected_tiles: set = set()  # Set of (tile_x_idx, tile_y_idx) tuples
         self._tile_results: List = []  # Store TileResult objects for retrieval
+        # Stride info for overlapping tiles (None = equal grid, no overlap)
+        self._tile_stride_x: Optional[int] = None  # Pixels between tile origins in X
+        self._tile_stride_y: Optional[int] = None  # Pixels between tile origins in Y
+        self._tile_w: Optional[int] = None  # Actual tile width in pixels
+        self._tile_h: Optional[int] = None  # Actual tile height in pixels
 
         # Contrast settings - slider values (0-1000 range for precision)
         self._contrast_min_slider = 0  # Maps to _image_min
@@ -234,6 +239,44 @@ class ImagePanel(QWidget):
         max_pct = int(self._contrast_max_slider / 10)
         self._contrast_label.setText(f"{min_pct}-{max_pct}%")
 
+    def set_tile_stride(
+        self,
+        stride_x: int,
+        stride_y: int,
+        tile_w: int,
+        tile_h: int,
+    ):
+        """Set tile stride for overlapping tiles.
+
+        When tiles overlap, the distance between tile origins (stride)
+        is less than the tile size. This affects grid line drawing
+        and click-to-tile detection.
+
+        Args:
+            stride_x: Pixels between tile origins in X.
+            stride_y: Pixels between tile origins in Y.
+            tile_w: Actual tile width in pixels.
+            tile_h: Actual tile height in pixels.
+        """
+        self._tile_stride_x = stride_x
+        self._tile_stride_y = stride_y
+        self._tile_w = tile_w
+        self._tile_h = tile_h
+
+        # Apply display downsampling to stride values for the ZoomableImageLabel
+        ds = self._display_scale
+        self.image_label.set_tile_stride(
+            stride_x // ds, stride_y // ds, tile_w // ds, tile_h // ds
+        )
+
+        # Rebuild overlay with new stride
+        self._invalidate_base_pixmap()
+        if self._image is not None and self._show_grid:
+            self._rebuild_base_pixmap()
+            self._pixmap = self._base_pixmap.copy()
+            self._draw_selection_overlay()
+            self.image_label.setPixmap(self._pixmap)
+
     def set_image(
         self, image: Optional[np.ndarray], tiles_x: int = 0, tiles_y: int = 0
     ):
@@ -247,6 +290,11 @@ class ImagePanel(QWidget):
         self._image = image
         self._tiles_x = tiles_x
         self._tiles_y = tiles_y
+        # Reset stride info (caller should call set_tile_stride after if needed)
+        self._tile_stride_x = None
+        self._tile_stride_y = None
+        self._tile_w = None
+        self._tile_h = None
 
         if image is not None:
             # Downsample large images for display performance.
@@ -545,21 +593,29 @@ class ImagePanel(QWidget):
 
         w = self._base_pixmap.width()
         h = self._base_pixmap.height()
-        tile_w = w / self._tiles_x
-        tile_h = h / self._tiles_y
 
-        # Draw vertical lines
+        # Use stride-based grid if available (tiles overlap), else equal-division
+        ds = self._display_scale
+        if self._tile_stride_x is not None and self._tile_stride_y is not None:
+            stride_x = self._tile_stride_x / ds
+            stride_y = self._tile_stride_y / ds
+        else:
+            stride_x = w / self._tiles_x
+            stride_y = h / self._tiles_y
+
+        # Draw vertical grid lines at stride intervals
         for i in range(1, self._tiles_x):
-            x = int(i * tile_w)
+            x = int(i * stride_x)
             painter.drawLine(x, 0, x, h)
 
-        # Draw horizontal lines
+        # Draw horizontal grid lines at stride intervals
         for i in range(1, self._tiles_y):
-            y = int(i * tile_h)
+            y = int(i * stride_y)
             painter.drawLine(0, y, w, y)
 
         logger.debug(
-            f"_draw_base_overlay: drew grid lines, {self._tiles_x}x{self._tiles_y} tiles"
+            f"_draw_base_overlay: drew grid lines, {self._tiles_x}x{self._tiles_y} tiles, "
+            f"stride=({stride_x:.0f}, {stride_y:.0f})"
         )
 
         painter.end()
@@ -587,8 +643,19 @@ class ImagePanel(QWidget):
 
         w = self._pixmap.width()
         h = self._pixmap.height()
-        tile_w = w / self._tiles_x
-        tile_h = h / self._tiles_y
+
+        # Use stride-based positioning if available
+        ds = self._display_scale
+        if self._tile_stride_x is not None and self._tile_stride_y is not None:
+            stride_x = self._tile_stride_x / ds
+            stride_y = self._tile_stride_y / ds
+            sel_w = self._tile_w / ds if self._tile_w else stride_x
+            sel_h = self._tile_h / ds if self._tile_h else stride_y
+        else:
+            stride_x = w / self._tiles_x
+            stride_y = h / self._tiles_y
+            sel_w = stride_x
+            sel_h = stride_y
 
         from PyQt5.QtCore import Qt
 
@@ -597,7 +664,7 @@ class ImagePanel(QWidget):
 
         # Calculate line width based on tile size (thicker for larger tiles)
         # Minimum 16px, scales with tile size for maximum visibility
-        line_width = max(16, int(min(tile_w, tile_h) / 8))
+        line_width = max(16, int(min(sel_w, sel_h) / 8))
 
         # Bright cyan border - 30% opacity (70% transparent)
         selection_pen = QPen(QColor(0, 255, 255, 76))
@@ -613,8 +680,8 @@ class ImagePanel(QWidget):
             else:
                 display_x_idx = tile_x_idx
 
-            x_pos = int(display_x_idx * tile_w)
-            y_pos = int(tile_y_idx * tile_h)
+            x_pos = int(display_x_idx * stride_x)
+            y_pos = int(tile_y_idx * stride_y)
 
             # Check if selection rectangle is within bounds
             if x_pos < 0 or x_pos >= w or y_pos < 0 or y_pos >= h:
@@ -626,7 +693,7 @@ class ImagePanel(QWidget):
                 )
                 continue
 
-            painter.drawRect(x_pos, y_pos, int(tile_w), int(tile_h))
+            painter.drawRect(x_pos, y_pos, int(sel_w), int(sel_h))
             selections_drawn += 1
 
         logger.info(
@@ -949,7 +1016,12 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
         # Calculate tile dimensions
         bbox = self._config.bounding_box
-        fov = 0.5182  # mm (no overlap - tiles are adjacent)
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            fov = get_hardware_config().fov_mm
+        except Exception:
+            fov = 0.5182  # mm fallback
 
         tiles_x = max(1, int((bbox.width / fov) + 1))
         tiles_y = max(1, int((bbox.height / fov) + 1))

@@ -349,7 +349,12 @@ class ConnectionService:
             scope_settings = fh.text_to_dict(str(settings_path))
             tube = float(scope_settings["Type"]["Tube lens design focal length (mm)"])
             obj = float(scope_settings["Type"]["Objective lens magnification"])
-            cam_um = 6.5
+            try:
+                from py2flamingo.configs.config_loader import get_hardware_config
+
+                cam_um = get_hardware_config().sensor_pixel_size_um
+            except Exception:
+                cam_um = 6.5
             image_pixel_size = (cam_um / (obj * (tube / 200))) / 1000.0  # mm
         return image_pixel_size, scope_settings
 
@@ -1369,10 +1374,18 @@ class MVCConnectionService:
                         scope_settings["Type"]["Tube lens design focal length (mm)"]
                     )
                     obj = float(scope_settings["Type"]["Objective lens magnification"])
-                    # Get camera pixel size from settings, or use common sensor value
+                    # Get camera pixel size from settings, or use hardware config
+                    try:
+                        from py2flamingo.configs.config_loader import (
+                            get_hardware_config,
+                        )
+
+                        _hw_default_cam = get_hardware_config().sensor_pixel_size_um
+                    except Exception:
+                        _hw_default_cam = 6.5
                     cam_um = float(
                         scope_settings.get("Camera", {}).get(
-                            "Physical pixel size (µm)", 6.5
+                            "Physical pixel size (\u00b5m)", _hw_default_cam
                         )
                     )
                     image_pixel_size = (

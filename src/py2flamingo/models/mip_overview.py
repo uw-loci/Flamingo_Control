@@ -608,9 +608,12 @@ def export_overview_with_labels(
         all_channels = [0]  # Single channel for subfolder layout
 
     n_chan = len(all_channels)
+    # Data channels + 1 overlay channel (grid lines + coordinate labels)
     mosaic = np.zeros((n_chan + 1, mosaic_h, mosaic_w), dtype=np.uint16)
 
-    # Place tiles for each channel
+    # Place tiles for each channel.
+    # Export uses raw grid-index layout matching the original
+    # stitch_tiles_with_overlay.py script: X=0 on left, Y=0 at bottom.
     for ch_idx, ch_id in enumerate(all_channels):
         for tile in tiles:
             # Get the image for this channel
@@ -654,12 +657,12 @@ def export_overview_with_labels(
             # Crop/pad to exact target size
             ds = ds[:downsample_size, :downsample_size]
 
-            # Place in mosaic (Y inverted: tile_y_idx=0 at bottom)
+            # Place tile — same layout as the interactive display
             if config.invert_x:
                 x_pos = (tiles_x - 1 - tile.tile_x_idx) * stride
             else:
                 x_pos = tile.tile_x_idx * stride
-            y_pos = (tiles_y - 1 - tile.tile_y_idx) * stride
+            y_pos = tile.tile_y_idx * stride
             dh, dw = ds.shape[:2]
             mosaic[ch_idx, y_pos : y_pos + dh, x_pos : x_pos + dw] = ds
 
@@ -675,8 +678,8 @@ def export_overview_with_labels(
         y_line = min(row * stride, mosaic_h - 1)
         draw.line([(0, y_line), (mosaic_w - 1, y_line)], fill=255)
 
-    # Coordinate labels
-    font_size = max(downsample_size // 4, 8)
+    # Coordinate labels — large font (half tile size) centered in each tile
+    font_size = max(downsample_size // 2, 8)
     try:
         font = ImageFont.truetype("DejaVuSans.ttf", font_size)
     except Exception:
@@ -692,7 +695,7 @@ def export_overview_with_labels(
             x_pos = (tiles_x - 1 - tile.tile_x_idx) * stride
         else:
             x_pos = tile.tile_x_idx * stride
-        y_pos = (tiles_y - 1 - tile.tile_y_idx) * stride
+        y_pos = tile.tile_y_idx * stride
         cx = x_pos + downsample_size // 2
         cy = y_pos + downsample_size // 2
 
@@ -711,6 +714,6 @@ def export_overview_with_labels(
     overlay_arr = (overlay_arr * (65535 // 255)).astype(np.uint16)
     mosaic[-1] = overlay_arr
 
-    # Write multi-channel TIFF
+    # Write multi-channel TIFF (data channels + overlay)
     tifffile.imwrite(str(output_path), mosaic, photometric="minisblack")
     logger.info(f"Exported overview ({n_chan} channels + overlay) to {output_path}")

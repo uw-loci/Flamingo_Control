@@ -29,6 +29,24 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Load timeout defaults from stitching config
+try:
+    from py2flamingo.configs.config_loader import get_stitching_value as _get_sv
+
+    _IMPORT_CHECK_TIMEOUT = int(
+        _get_sv("isolated_timeouts", "import_check", default=15)
+    )
+    _FLAT_FIELD_TIMEOUT = int(
+        _get_sv("isolated_timeouts", "flat_field_estimation", default=300)
+    )
+    _LEONARDO_TIMEOUT = int(
+        _get_sv("isolated_timeouts", "leonardo_fusion", default=1200)
+    )
+except Exception:
+    _IMPORT_CHECK_TIMEOUT = 15
+    _FLAT_FIELD_TIMEOUT = 300
+    _LEONARDO_TIMEOUT = 1200
+
 
 # ---------------------------------------------------------------------------
 # SharedArray — numpy array backed by named shared memory
@@ -144,7 +162,7 @@ class IsolatedPreprocessingService:
             result = subprocess.run(
                 [str(self._worker_python), "-c", f"import {module}"],
                 capture_output=True,
-                timeout=15,
+                timeout=_IMPORT_CHECK_TIMEOUT,
             )
             available = result.returncode == 0
         except (subprocess.TimeoutExpired, OSError):
@@ -258,7 +276,7 @@ class IsolatedPreprocessingService:
                     "flat_field_estimate",
                     {"stack": shm_in},
                     params={"channel_id": ch_id},
-                    timeout=300,
+                    timeout=_FLAT_FIELD_TIMEOUT,
                 )
                 flatfield = self._collect_output(result, "flatfield")
                 darkfield = self._collect_output(result, "darkfield")
@@ -294,7 +312,15 @@ class IsolatedPreprocessingService:
         # (no dependency on basicpy — just division and subtraction)
         flatfield = flatfield.astype(np.float32)
         darkfield = darkfield.astype(np.float32)
-        flatfield = np.where(flatfield > 0.001, flatfield, 1.0)
+        try:
+            from py2flamingo.configs.config_loader import get_stitching_value
+
+            _ff_thresh = float(
+                get_stitching_value("flat_field", "min_threshold", default=0.001)
+            )
+        except Exception:
+            _ff_thresh = 0.001
+        flatfield = np.where(flatfield > _ff_thresh, flatfield, 1.0)
 
         result = np.empty_like(volume)
         for z in range(volume.shape[0]):
@@ -330,7 +356,7 @@ class IsolatedPreprocessingService:
             result = self._run_worker(
                 "leonardo_fuse",
                 {"left": shm_left, "right": shm_right},
-                timeout=1200,  # Leonardo can be slow on large volumes
+                timeout=_LEONARDO_TIMEOUT,  # Leonardo can be slow on large volumes
             )
             fused = self._collect_output(result, "fused")
             logger.info(

@@ -39,8 +39,15 @@ logger = logging.getLogger(__name__)
 # Pattern: S000_t000000_V000_R0000_X000_Y000_C{ch}_I0_D1_P{planes}.raw
 RAW_FILE_PATTERN = re.compile(r"S\d+_.*_C(\d+)_.*_P(\d+)\.raw$")
 
-FRAME_WIDTH = 2048
-FRAME_HEIGHT = 2048
+try:
+    from py2flamingo.configs.config_loader import get_hardware_config as _get_hw
+
+    _hw = _get_hw()
+    FRAME_WIDTH = _hw.sensor_width_px
+    FRAME_HEIGHT = _hw.sensor_height_px
+except Exception:
+    FRAME_WIDTH = 2048
+    FRAME_HEIGHT = 2048
 DOWNSAMPLE_TARGET = 100
 
 

@@ -246,8 +246,13 @@ class MIPOverviewDialog(PersistentDialog):
         self._overlap_spin.setRange(0, 50)
         self._overlap_spin.setValue(5)
         self._overlap_spin.setSuffix("%")
-        self._overlap_spin.setToolTip("Tile overlap percentage for exported overview")
+        self._overlap_spin.setToolTip(
+            "Tile overlap percentage — affects both the mosaic display\n"
+            "and exported overview. Auto-detected from Workflow.txt\n"
+            "when available. 0% = tiles placed edge-to-edge."
+        )
         self._overlap_spin.setFixedWidth(65)
+        self._overlap_spin.valueChanged.connect(self._on_overlap_changed)
         button_layout.addWidget(self._overlap_spin)
 
         self._export_btn = QPushButton("Export Overview...")
@@ -677,6 +682,11 @@ class MIPOverviewDialog(PersistentDialog):
 
         logger.info(f"Switched to channel C{channel_id:02d}")
 
+    def _on_overlap_changed(self, value: int):
+        """Re-stitch and redisplay when overlap percentage changes."""
+        if self._tiles and self._config:
+            self._stitch_and_display()
+
     def _on_export_overview(self):
         """Export overview with grid lines and coordinate labels as TIFF."""
         if not self._tiles or not self._config:
@@ -722,13 +732,19 @@ class MIPOverviewDialog(PersistentDialog):
             )
 
     def _stitch_and_display(self):
-        """Stitch loaded MIP tiles into overview and display."""
+        """Stitch loaded MIP tiles into overview and display.
+
+        Uses the overlap percentage from the overlap spinbox to place tiles
+        with the correct spatial relationship. Overlap regions use
+        maximum-intensity blending.
+        """
         if not self._tiles or not self._config:
             return
 
         tiles_x = self._config.tiles_x
         tiles_y = self._config.tiles_y
         downsample = self._config.downsample_factor
+        overlap_pct = self._overlap_spin.value() / 100.0
 
         # Determine tile size after downsampling
         sample_tile = self._tiles[0].image
@@ -740,15 +756,27 @@ class MIPOverviewDialog(PersistentDialog):
         tile_h = orig_h // downsample
         tile_w = orig_w // downsample
 
-        # Create stitched image
-        stitched_h = tiles_y * tile_h
-        stitched_w = tiles_x * tile_w
+        # Compute stride (distance between tile origins) accounting for overlap
+        overlap_x = int(tile_w * overlap_pct)
+        overlap_y = int(tile_h * overlap_pct)
+        stride_x = tile_w - overlap_x
+        stride_y = tile_h - overlap_y
+
+        # Mosaic dimensions with overlap
+        if tiles_x > 1:
+            stitched_w = stride_x * (tiles_x - 1) + tile_w
+        else:
+            stitched_w = tile_w
+        if tiles_y > 1:
+            stitched_h = stride_y * (tiles_y - 1) + tile_h
+        else:
+            stitched_h = tile_h
 
         # Use same dtype as source
         dtype = sample_tile.dtype
         stitched = np.zeros((stitched_h, stitched_w), dtype=dtype)
 
-        # Place tiles
+        # Place tiles (max-intensity blending in overlap regions)
         for tile in self._tiles:
             # Downsample tile image
             if downsample > 1:
@@ -769,18 +797,18 @@ class MIPOverviewDialog(PersistentDialog):
             else:
                 downsampled = tile.image
 
-            # Calculate position (invert X if needed to match stage orientation)
+            # Calculate position using stride (invert X if needed)
             if self._config.invert_x:
-                # Invert: tile_x_idx=0 goes on right, tile_x_idx=max goes on left
                 inverted_x_idx = (tiles_x - 1) - tile.tile_x_idx
-                x_pos = inverted_x_idx * tile_w
+                x_pos = inverted_x_idx * stride_x
             else:
-                x_pos = tile.tile_x_idx * tile_w
-            y_pos = tile.tile_y_idx * tile_h
+                x_pos = tile.tile_x_idx * stride_x
+            y_pos = tile.tile_y_idx * stride_y
 
-            # Place in stitched image
+            # Place in stitched image with max-intensity blending for overlaps
             dh, dw = downsampled.shape[:2]
-            stitched[y_pos : y_pos + dh, x_pos : x_pos + dw] = downsampled
+            region = stitched[y_pos : y_pos + dh, x_pos : x_pos + dw]
+            np.maximum(region, downsampled[:dh, :dw], out=region)
 
         self._stitched_image = stitched
 
@@ -790,13 +818,15 @@ class MIPOverviewDialog(PersistentDialog):
         # Convert tiles to TileResult format for ImagePanel
         tile_results = self._mip_tiles_to_tile_results(self._tiles)
 
-        # Display in left panel (use invert_x from config for correct axis orientation)
+        # Display in left panel with stride info for correct grid lines
         self._left_panel.set_image(stitched, tiles_x, tiles_y)
+        self._left_panel.set_tile_stride(stride_x, stride_y, tile_w, tile_h)
         self._left_panel.set_tile_coordinates(coords, invert_x=self._config.invert_x)
         self._left_panel.set_tile_results(tile_results)
 
         logger.info(
-            f"Stitched {len(self._tiles)} tiles into {stitched_w}x{stitched_h} overview"
+            f"Stitched {len(self._tiles)} tiles into {stitched_w}x{stitched_h} overview "
+            f"(overlap={self._overlap_spin.value()}%, stride={stride_x}x{stride_y})"
         )
 
     def _mip_tiles_to_tile_results(

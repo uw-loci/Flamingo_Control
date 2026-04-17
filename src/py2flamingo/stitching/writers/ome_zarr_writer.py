@@ -38,11 +38,31 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Default chunk/shard configuration for uint16 lightsheet data
-DEFAULT_CHUNKS = (32, 256, 256)  # ~4 MB per chunk
-DEFAULT_SHARD_CHUNKS = (4, 4, 4)  # 64 chunks per shard → ~256 MB per shard
-DEFAULT_COMPRESSION = "zstd"
-DEFAULT_COMPRESSION_LEVEL = 3
+# Default chunk/shard configuration — loaded from stitching_config.yaml
+try:
+    from py2flamingo.configs.config_loader import get_stitching_value as _get_sv
+
+    DEFAULT_CHUNKS = tuple(
+        int(c) for c in _get_sv("zarr", "chunks", default=[32, 256, 256])
+    )
+    DEFAULT_SHARD_CHUNKS = tuple(
+        int(c) for c in _get_sv("zarr", "shard_chunks", default=[4, 4, 4])
+    )
+    DEFAULT_COMPRESSION = str(_get_sv("zarr", "compression", default="zstd"))
+    DEFAULT_COMPRESSION_LEVEL = int(_get_sv("zarr", "compression_level", default=3))
+except Exception:
+    DEFAULT_CHUNKS = (32, 256, 256)  # ~4 MB per chunk
+    DEFAULT_SHARD_CHUNKS = (4, 4, 4)  # 64 chunks per shard → ~256 MB per shard
+    DEFAULT_COMPRESSION = "zstd"
+    DEFAULT_COMPRESSION_LEVEL = 3
+
+# Pyramid auto-detection thresholds
+try:
+    _ZARR_PYRAMID_MIN_DIM = int(_get_sv("pyramid", "zarr_min_dimension", default=64))
+    _ZARR_PYRAMID_MAX_LEVELS = int(_get_sv("pyramid", "zarr_max_levels", default=6))
+except Exception:
+    _ZARR_PYRAMID_MIN_DIM = 64
+    _ZARR_PYRAMID_MAX_LEVELS = 6
 
 
 def write_ome_zarr_sharded(
@@ -194,10 +214,10 @@ def _write_via_ngff_zarr(
     if pyramid_levels is None:
         min_dim = min(spatial_shape)
         pyramid_levels = 0
-        while min_dim > 64:
+        while min_dim > _ZARR_PYRAMID_MIN_DIM:
             min_dim //= 2
             pyramid_levels += 1
-        pyramid_levels = max(1, min(pyramid_levels, 6))
+        pyramid_levels = max(1, min(pyramid_levels, _ZARR_PYRAMID_MAX_LEVELS))
 
     scale_factors = [2**i for i in range(1, pyramid_levels + 1)]
 
@@ -507,10 +527,10 @@ def write_ome_zarr_v2(
     if pyramid_levels is None:
         min_dim = min(spatial_shape)
         pyramid_levels = 0
-        while min_dim > 64:
+        while min_dim > _ZARR_PYRAMID_MIN_DIM:
             min_dim //= 2
             pyramid_levels += 1
-        pyramid_levels = max(1, min(pyramid_levels, 6))
+        pyramid_levels = max(1, min(pyramid_levels, _ZARR_PYRAMID_MAX_LEVELS))
 
     if progress_callback:
         progress_callback(10, f"Generating {pyramid_levels}-level pyramid...")

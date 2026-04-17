@@ -1,0 +1,336 @@
+# Stitching Pipeline Configuration
+# Default values for all stitching pipeline parameters.
+# These are loaded at startup and used as defaults when no QSettings
+# override exists. Users can also override individual fields in the
+# stitching dialog UI.
+#
+# Structure mirrors StitchingConfig dataclass in stitching/pipeline.py.
+# Additional sections cover writer, destripe, deconvolution, and depth
+# attenuation parameters that are not part of the dataclass but are
+# used internally by the pipeline.
+
+# ============================================================
+# Voxel size
+# ============================================================
+# XY pixel size in micrometers (effective, after magnification).
+# This is the image-plane pixel size, NOT the raw sensor pixel size.
+# For a 6.5um sensor pixel at 16x objective magnification:
+#   effective_pixel = 6.5 / 16.0 = 0.40625 um
+#
+# NOTE: The microscope_hardware.yaml derives effective_pixel_size_um from
+# the full system magnification (including tube lens factor), which gives
+# ~0.253 um. The value here (0.406) uses only the objective magnification
+# and has been validated on real stitching data. If your stitched data
+# appears the wrong size, check which magnification applies to your raw
+# data files. This value is user-editable in the stitching dialog.
+pixel_size_um: 0.406
+
+# ============================================================
+# Registration
+# ============================================================
+registration:
+  # Skip phase-correlation registration entirely.
+  # When true, tiles are placed using only their stage coordinates.
+  # Use this when tiles have no overlap or stage positions are precise.
+  skip: false
+
+  # Channel index used for registration (0-based).
+  # Registration is computed on this channel and applied to all others.
+  channel: 0
+
+  # Downsampling factors for phase-correlation registration.
+  # Higher values = faster but less precise.
+  # Fine:    {z: 1, y: 2, x: 2}   — most accurate, slowest
+  # Default: {z: 2, y: 4, x: 4}   — good balance
+  # Fast:    {z: 4, y: 8, x: 8}   — fastest, may miss small shifts
+  binning:
+    z: 2
+    y: 4
+    x: 4
+
+  # Minimum phase-correlation quality score (0.0 - 1.0).
+  # Tile pairs below this threshold are treated as unregistered.
+  # Lower values accept noisier matches (useful for sparse/dim data).
+  # Higher values reject questionable matches (use for high-SNR data).
+  # Typical range: 0.1 (lenient) to 0.5 (strict).
+  quality_threshold: 0.2
+
+  # Global optimization — iterative edge-pruning inspired by BigStitcher
+  # (Horl et al., Nature Methods 2019).
+  global_optimization:
+    # Maximum acceptable residual in pixels after global optimization.
+    # Edges with residuals above this are pruned if the graph stays connected.
+    # Depends on tile overlap and pixel size. Typical: 1.0 - 5.0 pixels.
+    absolute_tolerance: 3.5
+
+    # Relative convergence threshold for the optimization solver.
+    # Smaller = more precise but slower. 0.01 is usually fine.
+    relative_tolerance: 0.01
+
+# ============================================================
+# Blending & fusion
+# ============================================================
+blending:
+  # Cosine fade-out widths in micrometers at tile boundaries.
+  # Controls the smooth transition zone in overlap regions.
+  # Wider = smoother blending but more averaging of data.
+  # Should be roughly proportional to the overlap region size.
+  widths_um:
+    z: 50
+    y: 100
+    x: 100
+
+  # Content-based fusion (Preibisch local-variance weighting).
+  # Weights each tile's contribution by local sharpness in overlap regions.
+  # Improves quality for samples with uneven content but increases
+  # computation time significantly.
+  content_based: false
+
+# Illumination fusion method for dual-sided illumination data.
+# "max"      — maximum intensity (good for fluorescence, preserves signal)
+# "mean"     — arithmetic mean (reduces noise, may reduce contrast)
+# "leonardo" — Leonardo toolset FUSE_illu (requires isolated environment)
+illumination_fusion: "max"
+
+# ============================================================
+# Output format
+# ============================================================
+output:
+  # Output file format.
+  # "ome-zarr-sharded" — Zarr v3 + OME-NGFF v0.5 with sharding (napari)
+  # "ome-zarr-v2"      — Zarr v2 + OME-NGFF v0.4 (Fiji/QuPath/BDV/napari)
+  # "ome-tiff"         — Pyramidal OME-TIFF BigTIFF (single file, universal)
+  # "both"             — ome-zarr-sharded + ome-tiff
+  format: "ome-zarr-sharded"
+
+  # Chunk size for the fusion/stitching compute graph.
+  # These are the dask task chunk sizes, NOT the output file chunk sizes.
+  # Larger = fewer tasks but more memory per task.
+  chunksize:
+    z: 128
+    y: 256
+    x: 256
+
+  # Create .ozx (single ZIP archive) from OME-Zarr output.
+  package_ozx: false
+
+# ============================================================
+# OME-Zarr writer settings
+# ============================================================
+zarr:
+  # Inner chunk shape for Zarr arrays.
+  # For uint16 data, (32, 256, 256) gives ~4 MB per chunk.
+  # Tuning guidance:
+  #   - XY-plane viewing (napari, QuPath): (32, 256, 256) is optimal
+  #   - Z-reslicing / orthogonal views:    (128, 128, 128) is better
+  #   - Cloud/S3 streaming:                (64, 512, 512) reduces HTTP overhead
+  #   - Small datasets (<1 GB):            (16, 128, 128) avoids oversized chunks
+  chunks: [32, 256, 256]
+
+  # Shard configuration — chunks per shard per axis.
+  # Only used for ome-zarr-sharded (Zarr v3) output.
+  # (4, 4, 4) packs 64 chunks into each shard file (~256 MB per shard).
+  # Tuning guidance:
+  #   - Local NFS/POSIX:  (4, 4, 4) — balanced file count vs access granularity
+  #   - Cloud/S3:         (8, 4, 4) or (4, 8, 8) — fewer larger shards
+  #   - Very large data:  (8, 8, 8) — ~2 GB shards, minimal file count
+  shard_chunks: [4, 4, 4]
+
+  # Compression codec for Zarr chunks.
+  # "zstd" — good ratio + speed balance (recommended)
+  # "lz4"  — fastest decompression, lower ratio
+  # "blosc" — compatible with older zarr readers
+  # "none" — no compression (fastest write, largest files)
+  compression: "zstd"
+
+  # Compression level (codec-specific).
+  # For zstd: 1 (fastest) to 22 (max compression). Default 3 is a
+  # good balance. Use 1 for ephemeral data, 5-9 for archival.
+  compression_level: 3
+
+  # Use TensorStore backend for writing (experimental).
+  # May be faster for very large datasets but less tested.
+  use_tensorstore: false
+
+# ============================================================
+# OME-TIFF writer settings
+# ============================================================
+tiff:
+  # Compression codec for TIFF.
+  # "zlib" — universal support (Fiji, QuPath, OMERO, napari)
+  # "lzw"  — faster decompression (good for Fiji batch processing)
+  # "zstd" — better ratio, but not all readers support it yet
+  # "none" — no compression
+  compression: "zlib"
+
+  # Internal tile dimensions for random-access reads.
+  # 256x256 is the standard. Larger tiles (512x512) are more efficient
+  # for sequential reads; smaller tiles (128x128) are better for
+  # small ROI access patterns.
+  tile_size: [256, 256]
+
+# ============================================================
+# Pyramid settings
+# ============================================================
+pyramid:
+  # Number of pyramid (multi-resolution) levels.
+  # null = auto-detect based on image dimensions.
+  # Auto-detection downsamples by 2x until the smallest spatial
+  # dimension is below the minimum threshold.
+  levels: null
+
+  # Downsampling method for pyramid generation.
+  # "itkwasm_bin_shrink" — anti-aliased box filter (recommended)
+  # "itkwasm_gaussian"   — Gaussian smoothing before downsample (slower)
+  # "dask_image_gaussian" — dask-image Gaussian (for streaming mode)
+  method: "itkwasm_bin_shrink"
+
+  # Auto-detection thresholds (used when levels is null).
+  # Zarr: stop when min(Z,Y,X) <= min_dimension, max N levels.
+  # TIFF: stop when min(Y,X) <= min_dimension, max N levels.
+  zarr_min_dimension: 64
+  zarr_max_levels: 6
+  tiff_min_dimension: 128
+  tiff_max_levels: 5
+
+# ============================================================
+# Preprocessing: destriping
+# ============================================================
+destripe:
+  # PyStripe wavelet decomposition parameters.
+  # These control which spatial frequency bands of stripe artifacts
+  # are removed. The filter operates per-plane in the Fourier domain.
+
+  # Sigma values for the multiscale wavelet filter.
+  # Smaller values target narrower/finer stripes.
+  # Larger values target wider/coarser stripes.
+  # [128, 256] covers the typical range for light-sheet stripe artifacts.
+  sigma: [128, 256]
+
+  # Wavelet decomposition depth (number of levels).
+  # Higher = captures lower-frequency stripes but risks removing
+  # real biological structure. 5-9 is the typical range.
+  level: 7
+
+  # Wavelet family. "db2" (Daubechies-2) is standard for destriping.
+  # Alternatives: "db4", "sym4", "coif1" (rarely needed).
+  wavelet: "db2"
+
+  # OS memory headroom reserved during parallel destripe (bytes).
+  # Destripe spawns a thread pool; this reserves memory for the OS
+  # and other application threads to prevent swapping.
+  reserved_memory_bytes: 2147483648  # 2 GB
+
+# ============================================================
+# Preprocessing: depth attenuation correction
+# ============================================================
+depth_attenuation:
+  # Minimum number of Z-planes required for reliable exponential fit.
+  # Samples with fewer planes skip attenuation correction.
+  min_planes_for_fit: 5
+
+  # Minimum per-plane mean intensity for inclusion in the fit.
+  # Planes below this threshold are excluded (likely background/noise).
+  signal_threshold: 1.0
+
+# ============================================================
+# Preprocessing: flat-field correction
+# ============================================================
+flat_field:
+  # Minimum flatfield value (BaSiCPy output).
+  # Values below this are clipped to 1.0 to prevent division by
+  # near-zero values, which would amplify noise catastrophically.
+  min_threshold: 0.001
+
+# ============================================================
+# Deconvolution
+# ============================================================
+deconvolution:
+  # Deconvolution engine.
+  # "pycudadecon" — GPU-accelerated Richardson-Lucy (CUDA required)
+  # "redlionfish" — CPU/GPU Richardson-Lucy via scikit-image
+  engine: "pycudadecon"
+
+  # Number of Richardson-Lucy iterations.
+  # More iterations = sharper result but more noise amplification
+  # and longer computation. Typical range: 5-20.
+  iterations: 10
+
+  # PSF generation parameters (used when no PSF file is provided).
+  # NA and n_immersion should match microscope_hardware.yaml optics section.
+  # Wavelength should match the channel being deconvolved.
+  psf:
+    # Default emission wavelength (nm) for PSF generation.
+    # This is a fallback; per-channel wavelengths from
+    # microscope_hardware.yaml are preferred.
+    wavelength_nm: 488.0
+
+    # Number of Z-planes in the generated PSF.
+    # Must be large enough to cover the full PSF axial extent.
+    # 31 is sufficient for NA < 0.5. Use 61+ for high-NA objectives.
+    nz: 31
+
+    # XY grid size for PSF generation (pixels).
+    # 64 is sufficient for most cases. Increase for very low NA.
+    nxy: 64
+
+  # GPU settings
+  gpu_device_id: 0
+
+  # Z-slab size for GPU memory management.
+  # 0 = automatic (pycudadecon determines optimal slab size).
+  # Set explicitly if GPU has limited memory.
+  z_slab_size: 0
+
+# ============================================================
+# Memory management & streaming
+# ============================================================
+memory:
+  # Streaming mode selection.
+  # null  — auto-detect based on estimated memory usage vs available RAM
+  # true  — always use streaming (low memory, may be slower)
+  # false — always use in-memory (fast, requires data to fit in RAM)
+  streaming_mode: null
+
+  # Auto-streaming threshold: fraction of system RAM.
+  # If estimated peak memory exceeds this fraction of total RAM,
+  # auto-detection switches to streaming mode.
+  # 0.6 = trigger streaming when estimate > 60% of RAM.
+  # Lower = more conservative (fewer OOM risks).
+  # Higher = more aggressive (use on dedicated stitching machines).
+  auto_streaming_threshold: 0.6
+
+  # Multiplier for in-memory peak estimation.
+  # Peak RAM ~ output_size_gb * this_value.
+  # Accounts for compute buffers + result array + pyramid overhead.
+  in_memory_multiplier: 2.5
+
+  # Fallback system RAM assumption (GB) when psutil is unavailable.
+  fallback_system_ram_gb: 64.0
+
+  # Number of worker threads for streaming chunk computation.
+  # More workers = faster but more memory. Should scale with CPU cores.
+  streaming_workers: 4
+
+  # Dask chunk size for internal processing (tile loading, fusion).
+  # These are NOT the output file chunk sizes — see zarr.chunks and
+  # output.chunksize for those. These control the dask task graph
+  # granularity during the fusion computation.
+  dask_processing_chunks: [64, 512, 512]
+
+# ============================================================
+# Isolated environment timeouts
+# ============================================================
+# These control timeouts for external tools that run in a separate
+# Python environment (basicpy flat-field, Leonardo fusion).
+isolated_timeouts:
+  # Timeout for checking if a module is importable (seconds).
+  import_check: 15
+
+  # Timeout for BaSiCPy flat-field estimation (seconds).
+  # Large datasets with many tiles may need longer.
+  flat_field_estimation: 300
+
+  # Timeout for Leonardo illumination fusion (seconds).
+  # Very large volumes may exceed the default 20 minutes.
+  leonardo_fusion: 1200

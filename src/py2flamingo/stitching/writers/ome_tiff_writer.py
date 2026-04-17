@@ -18,9 +18,21 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Default tile size for TIFF internal tiling (enables random access reads)
-DEFAULT_TILE_SIZE = (256, 256)
-DEFAULT_COMPRESSION = "zlib"
+# Default settings — loaded from stitching_config.yaml
+try:
+    from py2flamingo.configs.config_loader import get_stitching_value as _get_sv
+
+    DEFAULT_TILE_SIZE = tuple(
+        int(t) for t in _get_sv("tiff", "tile_size", default=[256, 256])
+    )
+    DEFAULT_COMPRESSION = str(_get_sv("tiff", "compression", default="zlib"))
+    _TIFF_PYRAMID_MIN_DIM = int(_get_sv("pyramid", "tiff_min_dimension", default=128))
+    _TIFF_PYRAMID_MAX_LEVELS = int(_get_sv("pyramid", "tiff_max_levels", default=5))
+except Exception:
+    DEFAULT_TILE_SIZE = (256, 256)
+    DEFAULT_COMPRESSION = "zlib"
+    _TIFF_PYRAMID_MIN_DIM = 128
+    _TIFF_PYRAMID_MAX_LEVELS = 5
 
 
 def write_pyramidal_ome_tiff(
@@ -86,10 +98,10 @@ def write_pyramidal_ome_tiff(
     if pyramid_levels is None:
         min_xy = min(y, x)
         pyramid_levels = 0
-        while min_xy > 128:
+        while min_xy > _TIFF_PYRAMID_MIN_DIM:
             min_xy //= 2
             pyramid_levels += 1
-        pyramid_levels = max(0, min(pyramid_levels, 5))
+        pyramid_levels = max(0, min(pyramid_levels, _TIFF_PYRAMID_MAX_LEVELS))
 
     logger.info(f"Pyramid levels: {pyramid_levels} (plus full resolution)")
 
@@ -250,10 +262,10 @@ def write_pyramidal_ome_tiff_streaming(
     if pyramid_levels is None:
         min_xy = min(y, x)
         pyramid_levels = 0
-        while min_xy > 128:
+        while min_xy > _TIFF_PYRAMID_MIN_DIM:
             min_xy //= 2
             pyramid_levels += 1
-        pyramid_levels = max(0, min(pyramid_levels, 5))
+        pyramid_levels = max(0, min(pyramid_levels, _TIFF_PYRAMID_MAX_LEVELS))
 
     logger.info(f"Pyramid levels: {pyramid_levels} (plus full resolution)")
 

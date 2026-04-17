@@ -96,12 +96,21 @@ class StitchingDialog(PersistentDialog):
         settings_layout = QGridLayout()
         settings_layout.setSpacing(6)
 
+        # Load hardware-derived pixel size default
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            _hw = get_hardware_config()
+            self._default_pixel_um = round(_hw.effective_pixel_size_um, 4)
+        except Exception:
+            self._default_pixel_um = 0.406
+
         # Pixel size
         settings_layout.addWidget(QLabel("Pixel size (\u00b5m):"), 0, 0)
         self._pixel_size_spin = QDoubleSpinBox()
         self._pixel_size_spin.setRange(0.01, 100.0)
         self._pixel_size_spin.setDecimals(3)
-        self._pixel_size_spin.setValue(0.406)
+        self._pixel_size_spin.setValue(self._default_pixel_um)
         self._pixel_size_spin.setSingleStep(0.001)
         settings_layout.addWidget(self._pixel_size_spin, 0, 1)
 
@@ -551,32 +560,35 @@ class StitchingDialog(PersistentDialog):
     # --- Run / Cancel ---
 
     def _build_config(self):
-        """Build a StitchingConfig from current UI settings."""
+        """Build a StitchingConfig from YAML defaults + current UI settings."""
         from py2flamingo.stitching.pipeline import StitchingConfig
 
+        # Start from YAML defaults (fills in all non-UI-exposed fields)
+        config = StitchingConfig.with_yaml_defaults()
+
+        # Overlay UI settings
         z_step = self._z_step_spin.value()
-        return StitchingConfig(
-            pixel_size_um=self._pixel_size_spin.value(),
-            z_step_um=z_step if z_step > 0 else None,
-            illumination_fusion=self._fusion_combo.currentData(),
-            output_format=self._format_combo.currentData(),
-            flat_field_correction=self._flat_field_cb.isChecked(),
-            destripe=self._destripe_cb.isChecked(),
-            destripe_fast=self._destripe_fast_cb.isChecked(),
-            depth_attenuation=self._depth_atten_cb.isChecked(),
-            depth_attenuation_mu=(
-                self._depth_atten_mu_spin.value()
-                if self._depth_atten_mu_spin.value() > 0
-                else None
-            ),
-            downsample_factor=self._downsample_combo.currentData(),
-            deconvolution_enabled=self._deconv_cb.isChecked(),
-            content_based_fusion=self._content_fusion_cb.isChecked(),
-            skip_registration=self._skip_reg_cb.isChecked(),
-            registration_binning=self._reg_binning_combo.currentData(),
-            package_ozx=self._ozx_cb.isChecked(),
-            streaming_mode=self._streaming_combo.currentData(),
+        config.pixel_size_um = self._pixel_size_spin.value()
+        config.z_step_um = z_step if z_step > 0 else None
+        config.illumination_fusion = self._fusion_combo.currentData()
+        config.output_format = self._format_combo.currentData()
+        config.flat_field_correction = self._flat_field_cb.isChecked()
+        config.destripe = self._destripe_cb.isChecked()
+        config.destripe_fast = self._destripe_fast_cb.isChecked()
+        config.depth_attenuation = self._depth_atten_cb.isChecked()
+        config.depth_attenuation_mu = (
+            self._depth_atten_mu_spin.value()
+            if self._depth_atten_mu_spin.value() > 0
+            else None
         )
+        config.downsample_factor = self._downsample_combo.currentData()
+        config.deconvolution_enabled = self._deconv_cb.isChecked()
+        config.content_based_fusion = self._content_fusion_cb.isChecked()
+        config.skip_registration = self._skip_reg_cb.isChecked()
+        config.registration_binning = self._reg_binning_combo.currentData()
+        config.package_ozx = self._ozx_cb.isChecked()
+        config.streaming_mode = self._streaming_combo.currentData()
+        return config
 
     def _parse_channels(self) -> Optional[List[int]]:
         """Parse channels from the channels line edit. Returns None for 'all'."""
@@ -941,7 +953,7 @@ class StitchingDialog(PersistentDialog):
         if output_dir:
             self._output_dir_edit.setText(output_dir)
 
-        pixel_size = s.value("pixel_size", 0.406, type=float)
+        pixel_size = s.value("pixel_size", self._default_pixel_um, type=float)
         self._pixel_size_spin.setValue(pixel_size)
 
         z_step = s.value("z_step", 0.0, type=float)
@@ -1135,7 +1147,7 @@ class NativeStitchingDialog(StitchingDialog):
         if output_dir:
             self._output_dir_edit.setText(output_dir)
 
-        pixel_size = s.value("pixel_size", 0.406, type=float)
+        pixel_size = s.value("pixel_size", self._default_pixel_um, type=float)
         self._pixel_size_spin.setValue(pixel_size)
 
         z_step = s.value("z_step", 0.0, type=float)

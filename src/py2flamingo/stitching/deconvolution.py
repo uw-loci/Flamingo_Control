@@ -20,24 +20,57 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Load optical defaults from hardware config
+try:
+    from py2flamingo.configs.config_loader import get_hardware_config as _get_hw
+
+    _hw = _get_hw()
+    _DEFAULT_NA = _hw.numerical_aperture
+    _DEFAULT_N_IMMERSION = _hw.immersion_refractive_index
+except Exception:
+    _DEFAULT_NA = 0.4
+    _DEFAULT_N_IMMERSION = 1.33
+
+# Load deconvolution defaults from stitching config
+try:
+    from py2flamingo.configs.config_loader import get_stitching_value as _get_sv
+
+    _DEFAULT_ENGINE = str(_get_sv("deconvolution", "engine", default="pycudadecon"))
+    _DEFAULT_ITERATIONS = int(_get_sv("deconvolution", "iterations", default=10))
+    _DEFAULT_WAVELENGTH = float(
+        _get_sv("deconvolution", "psf", "wavelength_nm", default=488.0)
+    )
+    _DEFAULT_GPU_ID = int(_get_sv("deconvolution", "gpu_device_id", default=0))
+    _DEFAULT_Z_SLAB = int(_get_sv("deconvolution", "z_slab_size", default=0))
+    _DEFAULT_PSF_NZ = int(_get_sv("deconvolution", "psf", "nz", default=31))
+    _DEFAULT_PSF_NXY = int(_get_sv("deconvolution", "psf", "nxy", default=64))
+except Exception:
+    _DEFAULT_ENGINE = "pycudadecon"
+    _DEFAULT_ITERATIONS = 10
+    _DEFAULT_WAVELENGTH = 488.0
+    _DEFAULT_GPU_ID = 0
+    _DEFAULT_Z_SLAB = 0
+    _DEFAULT_PSF_NZ = 31
+    _DEFAULT_PSF_NXY = 64
+
 
 @dataclass
 class DeconvolutionConfig:
     """Configuration for deconvolution."""
 
     enabled: bool = False
-    engine: str = "pycudadecon"  # "pycudadecon", "redlionfish", or "none"
-    num_iterations: int = 10
+    engine: str = _DEFAULT_ENGINE
+    num_iterations: int = _DEFAULT_ITERATIONS
     # PSF parameters for OTF generation (used if psf_path is not set)
-    na: float = 0.4  # Numerical aperture
-    wavelength_nm: float = 488.0  # Emission wavelength
-    n_immersion: float = 1.33  # Refractive index of immersion medium
+    na: float = _DEFAULT_NA
+    wavelength_nm: float = _DEFAULT_WAVELENGTH
+    n_immersion: float = _DEFAULT_N_IMMERSION
     # Or provide a pre-computed PSF file
     psf_path: Optional[str] = None
     # GPU settings
-    gpu_device_id: int = 0
+    gpu_device_id: int = _DEFAULT_GPU_ID
     # Z-slab size for GPU memory management (0 = auto)
-    z_slab_size: int = 0
+    z_slab_size: int = _DEFAULT_Z_SLAB
 
 
 def deconvolve_tile(
@@ -73,7 +106,7 @@ def generate_psf(
     config: DeconvolutionConfig,
     pixel_size_um: float,
     z_step_um: float,
-    nz: int = 31,
+    nz: int = _DEFAULT_PSF_NZ,
 ) -> np.ndarray:
     """Generate a theoretical lightsheet PSF.
 
@@ -98,7 +131,7 @@ def generate_psf(
         psf = tot_psf(
             nz=nz,
             dz=z_step_um,
-            nx=64,
+            nx=_DEFAULT_PSF_NXY,
             dxy=pixel_size_um,
             NA=config.na,
             wvl=config.wavelength_nm / 1000.0,  # PSFmodels uses µm

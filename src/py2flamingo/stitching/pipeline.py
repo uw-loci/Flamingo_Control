@@ -42,10 +42,27 @@ def _get_git_version() -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# Constants
+# Constants (loaded from microscope_hardware.yaml if available)
 # ---------------------------------------------------------------------------
-FRAME_WIDTH = 2048
-FRAME_HEIGHT = 2048
+try:
+    from py2flamingo.configs.config_loader import get_hardware_config as _get_hw
+
+    _hw = _get_hw()
+    FRAME_WIDTH = _hw.sensor_width_px
+    FRAME_HEIGHT = _hw.sensor_height_px
+except Exception:
+    FRAME_WIDTH = 2048
+    FRAME_HEIGHT = 2048
+
+# Dask chunk size for internal processing (tile loading, fusion).
+# Loaded from stitching_config.yaml memory.dask_processing_chunks.
+try:
+    from py2flamingo.configs.config_loader import get_stitching_value as _get_sv
+
+    _dpc = _get_sv("memory", "dask_processing_chunks", default=[64, 512, 512])
+    _DASK_PROCESSING_CHUNKS = tuple(int(c) for c in _dpc)
+except Exception:
+    _DASK_PROCESSING_CHUNKS = (64, 512, 512)
 
 # Raw filename pattern: S000_t000000_V000_R0000_X000_Y000_C{ch}_I{illum}_D{det}_P{planes}.raw
 RAW_FILE_PATTERN = re.compile(
@@ -170,6 +187,22 @@ class StitchingConfig:
     #   False = force in-memory (fast, requires all data to fit in RAM)
     streaming_mode: Optional[bool] = None
 
+    @classmethod
+    def with_yaml_defaults(cls) -> "StitchingConfig":
+        """Create a StitchingConfig with defaults loaded from stitching_config.yaml.
+
+        YAML values override the hardcoded dataclass defaults. Returns a
+        plain StitchingConfig if the YAML file is not found.
+        """
+        config = cls()
+        try:
+            from py2flamingo.configs.config_loader import apply_stitching_yaml_to_config
+
+            apply_stitching_yaml_to_config(config)
+        except Exception:
+            logger.debug("Could not load YAML defaults, using built-in defaults")
+        return config
+
 
 # ---------------------------------------------------------------------------
 # Memory estimation
@@ -222,16 +255,36 @@ def estimate_memory_usage(
     output_bytes = n_channels * out_z_px * out_y_px * out_x_px * bpv
     output_gb = output_bytes / (1024**3)
 
+    # Load memory estimation tunables from YAML config
+    try:
+        from py2flamingo.configs.config_loader import get_stitching_value
+
+        _mem_multiplier = float(
+            get_stitching_value("memory", "in_memory_multiplier", default=2.5)
+        )
+        _fallback_ram = float(
+            get_stitching_value("memory", "fallback_system_ram_gb", default=64.0)
+        )
+        _streaming_threshold = float(
+            get_stitching_value("memory", "auto_streaming_threshold", default=0.6)
+        )
+        _streaming_workers = int(
+            get_stitching_value("memory", "streaming_workers", default=4)
+        )
+    except Exception:
+        _mem_multiplier = 2.5
+        _fallback_ram = 64.0
+        _streaming_threshold = 0.6
+        _streaming_workers = 4
+
     # In-memory peak: stacked array + one channel during compute + pyramid overhead
-    # Roughly 2x the output (compute + result) plus pyramids (~33% extra)
-    in_memory_gb = output_gb * 2.5
+    in_memory_gb = output_gb * _mem_multiplier
 
     # Streaming peak: chunk buffers + OS-managed memmap page cache
     chunk_z = config.output_chunksize.get("z", 128)
     chunk_y = config.output_chunksize.get("y", 256)
     chunk_x = config.output_chunksize.get("x", 256)
-    n_workers = 4
-    chunk_buffer_gb = n_workers * chunk_z * chunk_y * chunk_x * bpv / (1024**3)
+    chunk_buffer_gb = _streaming_workers * chunk_z * chunk_y * chunk_x * bpv / (1024**3)
     # Plus one tile volume for fusion working set (demand-paged via memmap)
     tile_gb = n_planes * FRAME_WIDTH * FRAME_HEIGHT * bpv / (1024**3)
     streaming_gb = chunk_buffer_gb + tile_gb * 2  # ~2 tiles active during fusion
@@ -242,8 +295,8 @@ def estimate_memory_usage(
 
         system_ram_gb = psutil.virtual_memory().total / (1024**3)
     except ImportError:
-        system_ram_gb = 64.0  # conservative fallback
-    auto_streaming = in_memory_gb > system_ram_gb * 0.6
+        system_ram_gb = _fallback_ram
+    auto_streaming = in_memory_gb > system_ram_gb * _streaming_threshold
 
     return {
         "in_memory_gb": round(in_memory_gb, 1),
@@ -724,7 +777,16 @@ def _estimate_destripe_workers(
     working_mem_per_worker = plane_bytes * 4
 
     available = psutil.virtual_memory().available
-    reserved = 2 * 1024**3  # 2 GB for OS + app headroom
+    try:
+        from py2flamingo.configs.config_loader import get_stitching_value
+
+        reserved = int(
+            get_stitching_value(
+                "destripe", "reserved_memory_bytes", default=2 * 1024**3
+            )
+        )
+    except Exception:
+        reserved = 2 * 1024**3  # 2 GB for OS + app headroom
     usable = max(available - reserved, working_mem_per_worker)
 
     max_by_memory = max(1, int(usable / working_mem_per_worker))
@@ -761,9 +823,24 @@ def destripe_volume(
     n_planes = volume.shape[0]
     result = np.empty_like(volume)
 
+    # Load destripe parameters from YAML config (fallback to built-in defaults)
+    try:
+        from py2flamingo.configs.config_loader import get_stitching_value
+
+        _ds_sigma = get_stitching_value("destripe", "sigma", default=[128, 256])
+        _ds_level = get_stitching_value("destripe", "level", default=7)
+        _ds_wavelet = get_stitching_value("destripe", "wavelet", default="db2")
+    except Exception:
+        _ds_sigma = [128, 256]
+        _ds_level = 7
+        _ds_wavelet = "db2"
+
     def _process_plane(z: int) -> int:
         result[z] = filter_streaks(
-            volume[z].astype(np.float32), sigma=[128, 256], level=7, wavelet="db2"
+            volume[z].astype(np.float32),
+            sigma=_ds_sigma,
+            level=_ds_level,
+            wavelet=_ds_wavelet,
         ).astype(np.uint16)
         return z
 
@@ -1499,7 +1576,7 @@ class StitchingPipeline:
                 "x": tile_info.x_mm * 1000.0,
             }
             if not isinstance(volume, da.Array):
-                volume = da.from_array(volume, chunks=(64, 512, 512))
+                volume = da.from_array(volume, chunks=_DASK_PROCESSING_CHUNKS)
 
             sim = si_utils.get_sim_from_array(
                 volume,
@@ -1599,7 +1676,7 @@ class StitchingPipeline:
                 "x": tile_info.x_mm * 1000.0,
             }
             if not isinstance(volume, da.Array):
-                volume = da.from_array(volume, chunks=(64, 512, 512))
+                volume = da.from_array(volume, chunks=_DASK_PROCESSING_CHUNKS)
 
             sim = si_utils.get_sim_from_array(
                 volume,
@@ -1900,7 +1977,7 @@ class StitchingPipeline:
 
             # Wrap as dask array for lazy computation
             if not isinstance(volume, da.Array):
-                volume = da.from_array(volume, chunks=(64, 512, 512))
+                volume = da.from_array(volume, chunks=_DASK_PROCESSING_CHUNKS)
 
             sim = si_utils.get_sim_from_array(
                 volume,

@@ -271,7 +271,13 @@ class TileProcessingWorker(QObject):
         H, W = first_frame.shape
         y_indices, x_indices = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
 
-        FOV_mm = 0.5182
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            _hw = get_hardware_config()
+            FOV_mm = _hw.fov_mm
+        except Exception:
+            FOV_mm = 0.5182
         FOV_um = FOV_mm * 1000
         pixel_size_um = FOV_um / W
 
