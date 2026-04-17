@@ -178,6 +178,30 @@ def setup_logging(level: str):
     root_logger.info(f"Logging to file: {log_file}")
 
 
+def _get_git_version() -> Optional[str]:
+    """Get the current git commit hash, if available.
+
+    Returns short hash + dirty marker, e.g. "a1b2c3d" or "a1b2c3d-dirty".
+    Returns None silently if not in a git repo or git is unavailable.
+    """
+    try:
+        import subprocess
+
+        repo_dir = Path(__file__).parent.parent.parent  # src/ -> Flamingo_Control/
+        result = subprocess.run(
+            ["git", "describe", "--always", "--dirty"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
 def main(args: Optional[List[str]] = None) -> int:
     """Main entry point for the application.
 
@@ -204,7 +228,9 @@ def main(args: Optional[List[str]] = None) -> int:
     setup_logging(parsed_args.log_level)
 
     logger = logging.getLogger(__name__)
-    logger.info("Starting Flamingo Microscope Control...")
+    git_version = _get_git_version()
+    version_suffix = f" ({git_version})" if git_version else ""
+    logger.info(f"Starting Flamingo Microscope Control...{version_suffix}")
     logger.debug(f"Arguments: IP={parsed_args.ip}, Port={parsed_args.port}")
 
     # Validate arguments

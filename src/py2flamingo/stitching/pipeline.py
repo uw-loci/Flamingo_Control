@@ -20,6 +20,27 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+
+def _get_git_version() -> Optional[str]:
+    """Get current git commit hash, or None if unavailable."""
+    try:
+        import subprocess
+
+        repo_dir = Path(__file__).parent.parent.parent.parent
+        result = subprocess.run(
+            ["git", "describe", "--always", "--dirty"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -838,6 +859,7 @@ class StitchingPipeline:
         """
         t0 = time.time()
         self.logger.info(f"=== Stitching Pipeline Start ===")
+        self.logger.info(f"Git: {_get_git_version() or 'unknown'}")
         self.logger.info(f"Input:  {acquisition_dir}")
         self.logger.info(f"Output: {output_path}")
 
