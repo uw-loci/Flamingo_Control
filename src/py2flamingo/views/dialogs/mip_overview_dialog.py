@@ -54,6 +54,7 @@ from py2flamingo.models.mip_overview import (
     find_tile_folders,
     load_invert_x_setting,
     parse_coords_from_folder,
+    read_tile_overlap_from_workflow,
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.visualization.zarr_2d_session import (
@@ -505,6 +506,14 @@ class MIPOverviewDialog(PersistentDialog):
         self._flat_tile_infos = flat_infos
         self._channel_cache.clear()
         self._detected_layout = "flat"
+
+        # Auto-detect tile overlap from Workflow.txt
+        overlap = read_tile_overlap_from_workflow(load_path)
+        if overlap is not None:
+            # Use the average of X and Y overlap (they're usually equal)
+            avg_overlap = round((overlap[0] + overlap[1]) / 2)
+            self._overlap_spin.setValue(int(avg_overlap))
+            logger.info(f"Auto-set overlap to {avg_overlap}% from Workflow.txt")
 
         # Determine available channels
         all_channels = sorted(set(ch for t in flat_infos for ch in t.channel_files))

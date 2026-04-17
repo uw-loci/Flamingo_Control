@@ -361,6 +361,46 @@ def _parse_flat_mip_filename(filename: str) -> Optional[Tuple[int, int, int]]:
     return None
 
 
+def read_tile_overlap_from_workflow(directory: Path) -> Optional[Tuple[float, float]]:
+    """Read tile overlap percentages from a Workflow.txt file.
+
+    Looks for the Stack option settings in the Workflow.txt:
+        Stack option = Tile
+        Stack option settings 1 = 25.0   (X overlap %)
+        Stack option settings 2 = 25.0   (Y overlap %)
+
+    Searches the given directory and its parent for Workflow.txt.
+
+    Returns:
+        (overlap_x_pct, overlap_y_pct) or None if not found.
+    """
+    for candidate in [directory / "Workflow.txt", directory.parent / "Workflow.txt"]:
+        if not candidate.exists():
+            continue
+        try:
+            content = candidate.read_text(errors="replace")
+
+            # Only parse overlap if this is a Tile workflow
+            option_match = re.search(r"Stack option\s*=\s*(\w+)", content)
+            if not option_match or option_match.group(1) != "Tile":
+                continue
+
+            s1 = re.search(r"Stack option settings 1\s*=\s*([\d.]+)", content)
+            s2 = re.search(r"Stack option settings 2\s*=\s*([\d.]+)", content)
+            if s1 and s2:
+                overlap_x = float(s1.group(1))
+                overlap_y = float(s2.group(1))
+                logger.info(
+                    f"Read tile overlap from {candidate.name}: "
+                    f"X={overlap_x}%, Y={overlap_y}%"
+                )
+                return (overlap_x, overlap_y)
+        except Exception as e:
+            logger.debug(f"Failed to read overlap from {candidate}: {e}")
+
+    return None
+
+
 def detect_layout_type(directory: Path) -> str:
     """Detect whether a directory contains subfolder or flat-layout MIP tiles.
 
