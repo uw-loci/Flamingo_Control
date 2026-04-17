@@ -241,7 +241,29 @@ class StitchingDialog(PersistentDialog):
             "  \u2022 You need sub-pixel alignment at tile boundaries\n"
             "  \u2022 Tiles have sufficient overlap for correlation (~10-25%)"
         )
-        settings_layout.addWidget(self._skip_reg_cb, 4, 0, 1, 2)
+        self._skip_reg_cb.toggled.connect(self._on_skip_reg_toggled)
+        settings_layout.addWidget(self._skip_reg_cb, 4, 0)
+
+        # Registration binning
+        self._reg_binning_label = QLabel("Reg. binning:")
+        settings_layout.addWidget(self._reg_binning_label, 4, 1)
+        self._reg_binning_combo = QComboBox()
+        self._reg_binning_combo.addItem("Fine (z1 y2 x2)", {"z": 1, "y": 2, "x": 2})
+        self._reg_binning_combo.addItem("Default (z2 y4 x4)", {"z": 2, "y": 4, "x": 4})
+        self._reg_binning_combo.addItem("Fast (z4 y8 x8)", {"z": 4, "y": 8, "x": 8})
+        self._reg_binning_combo.setCurrentIndex(1)  # Default
+        self._reg_binning_combo.setToolTip(
+            "How much to downsample tiles for phase-correlation registration.\n\n"
+            "Fine (z1 y2 x2): highest accuracy, slowest, most memory.\n"
+            "Best for small tiles or when sub-pixel precision matters.\n\n"
+            "Default (z2 y4 x4): good balance of speed and accuracy.\n"
+            "Works well for 2048\u00d72048 tiles with 10-25% overlap.\n\n"
+            "Fast (z4 y8 x8): fastest, lower precision.\n"
+            "Use for large tile grids where speed matters more\n"
+            "than sub-pixel accuracy, or as a quick check before\n"
+            "re-running with finer binning."
+        )
+        settings_layout.addWidget(self._reg_binning_combo, 4, 2)
 
         # Flat-field correction
         self._flat_field_cb = QCheckBox("Flat-field correction")
@@ -489,6 +511,11 @@ class StitchingDialog(PersistentDialog):
         self._log("")
         self._log("Ready to stitch. Click 'Run Stitching' to begin.")
 
+    def _on_skip_reg_toggled(self, checked: bool):
+        """Enable/disable registration controls based on skip state."""
+        self._reg_binning_combo.setEnabled(not checked)
+        self._reg_binning_label.setEnabled(not checked)
+
     def _update_memory_estimate(self):
         """Compute and display memory estimates for in-memory vs streaming modes."""
         if not self._tiles:
@@ -546,6 +573,7 @@ class StitchingDialog(PersistentDialog):
             deconvolution_enabled=self._deconv_cb.isChecked(),
             content_based_fusion=self._content_fusion_cb.isChecked(),
             skip_registration=self._skip_reg_cb.isChecked(),
+            registration_binning=self._reg_binning_combo.currentData(),
             package_ozx=self._ozx_cb.isChecked(),
             streaming_mode=self._streaming_combo.currentData(),
         )
@@ -897,6 +925,7 @@ class StitchingDialog(PersistentDialog):
         s.setValue("channels", self._channels_edit.text())
         s.setValue("streaming_mode", self._streaming_combo.currentIndex())
         s.setValue("skip_registration", self._skip_reg_cb.isChecked())
+        s.setValue("reg_binning", self._reg_binning_combo.currentIndex())
         s.endGroup()
 
     def _restore_settings(self):
@@ -970,6 +999,10 @@ class StitchingDialog(PersistentDialog):
 
         skip_reg = s.value("skip_registration", False, type=bool)
         self._skip_reg_cb.setChecked(skip_reg)
+
+        reg_binning_idx = s.value("reg_binning", 1, type=int)  # default = index 1
+        if 0 <= reg_binning_idx < self._reg_binning_combo.count():
+            self._reg_binning_combo.setCurrentIndex(reg_binning_idx)
 
         s.endGroup()
 
