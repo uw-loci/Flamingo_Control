@@ -277,8 +277,14 @@ def estimate_memory_usage(
         _streaming_threshold = 0.6
         _streaming_workers = 4
 
-    # In-memory peak: stacked array + one channel during compute + pyramid overhead
-    in_memory_gb = output_gb * _mem_multiplier
+    # In-memory peak: stacked array (full output) + one channel being
+    # computed by dask + pyramid overhead during write.
+    # For multi-channel: peak = output + max(one_channel_compute, pyramid)
+    # For single-channel: peak = output + pyramid (~33%)
+    per_channel_gb = output_gb / max(n_channels, 1)
+    pyramid_overhead_gb = output_gb * 0.33
+    compute_overhead_gb = per_channel_gb + tile_gb * 2  # dask working set
+    in_memory_gb = output_gb + max(compute_overhead_gb, pyramid_overhead_gb)
 
     # Streaming peak: chunk buffers + OS-managed memmap page cache
     chunk_z = config.output_chunksize.get("z", 128)
@@ -1218,12 +1224,19 @@ class StitchingPipeline:
         # IN-MEMORY PATH (original)
         # ============================================================
 
-        # --- Step 4: Fuse each channel using shared registration ---
-        channel_volumes = []  # list of 3D numpy arrays
-        channel_origins = []  # list of origin dicts
-        fused_channel_ids = []
+        # --- Step 4+5: Fuse each channel and build stacked (C,Z,Y,X) ---
+        # Memory-efficient approach: fuse the first channel to learn the
+        # output shape, pre-allocate the full stacked array, copy ch0 into
+        # it (then free ch0), and compute remaining channels directly into
+        # their slice of the stacked array. Peak RAM = stacked + 1 channel
+        # working set, NOT stacked + all channels.
+        import dask.diagnostics
 
-        for ch_id in process_channels:
+        channel_origins = []
+        fused_channel_ids = []
+        stacked = None  # Will be allocated after first channel is fused
+
+        for ch_idx, ch_id in enumerate(process_channels):
             if self._cancelled_fn():
                 self.logger.info("Pipeline cancelled by user")
                 return output_path
@@ -1233,7 +1246,6 @@ class StitchingPipeline:
                 self.logger.warning(f"No data for channel {ch_id}, skipping")
                 continue
 
-            ch_idx = process_channels.index(ch_id)
             fuse_pct = 55 + int(15 * ch_idx / max(len(process_channels), 1))
             self._progress_fn(
                 fuse_pct, f"Fusing channel {ch_id} ({len(tile_data)} tiles)..."
@@ -1245,9 +1257,6 @@ class StitchingPipeline:
                 tile_data, voxel_size_um, reg_params, transform_key
             )
 
-            # Compute to numpy
-            import dask.diagnostics
-
             self._progress_fn(fuse_pct + 5, f"Computing channel {ch_id} into memory...")
             self.logger.info(f"  Computing channel {ch_id} into memory...")
             with dask.diagnostics.ProgressBar():
@@ -1257,34 +1266,40 @@ class StitchingPipeline:
                 vol = vol[0]
             vol = np.clip(vol, 0, 65535).astype(np.uint16)
 
-            channel_volumes.append(vol)
+            if stacked is None:
+                # First channel — allocate the full stacked array
+                n_total = sum(1 for c in process_channels if channel_tile_data.get(c))
+                if n_total > 1:
+                    stacked = np.zeros((n_total, *vol.shape), dtype=np.uint16)
+                    stacked[0] = vol
+                    self.logger.info(
+                        f"  Pre-allocated stacked array: "
+                        f"{stacked.shape} "
+                        f"({stacked.nbytes / (1024**3):.1f} GB)"
+                    )
+                else:
+                    stacked = vol
+            else:
+                # Subsequent channels — copy into pre-allocated slice
+                dest_idx = len(fused_channel_ids)
+                sz, sy, sx = vol.shape
+                stacked[dest_idx, :sz, :sy, :sx] = vol
+
+            # Free the per-channel array
+            del vol
+
             channel_origins.append(origin_um)
             fused_channel_ids.append(ch_id)
 
             self.logger.info(
-                f"  Channel {ch_id}: shape={vol.shape}, "
+                f"  Channel {ch_id}: shape={stacked.shape[-3:] if stacked.ndim == 4 else stacked.shape}, "
                 f"origin Z={origin_um['z']:.1f} Y={origin_um['y']:.1f} "
                 f"X={origin_um['x']:.1f} µm"
             )
 
-        if not channel_volumes:
+        if stacked is None:
             self.logger.error("No channels were fused successfully")
             return output_path
-
-        # --- Step 5: Stack channels → (C, Z, Y, X) ---
-        if len(channel_volumes) > 1:
-            max_shape = tuple(
-                max(v.shape[d] for v in channel_volumes) for d in range(3)
-            )
-            padded = []
-            for vol in channel_volumes:
-                if vol.shape != max_shape:
-                    pad_widths = [(0, max_shape[d] - vol.shape[d]) for d in range(3)]
-                    vol = np.pad(vol, pad_widths, mode="constant", constant_values=0)
-                padded.append(vol)
-            stacked = np.stack(padded, axis=0)
-        else:
-            stacked = channel_volumes[0]
 
         self.logger.info(
             f"Step 5: Stacked {len(fused_channel_ids)} channels → "
