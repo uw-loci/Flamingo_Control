@@ -277,23 +277,65 @@ def estimate_memory_usage(
         _streaming_threshold = 0.6
         _streaming_workers = 4
 
-    # In-memory peak: stacked array (full output) + one channel being
-    # computed by dask + pyramid overhead during write.
-    # For multi-channel: peak = output + max(one_channel_compute, pyramid)
-    # For single-channel: peak = output + pyramid (~33%)
+    # In-memory peak: tile data + stacked output + compute/pyramid overhead.
+    # Tile data (preprocessed volumes) persists throughout the pipeline.
+    # On top of that, the stacked output array is built, then pyramids are
+    # generated during write.
+    tile_gb = n_planes * FRAME_WIDTH * FRAME_HEIGHT * bpv / (1024**3)
     per_channel_gb = output_gb / max(n_channels, 1)
     pyramid_overhead_gb = output_gb * 0.33
     compute_overhead_gb = per_channel_gb + tile_gb * 2  # dask working set
-    in_memory_gb = output_gb + max(compute_overhead_gb, pyramid_overhead_gb)
 
-    # Streaming peak: chunk buffers + OS-managed memmap page cache
+    # Tile data footprint (same calc as streaming path)
+    ds_tile_planes = n_planes // ds if ds > 1 else n_planes
+    ds_tile_w = FRAME_WIDTH // ds if ds > 1 else FRAME_WIDTH
+    ds_tile_h = FRAME_HEIGHT // ds if ds > 1 else FRAME_HEIGHT
+    n_tiles = len(tiles)
+    if ds > 1:
+        tile_data_gb = (
+            n_tiles
+            * n_channels
+            * ds_tile_planes
+            * ds_tile_w
+            * ds_tile_h
+            * bpv
+            / (1024**3)
+        )
+    else:
+        tile_data_gb = 2 * tile_gb  # memmaps, demand-paged
+
+    in_memory_gb = (
+        tile_data_gb + output_gb + max(compute_overhead_gb, pyramid_overhead_gb)
+    )
+
+    # Streaming peak: preprocessed tile volumes + fusion working set.
+    # All preprocessed tiles persist in channel_tile_data during fusion.
+    # With downsample, tiles are materialized at reduced size.
+    # Without downsample, tiles stay as memmaps (demand-paged).
+    ds_tile_planes = n_planes // ds if ds > 1 else n_planes
+    ds_tile_w = FRAME_WIDTH // ds if ds > 1 else FRAME_WIDTH
+    ds_tile_h = FRAME_HEIGHT // ds if ds > 1 else FRAME_HEIGHT
+    n_tiles = len(tiles)
+    if ds > 1:
+        # Materialized (downsampled) tiles persist for all channels
+        tile_data_gb = (
+            n_tiles
+            * n_channels
+            * ds_tile_planes
+            * ds_tile_w
+            * ds_tile_h
+            * bpv
+            / (1024**3)
+        )
+    else:
+        # Memmaps — OS demand-pages, count ~2 tiles active at a time
+        tile_data_gb = 2 * tile_gb
+    # Plus chunk buffers during zarr/TIFF write
     chunk_z = config.output_chunksize.get("z", 128)
     chunk_y = config.output_chunksize.get("y", 256)
     chunk_x = config.output_chunksize.get("x", 256)
     chunk_buffer_gb = _streaming_workers * chunk_z * chunk_y * chunk_x * bpv / (1024**3)
-    # Plus one tile volume for fusion working set (demand-paged via memmap)
-    tile_gb = n_planes * FRAME_WIDTH * FRAME_HEIGHT * bpv / (1024**3)
-    streaming_gb = chunk_buffer_gb + tile_gb * 2  # ~2 tiles active during fusion
+    streaming_gb = tile_data_gb + chunk_buffer_gb
 
     # Auto-detect: stream if in-memory estimate exceeds available RAM
     try:
