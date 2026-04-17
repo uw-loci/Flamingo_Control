@@ -255,13 +255,27 @@ class StitchingDialog(PersistentDialog):
         self._depth_atten_cb.toggled.connect(self._depth_atten_mu_spin.setEnabled)
         settings_layout.addWidget(self._depth_atten_mu_spin, 4, 3)
 
-        # Row 5: package + channels
+        # Row 5: package + memory mode
         self._ozx_cb = QCheckBox("Package as .ozx")
         self._ozx_cb.setToolTip(
             "Create a single .ozx ZIP file from the OME-Zarr output\n"
             "for easy sharing/copying"
         )
         settings_layout.addWidget(self._ozx_cb, 5, 0, 1, 2)
+
+        settings_layout.addWidget(QLabel("Memory mode:"), 5, 2)
+        self._streaming_combo = QComboBox()
+        self._streaming_combo.addItem("Auto", None)
+        self._streaming_combo.addItem("In-memory (fast)", False)
+        self._streaming_combo.addItem("Streaming (low memory)", True)
+        self._streaming_combo.setToolTip(
+            "Auto: automatically chooses based on estimated data size and RAM.\n\n"
+            "In-memory: computes the full fused volume in RAM before writing.\n"
+            "Faster, but requires RAM > ~2.5x the output size.\n\n"
+            "Streaming: writes output chunk-by-chunk directly from the fusion\n"
+            "graph. Uses minimal RAM (~2 tile volumes), required for TB-scale data."
+        )
+        settings_layout.addWidget(self._streaming_combo, 5, 3)
 
         # Channels
         settings_layout.addWidget(QLabel("Channels:"), 6, 0)
@@ -272,10 +286,17 @@ class StitchingDialog(PersistentDialog):
         )
         settings_layout.addWidget(self._channels_edit, 6, 1, 1, 3)
 
+        # Memory estimate label (updated after tile discovery)
+        self._memory_label = QLabel("")
+        self._memory_label.setStyleSheet(
+            "color: #888; font-style: italic; font-size: 11px;"
+        )
+        settings_layout.addWidget(self._memory_label, 7, 0, 1, 5)
+
         # Timing legend
         legend = QLabel("\u2731 = significantly increases processing time")
         legend.setStyleSheet("color: #FF8C00; font-style: italic; font-size: 11px;")
-        settings_layout.addWidget(legend, 7, 0, 1, 4)
+        settings_layout.addWidget(legend, 8, 0, 1, 4)
 
         settings_group.setLayout(settings_layout)
         layout.addWidget(settings_group)
@@ -420,6 +441,7 @@ class StitchingDialog(PersistentDialog):
 
             self._tiles = tiles
             self._log_tile_summary(tiles)
+            self._update_memory_estimate()
             self._run_btn.setEnabled(True)
             # Swap green highlight: Discover done → Run is next action
             self._set_btn_default(self._discover_btn)
@@ -452,6 +474,38 @@ class StitchingDialog(PersistentDialog):
         self._log("")
         self._log("Ready to stitch. Click 'Run Stitching' to begin.")
 
+    def _update_memory_estimate(self):
+        """Compute and display memory estimates for in-memory vs streaming modes."""
+        if not self._tiles:
+            self._memory_label.setText("")
+            return
+
+        try:
+            from py2flamingo.stitching.pipeline import estimate_memory_usage
+
+            config = self._build_config()
+            channels = self._parse_channels()
+            all_ch = sorted(set(ch for t in self._tiles for ch in t.channels))
+            process_ch = channels if channels else all_ch
+
+            est = estimate_memory_usage(self._tiles, process_ch, config)
+
+            mode_hint = ""
+            if est["auto_streaming"]:
+                mode_hint = " \u2192 auto will use streaming"
+            else:
+                mode_hint = " \u2192 auto will use in-memory"
+
+            self._memory_label.setText(
+                f"In-memory: ~{est['in_memory_gb']:.0f} GB  |  "
+                f"Streaming: ~{est['streaming_gb']:.1f} GB  |  "
+                f"Output: ~{est['output_gb']:.0f} GB"
+                f"{mode_hint}"
+            )
+        except Exception as e:
+            self._logger.debug(f"Memory estimate failed: {e}")
+            self._memory_label.setText("")
+
     # --- Run / Cancel ---
 
     def _build_config(self):
@@ -477,6 +531,7 @@ class StitchingDialog(PersistentDialog):
             deconvolution_enabled=self._deconv_cb.isChecked(),
             content_based_fusion=self._content_fusion_cb.isChecked(),
             package_ozx=self._ozx_cb.isChecked(),
+            streaming_mode=self._streaming_combo.currentData(),
         )
 
     def _parse_channels(self) -> Optional[List[int]]:
@@ -824,6 +879,7 @@ class StitchingDialog(PersistentDialog):
         s.setValue("package_ozx", self._ozx_cb.isChecked())
         s.setValue("output_format", self._format_combo.currentData())
         s.setValue("channels", self._channels_edit.text())
+        s.setValue("streaming_mode", self._streaming_combo.currentIndex())
         s.endGroup()
 
     def _restore_settings(self):
@@ -890,6 +946,10 @@ class StitchingDialog(PersistentDialog):
         channels = s.value("channels", "", type=str)
         if channels:
             self._channels_edit.setText(channels)
+
+        streaming_idx = s.value("streaming_mode", 0, type=int)
+        if 0 <= streaming_idx < self._streaming_combo.count():
+            self._streaming_combo.setCurrentIndex(streaming_idx)
 
         s.endGroup()
 

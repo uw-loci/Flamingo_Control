@@ -162,6 +162,95 @@ class StitchingConfig:
     # Resource constraints
     max_memory_gb: Optional[float] = None  # None = auto (50% of system RAM)
 
+    # Streaming mode — writes fused output chunk-by-chunk instead of
+    # materializing the full volume into RAM. Required for TB-scale datasets.
+    #   None  = auto-detect based on estimated output size vs available RAM
+    #   True  = force streaming (low memory, may be slower)
+    #   False = force in-memory (fast, requires all data to fit in RAM)
+    streaming_mode: Optional[bool] = None
+
+
+# ---------------------------------------------------------------------------
+# Memory estimation
+# ---------------------------------------------------------------------------
+
+
+def estimate_memory_usage(
+    tiles: List["RawTileInfo"],
+    channels: List[int],
+    config: "StitchingConfig",
+) -> Dict[str, float]:
+    """Estimate peak memory for in-memory vs streaming stitching modes.
+
+    Returns:
+        Dict with keys:
+            in_memory_gb: estimated peak RAM for in-memory mode
+            streaming_gb: estimated peak RAM for streaming mode
+            output_gb: estimated uncompressed output size
+            auto_streaming: whether auto-detect would choose streaming
+    """
+    if not tiles:
+        return {
+            "in_memory_gb": 0.0,
+            "streaming_gb": 0.0,
+            "output_gb": 0.0,
+            "auto_streaming": False,
+        }
+
+    n_channels = len(channels)
+    n_planes = max(t.n_planes for t in tiles)
+    ds = config.downsample_factor
+
+    # Estimate output spatial extent from tile positions
+    x_vals = [t.x_mm for t in tiles]
+    y_vals = [t.y_mm for t in tiles]
+    x_range_mm = max(x_vals) - min(x_vals) if len(x_vals) > 1 else 0
+    y_range_mm = max(y_vals) - min(y_vals) if len(y_vals) > 1 else 0
+
+    # FOV per tile in mm (approx: pixel_size * frame_width)
+    fov_mm = config.pixel_size_um * FRAME_WIDTH / 1000.0
+    fov_ds = fov_mm / ds  # FOV in downsampled space doesn't change mm
+
+    # Output dimensions in pixels (downsampled)
+    out_x_px = int((x_range_mm + fov_mm) / config.pixel_size_um * 1000.0) // ds
+    out_y_px = int((y_range_mm + fov_mm) / config.pixel_size_um * 1000.0) // ds
+    out_z_px = n_planes // ds if ds > 1 else n_planes
+
+    # Bytes per voxel
+    bpv = 2  # uint16
+    output_bytes = n_channels * out_z_px * out_y_px * out_x_px * bpv
+    output_gb = output_bytes / (1024**3)
+
+    # In-memory peak: stacked array + one channel during compute + pyramid overhead
+    # Roughly 2x the output (compute + result) plus pyramids (~33% extra)
+    in_memory_gb = output_gb * 2.5
+
+    # Streaming peak: chunk buffers + OS-managed memmap page cache
+    chunk_z = config.output_chunksize.get("z", 128)
+    chunk_y = config.output_chunksize.get("y", 256)
+    chunk_x = config.output_chunksize.get("x", 256)
+    n_workers = 4
+    chunk_buffer_gb = n_workers * chunk_z * chunk_y * chunk_x * bpv / (1024**3)
+    # Plus one tile volume for fusion working set (demand-paged via memmap)
+    tile_gb = n_planes * FRAME_WIDTH * FRAME_HEIGHT * bpv / (1024**3)
+    streaming_gb = chunk_buffer_gb + tile_gb * 2  # ~2 tiles active during fusion
+
+    # Auto-detect: stream if in-memory estimate exceeds available RAM
+    try:
+        import psutil
+
+        system_ram_gb = psutil.virtual_memory().total / (1024**3)
+    except ImportError:
+        system_ram_gb = 64.0  # conservative fallback
+    auto_streaming = in_memory_gb > system_ram_gb * 0.6
+
+    return {
+        "in_memory_gb": round(in_memory_gb, 1),
+        "streaming_gb": round(streaming_gb, 1),
+        "output_gb": round(output_gb, 1),
+        "auto_streaming": auto_streaming,
+    }
+
 
 # ---------------------------------------------------------------------------
 # Tile metadata
@@ -772,6 +861,29 @@ def downsample_volume(volume: np.ndarray, factor: int) -> np.ndarray:
     return np.clip(result, 0, 65535).astype(np.uint16)
 
 
+def _lazy_stack_channels(channel_arrays: list) -> "dask.array.Array":
+    """Lazily stack per-channel dask arrays into (C, Z, Y, X).
+
+    Pads shapes if they differ slightly (rounding differences between channels).
+    Returns the single array if only one channel.
+    """
+    import dask.array as da
+
+    if len(channel_arrays) == 1:
+        return channel_arrays[0]
+
+    # Pad to uniform shape
+    max_shape = tuple(max(a.shape[d] for a in channel_arrays) for d in range(3))
+    padded = []
+    for a in channel_arrays:
+        if a.shape != max_shape:
+            pad_widths = [(0, max_shape[d] - a.shape[d]) for d in range(3)]
+            a = da.pad(a, pad_widths, mode="constant", constant_values=0)
+        padded.append(a)
+
+    return da.stack(padded, axis=0)  # (C, Z, Y, X), still lazy
+
+
 # ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
@@ -972,6 +1084,39 @@ class StitchingPipeline:
             self.logger.info("Pipeline cancelled by user")
             return output_path
 
+        # --- Determine streaming vs in-memory mode ---
+        use_streaming = self.config.streaming_mode
+        if use_streaming is None:
+            mem_est = estimate_memory_usage(tiles, process_channels, self.config)
+            use_streaming = mem_est["auto_streaming"]
+            self.logger.info(
+                f"Memory estimate: in-memory ~{mem_est['in_memory_gb']:.0f} GB, "
+                f"streaming ~{mem_est['streaming_gb']:.1f} GB, "
+                f"output ~{mem_est['output_gb']:.0f} GB → "
+                f"{'streaming' if use_streaming else 'in-memory'} mode"
+            )
+        else:
+            self.logger.info(
+                f"Mode: {'streaming' if use_streaming else 'in-memory'} (user-selected)"
+            )
+
+        if use_streaming:
+            return self._run_streaming(
+                process_channels,
+                channel_tile_data,
+                voxel_size_um,
+                reg_params,
+                transform_key,
+                output_path,
+                tiles,
+                acquisition_dir,
+                t0,
+            )
+
+        # ============================================================
+        # IN-MEMORY PATH (original)
+        # ============================================================
+
         # --- Step 4: Fuse each channel using shared registration ---
         channel_volumes = []  # list of 3D numpy arrays
         channel_origins = []  # list of origin dicts
@@ -1020,7 +1165,6 @@ class StitchingPipeline:
             return output_path
 
         # --- Step 5: Stack channels → (C, Z, Y, X) ---
-        # Pad if shapes differ slightly (rounding differences between channels)
         if len(channel_volumes) > 1:
             max_shape = tuple(
                 max(v.shape[d] for v in channel_volumes) for d in range(3)
@@ -1031,16 +1175,16 @@ class StitchingPipeline:
                     pad_widths = [(0, max_shape[d] - vol.shape[d]) for d in range(3)]
                     vol = np.pad(vol, pad_widths, mode="constant", constant_values=0)
                 padded.append(vol)
-            stacked = np.stack(padded, axis=0)  # (C, Z, Y, X)
+            stacked = np.stack(padded, axis=0)
         else:
-            stacked = channel_volumes[0]  # single channel stays 3D
+            stacked = channel_volumes[0]
 
         self.logger.info(
             f"Step 5: Stacked {len(fused_channel_ids)} channels → "
             f"shape={stacked.shape}"
         )
 
-        # --- Step 6: Write single multi-channel store ---
+        # --- Step 6: Write ---
         if self._cancelled_fn():
             self.logger.info("Pipeline cancelled by user")
             return output_path
@@ -1053,8 +1197,7 @@ class StitchingPipeline:
             stacked, channel_names, voxel_size_um, output_path, basename
         )
 
-        # --- Step 7: Write stitch_metadata.json v2 ---
-        # Use the first channel's origin (they should be identical with shared reg)
+        # --- Step 7: Write metadata ---
         origin_um = channel_origins[0]
         self._write_stitch_metadata_v2(
             output_path,
@@ -1069,6 +1212,107 @@ class StitchingPipeline:
         elapsed = time.time() - t0
         self.logger.info(
             f"=== Pipeline complete in {elapsed:.1f}s === Output: {output_path}"
+        )
+        return output_path
+
+    def _run_streaming(
+        self,
+        process_channels: List[int],
+        channel_tile_data: Dict[int, list],
+        voxel_size_um: Dict[str, float],
+        reg_params: list,
+        transform_key: str,
+        output_path: Path,
+        tiles: List[RawTileInfo],
+        acquisition_dir: Path,
+        t0: float,
+    ) -> Path:
+        """Streaming pipeline path: fuse and write chunk-by-chunk.
+
+        Keeps the fused output as a lazy dask array and writes it directly
+        to zarr or OME-TIFF without materializing the full volume.
+        """
+        import dask.array as da
+
+        # --- Step 4: Fuse each channel (lazy) ---
+        channel_dask = []
+        channel_origins = []
+        fused_channel_ids = []
+
+        for ch_id in process_channels:
+            if self._cancelled_fn():
+                self.logger.info("Pipeline cancelled by user")
+                return output_path
+
+            tile_data = channel_tile_data.get(ch_id, [])
+            if not tile_data:
+                self.logger.warning(f"No data for channel {ch_id}, skipping")
+                continue
+
+            self.logger.info(
+                f"Step 4: Fusing channel {ch_id} ({len(tile_data)} tiles) [streaming]..."
+            )
+            fused_sim, origin_um = self._fuse_channel(
+                tile_data, voxel_size_um, reg_params, transform_key
+            )
+
+            # Extract dask array, squeeze singletons (stays lazy)
+            darr = fused_sim.data
+            while darr.ndim > 3:
+                darr = darr[0]
+
+            channel_dask.append(darr)
+            channel_origins.append(origin_um)
+            fused_channel_ids.append(ch_id)
+
+            self.logger.info(
+                f"  Channel {ch_id}: fused shape={darr.shape} (lazy), "
+                f"origin Z={origin_um['z']:.1f} Y={origin_um['y']:.1f} "
+                f"X={origin_um['x']:.1f} µm"
+            )
+
+        if not channel_dask:
+            self.logger.error("No channels were fused successfully")
+            return output_path
+
+        # --- Step 5: Lazy stack + clip ---
+        stacked = _lazy_stack_channels(channel_dask)
+        stacked = da.clip(stacked, 0, 65535).astype(np.uint16)
+
+        self.logger.info(
+            f"Step 5: Lazy-stacked {len(fused_channel_ids)} channels → "
+            f"shape={stacked.shape} (not yet computed)"
+        )
+
+        # --- Step 6: Streaming write ---
+        if self._cancelled_fn():
+            self.logger.info("Pipeline cancelled by user")
+            return output_path
+
+        self.logger.info("Step 6: Writing multi-channel output (streaming)...")
+        basename = self._build_output_basename(acquisition_dir)
+        self.logger.info(f"  Output basename: {basename}")
+        channel_names = [f"Channel_{ch_id}" for ch_id in fused_channel_ids]
+        self._write_multichannel_streaming(
+            stacked, channel_names, voxel_size_um, output_path, basename
+        )
+
+        # --- Step 7: Write metadata ---
+        origin_um = channel_origins[0]
+        self._write_stitch_metadata_v2(
+            output_path,
+            fused_channel_ids,
+            origin_um,
+            tiles,
+            voxel_size_um,
+            acquisition_dir,
+            basename,
+        )
+
+        elapsed = time.time() - t0
+        self.logger.info(
+            f"=== Pipeline complete (streaming) in {elapsed:.1f}s === "
+            f"Output: {output_path}"
         )
         return output_path
 
@@ -1450,6 +1694,67 @@ class StitchingPipeline:
                 )
             except ImportError as e:
                 self.logger.error(f"  OME-TIFF write failed: {e}")
+
+    def _write_multichannel_streaming(
+        self,
+        dask_data,
+        channel_names: List[str],
+        voxel_size_um: Dict[str, float],
+        output_dir: Path,
+        basename: str = "stitched",
+    ) -> None:
+        """Write dask array to output format in streaming mode (low memory).
+
+        Dispatches to streaming writers that compute and write chunk-by-chunk.
+        """
+        fmt = self.config.output_format
+
+        if fmt in ("ome-zarr-sharded", "ome-zarr-v2", "both"):
+            out_path = output_dir / f"{basename}.ome.zarr"
+            self.logger.info(f"  Writing OME-Zarr (streaming): {out_path}")
+            try:
+                from py2flamingo.stitching.writers.ome_zarr_writer import (
+                    write_ome_zarr_streaming,
+                )
+
+                write_ome_zarr_streaming(
+                    dask_data=dask_data,
+                    output_path=out_path,
+                    voxel_size_um=voxel_size_um,
+                    chunks=self.config.zarr_chunks,
+                    compression=self.config.zarr_compression,
+                    compression_level=self.config.zarr_compression_level,
+                    pyramid_levels=self.config.pyramid_levels,
+                    channel_names=channel_names,
+                )
+            except Exception as e:
+                self.logger.error(
+                    f"  Streaming OME-Zarr write failed: {e}", exc_info=True
+                )
+                if fmt != "both":
+                    raise
+
+        if fmt in ("ome-tiff", "both"):
+            tiff_path = output_dir / f"{basename}.ome.tif"
+            self.logger.info(f"  Writing OME-TIFF (streaming): {tiff_path}")
+            try:
+                from py2flamingo.stitching.writers.ome_tiff_writer import (
+                    write_pyramidal_ome_tiff_streaming,
+                )
+
+                write_pyramidal_ome_tiff_streaming(
+                    dask_data=dask_data,
+                    output_path=tiff_path,
+                    voxel_size_um=voxel_size_um,
+                    tile_size=self.config.tiff_tile_size,
+                    compression=self.config.tiff_compression,
+                    pyramid_levels=self.config.pyramid_levels,
+                    channel_names=channel_names,
+                )
+            except Exception as e:
+                self.logger.error(
+                    f"  Streaming OME-TIFF write failed: {e}", exc_info=True
+                )
 
     def _write_stitch_metadata_v2(
         self,

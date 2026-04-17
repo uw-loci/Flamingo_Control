@@ -675,6 +675,172 @@ def _downsample_2x_3d(arr: np.ndarray) -> np.ndarray:
     )
 
 
+def write_ome_zarr_streaming(
+    dask_data,
+    output_path: Path,
+    voxel_size_um: Dict[str, float],
+    chunks: Tuple[int, ...] = DEFAULT_CHUNKS,
+    compression: str = DEFAULT_COMPRESSION,
+    compression_level: int = DEFAULT_COMPRESSION_LEVEL,
+    pyramid_levels: Optional[int] = None,
+    channel_names: Optional[list] = None,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+) -> Path:
+    """Write a dask array to OME-Zarr v2 in streaming mode (low memory).
+
+    Writes the fused dask array chunk-by-chunk using dask.array.to_zarr(),
+    then generates pyramid levels by reading back and downsampling lazily.
+    Peak memory is proportional to chunk size, not the full volume.
+
+    Args:
+        dask_data: dask.array.Array with shape (Z,Y,X) or (C,Z,Y,X).
+        output_path: Where to write the .ome.zarr directory.
+        voxel_size_um: Dict with 'z', 'y', 'x' voxel sizes in µm.
+        chunks: Chunk shape for the output store.
+        compression: Compression codec.
+        compression_level: Compression level.
+        pyramid_levels: Number of pyramid levels (None = auto).
+        channel_names: Optional channel name list.
+        progress_callback: Optional (percentage, message) callback.
+
+    Returns:
+        Path to the written .ome.zarr directory.
+    """
+    import dask
+    import dask.array as da
+
+    output_path = Path(output_path)
+
+    if progress_callback:
+        progress_callback(0, "Preparing streaming OME-Zarr output...")
+
+    # Normalize dask array: squeeze singleton dims, keep lazy
+    arr = dask_data
+    if hasattr(arr, "data"):
+        arr = arr.data
+    while arr.ndim > 4:
+        arr = arr[0]
+
+    is_4d = arr.ndim == 4
+    if is_4d:
+        n_channels, z, y, x = arr.shape
+        target_chunks = (1,) + tuple(chunks)
+    else:
+        z, y, x = arr.shape
+        n_channels = 1
+        target_chunks = tuple(chunks)
+
+    # Rechunk to target
+    arr = arr.rechunk(target_chunks)
+
+    logger.info(
+        f"Streaming OME-Zarr write: {output_path} "
+        f"shape={arr.shape} chunks={target_chunks} "
+        f"compression={compression}"
+    )
+
+    # Auto pyramid levels
+    if pyramid_levels is None:
+        min_xy = min(y, x)
+        pyramid_levels = 0
+        while min_xy > 128:
+            min_xy //= 2
+            pyramid_levels += 1
+        pyramid_levels = max(0, min(pyramid_levels, 5))
+
+    logger.info(f"Pyramid levels: {pyramid_levels} (plus full resolution)")
+
+    # Build compressor
+    compressor = _build_v2_compressor(compression, compression_level)
+
+    # Write full resolution via dask.array.to_zarr
+    if progress_callback:
+        progress_callback(5, "Writing full-resolution data (streaming)...")
+
+    import zarr
+
+    full_res_path = str(output_path / "0")
+    logger.info("  Writing full-resolution (streaming)...")
+
+    # Use synchronous scheduler for predictable memory usage
+    with dask.config.set(scheduler="synchronous"):
+        arr.to_zarr(
+            full_res_path,
+            overwrite=True,
+            compressor=compressor,
+        )
+
+    logger.info(f"  Full resolution written: shape={arr.shape}")
+
+    if progress_callback:
+        progress_callback(50, "Generating pyramid levels...")
+
+    # Generate pyramid levels by reading back and downsampling lazily
+    datasets = [{"path": "0"}]
+    prev_path = full_res_path
+
+    for level in range(pyramid_levels):
+        if progress_callback:
+            pct = 50 + int(40 * (level + 1) / max(pyramid_levels, 1))
+            progress_callback(
+                pct, f"Writing pyramid level {level + 1}/{pyramid_levels}..."
+            )
+
+        level_path = str(output_path / str(level + 1))
+
+        # Read previous level as lazy dask array
+        prev_arr = da.from_zarr(prev_path)
+
+        # Downsample 2x in Y and X only (keep Z and C)
+        if prev_arr.ndim == 4:
+            # (C, Z, Y, X)
+            coarse = da.coarsen(
+                np.mean,
+                prev_arr,
+                {0: 1, 1: 1, 2: 2, 3: 2},
+                trim_excess=True,
+            ).astype(np.uint16)
+        else:
+            # (Z, Y, X)
+            coarse = da.coarsen(
+                np.mean,
+                prev_arr,
+                {0: 1, 1: 2, 2: 2},
+                trim_excess=True,
+            ).astype(np.uint16)
+
+        # Rechunk for the smaller level
+        level_chunks = tuple(min(c, s) for c, s in zip(target_chunks, coarse.shape))
+        coarse = coarse.rechunk(level_chunks)
+
+        logger.info(
+            f"  Pyramid level {level + 1}: {coarse.shape} " f"(2x YX downsample)"
+        )
+
+        with dask.config.set(scheduler="synchronous"):
+            coarse.to_zarr(level_path, overwrite=True, compressor=compressor)
+
+        datasets.append({"path": str(level + 1)})
+        prev_path = level_path
+
+    # Write OME-NGFF metadata
+    _write_ome_zarr_metadata(
+        output_path,
+        datasets,
+        voxel_size_um,
+        channel_names=channel_names,
+        is_4d=is_4d,
+        n_channels=n_channels,
+    )
+
+    _log_output_stats(output_path)
+
+    if progress_callback:
+        progress_callback(100, "Streaming OME-Zarr write complete")
+
+    return output_path
+
+
 def package_as_ozx(zarr_path: Path, ozx_path: Path) -> Path:
     """Package an OME-Zarr directory into a single .ozx ZIP file for sharing.
 

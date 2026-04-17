@@ -179,6 +179,196 @@ def write_pyramidal_ome_tiff(
     return output_path
 
 
+def write_pyramidal_ome_tiff_streaming(
+    dask_data,
+    output_path: Path,
+    voxel_size_um: Dict[str, float],
+    tile_size: Tuple[int, int] = DEFAULT_TILE_SIZE,
+    compression: str = DEFAULT_COMPRESSION,
+    pyramid_levels: Optional[int] = None,
+    channel_names: Optional[list] = None,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+) -> Path:
+    """Write a dask array to pyramidal OME-TIFF in streaming mode (low memory).
+
+    Writes one Z-plane at a time from the dask array, then generates
+    pyramid SubIFDs by recomputing downsampled planes from the dask graph.
+    Peak memory is proportional to one Z-plane, not the full volume.
+
+    Args:
+        dask_data: dask.array.Array with shape (Z,Y,X) or (C,Z,Y,X).
+        output_path: Output .ome.tif file path.
+        voxel_size_um: Dict with 'z', 'y', 'x' voxel sizes in µm.
+        tile_size: TIFF tile dimensions (height, width).
+        compression: Compression codec.
+        pyramid_levels: Number of pyramid levels (None = auto).
+        channel_names: Optional channel name list.
+        progress_callback: Optional (percentage, message) callback.
+
+    Returns:
+        Path to the written .ome.tif file.
+    """
+    try:
+        import tifffile
+    except ImportError:
+        raise ImportError(
+            "tifffile is required for OME-TIFF output. "
+            "Install with: pip install tifffile"
+        )
+
+    import dask
+    import dask.array as da
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if progress_callback:
+        progress_callback(0, "Preparing streaming OME-TIFF output...")
+
+    # Normalize dask array
+    arr = dask_data
+    if hasattr(arr, "data"):
+        arr = arr.data
+    while arr.ndim > 4:
+        arr = arr[0]
+
+    is_4d = arr.ndim == 4
+    if is_4d:
+        n_channels, n_z, y, x = arr.shape
+    else:
+        n_z, y, x = arr.shape
+        n_channels = 1
+
+    dtype = np.uint16
+
+    logger.info(
+        f"Streaming OME-TIFF write: {output_path} "
+        f"shape={arr.shape} tile={tile_size} compression={compression}"
+    )
+
+    # Auto pyramid levels
+    if pyramid_levels is None:
+        min_xy = min(y, x)
+        pyramid_levels = 0
+        while min_xy > 128:
+            min_xy //= 2
+            pyramid_levels += 1
+        pyramid_levels = max(0, min(pyramid_levels, 5))
+
+    logger.info(f"Pyramid levels: {pyramid_levels} (plus full resolution)")
+
+    # Build OME metadata
+    metadata = {
+        "axes": "CZYX" if is_4d else "ZYX",
+        "PhysicalSizeX": voxel_size_um["x"],
+        "PhysicalSizeXUnit": "\u00b5m",
+        "PhysicalSizeY": voxel_size_um["y"],
+        "PhysicalSizeYUnit": "\u00b5m",
+        "PhysicalSizeZ": voxel_size_um["z"],
+        "PhysicalSizeZUnit": "\u00b5m",
+    }
+    if channel_names:
+        metadata["Channel"] = {"Name": channel_names}
+
+    tiff_compression = None if compression == "none" else compression
+
+    write_opts = dict(
+        tile=tile_size,
+        compression=tiff_compression,
+        photometric="minisblack",
+    )
+
+    if progress_callback:
+        progress_callback(5, "Writing full-resolution planes (streaming)...")
+
+    with tifffile.TiffWriter(str(output_path), bigtiff=True, ome=True) as tif:
+        # Write full-resolution planes one Z at a time
+        for z_idx in range(n_z):
+            if progress_callback and z_idx % max(n_z // 20, 1) == 0:
+                pct = 5 + int(45 * z_idx / n_z)
+                progress_callback(pct, f"Writing plane {z_idx + 1}/{n_z}...")
+
+            # Compute one Z-plane from the dask array
+            if is_4d:
+                plane = arr[:, z_idx, :, :].compute()  # (C, Y, X)
+            else:
+                plane = arr[z_idx, :, :].compute()  # (Y, X)
+
+            plane = np.clip(plane, 0, 65535).astype(dtype)
+
+            # First plane carries metadata and SubIFD allocation
+            if z_idx == 0:
+                tif.write(
+                    plane,
+                    subifds=pyramid_levels if pyramid_levels > 0 else None,
+                    metadata=metadata,
+                    **write_opts,
+                )
+            else:
+                tif.write(plane, **write_opts)
+
+        logger.info(f"  Full resolution written: {n_z} planes")
+
+        # Write pyramid SubIFDs
+        if pyramid_levels > 0:
+            if progress_callback:
+                progress_callback(50, "Writing pyramid levels...")
+
+            for level in range(pyramid_levels):
+                factor = 2 ** (level + 1)
+                ds_y = y // factor
+                ds_x = x // factor
+
+                if progress_callback:
+                    pct = 50 + int(40 * (level + 1) / pyramid_levels)
+                    progress_callback(
+                        pct,
+                        f"Writing pyramid level {level + 1}/{pyramid_levels}...",
+                    )
+
+                logger.info(
+                    f"  Pyramid level {level + 1}: "
+                    f"({n_z}, {ds_y}, {ds_x}) ({factor}x YX downsample)"
+                )
+
+                # Downsample lazily and compute plane-by-plane
+                if is_4d:
+                    ds_arr = da.coarsen(
+                        np.mean,
+                        arr,
+                        {0: 1, 1: 1, 2: factor, 3: factor},
+                        trim_excess=True,
+                    )
+                else:
+                    ds_arr = da.coarsen(
+                        np.mean,
+                        arr,
+                        {0: 1, 1: factor, 2: factor},
+                        trim_excess=True,
+                    )
+
+                ds_nz = ds_arr.shape[1] if is_4d else ds_arr.shape[0]
+
+                for z_idx in range(ds_nz):
+                    if is_4d:
+                        plane = ds_arr[:, z_idx, :, :].compute()
+                    else:
+                        plane = ds_arr[z_idx, :, :].compute()
+
+                    plane = np.clip(plane, 0, 65535).astype(dtype)
+                    tif.write(plane, subfiletype=1, **write_opts)
+
+    # Log output stats
+    file_size = output_path.stat().st_size
+    size_gb = file_size / (1024**3)
+    logger.info(f"OME-TIFF written (streaming): {output_path} — {size_gb:.2f} GB")
+
+    if progress_callback:
+        progress_callback(100, "Streaming OME-TIFF write complete")
+
+    return output_path
+
+
 def _downsample_yx(volume: np.ndarray, factor: int) -> np.ndarray:
     """Downsample only Y and X axes by integer factor (bin-shrink).
 
