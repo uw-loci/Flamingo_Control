@@ -103,9 +103,8 @@ class StitchingWorker(QThread):
             pipeline = StitchingPipeline(
                 config=self._config,
                 cancelled_fn=lambda: self._cancelled,
+                progress_fn=self.progress.emit,
             )
-
-            self.progress.emit(5, "Discovering tiles...")
 
             output_path = pipeline.run(
                 acquisition_dir=self._acq_dir,

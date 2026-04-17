@@ -899,10 +899,16 @@ class StitchingPipeline:
         )
     """
 
-    def __init__(self, config: Optional[StitchingConfig] = None, cancelled_fn=None):
+    def __init__(
+        self,
+        config: Optional[StitchingConfig] = None,
+        cancelled_fn=None,
+        progress_fn=None,
+    ):
         self.config = config or StitchingConfig()
         self.logger = logging.getLogger(__name__)
         self._cancelled_fn = cancelled_fn or (lambda: False)
+        self._progress_fn = progress_fn or (lambda pct, msg: None)
 
     def _build_output_basename(self, acquisition_dir: Path) -> str:
         """Build a descriptive base filename from acquisition path and settings.
@@ -976,6 +982,7 @@ class StitchingPipeline:
         self.logger.info(f"Output: {output_path}")
 
         # --- Step 1: Discover tiles ---
+        self._progress_fn(2, "Discovering tiles...")
         if tiles is None:
             self.logger.info("Step 1: Discovering tiles...")
             tiles = discover_tiles(acquisition_dir)
@@ -1019,6 +1026,7 @@ class StitchingPipeline:
             self.logger.info("Pipeline cancelled by user")
             return output_path
 
+        self._progress_fn(5, "Loading and preprocessing tiles...")
         self.logger.info("Step 2: Loading and preprocessing tiles...")
         channel_tile_data = self._load_and_preprocess(tiles, process_channels)
 
@@ -1074,6 +1082,7 @@ class StitchingPipeline:
             ref_ch = process_channels[0]
         ref_tile_data = channel_tile_data[ref_ch]
 
+        self._progress_fn(45, f"Registering tiles (channel {ref_ch})...")
         self.logger.info(
             f"Step 3: Registering on reference channel {ref_ch} "
             f"({len(ref_tile_data)} tiles)..."
@@ -1132,6 +1141,11 @@ class StitchingPipeline:
                 self.logger.warning(f"No data for channel {ch_id}, skipping")
                 continue
 
+            ch_idx = process_channels.index(ch_id)
+            fuse_pct = 55 + int(15 * ch_idx / max(len(process_channels), 1))
+            self._progress_fn(
+                fuse_pct, f"Fusing channel {ch_id} ({len(tile_data)} tiles)..."
+            )
             self.logger.info(
                 f"Step 4: Fusing channel {ch_id} ({len(tile_data)} tiles)..."
             )
@@ -1142,6 +1156,7 @@ class StitchingPipeline:
             # Compute to numpy
             import dask.diagnostics
 
+            self._progress_fn(fuse_pct + 5, f"Computing channel {ch_id} into memory...")
             self.logger.info(f"  Computing channel {ch_id} into memory...")
             with dask.diagnostics.ProgressBar():
                 vol = np.asarray(fused_sim.data.compute())
@@ -1189,6 +1204,7 @@ class StitchingPipeline:
             self.logger.info("Pipeline cancelled by user")
             return output_path
 
+        self._progress_fn(75, "Writing multi-channel output...")
         self.logger.info("Step 6: Writing multi-channel output...")
         basename = self._build_output_basename(acquisition_dir)
         self.logger.info(f"  Output basename: {basename}")
@@ -1198,6 +1214,7 @@ class StitchingPipeline:
         )
 
         # --- Step 7: Write metadata ---
+        self._progress_fn(95, "Writing metadata...")
         origin_um = channel_origins[0]
         self._write_stitch_metadata_v2(
             output_path,
@@ -1249,6 +1266,12 @@ class StitchingPipeline:
                 self.logger.warning(f"No data for channel {ch_id}, skipping")
                 continue
 
+            ch_idx = process_channels.index(ch_id)
+            fuse_pct = 55 + int(10 * ch_idx / max(len(process_channels), 1))
+            self._progress_fn(
+                fuse_pct,
+                f"Building fusion graph for channel {ch_id}...",
+            )
             self.logger.info(
                 f"Step 4: Fusing channel {ch_id} ({len(tile_data)} tiles) [streaming]..."
             )
@@ -1289,6 +1312,9 @@ class StitchingPipeline:
             self.logger.info("Pipeline cancelled by user")
             return output_path
 
+        self._progress_fn(
+            65, "Writing output (streaming — this is the main compute)..."
+        )
         self.logger.info("Step 6: Writing multi-channel output (streaming)...")
         basename = self._build_output_basename(acquisition_dir)
         self.logger.info(f"  Output basename: {basename}")
@@ -1298,6 +1324,7 @@ class StitchingPipeline:
         )
 
         # --- Step 7: Write metadata ---
+        self._progress_fn(95, "Writing metadata...")
         origin_um = channel_origins[0]
         self._write_stitch_metadata_v2(
             output_path,
@@ -1331,6 +1358,14 @@ class StitchingPipeline:
             if self._cancelled_fn():
                 self.logger.info("Pipeline cancelled by user")
                 return result
+
+            # Progress: tiles span 5%–45% of total pipeline
+            tile_pct = 5 + int(40 * i / max(len(tiles), 1))
+            self._progress_fn(
+                tile_pct,
+                f"Loading tile {i + 1}/{len(tiles)} "
+                f"(X={tile.x_mm:.2f} Y={tile.y_mm:.2f})",
+            )
 
             self.logger.info(
                 f"  Tile {i + 1}/{len(tiles)}: {tile.folder.name} "
