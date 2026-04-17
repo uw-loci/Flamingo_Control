@@ -1130,13 +1130,11 @@ class StitchingPipeline:
 
                 # Flip X axis if camera is inverted relative to stage
                 # so tile image data aligns with stage-coordinate translations.
-                # Done in-place plane-by-plane to avoid allocating a full copy
-                # (~6 GiB per tile at full resolution).
+                # Use a view (no copy/materialization) — dask handles negative
+                # strides when the volume is wrapped downstream.  This keeps
+                # memmapped tiles lazy so 66+ tiles don't exhaust RAM.
                 if self.config.camera_x_inverted:
-                    if not volume.flags.writeable:
-                        volume = np.array(volume)
-                    for z in range(volume.shape[0]):
-                        volume[z] = volume[z, :, ::-1]
+                    volume = volume[:, :, ::-1]
 
                 result[ch_id].append((volume, tile))
 
