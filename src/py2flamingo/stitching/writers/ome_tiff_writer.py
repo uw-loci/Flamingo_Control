@@ -291,48 +291,54 @@ def write_pyramidal_ome_tiff_streaming(
     )
 
     if progress_callback:
-        progress_callback(5, "Writing full-resolution planes (streaming)...")
+        progress_callback(5, "Writing full-resolution data (streaming)...")
 
-    total_pages = n_channels * n_z
     with tifffile.TiffWriter(str(output_path), bigtiff=True, ome=True) as tif:
-        # Write full-resolution pages one (Y,X) plane at a time.
-        # For CZYX data, iterate C then Z to match OME axis ordering:
-        # page order = [C0Z0, C0Z1, ..., C0Zn, C1Z0, C1Z1, ..., C1Zn]
-        page_num = 0
+        # For multi-channel (CZYX) data: compute one full ZYX channel at a
+        # time and write it as a 3D block. tifffile can correctly build
+        # OME-XML when it receives coherent 3D/4D arrays, but NOT when
+        # given individual 2D pages with CZYX axes (it can't determine
+        # how to decompose N pages into C and Z).
+        #
+        # Peak memory = one channel volume (e.g. 15 GB at 2x downsample).
+        # For TB-scale full-res data, use OME-Zarr streaming instead.
         for c_idx in range(n_channels):
-            for z_idx in range(n_z):
-                if progress_callback and page_num % max(total_pages // 20, 1) == 0:
-                    pct = 5 + int(45 * page_num / total_pages)
-                    progress_callback(
-                        pct,
-                        f"Writing page {page_num + 1}/{total_pages} "
-                        f"(C{c_idx} Z{z_idx + 1}/{n_z})...",
-                    )
+            if progress_callback:
+                pct = 5 + int(45 * (c_idx + 1) / n_channels)
+                progress_callback(
+                    pct,
+                    f"Computing channel {c_idx + 1}/{n_channels} "
+                    f"({n_z} Z-planes)...",
+                )
 
-                # Compute one (Y, X) plane from the dask array
-                if is_4d:
-                    plane = arr[c_idx, z_idx, :, :].compute()  # (Y, X)
-                else:
-                    plane = arr[z_idx, :, :].compute()  # (Y, X)
+            # Compute one channel from the dask graph
+            if is_4d:
+                channel_data = arr[c_idx].compute()  # (Z, Y, X)
+            else:
+                channel_data = arr.compute()  # (Z, Y, X)
+            channel_data = np.clip(channel_data, 0, 65535).astype(dtype)
 
-                plane = np.clip(plane, 0, 65535).astype(dtype)
+            logger.info(
+                f"  Channel {c_idx + 1}/{n_channels}: "
+                f"computed {channel_data.shape}, writing..."
+            )
 
-                # First page carries metadata and SubIFD allocation
-                if page_num == 0:
-                    tif.write(
-                        plane,
-                        subifds=pyramid_levels if pyramid_levels > 0 else None,
-                        metadata=metadata,
-                        **write_opts,
-                    )
-                else:
-                    tif.write(plane, **write_opts)
+            if c_idx == 0:
+                # First channel: metadata + SubIFD allocation
+                tif.write(
+                    channel_data,
+                    subifds=pyramid_levels if pyramid_levels > 0 else None,
+                    metadata=metadata,
+                    **write_opts,
+                )
+            else:
+                tif.write(channel_data, **write_opts)
 
-                page_num += 1
+            # Free channel data before computing next
+            del channel_data
 
         logger.info(
-            f"  Full resolution written: {page_num} pages "
-            f"({n_channels} channels x {n_z} Z-planes)"
+            f"  Full resolution written: " f"{n_channels} channels x {n_z} Z-planes"
         )
 
         # Write pyramid SubIFDs
@@ -354,10 +360,10 @@ def write_pyramidal_ome_tiff_streaming(
 
                 logger.info(
                     f"  Pyramid level {level + 1}: "
-                    f"({n_channels}x{n_z}, {ds_y}, {ds_x}) ({factor}x YX downsample)"
+                    f"({ds_y}, {ds_x}) ({factor}x YX downsample)"
                 )
 
-                # Downsample lazily and compute plane-by-plane
+                # Downsample and compute one channel at a time
                 if is_4d:
                     ds_arr = da.coarsen(
                         np.mean,
@@ -373,18 +379,14 @@ def write_pyramidal_ome_tiff_streaming(
                         trim_excess=True,
                     )
 
-                ds_nz = ds_arr.shape[1] if is_4d else ds_arr.shape[0]
-
-                # Same C-then-Z ordering for pyramid SubIFDs
                 for c_idx in range(n_channels):
-                    for z_idx in range(ds_nz):
-                        if is_4d:
-                            plane = ds_arr[c_idx, z_idx, :, :].compute()
-                        else:
-                            plane = ds_arr[z_idx, :, :].compute()
-
-                        plane = np.clip(plane, 0, 65535).astype(dtype)
-                        tif.write(plane, subfiletype=1, **write_opts)
+                    if is_4d:
+                        level_data = ds_arr[c_idx].compute()
+                    else:
+                        level_data = ds_arr.compute()
+                    level_data = np.clip(level_data, 0, 65535).astype(dtype)
+                    tif.write(level_data, subfiletype=1, **write_opts)
+                    del level_data
 
     # Log output stats
     file_size = output_path.stat().st_size
