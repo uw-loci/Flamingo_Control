@@ -293,33 +293,47 @@ def write_pyramidal_ome_tiff_streaming(
     if progress_callback:
         progress_callback(5, "Writing full-resolution planes (streaming)...")
 
+    total_pages = n_channels * n_z
     with tifffile.TiffWriter(str(output_path), bigtiff=True, ome=True) as tif:
-        # Write full-resolution planes one Z at a time
-        for z_idx in range(n_z):
-            if progress_callback and z_idx % max(n_z // 20, 1) == 0:
-                pct = 5 + int(45 * z_idx / n_z)
-                progress_callback(pct, f"Writing plane {z_idx + 1}/{n_z}...")
+        # Write full-resolution pages one (Y,X) plane at a time.
+        # For CZYX data, iterate C then Z to match OME axis ordering:
+        # page order = [C0Z0, C0Z1, ..., C0Zn, C1Z0, C1Z1, ..., C1Zn]
+        page_num = 0
+        for c_idx in range(n_channels):
+            for z_idx in range(n_z):
+                if progress_callback and page_num % max(total_pages // 20, 1) == 0:
+                    pct = 5 + int(45 * page_num / total_pages)
+                    progress_callback(
+                        pct,
+                        f"Writing page {page_num + 1}/{total_pages} "
+                        f"(C{c_idx} Z{z_idx + 1}/{n_z})...",
+                    )
 
-            # Compute one Z-plane from the dask array
-            if is_4d:
-                plane = arr[:, z_idx, :, :].compute()  # (C, Y, X)
-            else:
-                plane = arr[z_idx, :, :].compute()  # (Y, X)
+                # Compute one (Y, X) plane from the dask array
+                if is_4d:
+                    plane = arr[c_idx, z_idx, :, :].compute()  # (Y, X)
+                else:
+                    plane = arr[z_idx, :, :].compute()  # (Y, X)
 
-            plane = np.clip(plane, 0, 65535).astype(dtype)
+                plane = np.clip(plane, 0, 65535).astype(dtype)
 
-            # First plane carries metadata and SubIFD allocation
-            if z_idx == 0:
-                tif.write(
-                    plane,
-                    subifds=pyramid_levels if pyramid_levels > 0 else None,
-                    metadata=metadata,
-                    **write_opts,
-                )
-            else:
-                tif.write(plane, **write_opts)
+                # First page carries metadata and SubIFD allocation
+                if page_num == 0:
+                    tif.write(
+                        plane,
+                        subifds=pyramid_levels if pyramid_levels > 0 else None,
+                        metadata=metadata,
+                        **write_opts,
+                    )
+                else:
+                    tif.write(plane, **write_opts)
 
-        logger.info(f"  Full resolution written: {n_z} planes")
+                page_num += 1
+
+        logger.info(
+            f"  Full resolution written: {page_num} pages "
+            f"({n_channels} channels x {n_z} Z-planes)"
+        )
 
         # Write pyramid SubIFDs
         if pyramid_levels > 0:
@@ -340,7 +354,7 @@ def write_pyramidal_ome_tiff_streaming(
 
                 logger.info(
                     f"  Pyramid level {level + 1}: "
-                    f"({n_z}, {ds_y}, {ds_x}) ({factor}x YX downsample)"
+                    f"({n_channels}x{n_z}, {ds_y}, {ds_x}) ({factor}x YX downsample)"
                 )
 
                 # Downsample lazily and compute plane-by-plane
@@ -361,14 +375,16 @@ def write_pyramidal_ome_tiff_streaming(
 
                 ds_nz = ds_arr.shape[1] if is_4d else ds_arr.shape[0]
 
-                for z_idx in range(ds_nz):
-                    if is_4d:
-                        plane = ds_arr[:, z_idx, :, :].compute()
-                    else:
-                        plane = ds_arr[z_idx, :, :].compute()
+                # Same C-then-Z ordering for pyramid SubIFDs
+                for c_idx in range(n_channels):
+                    for z_idx in range(ds_nz):
+                        if is_4d:
+                            plane = ds_arr[c_idx, z_idx, :, :].compute()
+                        else:
+                            plane = ds_arr[z_idx, :, :].compute()
 
-                    plane = np.clip(plane, 0, 65535).astype(dtype)
-                    tif.write(plane, subfiletype=1, **write_opts)
+                        plane = np.clip(plane, 0, 65535).astype(dtype)
+                        tif.write(plane, subfiletype=1, **write_opts)
 
     # Log output stats
     file_size = output_path.stat().st_size
