@@ -1251,6 +1251,9 @@ class NativeStitchingDialog(StitchingDialog):
         s.setValue("package_ozx", self._ozx_cb.isChecked())
         s.setValue("output_format", self._format_combo.currentData())
         s.setValue("channels", self._channels_edit.text())
+        s.setValue("streaming_mode", self._streaming_combo.currentIndex())
+        s.setValue("skip_registration", self._skip_reg_cb.isChecked())
+        s.setValue("reg_binning", self._reg_binning_combo.currentIndex())
         s.endGroup()
 
     def _restore_settings(self):
@@ -1317,5 +1320,16 @@ class NativeStitchingDialog(StitchingDialog):
         channels = s.value("channels", "", type=str)
         if channels:
             self._channels_edit.setText(channels)
+
+        streaming_idx = s.value("streaming_mode", 0, type=int)
+        if 0 <= streaming_idx < self._streaming_combo.count():
+            self._streaming_combo.setCurrentIndex(streaming_idx)
+
+        skip_reg = s.value("skip_registration", False, type=bool)
+        self._skip_reg_cb.setChecked(skip_reg)
+
+        reg_binning_idx = s.value("reg_binning", 1, type=int)
+        if 0 <= reg_binning_idx < self._reg_binning_combo.count():
+            self._reg_binning_combo.setCurrentIndex(reg_binning_idx)
 
         s.endGroup()
