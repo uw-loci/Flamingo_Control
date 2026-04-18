@@ -58,7 +58,8 @@ class StitchingDialog(PersistentDialog):
 
         self.setWindowTitle("Tile Stitching")
         self.setMinimumWidth(650)
-        self.setMinimumHeight(550)
+        self.setMinimumHeight(700)
+        self.resize(720, 750)  # Default size before geometry restore
         self.setAttribute(Qt.WA_DeleteOnClose, False)
 
         self._setup_ui()
