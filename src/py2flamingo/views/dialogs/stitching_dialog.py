@@ -219,16 +219,19 @@ class StitchingDialog(PersistentDialog):
         )
         settings_layout.addWidget(format_help, 2, 4)
 
-        # Deconvolution
+        # Row 3: Deconvolution + Flat-field + Content-based blending
         self._deconv_cb = QCheckBox("Deconvolution \u2731")
         self._deconv_cb.setToolTip(
             "\u2731 GPU Richardson-Lucy deconvolution per tile.\n"
             "Requires pycudadecon or RedLionfish.\n\n"
             "Significantly improves resolution."
         )
-        settings_layout.addWidget(self._deconv_cb, 3, 0, 1, 2)
+        settings_layout.addWidget(self._deconv_cb, 3, 0)
 
-        # Content-based fusion (BigStitcher-inspired)
+        self._flat_field_cb = QCheckBox("Flat-field correction")
+        self._update_preprocessing_availability()
+        settings_layout.addWidget(self._flat_field_cb, 3, 1)
+
         self._content_fusion_cb = QCheckBox("Content-based blending \u2731")
         self._content_fusion_cb.setToolTip(
             "\u2731 Weights tile overlaps by local sharpness\n"
@@ -237,7 +240,7 @@ class StitchingDialog(PersistentDialog):
         )
         settings_layout.addWidget(self._content_fusion_cb, 3, 2, 1, 2)
 
-        # Skip registration
+        # Row 4: Skip registration + Reg binning
         self._skip_reg_cb = QCheckBox("Skip registration")
         self._skip_reg_cb.setToolTip(
             "Use stage positions only — skip phase-correlation registration.\n\n"
@@ -253,7 +256,6 @@ class StitchingDialog(PersistentDialog):
         self._skip_reg_cb.toggled.connect(self._on_skip_reg_toggled)
         settings_layout.addWidget(self._skip_reg_cb, 4, 0)
 
-        # Registration binning
         self._reg_binning_label = QLabel("Reg. binning:")
         settings_layout.addWidget(self._reg_binning_label, 4, 1)
         self._reg_binning_combo = QComboBox()
@@ -272,14 +274,9 @@ class StitchingDialog(PersistentDialog):
             "than sub-pixel accuracy, or as a quick check before\n"
             "re-running with finer binning."
         )
-        settings_layout.addWidget(self._reg_binning_combo, 4, 2)
+        settings_layout.addWidget(self._reg_binning_combo, 4, 2, 1, 2)
 
-        # Flat-field correction
-        self._flat_field_cb = QCheckBox("Flat-field correction")
-        self._update_preprocessing_availability()
-        settings_layout.addWidget(self._flat_field_cb, 4, 2, 1, 2)
-
-        # Depth-dependent attenuation correction
+        # Row 5: Depth attenuation
         self._depth_atten_cb = QCheckBox("Depth attenuation")
         self._depth_atten_cb.setToolTip(
             "Correct exponential Z-intensity falloff\n"
@@ -301,7 +298,7 @@ class StitchingDialog(PersistentDialog):
         self._depth_atten_cb.toggled.connect(self._depth_atten_mu_spin.setEnabled)
         settings_layout.addWidget(self._depth_atten_mu_spin, 5, 1)
 
-        # Row 6: package + memory mode
+        # Row 6: Package .ozx + Memory mode
         self._ozx_cb = QCheckBox("Package as .ozx")
         self._ozx_cb.setToolTip(
             "Create a single .ozx ZIP file from the OME-Zarr output\n"
@@ -323,7 +320,7 @@ class StitchingDialog(PersistentDialog):
         )
         settings_layout.addWidget(self._streaming_combo, 6, 3)
 
-        # Channels
+        # Row 7: Channels
         settings_layout.addWidget(QLabel("Channels:"), 7, 0)
         self._channels_edit = QLineEdit()
         self._channels_edit.setPlaceholderText("All (or e.g. 0,1)")
@@ -345,6 +342,7 @@ class StitchingDialog(PersistentDialog):
         settings_layout.addWidget(legend, 9, 0, 1, 4)
 
         settings_group.setLayout(settings_layout)
+        self._settings_group = settings_group  # For enabling/disabling during run
         layout.addWidget(settings_group)
 
         # --- Action buttons ---
@@ -553,6 +551,21 @@ class StitchingDialog(PersistentDialog):
                 f"Output: ~{est['output_gb']:.0f} GB"
                 f"{mode_hint}"
             )
+
+            # Also log to the log area for visibility
+            try:
+                import psutil
+
+                sys_ram = psutil.virtual_memory().total / (1024**3)
+            except ImportError:
+                sys_ram = 0
+            self._log(
+                f"Memory estimate (system RAM: {sys_ram:.0f} GB):\n"
+                f"  In-memory mode: ~{est['in_memory_gb']:.0f} GB peak\n"
+                f"  Streaming mode: ~{est['streaming_gb']:.1f} GB peak\n"
+                f"  Output size:    ~{est['output_gb']:.0f} GB\n"
+                f"  Recommendation: {'Streaming (low memory)' if est['auto_streaming'] else 'In-memory (fast)'}"
+            )
         except Exception as e:
             self._logger.debug(f"Memory estimate failed: {e}")
             self._memory_label.setText("")
@@ -639,10 +652,13 @@ class StitchingDialog(PersistentDialog):
         self._log_text.clear()
         self._log("Starting stitching pipeline...")
 
-        # Disable controls
+        # Disable all controls during run so user can't change settings
         self._run_btn.setEnabled(False)
         self._discover_btn.setEnabled(False)
         self._cancel_btn.setEnabled(True)
+        self._settings_group.setEnabled(False)
+        self._acq_dir_edit.setEnabled(False)
+        self._output_dir_edit.setEnabled(False)
 
         from py2flamingo.stitching.worker import StitchingWorker
 
@@ -720,6 +736,9 @@ class StitchingDialog(PersistentDialog):
         """Handle worker thread completion (success, error, or cancel)."""
         self._discover_btn.setEnabled(True)
         self._cancel_btn.setEnabled(False)
+        self._settings_group.setEnabled(True)
+        self._acq_dir_edit.setEnabled(True)
+        self._output_dir_edit.setEnabled(True)
         self._worker = None
         if self._tiles:
             # Tiles still valid — Run is the next action
@@ -1102,6 +1121,7 @@ class NativeStitchingDialog(StitchingDialog):
                         break
 
             self._log_tile_summary(tiles)
+            self._update_memory_estimate()
             self._run_btn.setEnabled(True)
             self._set_btn_default(self._discover_btn)
             self._set_btn_green(self._run_btn)
