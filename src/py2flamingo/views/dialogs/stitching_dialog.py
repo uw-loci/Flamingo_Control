@@ -318,7 +318,15 @@ class StitchingDialog(PersistentDialog):
             "Streaming: writes output chunk-by-chunk directly from the fusion\n"
             "graph. Uses minimal RAM (~2 tile volumes), required for TB-scale data."
         )
+        self._streaming_combo.currentIndexChanged.connect(self._update_memory_indicator)
         settings_layout.addWidget(self._streaming_combo, 6, 3)
+
+        # Memory safety indicator (like "Zarr?" but for RAM)
+        self._memory_indicator = QLabel("")
+        self._memory_indicator.setFixedWidth(40)
+        self._memory_indicator.setAlignment(Qt.AlignCenter)
+        self._last_mem_estimate = None  # Cached estimate dict
+        settings_layout.addWidget(self._memory_indicator, 6, 4)
 
         # Row 7: Channels
         settings_layout.addWidget(QLabel("Channels:"), 7, 0)
@@ -527,6 +535,8 @@ class StitchingDialog(PersistentDialog):
         """Compute and display memory estimates for in-memory vs streaming modes."""
         if not self._tiles:
             self._memory_label.setText("")
+            self._last_mem_estimate = None
+            self._update_memory_indicator()
             return
 
         try:
@@ -538,6 +548,7 @@ class StitchingDialog(PersistentDialog):
             process_ch = channels if channels else all_ch
 
             est = estimate_memory_usage(self._tiles, process_ch, config)
+            self._last_mem_estimate = est
 
             mode_hint = ""
             if est["auto_streaming"]:
@@ -551,6 +562,9 @@ class StitchingDialog(PersistentDialog):
                 f"Output: ~{est['output_gb']:.0f} GB"
                 f"{mode_hint}"
             )
+
+            # Update the indicator badge
+            self._update_memory_indicator()
 
             # Also log to the log area for visibility
             try:
@@ -569,6 +583,91 @@ class StitchingDialog(PersistentDialog):
         except Exception as e:
             self._logger.debug(f"Memory estimate failed: {e}")
             self._memory_label.setText("")
+            self._last_mem_estimate = None
+            self._update_memory_indicator()
+
+    def _update_memory_indicator(self, _index=None):
+        """Update the memory safety indicator next to the Memory Mode combo.
+
+        Shows a colored badge:
+          Green "OK"     — selected mode fits comfortably in RAM
+          Orange "Warn"  — selected mode is tight (>80% RAM) or auto would differ
+          Red "OOM!"     — selected mode will likely exceed RAM
+          Empty          — no tile data yet (nothing to estimate)
+        """
+        est = self._last_mem_estimate
+        if est is None:
+            self._memory_indicator.setText("")
+            self._memory_indicator.setToolTip("")
+            return
+
+        # Get system RAM
+        try:
+            import psutil
+
+            sys_ram = psutil.virtual_memory().total / (1024**3)
+        except ImportError:
+            sys_ram = 192.0
+
+        # Determine which mode will actually be used
+        selected = self._streaming_combo.currentData()
+        if selected is None:  # Auto
+            will_stream = est["auto_streaming"]
+            peak_gb = est["streaming_gb"] if will_stream else est["in_memory_gb"]
+            mode_name = "streaming" if will_stream else "in-memory"
+        elif selected:  # Streaming forced
+            will_stream = True
+            peak_gb = est["streaming_gb"]
+            mode_name = "streaming"
+        else:  # In-memory forced
+            will_stream = False
+            peak_gb = est["in_memory_gb"]
+            mode_name = "in-memory"
+
+        ratio = peak_gb / sys_ram if sys_ram > 0 else 1.0
+
+        if ratio > 0.95:
+            # Red — will almost certainly OOM
+            self._memory_indicator.setText("OOM!")
+            self._memory_indicator.setStyleSheet(
+                "QLabel { color: white; background-color: #D32F2F; "
+                "font-weight: bold; font-size: 10px; "
+                "border-radius: 8px; padding: 1px 3px; }"
+            )
+            self._memory_indicator.setToolTip(
+                f"<b>Out of memory risk!</b><br>"
+                f"Estimated peak: ~{peak_gb:.0f} GB ({mode_name})<br>"
+                f"System RAM: {sys_ram:.0f} GB<br><br>"
+                f"Switch to <b>Streaming</b> mode (~{est['streaming_gb']:.1f} GB peak) "
+                f"or increase downsample factor."
+            )
+        elif ratio > 0.70:
+            # Orange — tight, might work but risky
+            self._memory_indicator.setText("Tight")
+            self._memory_indicator.setStyleSheet(
+                "QLabel { color: white; background-color: #F57C00; "
+                "font-weight: bold; font-size: 10px; "
+                "border-radius: 8px; padding: 1px 3px; }"
+            )
+            self._memory_indicator.setToolTip(
+                f"<b>Memory is tight</b><br>"
+                f"Estimated peak: ~{peak_gb:.0f} GB ({mode_name})<br>"
+                f"System RAM: {sys_ram:.0f} GB ({ratio*100:.0f}% usage)<br><br>"
+                f"Should work but leave little room for other applications.<br>"
+                f"Streaming mode would use ~{est['streaming_gb']:.1f} GB."
+            )
+        else:
+            # Green — comfortable
+            self._memory_indicator.setText("OK")
+            self._memory_indicator.setStyleSheet(
+                "QLabel { color: white; background-color: #388E3C; "
+                "font-weight: bold; font-size: 10px; "
+                "border-radius: 8px; padding: 1px 3px; }"
+            )
+            self._memory_indicator.setToolTip(
+                f"Estimated peak: ~{peak_gb:.0f} GB ({mode_name})<br>"
+                f"System RAM: {sys_ram:.0f} GB ({ratio*100:.0f}% usage)"
+            )
 
     # --- Run / Cancel ---
 
