@@ -298,15 +298,30 @@ class StitchingDialog(PersistentDialog):
         self._depth_atten_cb.toggled.connect(self._depth_atten_mu_spin.setEnabled)
         settings_layout.addWidget(self._depth_atten_mu_spin, 5, 1)
 
-        # Row 6: Package .ozx + Memory mode
+        # Row 6: Compression
+        settings_layout.addWidget(QLabel("Compression:"), 6, 0)
+        self._compression_combo = QComboBox()
+        self._compression_combo.setToolTip(
+            "Compression codec for the output file.\n\n"
+            "Options depend on the output format:\n"
+            "  Zarr: zstd (recommended), lz4 (fastest), blosc, none\n"
+            "  TIFF: zlib (universal), lzw (fast read), zstd (best ratio), none\n\n"
+            "zstd level 3 gives ~2-3x compression with fast read/write.\n"
+            "none = no compression (fastest write, largest files).\n"
+            "lzw is fastest for TIFF readers (Fiji batch processing)."
+        )
+        settings_layout.addWidget(self._compression_combo, 6, 1)
+        self._update_compression_options()  # Populate based on current format
+
         self._ozx_cb = QCheckBox("Package as .ozx")
         self._ozx_cb.setToolTip(
             "Create a single .ozx ZIP file from the OME-Zarr output\n"
             "for easy sharing/copying"
         )
-        settings_layout.addWidget(self._ozx_cb, 6, 0, 1, 2)
+        settings_layout.addWidget(self._ozx_cb, 6, 2, 1, 2)
 
-        settings_layout.addWidget(QLabel("Memory mode:"), 6, 2)
+        # Row 7: Memory mode
+        settings_layout.addWidget(QLabel("Memory mode:"), 7, 0)
         self._streaming_combo = QComboBox()
         self._streaming_combo.addItem("Auto", None)
         self._streaming_combo.addItem("In-memory (fast)", False)
@@ -319,35 +334,35 @@ class StitchingDialog(PersistentDialog):
             "graph. Uses minimal RAM (~2 tile volumes), required for TB-scale data."
         )
         self._streaming_combo.currentIndexChanged.connect(self._update_memory_indicator)
-        settings_layout.addWidget(self._streaming_combo, 6, 3)
+        settings_layout.addWidget(self._streaming_combo, 7, 1)
 
         # Memory safety indicator (like "Zarr?" but for RAM)
         self._memory_indicator = QLabel("")
         self._memory_indicator.setFixedWidth(40)
         self._memory_indicator.setAlignment(Qt.AlignCenter)
         self._last_mem_estimate = None  # Cached estimate dict
-        settings_layout.addWidget(self._memory_indicator, 6, 4)
+        settings_layout.addWidget(self._memory_indicator, 7, 2)
 
-        # Row 7: Channels
-        settings_layout.addWidget(QLabel("Channels:"), 7, 0)
+        # Row 8: Channels
+        settings_layout.addWidget(QLabel("Channels:"), 8, 0)
         self._channels_edit = QLineEdit()
         self._channels_edit.setPlaceholderText("All (or e.g. 0,1)")
         self._channels_edit.setToolTip(
             "Leave empty for all channels, or comma-separated list (e.g. 0,1)"
         )
-        settings_layout.addWidget(self._channels_edit, 7, 1, 1, 3)
+        settings_layout.addWidget(self._channels_edit, 8, 1, 1, 3)
 
         # Memory estimate label (updated after tile discovery)
         self._memory_label = QLabel("")
         self._memory_label.setStyleSheet(
             "color: #888; font-style: italic; font-size: 11px;"
         )
-        settings_layout.addWidget(self._memory_label, 8, 0, 1, 5)
+        settings_layout.addWidget(self._memory_label, 9, 0, 1, 5)
 
         # Timing legend
         legend = QLabel("\u2731 = significantly increases processing time")
         legend.setStyleSheet("color: #FF8C00; font-style: italic; font-size: 11px;")
-        settings_layout.addWidget(legend, 9, 0, 1, 4)
+        settings_layout.addWidget(legend, 10, 0, 1, 4)
 
         settings_group.setLayout(settings_layout)
         self._settings_group = settings_group  # For enabling/disabling during run
@@ -700,6 +715,18 @@ class StitchingDialog(PersistentDialog):
         config.registration_binning = self._reg_binning_combo.currentData()
         config.package_ozx = self._ozx_cb.isChecked()
         config.streaming_mode = self._streaming_combo.currentData()
+
+        # Set compression based on format
+        compression = self._compression_combo.currentData()
+        if compression:
+            fmt = config.output_format
+            if fmt == "ome-tiff":
+                config.tiff_compression = compression
+            elif fmt in ("ome-zarr-sharded", "ome-zarr-v2"):
+                config.zarr_compression = compression
+            elif fmt == "both":
+                config.zarr_compression = compression
+                config.tiff_compression = compression
         return config
 
     def _parse_channels(self) -> Optional[List[int]]:
@@ -853,12 +880,50 @@ class StitchingDialog(PersistentDialog):
     # --- Format-dependent UI ---
 
     def _on_format_changed(self, _index=None):
-        """Enable/disable .ozx checkbox based on selected output format."""
+        """Update compression options and .ozx checkbox for selected format."""
         fmt = self._format_combo.currentData()
         has_zarr = fmt in ("ome-zarr-sharded", "ome-zarr-v2", "both")
         self._ozx_cb.setEnabled(has_zarr)
         if not has_zarr:
             self._ozx_cb.setChecked(False)
+        self._update_compression_options()
+
+    def _update_compression_options(self):
+        """Populate compression combo based on selected output format."""
+        fmt = self._format_combo.currentData()
+        prev = self._compression_combo.currentData()
+        self._compression_combo.blockSignals(True)
+        self._compression_combo.clear()
+
+        if fmt == "ome-tiff":
+            self._compression_combo.addItem("zlib (universal)", "zlib")
+            self._compression_combo.addItem("lzw (fast read)", "lzw")
+            self._compression_combo.addItem("zstd (best ratio)", "zstd")
+            self._compression_combo.addItem("None (fastest write)", "none")
+            default = "zlib"
+        elif fmt in ("ome-zarr-sharded", "ome-zarr-v2"):
+            self._compression_combo.addItem("zstd (recommended)", "zstd")
+            self._compression_combo.addItem("lz4 (fastest)", "lz4")
+            self._compression_combo.addItem("blosc (compatible)", "blosc")
+            self._compression_combo.addItem("None (fastest write)", "none")
+            default = "zstd"
+        else:
+            # "both" — show zarr options (tiff uses its own default internally)
+            self._compression_combo.addItem("zstd (recommended)", "zstd")
+            self._compression_combo.addItem("lz4 (fastest)", "lz4")
+            self._compression_combo.addItem("blosc (compatible)", "blosc")
+            self._compression_combo.addItem("None (fastest write)", "none")
+            default = "zstd"
+
+        # Restore previous selection if still valid
+        idx = self._compression_combo.findData(prev)
+        if idx >= 0:
+            self._compression_combo.setCurrentIndex(idx)
+        else:
+            idx = self._compression_combo.findData(default)
+            if idx >= 0:
+                self._compression_combo.setCurrentIndex(idx)
+        self._compression_combo.blockSignals(False)
 
     # --- Button styling helpers ---
 
@@ -1052,6 +1117,7 @@ class StitchingDialog(PersistentDialog):
         s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
         s.setValue("package_ozx", self._ozx_cb.isChecked())
         s.setValue("output_format", self._format_combo.currentData())
+        s.setValue("compression", self._compression_combo.currentData())
         s.setValue("channels", self._channels_edit.text())
         s.setValue("streaming_mode", self._streaming_combo.currentIndex())
         s.setValue("skip_registration", self._skip_reg_cb.isChecked())
@@ -1118,6 +1184,13 @@ class StitchingDialog(PersistentDialog):
             idx = self._format_combo.findData(output_format)
             if idx >= 0:
                 self._format_combo.setCurrentIndex(idx)
+
+        # Restore compression after format (format determines available options)
+        compression = s.value("compression", "", type=str)
+        if compression:
+            idx = self._compression_combo.findData(compression)
+            if idx >= 0:
+                self._compression_combo.setCurrentIndex(idx)
 
         channels = s.value("channels", "", type=str)
         if channels:
@@ -1250,6 +1323,7 @@ class NativeStitchingDialog(StitchingDialog):
         s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
         s.setValue("package_ozx", self._ozx_cb.isChecked())
         s.setValue("output_format", self._format_combo.currentData())
+        s.setValue("compression", self._compression_combo.currentData())
         s.setValue("channels", self._channels_edit.text())
         s.setValue("streaming_mode", self._streaming_combo.currentIndex())
         s.setValue("skip_registration", self._skip_reg_cb.isChecked())
@@ -1316,6 +1390,12 @@ class NativeStitchingDialog(StitchingDialog):
             idx = self._format_combo.findData(output_format)
             if idx >= 0:
                 self._format_combo.setCurrentIndex(idx)
+
+        compression = s.value("compression", "", type=str)
+        if compression:
+            idx = self._compression_combo.findData(compression)
+            if idx >= 0:
+                self._compression_combo.setCurrentIndex(idx)
 
         channels = s.value("channels", "", type=str)
         if channels:
