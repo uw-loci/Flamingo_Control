@@ -228,9 +228,6 @@ def write_pyramidal_ome_tiff_streaming(
             "Install with: pip install tifffile"
         )
 
-    import dask
-    import dask.array as da
-
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -269,134 +266,75 @@ def write_pyramidal_ome_tiff_streaming(
 
     logger.info(f"Pyramid levels: {pyramid_levels} (plus full resolution)")
 
-    # Build OME metadata
-    metadata = {
-        "axes": "CZYX" if is_4d else "ZYX",
-        "PhysicalSizeX": voxel_size_um["x"],
-        "PhysicalSizeXUnit": "\u00b5m",
-        "PhysicalSizeY": voxel_size_um["y"],
-        "PhysicalSizeYUnit": "\u00b5m",
-        "PhysicalSizeZ": voxel_size_um["z"],
-        "PhysicalSizeZUnit": "\u00b5m",
-    }
-    if channel_names:
-        metadata["Channel"] = {"Name": channel_names}
+    # tifffile's ome=True mode cannot handle per-channel or per-page
+    # streaming for multi-dimensional (CZYX) data — it needs to see the
+    # complete array shape in a single write() call.
+    #
+    # Strategy: pre-allocate the full output array, compute each channel
+    # from the dask graph into its slice (one at a time to limit peak
+    # memory), then delegate to write_pyramidal_ome_tiff which handles
+    # OME-XML, pyramids, and tiling correctly.
+    #
+    # Peak memory = output array + one channel compute working set.
+    # For a 2-channel 2x-downsample 66-tile dataset: ~57 + 15 = 72 GB.
+    # For true minimal-memory streaming, use OME-Zarr instead.
 
-    tiff_compression = None if compression == "none" else compression
-
-    write_opts = dict(
-        tile=tile_size,
-        compression=tiff_compression,
-        photometric="minisblack",
-    )
+    if is_4d:
+        output_shape = (n_channels, n_z, y, x)
+    else:
+        output_shape = (n_z, y, x)
+    output_gb = np.prod(output_shape) * 2 / (1024**3)
 
     if progress_callback:
-        progress_callback(5, "Writing full-resolution data (streaming)...")
+        progress_callback(5, f"Allocating output array ({output_gb:.1f} GB)...")
 
-    with tifffile.TiffWriter(str(output_path), bigtiff=True, ome=True) as tif:
-        # For multi-channel (CZYX) data: compute one full ZYX channel at a
-        # time and write it as a 3D block. tifffile can correctly build
-        # OME-XML when it receives coherent 3D/4D arrays, but NOT when
-        # given individual 2D pages with CZYX axes (it can't determine
-        # how to decompose N pages into C and Z).
-        #
-        # Peak memory = one channel volume (e.g. 15 GB at 2x downsample).
-        # For TB-scale full-res data, use OME-Zarr streaming instead.
-        for c_idx in range(n_channels):
-            if progress_callback:
-                pct = 5 + int(45 * (c_idx + 1) / n_channels)
-                progress_callback(
-                    pct,
-                    f"Computing channel {c_idx + 1}/{n_channels} "
-                    f"({n_z} Z-planes)...",
-                )
+    logger.info(f"  Pre-allocating output: {output_shape} ({output_gb:.1f} GB)")
+    output = np.zeros(output_shape, dtype=dtype)
 
-            # Compute one channel from the dask graph
-            if is_4d:
-                channel_data = arr[c_idx].compute()  # (Z, Y, X)
-            else:
-                channel_data = arr.compute()  # (Z, Y, X)
-            channel_data = np.clip(channel_data, 0, 65535).astype(dtype)
-
-            logger.info(
-                f"  Channel {c_idx + 1}/{n_channels}: "
-                f"computed {channel_data.shape}, writing..."
+    # Compute channels one at a time into the pre-allocated array
+    for c_idx in range(n_channels):
+        if progress_callback:
+            pct = 5 + int(45 * (c_idx + 1) / n_channels)
+            progress_callback(
+                pct,
+                f"Computing channel {c_idx + 1}/{n_channels} " f"({n_z} Z-planes)...",
             )
 
-            if c_idx == 0:
-                # First channel: metadata + SubIFD allocation
-                tif.write(
-                    channel_data,
-                    subifds=pyramid_levels if pyramid_levels > 0 else None,
-                    metadata=metadata,
-                    **write_opts,
-                )
-            else:
-                tif.write(channel_data, **write_opts)
+        if is_4d:
+            channel_data = arr[c_idx].compute()  # (Z, Y, X)
+        else:
+            channel_data = arr.compute()
 
-            # Free channel data before computing next
-            del channel_data
+        channel_data = np.clip(channel_data, 0, 65535).astype(dtype)
 
         logger.info(
-            f"  Full resolution written: " f"{n_channels} channels x {n_z} Z-planes"
+            f"  Channel {c_idx + 1}/{n_channels}: " f"computed {channel_data.shape}"
         )
 
-        # Write pyramid SubIFDs
-        if pyramid_levels > 0:
-            if progress_callback:
-                progress_callback(50, "Writing pyramid levels...")
+        if is_4d:
+            sz, sy, sx = channel_data.shape
+            output[c_idx, :sz, :sy, :sx] = channel_data
+        else:
+            output[:] = channel_data
+        del channel_data
 
-            for level in range(pyramid_levels):
-                factor = 2 ** (level + 1)
-                ds_y = y // factor
-                ds_x = x // factor
-
-                if progress_callback:
-                    pct = 50 + int(40 * (level + 1) / pyramid_levels)
-                    progress_callback(
-                        pct,
-                        f"Writing pyramid level {level + 1}/{pyramid_levels}...",
-                    )
-
-                logger.info(
-                    f"  Pyramid level {level + 1}: "
-                    f"({ds_y}, {ds_x}) ({factor}x YX downsample)"
-                )
-
-                # Downsample and compute one channel at a time
-                if is_4d:
-                    ds_arr = da.coarsen(
-                        np.mean,
-                        arr,
-                        {0: 1, 1: 1, 2: factor, 3: factor},
-                        trim_excess=True,
-                    )
-                else:
-                    ds_arr = da.coarsen(
-                        np.mean,
-                        arr,
-                        {0: 1, 1: factor, 2: factor},
-                        trim_excess=True,
-                    )
-
-                for c_idx in range(n_channels):
-                    if is_4d:
-                        level_data = ds_arr[c_idx].compute()
-                    else:
-                        level_data = ds_arr.compute()
-                    level_data = np.clip(level_data, 0, 65535).astype(dtype)
-                    tif.write(level_data, subfiletype=1, **write_opts)
-                    del level_data
-
-    # Log output stats
-    file_size = output_path.stat().st_size
-    size_gb = file_size / (1024**3)
-    logger.info(f"OME-TIFF written (streaming): {output_path} — {size_gb:.2f} GB")
-
+    # Delegate to the standard OME-TIFF writer (handles ome=True,
+    # pyramids, tiling, and metadata correctly)
     if progress_callback:
-        progress_callback(100, "Streaming OME-TIFF write complete")
+        progress_callback(50, "Writing OME-TIFF with pyramids...")
 
-    return output_path
+    result = write_pyramidal_ome_tiff(
+        data=output,
+        output_path=output_path,
+        voxel_size_um=voxel_size_um,
+        tile_size=tile_size,
+        compression=compression,
+        pyramid_levels=pyramid_levels,
+        channel_names=channel_names,
+        progress_callback=progress_callback,
+    )
+    del output
+    return result
 
 
 def _downsample_yx(volume: np.ndarray, factor: int) -> np.ndarray:
