@@ -890,33 +890,41 @@ class StitchingDialog(PersistentDialog):
         self._update_compression_options()
 
     def _update_compression_options(self):
-        """Populate compression combo based on selected output format."""
+        """Populate compression combo based on selected output format.
+
+        Only offers codecs that are actually available in the current
+        environment. zstd for TIFF requires the imagecodecs package.
+        """
         fmt = self._format_combo.currentData()
         prev = self._compression_combo.currentData()
         self._compression_combo.blockSignals(True)
         self._compression_combo.clear()
 
         if fmt == "ome-tiff":
+            # zlib and lzw are always available (built into tifffile/Python)
             self._compression_combo.addItem("zlib (universal)", "zlib")
             self._compression_combo.addItem("lzw (fast read)", "lzw")
-            self._compression_combo.addItem("zstd (best ratio)", "zstd")
+            # zstd for TIFF requires imagecodecs
+            if self._tiff_zstd_available():
+                self._compression_combo.addItem("zstd (best ratio)", "zstd")
             self._compression_combo.addItem("None (fastest write)", "none")
             default = "zlib"
         elif fmt in ("ome-zarr-sharded", "ome-zarr-v2"):
+            # Zarr codecs are handled by numcodecs, always available
             self._compression_combo.addItem("zstd (recommended)", "zstd")
             self._compression_combo.addItem("lz4 (fastest)", "lz4")
             self._compression_combo.addItem("blosc (compatible)", "blosc")
             self._compression_combo.addItem("None (fastest write)", "none")
             default = "zstd"
         else:
-            # "both" — show zarr options (tiff uses its own default internally)
+            # "both" — show zarr options (tiff will use zlib internally)
             self._compression_combo.addItem("zstd (recommended)", "zstd")
             self._compression_combo.addItem("lz4 (fastest)", "lz4")
             self._compression_combo.addItem("blosc (compatible)", "blosc")
             self._compression_combo.addItem("None (fastest write)", "none")
             default = "zstd"
 
-        # Restore previous selection if still valid
+        # Restore previous selection if still valid for this format
         idx = self._compression_combo.findData(prev)
         if idx >= 0:
             self._compression_combo.setCurrentIndex(idx)
@@ -925,6 +933,23 @@ class StitchingDialog(PersistentDialog):
             if idx >= 0:
                 self._compression_combo.setCurrentIndex(idx)
         self._compression_combo.blockSignals(False)
+
+    @staticmethod
+    def _tiff_zstd_available() -> bool:
+        """Check if zstd compression is available for TIFF output."""
+        try:
+            import imagecodecs  # noqa: F401
+
+            return True
+        except ImportError:
+            pass
+        try:
+            from compression import zstd  # noqa: F401
+
+            return True
+        except ImportError:
+            pass
+        return False
 
     # --- Button styling helpers ---
 
