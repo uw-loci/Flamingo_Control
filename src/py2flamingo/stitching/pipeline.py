@@ -164,9 +164,8 @@ class StitchingConfig:
     # Depth-dependent attenuation correction (Beer-Lambert Z-falloff)
     depth_attenuation: bool = False
     depth_attenuation_mu: Optional[float] = None  # 1/µm; None = auto-fit
-    downsample_factor: int = (
-        1  # 1 = no downsampling, 2/4/8 = downsample before stitching
-    )
+    downsample_xy: int = 1  # XY downsample factor (1, 2, 4, 8)
+    downsample_z: int = 1  # Z downsample factor (1, 2, 4)
 
     # Deconvolution
     deconvolution_enabled: bool = False
@@ -233,7 +232,8 @@ def estimate_memory_usage(
 
     n_channels = len(channels)
     n_planes = max(t.n_planes for t in tiles)
-    ds = config.downsample_factor
+    ds_xy = config.downsample_xy
+    ds_z = config.downsample_z
 
     # Estimate output spatial extent from tile positions
     x_vals = [t.x_mm for t in tiles]
@@ -243,12 +243,11 @@ def estimate_memory_usage(
 
     # FOV per tile in mm (approx: pixel_size * frame_width)
     fov_mm = config.pixel_size_um * FRAME_WIDTH / 1000.0
-    fov_ds = fov_mm / ds  # FOV in downsampled space doesn't change mm
 
     # Output dimensions in pixels (downsampled)
-    out_x_px = int((x_range_mm + fov_mm) / config.pixel_size_um * 1000.0) // ds
-    out_y_px = int((y_range_mm + fov_mm) / config.pixel_size_um * 1000.0) // ds
-    out_z_px = n_planes // ds if ds > 1 else n_planes
+    out_x_px = int((x_range_mm + fov_mm) / config.pixel_size_um * 1000.0) // ds_xy
+    out_y_px = int((y_range_mm + fov_mm) / config.pixel_size_um * 1000.0) // ds_xy
+    out_z_px = n_planes // ds_z if ds_z > 1 else n_planes
 
     # Bytes per voxel
     bpv = 2  # uint16
@@ -286,12 +285,13 @@ def estimate_memory_usage(
     pyramid_overhead_gb = output_gb * 0.33
     compute_overhead_gb = per_channel_gb + tile_gb * 2  # dask working set
 
-    # Tile data footprint (same calc as streaming path)
-    ds_tile_planes = n_planes // ds if ds > 1 else n_planes
-    ds_tile_w = FRAME_WIDTH // ds if ds > 1 else FRAME_WIDTH
-    ds_tile_h = FRAME_HEIGHT // ds if ds > 1 else FRAME_HEIGHT
+    # Tile data footprint
+    ds_any = ds_xy > 1 or ds_z > 1
+    ds_tile_planes = n_planes // ds_z if ds_z > 1 else n_planes
+    ds_tile_w = FRAME_WIDTH // ds_xy if ds_xy > 1 else FRAME_WIDTH
+    ds_tile_h = FRAME_HEIGHT // ds_xy if ds_xy > 1 else FRAME_HEIGHT
     n_tiles = len(tiles)
-    if ds > 1:
+    if ds_any:
         tile_data_gb = (
             n_tiles
             * n_channels
@@ -308,19 +308,15 @@ def estimate_memory_usage(
         tile_data_gb + output_gb + max(compute_overhead_gb, pyramid_overhead_gb)
     )
 
-    # Streaming peak: preprocessed tile volumes + fusion working set.
-    # All preprocessed tiles persist in channel_tile_data during fusion.
+    # Streaming peak: one channel's tiles + uint16 output array.
     # With downsample, tiles are materialized at reduced size.
     # Without downsample, tiles stay as memmaps (demand-paged).
-    ds_tile_planes = n_planes // ds if ds > 1 else n_planes
-    ds_tile_w = FRAME_WIDTH // ds if ds > 1 else FRAME_WIDTH
-    ds_tile_h = FRAME_HEIGHT // ds if ds > 1 else FRAME_HEIGHT
     n_tiles = len(tiles)
-    if ds > 1:
-        # Materialized (downsampled) tiles persist for all channels
+    if ds_any:
+        # Materialized (downsampled) tiles for ONE channel + output
         tile_data_gb = (
             n_tiles
-            * n_channels
+            * 1  # streaming loads one channel at a time
             * ds_tile_planes
             * ds_tile_w
             * ds_tile_h
@@ -960,30 +956,33 @@ def destripe_volume(
     return result
 
 
-def downsample_volume(volume: np.ndarray, factor: int) -> np.ndarray:
-    """Downsample a volume by an integer factor using linear interpolation.
+def downsample_volume(
+    volume: np.ndarray, factor_xy: int = 1, factor_z: int = 1
+) -> np.ndarray:
+    """Downsample a volume with separate Z and XY factors.
 
     Uses scipy.ndimage.zoom (order=1) for quality downsampling,
     same approach as sample_view.py:_downsample_for_storage.
 
     Args:
         volume: (Z, Y, X) array
-        factor: Downsample factor (2, 4, 8, etc.)
+        factor_xy: XY downsample factor (1, 2, 4, 8)
+        factor_z: Z downsample factor (1, 2, 4)
 
     Returns:
         Downsampled volume
     """
-    if factor <= 1:
+    if factor_xy <= 1 and factor_z <= 1:
         return volume
 
     from scipy.ndimage import zoom
 
-    zoom_factor = 1.0 / factor
+    zoom_factors = (1.0 / factor_z, 1.0 / factor_xy, 1.0 / factor_xy)
+    label = f"Z{factor_z}x/XY{factor_xy}x" if factor_z != factor_xy else f"{factor_xy}x"
     logger.info(
-        f"Downsampling volume {volume.shape} by {factor}x "
-        f"(zoom={zoom_factor:.3f})..."
+        f"Downsampling volume {volume.shape} by {label} " f"(zoom={zoom_factors})..."
     )
-    result = zoom(volume.astype(np.float32), zoom_factor, order=1)
+    result = zoom(volume.astype(np.float32), zoom_factors, order=1)
     return np.clip(result, 0, 65535).astype(np.uint16)
 
 
@@ -1070,8 +1069,13 @@ class StitchingPipeline:
             tags.append("atten")
         if self.config.deconvolution_enabled:
             tags.append("deconv")
-        if self.config.downsample_factor > 1:
-            tags.append(f"{self.config.downsample_factor}x")
+        if self.config.downsample_xy > 1 or self.config.downsample_z > 1:
+            if self.config.downsample_xy == self.config.downsample_z:
+                tags.append(f"{self.config.downsample_xy}x")
+            else:
+                tags.append(
+                    f"xy{self.config.downsample_xy}x_z{self.config.downsample_z}x"
+                )
         if self.config.content_based_fusion:
             tags.append("cbf")
 
@@ -1133,15 +1137,16 @@ class StitchingPipeline:
             z_step_um = tiles[0].z_step_mm * 1000.0
             self.logger.info(f"Z step from data: {z_step_um:.3f} µm")
 
-        # Apply downsample factor to voxel sizes
-        ds = self.config.downsample_factor
+        # Apply downsample factors to voxel sizes
+        ds_xy = self.config.downsample_xy
+        ds_z = self.config.downsample_z
         voxel_size_um = {
-            "z": z_step_um * ds,
-            "y": self.config.pixel_size_um * ds,
-            "x": self.config.pixel_size_um * ds,
+            "z": z_step_um * ds_z,
+            "y": self.config.pixel_size_um * ds_xy,
+            "x": self.config.pixel_size_um * ds_xy,
         }
-        if ds > 1:
-            self.logger.info(f"Downsample factor: {ds}x")
+        if ds_xy > 1 or ds_z > 1:
+            self.logger.info(f"Downsample: XY={ds_xy}x Z={ds_z}x")
         self.logger.info(
             f"Voxel size: Z={voxel_size_um['z']:.3f} "
             f"Y={voxel_size_um['y']:.3f} X={voxel_size_um['x']:.3f} µm"
@@ -1689,8 +1694,10 @@ class StitchingPipeline:
                     volume = self._deconvolve_tile(volume, tile)
 
                 # Downsample
-                if self.config.downsample_factor > 1:
-                    volume = downsample_volume(volume, self.config.downsample_factor)
+                if self.config.downsample_xy > 1 or self.config.downsample_z > 1:
+                    volume = downsample_volume(
+                        volume, self.config.downsample_xy, self.config.downsample_z
+                    )
 
                 # Destripe (after downsample — fast mode)
                 if self.config.destripe and self.config.destripe_fast:
@@ -2097,7 +2104,8 @@ class StitchingPipeline:
             "store_path": store_path,
             "origin_um": origin_list,
             "channel_ids": channel_ids,
-            "downsample_factor": self.config.downsample_factor,
+            "downsample_xy": self.config.downsample_xy,
+            "downsample_z": self.config.downsample_z,
             "output_format": self.config.output_format,
             "channels": channels_meta,
             "tile_count": len(tiles),
@@ -2399,7 +2407,8 @@ class StitchingPipeline:
         metadata = {
             "source_acquisition": str(acquisition_dir),
             "voxel_size_um": voxel_size_um,
-            "downsample_factor": self.config.downsample_factor,
+            "downsample_xy": self.config.downsample_xy,
+            "downsample_z": self.config.downsample_z,
             "output_format": self.config.output_format,
             "channels": channels_meta,
             "tile_count": len(tiles),

@@ -174,15 +174,34 @@ class StitchingDialog(PersistentDialog):
         )
         settings_layout.addWidget(self._z_step_spin, 0, 3)
 
-        # Downsample
+        # Downsample XY + Z
         settings_layout.addWidget(QLabel("Downsample:"), 1, 0)
-        self._downsample_combo = QComboBox()
-        for label, value in [("1x (none)", 1), ("2x", 2), ("4x", 4), ("8x", 8)]:
-            self._downsample_combo.addItem(label, value)
-        self._downsample_combo.setToolTip(
-            "Downsample tiles before registration/fusion for faster processing"
+
+        ds_layout = QHBoxLayout()
+        ds_layout.setSpacing(4)
+        ds_layout.addWidget(QLabel("XY"))
+        self._downsample_xy_combo = QComboBox()
+        for label, value in [("1x", 1), ("2x", 2), ("4x", 4), ("8x", 8)]:
+            self._downsample_xy_combo.addItem(label, value)
+        self._downsample_xy_combo.setToolTip(
+            "XY downsample factor.\n"
+            "Reduces tile width/height before registration.\n"
+            "2x: 2048\u21921024, 4x: 2048\u2192512"
         )
-        settings_layout.addWidget(self._downsample_combo, 1, 1)
+        ds_layout.addWidget(self._downsample_xy_combo)
+        ds_layout.addWidget(QLabel("Z"))
+        self._downsample_z_combo = QComboBox()
+        for label, value in [("1x", 1), ("2x", 2), ("4x", 4)]:
+            self._downsample_z_combo.addItem(label, value)
+        self._downsample_z_combo.setToolTip(
+            "Z downsample factor.\n"
+            "Z pixel size is often already much coarser than XY,\n"
+            "so 1x (no Z downsample) is common.\n\n"
+            "Example: XY=0.406\u00b5m, Z=2.5\u00b5m \u2192 Z is 6x coarser.\n"
+            "2x XY + 1x Z keeps Z resolution while shrinking XY."
+        )
+        ds_layout.addWidget(self._downsample_z_combo)
+        settings_layout.addLayout(ds_layout, 1, 1)
 
         # Illumination fusion
         settings_layout.addWidget(QLabel("Illum. fusion:"), 1, 2)
@@ -892,7 +911,8 @@ class StitchingDialog(PersistentDialog):
             if self._depth_atten_mu_spin.value() > 0
             else None
         )
-        config.downsample_factor = self._downsample_combo.currentData()
+        config.downsample_xy = self._downsample_xy_combo.currentData()
+        config.downsample_z = self._downsample_z_combo.currentData()
         config.deconvolution_enabled = self._deconv_cb.isChecked()
         config.content_based_fusion = self._content_fusion_cb.isChecked()
         config.skip_registration = self._skip_reg_cb.isChecked()
@@ -1449,7 +1469,8 @@ class StitchingDialog(PersistentDialog):
         s.setValue("output_dir", self._output_dir_edit.text())
         s.setValue("pixel_size", self._pixel_size_spin.value())
         s.setValue("z_step", self._z_step_spin.value())
-        s.setValue("downsample", self._downsample_combo.currentData())
+        s.setValue("downsample_xy", self._downsample_xy_combo.currentData())
+        s.setValue("downsample_z", self._downsample_z_combo.currentData())
         s.setValue("fusion", self._fusion_combo.currentData())
         s.setValue("flat_field", self._flat_field_cb.isChecked())
         s.setValue("destripe", self._destripe_cb.isChecked())
@@ -1496,11 +1517,23 @@ class StitchingDialog(PersistentDialog):
         z_step = s.value("z_step", 0.0, type=float)
         self._z_step_spin.setValue(z_step)
 
-        downsample = s.value("downsample", 0, type=int)
-        if downsample:
-            idx = self._downsample_combo.findData(downsample)
+        ds_xy = s.value("downsample_xy", 0, type=int)
+        if ds_xy:
+            idx = self._downsample_xy_combo.findData(ds_xy)
             if idx >= 0:
-                self._downsample_combo.setCurrentIndex(idx)
+                self._downsample_xy_combo.setCurrentIndex(idx)
+        else:
+            # Legacy: try old single "downsample" key as XY
+            ds_old = s.value("downsample", 0, type=int)
+            if ds_old:
+                idx = self._downsample_xy_combo.findData(ds_old)
+                if idx >= 0:
+                    self._downsample_xy_combo.setCurrentIndex(idx)
+        ds_z = s.value("downsample_z", 0, type=int)
+        if ds_z:
+            idx = self._downsample_z_combo.findData(ds_z)
+            if idx >= 0:
+                self._downsample_z_combo.setCurrentIndex(idx)
 
         fusion = s.value("fusion", "", type=str)
         if fusion:
@@ -1635,7 +1668,8 @@ class NativeStitchingDialog(StitchingDialog):
         s.setValue("output_dir", self._output_dir_edit.text())
         s.setValue("pixel_size", self._pixel_size_spin.value())
         s.setValue("z_step", self._z_step_spin.value())
-        s.setValue("downsample", self._downsample_combo.currentData())
+        s.setValue("downsample_xy", self._downsample_xy_combo.currentData())
+        s.setValue("downsample_z", self._downsample_z_combo.currentData())
         s.setValue("fusion", self._fusion_combo.currentData())
         s.setValue("flat_field", self._flat_field_cb.isChecked())
         s.setValue("destripe", self._destripe_cb.isChecked())
@@ -1682,11 +1716,23 @@ class NativeStitchingDialog(StitchingDialog):
         z_step = s.value("z_step", 0.0, type=float)
         self._z_step_spin.setValue(z_step)
 
-        downsample = s.value("downsample", 0, type=int)
-        if downsample:
-            idx = self._downsample_combo.findData(downsample)
+        ds_xy = s.value("downsample_xy", 0, type=int)
+        if ds_xy:
+            idx = self._downsample_xy_combo.findData(ds_xy)
             if idx >= 0:
-                self._downsample_combo.setCurrentIndex(idx)
+                self._downsample_xy_combo.setCurrentIndex(idx)
+        else:
+            # Legacy: try old single "downsample" key as XY
+            ds_old = s.value("downsample", 0, type=int)
+            if ds_old:
+                idx = self._downsample_xy_combo.findData(ds_old)
+                if idx >= 0:
+                    self._downsample_xy_combo.setCurrentIndex(idx)
+        ds_z = s.value("downsample_z", 0, type=int)
+        if ds_z:
+            idx = self._downsample_z_combo.findData(ds_z)
+            if idx >= 0:
+                self._downsample_z_combo.setCurrentIndex(idx)
 
         fusion = s.value("fusion", "", type=str)
         if fusion:

@@ -85,7 +85,7 @@ class StitchingWorker(QThread):
             self.log_message.emit(
                 f"Acquisition dir: {self._acq_dir}\n"
                 f"Output dir: {self._output_dir}\n"
-                f"Downsample: {self._config.downsample_factor}x\n"
+                f"Downsample: XY={self._config.downsample_xy}x Z={self._config.downsample_z}x\n"
                 f"Illumination fusion: {self._config.illumination_fusion}\n"
                 f"Flat-field correction: {self._config.flat_field_correction}\n"
                 f"Camera X inverted: {self._config.camera_x_inverted}\n"
