@@ -153,7 +153,7 @@ class StitchingDialog(PersistentDialog):
         except Exception:
             self._default_pixel_um = 0.406
 
-        # Pixel size
+        # Row 0: Pixel size + Z step
         settings_layout.addWidget(QLabel("Pixel size (\u00b5m):"), 0, 0)
         self._pixel_size_spin = QDoubleSpinBox()
         self._pixel_size_spin.setRange(0.01, 100.0)
@@ -162,7 +162,6 @@ class StitchingDialog(PersistentDialog):
         self._pixel_size_spin.setSingleStep(0.001)
         settings_layout.addWidget(self._pixel_size_spin, 0, 1)
 
-        # Z step
         settings_layout.addWidget(QLabel("Z step (\u00b5m):"), 0, 2)
         self._z_step_spin = QDoubleSpinBox()
         self._z_step_spin.setRange(0.0, 1000.0)
@@ -174,9 +173,8 @@ class StitchingDialog(PersistentDialog):
         )
         settings_layout.addWidget(self._z_step_spin, 0, 3)
 
-        # Downsample XY + Z
+        # Row 1: Downsample XY/Z + Illumination fusion
         settings_layout.addWidget(QLabel("Downsample:"), 1, 0)
-
         ds_layout = QHBoxLayout()
         ds_layout.setSpacing(4)
         ds_layout.addWidget(QLabel("XY"))
@@ -203,7 +201,6 @@ class StitchingDialog(PersistentDialog):
         ds_layout.addWidget(self._downsample_z_combo)
         settings_layout.addLayout(ds_layout, 1, 1)
 
-        # Illumination fusion
         settings_layout.addWidget(QLabel("Illum. fusion:"), 1, 2)
         self._fusion_combo = QComboBox()
         for label, value in [
@@ -214,28 +211,8 @@ class StitchingDialog(PersistentDialog):
             self._fusion_combo.addItem(label, value)
         settings_layout.addWidget(self._fusion_combo, 1, 3)
 
-        # Destripe
-        self._destripe_cb = QCheckBox("Destripe (PyStripe) \u2731")
-        self._destripe_cb.setToolTip(
-            "\u2731 Processes every Z-plane at full resolution\n"
-            "before downsampling.\n\n"
-            "Removes horizontal stripe artifacts from light-sheet data.\n"
-            "Uses multiple CPU cores automatically."
-        )
-        settings_layout.addWidget(self._destripe_cb, 2, 0)
-
-        self._destripe_fast_cb = QCheckBox("Fast")
-        self._destripe_fast_cb.setToolTip(
-            "Destripe after downsampling instead of before.\n"
-            "Much faster but slightly lower quality.\n\n"
-            "Only effective when downsample factor > 1."
-        )
-        self._destripe_fast_cb.setEnabled(False)
-        self._destripe_cb.toggled.connect(self._destripe_fast_cb.setEnabled)
-        settings_layout.addWidget(self._destripe_fast_cb, 2, 1)
-
-        # Output format
-        settings_layout.addWidget(QLabel("Output format:"), 2, 2)
+        # Row 2: Output format + Compression
+        settings_layout.addWidget(QLabel("Output format:"), 2, 0)
         self._format_combo = QComboBox()
         self._format_combo.addItem("OME-Zarr (Fiji compatible)", "ome-zarr-v2")
         self._format_combo.addItem("OME-Zarr Sharded", "ome-zarr-sharded")
@@ -248,10 +225,10 @@ class StitchingDialog(PersistentDialog):
             "Both: write Zarr Sharded + TIFF"
         )
         self._format_combo.currentIndexChanged.connect(self._on_format_changed)
-        settings_layout.addWidget(self._format_combo, 2, 3)
+        settings_layout.addWidget(self._format_combo, 2, 1)
 
         # Format help label
-        format_help = QLabel("Zarr?")
+        format_help = QLabel("?")
         format_help.setStyleSheet(
             "QLabel { color: #1976D2; font-weight: bold; font-size: 11px; "
             "border: 1px solid #1976D2; border-radius: 8px; "
@@ -262,42 +239,107 @@ class StitchingDialog(PersistentDialog):
             "<b>Zarr Format Guide</b><br><br>"
             "<b>OME-Zarr (Fiji compatible)</b> &mdash; Zarr v2 + OME-NGFF v0.4<br>"
             "Opens in <b>Fiji</b> (N5 plugin), <b>QuPath</b>, <b>BigDataViewer</b>, "
-            "<b>napari</b>, and most bio-imaging tools. More files on disk "
-            "(~250k/TB) but universal reader support.<br><br>"
+            "<b>napari</b>, and most bio-imaging tools.<br><br>"
             "<b>OME-Zarr Sharded</b> &mdash; Zarr v3 + OME-NGFF v0.5<br>"
-            "Fewest files (~2,000/TB) via sharding. Only readable by "
-            "<b>napari</b> and zarr-python 3.x. Fiji, QuPath, and "
-            "BigDataViewer <b>cannot open this format</b>.<br><br>"
+            "Fewest files via sharding. Only readable by "
+            "<b>napari</b> and zarr-python 3.x.<br><br>"
             "<b>OME-TIFF</b> &mdash; Single file per channel<br>"
-            "Universally readable. Best for sharing and archiving. "
-            "Larger files, slower random access than Zarr.<br><br>"
-            "<hr>"
-            "<b>Which should I choose?</b><br>"
-            "<ul>"
-            "<li><b>Need Fiji/QuPath?</b> &rarr; OME-Zarr (Fiji compatible) "
-            "or OME-TIFF</li>"
-            "<li><b>napari only, large data?</b> &rarr; OME-Zarr Sharded</li>"
-            "<li><b>Sharing with collaborators?</b> &rarr; OME-TIFF</li>"
-            "</ul>"
-            "<hr>"
-            "<b>Need Imaris .ims format?</b><br>"
-            "Export as <b>OME-TIFF</b>, then use <b>ImarisFileConverter</b> "
-            "(bundled with Imaris) to convert OME-TIFF &rarr; .ims."
+            "Universally readable. Best for sharing and archiving.<br><br>"
+            "<b>Need Imaris .ims?</b> Export OME-TIFF, convert with ImarisFileConverter."
         )
-        settings_layout.addWidget(format_help, 2, 4)
+        format_help.setFixedWidth(20)
+        settings_layout.addWidget(format_help, 2, 2)
 
-        # Row 3: Deconvolution + Flat-field + Content-based blending
-        self._deconv_cb = QCheckBox("Deconvolution \u2731")
-        self._deconv_cb.setToolTip(
-            "\u2731 GPU Richardson-Lucy deconvolution per tile.\n"
-            "Requires pycudadecon or RedLionfish.\n\n"
-            "Significantly improves resolution."
+        settings_layout.addWidget(QLabel("Compression:"), 2, 3)
+        self._compression_combo = QComboBox()
+        self._compression_combo.setToolTip(
+            "Compression codec for the output file.\n\n"
+            "Options depend on the output format:\n"
+            "  Zarr: zstd (recommended), lz4 (fastest), blosc, none\n"
+            "  TIFF: zlib (universal), lzw (fast read), zstd (best ratio), none"
         )
-        settings_layout.addWidget(self._deconv_cb, 3, 0)
+        settings_layout.addWidget(self._compression_combo, 2, 4)
+        self._update_compression_options()
 
-        self._flat_field_cb = QCheckBox("Flat-field correction")
-        self._update_preprocessing_availability()
-        settings_layout.addWidget(self._flat_field_cb, 3, 1)
+        # Row 3: Channels + Memory mode
+        settings_layout.addWidget(QLabel("Channels:"), 3, 0)
+        self._channels_edit = QLineEdit()
+        self._channels_edit.setPlaceholderText("All (or e.g. 0,1)")
+        self._channels_edit.setToolTip(
+            "Leave empty for all channels, or comma-separated list (e.g. 0,1)"
+        )
+        settings_layout.addWidget(self._channels_edit, 3, 1)
+
+        settings_layout.addWidget(QLabel("Memory mode:"), 3, 3)
+        self._streaming_combo = QComboBox()
+        self._streaming_combo.addItem("Auto", None)
+        self._streaming_combo.addItem("In-memory (fast)", False)
+        self._streaming_combo.addItem("Streaming (low memory)", True)
+        self._streaming_combo.setToolTip(
+            "Auto: automatically chooses based on estimated data size and RAM.\n"
+            "In-memory: fast, requires RAM > ~2.5x output size.\n"
+            "Streaming: low RAM, required for TB-scale data."
+        )
+        self._streaming_combo.currentIndexChanged.connect(self._update_memory_indicator)
+        settings_layout.addWidget(self._streaming_combo, 3, 4)
+
+        # Memory safety indicator
+        self._memory_indicator = QLabel("")
+        self._memory_indicator.setFixedWidth(40)
+        self._memory_indicator.setAlignment(Qt.AlignCenter)
+        self._last_mem_estimate = None
+        settings_layout.addWidget(self._memory_indicator, 3, 2)
+
+        # Row 4: Memory estimate
+        self._memory_label = QLabel("")
+        self._memory_label.setStyleSheet(
+            "color: #888; font-style: italic; font-size: 11px;"
+        )
+        settings_layout.addWidget(self._memory_label, 4, 0, 1, 5)
+
+        settings_group.setLayout(settings_layout)
+        self._settings_group = settings_group
+        layout.addWidget(settings_group)
+
+        # --- Collapsible processing options ---
+        self._proc_toggle = QPushButton("\u25b6 Processing Options")
+        self._proc_toggle.setCheckable(True)
+        self._proc_toggle.setChecked(False)
+        self._proc_toggle.setStyleSheet(
+            "QPushButton { text-align: left; border: none; "
+            "padding: 4px 2px; font-weight: bold; color: #555; }"
+            "QPushButton:hover { color: #333; }"
+        )
+        self._proc_toggle.toggled.connect(self._on_proc_toggle)
+        layout.addWidget(self._proc_toggle)
+
+        self._proc_widget = QGroupBox()
+        self._proc_widget.setStyleSheet(
+            "QGroupBox { border: 1px solid #ccc; border-radius: 4px; "
+            "margin-top: 0px; padding-top: 6px; }"
+        )
+        proc_layout = QGridLayout()
+        proc_layout.setSpacing(6)
+
+        # Proc Row 0: Destripe + Content-based blending
+        self._destripe_cb = QCheckBox("Destripe (PyStripe) \u2731")
+        self._destripe_cb.setToolTip(
+            "\u2731 Processes every Z-plane at full resolution\n"
+            "before downsampling.\n\n"
+            "Removes horizontal stripe artifacts from light-sheet data.\n"
+            "Uses multiple CPU cores automatically."
+        )
+        proc_layout.addWidget(self._destripe_cb, 0, 0)
+
+        self._destripe_fast_cb = QCheckBox("Fast")
+        self._destripe_fast_cb.setToolTip(
+            "Destripe after downsampling instead of before.\n"
+            "Much faster but slightly lower quality.\n\n"
+            "Only effective when downsample factor > 1."
+        )
+        self._destripe_fast_cb.setEnabled(False)
+        self._destripe_cb.toggled.connect(self._destripe_fast_cb.setEnabled)
+        proc_layout.addWidget(self._destripe_fast_cb, 0, 1)
 
         self._content_fusion_cb = QCheckBox("Content-based blending \u2731")
         self._content_fusion_cb.setToolTip(
@@ -305,52 +347,61 @@ class StitchingDialog(PersistentDialog):
             "(Preibisch local-variance, inspired by BigStitcher).\n\n"
             "Improves fusion quality in overlap regions."
         )
-        settings_layout.addWidget(self._content_fusion_cb, 3, 2, 1, 2)
+        proc_layout.addWidget(self._content_fusion_cb, 0, 2, 1, 2)
 
-        # Row 4: Skip registration + Reg binning
+        # Proc Row 1: Deconvolution + Flat-field
+        self._deconv_cb = QCheckBox("Deconvolution \u2731")
+        self._deconv_cb.setToolTip(
+            "\u2731 GPU Richardson-Lucy deconvolution per tile.\n"
+            "Requires pycudadecon or RedLionfish.\n\n"
+            "Significantly improves resolution."
+        )
+        proc_layout.addWidget(self._deconv_cb, 1, 0)
+
+        self._flat_field_cb = QCheckBox("Flat-field correction")
+        self._update_preprocessing_availability()
+        proc_layout.addWidget(self._flat_field_cb, 1, 1)
+
+        self._ozx_cb = QCheckBox("Package as .ozx")
+        self._ozx_cb.setToolTip(
+            "Create a single .ozx ZIP file from the OME-Zarr output\n"
+            "for easy sharing/copying"
+        )
+        proc_layout.addWidget(self._ozx_cb, 1, 2, 1, 2)
+
+        # Proc Row 2: Registration
         self._skip_reg_cb = QCheckBox("Skip registration")
         self._skip_reg_cb.setToolTip(
-            "Use stage positions only — skip phase-correlation registration.\n\n"
+            "Use stage positions only \u2014 skip phase-correlation registration.\n\n"
             "CHECK this when:\n"
-            "  \u2022 Tiles have no overlap (registration needs overlap to work)\n"
-            "  \u2022 Stage positions are precise (e.g. single-workflow tiling)\n"
-            "  \u2022 You want faster processing on large tile grids\n\n"
+            "  \u2022 Tiles have no overlap\n"
+            "  \u2022 Stage positions are precise\n\n"
             "UNCHECK (default) when:\n"
-            "  \u2022 Tiles were acquired across multiple sessions with drift\n"
-            "  \u2022 You need sub-pixel alignment at tile boundaries\n"
-            "  \u2022 Tiles have sufficient overlap for correlation (~10-25%)"
+            "  \u2022 Tiles overlap and you need sub-pixel alignment"
         )
         self._skip_reg_cb.toggled.connect(self._on_skip_reg_toggled)
-        settings_layout.addWidget(self._skip_reg_cb, 4, 0)
+        proc_layout.addWidget(self._skip_reg_cb, 2, 0)
 
         self._reg_binning_label = QLabel("Reg. binning:")
-        settings_layout.addWidget(self._reg_binning_label, 4, 1)
+        proc_layout.addWidget(self._reg_binning_label, 2, 1)
         self._reg_binning_combo = QComboBox()
         self._reg_binning_combo.addItem("Fine (z1 y2 x2)", {"z": 1, "y": 2, "x": 2})
         self._reg_binning_combo.addItem("Default (z2 y4 x4)", {"z": 2, "y": 4, "x": 4})
         self._reg_binning_combo.addItem("Fast (z4 y8 x8)", {"z": 4, "y": 8, "x": 8})
-        self._reg_binning_combo.setCurrentIndex(1)  # Default
+        self._reg_binning_combo.setCurrentIndex(1)
         self._reg_binning_combo.setToolTip(
-            "How much to downsample tiles for phase-correlation registration.\n\n"
-            "Fine (z1 y2 x2): highest accuracy, slowest, most memory.\n"
-            "Best for small tiles or when sub-pixel precision matters.\n\n"
-            "Default (z2 y4 x4): good balance of speed and accuracy.\n"
-            "Works well for 2048\u00d72048 tiles with 10-25% overlap.\n\n"
-            "Fast (z4 y8 x8): fastest, lower precision.\n"
-            "Use for large tile grids where speed matters more\n"
-            "than sub-pixel accuracy, or as a quick check before\n"
-            "re-running with finer binning."
+            "How much to downsample tiles for phase-correlation registration."
         )
-        settings_layout.addWidget(self._reg_binning_combo, 4, 2, 1, 2)
+        proc_layout.addWidget(self._reg_binning_combo, 2, 2, 1, 2)
 
-        # Row 5: Depth attenuation
+        # Proc Row 3: Depth attenuation
         self._depth_atten_cb = QCheckBox("Depth attenuation")
         self._depth_atten_cb.setToolTip(
             "Correct exponential Z-intensity falloff\n"
             "(Beer-Lambert scattering/absorption compensation).\n"
             "Auto-fits decay coefficient from data unless overridden."
         )
-        settings_layout.addWidget(self._depth_atten_cb, 5, 0)
+        proc_layout.addWidget(self._depth_atten_cb, 3, 0)
 
         self._depth_atten_mu_spin = QDoubleSpinBox()
         self._depth_atten_mu_spin.setRange(0.0, 1.0)
@@ -363,77 +414,16 @@ class StitchingDialog(PersistentDialog):
         )
         self._depth_atten_mu_spin.setEnabled(False)
         self._depth_atten_cb.toggled.connect(self._depth_atten_mu_spin.setEnabled)
-        settings_layout.addWidget(self._depth_atten_mu_spin, 5, 1)
+        proc_layout.addWidget(self._depth_atten_mu_spin, 3, 1)
 
-        # Row 6: Compression
-        settings_layout.addWidget(QLabel("Compression:"), 6, 0)
-        self._compression_combo = QComboBox()
-        self._compression_combo.setToolTip(
-            "Compression codec for the output file.\n\n"
-            "Options depend on the output format:\n"
-            "  Zarr: zstd (recommended), lz4 (fastest), blosc, none\n"
-            "  TIFF: zlib (universal), lzw (fast read), zstd (best ratio), none\n\n"
-            "zstd level 3 gives ~2-3x compression with fast read/write.\n"
-            "none = no compression (fastest write, largest files).\n"
-            "lzw is fastest for TIFF readers (Fiji batch processing)."
-        )
-        settings_layout.addWidget(self._compression_combo, 6, 1)
-        self._update_compression_options()  # Populate based on current format
-
-        self._ozx_cb = QCheckBox("Package as .ozx")
-        self._ozx_cb.setToolTip(
-            "Create a single .ozx ZIP file from the OME-Zarr output\n"
-            "for easy sharing/copying"
-        )
-        settings_layout.addWidget(self._ozx_cb, 6, 2, 1, 2)
-
-        # Row 7: Memory mode
-        settings_layout.addWidget(QLabel("Memory mode:"), 7, 0)
-        self._streaming_combo = QComboBox()
-        self._streaming_combo.addItem("Auto", None)
-        self._streaming_combo.addItem("In-memory (fast)", False)
-        self._streaming_combo.addItem("Streaming (low memory)", True)
-        self._streaming_combo.setToolTip(
-            "Auto: automatically chooses based on estimated data size and RAM.\n\n"
-            "In-memory: computes the full fused volume in RAM before writing.\n"
-            "Faster, but requires RAM > ~2.5x the output size.\n\n"
-            "Streaming: writes output chunk-by-chunk directly from the fusion\n"
-            "graph. Uses minimal RAM (~2 tile volumes), required for TB-scale data."
-        )
-        self._streaming_combo.currentIndexChanged.connect(self._update_memory_indicator)
-        settings_layout.addWidget(self._streaming_combo, 7, 1)
-
-        # Memory safety indicator (like "Zarr?" but for RAM)
-        self._memory_indicator = QLabel("")
-        self._memory_indicator.setFixedWidth(40)
-        self._memory_indicator.setAlignment(Qt.AlignCenter)
-        self._last_mem_estimate = None  # Cached estimate dict
-        settings_layout.addWidget(self._memory_indicator, 7, 2)
-
-        # Row 8: Channels
-        settings_layout.addWidget(QLabel("Channels:"), 8, 0)
-        self._channels_edit = QLineEdit()
-        self._channels_edit.setPlaceholderText("All (or e.g. 0,1)")
-        self._channels_edit.setToolTip(
-            "Leave empty for all channels, or comma-separated list (e.g. 0,1)"
-        )
-        settings_layout.addWidget(self._channels_edit, 8, 1, 1, 3)
-
-        # Memory estimate label (updated after tile discovery)
-        self._memory_label = QLabel("")
-        self._memory_label.setStyleSheet(
-            "color: #888; font-style: italic; font-size: 11px;"
-        )
-        settings_layout.addWidget(self._memory_label, 9, 0, 1, 5)
-
-        # Timing legend
+        # Proc Row 4: Legend
         legend = QLabel("\u2731 = significantly increases processing time")
         legend.setStyleSheet("color: #FF8C00; font-style: italic; font-size: 11px;")
-        settings_layout.addWidget(legend, 10, 0, 1, 4)
+        proc_layout.addWidget(legend, 4, 0, 1, 4)
 
-        settings_group.setLayout(settings_layout)
-        self._settings_group = settings_group  # For enabling/disabling during run
-        layout.addWidget(settings_group)
+        self._proc_widget.setLayout(proc_layout)
+        self._proc_widget.setVisible(False)
+        layout.addWidget(self._proc_widget)
 
         # --- Action buttons ---
         btn_layout = QHBoxLayout()
@@ -740,6 +730,13 @@ class StitchingDialog(PersistentDialog):
         )
         self._log("")
         self._log("Ready to stitch. Click 'Run Stitching' to begin.")
+
+    def _on_proc_toggle(self, checked: bool):
+        """Show/hide the processing options panel."""
+        self._proc_widget.setVisible(checked)
+        self._proc_toggle.setText(
+            ("\u25bc " if checked else "\u25b6 ") + "Processing Options"
+        )
 
     def _on_skip_reg_toggled(self, checked: bool):
         """Enable/disable registration controls based on skip state."""
@@ -1486,6 +1483,7 @@ class StitchingDialog(PersistentDialog):
         s.setValue("streaming_mode", self._streaming_combo.currentIndex())
         s.setValue("skip_registration", self._skip_reg_cb.isChecked())
         s.setValue("reg_binning", self._reg_binning_combo.currentIndex())
+        s.setValue("proc_options_expanded", self._proc_toggle.isChecked())
         s.endGroup()
 
     def _restore_settings(self):
@@ -1593,6 +1591,9 @@ class StitchingDialog(PersistentDialog):
         if 0 <= reg_binning_idx < self._reg_binning_combo.count():
             self._reg_binning_combo.setCurrentIndex(reg_binning_idx)
 
+        proc_expanded = s.value("proc_options_expanded", False, type=bool)
+        self._proc_toggle.setChecked(proc_expanded)
+
         s.endGroup()
 
     def closeEvent(self, event):
@@ -1685,6 +1686,7 @@ class NativeStitchingDialog(StitchingDialog):
         s.setValue("streaming_mode", self._streaming_combo.currentIndex())
         s.setValue("skip_registration", self._skip_reg_cb.isChecked())
         s.setValue("reg_binning", self._reg_binning_combo.currentIndex())
+        s.setValue("proc_options_expanded", self._proc_toggle.isChecked())
         s.endGroup()
 
     def _restore_settings(self):
@@ -1790,5 +1792,8 @@ class NativeStitchingDialog(StitchingDialog):
         reg_binning_idx = s.value("reg_binning", 1, type=int)
         if 0 <= reg_binning_idx < self._reg_binning_combo.count():
             self._reg_binning_combo.setCurrentIndex(reg_binning_idx)
+
+        proc_expanded = s.value("proc_options_expanded", False, type=bool)
+        self._proc_toggle.setChecked(proc_expanded)
 
         s.endGroup()
