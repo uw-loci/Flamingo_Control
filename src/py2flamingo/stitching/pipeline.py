@@ -1421,8 +1421,6 @@ class StitchingPipeline:
                 "Step 3: Skipping registration \u2014 using stage positions only"
             )
             reg_params = []
-            ref_ch = None
-            ref_tile_data = None
             try:
                 from multiview_stitcher import io as mvs_io
 
@@ -1460,14 +1458,34 @@ class StitchingPipeline:
             reg_params, transform_key = self._register_tiles(
                 ref_tile_data, voxel_size_um
             )
-            del ref_data  # Only keep ref_tile_data, not the dict wrapper
+            # Free all registration data — fusion uses lazy tile loading
+            del ref_data, ref_tile_data
+            gc.collect()
+            self.logger.info("  Freed registration tile data")
 
         if self._cancelled_fn():
             self.logger.info("Pipeline cancelled by user")
             return output_path
 
         # --- Step 4+5: Fuse each channel, compute, accumulate ---
+        # Lazy tile loading: tiles load from disk on-demand during
+        # fusion compute via dask.delayed. Only tiles overlapping the
+        # current output chunk are in memory at any time.
         # Process one channel at a time: load \u2192 fuse \u2192 compute \u2192 free.
+        import dask
+        import dask.array as da
+
+        # Determine tile output shape (load one tile, measure, free)
+        probe_ch = process_channels[0]
+        probe_vol = self._preprocess_single_tile(tiles[0], probe_ch)
+        expected_tile_shape = probe_vol.shape
+        del probe_vol
+        gc.collect()
+        self.logger.info(
+            f"  Tile output shape: {expected_tile_shape} "
+            f"({np.prod(expected_tile_shape) * 2 / (1024**3):.2f} GB uint16)"
+        )
+
         channel_origins = []
         fused_channel_ids = []
         stacked = None
@@ -1477,72 +1495,48 @@ class StitchingPipeline:
                 self.logger.info("Pipeline cancelled by user")
                 return output_path
 
-            # Load tiles (reuse ref channel if already loaded)
-            if ref_tile_data is not None and ch_id == ref_ch:
-                tile_data = ref_tile_data
-                self.logger.info(
-                    f"Step 4: Fusing channel {ch_id} "
-                    f"({len(tile_data)} tiles) [streaming, reusing ref data]..."
-                )
-            else:
-                load_pct = 5 + int(40 * ch_idx / max(len(process_channels), 1))
-                self._progress_fn(
-                    load_pct,
-                    f"Loading channel {ch_id} tiles ({ch_idx + 1}/{len(process_channels)})...",
-                )
-                self.logger.info(
-                    f"Step 4: Loading + fusing channel {ch_id} "
-                    f"({len(tiles)} tiles) [streaming]..."
-                )
-                ch_data = self._load_and_preprocess(tiles, [ch_id])
-                tile_data = ch_data.get(ch_id, [])
-                del ch_data
+            fuse_pct = 50 + int(35 * (ch_idx + 0.5) / max(len(process_channels), 1))
+            self._progress_fn(
+                fuse_pct,
+                f"Fusing channel {ch_id} "
+                f"({ch_idx + 1}/{len(process_channels)}) [lazy tiles]...",
+            )
+            self.logger.info(
+                f"Step 4: Fusing channel {ch_id} ({len(tiles)} tiles) "
+                f"[streaming, lazy tile loading]..."
+            )
 
+            # Build lazy tile data — no tiles loaded yet
+            tile_data = self._make_lazy_tile_data(tiles, ch_id, expected_tile_shape)
             if not tile_data:
                 self.logger.warning(f"No data for channel {ch_id}, skipping")
                 continue
 
-            fuse_pct = 50 + int(35 * (ch_idx + 0.5) / max(len(process_channels), 1))
-            self._progress_fn(
-                fuse_pct, f"Fusing channel {ch_id} ({len(tile_data)} tiles)..."
-            )
             fused_sim, origin_um = self._fuse_channel(
                 tile_data, voxel_size_um, reg_params, transform_key
             )
 
-            # Compute into memory — chunk by chunk to avoid materializing
-            # the full float64 fusion output.  The dask graph produces
-            # float64 internally; clip+cast to uint16 is added to the
-            # graph so each chunk is converted before being stored,
-            # keeping peak RAM = tiles + uint16 output (not tiles + float64).
-            import dask.array as da
-
+            # Compute chunk by chunk with synchronous scheduler.
+            # Tiles load from disk as each chunk needs them (lazy).
+            # Clip + cast to uint16 in the graph so float64 intermediates
+            # are converted per-chunk, never materializing the full volume.
             compute_pct = 50 + int(35 * (ch_idx + 0.8) / max(len(process_channels), 1))
             self._progress_fn(
                 compute_pct,
-                f"Computing channel {ch_id} into memory "
+                f"Computing channel {ch_id} "
                 f"({ch_idx + 1}/{len(process_channels)})...",
             )
 
             darr = fused_sim.data
             while darr.ndim > 3:
                 darr = darr[0]
-
-            # Clip + cast in the dask graph (lazy) so float64 chunks
-            # are converted to uint16 before writing to the target.
             darr = da.clip(darr, 0, 65535).astype(np.uint16)
 
             self.logger.info(
-                f"  Computing channel {ch_id} into memory "
-                f"(shape={darr.shape}, chunk-by-chunk)..."
+                f"  Computing channel {ch_id} "
+                f"(shape={darr.shape}, lazy tiles, synchronous)..."
             )
 
-            # Pre-allocate uint16 target and compute chunk by chunk.
-            # Use the synchronous scheduler so only ONE chunk's fusion
-            # intermediates exist at a time. The threaded scheduler
-            # computes N chunks in parallel, each creating float64
-            # tile-sized buffers — N * 4 tiles * 8 bytes/voxel can
-            # easily exceed remaining RAM.
             vol = np.zeros(darr.shape, dtype=np.uint16)
             with dask.config.set(scheduler="synchronous"):
                 da.store(darr, vol, compute=True)
@@ -1572,8 +1566,6 @@ class StitchingPipeline:
 
             # Free channel data before loading the next one
             del vol, darr, fused_sim, tile_data
-            if ch_id == ref_ch:
-                ref_tile_data = None
             gc.collect()
 
             channel_origins.append(origin_um)
@@ -1719,6 +1711,94 @@ class StitchingPipeline:
                     volume = volume[:, :, ::-1]
 
                 result[ch_id].append((volume, tile))
+
+        return result
+
+    def _preprocess_single_tile(self, tile: RawTileInfo, ch_id: int) -> np.ndarray:
+        """Load and preprocess a single tile for one channel.
+
+        Applies the full preprocessing chain: illumination fusion,
+        depth attenuation, destripe, deconvolution, downsample, camera flip.
+        Returns a uint16 numpy array ready for fusion.
+        """
+        illum_files = tile.raw_files.get(ch_id, {})
+        if not illum_files:
+            raise ValueError(f"No raw files for channel {ch_id} in {tile.folder}")
+
+        illum_volumes = {}
+        for illum_side, raw_path in illum_files.items():
+            vol = load_raw_volume(raw_path, tile.n_planes)
+            illum_volumes[illum_side] = vol
+
+        if len(illum_volumes) > 1:
+            volume = fuse_illumination_sides(
+                illum_volumes, method=self.config.illumination_fusion
+            )
+        else:
+            volume = np.asarray(list(illum_volumes.values())[0])
+
+        if self.config.depth_attenuation:
+            from .depth_attenuation import correct_depth_attenuation
+
+            z_step = self.config.z_step_um
+            if z_step is None:
+                z_step = tile.z_step_mm * 1000.0 if tile.z_step_mm else 10.0
+            volume = correct_depth_attenuation(
+                volume, mu=self.config.depth_attenuation_mu, z_step_um=z_step
+            )
+
+        if self.config.destripe and not self.config.destripe_fast:
+            volume = destripe_volume(volume, max_workers=self.config.destripe_workers)
+
+        if self.config.deconvolution_enabled:
+            volume = self._deconvolve_tile(volume, tile)
+
+        if self.config.downsample_xy > 1 or self.config.downsample_z > 1:
+            volume = downsample_volume(
+                volume, self.config.downsample_xy, self.config.downsample_z
+            )
+
+        if self.config.destripe and self.config.destripe_fast:
+            volume = destripe_volume(volume, max_workers=self.config.destripe_workers)
+
+        if self.config.camera_x_inverted:
+            volume = np.ascontiguousarray(volume[:, :, ::-1])
+
+        return volume
+
+    def _make_lazy_tile_data(
+        self,
+        tiles: List[RawTileInfo],
+        ch_id: int,
+        expected_shape: tuple,
+    ) -> List[Tuple[Any, RawTileInfo]]:
+        """Build lazy (dask.delayed) tile data for streaming fusion.
+
+        Returns [(dask_array, tile_info), ...] where each dask_array
+        is a delayed computation that loads and preprocesses the tile
+        from disk on-demand. No tile data is in memory until the
+        fusion graph is computed.
+        """
+        import dask
+        import dask.array as da
+
+        result = []
+        for tile in tiles:
+            if ch_id not in tile.raw_files:
+                continue
+
+            # Capture tile by value in the default arg to avoid
+            # Python closure-in-loop pitfall.
+            @dask.delayed
+            def _load_tile(_tile=tile, _ch=ch_id):
+                return self._preprocess_single_tile(_tile, _ch)
+
+            lazy_arr = da.from_delayed(
+                _load_tile(),
+                shape=expected_shape,
+                dtype=np.uint16,
+            )
+            result.append((lazy_arr, tile))
 
         return result
 
