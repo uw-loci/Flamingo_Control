@@ -1505,19 +1505,37 @@ class StitchingPipeline:
                 tile_data, voxel_size_um, reg_params, transform_key
             )
 
-            # Compute into memory
+            # Compute into memory — chunk by chunk to avoid materializing
+            # the full float64 fusion output.  The dask graph produces
+            # float64 internally; clip+cast to uint16 is added to the
+            # graph so each chunk is converted before being stored,
+            # keeping peak RAM = tiles + uint16 output (not tiles + float64).
+            import dask.array as da
+
             compute_pct = 50 + int(35 * (ch_idx + 0.8) / max(len(process_channels), 1))
             self._progress_fn(
                 compute_pct,
                 f"Computing channel {ch_id} into memory "
                 f"({ch_idx + 1}/{len(process_channels)})...",
             )
-            self.logger.info(f"  Computing channel {ch_id} into memory...")
+
+            darr = fused_sim.data
+            while darr.ndim > 3:
+                darr = darr[0]
+
+            # Clip + cast in the dask graph (lazy) so float64 chunks
+            # are converted to uint16 before writing to the target.
+            darr = da.clip(darr, 0, 65535).astype(np.uint16)
+
+            self.logger.info(
+                f"  Computing channel {ch_id} into memory "
+                f"(shape={darr.shape}, chunk-by-chunk)..."
+            )
+
+            # Pre-allocate uint16 target and compute chunk by chunk
+            vol = np.zeros(darr.shape, dtype=np.uint16)
             with dask.diagnostics.ProgressBar():
-                vol = np.asarray(fused_sim.data.compute())
-            while vol.ndim > 3:
-                vol = vol[0]
-            vol = np.clip(vol, 0, 65535).astype(np.uint16)
+                da.store(darr, vol, compute=True)
 
             self.logger.info(
                 f"  Channel {ch_id}: shape={vol.shape}, "
@@ -1543,7 +1561,7 @@ class StitchingPipeline:
                 stacked[dest_idx, :sz, :sy, :sx] = vol
 
             # Free channel data before loading the next one
-            del vol, fused_sim, tile_data
+            del vol, darr, fused_sim, tile_data
             if ch_id == ref_ch:
                 ref_tile_data = None
             gc.collect()
