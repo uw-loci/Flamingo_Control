@@ -1537,9 +1537,14 @@ class StitchingPipeline:
                 f"(shape={darr.shape}, chunk-by-chunk)..."
             )
 
-            # Pre-allocate uint16 target and compute chunk by chunk
+            # Pre-allocate uint16 target and compute chunk by chunk.
+            # Use the synchronous scheduler so only ONE chunk's fusion
+            # intermediates exist at a time. The threaded scheduler
+            # computes N chunks in parallel, each creating float64
+            # tile-sized buffers — N * 4 tiles * 8 bytes/voxel can
+            # easily exceed remaining RAM.
             vol = np.zeros(darr.shape, dtype=np.uint16)
-            with dask.diagnostics.ProgressBar():
+            with dask.config.set(scheduler="synchronous"):
                 da.store(darr, vol, compute=True)
 
             self.logger.info(

@@ -122,7 +122,10 @@ class StitchingWorker(QThread):
 
         except Exception as e:
             logger.exception("Stitching pipeline error")
-            self.error.emit(str(e))
+            msg = str(e)
+            if not msg:
+                msg = f"{type(e).__name__} (no details)"
+            self.error.emit(msg)
 
         finally:
             pipeline_logger.removeHandler(handler)
