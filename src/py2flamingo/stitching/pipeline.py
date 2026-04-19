@@ -1147,6 +1147,46 @@ class StitchingPipeline:
             f"Y={voxel_size_um['y']:.3f} X={voxel_size_um['x']:.3f} µm"
         )
 
+        output_path = Path(output_path)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        # --- Determine streaming vs in-memory mode (before loading) ---
+        use_streaming = self.config.streaming_mode
+        if use_streaming is None:
+            mem_est = estimate_memory_usage(tiles, process_channels, self.config)
+            use_streaming = mem_est["auto_streaming"]
+            self.logger.info(
+                f"Memory estimate: in-memory ~{mem_est['in_memory_gb']:.0f} GB, "
+                f"streaming ~{mem_est['streaming_gb']:.1f} GB, "
+                f"output ~{mem_est['output_gb']:.0f} GB \u2192 "
+                f"{'streaming' if use_streaming else 'in-memory'} mode"
+            )
+        else:
+            self.logger.info(
+                f"Mode: {'streaming' if use_streaming else 'in-memory'} (user-selected)"
+            )
+
+        if use_streaming:
+            # ============================================================
+            # STREAMING PATH: load one channel at a time to minimize RAM.
+            # Only the reference channel is loaded for registration;
+            # subsequent channels are loaded, fused, computed into the
+            # output array, then freed before the next channel loads.
+            # Peak RAM = output array + one channel's tiles.
+            # ============================================================
+            return self._run_streaming(
+                process_channels,
+                voxel_size_um,
+                output_path,
+                tiles,
+                acquisition_dir,
+                t0,
+            )
+
+        # ============================================================
+        # IN-MEMORY PATH: load all channels, register, fuse, write.
+        # ============================================================
+
         # --- Step 2: Load + preprocess tiles ---
         if self._cancelled_fn():
             self.logger.info("Pipeline cancelled by user")
@@ -1198,9 +1238,6 @@ class StitchingPipeline:
                 else:
                     self.logger.warning("  No flat-field models — skipping correction")
 
-        output_path = Path(output_path)
-        output_path.mkdir(parents=True, exist_ok=True)
-
         # --- Step 3: Register using reference channel ---
         if self.config.skip_registration:
             self._progress_fn(45, "Skipping registration (using stage positions)...")
@@ -1232,35 +1269,6 @@ class StitchingPipeline:
         if self._cancelled_fn():
             self.logger.info("Pipeline cancelled by user")
             return output_path
-
-        # --- Determine streaming vs in-memory mode ---
-        use_streaming = self.config.streaming_mode
-        if use_streaming is None:
-            mem_est = estimate_memory_usage(tiles, process_channels, self.config)
-            use_streaming = mem_est["auto_streaming"]
-            self.logger.info(
-                f"Memory estimate: in-memory ~{mem_est['in_memory_gb']:.0f} GB, "
-                f"streaming ~{mem_est['streaming_gb']:.1f} GB, "
-                f"output ~{mem_est['output_gb']:.0f} GB → "
-                f"{'streaming' if use_streaming else 'in-memory'} mode"
-            )
-        else:
-            self.logger.info(
-                f"Mode: {'streaming' if use_streaming else 'in-memory'} (user-selected)"
-            )
-
-        if use_streaming:
-            return self._run_streaming(
-                process_channels,
-                channel_tile_data,
-                voxel_size_um,
-                reg_params,
-                transform_key,
-                output_path,
-                tiles,
-                acquisition_dir,
-                t0,
-            )
 
         # ============================================================
         # IN-MEMORY PATH (original)
@@ -1384,91 +1392,185 @@ class StitchingPipeline:
     def _run_streaming(
         self,
         process_channels: List[int],
-        channel_tile_data: Dict[int, list],
         voxel_size_um: Dict[str, float],
-        reg_params: list,
-        transform_key: str,
         output_path: Path,
         tiles: List[RawTileInfo],
         acquisition_dir: Path,
         t0: float,
     ) -> Path:
-        """Streaming pipeline path: fuse and write chunk-by-chunk.
+        """Streaming pipeline path: load one channel at a time.
 
-        Keeps the fused output as a lazy dask array and writes it directly
-        to zarr or OME-TIFF without materializing the full volume.
+        For each channel: load tiles from disk \u2192 fuse \u2192 compute into
+        a pre-allocated output array \u2192 free tiles before the next channel.
+        Peak RAM = output array + one channel's tile data, instead of
+        all channels' tile data simultaneously.
         """
-        import dask.array as da
+        import gc
 
-        # --- Step 4: Fuse each channel (lazy) ---
-        channel_dask = []
-        channel_origins = []
-        fused_channel_ids = []
+        import dask.diagnostics
 
-        for ch_id in process_channels:
+        # --- Step 2+3: Load reference channel + register ---
+        if self.config.skip_registration:
+            self._progress_fn(45, "Skipping registration (using stage positions)...")
+            self.logger.info(
+                "Step 3: Skipping registration \u2014 using stage positions only"
+            )
+            reg_params = []
+            ref_ch = None
+            ref_tile_data = None
+            try:
+                from multiview_stitcher import io as mvs_io
+
+                transform_key = mvs_io.METADATA_TRANSFORM_KEY
+            except ImportError:
+                transform_key = "affine_metadata"
+        else:
+            ref_ch = self.config.reg_channel
+            if ref_ch not in process_channels:
+                ref_ch = process_channels[0]
+
+            self._progress_fn(
+                5, f"Loading reference channel {ref_ch} for registration..."
+            )
+            self.logger.info(
+                f"Step 2: Loading reference channel {ref_ch} "
+                f"({len(tiles)} tiles) [streaming]..."
+            )
+            ref_data = self._load_and_preprocess(tiles, [ref_ch])
+            ref_tile_data = ref_data.get(ref_ch, [])
+
+            if not ref_tile_data:
+                self.logger.error(f"No tiles loaded for reference channel {ref_ch}")
+                return output_path
+
             if self._cancelled_fn():
                 self.logger.info("Pipeline cancelled by user")
                 return output_path
 
-            tile_data = channel_tile_data.get(ch_id, [])
+            self._progress_fn(45, f"Registering tiles (channel {ref_ch})...")
+            self.logger.info(
+                f"Step 3: Registering on reference channel {ref_ch} "
+                f"({len(ref_tile_data)} tiles)..."
+            )
+            reg_params, transform_key = self._register_tiles(
+                ref_tile_data, voxel_size_um
+            )
+            del ref_data  # Only keep ref_tile_data, not the dict wrapper
+
+        if self._cancelled_fn():
+            self.logger.info("Pipeline cancelled by user")
+            return output_path
+
+        # --- Step 4+5: Fuse each channel, compute, accumulate ---
+        # Process one channel at a time: load \u2192 fuse \u2192 compute \u2192 free.
+        channel_origins = []
+        fused_channel_ids = []
+        stacked = None
+
+        for ch_idx, ch_id in enumerate(process_channels):
+            if self._cancelled_fn():
+                self.logger.info("Pipeline cancelled by user")
+                return output_path
+
+            # Load tiles (reuse ref channel if already loaded)
+            if ref_tile_data is not None and ch_id == ref_ch:
+                tile_data = ref_tile_data
+                self.logger.info(
+                    f"Step 4: Fusing channel {ch_id} "
+                    f"({len(tile_data)} tiles) [streaming, reusing ref data]..."
+                )
+            else:
+                load_pct = 5 + int(40 * ch_idx / max(len(process_channels), 1))
+                self._progress_fn(
+                    load_pct,
+                    f"Loading channel {ch_id} tiles ({ch_idx + 1}/{len(process_channels)})...",
+                )
+                self.logger.info(
+                    f"Step 4: Loading + fusing channel {ch_id} "
+                    f"({len(tiles)} tiles) [streaming]..."
+                )
+                ch_data = self._load_and_preprocess(tiles, [ch_id])
+                tile_data = ch_data.get(ch_id, [])
+                del ch_data
+
             if not tile_data:
                 self.logger.warning(f"No data for channel {ch_id}, skipping")
                 continue
 
-            ch_idx = process_channels.index(ch_id)
-            fuse_pct = 55 + int(10 * ch_idx / max(len(process_channels), 1))
+            fuse_pct = 50 + int(35 * (ch_idx + 0.5) / max(len(process_channels), 1))
             self._progress_fn(
-                fuse_pct,
-                f"Building fusion graph for channel {ch_id}...",
-            )
-            self.logger.info(
-                f"Step 4: Fusing channel {ch_id} ({len(tile_data)} tiles) [streaming]..."
+                fuse_pct, f"Fusing channel {ch_id} ({len(tile_data)} tiles)..."
             )
             fused_sim, origin_um = self._fuse_channel(
                 tile_data, voxel_size_um, reg_params, transform_key
             )
 
-            # Extract dask array, squeeze singletons (stays lazy)
-            darr = fused_sim.data
-            while darr.ndim > 3:
-                darr = darr[0]
+            # Compute into memory
+            compute_pct = 50 + int(35 * (ch_idx + 0.8) / max(len(process_channels), 1))
+            self._progress_fn(
+                compute_pct,
+                f"Computing channel {ch_id} into memory "
+                f"({ch_idx + 1}/{len(process_channels)})...",
+            )
+            self.logger.info(f"  Computing channel {ch_id} into memory...")
+            with dask.diagnostics.ProgressBar():
+                vol = np.asarray(fused_sim.data.compute())
+            while vol.ndim > 3:
+                vol = vol[0]
+            vol = np.clip(vol, 0, 65535).astype(np.uint16)
 
-            channel_dask.append(darr)
+            self.logger.info(
+                f"  Channel {ch_id}: shape={vol.shape}, "
+                f"origin Z={origin_um['z']:.1f} Y={origin_um['y']:.1f} "
+                f"X={origin_um['x']:.1f} \u00b5m"
+            )
+
+            # Allocate / fill stacked output array
+            if stacked is None:
+                n_total = len(process_channels)
+                if n_total > 1:
+                    stacked = np.zeros((n_total, *vol.shape), dtype=np.uint16)
+                    stacked[0] = vol
+                    self.logger.info(
+                        f"  Pre-allocated output array: {stacked.shape} "
+                        f"({stacked.nbytes / (1024**3):.1f} GB)"
+                    )
+                else:
+                    stacked = vol
+            else:
+                dest_idx = len(fused_channel_ids)
+                sz, sy, sx = vol.shape
+                stacked[dest_idx, :sz, :sy, :sx] = vol
+
+            # Free channel data before loading the next one
+            del vol, fused_sim, tile_data
+            if ch_id == ref_ch:
+                ref_tile_data = None
+            gc.collect()
+
             channel_origins.append(origin_um)
             fused_channel_ids.append(ch_id)
 
-            self.logger.info(
-                f"  Channel {ch_id}: fused shape={darr.shape} (lazy), "
-                f"origin Z={origin_um['z']:.1f} Y={origin_um['y']:.1f} "
-                f"X={origin_um['x']:.1f} µm"
-            )
-
-        if not channel_dask:
+        if stacked is None:
             self.logger.error("No channels were fused successfully")
             return output_path
 
-        # --- Step 5: Lazy stack + clip ---
-        stacked = _lazy_stack_channels(channel_dask)
-        stacked = da.clip(stacked, 0, 65535).astype(np.uint16)
-
         self.logger.info(
-            f"Step 5: Lazy-stacked {len(fused_channel_ids)} channels → "
-            f"shape={stacked.shape} (not yet computed)"
+            f"Step 5: Computed {len(fused_channel_ids)} channels \u2192 "
+            f"shape={stacked.shape}"
         )
 
-        # --- Step 6: Streaming write ---
+        # --- Step 6: Write ---
         if self._cancelled_fn():
             self.logger.info("Pipeline cancelled by user")
             return output_path
 
-        self._progress_fn(
-            65, "Writing output (streaming — this is the main compute)..."
-        )
+        self._progress_fn(85, "Writing multi-channel output...")
         self.logger.info("Step 6: Writing multi-channel output (streaming)...")
         basename = self._build_output_basename(acquisition_dir)
         self.logger.info(f"  Output basename: {basename}")
         channel_names = [f"Channel_{ch_id}" for ch_id in fused_channel_ids]
-        self._write_multichannel_streaming(
+        self._write_multichannel_output(
             stacked, channel_names, voxel_size_um, output_path, basename
         )
 

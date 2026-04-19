@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import List, Optional
 
 from PyQt5.QtCore import QProcess, QSettings, Qt, pyqtSignal
+from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -17,11 +19,14 @@ from PyQt5.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
 )
@@ -54,7 +59,14 @@ class StitchingDialog(PersistentDialog):
         super().__init__(parent=parent)
         self._logger = logging.getLogger(__name__)
         self._worker = None
-        self._tiles = None  # Cached discovered tiles
+
+        # Batch queue state
+        self._queue = []  # List of dicts: {path, status, tiles, error, output_path}
+        self._queue_index = -1  # Index of currently processing item
+        self._batch_running = False
+        self._batch_config = None
+        self._batch_channels = None
+        self._batch_results = []  # List of (path, success, error_msg)
 
         self.setWindowTitle("Tile Stitching")
         self.setMinimumWidth(650)
@@ -70,27 +82,62 @@ class StitchingDialog(PersistentDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        # --- Directory selection ---
-        dir_layout = QGridLayout()
-        dir_layout.setSpacing(6)
+        # --- Batch queue ---
+        queue_group = QGroupBox("Acquisition Queue")
+        queue_layout = QVBoxLayout()
+        queue_layout.setSpacing(4)
 
-        dir_layout.addWidget(QLabel("Acquisition Directory:"), 0, 0)
-        self._acq_dir_edit = QLineEdit()
-        self._acq_dir_edit.setPlaceholderText("Path to raw acquisition folder...")
-        dir_layout.addWidget(self._acq_dir_edit, 0, 1)
-        acq_browse_btn = QPushButton("Browse...")
-        acq_browse_btn.clicked.connect(self._browse_acq_dir)
-        dir_layout.addWidget(acq_browse_btn, 0, 2)
+        self._queue_table = QTableWidget(0, 2)
+        self._queue_table.setHorizontalHeaderLabels(["Status", "Directory"])
+        self._queue_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeToContents
+        )
+        self._queue_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.Stretch
+        )
+        self._queue_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self._queue_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self._queue_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._queue_table.verticalHeader().setVisible(False)
+        self._queue_table.setMaximumHeight(140)
+        queue_layout.addWidget(self._queue_table)
 
-        dir_layout.addWidget(QLabel("Output Directory:"), 1, 0)
+        queue_btn_layout = QHBoxLayout()
+        self._add_btn = QPushButton("Add...")
+        self._add_btn.setToolTip("Add an acquisition directory to the queue")
+        self._add_btn.clicked.connect(self._add_to_queue)
+        queue_btn_layout.addWidget(self._add_btn)
+
+        self._add_folder_btn = QPushButton("Add All in Folder...")
+        self._add_folder_btn.setToolTip(
+            "Select a parent folder and add all acquisition\n"
+            "subdirectories to the queue"
+        )
+        self._add_folder_btn.clicked.connect(self._add_folder_to_queue)
+        queue_btn_layout.addWidget(self._add_folder_btn)
+
+        self._remove_btn = QPushButton("Remove")
+        self._remove_btn.setToolTip("Remove selected directories from the queue")
+        self._remove_btn.clicked.connect(self._remove_from_queue)
+        queue_btn_layout.addWidget(self._remove_btn)
+
+        queue_btn_layout.addStretch()
+        queue_layout.addLayout(queue_btn_layout)
+        queue_group.setLayout(queue_layout)
+        layout.addWidget(queue_group)
+
+        # --- Output directory ---
+        out_layout = QHBoxLayout()
+        out_layout.addWidget(QLabel("Output Directory:"))
         self._output_dir_edit = QLineEdit()
-        self._output_dir_edit.setPlaceholderText("Where to save stitched output...")
-        dir_layout.addWidget(self._output_dir_edit, 1, 1)
+        self._output_dir_edit.setPlaceholderText(
+            "Shared output folder (each acquisition gets a subfolder)..."
+        )
+        out_layout.addWidget(self._output_dir_edit)
         out_browse_btn = QPushButton("Browse...")
         out_browse_btn.clicked.connect(self._browse_output_dir)
-        dir_layout.addWidget(out_browse_btn, 1, 2)
-
-        layout.addLayout(dir_layout)
+        out_layout.addWidget(out_browse_btn)
+        layout.addLayout(out_layout)
 
         # --- Settings group ---
         settings_group = QGroupBox("Settings")
@@ -373,13 +420,17 @@ class StitchingDialog(PersistentDialog):
         btn_layout = QHBoxLayout()
 
         self._discover_btn = QPushButton("Discover Tiles")
-        self._discover_btn.setToolTip("Scan acquisition directory for tile data")
+        self._discover_btn.setToolTip(
+            "Scan all queued directories for tile data\n"
+            "(optional — Run will auto-discover if needed)"
+        )
         self._discover_btn.clicked.connect(self._on_discover)
-        self._set_btn_green(self._discover_btn)
         btn_layout.addWidget(self._discover_btn)
 
-        self._run_btn = QPushButton("Run Stitching")
-        self._set_btn_default(self._run_btn)
+        self._run_btn = QPushButton("Run All")
+        self._run_btn.setToolTip(
+            "Process all pending directories in the queue sequentially"
+        )
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self._on_run)
         btn_layout.addWidget(self._run_btn)
@@ -430,39 +481,162 @@ class StitchingDialog(PersistentDialog):
         # Sync .ozx checkbox enabled state with initial format
         self._on_format_changed()
 
-    # --- Directory browsing ---
+    # --- Queue management ---
 
-    def _browse_acq_dir(self):
-        current = self._acq_dir_edit.text() or ""
-        if current:
-            # Start Browse near sibling acquisitions (go up N levels)
-            start = Path(current)
-            for _ in range(self._acq_dir_restore_levels_up):
-                if start.parent != start:
-                    start = start.parent
-            start = str(start)
-        else:
-            # Fall back to output dir parent, then mapped drives, then home
-            output = self._output_dir_edit.text()
-            if output and Path(output).parent.exists():
-                start = str(Path(output).parent)
-            else:
-                start = str(Path.home())
+    def _add_to_queue(self):
+        """Add an acquisition directory to the batch queue."""
+        start = self._queue_browse_start()
         folder = QFileDialog.getExistingDirectory(
             self, "Select Acquisition Directory", start
         )
         if folder:
-            # Normalize to native separators (Qt returns forward slashes)
-            folder = str(Path(folder))
-            self._acq_dir_edit.setText(folder)
-            # Auto-update output dir to match the new acquisition folder
-            acq_name = Path(folder).name
-            new_output = str(Path(folder).parent / f"{acq_name}_stitched")
-            self._output_dir_edit.setText(new_output)
-            # Reset tile discovery — Discover is next action again
-            self._tiles = None
+            self._add_path_to_queue(Path(folder))
+
+    def _add_folder_to_queue(self):
+        """Add all acquisition subdirectories from a parent folder."""
+        start = self._queue_browse_start()
+        parent = QFileDialog.getExistingDirectory(
+            self, "Select Parent Folder (contains acquisition folders)", start
+        )
+        if not parent:
+            return
+
+        parent_path = Path(parent)
+        added = 0
+        for child in sorted(parent_path.iterdir()):
+            if child.is_dir() and not child.name.startswith("."):
+                if self._looks_like_acquisition(child):
+                    self._add_path_to_queue(child)
+                    added += 1
+
+        if added == 0:
+            self._log(f"No acquisition directories found in: {parent}")
+        else:
+            self._log(f"Added {added} directories from: {parent}")
+
+    def _queue_browse_start(self) -> str:
+        """Determine the starting path for the file browser."""
+        if self._queue:
+            last = self._queue[-1]["path"]
+            start = last.parent
+            for _ in range(self._acq_dir_restore_levels_up - 1):
+                if start.parent != start:
+                    start = start.parent
+            return str(start)
+        output = self._output_dir_edit.text()
+        if output and Path(output).parent.exists():
+            return str(Path(output).parent)
+        return str(Path.home())
+
+    def _looks_like_acquisition(self, path: Path) -> bool:
+        """Check if a directory looks like an acquisition folder.
+
+        Subclasses can override for different layout detection.
+        """
+        if (path / "Workflow.txt").exists():
+            return True
+        # Check first few children for tile indicators
+        checked = 0
+        for child in path.iterdir():
+            if child.is_dir() and (child / "Workflow.txt").exists():
+                return True
+            if child.suffix == ".raw":
+                return True
+            checked += 1
+            if checked >= 5:
+                break
+        return False
+
+    def _add_path_to_queue(self, path: Path):
+        """Add a single path to the queue (with dedup)."""
+        path = Path(path)
+        for item in self._queue:
+            if item["path"] == path:
+                return  # Already in queue
+
+        self._queue.append(
+            {
+                "path": path,
+                "status": "pending",
+                "tiles": None,
+                "error": None,
+                "output_path": None,
+            }
+        )
+        self._update_queue_table()
+
+        # Auto-set output directory from first item
+        if len(self._queue) == 1 and not self._output_dir_edit.text().strip():
+            self._output_dir_edit.setText(str(path.parent))
+
+        self._update_action_buttons()
+
+    def _remove_from_queue(self):
+        """Remove selected items from the queue."""
+        rows = sorted(
+            set(idx.row() for idx in self._queue_table.selectedIndexes()),
+            reverse=True,
+        )
+        for row in rows:
+            if 0 <= row < len(self._queue):
+                # Don't remove the currently running item
+                if self._batch_running and row == self._queue_index:
+                    continue
+                del self._queue[row]
+                if self._batch_running and row < self._queue_index:
+                    self._queue_index -= 1
+        self._update_queue_table()
+        self._update_action_buttons()
+
+    def _update_queue_table(self):
+        """Refresh the queue table from self._queue."""
+        self._queue_table.setRowCount(len(self._queue))
+        status_styles = {
+            "pending": ("\u25cb Pending", "#888888"),
+            "discovering": ("\u25c9 Discovering", "#1976D2"),
+            "stitching": ("\u25b6 Stitching", "#1976D2"),
+            "done": ("\u2713 Done", "#388E3C"),
+            "error": ("\u2717 Error", "#D32F2F"),
+            "cancelled": ("\u2014 Cancelled", "#888888"),
+        }
+        for i, item in enumerate(self._queue):
+            text, color = status_styles.get(item["status"], (item["status"], "#888888"))
+            status_item = QTableWidgetItem(text)
+            status_item.setForeground(QColor(color))
+            if item["status"] == "stitching":
+                font = status_item.font()
+                font.setBold(True)
+                status_item.setFont(font)
+            self._queue_table.setItem(i, 0, status_item)
+
+            path_item = QTableWidgetItem(str(item["path"]))
+            if item.get("error"):
+                path_item.setToolTip(f"Error: {item['error']}")
+            self._queue_table.setItem(i, 1, path_item)
+
+    def _update_action_buttons(self):
+        """Update Discover/Run button states based on queue."""
+        has_pending = any(item["status"] == "pending" for item in self._queue)
+        if self._batch_running:
+            self._discover_btn.setEnabled(False)
             self._run_btn.setEnabled(False)
-            self._set_btn_green(self._discover_btn)
+            self._cancel_btn.setEnabled(True)
+        elif has_pending:
+            self._discover_btn.setEnabled(True)
+            self._run_btn.setEnabled(True)
+            self._set_btn_green(self._run_btn)
+            self._set_btn_default(self._discover_btn)
+        elif self._queue:
+            # Queue exists but nothing pending (all done/error)
+            self._discover_btn.setEnabled(False)
+            self._run_btn.setEnabled(False)
+            self._set_btn_default(self._discover_btn)
+            self._set_btn_default(self._run_btn)
+        else:
+            # Empty queue
+            self._discover_btn.setEnabled(False)
+            self._run_btn.setEnabled(False)
+            self._set_btn_default(self._discover_btn)
             self._set_btn_default(self._run_btn)
 
     def _browse_output_dir(self):
@@ -476,50 +650,56 @@ class StitchingDialog(PersistentDialog):
     # --- Tile discovery ---
 
     def _on_discover(self):
-        """Discover tiles in the acquisition directory."""
-        acq_dir = self._acq_dir_edit.text().strip()
-        if not acq_dir:
-            QMessageBox.warning(
-                self, "No Directory", "Please select an acquisition directory."
-            )
-            return
-
-        acq_path = Path(acq_dir)
-        if not acq_path.is_dir():
+        """Discover tiles for all pending items in the queue."""
+        pending = [item for item in self._queue if item["status"] == "pending"]
+        if not pending:
             QMessageBox.warning(
                 self,
-                "Invalid Directory",
-                f"Directory does not exist:\n{acq_dir}",
+                "Nothing to Discover",
+                "No pending directories in the queue.\n"
+                "Add directories with 'Add...' first.",
             )
             return
 
         self._log_text.clear()
-        self._log(f"Discovering tiles in: {acq_dir}")
+        self._log(f"Discovering tiles for {len(pending)} directories...\n")
 
-        try:
-            from py2flamingo.stitching.pipeline import discover_tiles
+        for item in pending:
+            self._log(f"Scanning: {item['path'].name}")
+            try:
+                tiles = self._discover_tiles_for_path(item["path"])
+                if tiles:
+                    item["tiles"] = tiles
+                    self._log(f"  Found {len(tiles)} tiles")
+                else:
+                    self._log("  No tiles found")
+                    item["status"] = "error"
+                    item["error"] = "No tiles found"
+            except Exception as e:
+                self._log(f"  Error: {e}")
+                self._logger.exception("Tile discovery error")
+                item["status"] = "error"
+                item["error"] = str(e)
 
-            tiles = discover_tiles(acq_path)
+        self._update_queue_table()
+        total = sum(len(it["tiles"]) for it in self._queue if it["tiles"])
+        ok = sum(1 for it in pending if it["tiles"])
+        self._log(f"\nDiscovered {total} tiles across {ok}/{len(pending)} directories")
+        self._update_action_buttons()
 
-            if not tiles:
-                self._log("No tile folders found.")
-                self._tiles = None
-                self._run_btn.setEnabled(False)
-                return
+        # Show memory estimate for first discovered set (representative)
+        first_tiles = next((it["tiles"] for it in self._queue if it["tiles"]), None)
+        if first_tiles:
+            self._update_memory_estimate(first_tiles)
 
-            self._tiles = tiles
-            self._log_tile_summary(tiles)
-            self._update_memory_estimate()
-            self._run_btn.setEnabled(True)
-            # Swap green highlight: Discover done → Run is next action
-            self._set_btn_default(self._discover_btn)
-            self._set_btn_green(self._run_btn)
+    def _discover_tiles_for_path(self, acq_path: Path):
+        """Discover tiles in an acquisition directory.
 
-        except Exception as e:
-            self._log(f"Error discovering tiles: {e}")
-            self._logger.exception("Tile discovery error")
-            self._tiles = None
-            self._run_btn.setEnabled(False)
+        Override in subclasses for different tile layouts.
+        """
+        from py2flamingo.stitching.pipeline import discover_tiles
+
+        return discover_tiles(acq_path)
 
     def _log_tile_summary(self, tiles):
         """Display a summary of discovered tiles."""
@@ -547,9 +727,12 @@ class StitchingDialog(PersistentDialog):
         self._reg_binning_combo.setEnabled(not checked)
         self._reg_binning_label.setEnabled(not checked)
 
-    def _update_memory_estimate(self):
+    def _update_memory_estimate(self, tiles=None):
         """Compute and display memory estimates for in-memory vs streaming modes."""
-        if not self._tiles:
+        if tiles is None:
+            # Try to find tiles from first queue item with discovered tiles
+            tiles = next((it["tiles"] for it in self._queue if it["tiles"]), None)
+        if not tiles:
             self._memory_label.setText("")
             self._last_mem_estimate = None
             self._update_memory_indicator()
@@ -560,10 +743,10 @@ class StitchingDialog(PersistentDialog):
 
             config = self._build_config()
             channels = self._parse_channels()
-            all_ch = sorted(set(ch for t in self._tiles for ch in t.channels))
+            all_ch = sorted(set(ch for t in tiles for ch in t.channels))
             process_ch = channels if channels else all_ch
 
-            est = estimate_memory_usage(self._tiles, process_ch, config)
+            est = estimate_memory_usage(tiles, process_ch, config)
             self._last_mem_estimate = est
 
             mode_hint = ""
@@ -741,14 +924,15 @@ class StitchingDialog(PersistentDialog):
             return None
 
     def _on_run(self):
-        """Start the stitching pipeline."""
-        acq_dir = self._acq_dir_edit.text().strip()
-        output_dir = self._output_dir_edit.text().strip()
-
-        if not acq_dir or not Path(acq_dir).is_dir():
-            QMessageBox.warning(self, "Invalid Input", "Invalid acquisition directory.")
+        """Start batch stitching of all pending queue items."""
+        pending = [item for item in self._queue if item["status"] == "pending"]
+        if not pending:
+            QMessageBox.warning(
+                self, "Nothing to Run", "No pending directories in the queue."
+            )
             return
 
+        output_dir = self._output_dir_edit.text().strip()
         if not output_dir:
             QMessageBox.warning(
                 self, "Invalid Input", "Please specify an output directory."
@@ -756,7 +940,6 @@ class StitchingDialog(PersistentDialog):
             return
 
         config = self._build_config()
-        channels = self._parse_channels()
 
         # Pre-flight: warn if flat-field is requested but basicpy missing
         if config.flat_field_correction:
@@ -777,106 +960,238 @@ class StitchingDialog(PersistentDialog):
                 config.flat_field_correction = False
 
         self._log_text.clear()
-        self._log("Starting stitching pipeline...")
+        n_pending = len(pending)
+        self._log(f"Starting batch stitching: {n_pending} directories\n")
 
-        # Disable all controls during run so user can't change settings
-        self._run_btn.setEnabled(False)
-        self._discover_btn.setEnabled(False)
-        self._cancel_btn.setEnabled(True)
+        # Store batch state
+        self._batch_running = True
+        self._batch_config = config
+        self._batch_channels = self._parse_channels()
+        self._batch_results = []
+
+        # Lock settings during run
         self._settings_group.setEnabled(False)
-        self._acq_dir_edit.setEnabled(False)
         self._output_dir_edit.setEnabled(False)
+        self._update_action_buttons()
 
+        # Start processing
+        self._advance_queue()
+
+    def _advance_queue(self):
+        """Process the next pending item in the queue."""
+        # Find next pending
+        next_idx = None
+        for i, item in enumerate(self._queue):
+            if item["status"] == "pending":
+                next_idx = i
+                break
+
+        if next_idx is None:
+            self._on_batch_complete()
+            return
+
+        self._queue_index = next_idx
+        item = self._queue[next_idx]
+        n_total = sum(1 for it in self._queue if it["status"] not in ("cancelled",))
+        n_done = sum(1 for it in self._queue if it["status"] in ("done", "error"))
+
+        self._log(f"\n{'=' * 60}")
+        self._log(f"Processing {n_done + 1}/{n_total}: {item['path'].name}")
+        self._log(f"{'=' * 60}\n")
+
+        # Discover tiles if not already discovered
+        if item["tiles"] is None:
+            item["status"] = "discovering"
+            self._update_queue_table()
+            try:
+                tiles = self._discover_tiles_for_path(item["path"])
+                if not tiles:
+                    item["status"] = "error"
+                    item["error"] = "No tiles found"
+                    self._log("  No tiles found \u2014 skipping")
+                    self._update_queue_table()
+                    self._batch_results.append((item["path"], False, "No tiles found"))
+                    self._advance_queue()
+                    return
+                item["tiles"] = tiles
+                self._log_tile_summary(tiles)
+            except Exception as e:
+                item["status"] = "error"
+                item["error"] = str(e)
+                self._log(f"  Discovery error: {e}")
+                self._logger.exception("Batch tile discovery error")
+                self._update_queue_table()
+                self._batch_results.append((item["path"], False, str(e)))
+                self._advance_queue()
+                return
+
+        # Compute output path
+        acq_name = item["path"].name
+        output_dir = Path(self._output_dir_edit.text()) / f"{acq_name}_stitched"
+        item["output_path"] = str(output_dir)
+
+        # Update status
+        item["status"] = "stitching"
+        self._update_queue_table()
+
+        # Start worker
         from py2flamingo.stitching.worker import StitchingWorker
 
         self._worker = StitchingWorker(
-            config=config,
-            acq_dir=Path(acq_dir),
-            output_dir=Path(output_dir),
-            channels=channels,
-            tiles=self._tiles,
+            config=self._batch_config,
+            acq_dir=item["path"],
+            output_dir=output_dir,
+            channels=self._batch_channels,
+            tiles=item["tiles"],
             parent=self,
         )
         self._worker.progress.connect(self._on_progress)
         self._worker.log_message.connect(self._on_log_message)
-        self._worker.completed.connect(self._on_completed)
-        self._worker.error.connect(self._on_error)
-        self._worker.finished.connect(self._on_worker_finished)
+        self._worker.completed.connect(self._on_item_completed)
+        self._worker.error.connect(self._on_item_error)
+        self._worker.finished.connect(self._on_item_finished)
         self._worker.start()
 
     def _on_cancel(self):
-        """Cancel the running pipeline."""
+        """Cancel the running pipeline and stop the batch."""
         if self._worker:
             self._worker.cancel()
             self._status_label.setText("Cancelling...")
             self._log("Cancellation requested...")
+        # Mark remaining pending items as cancelled
+        for item in self._queue:
+            if item["status"] == "pending":
+                item["status"] = "cancelled"
+        self._update_queue_table()
 
     def _on_progress(self, percentage: int, status: str):
         """Handle progress updates from worker."""
         self._progress_bar.setValue(percentage)
-        self._status_label.setText(status)
+        # Add batch context if multiple items
+        if self._batch_running and len(self._queue) > 1:
+            n_total = sum(1 for it in self._queue if it["status"] != "cancelled")
+            n_done = sum(1 for it in self._queue if it["status"] in ("done", "error"))
+            self._status_label.setText(f"[{n_done + 1}/{n_total}] {status}")
+        else:
+            self._status_label.setText(status)
 
     def _on_log_message(self, message: str):
         """Handle log messages from worker."""
         self._log_text.append(message)
-        # Auto-scroll to bottom
         scrollbar = self._log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
-    def _on_completed(self, output_path: str):
-        """Handle successful pipeline completion."""
-        self._log(f"\nStitching complete! Output: {output_path}")
+    def _on_item_completed(self, output_path: str):
+        """Handle successful completion of one queue item."""
+        if 0 <= self._queue_index < len(self._queue):
+            item = self._queue[self._queue_index]
+            item["status"] = "done"
+            item["output_path"] = output_path
+            self._batch_results.append((item["path"], True, None))
+            self._update_queue_table()
+        self._log(f"\n\u2713 Completed: {Path(output_path).parent.name}")
 
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Stitching Complete")
-        msg.setText(f"Stitched volume saved to:\n{output_path}")
-        msg.setIcon(QMessageBox.Information)
+    def _on_item_error(self, error_msg: str):
+        """Handle error in one queue item."""
+        if 0 <= self._queue_index < len(self._queue):
+            item = self._queue[self._queue_index]
+            item["status"] = "error"
+            item["error"] = error_msg
+            self._batch_results.append((item["path"], False, error_msg))
+            self._update_queue_table()
+        self._log(f"\n\u2717 Error: {error_msg}")
 
-        load_btn = msg.addButton("Load into Sample View", QMessageBox.AcceptRole)
-        open_btn = msg.addButton("Open Folder", QMessageBox.ActionRole)
-        msg.addButton(QMessageBox.Close)
-
-        msg.exec_()
-        clicked = msg.clickedButton()
-
-        if clicked == load_btn:
-            self.load_stitched_requested.emit(output_path)
-        elif clicked == open_btn:
-            import subprocess
-            import sys
-
-            folder = str(Path(output_path))
-            if sys.platform == "win32":
-                subprocess.Popen(["explorer", folder])
-            elif sys.platform == "darwin":
-                subprocess.Popen(["open", folder])
-            else:
-                subprocess.Popen(["xdg-open", folder])
-
-    def _on_error(self, error_msg: str):
-        """Handle pipeline error."""
-        self._log(f"\nERROR: {error_msg}")
-        self._status_label.setText("Error")
-        QMessageBox.critical(self, "Stitching Error", f"Pipeline failed:\n{error_msg}")
-
-    def _on_worker_finished(self):
-        """Handle worker thread completion (success, error, or cancel)."""
-        self._discover_btn.setEnabled(True)
-        self._cancel_btn.setEnabled(False)
-        self._settings_group.setEnabled(True)
-        self._acq_dir_edit.setEnabled(True)
-        self._output_dir_edit.setEnabled(True)
+    def _on_item_finished(self):
+        """Handle worker thread completion for a queue item."""
         self._worker = None
-        if self._tiles:
-            # Tiles still valid — Run is the next action
-            self._run_btn.setEnabled(True)
-            self._set_btn_green(self._run_btn)
-            self._set_btn_default(self._discover_btn)
+        # If the item is still 'stitching', it was cancelled mid-run
+        if 0 <= self._queue_index < len(self._queue):
+            item = self._queue[self._queue_index]
+            if item["status"] in ("stitching", "discovering"):
+                item["status"] = "cancelled"
+                self._batch_results.append((item["path"], False, "Cancelled"))
+                self._update_queue_table()
+
+        if self._batch_running:
+            self._advance_queue()
+
+    def _on_batch_complete(self):
+        """Handle completion of all queue items."""
+        self._batch_running = False
+        self._queue_index = -1
+        self._batch_config = None
+        self._batch_channels = None
+
+        # Re-enable UI
+        self._settings_group.setEnabled(True)
+        self._output_dir_edit.setEnabled(True)
+        self._cancel_btn.setEnabled(False)
+        self._update_action_buttons()
+
+        n_success = sum(1 for _, ok, _ in self._batch_results if ok)
+        n_error = sum(1 for _, ok, _ in self._batch_results if not ok)
+        total = len(self._batch_results)
+
+        self._log(f"\n{'=' * 60}")
+        self._log(f"Batch complete: {n_success}/{total} succeeded")
+        if n_error:
+            self._log(f"  {n_error} failed:")
+            for path, ok, err in self._batch_results:
+                if not ok:
+                    self._log(f"    \u2717 {path.name}: {err}")
+        self._log(f"{'=' * 60}")
+
+        self._progress_bar.setValue(100 if n_success > 0 else 0)
+        self._status_label.setText(f"Done: {n_success}/{total} succeeded")
+
+        # Show summary dialog
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Batch Stitching Complete")
+        if n_error:
+            msg.setIcon(QMessageBox.Warning)
+            msg.setText(
+                f"Batch stitching complete.\n\n"
+                f"Succeeded: {n_success}/{total}\n"
+                f"Failed: {n_error}/{total}"
+            )
         else:
-            # No tiles — Discover is the next action
-            self._run_btn.setEnabled(False)
-            self._set_btn_green(self._discover_btn)
-            self._set_btn_default(self._run_btn)
+            msg.setIcon(QMessageBox.Information)
+            msg.setText(f"All {total} acquisition(s) stitched successfully!")
+
+        # Find last successful output for "Load" option
+        last_success_path = None
+        for path, ok, _ in reversed(self._batch_results):
+            if ok:
+                acq_name = path.name
+                last_success_path = str(
+                    Path(self._output_dir_edit.text()) / f"{acq_name}_stitched"
+                )
+                break
+
+        if last_success_path:
+            load_btn = msg.addButton(
+                "Load Latest into Sample View", QMessageBox.AcceptRole
+            )
+            open_btn = msg.addButton("Open Output Folder", QMessageBox.ActionRole)
+            msg.addButton(QMessageBox.Close)
+            msg.exec_()
+            clicked = msg.clickedButton()
+            if clicked == load_btn:
+                self.load_stitched_requested.emit(last_success_path)
+            elif clicked == open_btn:
+                import subprocess
+                import sys
+
+                folder = self._output_dir_edit.text()
+                if sys.platform == "win32":
+                    subprocess.Popen(["explorer", folder])
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", folder])
+                else:
+                    subprocess.Popen(["xdg-open", folder])
+        else:
+            msg.addButton(QMessageBox.Close)
+            msg.exec_()
 
     # --- Format-dependent UI ---
 
@@ -1128,7 +1443,9 @@ class StitchingDialog(PersistentDialog):
         """Save dialog settings to QSettings."""
         s = QSettings()
         s.beginGroup(_SETTINGS_GROUP)
-        s.setValue("acq_dir", self._acq_dir_edit.text())
+        # Save queue paths (only pending/done items, not transient states)
+        paths = [str(item["path"]) for item in self._queue]
+        s.setValue("queue_paths", paths)
         s.setValue("output_dir", self._output_dir_edit.text())
         s.setValue("pixel_size", self._pixel_size_spin.value())
         s.setValue("z_step", self._z_step_spin.value())
@@ -1155,9 +1472,19 @@ class StitchingDialog(PersistentDialog):
         s = QSettings()
         s.beginGroup(_SETTINGS_GROUP)
 
-        acq_dir = s.value("acq_dir", "", type=str)
-        if acq_dir:
-            self._acq_dir_edit.setText(acq_dir)
+        # Restore queue paths
+        paths = s.value("queue_paths", [], type=list)
+        if paths:
+            if isinstance(paths, str):
+                paths = [paths]
+            for p in paths:
+                if p and Path(p).is_dir():
+                    self._add_path_to_queue(Path(p))
+        # Legacy: also try old single acq_dir key
+        if not self._queue:
+            acq_dir = s.value("acq_dir", "", type=str)
+            if acq_dir and Path(acq_dir).is_dir():
+                self._add_path_to_queue(Path(acq_dir))
 
         output_dir = s.value("output_dir", "", type=str)
         if output_dir:
@@ -1241,6 +1568,7 @@ class StitchingDialog(PersistentDialog):
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(2000)
+        self._batch_running = False
         super().closeEvent(event)
 
     def hideEvent(self, event):
@@ -1268,73 +1596,42 @@ class NativeStitchingDialog(StitchingDialog):
         super().__init__(parent=parent)
         self.setWindowTitle("Tile Stitching (Single Workflow)")
 
-    def _on_discover(self):
+    def _discover_tiles_for_path(self, acq_path: Path):
         """Discover tiles using flat-layout scanner."""
-        acq_dir = self._acq_dir_edit.text().strip()
-        if not acq_dir:
-            QMessageBox.warning(
-                self, "No Directory", "Please select an acquisition directory."
-            )
-            return
+        from py2flamingo.stitching.pipeline import (
+            _read_plane_spacing,
+            discover_flat_tiles,
+        )
 
-        acq_path = Path(acq_dir)
-        if not acq_path.is_dir():
-            QMessageBox.warning(
-                self,
-                "Invalid Directory",
-                f"Directory does not exist:\n{acq_dir}",
-            )
-            return
+        tiles = discover_flat_tiles(acq_path)
 
-        self._log_text.clear()
-        self._log(f"Discovering flat-layout tiles in: {acq_dir}")
+        # Auto-set Z step from Workflow.txt if currently "Auto"
+        if tiles and self._z_step_spin.value() == 0.0:
+            for wf_candidate in [
+                acq_path / "Workflow.txt",
+                tiles[0].folder / "Workflow.txt",
+            ]:
+                if wf_candidate.exists():
+                    spacing = _read_plane_spacing(wf_candidate)
+                    if spacing:
+                        self._z_step_spin.setValue(spacing)
+                        self._log(f"Auto-detected Z step: {spacing} \u00b5m")
+                    break
 
-        try:
-            from py2flamingo.stitching.pipeline import (
-                _read_plane_spacing,
-                discover_flat_tiles,
-            )
+        return tiles
 
-            tiles = discover_flat_tiles(acq_path)
-
-            if not tiles:
-                self._log("No flat-layout tiles found.")
-                self._tiles = None
-                self._run_btn.setEnabled(False)
-                return
-
-            self._tiles = tiles
-
-            # Auto-set Z step from root Workflow.txt if currently "Auto"
-            if self._z_step_spin.value() == 0.0:
-                for wf_candidate in [
-                    acq_path / "Workflow.txt",
-                    tiles[0].folder / "Workflow.txt",
-                ]:
-                    if wf_candidate.exists():
-                        spacing = _read_plane_spacing(wf_candidate)
-                        if spacing:
-                            self._z_step_spin.setValue(spacing)
-                            self._log(f"Auto-detected Z step: {spacing} \u00b5m")
-                        break
-
-            self._log_tile_summary(tiles)
-            self._update_memory_estimate()
-            self._run_btn.setEnabled(True)
-            self._set_btn_default(self._discover_btn)
-            self._set_btn_green(self._run_btn)
-
-        except Exception as e:
-            self._log(f"Error discovering tiles: {e}")
-            self._logger.exception("Flat tile discovery error")
-            self._tiles = None
-            self._run_btn.setEnabled(False)
+    def _looks_like_acquisition(self, path: Path) -> bool:
+        """Check if a directory looks like a flat-layout acquisition."""
+        if (path / "Workflow.txt").exists():
+            return True
+        return any(path.glob("*.raw"))
 
     def _save_settings(self):
         """Save dialog settings to QSettings (independent group)."""
         s = QSettings()
         s.beginGroup(_NATIVE_SETTINGS_GROUP)
-        s.setValue("acq_dir", self._acq_dir_edit.text())
+        paths = [str(item["path"]) for item in self._queue]
+        s.setValue("queue_paths", paths)
         s.setValue("output_dir", self._output_dir_edit.text())
         s.setValue("pixel_size", self._pixel_size_spin.value())
         s.setValue("z_step", self._z_step_spin.value())
@@ -1361,9 +1658,19 @@ class NativeStitchingDialog(StitchingDialog):
         s = QSettings()
         s.beginGroup(_NATIVE_SETTINGS_GROUP)
 
-        acq_dir = s.value("acq_dir", "", type=str)
-        if acq_dir:
-            self._acq_dir_edit.setText(acq_dir)
+        # Restore queue paths
+        paths = s.value("queue_paths", [], type=list)
+        if paths:
+            if isinstance(paths, str):
+                paths = [paths]
+            for p in paths:
+                if p and Path(p).is_dir():
+                    self._add_path_to_queue(Path(p))
+        # Legacy: also try old single acq_dir key
+        if not self._queue:
+            acq_dir = s.value("acq_dir", "", type=str)
+            if acq_dir and Path(acq_dir).is_dir():
+                self._add_path_to_queue(Path(acq_dir))
 
         output_dir = s.value("output_dir", "", type=str)
         if output_dir:
