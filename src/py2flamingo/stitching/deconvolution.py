@@ -20,6 +20,57 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Availability probes
+# ---------------------------------------------------------------------------
+
+
+def _probe(module_name: str) -> bool:
+    try:
+        __import__(module_name)
+        return True
+    except Exception:
+        return False
+
+
+_PYCUDADECON_AVAILABLE: Optional[bool] = None
+_REDLIONFISH_AVAILABLE: Optional[bool] = None
+
+
+def has_pycudadecon() -> bool:
+    """Return True if pycudadecon imports successfully (cached)."""
+    global _PYCUDADECON_AVAILABLE
+    if _PYCUDADECON_AVAILABLE is None:
+        _PYCUDADECON_AVAILABLE = _probe("pycudadecon")
+    return _PYCUDADECON_AVAILABLE
+
+
+def has_redlionfish() -> bool:
+    """Return True if RedLionfish imports successfully (cached)."""
+    global _REDLIONFISH_AVAILABLE
+    if _REDLIONFISH_AVAILABLE is None:
+        _REDLIONFISH_AVAILABLE = _probe("RedLionfish")
+    return _REDLIONFISH_AVAILABLE
+
+
+def is_available() -> bool:
+    """True if *either* deconvolution backend is importable."""
+    return has_pycudadecon() or has_redlionfish()
+
+
+def unavailable_reason() -> str:
+    """Short human-readable explanation for why deconvolution is unavailable."""
+    if is_available():
+        return ""
+    return (
+        "Deconvolution requires pycudadecon (NVIDIA GPU, CUDA) or "
+        "RedLionfish (any GPU via OpenCL). Install one with:\n"
+        "  conda install -c conda-forge pycudadecon\n"
+        "  pip install RedLionfish"
+    )
+
+
 # Load optical defaults from hardware config
 try:
     from py2flamingo.configs.config_loader import get_hardware_config as _get_hw

@@ -1498,7 +1498,14 @@ class StitchingDialog(PersistentDialog):
     # --- Preprocessing environment ---
 
     def _update_preprocessing_availability(self):
-        """Update flat-field/leonardo availability based on env status."""
+        """Grey out processing options whose backend isn't importable.
+
+        Covers flat-field (basicpy), Leonardo FUSE (leonardo-toolset),
+        destriping (pystripe), and deconvolution (pycudadecon / RedLionfish).
+        Each disabled control gets a tooltip explaining what's missing and
+        how to get it.
+        """
+        # --- Flat-field correction (basicpy, direct or isolated env) ---
         from py2flamingo.stitching.flat_field import is_available as _ff_available
 
         if _ff_available():
@@ -1509,12 +1516,83 @@ class StitchingDialog(PersistentDialog):
                 "Improves tile intensity consistency and reduces seams."
             )
         else:
+            self._flat_field_cb.setChecked(False)
             self._flat_field_cb.setEnabled(False)
             self._flat_field_cb.setToolTip(
                 "Flat-field correction requires basicpy.\n"
                 "Click 'Setup Preprocessing...' to install it\n"
                 "in an isolated environment."
             )
+
+        # --- Destriping (pystripe) ---
+        try:
+            import pystripe  # noqa: F401
+
+            pystripe_ok = True
+        except Exception:
+            pystripe_ok = False
+
+        if pystripe_ok:
+            self._destripe_cb.setEnabled(True)
+            self._destripe_cb.setToolTip(
+                "PyStripe wavelet destriping per Z-plane.\n"
+                "Removes stripe artifacts from illumination-side scanning."
+            )
+        else:
+            self._destripe_cb.setChecked(False)
+            self._destripe_cb.setEnabled(False)
+            self._destripe_fast_cb.setChecked(False)
+            self._destripe_fast_cb.setEnabled(False)
+            self._destripe_cb.setToolTip(
+                "Destriping requires pystripe.\n" "Install with: pip install pystripe"
+            )
+
+        # --- Deconvolution (pycudadecon or RedLionfish) ---
+        from py2flamingo.stitching import deconvolution as _decon
+
+        if _decon.is_available():
+            self._deconv_cb.setEnabled(True)
+            self._deconv_cb.setToolTip(
+                "Per-tile GPU deconvolution before stitching.\n"
+                "Uses pycudadecon (NVIDIA) or RedLionfish (any GPU)."
+            )
+        else:
+            self._deconv_cb.setChecked(False)
+            self._deconv_cb.setEnabled(False)
+            self._deconv_cb.setToolTip(_decon.unavailable_reason())
+
+        # --- Leonardo FUSE illumination fusion combo item ---
+        try:
+            from py2flamingo.stitching.isolated_service import (
+                IsolatedPreprocessingService,
+            )
+
+            leo_ok = IsolatedPreprocessingService().has_leonardo()
+        except Exception:
+            leo_ok = False
+
+        leo_idx = self._fusion_combo.findData("leonardo")
+        if leo_idx >= 0:
+            item = self._fusion_combo.model().item(leo_idx)
+            if item is not None:
+                item.setEnabled(leo_ok)
+                if leo_ok:
+                    item.setToolTip(
+                        "Leonardo FUSE content-based illumination fusion\n"
+                        "(leonardo-toolset in the isolated preprocessing env)."
+                    )
+                else:
+                    item.setToolTip(
+                        "Leonardo FUSE requires leonardo-toolset in the\n"
+                        "isolated preprocessing environment.\n"
+                        "Click 'Setup Preprocessing...' to install it."
+                    )
+            # If the current selection is Leonardo but it's now disabled,
+            # fall back to Max so the run doesn't pick an unavailable mode.
+            if not leo_ok and self._fusion_combo.currentData() == "leonardo":
+                max_idx = self._fusion_combo.findData("max")
+                if max_idx >= 0:
+                    self._fusion_combo.setCurrentIndex(max_idx)
 
     def _on_setup_env(self):
         """Run the preprocessing environment setup script."""
