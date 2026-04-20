@@ -179,26 +179,45 @@ class StitchingDialog(PersistentDialog):
         ds_layout.setSpacing(4)
         ds_layout.addWidget(QLabel("XY"))
         self._downsample_xy_combo = QComboBox()
-        for label, value in [("1x", 1), ("2x", 2), ("4x", 4), ("8x", 8)]:
+        for label, value in [
+            ("1x", 1),
+            ("2x", 2),
+            ("4x", 4),
+            ("8x", 8),
+            ("iso", -1),
+        ]:
             self._downsample_xy_combo.addItem(label, value)
-        self._downsample_xy_combo.setToolTip(
-            "XY downsample factor.\n"
-            "Reduces tile width/height before registration.\n"
-            "2x: 2048\u21921024, 4x: 2048\u2192512"
+        iso_tooltip = (
+            "Downsample factor.\n"
+            "XY: 1x/2x/4x/8x reduces tile width+height.\n"
+            "Z:  1x/2x/4x reduces planes.\n\n"
+            "iso: auto-pick factors that make output voxels as close\n"
+            "to cubic as possible, subject to the allowed factors\n"
+            "above. Resolved at run time from the acquisition's\n"
+            "actual Z step, so each item in a batch queue is sized\n"
+            "independently. Selecting iso in one dropdown flips the\n"
+            "other to iso too (they act as a single choice).\n\n"
+            "Examples at XY pixel = 0.406 \u00b5m:\n"
+            "  Z 0.5 \u00b5m  \u2192 XY 1x, Z 1x  (0.41 \u00d7 0.50 \u00b5m)\n"
+            "  Z 1.0 \u00b5m  \u2192 XY 2x, Z 1x  (0.81 \u00d7 1.00 \u00b5m)\n"
+            "  Z 2.5 \u00b5m  \u2192 XY 8x, Z 1x  (3.25 \u00d7 2.50 \u00b5m)\n"
+            "  Z 5.0 \u00b5m  \u2192 XY 8x, Z 1x  (3.25 \u00d7 5.00 \u00b5m)"
         )
+        self._downsample_xy_combo.setToolTip(iso_tooltip)
         ds_layout.addWidget(self._downsample_xy_combo)
         ds_layout.addWidget(QLabel("Z"))
         self._downsample_z_combo = QComboBox()
-        for label, value in [("1x", 1), ("2x", 2), ("4x", 4)]:
+        for label, value in [("1x", 1), ("2x", 2), ("4x", 4), ("iso", -1)]:
             self._downsample_z_combo.addItem(label, value)
-        self._downsample_z_combo.setToolTip(
-            "Z downsample factor.\n"
-            "Z pixel size is often already much coarser than XY,\n"
-            "so 1x (no Z downsample) is common.\n\n"
-            "Example: XY=0.406\u00b5m, Z=2.5\u00b5m \u2192 Z is 6x coarser.\n"
-            "2x XY + 1x Z keeps Z resolution while shrinking XY."
+        self._downsample_z_combo.setToolTip(iso_tooltip)
+        # Link the two combos so "iso" is always a paired choice.
+        self._iso_sync_guard = False
+        self._downsample_xy_combo.currentIndexChanged.connect(
+            self._on_downsample_xy_changed
         )
-        ds_layout.addWidget(self._downsample_z_combo)
+        self._downsample_z_combo.currentIndexChanged.connect(
+            self._on_downsample_z_changed
+        )
         settings_layout.addLayout(ds_layout, 1, 1)
 
         settings_layout.addWidget(QLabel("Illum. fusion:"), 1, 2)
@@ -732,10 +751,9 @@ class StitchingDialog(PersistentDialog):
         self._log(f"\nDiscovered {total} tiles across {ok}/{len(pending)} directories")
         self._update_action_buttons()
 
-        # Show memory estimate for first discovered set (representative)
-        first_tiles = next((it["tiles"] for it in self._queue if it["tiles"]), None)
-        if first_tiles:
-            self._update_memory_estimate(first_tiles)
+        # Show memory estimate across ALL discovered queue items (worst case).
+        if any(it["tiles"] for it in self._queue):
+            self._update_memory_estimate()
 
     def _discover_tiles_for_path(self, acq_path: Path):
         """Discover tiles in an acquisition directory.
@@ -779,12 +797,62 @@ class StitchingDialog(PersistentDialog):
         self._reg_binning_combo.setEnabled(not checked)
         self._reg_binning_label.setEnabled(not checked)
 
+    def _on_downsample_xy_changed(self, _index: int):
+        """Keep XY and Z downsample combos in sync around the iso choice."""
+        if self._iso_sync_guard:
+            return
+        xy_val = self._downsample_xy_combo.currentData()
+        z_val = self._downsample_z_combo.currentData()
+        self._iso_sync_guard = True
+        try:
+            if xy_val == -1 and z_val != -1:
+                idx = self._downsample_z_combo.findData(-1)
+                if idx >= 0:
+                    self._downsample_z_combo.setCurrentIndex(idx)
+            elif xy_val != -1 and z_val == -1:
+                idx = self._downsample_z_combo.findData(1)
+                if idx >= 0:
+                    self._downsample_z_combo.setCurrentIndex(idx)
+        finally:
+            self._iso_sync_guard = False
+
+    def _on_downsample_z_changed(self, _index: int):
+        """Keep XY and Z downsample combos in sync around the iso choice."""
+        if self._iso_sync_guard:
+            return
+        xy_val = self._downsample_xy_combo.currentData()
+        z_val = self._downsample_z_combo.currentData()
+        self._iso_sync_guard = True
+        try:
+            if z_val == -1 and xy_val != -1:
+                idx = self._downsample_xy_combo.findData(-1)
+                if idx >= 0:
+                    self._downsample_xy_combo.setCurrentIndex(idx)
+            elif z_val != -1 and xy_val == -1:
+                idx = self._downsample_xy_combo.findData(1)
+                if idx >= 0:
+                    self._downsample_xy_combo.setCurrentIndex(idx)
+        finally:
+            self._iso_sync_guard = False
+
     def _update_memory_estimate(self, tiles=None):
-        """Compute and display memory estimates for in-memory vs streaming modes."""
-        if tiles is None:
-            # Try to find tiles from first queue item with discovered tiles
-            tiles = next((it["tiles"] for it in self._queue if it["tiles"]), None)
-        if not tiles:
+        """Compute and display memory estimates for in-memory vs streaming modes.
+
+        When ``tiles`` is None and the queue has multiple discovered items,
+        the estimate reports the worst case across all queued items (picked
+        by largest in-memory peak) so the user sees the ceiling the run
+        must fit under, not just the first acquisition.
+        """
+        # Build the list of (label, tiles) pairs to estimate against. When
+        # called with an explicit tiles list, honour it as a single item.
+        if tiles is not None:
+            tile_sets = [(None, tiles)]
+        else:
+            tile_sets = [
+                (it.get("path"), it["tiles"]) for it in self._queue if it["tiles"]
+            ]
+
+        if not tile_sets:
             self._memory_label.setText("")
             self._last_mem_estimate = None
             self._update_memory_indicator()
@@ -795,10 +863,18 @@ class StitchingDialog(PersistentDialog):
 
             config = self._build_config()
             channels = self._parse_channels()
-            all_ch = sorted(set(ch for t in tiles for ch in t.channels))
-            process_ch = channels if channels else all_ch
 
-            est = estimate_memory_usage(tiles, process_ch, config)
+            worst_est = None
+            worst_label = None
+            for label, tset in tile_sets:
+                all_ch = sorted(set(ch for t in tset for ch in t.channels))
+                process_ch = channels if channels else all_ch
+                est = estimate_memory_usage(tset, process_ch, config)
+                if worst_est is None or est["in_memory_gb"] > worst_est["in_memory_gb"]:
+                    worst_est = est
+                    worst_label = label
+
+            est = worst_est
             self._last_mem_estimate = est
 
             mode_hint = ""
@@ -807,10 +883,15 @@ class StitchingDialog(PersistentDialog):
             else:
                 mode_hint = " \u2192 auto will use in-memory"
 
+            queue_hint = ""
+            if len(tile_sets) > 1:
+                queue_hint = f"  (worst of {len(tile_sets)} queued)"
+
             self._memory_label.setText(
                 f"In-memory: ~{est['in_memory_gb']:.0f} GB  |  "
                 f"Streaming: ~{est['streaming_gb']:.1f} GB  |  "
                 f"Output: ~{est['output_gb']:.0f} GB"
+                f"{queue_hint}"
                 f"{mode_hint}"
             )
 
@@ -824,8 +905,17 @@ class StitchingDialog(PersistentDialog):
                 sys_ram = psutil.virtual_memory().total / (1024**3)
             except ImportError:
                 sys_ram = 0
+            worst_suffix = ""
+            if len(tile_sets) > 1 and worst_label is not None:
+                try:
+                    worst_suffix = (
+                        f" (worst of {len(tile_sets)} queued: "
+                        f"{Path(str(worst_label)).name})"
+                    )
+                except Exception:
+                    worst_suffix = f" (worst of {len(tile_sets)} queued)"
             self._log(
-                f"Memory estimate (system RAM: {sys_ram:.0f} GB):\n"
+                f"Memory estimate{worst_suffix} (system RAM: {sys_ram:.0f} GB):\n"
                 f"  In-memory mode: ~{est['in_memory_gb']:.0f} GB peak\n"
                 f"  Streaming mode: ~{est['streaming_gb']:.1f} GB peak\n"
                 f"  Output size:    ~{est['output_gb']:.0f} GB\n"

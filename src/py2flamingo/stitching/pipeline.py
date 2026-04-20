@@ -168,8 +168,8 @@ class StitchingConfig:
     # Depth-dependent attenuation correction (Beer-Lambert Z-falloff)
     depth_attenuation: bool = False
     depth_attenuation_mu: Optional[float] = None  # 1/µm; None = auto-fit
-    downsample_xy: int = 1  # XY downsample factor (1, 2, 4, 8)
-    downsample_z: int = 1  # Z downsample factor (1, 2, 4)
+    downsample_xy: int = 1  # XY downsample factor (1, 2, 4, 8; -1 = iso)
+    downsample_z: int = 1  # Z downsample factor (1, 2, 4; -1 = iso)
 
     # Deconvolution
     deconvolution_enabled: bool = False
@@ -205,6 +205,51 @@ class StitchingConfig:
         except Exception:
             logger.debug("Could not load YAML defaults, using built-in defaults")
         return config
+
+
+# Sentinel stored in StitchingConfig.downsample_xy/_z to request
+# automatic isotropic factor selection. Resolved at run time against
+# the acquisition's actual z_step, so batch queues with different
+# Z steps each get their own resolution.
+ISO_DOWNSAMPLE = -1
+
+
+def compute_iso_downsample(
+    xy_pixel_um: float,
+    z_step_um: float,
+    xy_choices: Sequence[int] = (1, 2, 4, 8),
+    z_choices: Sequence[int] = (1, 2, 4),
+) -> Tuple[int, int]:
+    """Pick (downsample_xy, downsample_z) that make output voxels closest to cubic.
+
+    Searches the Cartesian product of allowed XY and Z factors, minimising
+    post-downsample anisotropy ``max(out_xy, out_z) / min(out_xy, out_z)``.
+    Ties break toward less data loss (smaller ``dxy * dz``).
+
+    Args:
+        xy_pixel_um: Native XY pixel size in micrometres.
+        z_step_um: Native Z step in micrometres.
+        xy_choices: Allowed XY downsample factors (must match UI).
+        z_choices: Allowed Z downsample factors (must match UI).
+
+    Returns:
+        (downsample_xy, downsample_z) integers from the allowed sets.
+    """
+    if xy_pixel_um <= 0 or z_step_um <= 0:
+        return 1, 1
+
+    best: Tuple[int, int] = (1, 1)
+    best_score: Tuple[float, int] = (float("inf"), 0)
+    for dz in z_choices:
+        for dxy in xy_choices:
+            out_xy = xy_pixel_um * dxy
+            out_z = z_step_um * dz
+            anis = max(out_xy, out_z) / min(out_xy, out_z)
+            score = (anis, dxy * dz)
+            if score < best_score:
+                best_score = score
+                best = (dxy, dz)
+    return best
 
 
 # ---------------------------------------------------------------------------
@@ -1140,6 +1185,23 @@ class StitchingPipeline:
         if z_step_um is None:
             z_step_um = tiles[0].z_step_mm * 1000.0
             self.logger.info(f"Z step from data: {z_step_um:.3f} µm")
+
+        # Resolve iso sentinel (either axis set to ISO_DOWNSAMPLE triggers
+        # isotropic auto-selection for both). Writes resolved ints back to
+        # the config so tags, preprocessing, and metadata see real factors.
+        if (
+            self.config.downsample_xy == ISO_DOWNSAMPLE
+            or self.config.downsample_z == ISO_DOWNSAMPLE
+        ):
+            iso_xy, iso_z = compute_iso_downsample(self.config.pixel_size_um, z_step_um)
+            self.logger.info(
+                f"Iso downsample: native XY={self.config.pixel_size_um:.3f} µm "
+                f"Z={z_step_um:.3f} µm → XY={iso_xy}x Z={iso_z}x "
+                f"(output {self.config.pixel_size_um * iso_xy:.3f} × "
+                f"{z_step_um * iso_z:.3f} µm)"
+            )
+            self.config.downsample_xy = iso_xy
+            self.config.downsample_z = iso_z
 
         # Apply downsample factors to voxel sizes
         ds_xy = self.config.downsample_xy
