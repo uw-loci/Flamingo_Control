@@ -289,8 +289,11 @@ class DualResolutionVoxelStorage:
         # Set when first data is captured - all subsequent positions are relative to this
         self.reference_stage_position = None  # Will be set on first data capture
 
-        # Initialize storage for each channel
-        self.num_channels = 8
+        # Initialize storage for each channel.
+        # 0–3: left-side laser channels (405/488/561/640)
+        # 4–7: right-side laser channels (same lasers, opposite path)
+        # 8:   LED / brightfield (dedicated so it doesn't overwrite 405nm)
+        self.num_channels = 9
         self._initialize_storage()
 
         # Track data bounds for optimization

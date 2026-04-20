@@ -215,6 +215,19 @@ channels:
     default_contrast_min: 0
     default_contrast_max: 500
 
+  # Dedicated LED / brightfield channel — separate from fluorescence
+  # so it keeps its own contrast controls and doesn't overwrite the
+  # 405nm channel when "Populate from Live" is used in LED mode.
+  - id: 8
+    name: "LED / Brightfield"
+    default_colormap: "gray"
+    default_visible: true
+    update_strategy: "maximum"
+    blend_mode: "additive"
+    opacity: 0.8
+    default_contrast_min: 0
+    default_contrast_max: 4000
+
 # Live view display settings
 live_display:
   # Default contrast limits for live camera feed

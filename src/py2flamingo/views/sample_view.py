@@ -934,8 +934,7 @@ class SampleView(QWidget):
             "  + White cross      \u2192 Current stage position\n"
             "  \u2295 Orange crosshair \u2192 Move target (active)\n"
             "  \u2295 Purple crosshair \u2192 Move target (reached)\n"
-            "  \u2508 Cyan dashed box  \u2192 3D viewing frame\n"
-            "  \u2508 Cyan dashed line \u2192 Focal plane\n"
+            "  \u2508 Cyan dashed line \u2192 Focal plane (one per view)\n"
             "\n"
             "Mouse Controls:\n"
             "  Double-click \u2192 Move stage (2 axes)\n"
@@ -1086,13 +1085,40 @@ class SampleView(QWidget):
             right_layout = QVBoxLayout()
             right_layout.setSpacing(2)
             right_layout.setContentsMargins(4, 4, 4, 4)
-            for i in range(4, self._num_channels):
+            # Right-side lasers are channels 4-7 only — channel 8 (LED)
+            # lives in its own group below.
+            for i in range(4, min(8, self._num_channels)):
                 right_layout.addLayout(
                     self._create_channel_row(i, channels_config, default_channel_info)
                 )
             self._right_side_group.setLayout(right_layout)
             self._right_side_group.toggled.connect(self._on_right_side_toggled)
             layout.addWidget(self._right_side_group)
+
+        # LED / Brightfield group (channel 8) — separate from the laser
+        # side groups because it's a different modality and has no
+        # left/right pairing. Collapsed by default; expanded by
+        # _update_channel_availability when LED data arrives.
+        if self._num_channels > 8:
+            self._led_group = QGroupBox("LED / Brightfield")
+            self._led_group.setToolTip(
+                "Channel 8: LED / brightfield.\n"
+                "Populated by 'Populate from Live' when no laser is on.\n"
+                "Uses its own contrast controls, independent of the\n"
+                "405nm fluorescence channel."
+            )
+            self._led_group.setCheckable(True)
+            self._led_group.setChecked(False)
+            led_layout = QVBoxLayout()
+            led_layout.setSpacing(2)
+            led_layout.setContentsMargins(4, 4, 4, 4)
+            for i in range(8, self._num_channels):
+                led_layout.addLayout(
+                    self._create_channel_row(i, channels_config, default_channel_info)
+                )
+            self._led_group.setLayout(led_layout)
+            self._led_group.toggled.connect(self._on_led_group_toggled)
+            layout.addWidget(self._led_group)
 
         # Auto Contrast button + Grayscale + Link Sides row
         btn_row = QHBoxLayout()
@@ -1853,13 +1879,35 @@ class SampleView(QWidget):
         self.max_intensity_spinbox.blockSignals(False)
         self._update_live_display()
 
+    def _on_led_group_toggled(self, checked: bool) -> None:
+        """Handle LED group checkbox toggle.
+
+        When unchecked, hide all LED-group layers (channel 8+).
+        When checked, restore their visibility based on individual checkboxes.
+        """
+        for ch_id in range(8, self._num_channels):
+            layer = self.channel_layers.get(ch_id) if self.channel_layers else None
+            if layer is not None:
+                try:
+                    if checked:
+                        cb = self.channel_checkboxes.get(ch_id)
+                        layer.visible = cb.isChecked() if cb else False
+                    else:
+                        layer.visible = False
+                except Exception as e:
+                    self.logger.warning(
+                        f"Could not set visibility for LED channel {ch_id}: {e}"
+                    )
+        self._update_plane_views()
+
     def _on_right_side_toggled(self, checked: bool) -> None:
         """Handle Right Side group checkbox toggle.
 
         When unchecked, hide all right-side channels (4-7).
         When checked, restore their visibility based on individual checkboxes.
+        Channel 8 (LED) is governed by its own group and is not affected here.
         """
-        for ch_id in range(4, self._num_channels):
+        for ch_id in range(4, min(8, self._num_channels)):
             layer = self.channel_layers.get(ch_id) if self.channel_layers else None
             if layer is not None:
                 try:
@@ -2343,9 +2391,13 @@ class SampleView(QWidget):
                 self.logger.info(f"Channel {ch_id} auto-enabled (data received)")
 
                 # Auto-expand right side group when right-side data arrives
-                if ch_id >= 4 and hasattr(self, "_right_side_group"):
+                if 4 <= ch_id < 8 and hasattr(self, "_right_side_group"):
                     if not self._right_side_group.isChecked():
                         self._right_side_group.setChecked(True)
+                # Auto-expand LED group when LED data arrives
+                elif ch_id >= 8 and hasattr(self, "_led_group"):
+                    if not self._led_group.isChecked():
+                        self._led_group.setChecked(True)
 
     def _get_viewer(self):
         """Get the napari viewer owned by this Sample View."""
@@ -3158,7 +3210,15 @@ class SampleView(QWidget):
             self.logger.debug(f"Populate tick error: {e}")
 
     def _detect_active_channel(self) -> Optional[int]:
-        """Detect which channel is currently active based on laser state."""
+        """Detect which channel is currently active.
+
+        Returns the laser channel index (0–3) if any laser is on,
+        otherwise channel 8 (the dedicated LED/brightfield channel)
+        so LED data gets its own contrast controls and doesn't
+        overwrite the 405nm fluorescence channel. Returns 0 only as
+        a last-resort fallback when the laser/LED controller is
+        unavailable.
+        """
         if not self.laser_led_controller:
             return 0
 
@@ -3167,8 +3227,8 @@ class SampleView(QWidget):
             for ch_id, is_on in enumerate(laser_states[:4]):
                 if is_on:
                     return ch_id
-            return None  # No laser on (probably LED)
-        except:
+            return 8  # No laser on → LED / brightfield channel
+        except Exception:
             return 0
 
     def _on_fusion_mode_changed(self, text: str) -> None:

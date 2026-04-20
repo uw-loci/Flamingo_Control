@@ -1040,7 +1040,12 @@ class ChamberVisualizationManager:
             # Create empty volume
             empty_volume = np.zeros(display_dims, dtype=np.uint16)
 
-            # Add layer
+            # Add layer. Pull the contrast limits from the channel's YAML
+            # entry so LED/brightfield (which is much brighter than
+            # fluorescence) can start at a different range than the
+            # lasers without the user hunting for the slider.
+            cmin = ch_config.get("default_contrast_min", 0)
+            cmax = ch_config.get("default_contrast_max", 500)
             layer = self.viewer.add_image(
                 empty_volume,
                 name=ch_name,
@@ -1049,7 +1054,7 @@ class ChamberVisualizationManager:
                 blending="additive",
                 opacity=0.8,
                 rendering="mip",
-                contrast_limits=(0, 500),  # Match UI slider default
+                contrast_limits=(cmin, cmax),
             )
 
             self.channel_layers[ch_id] = layer
