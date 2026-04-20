@@ -1494,6 +1494,12 @@ class StitchingPipeline:
         fused_channel_ids = []
         stacked = None
 
+        # Imaris block-streaming path: keep lazy dask arrays, don't
+        # materialize channels.  PyImarisWriter iterates blocks later.
+        imaris_mode = self.config.output_format == "imaris"
+        per_channel_darrays: list = []
+        fused_sims: list = []
+
         for ch_idx, ch_id in enumerate(process_channels):
             if self._cancelled_fn():
                 self.logger.info("Pipeline cancelled by user")
@@ -1537,52 +1543,58 @@ class StitchingPipeline:
             darr = da.clip(darr, 0, 65535).astype(np.uint16)
 
             self.logger.info(
-                f"  Computing channel {ch_id} "
-                f"(shape={darr.shape}, lazy tiles, synchronous)..."
-            )
-
-            vol = np.zeros(darr.shape, dtype=np.uint16)
-            with dask.config.set(scheduler="synchronous"):
-                da.store(darr, vol, compute=True)
-
-            self.logger.info(
-                f"  Channel {ch_id}: shape={vol.shape}, "
+                f"  Channel {ch_id}: shape={darr.shape} "
                 f"origin Z={origin_um['z']:.1f} Y={origin_um['y']:.1f} "
                 f"X={origin_um['x']:.1f} \u00b5m"
             )
 
-            # Allocate / fill stacked output array
-            if stacked is None:
-                n_total = len(process_channels)
-                if n_total > 1:
-                    stacked = np.zeros((n_total, *vol.shape), dtype=np.uint16)
-                    stacked[0] = vol
-                    self.logger.info(
-                        f"  Pre-allocated output array: {stacked.shape} "
-                        f"({stacked.nbytes / (1024**3):.1f} GB)"
-                    )
-                else:
-                    stacked = vol
+            if imaris_mode:
+                # Keep the lazy dask array for block-streamed .ims write.
+                # No materialization — PyImarisWriter drives compute block
+                # by block, loading only overlapping tiles per block.
+                per_channel_darrays.append(darr)
+                # Hold fused_sim alive so darr keeps a valid graph.
+                fused_sims.append(fused_sim)
+                del tile_data
             else:
-                dest_idx = len(fused_channel_ids)
-                sz, sy, sx = vol.shape
-                stacked[dest_idx, :sz, :sy, :sx] = vol
+                # TIFF/Zarr path: compute channel into numpy, accumulate
+                # into the stacked (C,Z,Y,X) array.
+                self.logger.info(
+                    f"  Computing channel {ch_id} " f"(lazy tiles, synchronous)..."
+                )
+                vol = np.zeros(darr.shape, dtype=np.uint16)
+                with dask.config.set(scheduler="synchronous"):
+                    da.store(darr, vol, compute=True)
 
-            # Free channel data before loading the next one
-            del vol, darr, fused_sim, tile_data
-            gc.collect()
+                if stacked is None:
+                    n_total = len(process_channels)
+                    if n_total > 1:
+                        stacked = np.zeros((n_total, *vol.shape), dtype=np.uint16)
+                        stacked[0] = vol
+                        self.logger.info(
+                            f"  Pre-allocated output array: {stacked.shape} "
+                            f"({stacked.nbytes / (1024**3):.1f} GB)"
+                        )
+                    else:
+                        stacked = vol
+                else:
+                    dest_idx = len(fused_channel_ids)
+                    sz, sy, sx = vol.shape
+                    stacked[dest_idx, :sz, :sy, :sx] = vol
+
+                del vol, darr, fused_sim, tile_data
+                gc.collect()
 
             channel_origins.append(origin_um)
             fused_channel_ids.append(ch_id)
 
-        if stacked is None:
+        if not fused_channel_ids:
             self.logger.error("No channels were fused successfully")
             return output_path
 
-        self.logger.info(
-            f"Step 5: Computed {len(fused_channel_ids)} channels \u2192 "
-            f"shape={stacked.shape}"
-        )
+        if not imaris_mode and stacked is None:
+            self.logger.error("No channels materialized for write")
+            return output_path
 
         # --- Step 6: Write ---
         if self._cancelled_fn():
@@ -1590,13 +1602,46 @@ class StitchingPipeline:
             return output_path
 
         self._progress_fn(85, "Writing multi-channel output...")
-        self.logger.info("Step 6: Writing multi-channel output (streaming)...")
         basename = self._build_output_basename(acquisition_dir)
         self.logger.info(f"  Output basename: {basename}")
         channel_names = [f"Channel_{ch_id}" for ch_id in fused_channel_ids]
-        self._write_multichannel_output(
-            stacked, channel_names, voxel_size_um, output_path, basename
-        )
+
+        if imaris_mode:
+            self.logger.info(
+                "Step 6: Writing Imaris .ims (block-streaming, "
+                "no full-channel materialization)..."
+            )
+            ims_path = output_path / f"{basename}.ims"
+            try:
+                from py2flamingo.stitching.writers import imaris_writer
+
+                if not imaris_writer.is_available():
+                    self.logger.error(
+                        f"Imaris writer unavailable: {imaris_writer.unavailable_reason()}"
+                    )
+                else:
+                    imaris_writer.write_imaris_streaming(
+                        per_channel_darrays=per_channel_darrays,
+                        output_path=ims_path,
+                        voxel_size_um=voxel_size_um,
+                        channel_names=channel_names,
+                        progress_callback=self._progress_fn,
+                    )
+            except Exception as e:
+                self.logger.error(f"Imaris .ims write failed: {e}", exc_info=True)
+            finally:
+                # Now safe to release fusion graphs
+                del per_channel_darrays, fused_sims
+                gc.collect()
+        else:
+            self.logger.info(
+                f"Step 5: Computed {len(fused_channel_ids)} channels \u2192 "
+                f"shape={stacked.shape}"
+            )
+            self.logger.info("Step 6: Writing multi-channel output (streaming)...")
+            self._write_multichannel_output(
+                stacked, channel_names, voxel_size_um, output_path, basename
+            )
 
         # --- Step 7: Write metadata ---
         self._progress_fn(95, "Writing metadata...")
@@ -2097,6 +2142,27 @@ class StitchingPipeline:
             except ImportError as e:
                 self.logger.error(f"  OME-TIFF write failed: {e}")
 
+        if fmt == "imaris":
+            ims_path = output_dir / f"{basename}.ims"
+            self.logger.info(f"  Writing Imaris .ims (direct): {ims_path}")
+            try:
+                from py2flamingo.stitching.writers import imaris_writer
+
+                if not imaris_writer.is_available():
+                    self.logger.error(
+                        f"  Imaris writer unavailable: {imaris_writer.unavailable_reason()}"
+                    )
+                else:
+                    imaris_writer.write_imaris_from_array(
+                        stacked=stacked,
+                        output_path=ims_path,
+                        voxel_size_um=voxel_size_um,
+                        channel_names=channel_names,
+                        progress_callback=self._progress_fn,
+                    )
+            except Exception as e:
+                self.logger.error(f"  Imaris .ims write failed: {e}", exc_info=True)
+
     def _write_multichannel_streaming(
         self,
         dask_data,
@@ -2177,6 +2243,8 @@ class StitchingPipeline:
             store_path = f"{basename}.ome.zarr"
         elif fmt == "ome-tiff":
             store_path = f"{basename}.ome.tif"
+        elif fmt == "imaris":
+            store_path = f"{basename}.ims"
         else:
             store_path = f"{basename}.ome.zarr"
 

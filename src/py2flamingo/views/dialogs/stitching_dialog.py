@@ -217,11 +217,29 @@ class StitchingDialog(PersistentDialog):
         self._format_combo.addItem("OME-Zarr (Fiji compatible)", "ome-zarr-v2")
         self._format_combo.addItem("OME-Zarr Sharded", "ome-zarr-sharded")
         self._format_combo.addItem("OME-TIFF (single file)", "ome-tiff")
+        self._format_combo.addItem("Imaris (.ims)", "imaris")
         self._format_combo.addItem("Both (Sharded + TIFF)", "both")
+        # Disable Imaris option if PyImarisWriter not available
+        try:
+            from py2flamingo.stitching.writers import imaris_writer
+
+            if not imaris_writer.is_available():
+                idx = self._format_combo.findData("imaris")
+                if idx >= 0:
+                    item = self._format_combo.model().item(idx)
+                    item.setEnabled(False)
+                    item.setToolTip(
+                        "Imaris (.ims) unavailable:\n"
+                        + imaris_writer.unavailable_reason()
+                    )
+        except Exception:
+            pass
+
         self._format_combo.setToolTip(
             "OME-Zarr (Fiji compatible): opens in Fiji, QuPath, BigDataViewer, napari\n"
             "OME-Zarr Sharded: fewest files, napari only (Fiji cannot open)\n"
             "OME-TIFF: single file, universal viewer support\n"
+            "Imaris (.ims): direct writer \u2014 opens correctly in Imaris (Windows only)\n"
             "Both: write Zarr Sharded + TIFF"
         )
         self._format_combo.currentIndexChanged.connect(self._on_format_changed)
@@ -236,7 +254,7 @@ class StitchingDialog(PersistentDialog):
             "qproperty-alignment: AlignCenter; }"
         )
         format_help.setToolTip(
-            "<b>Zarr Format Guide</b><br><br>"
+            "<b>Output Format Guide</b><br><br>"
             "<b>OME-Zarr (Fiji compatible)</b> &mdash; Zarr v2 + OME-NGFF v0.4<br>"
             "Opens in <b>Fiji</b> (N5 plugin), <b>QuPath</b>, <b>BigDataViewer</b>, "
             "<b>napari</b>, and most bio-imaging tools.<br><br>"
@@ -245,7 +263,13 @@ class StitchingDialog(PersistentDialog):
             "<b>napari</b> and zarr-python 3.x.<br><br>"
             "<b>OME-TIFF</b> &mdash; Single file per channel<br>"
             "Universally readable. Best for sharing and archiving.<br><br>"
-            "<b>Need Imaris .ims?</b> Export OME-TIFF, convert with ImarisFileConverter."
+            "<b>Imaris (.ims)</b> &mdash; Direct writer via PyImarisWriter (Apache 2.0)<br>"
+            "Opens correctly in <b>Imaris</b> with auto-generated pyramids. "
+            "Avoids ImarisFileConverter's SubIFD-pyramid bug that otherwise "
+            "collapses all data into Z=0. Block-streamed write for TB-scale "
+            "datasets. <b>Windows only</b> (<code>pip install PyImarisWriter</code>).<br><br>"
+            "<b>Alternative for Imaris:</b> Export OME-TIFF with pyramids OFF, "
+            "then run through ImarisFileConverter."
         )
         format_help.setFixedWidth(20)
         settings_layout.addWidget(format_help, 2, 2)
@@ -1226,12 +1250,16 @@ class StitchingDialog(PersistentDialog):
     # --- Format-dependent UI ---
 
     def _on_format_changed(self, _index=None):
-        """Update compression options and .ozx checkbox for selected format."""
+        """Update compression options and .ozx/pyramid toggles for selected format."""
         fmt = self._format_combo.currentData()
         has_zarr = fmt in ("ome-zarr-sharded", "ome-zarr-v2", "both")
+        has_tiff = fmt in ("ome-tiff", "both")
         self._ozx_cb.setEnabled(has_zarr)
         if not has_zarr:
             self._ozx_cb.setChecked(False)
+        # TIFF pyramids toggle only relevant for TIFF output
+        if hasattr(self, "_tiff_pyramids_cb"):
+            self._tiff_pyramids_cb.setEnabled(has_tiff)
         self._update_compression_options()
 
     def _update_compression_options(self):
@@ -1244,6 +1272,16 @@ class StitchingDialog(PersistentDialog):
         prev = self._compression_combo.currentData()
         self._compression_combo.blockSignals(True)
         self._compression_combo.clear()
+
+        if fmt == "imaris":
+            # PyImarisWriter handles compression internally (Gzip Level 2).
+            # Lock the combo to a single informational entry.
+            self._compression_combo.addItem("(internal: Gzip L2)", "gzip")
+            self._compression_combo.setEnabled(False)
+            self._compression_combo.blockSignals(False)
+            return
+
+        self._compression_combo.setEnabled(True)
 
         if fmt == "ome-tiff":
             # zlib and lzw are always available (built into tifffile/Python)
