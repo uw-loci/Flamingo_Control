@@ -1472,10 +1472,12 @@ class StitchingPipeline:
             return output_path
 
         # --- Step 4+5: Fuse each channel, compute, accumulate ---
-        # Lazy tile loading: tiles load from disk on-demand during
-        # fusion compute via dask.delayed. Only tiles overlapping the
-        # current output chunk are in memory at any time.
-        # Process one channel at a time: load \u2192 fuse \u2192 compute \u2192 free.
+        # Tile spill-to-disk: each tile is preprocessed exactly once and
+        # written to a per-tile memmap under a temp dir. Fusion reads
+        # chunks directly from the flat files, so output-chunk computes
+        # never retrigger the full preprocess chain.
+        import shutil
+
         import dask
         import dask.array as da
 
@@ -1500,93 +1502,114 @@ class StitchingPipeline:
         per_channel_darrays: list = []
         fused_sims: list = []
 
-        for ch_idx, ch_id in enumerate(process_channels):
-            if self._cancelled_fn():
-                self.logger.info("Pipeline cancelled by user")
-                return output_path
+        tmp_root = output_path / ".stitch_tmp"
+        try:
+            for ch_idx, ch_id in enumerate(process_channels):
+                if self._cancelled_fn():
+                    self.logger.info("Pipeline cancelled by user")
+                    return output_path
 
-            fuse_pct = 50 + int(35 * (ch_idx + 0.5) / max(len(process_channels), 1))
-            self._progress_fn(
-                fuse_pct,
-                f"Fusing channel {ch_id} "
-                f"({ch_idx + 1}/{len(process_channels)}) [lazy tiles]...",
-            )
-            self.logger.info(
-                f"Step 4: Fusing channel {ch_id} ({len(tiles)} tiles) "
-                f"[streaming, lazy tile loading]..."
-            )
-
-            # Build lazy tile data — no tiles loaded yet
-            tile_data = self._make_lazy_tile_data(tiles, ch_id, expected_tile_shape)
-            if not tile_data:
-                self.logger.warning(f"No data for channel {ch_id}, skipping")
-                continue
-
-            fused_sim, origin_um = self._fuse_channel(
-                tile_data, voxel_size_um, reg_params, transform_key
-            )
-
-            # Compute chunk by chunk with synchronous scheduler.
-            # Tiles load from disk as each chunk needs them (lazy).
-            # Clip + cast to uint16 in the graph so float64 intermediates
-            # are converted per-chunk, never materializing the full volume.
-            compute_pct = 50 + int(35 * (ch_idx + 0.8) / max(len(process_channels), 1))
-            self._progress_fn(
-                compute_pct,
-                f"Computing channel {ch_id} "
-                f"({ch_idx + 1}/{len(process_channels)})...",
-            )
-
-            darr = fused_sim.data
-            while darr.ndim > 3:
-                darr = darr[0]
-            darr = da.clip(darr, 0, 65535).astype(np.uint16)
-
-            self.logger.info(
-                f"  Channel {ch_id}: shape={darr.shape} "
-                f"origin Z={origin_um['z']:.1f} Y={origin_um['y']:.1f} "
-                f"X={origin_um['x']:.1f} \u00b5m"
-            )
-
-            if imaris_mode:
-                # Keep the lazy dask array for block-streamed .ims write.
-                # No materialization — PyImarisWriter drives compute block
-                # by block, loading only overlapping tiles per block.
-                per_channel_darrays.append(darr)
-                # Hold fused_sim alive so darr keeps a valid graph.
-                fused_sims.append(fused_sim)
-                del tile_data
-            else:
-                # TIFF/Zarr path: compute channel into numpy, accumulate
-                # into the stacked (C,Z,Y,X) array.
-                self.logger.info(
-                    f"  Computing channel {ch_id} " f"(lazy tiles, synchronous)..."
+                fuse_pct = 50 + int(35 * (ch_idx + 0.5) / max(len(process_channels), 1))
+                self._progress_fn(
+                    fuse_pct,
+                    f"Fusing channel {ch_id} "
+                    f"({ch_idx + 1}/{len(process_channels)}) "
+                    f"[materializing tiles]...",
                 )
-                vol = np.zeros(darr.shape, dtype=np.uint16)
-                with dask.config.set(scheduler="synchronous"):
-                    da.store(darr, vol, compute=True)
+                self.logger.info(
+                    f"Step 4: Fusing channel {ch_id} ({len(tiles)} tiles) "
+                    f"[streaming, one-shot tile preprocess → memmap]..."
+                )
 
-                if stacked is None:
-                    n_total = len(process_channels)
-                    if n_total > 1:
-                        stacked = np.zeros((n_total, *vol.shape), dtype=np.uint16)
-                        stacked[0] = vol
-                        self.logger.info(
-                            f"  Pre-allocated output array: {stacked.shape} "
-                            f"({stacked.nbytes / (1024**3):.1f} GB)"
-                        )
-                    else:
-                        stacked = vol
+                # Preprocess each tile once, spill to memmap on disk.
+                ch_tmp_dir = tmp_root / f"ch{ch_id:02d}"
+                tile_data = self._materialize_tiles_to_disk(
+                    tiles, ch_id, expected_tile_shape, ch_tmp_dir
+                )
+                if not tile_data:
+                    self.logger.warning(f"No data for channel {ch_id}, skipping")
+                    if ch_tmp_dir.exists():
+                        shutil.rmtree(ch_tmp_dir, ignore_errors=True)
+                    continue
+
+                fused_sim, origin_um = self._fuse_channel(
+                    tile_data, voxel_size_um, reg_params, transform_key
+                )
+
+                # Clip + cast to uint16 in the graph so float64 intermediates
+                # are converted per-chunk, never materializing the full volume.
+                compute_pct = 50 + int(
+                    35 * (ch_idx + 0.8) / max(len(process_channels), 1)
+                )
+                self._progress_fn(
+                    compute_pct,
+                    f"Computing channel {ch_id} "
+                    f"({ch_idx + 1}/{len(process_channels)})...",
+                )
+
+                darr = fused_sim.data
+                while darr.ndim > 3:
+                    darr = darr[0]
+                darr = da.clip(darr, 0, 65535).astype(np.uint16)
+
+                self.logger.info(
+                    f"  Channel {ch_id}: shape={darr.shape} "
+                    f"origin Z={origin_um['z']:.1f} Y={origin_um['y']:.1f} "
+                    f"X={origin_um['x']:.1f} \u00b5m"
+                )
+
+                if imaris_mode:
+                    # Keep the dask array + fused_sim + tile_data alive so
+                    # PyImarisWriter can drive per-block compute. The tile
+                    # memmaps under tmp_root are cleaned up after the
+                    # Imaris write loop (see finally below).
+                    per_channel_darrays.append(darr)
+                    fused_sims.append(tile_data)  # hold memmaps alive
+                    fused_sims.append(fused_sim)
                 else:
-                    dest_idx = len(fused_channel_ids)
-                    sz, sy, sx = vol.shape
-                    stacked[dest_idx, :sz, :sy, :sx] = vol
+                    # TIFF/Zarr path: compute channel into numpy, accumulate
+                    # into the stacked (C,Z,Y,X) array.
+                    self.logger.info(
+                        f"  Computing channel {ch_id} "
+                        f"(memmap-backed tiles, synchronous)..."
+                    )
+                    vol = np.zeros(darr.shape, dtype=np.uint16)
+                    with dask.config.set(scheduler="synchronous"):
+                        da.store(darr, vol, compute=True)
 
-                del vol, darr, fused_sim, tile_data
-                gc.collect()
+                    if stacked is None:
+                        n_total = len(process_channels)
+                        if n_total > 1:
+                            stacked = np.zeros((n_total, *vol.shape), dtype=np.uint16)
+                            stacked[0] = vol
+                            self.logger.info(
+                                f"  Pre-allocated output array: {stacked.shape} "
+                                f"({stacked.nbytes / (1024**3):.1f} GB)"
+                            )
+                        else:
+                            stacked = vol
+                    else:
+                        dest_idx = len(fused_channel_ids)
+                        sz, sy, sx = vol.shape
+                        stacked[dest_idx, :sz, :sy, :sx] = vol
 
-            channel_origins.append(origin_um)
-            fused_channel_ids.append(ch_id)
+                    # Release references to memmap-backed arrays before
+                    # removing the files (Windows holds file locks until
+                    # the numpy memmap objects are gone).
+                    del vol, darr, fused_sim, tile_data
+                    gc.collect()
+                    shutil.rmtree(ch_tmp_dir, ignore_errors=True)
+
+                channel_origins.append(origin_um)
+                fused_channel_ids.append(ch_id)
+        finally:
+            # Ensures cleanup on exception / cancellation. For non-imaris,
+            # per-channel dirs are already gone; this catches stragglers.
+            # For imaris, cleanup happens here after the write loop runs
+            # (see the imaris_mode block below, which runs inside run()
+            # after this try/finally returns normally).
+            if not imaris_mode and tmp_root.exists():
+                shutil.rmtree(tmp_root, ignore_errors=True)
 
         if not fused_channel_ids:
             self.logger.error("No channels were fused successfully")
@@ -1630,9 +1653,14 @@ class StitchingPipeline:
             except Exception as e:
                 self.logger.error(f"Imaris .ims write failed: {e}", exc_info=True)
             finally:
-                # Now safe to release fusion graphs
+                # Release fusion graphs + memmap-backed tile data, then
+                # remove the per-tile spill directory.
                 del per_channel_darrays, fused_sims
                 gc.collect()
+                if tmp_root.exists():
+                    import shutil as _shutil
+
+                    _shutil.rmtree(tmp_root, ignore_errors=True)
         else:
             self.logger.info(
                 f"Step 5: Computed {len(fused_channel_ids)} channels \u2192 "
@@ -1815,39 +1843,64 @@ class StitchingPipeline:
 
         return volume
 
-    def _make_lazy_tile_data(
+    def _materialize_tiles_to_disk(
         self,
         tiles: List[RawTileInfo],
         ch_id: int,
         expected_shape: tuple,
+        tmp_dir: Path,
     ) -> List[Tuple[Any, RawTileInfo]]:
-        """Build lazy (dask.delayed) tile data for streaming fusion.
+        """Preprocess each tile exactly once and spill to a memmap file.
 
-        Returns [(dask_array, tile_info), ...] where each dask_array
-        is a delayed computation that loads and preprocesses the tile
-        from disk on-demand. No tile data is in memory until the
-        fusion graph is computed.
+        Returns [(dask_array, tile_info), ...] where each dask_array is
+        backed by a flat on-disk memmap. Fusion chunk-reads become cheap
+        file reads — no re-running of the preprocess chain per chunk.
+
+        Caller owns ``tmp_dir`` and must remove it once the returned
+        dask arrays are no longer referenced.
         """
-        import dask
         import dask.array as da
 
-        result = []
-        for tile in tiles:
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tile_bytes = int(np.prod(expected_shape) * 2)  # uint16
+        self.logger.info(
+            f"  Materializing {len(tiles)} tiles for channel {ch_id} "
+            f"→ {tmp_dir} "
+            f"({tile_bytes * len(tiles) / (1024**3):.1f} GB temp on disk)"
+        )
+
+        result: List[Tuple[Any, RawTileInfo]] = []
+        for i, tile in enumerate(tiles):
             if ch_id not in tile.raw_files:
                 continue
+            if self._cancelled_fn():
+                self.logger.info("Pipeline cancelled by user")
+                return result
 
-            # Capture tile by value in the default arg to avoid
-            # Python closure-in-loop pitfall.
-            @dask.delayed
-            def _load_tile(_tile=tile, _ch=ch_id):
-                return self._preprocess_single_tile(_tile, _ch)
-
-            lazy_arr = da.from_delayed(
-                _load_tile(),
-                shape=expected_shape,
-                dtype=np.uint16,
+            self._progress_fn(
+                50,
+                f"Preprocessing tile {i + 1}/{len(tiles)} (ch {ch_id})",
             )
-            result.append((lazy_arr, tile))
+            self.logger.info(
+                f"    Tile {i + 1}/{len(tiles)}: {tile.folder.name} "
+                f"(X={tile.x_mm:.2f} Y={tile.y_mm:.2f})"
+            )
+
+            vol = self._preprocess_single_tile(tile, ch_id)
+            if vol.shape != expected_shape:
+                raise RuntimeError(
+                    f"Tile {i} shape {vol.shape} != expected {expected_shape}"
+                )
+
+            mm_path = tmp_dir / f"tile_{i:04d}.dat"
+            mm = np.memmap(mm_path, dtype=np.uint16, mode="w+", shape=expected_shape)
+            mm[:] = vol
+            mm.flush()
+            del mm, vol
+            # Reopen read-only so dask's array is backed by a stable file view.
+            mm_r = np.memmap(mm_path, dtype=np.uint16, mode="r", shape=expected_shape)
+            lazy = da.from_array(mm_r, chunks=_DASK_PROCESSING_CHUNKS)
+            result.append((lazy, tile))
 
         return result
 
