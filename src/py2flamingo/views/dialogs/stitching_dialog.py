@@ -367,7 +367,19 @@ class StitchingDialog(PersistentDialog):
             "Create a single .ozx ZIP file from the OME-Zarr output\n"
             "for easy sharing/copying"
         )
-        proc_layout.addWidget(self._ozx_cb, 1, 2, 1, 2)
+        proc_layout.addWidget(self._ozx_cb, 1, 2)
+
+        self._tiff_pyramids_cb = QCheckBox("TIFF pyramids")
+        self._tiff_pyramids_cb.setChecked(True)
+        self._tiff_pyramids_cb.setToolTip(
+            "Write multi-resolution pyramid SubIFDs in the OME-TIFF output.\n\n"
+            "UNCHECK for ImarisFileConverter compatibility.\n"
+            "ImarisFileConverter may misread SubIFD pyramids as extra Z\n"
+            "planes, collapsing all real data into the first Z layer.\n\n"
+            "Pyramids help napari and QuPath viewing but are not required\n"
+            "for Fiji or Imaris (.ims has its own pyramid format)."
+        )
+        proc_layout.addWidget(self._tiff_pyramids_cb, 1, 3)
 
         # Proc Row 2: Registration
         self._skip_reg_cb = QCheckBox("Skip registration")
@@ -915,6 +927,7 @@ class StitchingDialog(PersistentDialog):
         config.skip_registration = self._skip_reg_cb.isChecked()
         config.registration_binning = self._reg_binning_combo.currentData()
         config.package_ozx = self._ozx_cb.isChecked()
+        config.tiff_pyramids = self._tiff_pyramids_cb.isChecked()
         config.streaming_mode = self._streaming_combo.currentData()
 
         # Set compression based on format
@@ -1477,6 +1490,7 @@ class StitchingDialog(PersistentDialog):
         s.setValue("deconvolution", self._deconv_cb.isChecked())
         s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
         s.setValue("package_ozx", self._ozx_cb.isChecked())
+        s.setValue("tiff_pyramids", self._tiff_pyramids_cb.isChecked())
         s.setValue("output_format", self._format_combo.currentData())
         s.setValue("compression", self._compression_combo.currentData())
         s.setValue("channels", self._channels_edit.text())
@@ -1562,6 +1576,9 @@ class StitchingDialog(PersistentDialog):
 
         ozx = s.value("package_ozx", False, type=bool)
         self._ozx_cb.setChecked(ozx)
+
+        tiff_pyramids = s.value("tiff_pyramids", True, type=bool)
+        self._tiff_pyramids_cb.setChecked(tiff_pyramids)
 
         output_format = s.value("output_format", "", type=str)
         if output_format:
@@ -1680,6 +1697,7 @@ class NativeStitchingDialog(StitchingDialog):
         s.setValue("deconvolution", self._deconv_cb.isChecked())
         s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
         s.setValue("package_ozx", self._ozx_cb.isChecked())
+        s.setValue("tiff_pyramids", self._tiff_pyramids_cb.isChecked())
         s.setValue("output_format", self._format_combo.currentData())
         s.setValue("compression", self._compression_combo.currentData())
         s.setValue("channels", self._channels_edit.text())
@@ -1765,6 +1783,9 @@ class NativeStitchingDialog(StitchingDialog):
 
         ozx = s.value("package_ozx", False, type=bool)
         self._ozx_cb.setChecked(ozx)
+
+        tiff_pyramids = s.value("tiff_pyramids", True, type=bool)
+        self._tiff_pyramids_cb.setChecked(tiff_pyramids)
 
         output_format = s.value("output_format", "", type=str)
         if output_format:

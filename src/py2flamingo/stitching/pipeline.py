@@ -148,6 +148,10 @@ class StitchingConfig:
     # TIFF options
     tiff_compression: str = "zlib"
     tiff_tile_size: Tuple = (256, 256)
+    # Pyramid SubIFDs help napari/QuPath viewing but break older OME-TIFF
+    # readers (notably ImarisFileConverter) which may read each SubIFD as
+    # a separate Z plane. Set False for maximum compatibility.
+    tiff_pyramids: bool = True
 
     # Package as single file after writing
     package_ozx: bool = False  # Create .ozx (ZIP) from OME-Zarr output
@@ -2085,7 +2089,9 @@ class StitchingPipeline:
                     voxel_size_um=voxel_size_um,
                     tile_size=self.config.tiff_tile_size,
                     compression=self.config.tiff_compression,
-                    pyramid_levels=self.config.pyramid_levels,
+                    pyramid_levels=(
+                        self.config.pyramid_levels if self.config.tiff_pyramids else 0
+                    ),
                     channel_names=channel_names,
                 )
             except ImportError as e:
@@ -2439,7 +2445,9 @@ class StitchingPipeline:
                     voxel_size_um=voxel_size_um,
                     tile_size=self.config.tiff_tile_size,
                     compression=self.config.tiff_compression,
-                    pyramid_levels=self.config.pyramid_levels,
+                    pyramid_levels=(
+                        self.config.pyramid_levels if self.config.tiff_pyramids else 0
+                    ),
                 )
                 if fmt == "ome-tiff":
                     out_path = tiff_path
