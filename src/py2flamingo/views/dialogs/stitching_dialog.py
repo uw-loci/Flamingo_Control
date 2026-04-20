@@ -76,6 +76,9 @@ class StitchingDialog(PersistentDialog):
 
         self._setup_ui()
         self._restore_settings()
+        # Initial paint of the Native → Output voxel readout using whatever
+        # restore left in the spins + combos.
+        self._update_voxel_readout()
 
     def _setup_ui(self):
         """Create and layout UI components."""
@@ -187,36 +190,35 @@ class StitchingDialog(PersistentDialog):
             ("iso", -1),
         ]:
             self._downsample_xy_combo.addItem(label, value)
-        iso_tooltip = (
-            "Downsample factor.\n"
-            "XY: 1x/2x/4x/8x reduces tile width+height.\n"
-            "Z:  1x/2x/4x reduces planes.\n\n"
-            "iso: auto-pick factors that make output voxels as close\n"
-            "to cubic as possible, subject to the allowed factors\n"
-            "above. Resolved at run time from the acquisition's\n"
-            "actual Z step, so each item in a batch queue is sized\n"
-            "independently. Selecting iso in one dropdown flips the\n"
-            "other to iso too (they act as a single choice).\n\n"
+        self._downsample_xy_combo.setToolTip(
+            "XY downsample factor.\n"
+            "1x/2x/4x/8x reduces tile width and height.\n\n"
+            "iso: auto-pick BOTH XY and Z factors so the output voxel\n"
+            "is as close to cubic as possible, using the allowed\n"
+            "factors (XY: 1/2/4/8, Z: 1/2/4). Resolved at run time\n"
+            "from the acquisition's own Z step, so each item in a\n"
+            "batch queue is sized independently. When iso is chosen\n"
+            "the Z downsample combo is ignored and greys out.\n\n"
             "Examples at XY pixel = 0.406 \u00b5m:\n"
             "  Z 0.5 \u00b5m  \u2192 XY 1x, Z 1x  (0.41 \u00d7 0.50 \u00b5m)\n"
             "  Z 1.0 \u00b5m  \u2192 XY 2x, Z 1x  (0.81 \u00d7 1.00 \u00b5m)\n"
             "  Z 2.5 \u00b5m  \u2192 XY 8x, Z 1x  (3.25 \u00d7 2.50 \u00b5m)\n"
             "  Z 5.0 \u00b5m  \u2192 XY 8x, Z 1x  (3.25 \u00d7 5.00 \u00b5m)"
         )
-        self._downsample_xy_combo.setToolTip(iso_tooltip)
         ds_layout.addWidget(self._downsample_xy_combo)
         ds_layout.addWidget(QLabel("Z"))
         self._downsample_z_combo = QComboBox()
-        for label, value in [("1x", 1), ("2x", 2), ("4x", 4), ("iso", -1)]:
+        for label, value in [("1x", 1), ("2x", 2), ("4x", 4)]:
             self._downsample_z_combo.addItem(label, value)
-        self._downsample_z_combo.setToolTip(iso_tooltip)
-        # Link the two combos so "iso" is always a paired choice.
-        self._iso_sync_guard = False
+        self._downsample_z_combo.setToolTip(
+            "Z downsample factor (independent of XY).\n"
+            "Greys out when XY is set to 'iso' — iso overrides both."
+        )
+        ds_layout.addWidget(self._downsample_z_combo)
+        # When XY=iso, Z is overridden by the iso-resolution algorithm at
+        # run time, so grey out the Z combo as a visual cue.
         self._downsample_xy_combo.currentIndexChanged.connect(
             self._on_downsample_xy_changed
-        )
-        self._downsample_z_combo.currentIndexChanged.connect(
-            self._on_downsample_z_changed
         )
         settings_layout.addLayout(ds_layout, 1, 1)
 
@@ -339,6 +341,25 @@ class StitchingDialog(PersistentDialog):
             "color: #888; font-style: italic; font-size: 11px;"
         )
         settings_layout.addWidget(self._memory_label, 4, 0, 1, 5)
+
+        # Live "Output voxel" readout showing how Pixel size, Z step, and
+        # the two downsample combos combine. Updated whenever any of those
+        # four inputs change so the relationship is always visible.
+        self._voxel_readout_label = QLabel("")
+        self._voxel_readout_label.setStyleSheet("color: #444; font-size: 11px;")
+        self._voxel_readout_label.setToolTip(
+            "Native voxel (XY pixel × XY pixel × Z step) from the fields\n"
+            "above, then the resulting output voxel after applying the\n"
+            "chosen downsample factors. For 'iso', the factors are\n"
+            "resolved from the native voxel and shown in parentheses."
+        )
+        settings_layout.addWidget(self._voxel_readout_label, 5, 0, 1, 5)
+        self._pixel_size_spin.valueChanged.connect(self._update_voxel_readout)
+        self._z_step_spin.valueChanged.connect(self._update_voxel_readout)
+        self._downsample_xy_combo.currentIndexChanged.connect(
+            self._update_voxel_readout
+        )
+        self._downsample_z_combo.currentIndexChanged.connect(self._update_voxel_readout)
 
         settings_group.setLayout(settings_layout)
         self._settings_group = settings_group
@@ -751,9 +772,22 @@ class StitchingDialog(PersistentDialog):
         self._log(f"\nDiscovered {total} tiles across {ok}/{len(pending)} directories")
         self._update_action_buttons()
 
+        # Auto-fill Z step from first discovered tile if still "Auto".
+        # Each tile carries z_step_mm derived from its raw filenames +
+        # Workflow Z range, so we don't need to re-parse Workflow.txt.
+        if self._z_step_spin.value() == 0.0:
+            first_tiles = next((it["tiles"] for it in self._queue if it["tiles"]), None)
+            if first_tiles and first_tiles[0].z_step_mm:
+                z_um = first_tiles[0].z_step_mm * 1000.0
+                self._z_step_spin.setValue(z_um)
+                self._log(f"Auto-detected Z step: {z_um:.3f} µm (from tile metadata)")
+
         # Show memory estimate across ALL discovered queue items (worst case).
         if any(it["tiles"] for it in self._queue):
             self._update_memory_estimate()
+
+        # Refresh the output-voxel readout now that Z may have auto-filled.
+        self._update_voxel_readout()
 
     def _discover_tiles_for_path(self, acq_path: Path):
         """Discover tiles in an acquisition directory.
@@ -786,11 +820,24 @@ class StitchingDialog(PersistentDialog):
         self._log("Ready to stitch. Click 'Run Stitching' to begin.")
 
     def _on_proc_toggle(self, checked: bool):
-        """Show/hide the processing options panel."""
+        """Show/hide the processing options panel and resize the dialog.
+
+        Without resizing, showing the panel squeezes the queue/log widgets
+        and hiding it leaves an empty gap. We recompute the dialog's
+        preferred height and resize to it, preserving the user's current
+        width.
+        """
         self._proc_widget.setVisible(checked)
         self._proc_toggle.setText(
             ("\u25bc " if checked else "\u25b6 ") + "Processing Options"
         )
+        # Let Qt recompute size hints for the new visibility state, then
+        # resize height to match. Width is preserved so the user's
+        # horizontal layout isn't disturbed.
+        self.updateGeometry()
+        if self.layout() is not None:
+            self.layout().activate()
+        self.resize(self.width(), self.sizeHint().height())
 
     def _on_skip_reg_toggled(self, checked: bool):
         """Enable/disable registration controls based on skip state."""
@@ -798,42 +845,45 @@ class StitchingDialog(PersistentDialog):
         self._reg_binning_label.setEnabled(not checked)
 
     def _on_downsample_xy_changed(self, _index: int):
-        """Keep XY and Z downsample combos in sync around the iso choice."""
-        if self._iso_sync_guard:
-            return
-        xy_val = self._downsample_xy_combo.currentData()
-        z_val = self._downsample_z_combo.currentData()
-        self._iso_sync_guard = True
-        try:
-            if xy_val == -1 and z_val != -1:
-                idx = self._downsample_z_combo.findData(-1)
-                if idx >= 0:
-                    self._downsample_z_combo.setCurrentIndex(idx)
-            elif xy_val != -1 and z_val == -1:
-                idx = self._downsample_z_combo.findData(1)
-                if idx >= 0:
-                    self._downsample_z_combo.setCurrentIndex(idx)
-        finally:
-            self._iso_sync_guard = False
+        """Grey out Z combo when XY is iso (iso overrides both factors)."""
+        is_iso = self._downsample_xy_combo.currentData() == -1
+        self._downsample_z_combo.setEnabled(not is_iso)
 
-    def _on_downsample_z_changed(self, _index: int):
-        """Keep XY and Z downsample combos in sync around the iso choice."""
-        if self._iso_sync_guard:
+    def _update_voxel_readout(self, *_args):
+        """Refresh the Native → Output voxel line below the downsample row."""
+        if not hasattr(self, "_voxel_readout_label"):
+            # Signals can fire during _build_ui before the label exists.
             return
-        xy_val = self._downsample_xy_combo.currentData()
-        z_val = self._downsample_z_combo.currentData()
-        self._iso_sync_guard = True
-        try:
-            if z_val == -1 and xy_val != -1:
-                idx = self._downsample_xy_combo.findData(-1)
-                if idx >= 0:
-                    self._downsample_xy_combo.setCurrentIndex(idx)
-            elif z_val != -1 and xy_val == -1:
-                idx = self._downsample_xy_combo.findData(1)
-                if idx >= 0:
-                    self._downsample_xy_combo.setCurrentIndex(idx)
-        finally:
-            self._iso_sync_guard = False
+        xy_pixel = self._pixel_size_spin.value()
+        z_step = self._z_step_spin.value()
+        ds_xy = self._downsample_xy_combo.currentData()
+        ds_z = self._downsample_z_combo.currentData()
+
+        if z_step <= 0.0:
+            native_str = f"Native: {xy_pixel:.3f} × {xy_pixel:.3f} × (Z auto) µm"
+            output_str = "Output: discover tiles to preview"
+            self._voxel_readout_label.setText(f"{native_str}   →   {output_str}")
+            return
+
+        iso_note = ""
+        if ds_xy == -1 or ds_z == -1:
+            try:
+                from py2flamingo.stitching.pipeline import compute_iso_downsample
+
+                ds_xy, ds_z = compute_iso_downsample(xy_pixel, z_step)
+                iso_note = f"  (iso \u2192 XY {ds_xy}x, Z {ds_z}x)"
+            except Exception:
+                self._voxel_readout_label.setText("Output: iso preview unavailable")
+                return
+
+        out_xy = xy_pixel * ds_xy
+        out_z = z_step * ds_z
+        self._voxel_readout_label.setText(
+            f"Native: {xy_pixel:.3f} × {xy_pixel:.3f} × {z_step:.3f} \u00b5m"
+            f"   \u2192   "
+            f"Output: {out_xy:.3f} × {out_xy:.3f} × {out_z:.3f} \u00b5m"
+            f"{iso_note}"
+        )
 
     def _update_memory_estimate(self, tiles=None):
         """Compute and display memory estimates for in-memory vs streaming modes.
