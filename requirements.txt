@@ -38,6 +38,12 @@ dask[array]>=2024.1.0,!=2025.12.0,!=2026.1.0,!=2026.1.1,!=2026.2.0,!=2026.3.0,<2
 # Stitching pipeline — preprocessing
 # pystripe installed separately (see update_and_run.bat) to avoid resolver backtracking
 
+# Stitching pipeline — direct Imaris (.ims) output (Windows only)
+# PyImarisWriter is Bitplane's official Apache 2.0 writer. Ships as
+# prebuilt Windows DLLs — the sys_platform marker makes pip silently
+# skip it on macOS/Linux (no error, no warning).
+PyImarisWriter>=0.7.0; sys_platform == "win32"
+
 # Stitching pipeline — optional (install separately if needed)
 #   Flat-field correction (BaSiCPy 2.0 + PyTorch CPU):
 #     pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
