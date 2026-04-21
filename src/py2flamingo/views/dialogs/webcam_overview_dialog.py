@@ -154,6 +154,22 @@ class WebcamOverviewDialog(PersistentDialog):
 
         self._start_stop_btn = QPushButton("Start Live")
         self._start_stop_btn.setFixedWidth(120)
+        # Webcam capture needs OpenCV (cv2). On a fresh install where it
+        # isn't available, disable the button with a tooltip hint instead
+        # of failing silently when the user clicks it.
+        try:
+            import cv2  # noqa: F401
+
+            _cv2_ok = True
+        except Exception:
+            _cv2_ok = False
+        if not _cv2_ok:
+            self._start_stop_btn.setEnabled(False)
+            self._start_stop_btn.setToolTip(
+                "Webcam feed requires OpenCV (cv2).\n"
+                "Install with: pip install opencv-python"
+            )
+            self._device_combo.setEnabled(False)
         device_layout.addWidget(self._start_stop_btn)
 
         self._resolution_label = QLabel("")

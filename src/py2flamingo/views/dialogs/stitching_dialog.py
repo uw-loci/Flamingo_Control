@@ -402,7 +402,11 @@ class StitchingDialog(PersistentDialog):
             "Only effective when downsample factor > 1."
         )
         self._destripe_fast_cb.setEnabled(False)
-        self._destripe_cb.toggled.connect(self._destripe_fast_cb.setEnabled)
+        # Fast is a destripe-only variant (apply after downsample). When
+        # Destripe is unchecked it must also be unchecked + disabled so
+        # the UI state matches what the pipeline will actually run. The
+        # plain toggled→setEnabled link only handled the enabled state.
+        self._destripe_cb.toggled.connect(self._on_destripe_toggled)
         proc_layout.addWidget(self._destripe_fast_cb, 0, 1)
 
         self._content_fusion_cb = QCheckBox("Content-based blending \u2731")
@@ -848,6 +852,19 @@ class StitchingDialog(PersistentDialog):
         """Grey out Z combo when XY is iso (iso overrides both factors)."""
         is_iso = self._downsample_xy_combo.currentData() == -1
         self._downsample_z_combo.setEnabled(not is_iso)
+
+    def _on_destripe_toggled(self, checked: bool):
+        """Keep the Fast sub-option in sync with the Destripe master.
+
+        Fast is a pystripe variant (destripe after downsample), so if
+        Destripe is off Fast must also be off — both the enabled state
+        and the checked state. Previously only enabled state was linked,
+        which let a persisted Fast=True survive Destripe=False and get
+        submitted to the pipeline.
+        """
+        self._destripe_fast_cb.setEnabled(checked)
+        if not checked:
+            self._destripe_fast_cb.setChecked(False)
 
     def _update_voxel_readout(self, *_args):
         """Refresh the Native → Output voxel line below the downsample row."""
