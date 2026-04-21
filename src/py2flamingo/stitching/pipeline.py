@@ -2069,6 +2069,36 @@ class StitchingPipeline:
         finally:
             reg_logger.setLevel(_saved_level)
 
+    def _fuse_with_fallback(self, fuse_fn, sims, fuse_kwargs):
+        """Call multiview_stitcher.fusion.fuse, retrying without
+        ``weights_func`` if the content-based path raises.
+
+        multiview-stitcher's ``content_based`` weighting has known edge
+        cases with large tiles / NaN-heavy overlaps that surface as
+        ``'NoneType' object is not subscriptable`` deep inside the fuse
+        graph. Rather than fail the whole run, log the traceback, drop
+        the weights_func, and retry with default cosine blending.
+        """
+        import traceback
+
+        try:
+            return fuse_fn(sims, **fuse_kwargs)
+        except Exception as e:
+            if "weights_func" not in fuse_kwargs:
+                raise
+            self.logger.error(
+                f"  Content-based fusion failed: {e}\n{traceback.format_exc()}"
+            )
+            self.logger.warning(
+                "  Falling back to default cosine blending "
+                "(turn off 'Content-based fusion' in Processing Options "
+                "to silence this warning)."
+            )
+            retry_kwargs = dict(fuse_kwargs)
+            retry_kwargs.pop("weights_func", None)
+            retry_kwargs.pop("weights_func_kwargs", None)
+            return fuse_fn(sims, **retry_kwargs)
+
     def _fuse_channel(
         self,
         tile_data: List[Tuple[Any, RawTileInfo]],
@@ -2155,7 +2185,7 @@ class StitchingPipeline:
                     "  content_based weights not available — using default blending"
                 )
 
-        fused = fusion.fuse(sims, **fuse_kwargs)
+        fused = self._fuse_with_fallback(fusion.fuse, sims, fuse_kwargs)
 
         origin_um = {
             "z": float(fused.coords["z"].values[0]),
@@ -2532,7 +2562,7 @@ class StitchingPipeline:
                     "multiview-stitcher version — using default blending"
                 )
 
-        fused = fusion.fuse(sims, **fuse_kwargs)
+        fused = self._fuse_with_fallback(fusion.fuse, sims, fuse_kwargs)
 
         # --- Extract world-space origin from fused SpatialImage coords ---
         origin_um = {
