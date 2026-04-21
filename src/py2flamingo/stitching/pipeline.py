@@ -1905,7 +1905,13 @@ class StitchingPipeline:
             volume = destripe_volume(volume, max_workers=self.config.destripe_workers)
 
         if self.config.camera_x_inverted:
-            volume = np.ascontiguousarray(volume[:, :, ::-1])
+            # Return a stride-reversed view, not a contiguous copy. The caller
+            # (_materialize_tiles_to_disk) immediately writes into a memmap via
+            # `mm[:] = vol`, which handles non-contiguous sources without
+            # allocating a full-volume scratch buffer. The old
+            # np.ascontiguousarray() here cost an extra ~5.7 GB per tile on
+            # full-res data and OOM'd on channel 2 of multi-channel runs.
+            volume = volume[:, :, ::-1]
 
         return volume
 
