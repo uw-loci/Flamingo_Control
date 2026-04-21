@@ -337,9 +337,9 @@ class StitchingDialog(PersistentDialog):
 
         # Row 4: Memory estimate
         self._memory_label = QLabel("")
-        self._memory_label.setStyleSheet(
-            "color: #888; font-style: italic; font-size: 11px;"
-        )
+        # Rich text so per-term spans can carry their own colour.
+        self._memory_label.setTextFormat(Qt.RichText)
+        self._memory_label.setStyleSheet("font-size: 11px;")
         settings_layout.addWidget(self._memory_label, 4, 0, 1, 5)
 
         # Live "Output voxel" readout showing how Pixel size, Z step, and
@@ -360,6 +360,19 @@ class StitchingDialog(PersistentDialog):
             self._update_voxel_readout
         )
         self._downsample_z_combo.currentIndexChanged.connect(self._update_voxel_readout)
+
+        # Any of these change the memory footprint — re-run the estimate
+        # so the colored label stays in sync with current settings.
+        self._pixel_size_spin.valueChanged.connect(self._refresh_memory_estimate)
+        self._z_step_spin.valueChanged.connect(self._refresh_memory_estimate)
+        self._downsample_xy_combo.currentIndexChanged.connect(
+            self._refresh_memory_estimate
+        )
+        self._downsample_z_combo.currentIndexChanged.connect(
+            self._refresh_memory_estimate
+        )
+        self._format_combo.currentIndexChanged.connect(self._refresh_memory_estimate)
+        self._channels_edit.textChanged.connect(self._refresh_memory_estimate)
 
         settings_group.setLayout(settings_layout)
         self._settings_group = settings_group
@@ -902,6 +915,15 @@ class StitchingDialog(PersistentDialog):
             f"{iso_note}"
         )
 
+    def _refresh_memory_estimate(self, *_args):
+        """Debounced re-run of the memory estimate after a settings change.
+
+        Swallows the Qt signal arg so this can be connected directly to
+        ``valueChanged``/``currentIndexChanged``/``textChanged``.
+        """
+        if any(it.get("tiles") for it in self._queue):
+            self._update_memory_estimate()
+
     def _update_memory_estimate(self, tiles=None):
         """Compute and display memory estimates for in-memory vs streaming modes.
 
@@ -954,10 +976,42 @@ class StitchingDialog(PersistentDialog):
             if len(tile_sets) > 1:
                 queue_hint = f"  (worst of {len(tile_sets)} queued)"
 
+            # Colour each peak term against system RAM so the user can see
+            # at a glance which mode fits. green <70%, orange 70–95%, red >95%.
+            try:
+                import psutil as _psutil
+
+                total_ram_gb = _psutil.virtual_memory().total / (1024**3)
+                avail_ram_gb = _psutil.virtual_memory().available / (1024**3)
+            except ImportError:
+                total_ram_gb = 0.0
+                avail_ram_gb = 0.0
+
+            def _colour(peak_gb: float) -> str:
+                if avail_ram_gb <= 0:
+                    return "#444"
+                ratio = peak_gb / avail_ram_gb
+                if ratio > 0.95:
+                    return "#D32F2F"  # red
+                if ratio > 0.70:
+                    return "#F57C00"  # orange
+                return "#388E3C"  # green
+
+            in_mem_gb = est["in_memory_gb"]
+            stream_gb = est["streaming_gb"]
+            ram_str = (
+                f" &nbsp;vs RAM {total_ram_gb:.0f} GB total, "
+                f"{avail_ram_gb:.0f} GB free"
+                if total_ram_gb > 0
+                else ""
+            )
             self._memory_label.setText(
-                f"In-memory: ~{est['in_memory_gb']:.0f} GB  |  "
-                f"Streaming: ~{est['streaming_gb']:.1f} GB  |  "
+                f"<span style='color:{_colour(in_mem_gb)};font-weight:bold;'>"
+                f"In-memory: ~{in_mem_gb:.0f} GB</span> &nbsp;|&nbsp; "
+                f"<span style='color:{_colour(stream_gb)};font-weight:bold;'>"
+                f"Streaming: ~{stream_gb:.1f} GB</span> &nbsp;|&nbsp; "
                 f"Output: ~{est['output_gb']:.0f} GB"
+                f"{ram_str}"
                 f"{queue_hint}"
                 f"{mode_hint}"
             )
