@@ -1170,6 +1170,11 @@ class StitchingDialog(PersistentDialog):
                     return
                 config.flat_field_correction = False
 
+        # Pre-flight: warn (popup) if projected peak RAM or disk free looks
+        # risky for any queue item. User must accept to proceed.
+        if not self._confirm_resource_headroom(pending, config):
+            return
+
         self._log_text.clear()
         n_pending = len(pending)
         self._log(f"Starting batch stitching: {n_pending} directories\n")
@@ -1187,6 +1192,123 @@ class StitchingDialog(PersistentDialog):
 
         # Start processing
         self._advance_queue()
+
+    def _confirm_resource_headroom(self, pending, config) -> bool:
+        """Show a popup if any pending item is likely to OOM or run out of
+        disk, and require user acceptance before continuing. Returns True
+        if the user confirmed (or nothing is tight), False to abort.
+        """
+        try:
+            import shutil as _shutil
+
+            import psutil as _psutil
+
+            from py2flamingo.stitching.pipeline import estimate_memory_usage
+        except ImportError:
+            return True
+
+        try:
+            avail_ram_gb = _psutil.virtual_memory().available / (1024**3)
+            total_ram_gb = _psutil.virtual_memory().total / (1024**3)
+        except Exception:
+            return True
+
+        output_dir = Path(self._output_dir_edit.text().strip())
+        try:
+            out_free_gb = _shutil.disk_usage(output_dir).free / (1024**3)
+        except OSError:
+            out_free_gb = None
+
+        ram_warnings = []  # per-item lines
+        disk_warnings = []
+        for item in pending:
+            tiles = item.get("tiles")
+            if not tiles:
+                # Not discovered yet — skip, the pipeline will check again.
+                continue
+            channels = self._parse_channels() or sorted(
+                set(ch for t in tiles for ch in t.channels)
+            )
+            try:
+                est = estimate_memory_usage(tiles, channels, config)
+            except Exception:
+                continue
+
+            use_streaming = config.streaming_mode
+            if use_streaming is None:
+                use_streaming = est["auto_streaming"]
+            peak_gb = est["streaming_gb" if use_streaming else "in_memory_gb"]
+
+            # Format-specific writer overhead (Imaris keeps a big block cache
+            # on top of our pipeline peak; Zarr v2 materializes pyramid levels).
+            fmt_overhead_gb = 0.0
+            fmt_note = ""
+            fmt = getattr(config, "output_format", "")
+            if fmt == "imaris":
+                fmt_overhead_gb = est["output_gb"] * 0.25
+                fmt_note = f" + ~{fmt_overhead_gb:.0f} GB Imaris writer overhead"
+            elif fmt == "ome-zarr-v2":
+                fmt_overhead_gb = est["output_gb"] * 0.30
+                fmt_note = f" + ~{fmt_overhead_gb:.0f} GB OME-Zarr v2 pyramid overhead"
+
+            combined_gb = peak_gb + fmt_overhead_gb
+            if combined_gb > avail_ram_gb * 0.9:
+                ram_warnings.append(
+                    f"  • {item['path'].name}: "
+                    f"peak ~{peak_gb:.0f} GB{fmt_note} "
+                    f"(available RAM {avail_ram_gb:.0f} GB)"
+                )
+
+            if out_free_gb is not None:
+                # Streaming mode spills one channel of tile memmaps to disk.
+                bpv = 2
+                ds_xy = max(config.downsample_xy, 1)
+                ds_z = max(config.downsample_z, 1)
+                n_planes = max(t.n_planes for t in tiles)
+                tile_bytes = (
+                    (n_planes // ds_z if ds_z > 1 else n_planes)
+                    * (2048 // ds_xy if ds_xy > 1 else 2048)
+                    * (2048 // ds_xy if ds_xy > 1 else 2048)
+                    * bpv
+                )
+                spill_gb = len(tiles) * tile_bytes / (1024**3) if use_streaming else 0.0
+                needed_gb = est["output_gb"] + spill_gb
+                if out_free_gb < needed_gb * 1.1:
+                    extra = f" + ~{spill_gb:.0f} GB temp spill" if spill_gb else ""
+                    disk_warnings.append(
+                        f"  • {item['path'].name}: "
+                        f"need ~{est['output_gb']:.0f} GB output{extra}, "
+                        f"{out_free_gb:.0f} GB free on {output_dir}"
+                    )
+
+        if not ram_warnings and not disk_warnings:
+            return True
+
+        lines = [
+            f"System RAM: {total_ram_gb:.0f} GB total, "
+            f"{avail_ram_gb:.0f} GB available."
+        ]
+        if ram_warnings:
+            lines.append("\nMemory is tight for:")
+            lines.extend(ram_warnings)
+            lines.append(
+                "\nIf the write hits swap it will slow to a crawl or be killed "
+                "by the OS. Consider Streaming mode or a higher downsample."
+            )
+        if disk_warnings:
+            lines.append("\nDisk space is tight for:")
+            lines.extend(disk_warnings)
+            lines.append("\nFree up space on the output drive or point it elsewhere.")
+        lines.append("\nContinue anyway?")
+
+        reply = QMessageBox.warning(
+            self,
+            "Resource Headroom Warning",
+            "\n".join(lines),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        return reply == QMessageBox.Yes
 
     def _advance_queue(self):
         """Process the next pending item in the queue."""

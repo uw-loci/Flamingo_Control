@@ -1222,9 +1222,9 @@ class StitchingPipeline:
         output_path.mkdir(parents=True, exist_ok=True)
 
         # --- Determine streaming vs in-memory mode (before loading) ---
+        mem_est = estimate_memory_usage(tiles, process_channels, self.config)
         use_streaming = self.config.streaming_mode
         if use_streaming is None:
-            mem_est = estimate_memory_usage(tiles, process_channels, self.config)
             use_streaming = mem_est["auto_streaming"]
             self.logger.info(
                 f"Memory estimate: in-memory ~{mem_est['in_memory_gb']:.0f} GB, "
@@ -1236,6 +1236,10 @@ class StitchingPipeline:
             self.logger.info(
                 f"Mode: {'streaming' if use_streaming else 'in-memory'} (user-selected)"
             )
+
+        self._log_preflight(
+            tiles, process_channels, output_path, mem_est, use_streaming
+        )
 
         if use_streaming:
             # ============================================================
@@ -2767,3 +2771,143 @@ class StitchingPipeline:
             f"  Planes per tile: {tiles[0].n_planes} "
             f"(Z range: {tiles[0].z_min_mm:.3f} – {tiles[0].z_max_mm:.3f} mm)"
         )
+
+        # On-disk input size: sum of every raw file across tiles, channels,
+        # and illumination sides. Log both a per-tile average and the total
+        # so the user sees what the pipeline has to read end-to-end.
+        total_bytes = 0
+        counted = 0
+        missing = 0
+        for t in tiles:
+            for ch_map in t.raw_files.values():
+                for raw_path in ch_map.values():
+                    try:
+                        total_bytes += raw_path.stat().st_size
+                        counted += 1
+                    except OSError:
+                        missing += 1
+        if counted:
+            total_gb = total_bytes / (1024**3)
+            avg_tile_mb = (total_bytes / counted) / (1024**2)
+            n_ch = max(len(all_ch), 1)
+            n_illum = max(len(all_illum), 1)
+            msg = (
+                f"  Input data on disk: ~{total_gb:.1f} GB across {counted} raw files "
+                f"(avg {avg_tile_mb:.0f} MB/file, "
+                f"{len(tiles)} tiles × {n_ch} ch × {n_illum} illum)"
+            )
+            if missing:
+                msg += f"  [warning: {missing} files could not be stat'd]"
+            self.logger.info(msg)
+
+    def _log_preflight(
+        self,
+        tiles: List[RawTileInfo],
+        channels: List[int],
+        output_path: Path,
+        mem_est: Dict[str, float],
+        use_streaming: bool,
+    ) -> None:
+        """Log RAM/disk headroom and format-specific warnings before the run.
+
+        ``mem_est`` comes from :func:`estimate_memory_usage` and only covers
+        our own graph. Writers (PyImarisWriter especially) add their own
+        overhead, and temp-spill memmaps can eat the output drive — both
+        are surfaced here so the user sees them in the log instead of
+        getting a mid-run OOM or ENOSPC.
+        """
+        try:
+            import shutil as _shutil
+
+            import psutil as _psutil
+        except ImportError:
+            _psutil = None
+            _shutil = None
+
+        # --- System RAM ---
+        if _psutil is not None:
+            sys_ram_gb = _psutil.virtual_memory().total / (1024**3)
+            avail_ram_gb = _psutil.virtual_memory().available / (1024**3)
+            mode = "streaming" if use_streaming else "in-memory"
+            peak = mem_est["streaming_gb" if use_streaming else "in_memory_gb"]
+            self.logger.info(
+                f"System RAM: {sys_ram_gb:.0f} GB total, "
+                f"{avail_ram_gb:.0f} GB available; "
+                f"projected peak {peak:.1f} GB ({mode})"
+            )
+            if peak > avail_ram_gb * 0.9:
+                self.logger.warning(
+                    f"  [warning] projected peak ({peak:.1f} GB) is close to or "
+                    f"exceeds available RAM ({avail_ram_gb:.1f} GB). "
+                    f"Consider Streaming mode or increasing downsample."
+                )
+
+        # --- Format-specific writer overhead ---
+        fmt = self.config.output_format
+        output_gb = mem_est["output_gb"]
+        if fmt == "imaris":
+            # PyImarisWriter keeps its own per-block scratch + HDF5 cache +
+            # pyramid working set. Empirically ~25% of the uncompressed
+            # output size on top of our own peak.
+            ims_overhead_gb = output_gb * 0.25
+            self.logger.info(
+                f"Imaris writer overhead: ~{ims_overhead_gb:.0f} GB "
+                f"(PyImarisWriter block cache + pyramid buffers, "
+                f"added on top of pipeline peak)"
+            )
+            if _psutil is not None:
+                combined = peak + ims_overhead_gb
+                if combined > avail_ram_gb * 0.9:
+                    self.logger.warning(
+                        f"  [warning] Imaris write may OOM: pipeline peak "
+                        f"({peak:.0f} GB) + writer overhead "
+                        f"(~{ims_overhead_gb:.0f} GB) vs "
+                        f"{avail_ram_gb:.0f} GB available. "
+                        f"Consider exporting OME-TIFF first, then using "
+                        f"ImarisFileConverter."
+                    )
+        elif fmt == "ome-zarr-v2":
+            self.logger.info(
+                "OME-Zarr v2 writer materializes each pyramid level from "
+                "numpy (not fully lazy). Level 0 roughly matches "
+                f"output_gb (~{output_gb:.0f} GB) during write."
+            )
+
+        # --- Disk free space ---
+        if _shutil is None:
+            return
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        # Estimated temp spill (per-tile memmaps for streaming mode) and
+        # final output footprint.
+        bpv = 2
+        ds_xy = max(self.config.downsample_xy, 1)
+        ds_z = max(self.config.downsample_z, 1)
+        n_planes = max(t.n_planes for t in tiles)
+        tile_bytes = (
+            (n_planes // ds_z if ds_z > 1 else n_planes)
+            * (FRAME_WIDTH // ds_xy if ds_xy > 1 else FRAME_WIDTH)
+            * (FRAME_HEIGHT // ds_xy if ds_xy > 1 else FRAME_HEIGHT)
+            * bpv
+        )
+        # Streaming spills one channel of tiles at a time.
+        spill_gb = (len(tiles) * tile_bytes / (1024**3)) if use_streaming else 0.0
+
+        try:
+            out_free_gb = _shutil.disk_usage(output_path).free / (1024**3)
+            needed_gb = output_gb + spill_gb
+            msg = (
+                f"Output drive ({output_path}): {out_free_gb:.0f} GB free, "
+                f"need ~{output_gb:.1f} GB output"
+            )
+            if spill_gb > 0:
+                msg += f" + ~{spill_gb:.1f} GB temp spill"
+            self.logger.info(msg)
+            if out_free_gb < needed_gb * 1.1:
+                self.logger.warning(
+                    f"  [warning] output drive may run out of space: "
+                    f"need ~{needed_gb:.0f} GB, {out_free_gb:.0f} GB free. "
+                    f"Free up space or point output to a larger drive."
+                )
+        except OSError as e:
+            self.logger.debug(f"Could not probe output drive free space: {e}")
