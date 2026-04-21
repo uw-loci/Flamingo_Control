@@ -1886,6 +1886,11 @@ class StitchingDialog(PersistentDialog):
 
         s.endGroup()
 
+        # Persisted values can re-check options whose backend is missing
+        # (e.g. Destripe True but pystripe not installed on this box). Re-run
+        # the availability gate so unavailable options end up unchecked+disabled.
+        self._update_preprocessing_availability()
+
     def closeEvent(self, event):
         """Save settings and cancel worker on close."""
         self._save_settings()
@@ -2091,3 +2096,8 @@ class NativeStitchingDialog(StitchingDialog):
         self._proc_toggle.setChecked(proc_expanded)
 
         s.endGroup()
+
+        # Persisted values can re-check options whose backend is missing
+        # (e.g. Destripe True but pystripe not installed on this box). Re-run
+        # the availability gate so unavailable options end up unchecked+disabled.
+        self._update_preprocessing_availability()

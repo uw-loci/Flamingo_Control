@@ -71,8 +71,12 @@ def correct_depth_attenuation(
         )
         return volume
 
-    # Per-plane mean intensity
-    means = volume.astype(np.float64).mean(axis=(1, 2))
+    # Per-plane mean intensity — compute per plane to avoid materializing a
+    # full float64 copy of the volume (would be ~23 GiB for a 727x2048x2048
+    # tile and OOM on 64 GB boxes).
+    means = np.empty(n_z, dtype=np.float64)
+    for z in range(n_z):
+        means[z] = volume[z].mean(dtype=np.float64)
     z_positions = np.arange(n_z, dtype=np.float64) * z_step_um
 
     if mu is None:
@@ -124,9 +128,13 @@ def correct_depth_attenuation(
     # Normalise so the first plane is unchanged (correction[0] == 1.0)
     correction /= correction[0]
 
-    # Apply per-plane
-    corrected = volume.astype(np.float32)
+    # Apply per-plane, writing directly into a uint16 output buffer so we
+    # never hold a full float32 copy of the volume in memory.
+    corrected = np.empty_like(volume)
     for z in range(n_z):
-        corrected[z] *= correction[z]
+        plane = volume[z].astype(np.float32)
+        plane *= correction[z]
+        np.clip(plane, 0, 65535, out=plane)
+        corrected[z] = plane.astype(np.uint16)
 
-    return np.clip(corrected, 0, 65535).astype(np.uint16)
+    return corrected
