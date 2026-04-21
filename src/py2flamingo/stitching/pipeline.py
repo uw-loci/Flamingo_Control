@@ -2179,6 +2179,12 @@ class StitchingPipeline:
                 from multiview_stitcher.weights import content_based
 
                 fuse_kwargs["weights_func"] = content_based
+                # content_based defaults (sigma_1=5, sigma_2=11). Must be
+                # provided explicitly: fusion.fuse calls
+                # calculate_required_overlap(weights_func, weights_func_kwargs)
+                # which unconditionally dereferences kwargs["sigma_2"], so
+                # passing None here crashes with a NoneType subscript error.
+                fuse_kwargs["weights_func_kwargs"] = {"sigma_1": 5, "sigma_2": 11}
                 self.logger.info("  Using content-based tile-overlap weighting")
             except ImportError:
                 self.logger.warning(
@@ -2552,6 +2558,12 @@ class StitchingPipeline:
                 from multiview_stitcher.weights import content_based
 
                 fuse_kwargs["weights_func"] = content_based
+                # content_based defaults (sigma_1=5, sigma_2=11). Must be
+                # provided explicitly: fusion.fuse calls
+                # calculate_required_overlap(weights_func, weights_func_kwargs)
+                # which unconditionally dereferences kwargs["sigma_2"], so
+                # passing None here crashes with a NoneType subscript error.
+                fuse_kwargs["weights_func_kwargs"] = {"sigma_1": 5, "sigma_2": 11}
                 self.logger.info(
                     "  Using content-based tile-overlap weighting "
                     "(Preibisch local-variance algorithm)"
