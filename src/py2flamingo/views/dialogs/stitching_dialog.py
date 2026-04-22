@@ -23,7 +23,6 @@ from PyQt5.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
-    QProgressBar,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -515,34 +514,38 @@ class StitchingDialog(PersistentDialog):
         self._depth_atten_cb.toggled.connect(self._depth_atten_mu_spin.setEnabled)
         proc_layout.addWidget(self._depth_atten_mu_spin, 3, 1)
 
-        # Proc Row 4: Output chunk size
-        proc_layout.addWidget(QLabel("Output chunk size:"), 4, 0)
+        # Proc Row 4: Fusion chunk size
+        proc_layout.addWidget(QLabel("Fusion chunk size:"), 4, 0)
         self._chunk_size_combo = QComboBox()
-        # (z, y, x) presets.  32 MB default is chosen for fits-in-CPU-cache
-        # pyramid work; 128 MB halves dask per-chunk overhead at the cost
-        # of more per-worker RAM during content-based fusion.
+        # Dask graph granularity for the fuse step. Separate from
+        # zarr_chunks (the final storage chunk size that determines
+        # viewer pan/zoom cost) — this only affects fusion throughput.
         self._chunk_size_combo.addItem(
-            "Small (32×256×256 = 4 MB)", {"z": 32, "y": 256, "x": 256}
+            "Small (4 MB, 32×256×256)", {"z": 32, "y": 256, "x": 256}
         )
         self._chunk_size_combo.addItem(
-            "Default (128×256×256 = 16 MB)", {"z": 128, "y": 256, "x": 256}
+            "Medium (16 MB, 128×256×256)", {"z": 128, "y": 256, "x": 256}
         )
         self._chunk_size_combo.addItem(
-            "Large (64×512×512 = 32 MB)", {"z": 64, "y": 512, "x": 512}
+            "Large (32 MB, 64×512×512)", {"z": 64, "y": 512, "x": 512}
         )
         self._chunk_size_combo.addItem(
-            "XL (64×1024×1024 = 128 MB)", {"z": 64, "y": 1024, "x": 1024}
+            "XL (128 MB, 64×1024×1024)", {"z": 64, "y": 1024, "x": 1024}
         )
-        self._chunk_size_combo.setCurrentIndex(1)
+        self._chunk_size_combo.setCurrentIndex(2)  # Large
         self._chunk_size_combo.setToolTip(
-            "Dask output chunk granularity for the fused-memmap store.\n\n"
-            "• Smaller chunks → less RAM per worker, more dask overhead.\n"
-            "• Larger chunks → fewer scheduling decisions, faster per-chunk\n"
-            "  content-based filters (less Python/graph overhead), but\n"
-            "  each worker holds a bigger float32 intermediate.\n\n"
-            "Try Large or XL if the fuse-store step is unexpectedly slow\n"
-            "and you have RAM headroom. Peak per-worker RAM = chunk_bytes\n"
-            "× ~6 (upcast + gaussian scratch)."
+            "Dask compute-chunk granularity for the fuse step.\n\n"
+            "This is internal to the fusion pipeline — it does NOT\n"
+            "affect the chunk size of the final OME-Zarr/Imaris output,\n"
+            "so pan/zoom performance in napari / Fiji / Imaris is\n"
+            "unchanged.\n\n"
+            "• Smaller chunks → less RAM per worker, more dask overhead\n"
+            "  (~47 graph tasks per chunk).\n"
+            "• Larger chunks → fewer scheduling decisions, faster fusion\n"
+            "  (7-8× fewer chunks from Small → XL).\n\n"
+            "Large (default) is a safe balance. Pick XL if the fuse\n"
+            "step is unexpectedly slow and you have RAM headroom.\n"
+            "Small helps on tight-RAM systems at the cost of throughput."
         )
         proc_layout.addWidget(self._chunk_size_combo, 4, 1, 1, 3)
 
@@ -615,17 +618,47 @@ class StitchingDialog(PersistentDialog):
         log_group.setLayout(log_layout)
         layout.addWidget(log_group)
 
-        # --- Progress bar ---
-        progress_layout = QHBoxLayout()
-        self._progress_bar = QProgressBar()
-        self._progress_bar.setRange(0, 100)
-        self._progress_bar.setValue(0)
-        progress_layout.addWidget(self._progress_bar)
+        # --- Progress: step list + detail ---
+        # A single 0–100% bar is misleading here because step costs are
+        # wildly uneven (preprocess ≪ fuse ≪ write for large runs). We
+        # instead show a list of pipeline phases with state pills:
+        #   Yellow = to-do
+        #   Orange = in progress
+        #   Blue = done
+        #   Red = error
+        # The raw status message (includes per-step % and ETA from the
+        # pipeline's dask Callback) is shown below the pills.
+        progress_group = QGroupBox("Progress")
+        progress_v = QVBoxLayout()
+
+        self._step_row = QHBoxLayout()
+        self._step_row.setSpacing(4)
+        self._step_labels: Dict[str, QLabel] = {}
+        self._step_order = [
+            ("discover", "Discover"),
+            ("register", "Register"),
+            ("preprocess", "Preprocess"),
+            ("fuse", "Fuse"),
+            ("write", "Write output"),
+            ("metadata", "Metadata"),
+        ]
+        for key, text in self._step_order:
+            pill = QLabel(text)
+            pill.setAlignment(Qt.AlignCenter)
+            pill.setProperty("_stitch_step", key)
+            self._step_labels[key] = pill
+            self._step_row.addWidget(pill)
+        self._step_row.addStretch()
+        progress_v.addLayout(self._step_row)
 
         self._status_label = QLabel("Ready")
-        self._status_label.setMinimumWidth(120)
-        progress_layout.addWidget(self._status_label)
-        layout.addLayout(progress_layout)
+        self._status_label.setStyleSheet("color: #555; font-size: 11px;")
+        progress_v.addWidget(self._status_label)
+
+        progress_group.setLayout(progress_v)
+        layout.addWidget(progress_group)
+
+        self._reset_step_progress()
 
         # Sync .ozx checkbox enabled state with initial format
         self._on_format_changed()
@@ -1280,6 +1313,7 @@ class StitchingDialog(PersistentDialog):
             return
 
         self._log_text.clear()
+        self._reset_step_progress()
         n_pending = len(pending)
         self._log(f"Starting batch stitching: {n_pending} directories\n")
 
@@ -1509,9 +1543,78 @@ class StitchingDialog(PersistentDialog):
                 item["status"] = "cancelled"
         self._update_queue_table()
 
+    # Step-list colours. Kept here so a11y changes are one place.
+    _STEP_COLORS = {
+        "todo": ("#FFC107", "#5D4200"),  # yellow pill, dark text
+        "running": ("#FF8C00", "#FFFFFF"),  # orange pill, white text
+        "done": ("#1976D2", "#FFFFFF"),  # blue pill, white text
+        "error": ("#D32F2F", "#FFFFFF"),  # red pill, white text
+        "skipped": ("#B0B0B0", "#404040"),  # grey pill, dark text
+    }
+
+    def _reset_step_progress(self):
+        """Mark every pipeline step as TODO and clear the status line."""
+        for key, _ in self._step_order:
+            self._set_step_state(key, "todo")
+        self._status_label.setText("Ready")
+
+    def _set_step_state(self, key: str, state: str):
+        """Set the colour of a step pill to TODO / RUNNING / DONE /
+        ERROR / SKIPPED. Unknown ``key`` is a no-op (safer than a
+        KeyError into the worker thread)."""
+        pill = self._step_labels.get(key)
+        if pill is None:
+            return
+        bg, fg = self._STEP_COLORS.get(state, self._STEP_COLORS["todo"])
+        pill.setStyleSheet(
+            f"QLabel {{ background-color: {bg}; color: {fg}; "
+            f"font-weight: bold; padding: 3px 10px; border-radius: 10px; }}"
+        )
+
+    # Map status substrings → step key. Ordered because several
+    # substrings legitimately match multiple keys (e.g. "channel" is
+    # in both preprocess and fuse status messages) — first match wins
+    # by design, and we order it to follow the actual pipeline flow.
+    _STATUS_TO_STEP = [
+        ("discover", "discover"),
+        ("loading reference", "register"),
+        ("registering", "register"),
+        ("skip registration", "register"),  # will be marked "skipped" separately
+        ("preprocess", "preprocess"),
+        ("materializing", "preprocess"),
+        ("fusing", "fuse"),
+        ("computing channel", "fuse"),
+        ("storing channel", "fuse"),
+        ("channel ", "fuse"),  # "channel 2 store progress"
+        ("writing ome", "write"),
+        ("writing imaris", "write"),
+        ("writing sharded", "write"),
+        ("writing pyramidal", "write"),
+        ("writing multi-channel", "write"),
+        ("finalizing", "write"),
+        (".ims write complete", "write"),
+        ("metadata", "metadata"),
+    ]
+
+    def _classify_step(self, status: str):
+        """Return the step key for the current status string (or None
+        if nothing obvious matches)."""
+        s = status.lower()
+        for needle, key in self._STATUS_TO_STEP:
+            if needle in s:
+                return key
+        return None
+
     def _on_progress(self, percentage: int, status: str):
-        """Handle progress updates from worker."""
-        self._progress_bar.setValue(percentage)
+        """Handle progress updates from worker.
+
+        ``percentage`` is ignored here — it was badly calibrated across
+        phases and jumped to ~50 % on the first tile. We derive the
+        current phase from the status string instead and light the
+        pills accordingly. ``percentage`` still shows up in the raw
+        status line on its own when the pipeline sends it.
+        """
+        del percentage  # intentionally unused; see docstring
         # Add batch context if multiple items
         if self._batch_running and len(self._queue) > 1:
             n_total = sum(1 for it in self._queue if it["status"] != "cancelled")
@@ -1519,6 +1622,41 @@ class StitchingDialog(PersistentDialog):
             self._status_label.setText(f"[{n_done + 1}/{n_total}] {status}")
         else:
             self._status_label.setText(status)
+
+        key = self._classify_step(status)
+        if key is None:
+            return
+
+        # Skip-registration special case: the status says "Skipping
+        # registration..." which we want to render as skipped (grey),
+        # not running (orange).
+        if key == "register" and "skip" in status.lower():
+            self._set_step_state("register", "skipped")
+            return
+
+        # Mark everything up to and including this step as done/running,
+        # everything after as todo. Keeps earlier pills from re-flipping
+        # when a later step emits a status line.
+        keys = [k for k, _ in self._step_order]
+        try:
+            idx = keys.index(key)
+        except ValueError:
+            return
+        for i, k in enumerate(keys):
+            if i < idx:
+                # Don't overwrite 'skipped'; leave it grey.
+                existing = self._step_labels[k].styleSheet()
+                if "#B0B0B0" not in existing:
+                    self._set_step_state(k, "done")
+            elif i == idx:
+                self._set_step_state(k, "running")
+            else:
+                # Only reset future steps if they haven't already been
+                # marked done — keeps the list stable when a later
+                # phase briefly echoes a string from an earlier one.
+                existing = self._step_labels[k].styleSheet()
+                if "#1976D2" not in existing:
+                    self._set_step_state(k, "todo")
 
     def _on_log_message(self, message: str):
         """Handle log messages from worker."""
@@ -1586,7 +1724,23 @@ class StitchingDialog(PersistentDialog):
                     self._log(f"    \u2717 {path.name}: {err}")
         self._log(f"{'=' * 60}")
 
-        self._progress_bar.setValue(100 if n_success > 0 else 0)
+        # Final state: everything done, or mark the pill for whichever
+        # step was current as errored if the run failed.
+        if n_error:
+            # Mark whichever step is currently "running" as error; any
+            # earlier steps stay done.
+            for k, _ in self._step_order:
+                existing = self._step_labels[k].styleSheet()
+                if "#FF8C00" in existing:  # orange = running
+                    self._set_step_state(k, "error")
+                    break
+        elif n_success > 0:
+            for k, _ in self._step_order:
+                existing = self._step_labels[k].styleSheet()
+                # Leave 'skipped' pills grey.
+                if "#B0B0B0" not in existing:
+                    self._set_step_state(k, "done")
+
         self._status_label.setText(f"Done: {n_success}/{total} succeeded")
 
         # Show summary dialog
@@ -2123,7 +2277,7 @@ class StitchingDialog(PersistentDialog):
         content_fusion = s.value("content_based_fusion", False, type=bool)
         self._content_fusion_cb.setChecked(content_fusion)
 
-        chunk_idx = s.value("chunk_size_idx", 1, type=int)
+        chunk_idx = s.value("chunk_size_idx", 2, type=int)
         if 0 <= chunk_idx < self._chunk_size_combo.count():
             self._chunk_size_combo.setCurrentIndex(chunk_idx)
 
@@ -2340,7 +2494,7 @@ class NativeStitchingDialog(StitchingDialog):
         content_fusion = s.value("content_based_fusion", False, type=bool)
         self._content_fusion_cb.setChecked(content_fusion)
 
-        chunk_idx = s.value("chunk_size_idx", 1, type=int)
+        chunk_idx = s.value("chunk_size_idx", 2, type=int)
         if 0 <= chunk_idx < self._chunk_size_combo.count():
             self._chunk_size_combo.setCurrentIndex(chunk_idx)
 
