@@ -234,6 +234,11 @@ class StitchingConfig:
     #   False = force in-memory (fast, requires all data to fit in RAM)
     streaming_mode: Optional[bool] = None
 
+    # Per-tile preprocess parallelism in streaming mode.
+    # 0 = auto (picked from available RAM vs tile size, clamped to [1, 4]);
+    # otherwise the requested worker count, clamped to [1, 8].
+    preprocess_workers: int = 0
+
     @classmethod
     def with_yaml_defaults(cls) -> "StitchingConfig":
         """Create a StitchingConfig with defaults loaded from stitching_config.yaml.
@@ -1991,60 +1996,146 @@ class StitchingPipeline:
         Caller owns ``tmp_dir`` and must remove it once the returned
         dask arrays are no longer referenced.
         """
-        import dask.array as da
+        import time as _time
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
         tmp_dir.mkdir(parents=True, exist_ok=True)
         tile_bytes = int(np.prod(expected_shape) * 2)  # uint16
+
+        # Filter to tiles that actually contain this channel, preserving
+        # their original indices so memmap filenames stay stable across
+        # channels (useful when debugging).
+        active = [(i, t) for i, t in enumerate(tiles) if ch_id in t.raw_files]
+
+        n_workers = self._pick_preprocess_workers(tile_bytes, len(active))
         self.logger.info(
-            f"  Materializing {len(tiles)} tiles for channel {ch_id} "
+            f"  Materializing {len(active)} tiles for channel {ch_id} "
             f"→ {tmp_dir} "
-            f"({tile_bytes * len(tiles) / (1024**3):.1f} GB temp on disk)"
+            f"({tile_bytes * len(active) / (1024**3):.1f} GB temp on disk, "
+            f"{n_workers} worker{'s' if n_workers != 1 else ''})"
         )
 
-        result: List[Tuple[Any, RawTileInfo]] = []
-        for i, tile in enumerate(tiles):
-            if ch_id not in tile.raw_files:
-                continue
-            if self._cancelled_fn():
-                self.logger.info("Pipeline cancelled by user")
-                return result
-
-            self._progress_fn(
-                50,
-                f"Preprocessing tile {i + 1}/{len(tiles)} (ch {ch_id})",
-            )
-            self.logger.info(
-                f"    Tile {i + 1}/{len(tiles)}: {tile.folder.name} "
-                f"(X={tile.x_mm:.2f} Y={tile.y_mm:.2f})"
-            )
-
+        def process_one(i: int, tile: RawTileInfo) -> Tuple[Any, RawTileInfo]:
+            # Preprocess (holds ~1 tile in RAM) → write memmap (stream) →
+            # return a lazy dask wrapper backed by the file. All per-tile
+            # preprocessing (flat-field/illum/depth atten/destripe/deconv/
+            # downsample/X-flip) happens on this thread; numpy releases
+            # the GIL for the heavy ops so multiple workers overlap cleanly.
             vol = self._preprocess_single_tile(tile, ch_id)
             if vol.shape != expected_shape:
                 raise RuntimeError(
                     f"Tile {i} shape {vol.shape} != expected {expected_shape}"
                 )
-
             mm_path = tmp_dir / f"tile_{i:04d}.dat"
             mm = np.memmap(mm_path, dtype=np.uint16, mode="w+", shape=expected_shape)
             mm[:] = vol
             mm.flush()
             del mm, vol
-            # Build the dask array directly from a per-chunk read graph.
-            # da.from_array unconditionally calls x.copy() on anything
-            # arraylike (incl. np.memmap) *before* the asarray flag is
-            # consulted (dask/array/core.py L3657), which materializes the
-            # full 5.7 GB tile into RAM and defeats spill-to-disk. The
-            # helper opens the memmap inside each task so reads stay lazy
-            # and the OS page cache handles sharing between chunks.
+            # _dask_array_from_memmap builds the task graph by hand so
+            # dask.from_array's unconditional x.copy() cannot materialize
+            # the file back into RAM (see commit 88f88c2).
             lazy = _dask_array_from_memmap(
-                mm_path,
-                expected_shape,
-                np.uint16,
-                _DASK_PROCESSING_CHUNKS,
+                mm_path, expected_shape, np.uint16, _DASK_PROCESSING_CHUNKS
             )
-            result.append((lazy, tile))
+            return lazy, tile
 
-        return result
+        result_by_idx: Dict[int, Tuple[Any, RawTileInfo]] = {}
+        completed = 0
+        t_started = _time.time()
+
+        if n_workers == 1:
+            # Serial path — identical to the old loop so single-worker
+            # runs behave exactly as they did before.
+            for i, tile in active:
+                if self._cancelled_fn():
+                    self.logger.info("Pipeline cancelled by user")
+                    break
+                t0 = _time.time()
+                self._progress_fn(
+                    50,
+                    f"Preprocessing tile {completed + 1}/{len(active)} (ch {ch_id})",
+                )
+                self.logger.info(
+                    f"    Tile {completed + 1}/{len(active)}: {tile.folder.name} "
+                    f"(X={tile.x_mm:.2f} Y={tile.y_mm:.2f})"
+                )
+                result_by_idx[i] = process_one(i, tile)
+                completed += 1
+                self.logger.info(
+                    f"      (tile {completed}/{len(active)} took "
+                    f"{_time.time() - t0:.1f}s)"
+                )
+        else:
+            with ThreadPoolExecutor(max_workers=n_workers) as ex:
+                futures = {
+                    ex.submit(process_one, i, tile): (i, tile) for i, tile in active
+                }
+                try:
+                    for fut in as_completed(futures):
+                        if self._cancelled_fn():
+                            for f in futures:
+                                f.cancel()
+                            self.logger.info("Pipeline cancelled by user")
+                            break
+                        i, tile = futures[fut]
+                        result_by_idx[i] = fut.result()
+                        completed += 1
+                        self._progress_fn(
+                            50,
+                            f"Preprocessed {completed}/{len(active)} (ch {ch_id})",
+                        )
+                        self.logger.info(
+                            f"    Tile {completed}/{len(active)}: {tile.folder.name} "
+                            f"(X={tile.x_mm:.2f} Y={tile.y_mm:.2f})"
+                        )
+                except Exception:
+                    for f in futures:
+                        f.cancel()
+                    raise
+
+        total = _time.time() - t_started
+        if completed:
+            self.logger.info(
+                f"  Preprocessed {completed} tiles in {total:.1f}s "
+                f"({total / completed:.1f}s/tile avg, "
+                f"{completed * tile_bytes / (1024**3) / max(total, 0.001):.1f} GB/s)"
+            )
+
+        # Return in original tile order so fusion sees tiles in the same
+        # spatial sequence regardless of completion order from the pool.
+        return [result_by_idx[i] for i in sorted(result_by_idx)]
+
+    def _pick_preprocess_workers(self, tile_bytes: int, n_tiles: int) -> int:
+        """Choose a safe ThreadPool size for per-tile preprocessing.
+
+        Each worker holds ~2.5× ``tile_bytes`` at peak (raw load +
+        preprocessed output + memmap writeback buffer). We cap workers
+        at 50% of available RAM divided by that footprint, and at
+        ``n_tiles`` so the pool never outsizes the work.
+
+        Config override:
+          * ``preprocess_workers = 0``: auto, clamped to [1, 4].
+          * ``preprocess_workers > 0``: honor the user's request,
+            clamped to [1, 8] — the disk saturates well before 8 so
+            larger values do nothing useful.
+        """
+        requested = int(getattr(self.config, "preprocess_workers", 0) or 0)
+
+        try:
+            import psutil
+
+            avail_bytes = psutil.virtual_memory().available
+        except Exception:
+            avail_bytes = 8 * 1024**3  # conservative 8 GB fallback
+
+        per_worker = max(1, int(tile_bytes * 2.5))
+        ram_cap = max(1, avail_bytes // (per_worker * 2))
+
+        if requested > 0:
+            chosen = min(requested, 8, n_tiles or 1)
+        else:
+            chosen = min(4, int(ram_cap), n_tiles or 1)
+        return max(1, chosen)
 
     def _register_tiles(
         self,
