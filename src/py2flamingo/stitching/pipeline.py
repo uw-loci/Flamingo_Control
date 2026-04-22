@@ -239,6 +239,14 @@ class StitchingConfig:
     # otherwise the requested worker count, clamped to [1, 8].
     preprocess_workers: int = 0
 
+    # dask thread-pool size for the fused-memmap `da.store` compute.
+    # Content-based fusion does two NaN Gaussian filters per chunk on
+    # float32 and is CPU-bound but trivially parallel across chunks.
+    # 0 = auto (picked from available RAM, clamped to [1, 4] — 1
+    # degenerates to the old synchronous scheduler);
+    # >0 = honor the request, clamped to [1, 8].
+    fuse_workers: int = 0
+
     @classmethod
     def with_yaml_defaults(cls) -> "StitchingConfig":
         """Create a StitchingConfig with defaults loaded from stitching_config.yaml.
@@ -1697,14 +1705,23 @@ class StitchingPipeline:
                         f"→ {fused_memmap_path}"
                     )
 
+                dest_idx = len(fused_channel_ids)
+                fuse_workers = self._pick_fuse_workers(darr)
+                if fuse_workers <= 1:
+                    scheduler_name = "synchronous"
+                    scheduler_cfg: Dict[str, Any] = {"scheduler": "synchronous"}
+                else:
+                    scheduler_name = f"threads×{fuse_workers}"
+                    scheduler_cfg = {
+                        "scheduler": "threads",
+                        "num_workers": fuse_workers,
+                    }
                 self.logger.info(
                     f"  Storing channel {ch_id} into fused memmap "
-                    f"(synchronous, memmap-backed tiles)..."
+                    f"(scheduler={scheduler_name}, memmap-backed tiles)..."
                 )
-                dest_idx = len(fused_channel_ids)
-                with dask.config.set(scheduler="synchronous"):
+                with dask.config.set(**scheduler_cfg):
                     da.store(darr, stacked[dest_idx], compute=True)
-                stacked.flush()
 
                 # Drop references to per-tile memmaps so Windows releases
                 # the file locks, then delete the per-channel spill dir.
@@ -2135,6 +2152,54 @@ class StitchingPipeline:
             chosen = min(requested, 8, n_tiles or 1)
         else:
             chosen = min(4, int(ram_cap), n_tiles or 1)
+        return max(1, chosen)
+
+    def _pick_fuse_workers(self, darr) -> int:
+        """Choose a safe dask thread-pool size for the fused-memmap store.
+
+        Each worker's peak per-chunk footprint is dominated by
+        content-based Gaussian weighting — float32 upcast of the output
+        chunk plus overlapping tile chunks plus gaussian filter scratch.
+        Empirically ~6× the uint16 chunk size per worker, so a default
+        16 MB chunk (64×512×512) needs ~100 MB per worker with cosine
+        blending, ~400 MB with content-based on top. We budget 1 GB per
+        worker as a safe overestimate.
+
+        On a 64 GB RAM box with ~40 GB free this picks 4 workers
+        (worst case ~4 GB in-flight), well under the tile-memmap page
+        cache that lives alongside it. On an 8 GB low-end box it drops
+        to 1 (synchronous) automatically.
+
+        Config override:
+          * ``fuse_workers = 0``: auto, clamped to [1, 4].
+          * ``fuse_workers > 0``: honor the request, clamped to [1, 8].
+        """
+        requested = int(getattr(self.config, "fuse_workers", 0) or 0)
+
+        try:
+            import psutil
+
+            avail_bytes = psutil.virtual_memory().available
+        except Exception:
+            avail_bytes = 8 * 1024**3  # conservative 8 GB fallback
+
+        # Reserve 25% for fused memmap page cache + tile memmap pages +
+        # OS. Remaining budget at 1 GB per worker.
+        budget_bytes = max(0, int(avail_bytes * 0.75))
+        per_worker_bytes = 1 * 1024**3
+        ram_cap = max(1, budget_bytes // per_worker_bytes)
+
+        # Cap by the number of output chunks so the pool never outsizes
+        # the work (tiny runs / huge chunks).
+        try:
+            n_chunks = max(1, int(np.prod([len(c) for c in darr.chunks])))
+        except Exception:
+            n_chunks = 64
+
+        if requested > 0:
+            chosen = min(requested, 8, n_chunks)
+        else:
+            chosen = min(4, int(ram_cap), n_chunks)
         return max(1, chosen)
 
     def _register_tiles(
