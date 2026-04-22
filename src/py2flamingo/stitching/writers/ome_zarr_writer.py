@@ -240,16 +240,23 @@ def _write_via_ngff_zarr(
     if progress_callback:
         progress_callback(60, "Writing sharded OME-Zarr v0.5...")
 
+    # ngff-zarr requires chunks_per_shard to match the array ndim. Our
+    # default is 3D (Z,Y,X); for multi-channel (C,Z,Y,X) data prepend a
+    # 1 on the channel axis so each shard still spans a single channel.
+    effective_shard_chunks = tuple(shard_chunks)
+    if np_data.ndim == 4 and len(effective_shard_chunks) == 3:
+        effective_shard_chunks = (1, *effective_shard_chunks)
+
     logger.info(
         f"Writing OME-Zarr v0.5 to {output_path} "
-        f"(shards={shard_chunks}, compression={compression})"
+        f"(shards={effective_shard_chunks}, compression={compression})"
     )
 
     to_ngff_zarr(
         str(output_path),
         multiscales,
         version="0.5",
-        chunks_per_shard=shard_chunks,
+        chunks_per_shard=effective_shard_chunks,
         use_tensorstore=use_tensorstore,
         overwrite=True,
     )
@@ -565,11 +572,13 @@ def write_ome_zarr_v2(
         else:
             level_chunks = tuple(min(c, s) for c, s in zip(chunks, level_data.shape))
 
+        # zarr-python >=3.1 raises "data parameter was used, but the dtype
+        # parameter was also used" when both are passed; data already carries
+        # its dtype, so skip the explicit kwarg.
         root.create_array(
             str(level_idx),
             data=level_data,
             chunks=level_chunks,
-            dtype=level_data.dtype,
             compressors=compressor,
         )
 
