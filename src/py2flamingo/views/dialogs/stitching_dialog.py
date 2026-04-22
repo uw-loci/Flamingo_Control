@@ -1314,7 +1314,10 @@ class StitchingDialog(PersistentDialog):
                 )
 
             if out_free_gb is not None:
-                # Streaming mode spills one channel of tile memmaps to disk.
+                # Streaming mode holds three things on disk: per-channel
+                # tile memmaps (one channel at a time), the fused
+                # (C,Z,Y,X) memmap that feeds the writer, and the final
+                # output file.
                 bpv = 2
                 ds_xy = max(config.downsample_xy, 1)
                 ds_z = max(config.downsample_z, 1)
@@ -1326,12 +1329,17 @@ class StitchingDialog(PersistentDialog):
                     * bpv
                 )
                 spill_gb = len(tiles) * tile_bytes / (1024**3) if use_streaming else 0.0
-                needed_gb = est["output_gb"] + spill_gb
+                fused_memmap_gb = est["output_gb"] if use_streaming else 0.0
+                needed_gb = est["output_gb"] + spill_gb + fused_memmap_gb
                 if out_free_gb < needed_gb * 1.1:
-                    extra = f" + ~{spill_gb:.0f} GB temp spill" if spill_gb else ""
+                    parts = [f"~{est['output_gb']:.0f} GB output"]
+                    if spill_gb:
+                        parts.append(f"~{spill_gb:.0f} GB tile spill")
+                    if fused_memmap_gb:
+                        parts.append(f"~{fused_memmap_gb:.0f} GB fused memmap")
                     disk_warnings.append(
                         f"  • {item['path'].name}: "
-                        f"need ~{est['output_gb']:.0f} GB output{extra}, "
+                        f"need {' + '.join(parts)}, "
                         f"{out_free_gb:.0f} GB free on {output_dir}"
                     )
 

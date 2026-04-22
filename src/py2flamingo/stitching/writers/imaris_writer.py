@@ -202,7 +202,7 @@ def _pad_to_block(arr: np.ndarray, block_shape_zyx: Tuple[int, int, int]) -> np.
 
 
 def write_imaris_streaming(
-    per_channel_darrays: List[Any],  # list of dask.array.Array, each (Z,Y,X) uint16
+    data: np.ndarray,  # (C, Z, Y, X) uint16, numpy array or np.memmap
     output_path: Path,
     voxel_size_um: Dict[str, float],
     channel_names: Optional[List[str]] = None,
@@ -212,15 +212,14 @@ def write_imaris_streaming(
     application_name: str = "py2flamingo",
     application_version: str = "0.4",
 ) -> Path:
-    """Write a multi-channel volume to .ims directly from lazy dask arrays.
-
-    Each per-channel array is a lazy ``(Z, Y, X)`` dask array of dtype
-    uint16 (already clipped).  Tiles are loaded and fused on demand as
-    PyImarisWriter requests blocks.
+    """Write a multi-channel volume to .ims from a materialized array.
 
     Args:
-        per_channel_darrays: list of (Z, Y, X) dask arrays, one per
-            channel.  All channels must share the same shape.
+        data: 4D ``(C, Z, Y, X)`` uint16 array — typically an
+            ``np.memmap`` so reads come from disk, not RAM, and
+            PyImarisWriter's per-block ``CopyBlock`` is bounded by file
+            I/O instead of the dask fusion graph. 3D ``(Z, Y, X)`` is
+            also accepted and treated as a single channel.
         output_path: Output ``.ims`` file path.
         voxel_size_um: Physical voxel size per axis.
         channel_names: Display names, defaults to ``Channel N``.
@@ -234,30 +233,24 @@ def write_imaris_streaming(
     if not IMARIS_AVAILABLE:
         raise RuntimeError(unavailable_reason())
 
-    if not per_channel_darrays:
-        raise ValueError("write_imaris_streaming: no channels provided")
-
-    import dask
-    import dask.array as da
+    if data is None or getattr(data, "size", 0) == 0:
+        raise ValueError("write_imaris_streaming: empty input data")
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Common shape across channels
-    shape_zyx = per_channel_darrays[0].shape
-    for ch, arr in enumerate(per_channel_darrays):
-        if arr.shape != shape_zyx:
-            raise ValueError(
-                f"Channel {ch} shape {arr.shape} differs from "
-                f"channel 0 shape {shape_zyx}"
-            )
-        if arr.dtype != np.uint16:
-            raise ValueError(
-                f"Channel {ch} dtype {arr.dtype} — expected uint16 "
-                "(caller should clip and cast before passing)"
-            )
+    if data.ndim == 3:
+        data = data[np.newaxis, ...]
+    if data.ndim != 4:
+        raise ValueError(f"data must be 3D (Z,Y,X) or 4D (C,Z,Y,X); got {data.ndim}D")
+    if data.dtype != np.uint16:
+        raise ValueError(
+            f"data dtype {data.dtype} — expected uint16 "
+            "(caller must clip and cast before passing)"
+        )
 
-    n_channels = len(per_channel_darrays)
+    n_channels = data.shape[0]
+    shape_zyx = data.shape[1:]
     z, y, x = shape_zyx
 
     image_size = PW.ImageSize(x=x, y=y, z=z, c=n_channels, t=1)
@@ -327,12 +320,10 @@ def write_imaris_streaming(
                 bx, by, bz, bc, bt, block_size, image_size
             )
 
-            # Pull the (Z,Y,X) slice from this channel's lazy dask array.
-            # Compute with the synchronous scheduler so only the tiles
-            # overlapping this block are loaded at once.
-            darr = per_channel_darrays[bc][z_slice, y_slice, x_slice]
-            with dask.config.set(scheduler="synchronous"):
-                sub = np.asarray(darr.compute())
+            # Pull the (Z,Y,X) slice straight out of the memmap. No
+            # dask compute — the fusion graph was already materialized
+            # to disk by the caller, so this is plain file I/O.
+            sub = np.ascontiguousarray(data[bc, z_slice, y_slice, x_slice])
 
             # Pad edge blocks to full block size
             padded = _pad_to_block(sub, (block_size.z, block_size.y, block_size.x))
@@ -388,16 +379,10 @@ def write_imaris_from_array(
     application_name: str = "py2flamingo",
     application_version: str = "0.4",
 ) -> Path:
-    """Write a numpy array to .ims.  Convenience wrapper for the
-    in-memory pipeline path that already has a stacked array in RAM.
-
-    Internally wraps each channel as a one-chunk dask array and calls
-    :func:`write_imaris_streaming`.  The block iteration still runs,
-    but no lazy loading occurs — blocks are sliced from the numpy
-    array directly.
-    """
-    import dask.array as da
-
+    """Write a numpy array to .ims. Convenience wrapper that clips to
+    uint16 (if needed) and then delegates to
+    :func:`write_imaris_streaming`, which does plain numpy indexing
+    per block."""
     if stacked.ndim == 3:
         stacked = stacked[np.newaxis, ...]
     if stacked.ndim != 4:
@@ -407,9 +392,8 @@ def write_imaris_from_array(
     if stacked.dtype != np.uint16:
         stacked = np.clip(stacked, 0, 65535).astype(np.uint16)
 
-    per_channel = [da.from_array(stacked[c]) for c in range(stacked.shape[0])]
     return write_imaris_streaming(
-        per_channel_darrays=per_channel,
+        data=stacked,
         output_path=output_path,
         voxel_size_um=voxel_size_um,
         channel_names=channel_names,

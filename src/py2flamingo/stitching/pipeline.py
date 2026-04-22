@@ -401,7 +401,9 @@ def estimate_memory_usage(
         tile_data_gb + output_gb + max(compute_overhead_gb, pyramid_overhead_gb)
     )
 
-    # Streaming peak: one channel's tiles + uint16 output array.
+    # Streaming peak: one channel's tile working set + dask chunk buffers.
+    # The fused output goes to an on-disk memmap (see `_run_streaming`),
+    # so no output-sized RAM allocation is counted here.
     # With downsample, tiles are materialized at reduced size.
     # Without downsample, tiles stay as memmaps (demand-paged).
     n_tiles = len(tiles)
@@ -1605,14 +1607,11 @@ class StitchingPipeline:
         channel_origins = []
         fused_channel_ids = []
         stacked = None
-
-        # Imaris block-streaming path: keep lazy dask arrays, don't
-        # materialize channels.  PyImarisWriter iterates blocks later.
-        imaris_mode = self.config.output_format == "imaris"
-        per_channel_darrays: list = []
-        fused_sims: list = []
+        fused_memmap_path = None
 
         tmp_root = output_path / ".stitch_tmp"
+        tmp_root.mkdir(parents=True, exist_ok=True)
+        imaris_mode = self.config.output_format == "imaris"
         try:
             for ch_idx, ch_id in enumerate(process_channels):
                 if self._cancelled_fn():
@@ -1668,70 +1667,83 @@ class StitchingPipeline:
                     f"X={origin_um['x']:.1f} \u00b5m"
                 )
 
-                if imaris_mode:
-                    # Keep the dask array + fused_sim + tile_data alive so
-                    # PyImarisWriter can drive per-block compute. The tile
-                    # memmaps under tmp_root are cleaned up after the
-                    # Imaris write loop (see finally below).
-                    per_channel_darrays.append(darr)
-                    fused_sims.append(tile_data)  # hold memmaps alive
-                    fused_sims.append(fused_sim)
-                else:
-                    # TIFF/Zarr path: compute channel into numpy, accumulate
-                    # into the stacked (C,Z,Y,X) array.
-                    self.logger.info(
-                        f"  Computing channel {ch_id} "
-                        f"(memmap-backed tiles, synchronous)..."
+                # Single code path for all output formats: compute fusion
+                # into a per-channel slot of a 4D on-disk memmap. This:
+                #   * Keeps `stacked` out of RAM (previously np.zeros ate
+                #     C × output_gb before any writer saw it).
+                #   * Means Imaris's PyImarisWriter reads final voxels from
+                #     the memmap file instead of driving dask compute per
+                #     8 MB block (was 30 s × 30 k blocks = ~11 days).
+                #   * Content-based weighting + blending now run exactly
+                #     once per channel instead of once per Imaris block.
+                if stacked is None:
+                    n_total = len(process_channels)
+                    fused_shape = (n_total, *darr.shape)
+                    fused_memmap_path = tmp_root / "fused.dat"
+                    stacked = np.memmap(
+                        fused_memmap_path,
+                        dtype=np.uint16,
+                        mode="w+",
+                        shape=fused_shape,
                     )
-                    vol = np.zeros(darr.shape, dtype=np.uint16)
-                    with dask.config.set(scheduler="synchronous"):
-                        da.store(darr, vol, compute=True)
+                    self.logger.info(
+                        f"  Fused output memmap: {fused_shape} "
+                        f"({np.prod(fused_shape) * 2 / (1024**3):.1f} GB) "
+                        f"→ {fused_memmap_path}"
+                    )
 
-                    if stacked is None:
-                        n_total = len(process_channels)
-                        if n_total > 1:
-                            stacked = np.zeros((n_total, *vol.shape), dtype=np.uint16)
-                            stacked[0] = vol
-                            self.logger.info(
-                                f"  Pre-allocated output array: {stacked.shape} "
-                                f"({stacked.nbytes / (1024**3):.1f} GB)"
-                            )
-                        else:
-                            stacked = vol
-                    else:
-                        dest_idx = len(fused_channel_ids)
-                        sz, sy, sx = vol.shape
-                        stacked[dest_idx, :sz, :sy, :sx] = vol
+                self.logger.info(
+                    f"  Storing channel {ch_id} into fused memmap "
+                    f"(synchronous, memmap-backed tiles)..."
+                )
+                dest_idx = len(fused_channel_ids)
+                with dask.config.set(scheduler="synchronous"):
+                    da.store(darr, stacked[dest_idx], compute=True)
+                stacked.flush()
 
-                    # Release references to memmap-backed arrays before
-                    # removing the files (Windows holds file locks until
-                    # the numpy memmap objects are gone).
-                    del vol, darr, fused_sim, tile_data
-                    gc.collect()
-                    shutil.rmtree(ch_tmp_dir, ignore_errors=True)
+                # Drop references to per-tile memmaps so Windows releases
+                # the file locks, then delete the per-channel spill dir.
+                del darr, fused_sim, tile_data
+                gc.collect()
+                shutil.rmtree(ch_tmp_dir, ignore_errors=True)
 
                 channel_origins.append(origin_um)
                 fused_channel_ids.append(ch_id)
-        finally:
-            # Ensures cleanup on exception / cancellation. For non-imaris,
-            # per-channel dirs are already gone; this catches stragglers.
-            # For imaris, cleanup happens here after the write loop runs
-            # (see the imaris_mode block below, which runs inside run()
-            # after this try/finally returns normally).
-            if not imaris_mode and tmp_root.exists():
+        except Exception:
+            # Release the memmap before bubbling so the file can be removed.
+            if stacked is not None:
+                stacked.flush()
+                del stacked
+                stacked = None
+            gc.collect()
+            if tmp_root.exists():
                 shutil.rmtree(tmp_root, ignore_errors=True)
+            raise
 
         if not fused_channel_ids:
             self.logger.error("No channels were fused successfully")
+            if stacked is not None:
+                del stacked
+                stacked = None
+            gc.collect()
+            if tmp_root.exists():
+                shutil.rmtree(tmp_root, ignore_errors=True)
             return output_path
 
-        if not imaris_mode and stacked is None:
-            self.logger.error("No channels materialized for write")
-            return output_path
+        # Trim the memmap view to only the channels that actually fused
+        # (in case a channel had no tile data and was skipped).
+        if len(fused_channel_ids) < stacked.shape[0]:
+            stacked = stacked[: len(fused_channel_ids)]
 
         # --- Step 6: Write ---
         if self._cancelled_fn():
             self.logger.info("Pipeline cancelled by user")
+            if stacked is not None:
+                del stacked
+                stacked = None
+            gc.collect()
+            if tmp_root.exists():
+                shutil.rmtree(tmp_root, ignore_errors=True)
             return output_path
 
         self._progress_fn(85, "Writing multi-channel output...")
@@ -1739,47 +1751,51 @@ class StitchingPipeline:
         self.logger.info(f"  Output basename: {basename}")
         channel_names = [f"Channel_{ch_id}" for ch_id in fused_channel_ids]
 
-        if imaris_mode:
-            self.logger.info(
-                "Step 6: Writing Imaris .ims (block-streaming, "
-                "no full-channel materialization)..."
-            )
-            ims_path = output_path / f"{basename}.ims"
-            try:
-                from py2flamingo.stitching.writers import imaris_writer
+        try:
+            if imaris_mode:
+                self.logger.info(
+                    "Step 6: Writing Imaris .ims from fused memmap "
+                    "(block reads are file I/O, not dask recompute)..."
+                )
+                ims_path = output_path / f"{basename}.ims"
+                try:
+                    from py2flamingo.stitching.writers import imaris_writer
 
-                if not imaris_writer.is_available():
-                    self.logger.error(
-                        f"Imaris writer unavailable: {imaris_writer.unavailable_reason()}"
-                    )
-                else:
-                    imaris_writer.write_imaris_streaming(
-                        per_channel_darrays=per_channel_darrays,
-                        output_path=ims_path,
-                        voxel_size_um=voxel_size_um,
-                        channel_names=channel_names,
-                        progress_callback=self._progress_fn,
-                    )
-            except Exception as e:
-                self.logger.error(f"Imaris .ims write failed: {e}", exc_info=True)
-            finally:
-                # Release fusion graphs + memmap-backed tile data, then
-                # remove the per-tile spill directory.
-                del per_channel_darrays, fused_sims
-                gc.collect()
-                if tmp_root.exists():
-                    import shutil as _shutil
-
-                    _shutil.rmtree(tmp_root, ignore_errors=True)
-        else:
-            self.logger.info(
-                f"Step 5: Computed {len(fused_channel_ids)} channels \u2192 "
-                f"shape={stacked.shape}"
-            )
-            self.logger.info("Step 6: Writing multi-channel output (streaming)...")
-            self._write_multichannel_output(
-                stacked, channel_names, voxel_size_um, output_path, basename
-            )
+                    if not imaris_writer.is_available():
+                        self.logger.error(
+                            "Imaris writer unavailable: "
+                            f"{imaris_writer.unavailable_reason()}"
+                        )
+                    else:
+                        imaris_writer.write_imaris_streaming(
+                            data=stacked,
+                            output_path=ims_path,
+                            voxel_size_um=voxel_size_um,
+                            channel_names=channel_names,
+                            progress_callback=self._progress_fn,
+                        )
+                except Exception as e:
+                    self.logger.error(f"Imaris .ims write failed: {e}", exc_info=True)
+            else:
+                self.logger.info(
+                    f"Step 5: Computed {len(fused_channel_ids)} channels \u2192 "
+                    f"shape={stacked.shape}"
+                )
+                self.logger.info(
+                    "Step 6: Writing multi-channel output from fused memmap..."
+                )
+                self._write_multichannel_output(
+                    stacked, channel_names, voxel_size_um, output_path, basename
+                )
+        finally:
+            # Release the memmap reference before deleting the backing file
+            # (Windows holds locks until every numpy.memmap is gone).
+            if stacked is not None:
+                del stacked
+                stacked = None
+            gc.collect()
+            if tmp_root.exists():
+                shutil.rmtree(tmp_root, ignore_errors=True)
 
         # --- Step 7: Write metadata ---
         self._progress_fn(95, "Writing metadata...")
@@ -2950,7 +2966,9 @@ class StitchingPipeline:
         if fmt == "imaris":
             # PyImarisWriter keeps its own per-block scratch + HDF5 cache +
             # pyramid working set. Empirically ~25% of the uncompressed
-            # output size on top of our own peak.
+            # output size on top of our own peak. Block reads are file I/O
+            # from the fused memmap, not dask graph recomputes, so write
+            # time is roughly output_gb ÷ writer_throughput.
             ims_overhead_gb = output_gb * 0.25
             self.logger.info(
                 f"Imaris writer overhead: ~{ims_overhead_gb:.0f} GB "
@@ -2970,8 +2988,8 @@ class StitchingPipeline:
                     )
         elif fmt == "ome-zarr-v2":
             self.logger.info(
-                "OME-Zarr v2 writer materializes each pyramid level from "
-                "numpy (not fully lazy). Level 0 roughly matches "
+                "OME-Zarr v2 writer reads pyramid levels from the fused "
+                "memmap (not fully lazy). Level 0 roughly matches "
                 f"output_gb (~{output_gb:.0f} GB) during write."
             )
 
@@ -2992,18 +3010,25 @@ class StitchingPipeline:
             * (FRAME_HEIGHT // ds_xy if ds_xy > 1 else FRAME_HEIGHT)
             * bpv
         )
-        # Streaming spills one channel of tiles at a time.
+        # Streaming spills one channel of tiles at a time, then fuses
+        # the full (C,Z,Y,X) stack to a second memmap on disk before the
+        # writer runs. Both live simultaneously for most of the run.
         spill_gb = (len(tiles) * tile_bytes / (1024**3)) if use_streaming else 0.0
+        fused_memmap_gb = output_gb if use_streaming else 0.0
 
         try:
             out_free_gb = _shutil.disk_usage(output_path).free / (1024**3)
-            needed_gb = output_gb + spill_gb
+            # Peak disk = per-channel tile spill + fused memmap + final output
+            needed_gb = output_gb + spill_gb + fused_memmap_gb
+            parts = [f"~{output_gb:.1f} GB output"]
+            if spill_gb > 0:
+                parts.append(f"~{spill_gb:.1f} GB tile spill")
+            if fused_memmap_gb > 0:
+                parts.append(f"~{fused_memmap_gb:.1f} GB fused memmap")
             msg = (
                 f"Output drive ({output_path}): {out_free_gb:.0f} GB free, "
-                f"need ~{output_gb:.1f} GB output"
+                f"need {' + '.join(parts)}"
             )
-            if spill_gb > 0:
-                msg += f" + ~{spill_gb:.1f} GB temp spill"
             self.logger.info(msg)
             if out_free_gb < needed_gb * 1.1:
                 self.logger.warning(
