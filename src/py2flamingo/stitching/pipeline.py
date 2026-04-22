@@ -79,6 +79,50 @@ FOLDER_COORD_PATTERN = re.compile(r"X([-\d.]+)_Y([-\d.]+)")
 
 
 # ---------------------------------------------------------------------------
+# Lazy memmap-backed dask array
+# ---------------------------------------------------------------------------
+def _read_memmap_slice(path, shape, dtype, slices):
+    """Read a slice out of a numpy memmap on disk. Runs inside each dask
+    task so the memmap is opened per-chunk, never materialized whole.
+    Returns a *copy* of the slice so the memmap handle can be dropped
+    immediately (otherwise Windows holds the file lock)."""
+    mm = np.memmap(path, dtype=dtype, mode="r", shape=shape)
+    out = np.array(mm[slices])  # np.array forces a read-into-RAM for THIS slice only
+    del mm
+    return out
+
+
+def _dask_array_from_memmap(path, shape, dtype, chunks):
+    """Build a dask array backed by a memmap without ever calling
+    ``da.from_array``. dask's ``from_array`` unconditionally does
+    ``x.copy()`` on anything arraylike *before* the ``asarray`` flag is
+    considered (dask/array/core.py L3657) — that materializes the full
+    memmap into RAM and defeats spill-to-disk.
+
+    We side-step by constructing the task graph ourselves: one node per
+    chunk, each node calls :func:`_read_memmap_slice` with the chunk's
+    slice ranges. Dask executes these lazily, chunk-at-a-time, during
+    fusion.
+    """
+    from itertools import product
+
+    import dask.array as _da
+    from dask.base import tokenize
+
+    norm_chunks = _da.core.normalize_chunks(chunks, shape=shape, dtype=dtype)
+    name = f"memmap-{tokenize(str(path), shape, dtype, norm_chunks)}"
+
+    locations = _da.core.slices_from_chunks(norm_chunks)
+    keys = list(product([name], *(range(len(c)) for c in norm_chunks)))
+
+    dsk = {
+        key: (_read_memmap_slice, str(path), shape, dtype, loc)
+        for key, loc in zip(keys, locations)
+    }
+    return _da.Array(dsk, name, norm_chunks, dtype=dtype)
+
+
+# ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 @dataclass
@@ -1969,13 +2013,19 @@ class StitchingPipeline:
             mm[:] = vol
             mm.flush()
             del mm, vol
-            # Reopen read-only so dask's array is backed by a stable file view.
-            mm_r = np.memmap(mm_path, dtype=np.uint16, mode="r", shape=expected_shape)
-            # asarray=False: stop dask from calling x.copy() on the memmap,
-            # which materializes the full 5.7 GB tile into RAM and defeats
-            # the whole spill-to-disk design. With asarray=False the memmap
-            # is wrapped as-is and dask reads it lazily per chunk.
-            lazy = da.from_array(mm_r, chunks=_DASK_PROCESSING_CHUNKS, asarray=False)
+            # Build the dask array directly from a per-chunk read graph.
+            # da.from_array unconditionally calls x.copy() on anything
+            # arraylike (incl. np.memmap) *before* the asarray flag is
+            # consulted (dask/array/core.py L3657), which materializes the
+            # full 5.7 GB tile into RAM and defeats spill-to-disk. The
+            # helper opens the memmap inside each task so reads stay lazy
+            # and the OS page cache handles sharing between chunks.
+            lazy = _dask_array_from_memmap(
+                mm_path,
+                expected_shape,
+                np.uint16,
+                _DASK_PROCESSING_CHUNKS,
+            )
             result.append((lazy, tile))
 
         return result
