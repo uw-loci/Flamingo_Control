@@ -1971,7 +1971,11 @@ class StitchingPipeline:
             del mm, vol
             # Reopen read-only so dask's array is backed by a stable file view.
             mm_r = np.memmap(mm_path, dtype=np.uint16, mode="r", shape=expected_shape)
-            lazy = da.from_array(mm_r, chunks=_DASK_PROCESSING_CHUNKS)
+            # asarray=False: stop dask from calling x.copy() on the memmap,
+            # which materializes the full 5.7 GB tile into RAM and defeats
+            # the whole spill-to-disk design. With asarray=False the memmap
+            # is wrapped as-is and dask reads it lazily per chunk.
+            lazy = da.from_array(mm_r, chunks=_DASK_PROCESSING_CHUNKS, asarray=False)
             result.append((lazy, tile))
 
         return result
