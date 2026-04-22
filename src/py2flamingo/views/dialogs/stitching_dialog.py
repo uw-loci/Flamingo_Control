@@ -426,7 +426,13 @@ class StitchingDialog(PersistentDialog):
         self._content_fusion_cb.setToolTip(
             "\u2731 Weights tile overlaps by local sharpness\n"
             "(Preibisch local-variance, inspired by BigStitcher).\n\n"
-            "Improves fusion quality in overlap regions."
+            "Improves fusion quality in overlap regions.\n\n"
+            "COST: Adds two NaN Gaussian filters per output chunk on\n"
+            "float32 — the fuse-store step becomes CPU-bound and can\n"
+            "be 5-10× slower than the default cosine blending. On a\n"
+            "66-tile TB-scale acquisition that's multiple hours of\n"
+            "fusion instead of ~10 min.\n\n"
+            "Leave off unless you've visually confirmed seams need it."
         )
         proc_layout.addWidget(self._content_fusion_cb, 0, 2, 1, 2)
 
@@ -509,10 +515,41 @@ class StitchingDialog(PersistentDialog):
         self._depth_atten_cb.toggled.connect(self._depth_atten_mu_spin.setEnabled)
         proc_layout.addWidget(self._depth_atten_mu_spin, 3, 1)
 
-        # Proc Row 4: Legend
+        # Proc Row 4: Output chunk size
+        proc_layout.addWidget(QLabel("Output chunk size:"), 4, 0)
+        self._chunk_size_combo = QComboBox()
+        # (z, y, x) presets.  32 MB default is chosen for fits-in-CPU-cache
+        # pyramid work; 128 MB halves dask per-chunk overhead at the cost
+        # of more per-worker RAM during content-based fusion.
+        self._chunk_size_combo.addItem(
+            "Small (32×256×256 = 4 MB)", {"z": 32, "y": 256, "x": 256}
+        )
+        self._chunk_size_combo.addItem(
+            "Default (128×256×256 = 16 MB)", {"z": 128, "y": 256, "x": 256}
+        )
+        self._chunk_size_combo.addItem(
+            "Large (64×512×512 = 32 MB)", {"z": 64, "y": 512, "x": 512}
+        )
+        self._chunk_size_combo.addItem(
+            "XL (64×1024×1024 = 128 MB)", {"z": 64, "y": 1024, "x": 1024}
+        )
+        self._chunk_size_combo.setCurrentIndex(1)
+        self._chunk_size_combo.setToolTip(
+            "Dask output chunk granularity for the fused-memmap store.\n\n"
+            "• Smaller chunks → less RAM per worker, more dask overhead.\n"
+            "• Larger chunks → fewer scheduling decisions, faster per-chunk\n"
+            "  content-based filters (less Python/graph overhead), but\n"
+            "  each worker holds a bigger float32 intermediate.\n\n"
+            "Try Large or XL if the fuse-store step is unexpectedly slow\n"
+            "and you have RAM headroom. Peak per-worker RAM = chunk_bytes\n"
+            "× ~6 (upcast + gaussian scratch)."
+        )
+        proc_layout.addWidget(self._chunk_size_combo, 4, 1, 1, 3)
+
+        # Proc Row 5: Legend
         legend = QLabel("\u2731 = significantly increases processing time")
         legend.setStyleSheet("color: #FF8C00; font-style: italic; font-size: 11px;")
-        proc_layout.addWidget(legend, 4, 0, 1, 4)
+        proc_layout.addWidget(legend, 5, 0, 1, 4)
 
         self._proc_widget.setLayout(proc_layout)
         self._proc_widget.setVisible(False)
@@ -1174,6 +1211,9 @@ class StitchingDialog(PersistentDialog):
         config.package_ozx = self._ozx_cb.isChecked()
         config.tiff_pyramids = self._tiff_pyramids_cb.isChecked()
         config.streaming_mode = self._streaming_combo.currentData()
+        chunk = self._chunk_size_combo.currentData()
+        if chunk:
+            config.output_chunksize = dict(chunk)
 
         # Set compression based on format
         compression = self._compression_combo.currentData()
@@ -1997,6 +2037,7 @@ class StitchingDialog(PersistentDialog):
         s.setValue("depth_attenuation_mu", self._depth_atten_mu_spin.value())
         s.setValue("deconvolution", self._deconv_cb.isChecked())
         s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
+        s.setValue("chunk_size_idx", self._chunk_size_combo.currentIndex())
         s.setValue("package_ozx", self._ozx_cb.isChecked())
         s.setValue("tiff_pyramids", self._tiff_pyramids_cb.isChecked())
         s.setValue("output_format", self._format_combo.currentData())
@@ -2081,6 +2122,10 @@ class StitchingDialog(PersistentDialog):
 
         content_fusion = s.value("content_based_fusion", False, type=bool)
         self._content_fusion_cb.setChecked(content_fusion)
+
+        chunk_idx = s.value("chunk_size_idx", 1, type=int)
+        if 0 <= chunk_idx < self._chunk_size_combo.count():
+            self._chunk_size_combo.setCurrentIndex(chunk_idx)
 
         ozx = s.value("package_ozx", False, type=bool)
         self._ozx_cb.setChecked(ozx)
@@ -2209,6 +2254,7 @@ class NativeStitchingDialog(StitchingDialog):
         s.setValue("depth_attenuation_mu", self._depth_atten_mu_spin.value())
         s.setValue("deconvolution", self._deconv_cb.isChecked())
         s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
+        s.setValue("chunk_size_idx", self._chunk_size_combo.currentIndex())
         s.setValue("package_ozx", self._ozx_cb.isChecked())
         s.setValue("tiff_pyramids", self._tiff_pyramids_cb.isChecked())
         s.setValue("output_format", self._format_combo.currentData())
@@ -2293,6 +2339,10 @@ class NativeStitchingDialog(StitchingDialog):
 
         content_fusion = s.value("content_based_fusion", False, type=bool)
         self._content_fusion_cb.setChecked(content_fusion)
+
+        chunk_idx = s.value("chunk_size_idx", 1, type=int)
+        if 0 <= chunk_idx < self._chunk_size_combo.count():
+            self._chunk_size_combo.setCurrentIndex(chunk_idx)
 
         ozx = s.value("package_ozx", False, type=bool)
         self._ozx_cb.setChecked(ozx)

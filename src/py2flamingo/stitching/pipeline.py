@@ -123,6 +123,88 @@ def _dask_array_from_memmap(path, shape, dtype, chunks):
 
 
 # ---------------------------------------------------------------------------
+# Dask progress callback (time-throttled so the log stays readable)
+# ---------------------------------------------------------------------------
+try:
+    from dask.callbacks import Callback as _DaskCallback
+except ImportError:  # pragma: no cover
+    _DaskCallback = object
+
+
+class _TimeThrottledProgress(_DaskCallback):
+    """Log dask task progress at most once every ``interval_s`` seconds.
+
+    Rationale: ``da.store`` on a content-based fusion graph can take
+    hours with no intermediate output, making it impossible to tell
+    whether the pipeline is healthy, stuck, or hopelessly slow. This
+    callback prints a single line at a bounded cadence (default 30 s)
+    so the log stays useful without spamming — at 30 s intervals a
+    3-hour run emits ~360 lines, a 10-min run emits ~20.
+
+    Each line reports % of tasks complete, a rate (tasks/s), and an
+    ETA from the observed rate so the user can judge at a glance
+    whether to wait it out or cancel. ``tasks`` here means dask graph
+    nodes, not output chunks — content-based fusion has ~5–10 tasks
+    per output chunk (read, gaussian filters, blend, store), which
+    makes the percentage a decent but not exact fraction of output
+    completion. Good enough for triage.
+    """
+
+    def __init__(self, logger, label: str = "store", interval_s: float = 30.0):
+        super().__init__()
+        self._logger = logger
+        self._label = label
+        self._interval = interval_s
+        self._completed = 0
+        self._total: Optional[int] = None
+        self._start_t: Optional[float] = None
+        self._last_log_t: float = 0.0
+
+    def _start_state(self, dsk, state):
+        # Called once before any task runs. Use it to capture the total
+        # task count so we can emit a percentage.
+        try:
+            self._total = len(dsk)
+        except Exception:
+            self._total = None
+        self._start_t = time.time()
+        self._last_log_t = self._start_t
+
+    def _posttask(self, key, result, dsk, state, worker_id):
+        self._completed += 1
+        now = time.time()
+        if now - self._last_log_t < self._interval:
+            return
+        elapsed = max(now - (self._start_t or now), 0.001)
+        rate = self._completed / elapsed
+        if self._total and rate > 0:
+            pct = 100.0 * self._completed / self._total
+            eta_min = (self._total - self._completed) / rate / 60.0
+            self._logger.info(
+                f"    {self._label} progress: {pct:.1f}% "
+                f"({self._completed}/{self._total} tasks, "
+                f"{rate:.0f} tasks/s, ETA {eta_min:.1f} min)"
+            )
+        else:
+            self._logger.info(
+                f"    {self._label} progress: {self._completed} tasks "
+                f"({rate:.0f}/s, {elapsed / 60:.1f} min elapsed)"
+            )
+        self._last_log_t = now
+
+    def _finish(self, dsk, state, errored):
+        if self._start_t is None:
+            return
+        elapsed = max(time.time() - self._start_t, 0.001)
+        rate = self._completed / elapsed
+        status = "errored" if errored else "done"
+        self._logger.info(
+            f"    {self._label} {status}: {self._completed} tasks "
+            f"in {elapsed:.1f}s ({rate:.0f} tasks/s)"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 @dataclass
@@ -1720,8 +1802,14 @@ class StitchingPipeline:
                     f"  Storing channel {ch_id} into fused memmap "
                     f"(scheduler={scheduler_name}, memmap-backed tiles)..."
                 )
+                progress_cb = _TimeThrottledProgress(
+                    self.logger,
+                    label=f"channel {ch_id} store",
+                    interval_s=30.0,
+                )
                 with dask.config.set(**scheduler_cfg):
-                    da.store(darr, stacked[dest_idx], compute=True)
+                    with progress_cb:
+                        da.store(darr, stacked[dest_idx], compute=True)
 
                 # Drop references to per-tile memmaps so Windows releases
                 # the file locks, then delete the per-channel spill dir.
@@ -3115,6 +3203,20 @@ class StitchingPipeline:
                     f"exceeds available RAM ({avail_ram_gb:.1f} GB). "
                     f"Consider Streaming mode or increasing downsample."
                 )
+
+        # --- Content-based fusion cost warning ---
+        # Two NaN Gaussian filters per output chunk on float32 scale
+        # super-linearly with tile overlap + tile count. Real-world
+        # datasets (66-tile 750 GB acq) hit ~5-8 hours of fuse time
+        # with threads×4; the default cosine blending is 5-10× faster.
+        if self.config.content_based_fusion:
+            self.logger.warning(
+                "  [info] Content-based fusion is enabled. Expect "
+                "the fuse-store step to be significantly slower (often "
+                "5-10× the default cosine blending). Disable under "
+                "Processing Options → 'Content-based blending' if "
+                "wall-clock matters more than per-overlap blending polish."
+            )
 
         # --- Format-specific writer overhead ---
         fmt = self.config.output_format
