@@ -553,6 +553,16 @@ class StitchingDialog(PersistentDialog):
         )
         self._setup_env_btn.clicked.connect(self._on_setup_env)
         btn_layout.addWidget(self._setup_env_btn)
+
+        self._help_btn = QPushButton("Help / Troubleshooting")
+        self._help_btn.setToolTip(
+            "Hardware requirements, disk/RAM planning, and a diagnostic\n"
+            "matrix for stuck or slow runs. Opens\n"
+            "docs/stitching_hardware_troubleshooting.md in your default\n"
+            "markdown/text viewer."
+        )
+        self._help_btn.clicked.connect(self._on_open_help_doc)
+        btn_layout.addWidget(self._help_btn)
         layout.addLayout(btn_layout)
 
         # --- Log area ---
@@ -1794,6 +1804,47 @@ class StitchingDialog(PersistentDialog):
                 max_idx = self._fusion_combo.findData("max")
                 if max_idx >= 0:
                     self._fusion_combo.setCurrentIndex(max_idx)
+
+    def _on_open_help_doc(self):
+        """Open the stitching hardware / troubleshooting doc.
+
+        Ships at ``docs/stitching_hardware_troubleshooting.md`` relative
+        to the repo root. Uses QDesktopServices so the user's default
+        markdown/text viewer handles it. If the file can't be located
+        (someone moved the repo, running from a pip install, etc.) we
+        show a QMessageBox with the expected location and a short
+        summary so they can still find it manually.
+        """
+        from PyQt5.QtCore import QUrl
+        from PyQt5.QtGui import QDesktopServices
+
+        # Walk up from this file to find the repo-root-ish
+        # `docs/stitching_hardware_troubleshooting.md`. The view lives
+        # at src/py2flamingo/views/dialogs/, so the repo root is 4
+        # parents up.
+        here = Path(__file__).resolve()
+        candidates = [
+            here.parents[4] / "docs" / "stitching_hardware_troubleshooting.md",
+            here.parents[3] / "docs" / "stitching_hardware_troubleshooting.md",
+        ]
+        doc_path = next((p for p in candidates if p.exists()), None)
+
+        if doc_path is None:
+            QMessageBox.information(
+                self,
+                "Help & Troubleshooting",
+                "The troubleshooting doc should be at "
+                "<code>docs/stitching_hardware_troubleshooting.md</code> "
+                "under the repo root, but it couldn't be found from this "
+                "install.<br><br>"
+                "It covers: RAM / disk / drive-type requirements, a "
+                "diagnostic matrix for stuck or slow runs "
+                "(CPU % × Disk %), and a symptom → commit-fix index "
+                "for every OOM, hang, or checkbox-state bug we've seen.",
+            )
+            return
+
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(doc_path)))
 
     def _on_setup_env(self):
         """Run the preprocessing environment setup script."""
