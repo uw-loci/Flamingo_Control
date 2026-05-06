@@ -88,8 +88,9 @@ Quick scanning feature for sample orientation and tile selection:
 - **[DEVELOPER.md](docs/DEVELOPER.md)** - Developer guide, architecture, testing
 - **[CLAUDE.md](docs/CLAUDE.md)** - AI assistant guidance for code work
 - **[LED 2D Overview Guide](docs/led_2d_overview.md)** - Sample orientation scanning
-- **[Pipeline JSON Format](docs/pipeline_json_format.md)** - Pipeline serialization reference
+- **[Pipeline JSON Format](docs/pipeline_json_format.md)** - Pipeline serialization reference (9 NodeTypes, port compatibility, examples)
 - **[Pipeline AI Prompt](docs/pipeline_ai_prompt.md)** - AI-assisted pipeline generation
+- **`py2flamingo-pipeline run <file.json>`** - Run a pipeline from the command line, no GUI required (installed automatically by `pip install -e .`). See `docs/CLAUDE.md` § Pipeline System for the headless Python API.
 
 ---
 

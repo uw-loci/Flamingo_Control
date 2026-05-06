@@ -1,0 +1,34 @@
+{
+  "format_version": "1.0",
+  "name": "09 Post Processing",
+  "_comment": "PostProcessing requires a real StitchingPipeline. The smoke test skips this NodeType (NoOp); to actually exercise stitching, run the CLI with --enable-stitching against a real acquisition directory. acquisition_dir is marked required=false at the fixture level (the canonical port definition has required=true) so the fixture passes Pipeline.validate() without an upstream connection — the runner falls back to config.acquisition_dir when the port is unconnected.",
+  "nodes": [
+    {
+      "id": "n-postproc",
+      "node_type": "POST_PROCESSING",
+      "name": "Stitch",
+      "inputs": [
+        {"id": "n-pp:in:acquisition_dir", "name": "acquisition_dir", "port_type": "FILE_PATH", "direction": "INPUT", "required": false},
+        {"id": "n-pp:in:trigger", "name": "trigger", "port_type": "TRIGGER", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-pp:out:output_path", "name": "output_path", "port_type": "FILE_PATH", "direction": "OUTPUT", "required": false},
+        {"id": "n-pp:out:completed", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "acquisition_dir": "__SUBSTITUTED_AT_RUNTIME__",
+        "pixel_size_um": 0.406,
+        "z_step_um": 0.0,
+        "destripe": false,
+        "illumination_fusion": "max",
+        "deconvolution_enabled": false,
+        "deconvolution_engine": "pycudadecon",
+        "output_format": "ome-zarr-sharded",
+        "package_ozx": false,
+        "channels": ""
+      },
+      "x": 100.0, "y": 100.0
+    }
+  ],
+  "connections": []
+}

@@ -32,6 +32,27 @@ from py2flamingo.pipeline.models.pipeline import NodeType, Pipeline, PipelineNod
 logger = logging.getLogger(__name__)
 
 
+# Config keys that runners read but the property panel intentionally does NOT
+# render in _CONFIG_SCHEMAS. Either the key is managed by a dedicated widget
+# (e.g. THRESHOLD's channel_thresholds list), auto-derived from another source
+# (e.g. THRESHOLD's voxel_size_um, taken from coordinate_config when available),
+# or kept for backward compatibility with old saved pipelines.
+#
+# The schema-coverage test (tests/test_pipeline_property_panel_coverage.py)
+# treats keys in this allowlist as covered. Add a key here only if the runner
+# legitimately needs it but the schema must not expose it.
+LEGACY_KEYS: Dict[NodeType, set] = {
+    NodeType.THRESHOLD: {
+        "channel_thresholds",  # managed by per-channel threshold widgets
+        "enabled_channels",  # managed by per-channel threshold widgets
+        "voxel_size_um",  # auto-derived from coordinate_config
+    },
+    NodeType.WORKFLOW: {
+        "config_mode",  # legacy: only honored to warn-and-skip
+    },
+}
+
+
 # Per-node-type config schema: list of (key, label, widget_type, default, options)
 _CONFIG_SCHEMAS: Dict[NodeType, list] = {
     NodeType.WORKFLOW: [
@@ -299,7 +320,16 @@ class PropertyPanel(QWidget):
 
         # Channel thresholds for Threshold node
         if node.node_type == NodeType.THRESHOLD:
+            self._add_threshold_import_button(node)
             self._add_channel_threshold_widgets(node)
+
+        # Per-NodeType import buttons (Phase 7a — simple flat forms).
+        if node.node_type == NodeType.SAMPLE_VIEW_DATA:
+            self._add_sample_view_import_button(node)
+        elif node.node_type == NodeType.POST_PROCESSING:
+            self._add_post_processing_import_button(node)
+        elif node.node_type == NodeType.OVERVIEW_ANALYSIS:
+            self._add_overview_analysis_import_button(node)
 
         # "Configure Workflow..." button for Workflow nodes
         if node.node_type == NodeType.WORKFLOW:
@@ -473,6 +503,393 @@ class PropertyPanel(QWidget):
             if "channel_thresholds" not in self._current_node.config:
                 self._current_node.config["channel_thresholds"] = {}
             self._current_node.config["channel_thresholds"][ch_id] = value
+
+    def _add_threshold_import_button(self, node: PipelineNode):
+        """Add an "Import from Workflow.txt…" button to the THRESHOLD panel.
+
+        Reads the laser-channel-enabled flags from a Workflow.txt file and
+        opens an :class:`AutofillPreviewDialog` so the user can review and
+        tweak before applying.
+        """
+        btn = QPushButton("\U0001f4c4 Import from Workflow.txt…")
+        btn.setToolTip(
+            "Import enabled-channel flags from an existing Workflow.txt file"
+        )
+        btn.setStyleSheet("QPushButton { padding: 6px 12px; }")
+        btn.clicked.connect(self._on_threshold_import_clicked)
+        self._config_layout.insertRow(0, btn)
+        self._widgets["_threshold_import_btn"] = btn
+
+    def _on_threshold_import_clicked(self):
+        if not self._current_node:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import settings from Workflow.txt",
+            "",
+            "Workflow files (*.txt);;All files (*)",
+        )
+        if not path:
+            return
+
+        from pathlib import Path
+
+        from py2flamingo.pipeline.ui.autofill_preview_dialog import (
+            AutofillPreviewDialog,
+            FieldSpec,
+        )
+        from py2flamingo.utils.tile_workflow_parser import (
+            read_laser_channels_from_workflow,
+        )
+
+        try:
+            enabled = read_laser_channels_from_workflow(Path(path))
+        except Exception as e:
+            logger.error("Failed to parse %s: %s", path, e)
+            return
+
+        # Per-channel boolean rows. Keys are synthetic ``ch<N>`` — the
+        # property-panel handler converts the checked subset back into the
+        # canonical ``enabled_channels`` list. The leading "ch" is stripped
+        # at parse time so the field-key format is decoupled from the schema.
+        current_enabled = set(self._current_node.config.get("enabled_channels", []))
+        parsed_enabled = set(enabled)
+        labels = [
+            "Channel 1 (405nm) L",
+            "Channel 2 (488nm) L",
+            "Channel 3 (561nm) L",
+            "Channel 4 (640nm) L",
+            "Channel 5 (405nm) R",
+            "Channel 6 (488nm) R",
+            "Channel 7 (561nm) R",
+            "Channel 8 (640nm) R",
+        ]
+        specs = [
+            FieldSpec(
+                key=f"ch{ch}",
+                label=labels[ch],
+                widget_type="bool",
+                current_value=ch in current_enabled,
+                parsed_value=ch in parsed_enabled,
+            )
+            for ch in range(8)
+        ]
+
+        dialog = AutofillPreviewDialog(
+            specs,
+            parent=self,
+            title="Import Threshold Settings",
+            source_summary=f"Imported from: {path}",
+        )
+        if dialog.exec_() != dialog.Accepted:
+            return
+        applied = dialog.result_values()
+        # Translate synthetic ``chN`` keys back to enabled_channels list.
+        # Only checked rows appear in ``applied``; their boolean values
+        # reflect the final checkbox state so the user can still override.
+        new_enabled = sorted(
+            int(k[2:]) for k, v in applied.items() if v and k.startswith("ch")
+        )
+        if applied:
+            self._current_node.config["enabled_channels"] = new_enabled
+        # Refresh so the channel-threshold widgets reflect the new state.
+        self.show_node(self._current_node.id)
+
+    # ------------------------------------------------------------------ #
+    # SAMPLE_VIEW_DATA: Import enabled channels from Workflow.txt.
+    # ------------------------------------------------------------------ #
+
+    def _add_sample_view_import_button(self, node: PipelineNode):
+        btn = QPushButton("\U0001f4c4 Import from Workflow.txt…")
+        btn.setToolTip("Import enabled-channel flags from a Workflow.txt file")
+        btn.setStyleSheet("QPushButton { padding: 6px 12px; }")
+        btn.clicked.connect(self._on_sample_view_import_clicked)
+        self._config_layout.insertRow(0, btn)
+        self._widgets["_sample_view_import_btn"] = btn
+
+    def _on_sample_view_import_clicked(self):
+        if not self._current_node:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import from Workflow.txt",
+            "",
+            "Workflow files (*.txt);;All files (*)",
+        )
+        if not path:
+            return
+        from pathlib import Path
+
+        from py2flamingo.pipeline.ui.autofill_preview_dialog import (
+            AutofillPreviewDialog,
+            FieldSpec,
+        )
+        from py2flamingo.utils.tile_workflow_parser import (
+            read_laser_channels_from_workflow,
+        )
+
+        try:
+            enabled = set(read_laser_channels_from_workflow(Path(path)))
+        except Exception as e:
+            logger.error("Failed to parse %s: %s", path, e)
+            return
+
+        labels = [
+            "Channel 1 (405nm) L",
+            "Channel 2 (488nm) L",
+            "Channel 3 (561nm) L",
+            "Channel 4 (640nm) L",
+            "Channel 5 (405nm) R",
+            "Channel 6 (488nm) R",
+            "Channel 7 (561nm) R",
+            "Channel 8 (640nm) R",
+        ]
+        specs = [
+            FieldSpec(
+                key=f"channel_{ch}",
+                label=labels[ch],
+                widget_type="bool",
+                current_value=bool(
+                    self._current_node.config.get(f"channel_{ch}", ch < 4)
+                ),
+                parsed_value=ch in enabled,
+            )
+            for ch in range(8)
+        ]
+        d = AutofillPreviewDialog(
+            specs,
+            parent=self,
+            title="Import Sample View Data Settings",
+            source_summary=f"Imported from: {path}",
+        )
+        if d.exec_() != d.Accepted:
+            return
+        applied = d.result_values()
+        # Each chN key maps directly to channel_N config — schema-aligned.
+        for k, v in applied.items():
+            self._current_node.config[k] = bool(v)
+        self.show_node(self._current_node.id)
+
+    # ------------------------------------------------------------------ #
+    # POST_PROCESSING: pixel_size / z_step / output_format from configs;
+    # acquisition_dir from Workflow.txt save settings.
+    # ------------------------------------------------------------------ #
+
+    def _add_post_processing_import_button(self, node: PipelineNode):
+        btn = QPushButton("\U0001f4c4 Import defaults / from Workflow.txt…")
+        btn.setToolTip(
+            "Pull pixel size + output format from configs/microscope_hardware.yaml "
+            "and configs/stitching_config.yaml; pull acquisition_dir from a "
+            "Workflow.txt's Save section."
+        )
+        btn.setStyleSheet("QPushButton { padding: 6px 12px; }")
+        btn.clicked.connect(self._on_post_processing_import_clicked)
+        self._config_layout.insertRow(0, btn)
+        self._widgets["_post_processing_import_btn"] = btn
+
+    def _on_post_processing_import_clicked(self):
+        if not self._current_node:
+            return
+        from pathlib import Path
+
+        from py2flamingo.configs.config_loader import (
+            get_hardware_config,
+            get_stitching_defaults,
+        )
+        from py2flamingo.pipeline.ui.autofill_preview_dialog import (
+            AutofillPreviewDialog,
+            FieldSpec,
+        )
+
+        try:
+            hw = get_hardware_config()
+            defaults = get_stitching_defaults()
+        except Exception as e:
+            logger.error("Failed to read hardware/stitching defaults: %s", e)
+            hw = None
+            defaults = {}
+
+        # Optional: prompt for a Workflow.txt for the save dir.
+        wf_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import save directory from Workflow.txt (optional — Cancel to skip)",
+            "",
+            "Workflow files (*.txt);;All files (*)",
+        )
+        save_dir_parsed = ""
+        if wf_path:
+            try:
+                from py2flamingo.utils.tile_workflow_parser import (
+                    read_save_directory_from_workflow,
+                )
+
+                drive, sub = read_save_directory_from_workflow(Path(wf_path))
+                if drive or sub:
+                    save_dir_parsed = str(Path(drive) / sub)
+            except Exception as e:
+                logger.warning("Could not parse save dir from %s: %s", wf_path, e)
+
+        cfg = self._current_node.config
+        specs = [
+            FieldSpec(
+                key="pixel_size_um",
+                label="Pixel Size (µm)",
+                widget_type="float",
+                current_value=float(cfg.get("pixel_size_um", 0.406)),
+                parsed_value=(
+                    float(getattr(hw, "effective_pixel_size_um", 0.406))
+                    if hw
+                    else float(cfg.get("pixel_size_um", 0.406))
+                ),
+            ),
+            FieldSpec(
+                key="z_step_um",
+                label="Z Step (µm, 0=auto)",
+                widget_type="float",
+                current_value=float(cfg.get("z_step_um", 0.0)),
+                parsed_value=float(
+                    defaults.get("z_step_um", cfg.get("z_step_um", 0.0))
+                    if isinstance(defaults, dict)
+                    else cfg.get("z_step_um", 0.0)
+                ),
+            ),
+            FieldSpec(
+                key="output_format",
+                label="Output Format",
+                widget_type="combo",
+                current_value=cfg.get("output_format", "ome-zarr-sharded"),
+                parsed_value=(
+                    defaults.get(
+                        "output_format", cfg.get("output_format", "ome-zarr-sharded")
+                    )
+                    if isinstance(defaults, dict)
+                    else cfg.get("output_format", "ome-zarr-sharded")
+                ),
+                options=["ome-zarr-sharded", "ome-tiff", "both", "tiff"],
+            ),
+            FieldSpec(
+                key="acquisition_dir",
+                label="Acquisition Directory",
+                widget_type="folder",
+                current_value=cfg.get("acquisition_dir", ""),
+                parsed_value=(
+                    save_dir_parsed
+                    if save_dir_parsed
+                    else cfg.get("acquisition_dir", "")
+                ),
+            ),
+        ]
+        d = AutofillPreviewDialog(
+            specs,
+            parent=self,
+            title="Import Post-Processing Settings",
+            source_summary=(
+                f"Defaults from configs/; save dir from {wf_path}"
+                if wf_path
+                else "Defaults from configs/microscope_hardware.yaml + stitching_config.yaml"
+            ),
+        )
+        if d.exec_() != d.Accepted:
+            return
+        applied = d.result_values()
+        for k, v in applied.items():
+            self._current_node.config[k] = v
+        self.show_node(self._current_node.id)
+
+    # ------------------------------------------------------------------ #
+    # OVERVIEW_ANALYSIS: tiles_x/tiles_y/image_path from stitch_metadata.json.
+    # ------------------------------------------------------------------ #
+
+    def _add_overview_analysis_import_button(self, node: PipelineNode):
+        btn = QPushButton("\U0001f4c4 Import from stitch_metadata.json…")
+        btn.setToolTip(
+            "Pull tile grid dimensions and image path from a stitched dataset's "
+            "stitch_metadata.json (v2 format)."
+        )
+        btn.setStyleSheet("QPushButton { padding: 6px 12px; }")
+        btn.clicked.connect(self._on_overview_analysis_import_clicked)
+        self._config_layout.insertRow(0, btn)
+        self._widgets["_overview_analysis_import_btn"] = btn
+
+    def _on_overview_analysis_import_clicked(self):
+        if not self._current_node:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import from stitch_metadata.json",
+            "",
+            "Stitch metadata (stitch_metadata.json);;JSON files (*.json);;All files (*)",
+        )
+        if not path:
+            return
+
+        import json
+        from pathlib import Path
+
+        from py2flamingo.pipeline.ui.autofill_preview_dialog import (
+            AutofillPreviewDialog,
+            FieldSpec,
+        )
+
+        try:
+            metadata = json.loads(Path(path).read_text())
+        except Exception as e:
+            logger.error("Failed to read %s: %s", path, e)
+            return
+
+        # Tile grid: v2 keeps it under metadata["tile_grid"] = {"x": .., "y": ..}
+        # but tolerate a few common spellings.
+        tile_grid = metadata.get("tile_grid") or metadata.get("tiles") or {}
+        parsed_tiles_x = int(
+            tile_grid.get("x") or tile_grid.get("nx") or metadata.get("tiles_x") or 8
+        )
+        parsed_tiles_y = int(
+            tile_grid.get("y") or tile_grid.get("ny") or metadata.get("tiles_y") or 8
+        )
+        # Image path: point at the stitched store / metadata directory.
+        parsed_image_path = (
+            str(Path(path).parent / metadata.get("store_path", ""))
+            if metadata.get("store_path")
+            else str(Path(path).parent)
+        )
+
+        cfg = self._current_node.config
+        specs = [
+            FieldSpec(
+                key="tiles_x",
+                label="Tiles X",
+                widget_type="int",
+                current_value=int(cfg.get("tiles_x", 8)),
+                parsed_value=parsed_tiles_x,
+            ),
+            FieldSpec(
+                key="tiles_y",
+                label="Tiles Y",
+                widget_type="int",
+                current_value=int(cfg.get("tiles_y", 8)),
+                parsed_value=parsed_tiles_y,
+            ),
+            FieldSpec(
+                key="image_path",
+                label="Image Path",
+                widget_type="file",
+                current_value=cfg.get("image_path", ""),
+                parsed_value=parsed_image_path,
+                options="Images (*.tif *.tiff *.png *.npy);;All files (*)",
+            ),
+        ]
+        d = AutofillPreviewDialog(
+            specs,
+            parent=self,
+            title="Import Overview Analysis Settings",
+            source_summary=f"Imported from: {path}",
+        )
+        if d.exec_() != d.Accepted:
+            return
+        applied = d.result_values()
+        for k, v in applied.items():
+            self._current_node.config[k] = v
+        self.show_node(self._current_node.id)
 
     def _add_workflow_configure_button(self, node: PipelineNode):
         """Add a 'Configure Workflow...' button above the template file field."""

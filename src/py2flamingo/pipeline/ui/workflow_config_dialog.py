@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QDialogButtonBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -74,6 +75,22 @@ class PipelineWorkflowConfigDialog(PersistentDialog):
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
+
+        # Import-from-existing-Workflow.txt button (Phase 7b autofill rollout).
+        # Click → file picker → preview dialog with collapsible Illumination /
+        # Camera / Z-Stack / Save sections → on Apply, load all settings into
+        # the embedded panels via _load_from_template.
+        import_row = QHBoxLayout()
+        import_btn = QPushButton("\U0001f4c4 Import from existing Workflow.txt…")
+        import_btn.setToolTip(
+            "Pre-populate every panel from an existing Workflow.txt file. "
+            "Each section is shown in a collapsible preview before applying."
+        )
+        import_btn.setStyleSheet("QPushButton { padding: 6px 12px; }")
+        import_btn.clicked.connect(self._on_import_clicked)
+        import_row.addWidget(import_btn)
+        import_row.addStretch()
+        layout.addLayout(import_row)
 
         # Workflow name field
         name_layout = QHBoxLayout()
@@ -138,6 +155,144 @@ class PipelineWorkflowConfigDialog(PersistentDialog):
         """Forward camera frame rate to z-stack panel."""
         frame_rate = settings.get("frame_rate", 40.0)
         self._zstack_panel.set_frame_rate(frame_rate)
+
+    def _on_import_clicked(self):
+        """Show a collapsible preview of an existing Workflow.txt's settings,
+        then load them into the embedded panels on Apply.
+
+        The :class:`AutofillPreviewDialog` renders one collapsible group per
+        section (Illumination / Camera / Z-Stack / Save) with key fields
+        editable inline. On Apply we delegate to :meth:`_load_from_template`
+        which performs the full load through each panel's
+        ``set_settings_from_workflow_dict`` method — the ~50-field surface
+        is best edited in the live panels themselves after import.
+        """
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import from Workflow.txt",
+            "",
+            "Workflow files (*.txt);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            wf = parse_workflow_file(path)
+        except Exception as e:
+            logger.warning("Could not parse %s: %s", path, e)
+            QMessageBox.warning(self, "Import failed", f"Could not parse {path}:\n{e}")
+            return
+
+        from py2flamingo.pipeline.ui.autofill_preview_dialog import (
+            AutofillPreviewDialog,
+            FieldSpec,
+        )
+
+        # Pull a small set of representative values from the parsed workflow.
+        # The preview is intentionally summary-only — full editing happens in
+        # the live embedded panels after Apply.
+        illum_source = wf.get("Illumination Source", {})
+        cam = wf.get("Camera Settings", {}) or wf.get("Experiment Settings", {})
+        stack = wf.get("Stack Settings", {})
+        exp = wf.get("Experiment Settings", {})
+
+        def _f(d, key, default=0.0):
+            try:
+                return float(str(d.get(key, default)).replace(",", ""))
+            except (TypeError, ValueError):
+                return default
+
+        def _i(d, key, default=0):
+            try:
+                return int(float(str(d.get(key, default))))
+            except (TypeError, ValueError):
+                return default
+
+        specs = [
+            FieldSpec(
+                key="illum_summary",
+                label="Illumination summary",
+                widget_type="str",
+                current_value="(see live panel)",
+                parsed_value=", ".join(
+                    f"{k}={v}" for k, v in list(illum_source.items())[:4]
+                )
+                or "(no Illumination Source block)",
+                group="Illumination",
+            ),
+            FieldSpec(
+                key="camera_exposure_us",
+                label="Exposure (µs)",
+                widget_type="float",
+                current_value=0.0,
+                parsed_value=_f(cam, "Exposure time (us)", 10000.0),
+                group="Camera",
+            ),
+            FieldSpec(
+                key="camera_frame_rate",
+                label="Frame rate (f/s)",
+                widget_type="float",
+                current_value=0.0,
+                parsed_value=_f(cam, "Frame rate (f/s)", 40.0),
+                group="Camera",
+            ),
+            FieldSpec(
+                key="zstack_num_planes",
+                label="Number of planes",
+                widget_type="int",
+                current_value=0,
+                parsed_value=_i(stack, "Number of planes", 100),
+                group="Z-Stack",
+            ),
+            FieldSpec(
+                key="zstack_z_range_mm",
+                label="Z range (mm)",
+                widget_type="float",
+                current_value=0.0,
+                parsed_value=_f(stack, "Change in Z axis (mm)", 0.25),
+                group="Z-Stack",
+            ),
+            FieldSpec(
+                key="save_drive",
+                label="Save drive",
+                widget_type="str",
+                current_value="",
+                parsed_value=str(exp.get("Save image drive", "")),
+                group="Save",
+            ),
+            FieldSpec(
+                key="save_directory",
+                label="Save directory",
+                widget_type="str",
+                current_value="",
+                parsed_value=str(exp.get("Save image directory", "")),
+                group="Save",
+            ),
+            FieldSpec(
+                key="sample",
+                label="Sample",
+                widget_type="str",
+                current_value="",
+                parsed_value=str(exp.get("Sample", "")),
+                group="Save",
+            ),
+        ]
+
+        d = AutofillPreviewDialog(
+            specs,
+            parent=self,
+            title="Import Workflow Settings",
+            source_summary=(
+                f"Imported from: {path}\n\n"
+                "Apply will load every setting (not just the previewed ones) "
+                "into the four panels below — edit there for fine control."
+            ),
+        )
+        if d.exec_() != d.Accepted:
+            return
+        # Full load via the existing helper. The preview is purely
+        # informational — partial-merging through panel APIs would require a
+        # dialog wired into each panel's specific set_settings shape.
+        self._load_from_template(path)
 
     def _load_from_template(self, path: str):
         """Pre-populate panels from an existing workflow .txt file."""

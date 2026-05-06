@@ -103,6 +103,9 @@ FOR_EACH
 CONDITIONAL
 EXTERNAL_COMMAND
 SAMPLE_VIEW_DATA
+OVERVIEW_ANALYSIS
+POST_PROCESSING
+TIMED_LOOP
 ```
 
 ### Port Types
@@ -218,6 +221,50 @@ Every node MUST include exactly these ports with exactly these names, types, and
 | `position` | `POSITION` |
 | `config` | `ANY` |
 
+### OVERVIEW_ANALYSIS
+
+**Inputs:**
+| Name | Port Type | Required |
+|------|-----------|----------|
+| `image` | `VOLUME` | `false` |
+| `image_path` | `FILE_PATH` | `false` |
+| `trigger` | `TRIGGER` | `false` |
+
+**Outputs:**
+| Name | Port Type |
+|------|-----------|
+| `selected_tiles` | `OBJECT_LIST` |
+| `count` | `SCALAR` |
+| `mask` | `VOLUME` |
+
+### POST_PROCESSING
+
+**Inputs:**
+| Name | Port Type | Required |
+|------|-----------|----------|
+| `acquisition_dir` | `FILE_PATH` | `true` |
+| `trigger` | `TRIGGER` | `false` |
+
+**Outputs:**
+| Name | Port Type |
+|------|-----------|
+| `output_path` | `FILE_PATH` |
+| `completed` | `TRIGGER` |
+
+### TIMED_LOOP
+
+**Inputs:**
+| Name | Port Type | Required |
+|------|-----------|----------|
+| `trigger` | `TRIGGER` | `false` |
+
+**Outputs:**
+| Name | Port Type |
+|------|-----------|
+| `iteration` | `SCALAR` |
+| `elapsed_seconds` | `SCALAR` |
+| `completed` | `TRIGGER` |
+
 ---
 
 ## Complete Config Schemas Per Node Type
@@ -270,10 +317,55 @@ Empty object: `{}`
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `channel_0` | bool | `true` | Include 405nm (DAPI) channel |
-| `channel_1` | bool | `true` | Include 488nm (GFP) channel |
-| `channel_2` | bool | `true` | Include 561nm (RFP) channel |
-| `channel_3` | bool | `true` | Include 640nm (Far-Red) channel |
+| `channel_0` | bool | `true` | Channel 1 — 405nm Left |
+| `channel_1` | bool | `true` | Channel 2 — 488nm Left |
+| `channel_2` | bool | `true` | Channel 3 — 561nm Left |
+| `channel_3` | bool | `true` | Channel 4 — 640nm Left |
+| `channel_4` | bool | `false` | Channel 5 — 405nm Right (dual-side acquisitions only) |
+| `channel_5` | bool | `false` | Channel 6 — 488nm Right |
+| `channel_6` | bool | `false` | Channel 7 — 561nm Right |
+| `channel_7` | bool | `false` | Channel 8 — 640nm Right |
+
+### OVERVIEW_ANALYSIS Config
+
+| Key | Type | Default | Valid Values | Description |
+|-----|------|---------|--------------|-------------|
+| `method` | string | `"entropy"` | `entropy`, `bandpass`, `gradient`, `dog`, `tube_detect`, `variance`, `edge`, `intensity`, `combined` | Detection method |
+| `tiles_x` | int | `8` | >= 1 | Tile grid columns |
+| `tiles_y` | int | `8` | >= 1 | Tile grid rows |
+| `image_path` | string | `""` | file path | Used when neither `image` nor `image_path` input port is connected |
+| `entropy_threshold` | float | `3.0` | — | Entropy method threshold |
+| `variance_threshold` | float | `100.0` | — | Variance method threshold |
+| `intensity_min` | float | `20.0` | — | Intensity method lower bound |
+| `intensity_max` | float | `255.0` | — | Intensity method upper bound |
+| `morphological_cleanup` | bool | `false` | — | Post-process tile mask with morphology |
+| `invert` | bool | `false` | — | Invert the tile selection |
+
+(Method-specific knobs: `bp_var_min`, `bp_var_max`, `bp_entropy_min`, `gradient_threshold`, `dog_threshold`, `dog_sigma1`, `dog_sigma2`, `tube_interior_method`, `tube_interior_threshold`, `tube_edge_sensitivity`, `edge_threshold`, `morphological_radius`. See `pipeline/ui/property_panel.py:_CONFIG_SCHEMAS[NodeType.OVERVIEW_ANALYSIS]` for the full list.)
+
+### POST_PROCESSING Config
+
+| Key | Type | Default | Valid Values | Description |
+|-----|------|---------|--------------|-------------|
+| `acquisition_dir` | string | `""` | folder path | Raw acquisition input dir (overridden by input port if connected) |
+| `output_dir` | string | `""` | folder path | Output dir (defaults to `<acquisition_dir>/stitched`) |
+| `pixel_size_um` | float | `0.406` | > 0 | XY voxel size in microns |
+| `z_step_um` | float | `0.0` | >= 0 | Z step in microns (`0` = derive from metadata) |
+| `destripe` | bool | `false` | — | PyStripe destriping pre-pass |
+| `illumination_fusion` | string | `"max"` | `max`, `mean`, `leonardo` | How to fuse left/right illumination |
+| `deconvolution_enabled` | bool | `false` | — | Run deconvolution |
+| `deconvolution_engine` | string | `"pycudadecon"` | `pycudadecon`, `redlionfish` | Deconv backend |
+| `output_format` | string | `"ome-zarr-sharded"` | `ome-zarr-sharded`, `ome-tiff`, `both`, `tiff` | Stitched output format |
+| `package_ozx` | bool | `false` | — | Package output as `.ozx` |
+| `channels` | string | `""` | comma-separated ints, or `""` | Channels to process (`""` = all) |
+
+### TIMED_LOOP Config
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `iterations` | int | `10` | Number of iterations (`0` = indefinite — cancel via stop button) |
+| `interval_seconds` | float | `60.0` | Delay between iterations |
+| `timing_mode` | string | `"sequential"` | `sequential` (delay after each body finishes) or `clock_aligned` (next iteration starts at `start + idx*interval`, even if previous overran) |
 
 ---
 

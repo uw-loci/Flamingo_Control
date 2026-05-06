@@ -1,0 +1,78 @@
+{
+  "format_version": "1.0",
+  "name": "05 Conditional In ForEach",
+  "nodes": [
+    {
+      "id": "n-threshold",
+      "node_type": "THRESHOLD",
+      "name": "Threshold",
+      "inputs": [
+        {"id": "n-thresh:in:volume", "name": "volume", "port_type": "VOLUME", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-thresh:out:objects", "name": "objects", "port_type": "OBJECT_LIST", "direction": "OUTPUT", "required": false},
+        {"id": "n-thresh:out:mask", "name": "mask", "port_type": "VOLUME", "direction": "OUTPUT", "required": false},
+        {"id": "n-thresh:out:count", "name": "count", "port_type": "SCALAR", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "channel_thresholds": {"0": 100},
+        "enabled_channels": [0],
+        "default_threshold": 100
+      },
+      "x": 50.0, "y": 100.0
+    },
+    {
+      "id": "n-foreach",
+      "node_type": "FOR_EACH",
+      "name": "For Each Object",
+      "inputs": [
+        {"id": "n-fe:in:collection", "name": "collection", "port_type": "OBJECT_LIST", "direction": "INPUT", "required": true}
+      ],
+      "outputs": [
+        {"id": "n-fe:out:current_item", "name": "current_item", "port_type": "OBJECT", "direction": "OUTPUT", "required": false},
+        {"id": "n-fe:out:index", "name": "index", "port_type": "SCALAR", "direction": "OUTPUT", "required": false},
+        {"id": "n-fe:out:completed", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {},
+      "x": 300.0, "y": 100.0
+    },
+    {
+      "id": "n-conditional",
+      "node_type": "CONDITIONAL",
+      "name": "Always True",
+      "inputs": [
+        {"id": "n-cond:in:value", "name": "value", "port_type": "ANY", "direction": "INPUT", "required": true},
+        {"id": "n-cond:in:threshold", "name": "threshold", "port_type": "SCALAR", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-cond:out:true", "name": "true_branch", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false},
+        {"id": "n-cond:out:false", "name": "false_branch", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false},
+        {"id": "n-cond:out:passthrough", "name": "pass_through", "port_type": "ANY", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {"comparison_op": "!=", "threshold_value": 0},
+      "x": 600.0, "y": 100.0
+    },
+    {
+      "id": "n-workflow",
+      "node_type": "WORKFLOW",
+      "name": "Reacquire",
+      "inputs": [
+        {"id": "n-wf:in:trigger", "name": "trigger", "port_type": "TRIGGER", "direction": "INPUT", "required": false},
+        {"id": "n-wf:in:position", "name": "position", "port_type": "POSITION", "direction": "INPUT", "required": false},
+        {"id": "n-wf:in:z_range", "name": "z_range", "port_type": "OBJECT", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-wf:out:volume", "name": "volume", "port_type": "VOLUME", "direction": "OUTPUT", "required": false},
+        {"id": "n-wf:out:file_path", "name": "file_path", "port_type": "FILE_PATH", "direction": "OUTPUT", "required": false},
+        {"id": "n-wf:out:completed", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {"template_file": "", "use_input_position": false, "auto_z_range": false, "auto_tiling": false, "buffer_percent": 25.0},
+      "x": 900.0, "y": 100.0
+    }
+  ],
+  "connections": [
+    {"id": "c1", "source_node_id": "n-threshold", "source_port_id": "n-thresh:out:objects", "target_node_id": "n-foreach", "target_port_id": "n-fe:in:collection"},
+    {"id": "c2", "source_node_id": "n-foreach", "source_port_id": "n-fe:out:current_item", "target_node_id": "n-conditional", "target_port_id": "n-cond:in:value"},
+    {"id": "c3", "source_node_id": "n-conditional", "source_port_id": "n-cond:out:true", "target_node_id": "n-workflow", "target_port_id": "n-wf:in:trigger"}
+  ]
+}

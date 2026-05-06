@@ -45,16 +45,23 @@ class ThresholdRunner(AbstractNodeRunner):
     ) -> None:
         config = node.config
 
-        # Filter channel thresholds by enabled channels
-        all_thresholds = config.get("channel_thresholds", {})
+        # Filter channel thresholds by enabled channels.
+        # Normalize keys to int — JSON serialization forces string keys, but
+        # ThresholdAnalysisService and downstream code do arithmetic on the
+        # channel id (e.g. ch_id + 1 in analyze()), which fails on strings.
+        raw_thresholds = config.get("channel_thresholds", {}) or {}
+        all_thresholds: Dict[int, float] = {}
+        for k, v in raw_thresholds.items():
+            try:
+                all_thresholds[int(k)] = v
+            except (TypeError, ValueError):
+                logger.warning("Ignoring non-int channel key in thresholds: %r", k)
         enabled_channels = config.get("enabled_channels", None)
         if enabled_channels is not None:
             if isinstance(enabled_channels, list):
-                enabled_channels = set(enabled_channels)
+                enabled_channels = {int(c) for c in enabled_channels}
             filtered_thresholds = {
-                ch: val
-                for ch, val in all_thresholds.items()
-                if ch in enabled_channels or int(ch) in enabled_channels
+                ch: val for ch, val in all_thresholds.items() if ch in enabled_channels
             }
         else:
             filtered_thresholds = all_thresholds

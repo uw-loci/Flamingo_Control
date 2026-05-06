@@ -224,6 +224,39 @@ Visual DAG-based processing pipelines for automated microscope workflows. Access
 - Pipeline files saved to `~/.flamingo/pipelines/` as JSON with `format_version: "1.0"`
 - Source code: `src/py2flamingo/pipeline/`
 
+**Nine NodeTypes** — `WORKFLOW`, `THRESHOLD`, `FOR_EACH`, `CONDITIONAL`, `EXTERNAL_COMMAND`, `SAMPLE_VIEW_DATA`, `OVERVIEW_ANALYSIS`, `POST_PROCESSING`, `TIMED_LOOP`. Each has a runner under `pipeline/engine/node_runners/`.
+
+**Headless / CLI execution.** Pipelines run without the editor dialog via the public API in `src/py2flamingo/pipeline/headless_services.py`:
+
+```python
+from py2flamingo.pipeline.headless_services import build_headless_services, run_pipeline_headless
+from py2flamingo.pipeline.models.pipeline import Pipeline
+import json
+
+p = Pipeline.from_dict(json.loads(open("my_pipeline.json").read()))
+services = build_headless_services(volumes={0: my_volume})
+result = run_pipeline_headless(p, services=services)
+```
+
+The `py2flamingo-pipeline` console script wraps this:
+
+```bash
+py2flamingo-pipeline run my_pipeline.json \
+    --input volume.npy --volume-channel 0 \
+    --skip-tag workflow,sample_view_data,post_processing \
+    --output-json /tmp/out.json
+```
+
+`--skip-tag` replaces the named NodeType's runner with a `NoOpRunner` (defined in `headless_services.py`) — used for hardware-dependent NodeTypes when running in CI or against synthetic input.
+
+**Editor "Import from…" buttons.** The property panel for THRESHOLD, SAMPLE_VIEW_DATA, POST_PROCESSING, and OVERVIEW_ANALYSIS exposes an Import button that opens `pipeline/ui/autofill_preview_dialog.py:AutofillPreviewDialog`. The dialog shows parsed values in editable widgets with per-field checkboxes — users review and tweak before applying. Parsers are reused from `utils/workflow_parser.py`, `utils/tile_workflow_parser.py`, and `configs/config_loader.py`. The WORKFLOW node has a similar Import button inside `PipelineWorkflowConfigDialog` with collapsible Illumination / Camera / Z-Stack / Save sections.
+
+**Tests.** `tests/test_pipeline_*.py` (~100 tests) covers models, all 9 runners, scope resolver, persistence, smoke, and autofill. `tests/fixtures/pipelines/01_*.json` … `14_*.json` are minimal worked examples — including negative-path fixtures (`12_invalid_type.json`, `13_cycle.json`, `14_missing_required.json`) used by validation-rejection tests. `tests/test_pipeline_smoke.py` loads and runs every fixture + every sample headlessly. CI runs the suite on Python 3.10 + 3.11 via `.github/workflows/tests.yml`.
+
+**Schema-coverage guard.** `tests/test_pipeline_property_panel_coverage.py` regex-scans each runner module's `config.get("…")` calls and asserts every key is either in `_CONFIG_SCHEMAS[node_type]` (so users can edit via the property panel) or in `LEGACY_KEYS[node_type]` (allowlist for keys managed by custom widgets, auto-derived from other sources, or kept for backward compat). Add a new `config.get("…")` to a runner without updating one of the two and the test fails.
+
+**JSON quirk to know.** `channel_thresholds` keys are JSON strings (`"0"`, `"1"`, …) by spec, but `ThresholdAnalysisService` does integer arithmetic on channel IDs. `ThresholdRunner` normalizes keys to int on load — preserve that pattern if you add a similar dict-keyed config field.
+
 ## Important Configuration Files
 
 **Required for operation:**

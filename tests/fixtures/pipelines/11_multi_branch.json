@@ -1,0 +1,65 @@
+{
+  "format_version": "1.0",
+  "name": "11 Multi-Branch",
+  "_comment": "Two independent top-level chains in one pipeline. Both must execute.",
+  "nodes": [
+    {
+      "id": "n-threshold",
+      "node_type": "THRESHOLD",
+      "name": "Threshold (chain A)",
+      "inputs": [
+        {"id": "n-thresh:in:volume", "name": "volume", "port_type": "VOLUME", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-thresh:out:objects", "name": "objects", "port_type": "OBJECT_LIST", "direction": "OUTPUT", "required": false},
+        {"id": "n-thresh:out:mask", "name": "mask", "port_type": "VOLUME", "direction": "OUTPUT", "required": false},
+        {"id": "n-thresh:out:count", "name": "count", "port_type": "SCALAR", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "channel_thresholds": {"0": 100},
+        "enabled_channels": [0],
+        "default_threshold": 100
+      },
+      "x": 100.0, "y": 50.0
+    },
+    {
+      "id": "n-foreach",
+      "node_type": "FOR_EACH",
+      "name": "ForEach (chain A)",
+      "inputs": [
+        {"id": "n-fe:in:collection", "name": "collection", "port_type": "OBJECT_LIST", "direction": "INPUT", "required": true}
+      ],
+      "outputs": [
+        {"id": "n-fe:out:current_item", "name": "current_item", "port_type": "OBJECT", "direction": "OUTPUT", "required": false},
+        {"id": "n-fe:out:index", "name": "index", "port_type": "SCALAR", "direction": "OUTPUT", "required": false},
+        {"id": "n-fe:out:completed", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {},
+      "x": 400.0, "y": 50.0
+    },
+    {
+      "id": "n-extcmd",
+      "node_type": "EXTERNAL_COMMAND",
+      "name": "ExternalCommand (chain B)",
+      "inputs": [
+        {"id": "n-ext:in:input_data", "name": "input_data", "port_type": "ANY", "direction": "INPUT", "required": false},
+        {"id": "n-ext:in:trigger", "name": "trigger", "port_type": "TRIGGER", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-ext:out:output_data", "name": "output_data", "port_type": "ANY", "direction": "OUTPUT", "required": false},
+        {"id": "n-ext:out:file_path", "name": "file_path", "port_type": "FILE_PATH", "direction": "OUTPUT", "required": false},
+        {"id": "n-ext:out:completed", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "command_template": "true",
+        "input_format": "json",
+        "output_format": "json",
+        "timeout_seconds": 5
+      },
+      "x": 100.0, "y": 250.0
+    }
+  ],
+  "connections": [
+    {"id": "c-thresh-to-fe", "source_node_id": "n-threshold", "source_port_id": "n-thresh:out:objects", "target_node_id": "n-foreach", "target_port_id": "n-fe:in:collection"}
+  ]
+}

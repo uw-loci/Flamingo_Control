@@ -1,0 +1,86 @@
+{
+  "format_version": "1.0",
+  "name": "03 Threshold ForEach Workflow",
+  "nodes": [
+    {
+      "id": "n-threshold",
+      "node_type": "THRESHOLD",
+      "name": "Threshold",
+      "inputs": [
+        {"id": "n-threshold:in:volume", "name": "volume", "port_type": "VOLUME", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-threshold:out:objects", "name": "objects", "port_type": "OBJECT_LIST", "direction": "OUTPUT", "required": false},
+        {"id": "n-threshold:out:mask", "name": "mask", "port_type": "VOLUME", "direction": "OUTPUT", "required": false},
+        {"id": "n-threshold:out:count", "name": "count", "port_type": "SCALAR", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "channel_thresholds": {"0": 100},
+        "enabled_channels": [0],
+        "gauss_sigma": 0.0,
+        "opening_enabled": false,
+        "opening_radius": 1,
+        "min_object_size": 0,
+        "default_threshold": 100
+      },
+      "x": 100.0,
+      "y": 100.0
+    },
+    {
+      "id": "n-foreach",
+      "node_type": "FOR_EACH",
+      "name": "For Each Object",
+      "inputs": [
+        {"id": "n-foreach:in:collection", "name": "collection", "port_type": "OBJECT_LIST", "direction": "INPUT", "required": true}
+      ],
+      "outputs": [
+        {"id": "n-foreach:out:current_item", "name": "current_item", "port_type": "OBJECT", "direction": "OUTPUT", "required": false},
+        {"id": "n-foreach:out:index", "name": "index", "port_type": "SCALAR", "direction": "OUTPUT", "required": false},
+        {"id": "n-foreach:out:completed", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {},
+      "x": 400.0,
+      "y": 100.0
+    },
+    {
+      "id": "n-workflow",
+      "node_type": "WORKFLOW",
+      "name": "Reacquire",
+      "inputs": [
+        {"id": "n-workflow:in:trigger", "name": "trigger", "port_type": "TRIGGER", "direction": "INPUT", "required": false},
+        {"id": "n-workflow:in:position", "name": "position", "port_type": "POSITION", "direction": "INPUT", "required": false},
+        {"id": "n-workflow:in:z_range", "name": "z_range", "port_type": "OBJECT", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-workflow:out:volume", "name": "volume", "port_type": "VOLUME", "direction": "OUTPUT", "required": false},
+        {"id": "n-workflow:out:file_path", "name": "file_path", "port_type": "FILE_PATH", "direction": "OUTPUT", "required": false},
+        {"id": "n-workflow:out:completed", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "template_file": "",
+        "use_input_position": true,
+        "auto_z_range": false,
+        "auto_tiling": false,
+        "buffer_percent": 25.0
+      },
+      "x": 700.0,
+      "y": 100.0
+    }
+  ],
+  "connections": [
+    {
+      "id": "c-threshold-objects-to-foreach-collection",
+      "source_node_id": "n-threshold",
+      "source_port_id": "n-threshold:out:objects",
+      "target_node_id": "n-foreach",
+      "target_port_id": "n-foreach:in:collection"
+    },
+    {
+      "id": "c-foreach-current-to-workflow-position",
+      "source_node_id": "n-foreach",
+      "source_port_id": "n-foreach:out:current_item",
+      "target_node_id": "n-workflow",
+      "target_port_id": "n-workflow:in:position"
+    }
+  ]
+}

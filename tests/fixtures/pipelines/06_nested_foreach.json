@@ -1,0 +1,103 @@
+{
+  "format_version": "1.0",
+  "name": "06 Nested ForEach",
+  "nodes": [
+    {
+      "id": "n-threshold",
+      "node_type": "THRESHOLD",
+      "name": "Threshold",
+      "inputs": [
+        {"id": "n-thresh:in:volume", "name": "volume", "port_type": "VOLUME", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-thresh:out:objects", "name": "objects", "port_type": "OBJECT_LIST", "direction": "OUTPUT", "required": false},
+        {"id": "n-thresh:out:mask", "name": "mask", "port_type": "VOLUME", "direction": "OUTPUT", "required": false},
+        {"id": "n-thresh:out:count", "name": "count", "port_type": "SCALAR", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "channel_thresholds": {"0": 100},
+        "enabled_channels": [0],
+        "default_threshold": 100
+      },
+      "x": 50.0, "y": 100.0
+    },
+    {
+      "id": "n-outer-fe",
+      "node_type": "FOR_EACH",
+      "name": "Outer ForEach",
+      "inputs": [
+        {"id": "n-outer:in:collection", "name": "collection", "port_type": "OBJECT_LIST", "direction": "INPUT", "required": true}
+      ],
+      "outputs": [
+        {"id": "n-outer:out:current_item", "name": "current_item", "port_type": "OBJECT", "direction": "OUTPUT", "required": false},
+        {"id": "n-outer:out:index", "name": "index", "port_type": "SCALAR", "direction": "OUTPUT", "required": false},
+        {"id": "n-outer:out:completed", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {},
+      "x": 300.0, "y": 100.0
+    },
+    {
+      "id": "n-list-producer",
+      "node_type": "EXTERNAL_COMMAND",
+      "name": "Produce Inner List",
+      "inputs": [
+        {"id": "n-prod:in:input_data", "name": "input_data", "port_type": "ANY", "direction": "INPUT", "required": false},
+        {"id": "n-prod:in:trigger", "name": "trigger", "port_type": "TRIGGER", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-prod:out:output_data", "name": "output_data", "port_type": "ANY", "direction": "OUTPUT", "required": false},
+        {"id": "n-prod:out:file_path", "name": "file_path", "port_type": "FILE_PATH", "direction": "OUTPUT", "required": false},
+        {"id": "n-prod:out:completed", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "command_template": "printf '[1,2,3]' > '{output_dir}/out.json'",
+        "input_format": "json",
+        "output_format": "json",
+        "timeout_seconds": 10
+      },
+      "x": 550.0, "y": 100.0
+    },
+    {
+      "id": "n-inner-fe",
+      "node_type": "FOR_EACH",
+      "name": "Inner ForEach",
+      "inputs": [
+        {"id": "n-inner:in:collection", "name": "collection", "port_type": "OBJECT_LIST", "direction": "INPUT", "required": true}
+      ],
+      "outputs": [
+        {"id": "n-inner:out:current_item", "name": "current_item", "port_type": "OBJECT", "direction": "OUTPUT", "required": false},
+        {"id": "n-inner:out:index", "name": "index", "port_type": "SCALAR", "direction": "OUTPUT", "required": false},
+        {"id": "n-inner:out:completed", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {},
+      "x": 800.0, "y": 100.0
+    },
+    {
+      "id": "n-inner-action",
+      "node_type": "EXTERNAL_COMMAND",
+      "name": "Inner Action",
+      "inputs": [
+        {"id": "n-inner-act:in:input_data", "name": "input_data", "port_type": "ANY", "direction": "INPUT", "required": false},
+        {"id": "n-inner-act:in:trigger", "name": "trigger", "port_type": "TRIGGER", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-inner-act:out:output_data", "name": "output_data", "port_type": "ANY", "direction": "OUTPUT", "required": false},
+        {"id": "n-inner-act:out:file_path", "name": "file_path", "port_type": "FILE_PATH", "direction": "OUTPUT", "required": false},
+        {"id": "n-inner-act:out:completed", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "command_template": "true",
+        "input_format": "json",
+        "output_format": "json",
+        "timeout_seconds": 10
+      },
+      "x": 1050.0, "y": 100.0
+    }
+  ],
+  "connections": [
+    {"id": "c1", "source_node_id": "n-threshold", "source_port_id": "n-thresh:out:objects", "target_node_id": "n-outer-fe", "target_port_id": "n-outer:in:collection"},
+    {"id": "c2", "source_node_id": "n-outer-fe", "source_port_id": "n-outer:out:index", "target_node_id": "n-list-producer", "target_port_id": "n-prod:in:input_data"},
+    {"id": "c3", "source_node_id": "n-list-producer", "source_port_id": "n-prod:out:output_data", "target_node_id": "n-inner-fe", "target_port_id": "n-inner:in:collection"},
+    {"id": "c4", "source_node_id": "n-inner-fe", "source_port_id": "n-inner:out:current_item", "target_node_id": "n-inner-action", "target_port_id": "n-inner-act:in:input_data"}
+  ]
+}

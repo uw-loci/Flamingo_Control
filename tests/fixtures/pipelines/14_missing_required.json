@@ -1,0 +1,23 @@
+{
+  "format_version": "1.0",
+  "name": "14 Missing Required",
+  "_comment": "ForEach.collection is required but unconnected — Pipeline.validate() must flag the unconnected required input.",
+  "nodes": [
+    {
+      "id": "n-foreach",
+      "node_type": "FOR_EACH",
+      "name": "ForEach",
+      "inputs": [
+        {"id": "n-fe:in:collection", "name": "collection", "port_type": "OBJECT_LIST", "direction": "INPUT", "required": true}
+      ],
+      "outputs": [
+        {"id": "n-fe:out:current_item", "name": "current_item", "port_type": "OBJECT", "direction": "OUTPUT", "required": false},
+        {"id": "n-fe:out:index", "name": "index", "port_type": "SCALAR", "direction": "OUTPUT", "required": false},
+        {"id": "n-fe:out:completed", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {},
+      "x": 100.0, "y": 100.0
+    }
+  ],
+  "connections": []
+}

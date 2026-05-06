@@ -1,0 +1,46 @@
+{
+  "format_version": "1.0",
+  "name": "12 Invalid Type",
+  "_comment": "SCALAR -> VOLUME is not type-compatible. add_connection would reject this; the connection is hand-built to bypass validation. Pipeline.validate() should catch it as a type mismatch.",
+  "nodes": [
+    {
+      "id": "n-thresh-a",
+      "node_type": "THRESHOLD",
+      "name": "Threshold A",
+      "inputs": [
+        {"id": "n-a:in:volume", "name": "volume", "port_type": "VOLUME", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-a:out:objects", "name": "objects", "port_type": "OBJECT_LIST", "direction": "OUTPUT", "required": false},
+        {"id": "n-a:out:mask", "name": "mask", "port_type": "VOLUME", "direction": "OUTPUT", "required": false},
+        {"id": "n-a:out:count", "name": "count", "port_type": "SCALAR", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {},
+      "x": 50.0, "y": 100.0
+    },
+    {
+      "id": "n-thresh-b",
+      "node_type": "THRESHOLD",
+      "name": "Threshold B",
+      "inputs": [
+        {"id": "n-b:in:volume", "name": "volume", "port_type": "VOLUME", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-b:out:objects", "name": "objects", "port_type": "OBJECT_LIST", "direction": "OUTPUT", "required": false},
+        {"id": "n-b:out:mask", "name": "mask", "port_type": "VOLUME", "direction": "OUTPUT", "required": false},
+        {"id": "n-b:out:count", "name": "count", "port_type": "SCALAR", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {},
+      "x": 350.0, "y": 100.0
+    }
+  ],
+  "connections": [
+    {
+      "id": "c-bad-type",
+      "source_node_id": "n-thresh-a",
+      "source_port_id": "n-a:out:count",
+      "target_node_id": "n-thresh-b",
+      "target_port_id": "n-b:in:volume"
+    }
+  ]
+}

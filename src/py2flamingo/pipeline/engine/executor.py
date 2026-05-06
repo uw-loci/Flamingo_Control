@@ -82,9 +82,12 @@ class PipelineExecutor(QThread):
             self.pipeline_error.emit(msg)
             return
 
-        # Resolve scopes
+        # Resolve scopes; cache so execute_subgraph can re-inject the
+        # resolver into runners that need it (Conditional inside a ForEach
+        # body, for example).
         resolver = ScopeResolver(self._pipeline)
         resolver.resolve()
+        self._scope_resolver = resolver
         top_level_ids = resolver.get_top_level_node_ids()
 
         total = len(top_level_ids)
@@ -158,6 +161,15 @@ class PipelineExecutor(QThread):
                     f"No runner registered for node type {node.node_type.name}"
                 )
 
+            # Re-inject the resolver/executor for runners that need scope
+            # resolution (Conditional, nested ForEach, TimedLoop). Top-level
+            # _execute() does this once, but a runner can be invoked under a
+            # different parent scope here without ever passing through
+            # _execute first.
+            if hasattr(runner, "set_scope_resolver") and getattr(
+                self, "_scope_resolver", None
+            ):
+                runner.set_scope_resolver(self._scope_resolver)
             if hasattr(runner, "set_executor"):
                 runner.set_executor(self)
 

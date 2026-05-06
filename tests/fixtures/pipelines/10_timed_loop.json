@@ -1,0 +1,50 @@
+{
+  "format_version": "1.0",
+  "name": "10 TimedLoop",
+  "_comment": "2 iterations × 0.1s interval, body = ExternalCommand.",
+  "nodes": [
+    {
+      "id": "n-timedloop",
+      "node_type": "TIMED_LOOP",
+      "name": "TimedLoop",
+      "inputs": [
+        {"id": "n-tl:in:trigger", "name": "trigger", "port_type": "TRIGGER", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-tl:out:iteration", "name": "iteration", "port_type": "SCALAR", "direction": "OUTPUT", "required": false},
+        {"id": "n-tl:out:elapsed_seconds", "name": "elapsed_seconds", "port_type": "SCALAR", "direction": "OUTPUT", "required": false},
+        {"id": "n-tl:out:completed", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "iterations": 2,
+        "interval_seconds": 0.1,
+        "timing_mode": "sequential"
+      },
+      "x": 100.0, "y": 100.0
+    },
+    {
+      "id": "n-extcmd",
+      "node_type": "EXTERNAL_COMMAND",
+      "name": "Body",
+      "inputs": [
+        {"id": "n-ext:in:input_data", "name": "input_data", "port_type": "ANY", "direction": "INPUT", "required": false},
+        {"id": "n-ext:in:trigger", "name": "trigger", "port_type": "TRIGGER", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-ext:out:output_data", "name": "output_data", "port_type": "ANY", "direction": "OUTPUT", "required": false},
+        {"id": "n-ext:out:file_path", "name": "file_path", "port_type": "FILE_PATH", "direction": "OUTPUT", "required": false},
+        {"id": "n-ext:out:completed", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "command_template": "true",
+        "input_format": "json",
+        "output_format": "json",
+        "timeout_seconds": 5
+      },
+      "x": 400.0, "y": 100.0
+    }
+  ],
+  "connections": [
+    {"id": "c-tl-iter-to-ext", "source_node_id": "n-timedloop", "source_port_id": "n-tl:out:iteration", "target_node_id": "n-extcmd", "target_port_id": "n-ext:in:input_data"}
+  ]
+}

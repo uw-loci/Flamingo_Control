@@ -1,0 +1,32 @@
+{
+  "format_version": "1.0",
+  "name": "08 Overview Analysis",
+  "_comment": "OverviewAnalysis reads its 2D image from image_path config. The smoke test rewrites this to an absolute path of a fixture image before running.",
+  "nodes": [
+    {
+      "id": "n-overview",
+      "node_type": "OVERVIEW_ANALYSIS",
+      "name": "Overview Analysis",
+      "inputs": [
+        {"id": "n-ov:in:image", "name": "image", "port_type": "VOLUME", "direction": "INPUT", "required": false},
+        {"id": "n-ov:in:image_path", "name": "image_path", "port_type": "FILE_PATH", "direction": "INPUT", "required": false},
+        {"id": "n-ov:in:trigger", "name": "trigger", "port_type": "TRIGGER", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-ov:out:selected_tiles", "name": "selected_tiles", "port_type": "OBJECT_LIST", "direction": "OUTPUT", "required": false},
+        {"id": "n-ov:out:count", "name": "count", "port_type": "SCALAR", "direction": "OUTPUT", "required": false},
+        {"id": "n-ov:out:mask", "name": "mask", "port_type": "VOLUME", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "method": "intensity",
+        "tiles_x": 4,
+        "tiles_y": 4,
+        "image_path": "__SUBSTITUTED_AT_RUNTIME__",
+        "intensity_min": 100.0,
+        "intensity_max": 255.0
+      },
+      "x": 100.0, "y": 100.0
+    }
+  ],
+  "connections": []
+}

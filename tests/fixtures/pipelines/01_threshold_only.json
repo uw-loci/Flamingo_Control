@@ -1,0 +1,31 @@
+{
+  "format_version": "1.0",
+  "name": "01 Threshold Only",
+  "nodes": [
+    {
+      "id": "n-threshold",
+      "node_type": "THRESHOLD",
+      "name": "Threshold",
+      "inputs": [
+        {"id": "n-threshold:in:volume", "name": "volume", "port_type": "VOLUME", "direction": "INPUT", "required": false}
+      ],
+      "outputs": [
+        {"id": "n-threshold:out:objects", "name": "objects", "port_type": "OBJECT_LIST", "direction": "OUTPUT", "required": false},
+        {"id": "n-threshold:out:mask", "name": "mask", "port_type": "VOLUME", "direction": "OUTPUT", "required": false},
+        {"id": "n-threshold:out:count", "name": "count", "port_type": "SCALAR", "direction": "OUTPUT", "required": false}
+      ],
+      "config": {
+        "channel_thresholds": {"0": 100},
+        "enabled_channels": [0],
+        "gauss_sigma": 0.0,
+        "opening_enabled": false,
+        "opening_radius": 1,
+        "min_object_size": 0,
+        "default_threshold": 100
+      },
+      "x": 100.0,
+      "y": 100.0
+    }
+  ],
+  "connections": []
+}

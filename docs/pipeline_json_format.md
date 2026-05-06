@@ -205,10 +205,104 @@ Reads current volume data and position from the 3D sample view. Has no inputs �
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `channel_0` | bool | `true` | Include 405nm (DAPI) channel |
-| `channel_1` | bool | `true` | Include 488nm (GFP) channel |
-| `channel_2` | bool | `true` | Include 561nm (RFP) channel |
-| `channel_3` | bool | `true` | Include 640nm (Far-Red) channel |
+| `channel_0` | bool | `true` | Channel 1 — 405nm (DAPI) Left |
+| `channel_1` | bool | `true` | Channel 2 — 488nm (GFP) Left |
+| `channel_2` | bool | `true` | Channel 3 — 561nm (RFP) Left |
+| `channel_3` | bool | `true` | Channel 4 — 640nm (Far-Red) Left |
+| `channel_4` | bool | `false` | Channel 5 — 405nm Right (dual-side acquisitions) |
+| `channel_5` | bool | `false` | Channel 6 — 488nm Right |
+| `channel_6` | bool | `false` | Channel 7 — 561nm Right |
+| `channel_7` | bool | `false` | Channel 8 — 640nm Right |
+
+### OVERVIEW_ANALYSIS
+
+Analyzes a 2D overview image (or one slice of a 3D volume) and selects tiles
+of interest based on a chosen detection method (entropy, variance, intensity,
+etc.).
+
+**Default Ports:**
+
+| Direction | Name | Port Type | Required |
+|-----------|------|-----------|----------|
+| INPUT | image | VOLUME | — |
+| INPUT | image_path | FILE_PATH | — |
+| INPUT | trigger | TRIGGER | — |
+| OUTPUT | selected_tiles | OBJECT_LIST | — |
+| OUTPUT | count | SCALAR | — |
+| OUTPUT | mask | VOLUME | — |
+
+**Config Properties:**
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `method` | string | `"entropy"` | One of `entropy`, `bandpass`, `gradient`, `dog`, `tube_detect`, `variance`, `edge`, `intensity`, `combined` |
+| `tiles_x` | int | `8` | Tile grid columns |
+| `tiles_y` | int | `8` | Tile grid rows |
+| `image_path` | string | `""` | Optional path to load image from disk if `image`/`image_path` ports are unconnected |
+| `entropy_threshold` | float | `3.0` | Method-specific threshold (entropy) |
+| `variance_threshold` | float | `100.0` | Method-specific threshold (variance) |
+| `intensity_min` / `intensity_max` | float | `20.0` / `255.0` | Range for intensity method |
+| `morphological_cleanup` | bool | `false` | Post-process tile mask |
+| `invert` | bool | `false` | Invert the selection |
+
+The full set of method-specific knobs is enumerated in `pipeline/ui/property_panel.py` (`_CONFIG_SCHEMAS[NodeType.OVERVIEW_ANALYSIS]`). The Property Panel offers an Import button to populate `tiles_x`/`tiles_y`/`image_path` from a stitched dataset's `stitch_metadata.json`.
+
+### POST_PROCESSING
+
+Runs the stitching / deconvolution / format-conversion pipeline on a raw
+acquisition directory. The runner lazy-imports `py2flamingo.stitching.pipeline`
+inside `run()`, so non-stitching pipelines won't pull in `pyimagej` or
+`pycudadecon`.
+
+**Default Ports:**
+
+| Direction | Name | Port Type | Required |
+|-----------|------|-----------|----------|
+| INPUT | acquisition_dir | FILE_PATH | true |
+| INPUT | trigger | TRIGGER | — |
+| OUTPUT | output_path | FILE_PATH | — |
+| OUTPUT | completed | TRIGGER | — |
+
+**Config Properties:**
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `acquisition_dir` | string | `""` | Path to raw acquisition (overridden by input port if connected) |
+| `output_dir` | string | `""` | Stitched output dir (defaults to `<acquisition_dir>/stitched`) |
+| `pixel_size_um` | float | `0.406` | XY voxel size — auto-importable from `configs/microscope_hardware.yaml` |
+| `z_step_um` | float | `0.0` | Z step (`0` = derive from metadata) |
+| `destripe` | bool | `false` | Apply PyStripe artifact correction |
+| `illumination_fusion` | string | `"max"` | `max`, `mean`, or `leonardo` |
+| `deconvolution_enabled` | bool | `false` | Run deconvolution |
+| `deconvolution_engine` | string | `"pycudadecon"` | `pycudadecon` or `redlionfish` |
+| `output_format` | string | `"ome-zarr-sharded"` | `ome-zarr-sharded`, `ome-tiff`, `both`, `tiff` |
+| `package_ozx` | bool | `false` | Package output as `.ozx` |
+| `channels` | string | `""` | Comma-separated channel IDs (`""` = all) |
+
+### TIMED_LOOP
+
+Repeats a body subgraph N times with a configurable delay between iterations,
+or indefinitely if `iterations <= 0`. Body nodes are identified the same way
+ForEach uses ScopeResolver (downstream of `iteration` / `elapsed_seconds`).
+
+**Default Ports:**
+
+| Direction | Name | Port Type | Required |
+|-----------|------|-----------|----------|
+| INPUT | trigger | TRIGGER | — |
+| OUTPUT | iteration | SCALAR | — |
+| OUTPUT | elapsed_seconds | SCALAR | — |
+| OUTPUT | completed | TRIGGER | — |
+
+**Config Properties:**
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `iterations` | int | `10` | Number of iterations (`0` = indefinite, cancel via stop button) |
+| `interval_seconds` | float | `60.0` | Delay between iterations |
+| `timing_mode` | string | `"sequential"` | `sequential` (delay after each body) or `clock_aligned` (start at fixed wall-clock intervals) |
+
+Cancellation is responsive — the runner sleeps in 0.5s slices and checks `context.check_cancelled()` between them.
 
 ## Port Types
 
