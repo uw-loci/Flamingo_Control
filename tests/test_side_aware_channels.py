@@ -252,7 +252,12 @@ class TestChannelOffsetWithDiskLoader(unittest.TestCase):
             self._cleanup_folder(folder)
 
     def test_both_sides_channels_unchanged(self):
-        """Both sides: channels stay 0-based (merged)."""
+        """Both sides: emits the left channel AND the right-offset channel.
+
+        Earlier design merged both into a single 0-based channel set; current
+        design keeps them separate so each side's data stays addressable. With
+        laser 488 (channel id 1) the loader returns [1, 5] (= 1 and 1+4).
+        """
         from py2flamingo.visualization.disk_tile_loader import parse_tile_folder
 
         folder = self._make_tile_folder(
@@ -262,7 +267,7 @@ class TestChannelOffsetWithDiskLoader(unittest.TestCase):
         )
         try:
             info = parse_tile_folder(folder)
-            self.assertEqual(info.channels, [1])
+            self.assertEqual(info.channels, [1, 5])
             self.assertEqual(info.illumination_side, "both")
         finally:
             self._cleanup_folder(folder)
@@ -342,7 +347,11 @@ class TestConfigExpansion(unittest.TestCase):
     """Test that the config YAML has 8 channels."""
 
     def test_config_has_8_channels(self):
-        """Verify visualization_3d_config.yaml defines 8 channels."""
+        """Verify visualization_3d_config.yaml defines the 8 side-aware channels.
+
+        Note: the config also defines an extra LED/Brightfield channel at id 8
+        which is not part of the left/right side-aware split; we slice it out.
+        """
         import yaml
 
         config_path = (
@@ -358,7 +367,9 @@ class TestConfigExpansion(unittest.TestCase):
         with open(config_path) as f:
             config = yaml.safe_load(f)
 
-        channels = config.get("channels", [])
+        # Keep only the side-aware channels (ids 0-7). The LED/Brightfield
+        # channel at id 8 is a separate concern with its own contrast/colormap.
+        channels = [c for c in config.get("channels", []) if c["id"] < 8]
         self.assertEqual(len(channels), 8)
         self.assertEqual(config["display"]["max_channels"], 8)
 
@@ -410,35 +421,39 @@ class TestConfigExpansion(unittest.TestCase):
 
 @unittest.skipUnless(HAS_HEAVY_DEPS, "Requires sparse and scipy")
 class TestDualResolutionStorage8Channels(unittest.TestCase):
-    """Test that DualResolutionStorage supports 8 channels."""
+    """Test that DualResolutionVoxelStorage supports the 8 side-aware channels
+    plus the LED channel (9 total)."""
+
+    # 9 = 8 side-aware (0-7) + 1 LED/brightfield (8). Storage allocates for all.
+    EXPECTED_NUM_CHANNELS = 9
 
     def test_num_channels_is_8(self):
-        """Verify storage initializes with 8 channels."""
+        """Verify storage initializes with the expected channel count."""
         from py2flamingo.visualization.dual_resolution_storage import (
-            DualResolutionStorage,
+            DualResolutionVoxelStorage,
         )
 
-        storage = DualResolutionStorage()
-        self.assertEqual(storage.num_channels, 8)
+        storage = DualResolutionVoxelStorage()
+        self.assertEqual(storage.num_channels, self.EXPECTED_NUM_CHANNELS)
 
     def test_has_data_all_channels(self):
-        """Verify has_data works for channels 0-7."""
+        """Verify has_data works for all allocated channels."""
         from py2flamingo.visualization.dual_resolution_storage import (
-            DualResolutionStorage,
+            DualResolutionVoxelStorage,
         )
 
-        storage = DualResolutionStorage()
-        for ch_id in range(8):
+        storage = DualResolutionVoxelStorage()
+        for ch_id in range(self.EXPECTED_NUM_CHANNELS):
             self.assertFalse(storage.has_data(ch_id))
 
     def test_get_display_volume_all_channels(self):
-        """Verify get_display_volume works for channels 0-7."""
+        """Verify get_display_volume works for all allocated channels."""
         from py2flamingo.visualization.dual_resolution_storage import (
-            DualResolutionStorage,
+            DualResolutionVoxelStorage,
         )
 
-        storage = DualResolutionStorage()
-        for ch_id in range(8):
+        storage = DualResolutionVoxelStorage()
+        for ch_id in range(self.EXPECTED_NUM_CHANNELS):
             vol = storage.get_display_volume(ch_id)
             self.assertIsNotNone(vol)
 
