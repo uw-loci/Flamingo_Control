@@ -1287,9 +1287,15 @@ class SampleView(QWidget):
         self.workflow_progress_bar.setFormat("%p%")
         layout.addWidget(self.workflow_progress_bar, stretch=1)
 
-        # Time remaining
+        # Time remaining — set by callers via update_workflow_progress.
+        # Width sized to fit "MM:SS remaining (done ~HH:MM)".
         self.time_remaining_label = QLabel("--:--")
         self.time_remaining_label.setStyleSheet("color: #666;")
+        self.time_remaining_label.setMinimumWidth(220)
+        self.time_remaining_label.setToolTip(
+            "Estimated time remaining and projected completion clock time. "
+            "Refines as more progress is observed."
+        )
         layout.addWidget(self.time_remaining_label)
 
         widget.setLayout(layout)
@@ -4399,7 +4405,7 @@ class SampleView(QWidget):
     # ========== Public Methods ==========
 
     def update_workflow_progress(
-        self, status: str, progress: int, time_remaining: str
+        self, status: str, progress: int, time_remaining=None
     ) -> None:
         """
         Update workflow progress display.
@@ -4407,11 +4413,15 @@ class SampleView(QWidget):
         Args:
             status: Status text (e.g., "Running Step 3 of 10")
             progress: Progress percentage (0-100)
-            time_remaining: Time remaining string (e.g., "02:30")
+            time_remaining: Time remaining string (e.g., "02:30 remaining
+                (done ~14:07)"). Pass ``None`` to leave the existing
+                value alone -- useful for callers that drive the bar
+                from a different signal than the ETA source.
         """
         self.workflow_status_label.setText(f"Workflow: {status}")
         self.workflow_progress_bar.setValue(progress)
-        self.time_remaining_label.setText(time_remaining)
+        if time_remaining is not None:
+            self.time_remaining_label.setText(time_remaining)
 
     # ========== Window Events ==========
 
@@ -5062,7 +5072,9 @@ class SampleView(QWidget):
             tile_pct = min(1.0, frame_count / max(1, estimated_total))
             overall_pct = min(100, int(((tile_idx - 1 + tile_pct) / total_tiles) * 100))
             status = f"Tile {tile_idx}/{total_tiles}: {frame_count} frames"
-            self.update_workflow_progress(status, overall_pct, "--:--")
+            # ETA is driven by the tile-collection dialog's per-image
+            # estimator; pass None so we don't clobber its label.
+            self.update_workflow_progress(status, overall_pct, None)
 
         # Kick channel availability timer (will fire after processing catches up)
         self._channel_availability_timer.start()

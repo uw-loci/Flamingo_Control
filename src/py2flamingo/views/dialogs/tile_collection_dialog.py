@@ -31,6 +31,10 @@ from PyQt5.QtWidgets import (
 
 from py2flamingo.models.data.workflow import StackSettings, Workflow, WorkflowType
 from py2flamingo.models.microscope import Position
+from py2flamingo.services.progress_estimator import (
+    ProgressEstimator,
+    TimingCache,
+)
 from py2flamingo.services.tiff_size_validator import (
     TIFF_4GB_LIMIT,
     TiffSizeEstimate,
@@ -57,6 +61,9 @@ from py2flamingo.views.workflow_panels import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Shared timing cache for tile-collection ETAs across runs
+_TIMING_CACHE = TimingCache()
 
 
 class TileCollectionDialog(PersistentDialog):
@@ -1391,6 +1398,37 @@ class TileCollectionDialog(PersistentDialog):
         progress._overall_bar.setFormat("%p%")
         progress_layout.addWidget(progress._overall_bar)
 
+        # ETA label for the queue as a whole
+        progress._eta_label = QLabel("estimating...")
+        progress._eta_label.setStyleSheet("color: #666;")
+        progress._eta_label.setToolTip(
+            "Estimated time remaining and projected completion clock time. "
+            "Refines as more tiles are observed."
+        )
+        progress_layout.addWidget(progress._eta_label)
+
+        # Two-tier estimator. The per-image estimator drives the
+        # within-tile ETA shown on the current bar's label; the
+        # per-workflow estimator drives the queue ETA on the overall
+        # bar. Cache key is intentionally coarse -- a single
+        # "tile_collection_workflow" key smooths across geometry
+        # variations because the dominant cost is per-tile setup +
+        # acquisition, not the absolute frame count.
+        per_workflow_est = ProgressEstimator(
+            total_units=total_workflows,
+            cache=_TIMING_CACHE,
+            cache_key="tile_collection:workflow",
+        )
+        per_workflow_est.tick(0)
+        per_image_est = ProgressEstimator(
+            total_units=1,  # set when first workflow's expected count arrives
+            cache=_TIMING_CACHE,
+            cache_key="tile_collection:image",
+        )
+        per_image_est.tick(0)
+        progress._per_workflow_est = per_workflow_est
+        progress._per_image_est = per_image_est
+
         # Cancel button
         progress._cancel_btn = QPushButton("Cancel")
         btn_layout = QHBoxLayout()
@@ -1427,14 +1465,55 @@ class TileCollectionDialog(PersistentDialog):
                 workflow_progress = 0
             return min(99, int(base_progress + workflow_progress))
 
+        def queue_eta_label() -> str:
+            """Format the best available queue ETA.
+
+            Prefer the per-image estimator scaled to remaining work
+            once enough image samples land; fall back to the
+            per-workflow estimator (coarser but available sooner).
+            """
+            # Per-image is the higher-resolution signal: total remaining
+            # = images left in current workflow + (images-per-workflow
+            # estimate) * (workflows remaining). We approximate
+            # images-per-workflow with the current workflow's expected count.
+            img_mean_ms = per_image_est._mean_ms()
+            wf_idx = queue_service.current_index
+            cur_acq = current_workflow_images[0]
+            cur_exp = current_workflow_images[1]
+            if img_mean_ms is not None and cur_exp > 0:
+                images_remaining_now = max(0, cur_exp - cur_acq)
+                workflows_remaining = max(0, total_workflows - wf_idx - 1)
+                total_images_remaining = (
+                    images_remaining_now + workflows_remaining * cur_exp
+                )
+                seconds = img_mean_ms * total_images_remaining / 1000.0
+                from datetime import datetime as _dt
+                from datetime import timedelta as _td
+
+                from py2flamingo.services.progress_estimator import (
+                    _format_duration,
+                )
+
+                clock = _dt.now() + _td(seconds=seconds)
+                eta_str = (
+                    clock.strftime("%H:%M")
+                    if clock.date() == _dt.now().date()
+                    else clock.strftime("%a %H:%M")
+                )
+                return f"{_format_duration(seconds)} remaining (done ~{eta_str})"
+            return per_workflow_est.format_label()
+
         def update_sample_view(status, pct):
             """Update Sample View's workflow progress display."""
+            eta = queue_eta_label()
+            if hasattr(progress, "_eta_label"):
+                progress._eta_label.setText(eta)
             if (
                 self._app
                 and hasattr(self._app, "sample_view")
                 and self._app.sample_view
             ):
-                self._app.sample_view.update_workflow_progress(status, pct, "--:--")
+                self._app.sample_view.update_workflow_progress(status, pct, eta)
 
         def on_progress(current, total, message):
             if self._queue_completed:
@@ -1453,6 +1532,10 @@ class TileCollectionDialog(PersistentDialog):
                 # Reset image counters for the new tile
                 current_workflow_images[0] = 0
                 current_workflow_images[1] = 0
+                # Restart per-image clock so the previous tile's
+                # transition gap doesn't show up as a giant first delta.
+                per_image_est.reset()
+                per_image_est.tick(0)
             pct = calculate_overall_progress(
                 workflow_idx, current_workflow_images[0], current_workflow_images[1]
             )
@@ -1468,6 +1551,10 @@ class TileCollectionDialog(PersistentDialog):
             current_workflow_images[0] = acquired
             current_workflow_images[1] = expected
             workflow_idx = queue_service.current_index
+            # Tick per-image estimator (cumulative within current tile)
+            if expected > 0:
+                per_image_est.set_total(expected)
+                per_image_est.tick(acquired)
             # Update current workflow bar
             current_pct = int((acquired / max(1, expected)) * 100)
             progress._current_bar.setValue(current_pct)
@@ -1489,6 +1576,9 @@ class TileCollectionDialog(PersistentDialog):
                 return
             current_workflow_images[0] = 0
             current_workflow_images[1] = 0
+            # Tick per-workflow estimator with cumulative completed count
+            per_workflow_est.set_total(total)
+            per_workflow_est.tick(index + 1)
             pct = calculate_overall_progress(index + 1, 0, 0)
             progress._overall_bar.setValue(pct)
             progress._overall_label.setText(
@@ -1515,6 +1605,17 @@ class TileCollectionDialog(PersistentDialog):
             )
             progress._current_label.setText("Complete!")
             progress._current_bar.setValue(100)
+            try:
+                wf_saved = per_workflow_est.finalize()
+                img_saved = per_image_est.finalize()
+                if wf_saved or img_saved:
+                    logger.info(
+                        f"Saved tile-collection timing: "
+                        f"per-workflow={wf_saved}ms, per-image={img_saved}ms"
+                    )
+            except Exception as e:
+                logger.warning(f"Could not save tile-collection timing: {e}")
+            progress._eta_label.setText("Complete")
             update_sample_view("Complete!", 100)
             QTimer.singleShot(
                 1500, lambda: update_sample_view("Not Running", 0)

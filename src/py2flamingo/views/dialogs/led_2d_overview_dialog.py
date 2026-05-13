@@ -27,9 +27,17 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
+from py2flamingo.services.progress_estimator import (
+    ProgressEstimator,
+    TimingCache,
+)
 from py2flamingo.views.colors import ERROR_COLOR, WARNING_COLOR
 
 logger = logging.getLogger(__name__)
+
+# Module-level cache instance: shared so estimates accumulate across
+# dialog instances and across separate scan runs.
+_TIMING_CACHE = TimingCache()
 
 
 @dataclass
@@ -114,6 +122,9 @@ class LED2DOverviewDialog(PersistentDialog):
         # Current LED settings (loaded from Sample View or saved settings)
         self._current_led_name = None  # e.g., "led_red"
         self._current_led_intensity = 0.0  # percentage (0-100)
+
+        # Per-tile ETA estimator (built when scan starts, dropped when done)
+        self._estimator: Optional[ProgressEstimator] = None
 
         self.setWindowTitle("LED 2D Overview")
         self.setMinimumWidth(580)
@@ -1222,9 +1233,19 @@ class LED2DOverviewDialog(PersistentDialog):
 
         self._set_scan_in_progress(True, percent)
 
+        # Tick the ETA estimator (cumulative tile count, not delta)
+        if self._estimator is not None:
+            self._estimator.set_total(total_all_rotations)
+            self._estimator.tick(tiles_done)
+            time_remaining = self._estimator.format_label()
+        else:
+            time_remaining = "--:--"
+
         # Update Sample View's workflow progress display
         self._update_sample_view_progress(
-            f"LED 2D Overview: {tiles_done}/{total_all_rotations} tiles", percent
+            f"LED 2D Overview: {tiles_done}/{total_all_rotations} tiles",
+            percent,
+            time_remaining,
         )
 
     def _update_sample_view_progress(
@@ -1416,6 +1437,23 @@ class LED2DOverviewDialog(PersistentDialog):
         # Emit signal
         self.scan_requested.emit(config)
 
+        # Build ETA estimator. Cache key includes the per-run knobs that
+        # most strongly affect per-tile time (LED, z step, total tile
+        # count bucket); different runs with very different shapes will
+        # not pollute each other's stored mean.
+        z_key = round(float(config.z_step_size), 3)
+        tile_bucket = max(1, total_tiles // 50) * 50
+        cache_key = (
+            f"led_2d_overview:{self._current_led_name or 'none'}:"
+            f"z{z_key}:tiles~{tile_bucket}"
+        )
+        self._estimator = ProgressEstimator(
+            total_units=total_tiles,
+            cache=_TIMING_CACHE,
+            cache_key=cache_key,
+        )
+        self._estimator.tick(0)  # mark start time
+
         try:
             from py2flamingo.workflows.led_2d_overview_workflow import (
                 LED2DOverviewWorkflow,
@@ -1461,6 +1499,7 @@ class LED2DOverviewDialog(PersistentDialog):
         self._set_scan_in_progress(False)
         self._stop_sample_view_live()
         self._reset_sample_view_progress()
+        self._finalize_estimator()
 
         # Save LED settings for future use if they're valid
         if self._current_led_name and self._current_led_name != "none":
@@ -1472,6 +1511,21 @@ class LED2DOverviewDialog(PersistentDialog):
         self._set_scan_in_progress(False)
         self._stop_sample_view_live()
         self._reset_sample_view_progress()
+        # Skip cache update on error -- partial-run timings would skew it
+        self._estimator = None
+
+    def _finalize_estimator(self) -> None:
+        if self._estimator is None:
+            return
+        try:
+            saved = self._estimator.finalize()
+            if saved:
+                self._logger.info(
+                    f"Saved per-tile timing to cache: {saved:.0f} ms/tile"
+                )
+        except Exception as e:
+            self._logger.warning(f"Could not save timing data: {e}")
+        self._estimator = None
 
     def _on_cancel_clicked(self) -> None:
         """Handle Cancel Scan button click."""
