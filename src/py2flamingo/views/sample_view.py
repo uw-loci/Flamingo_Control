@@ -3108,9 +3108,15 @@ class SampleView(QWidget):
                 # Try to get microscope name from configuration service
                 microscope_name = "n7"  # Default
                 if self._configuration_service:
-                    config = self._configuration_service.get_current_configuration()
-                    if config:
-                        microscope_name = config.get("name", "n7")
+                    try:
+                        name = self._configuration_service.get_microscope_name()
+                        if name:
+                            microscope_name = name
+                    except Exception as e:
+                        self.logger.debug(
+                            f"Could not read microscope name from "
+                            f"ConfigurationService, defaulting to {microscope_name!r}: {e}"
+                        )
 
                 # Create settings service (will use the microscope_settings directory)
                 from pathlib import Path
