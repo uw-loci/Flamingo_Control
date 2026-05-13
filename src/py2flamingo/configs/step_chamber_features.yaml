@@ -47,17 +47,26 @@ features:
   -
     role: chamber_cavity
     type: aabb
+    # Inner cavity (empty air gap). NOT cubic — derived from the actual inner
+    # wall faces detected in the STEP file:
+    #   x: bounded by the two side-wall inner faces (illumination-port pockets)
+    #   y: bounded by the inner faces of the front (sample-entry) and back
+    #      (detection-objective) walls — taken from the *inner* end of each
+    #      bore's y_extent_step
+    #   z: extends from below the side-window region (chamber floor, above the
+    #      octagonal base plate) up to the inner face of the top wall
+    # Edit these to match the production chamber if the inner walls differ.
     bounds_step:
       x:
         - 122.38
         - 145.88
       y:
-        - -201.43
-        - -178.44
+        - -206.39
+        - -179.02
       z:
-        - 669.53
+        - 640.0
         - 692.52
-    _note: "subtractive volume; defines air gap. Not rendered."
+    _note: "subtractive volume; defines air gap. Not rendered as a solid."
   -
     role: detection_objective_port
     type: cylinder
@@ -97,19 +106,7 @@ features:
     visible_default: true
     napari_kind: shapes
     color: "#FF8800"
-    real_world_shape: rounded_rectangle
-    # Production chamber has this as a rectangular glass window. Render as a
-    # single flat rectangle outline (no depth-stacked rings). Adjust the
-    # rect_extents_step values below to match the real chamber's window.
-    display_as: rectangle
-    rect_extents_step:
-      file_x:
-        - 126.5
-        - 141.8
-      file_z:
-        - 673.0
-        - 688.5
-    _note: "FRONT face viewing port. STEP file's through-bore is 7.63 mm radius (15.26 mm dia); production chamber has a rectangular glass window. Edit rect_extents_step to match the production window dimensions."
+    _note: "FRONT face viewing port. Small circular through-bore (r=7.63 mm, 15.26 mm dia) — smaller than the illumination ports (r=10 mm). Rendered as a ring cylinder like the detection objective."
   -
     role: illumination_port_left
     type: cylinder
@@ -219,15 +216,16 @@ features:
     color: "#FF4400"
     # Production chamber's top sample-entry slot is a rounded RECTANGLE
     # (the sample drops in here). Render as a single rectangle outline on
-    # the chamber's top face. Edit rect_extents_step to match the real slot.
+    # the chamber's top face. The opening matches the cavity X/Y footprint
+    # so the bulk-metal cutout aligns with the wireframe interior.
     display_as: rectangle
     rect_extents_step:
       file_x:
-        - 126.0
-        - 146.0     # ~20 mm wide along illumination axis
+        - 122.38
+        - 145.88    # matches cavity x-extent (23.5 mm)
       file_y:
-        - -200.0
-        - -180.0    # ~20 mm long along optical axis
+        - -206.39
+        - -179.02   # matches cavity y-extent (27.4 mm)
     todo: "Not present in 'basic windows' STEP file. Edit radius_mm / center
            to match the production chamber's top sample-entry hole, or set
            visible_default: false to hide this placeholder."

@@ -124,18 +124,24 @@ def test_detector_port_radius_matches_user_spec(overlay):
     assert feat["axis"][1] == -1
 
 
-def test_sample_entry_port_renders_as_rectangle(overlay):
-    """The front viewing port should render as a flat rectangle outline, not
-    rings (the production chamber has a rectangular glass window there)."""
+def test_sample_entry_port_renders_as_circle(overlay):
+    """The front viewing port is a smaller circular cylinder (~r=7.63 mm),
+    NOT a rectangle. It's just smaller than the illumination ports (r=10)."""
     feat = next(
         f
         for f in overlay._features_data["features"]
         if f["role"] == "sample_entry_port"
     )
-    assert feat.get("display_as") == "rectangle"
-    assert "rect_extents_step" in feat
-    assert "file_x" in feat["rect_extents_step"]
-    assert "file_z" in feat["rect_extents_step"]
+    assert feat.get("display_as") != "rectangle"
+    assert "rect_extents_step" not in feat
+    assert feat["radius_mm"] == pytest.approx(7.63, abs=0.05)
+    # Smaller than the illumination ports
+    illum = next(
+        f
+        for f in overlay._features_data["features"]
+        if f["role"] == "illumination_port_left"
+    )
+    assert feat["radius_mm"] < illum["radius_mm"]
 
 
 def test_top_sample_entry_renders_as_rectangle(overlay):
@@ -199,10 +205,10 @@ class _FakeViewer:
 
 def test_rectangle_render_emits_single_closed_path(overlay):
     """The rectangle render path produces ONE closed polyline (5 points),
-    not depth-stacked rings."""
+    not depth-stacked rings. The top sample-entry hole uses this path."""
     overlay.viewer = _FakeViewer()
     overlay.add_layers(master_visible=True)
-    layer = overlay.viewer.layers["STEP Front Viewing Port"]
+    layer = overlay.viewer.layers["STEP Top Sample-Entry Hole"]
     # rect render: one path of 5 points (closed rectangle)
     assert len(layer.data) == 1
     assert len(layer.data[0]) == 5  # 4 corners + closing point
