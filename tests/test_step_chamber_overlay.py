@@ -124,16 +124,31 @@ def test_detector_port_radius_matches_user_spec(overlay):
     assert feat["axis"][1] == -1
 
 
-def test_sample_entry_port_carries_real_world_override(overlay):
-    """The sample-entry port should carry a real_world_override block so the
-    user can specify the production rounded-rectangle slot."""
+def test_sample_entry_port_renders_as_rectangle(overlay):
+    """The front viewing port should render as a flat rectangle outline, not
+    rings (the production chamber has a rectangular glass window there)."""
     feat = next(
         f
         for f in overlay._features_data["features"]
         if f["role"] == "sample_entry_port"
     )
-    assert feat["real_world_shape"] == "rounded_rectangle"
-    assert "real_world_override" in feat
+    assert feat.get("display_as") == "rectangle"
+    assert "rect_extents_step" in feat
+    assert "file_x" in feat["rect_extents_step"]
+    assert "file_z" in feat["rect_extents_step"]
+
+
+def test_top_sample_entry_renders_as_rectangle(overlay):
+    """The top sample-entry hole is rectangular in the production chamber."""
+    feat = next(
+        f
+        for f in overlay._features_data["features"]
+        if f["role"] == "sample_entry_top_hole"
+    )
+    assert feat.get("display_as") == "rectangle"
+    ext = feat["rect_extents_step"]
+    assert "file_x" in ext
+    assert "file_y" in ext
 
 
 def test_illumination_ports_symmetric(overlay):
@@ -182,28 +197,15 @@ class _FakeViewer:
         return layer
 
 
-def test_stadium_slot_renders_when_override_enabled(overlay):
-    """Turning on real_world_override on the sample_entry_port should make the
-    renderer emit a stadium-shape polyline instead of a circle."""
-    # Locate the feature dict and enable the override with realistic slot dims
-    for f in overlay._features_data["features"]:
-        if f["role"] == "sample_entry_port":
-            f["real_world_override"] = {
-                "enabled": True,
-                # Plausible slot: 20 mm long along Z, 10 mm wide along X
-                "slot_x_extent_mm": [129.13, 139.13],
-                "slot_z_extent_mm": [670.65, 690.65],
-            }
-            break
+def test_rectangle_render_emits_single_closed_path(overlay):
+    """The rectangle render path produces ONE closed polyline (5 points),
+    not depth-stacked rings."""
     overlay.viewer = _FakeViewer()
     overlay.add_layers(master_visible=True)
-    # The stadium renderer attaches the slot ring(s) under the same layer name
-    assert "STEP Sample-Entry / Front Port" in overlay.viewer.layers
-    layer = overlay.viewer.layers["STEP Sample-Entry / Front Port"]
-    # Stadium rendering: 3 depth-stacked closed polylines
-    assert len(layer.data) == 3
-    # Each ring is 2 caps × 19 arc points + 2 straight edges + closure ≈ 40 pts
-    assert all(len(ring) >= 38 for ring in layer.data)
+    layer = overlay.viewer.layers["STEP Front Viewing Port"]
+    # rect render: one path of 5 points (closed rectangle)
+    assert len(layer.data) == 1
+    assert len(layer.data[0]) == 5  # 4 corners + closing point
 
 
 def test_bulk_with_holes_has_more_triangles_than_solid_box(overlay):

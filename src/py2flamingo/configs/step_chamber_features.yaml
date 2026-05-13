@@ -93,20 +93,23 @@ features:
     y_extent_step:
       - -167.02
       - -179.02
-    layer_name: "STEP Sample-Entry / Front Port"
+    layer_name: "STEP Front Viewing Port"
     visible_default: true
     napari_kind: shapes
     color: "#FF8800"
     real_world_shape: rounded_rectangle
-    real_world_override:
-      enabled: false
-      slot_x_extent_mm:
-        - null
-        - null
-      slot_z_extent_mm:
-        - null
-        - null
-    _note: "FRONT face port for sample insertion / viewing. Production chamber has a rounded-rectangle slot here. Set real_world_override.enabled to true and fill in the slot extents to override."
+    # Production chamber has this as a rectangular glass window. Render as a
+    # single flat rectangle outline (no depth-stacked rings). Adjust the
+    # rect_extents_step values below to match the real chamber's window.
+    display_as: rectangle
+    rect_extents_step:
+      file_x:
+        - 126.5
+        - 141.8
+      file_z:
+        - 673.0
+        - 688.5
+    _note: "FRONT face viewing port. STEP file's through-bore is 7.63 mm radius (15.26 mm dia); production chamber has a rectangular glass window. Edit rect_extents_step to match the production window dimensions."
   -
     role: illumination_port_left
     type: cylinder
@@ -203,17 +206,28 @@ features:
       - 0
       - 1
     # Initial guess: centered horizontally over the chamber body at the top.
-    # XZ midpoint = (chamber X mid, cavity Y mid, chamber Z_hi).
     center_step:
       - 136.13
       - -189.94
       - 700.5
-    # Initial guess: 10 mm radius (= 20 mm dia). Production may differ.
+    # radius_mm is only used for collision-distance math (the production
+    # sample-entry slot is rectangular, see rect_extents_step below).
     radius_mm: 10.0
     layer_name: "STEP Top Sample-Entry Hole"
     visible_default: true
     napari_kind: shapes
     color: "#FF4400"
+    # Production chamber's top sample-entry slot is a rounded RECTANGLE
+    # (the sample drops in here). Render as a single rectangle outline on
+    # the chamber's top face. Edit rect_extents_step to match the real slot.
+    display_as: rectangle
+    rect_extents_step:
+      file_x:
+        - 126.0
+        - 146.0     # ~20 mm wide along illumination axis
+      file_y:
+        - -200.0
+        - -180.0    # ~20 mm long along optical axis
     todo: "Not present in 'basic windows' STEP file. Edit radius_mm / center
            to match the production chamber's top sample-entry hole, or set
            visible_default: false to hide this placeholder."

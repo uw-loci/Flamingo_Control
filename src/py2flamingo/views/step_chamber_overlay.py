@@ -175,9 +175,103 @@ class StepChamberOverlay:
         if ftype == "aabb":
             self._render_box(feature, layer_name, color, opacity, visible)
         elif ftype == "cylinder":
-            self._render_cylinder(feature, layer_name, color, opacity, visible)
+            # Cylinder features can opt in to a single-rectangle outline
+            # render via `display_as: rectangle` (for ports that are
+            # rectangular in the production chamber even though this STEP
+            # simplifies them to a circle).
+            if feature.get("display_as") == "rectangle":
+                self._render_face_rectangle(
+                    feature, layer_name, color, opacity, visible
+                )
+            else:
+                self._render_cylinder(feature, layer_name, color, opacity, visible)
         else:
             self.logger.debug(f"Skipping unknown feature type: {ftype}")
+
+    def _render_face_rectangle(
+        self,
+        feature: dict,
+        layer_name: str,
+        color: str,
+        opacity: float,
+        visible: bool,
+    ) -> None:
+        """Render a feature as a single flat rectangle outline on its face,
+        instead of depth-stacked rings.
+
+        Used for the top sample-entry hole and the front viewing port — both
+        of which are rectangular in the production chamber even though this
+        STEP file models them as cylindrical bores. The underlying feature
+        still has `type: cylinder` so the chamber-bulk hole-punching code can
+        find it; only the visual is overridden.
+
+        Reads rectangle extents from `rect_extents_step`, a dict keyed by
+        the two in-plane file-axis names ("file_x", "file_y", "file_z"). If
+        missing, falls back to a default centered on `center_step` sized 2x
+        the bore radius along each in-plane axis.
+        """
+        axis = feature.get("axis") or [0, 0, 1]
+        center = feature.get("center_step")
+        if center is None:
+            return
+        axis_vec = np.array(axis, dtype=np.float64)
+        ai = int(np.argmax(np.abs(axis_vec)))
+        sign = 1 if axis_vec[ai] > 0 else -1
+
+        in_plane = [i for i in range(3) if i != ai]
+        axis_names = ("file_x", "file_y", "file_z")
+
+        # Rectangle extents per in-plane axis
+        rect_ext = feature.get("rect_extents_step") or {}
+        r = float(feature.get("radius_mm", 5.0))
+
+        def ext_for(idx: int) -> tuple[float, float]:
+            key = axis_names[idx]
+            v = rect_ext.get(key)
+            if v and len(v) == 2:
+                return (float(v[0]), float(v[1]))
+            # Fallback: 2 * radius square centered on the bore axis
+            c = center[idx]
+            return (c - r, c + r)
+
+        u_lo, u_hi = ext_for(in_plane[0])
+        v_lo, v_hi = ext_for(in_plane[1])
+
+        # Place rectangle at the bore's outer face position. This is the
+        # axis-coordinate of `center_step` (where the bore origin sits).
+        face_pos = center[ai]
+
+        def to_3d(u: float, v: float) -> tuple[float, float, float]:
+            p = [0.0, 0.0, 0.0]
+            p[ai] = face_pos
+            p[in_plane[0]] = u
+            p[in_plane[1]] = v
+            return tuple(p)
+
+        corners_step = [
+            to_3d(u_lo, v_lo),
+            to_3d(u_hi, v_lo),
+            to_3d(u_hi, v_hi),
+            to_3d(u_lo, v_hi),
+            to_3d(u_lo, v_lo),  # close
+        ]
+        path_napari = np.array(
+            [self._step_to_napari(c) for c in corners_step], dtype=np.float32
+        )
+
+        layer = self.viewer.add_shapes(
+            data=[path_napari],
+            shape_type="path",
+            name=layer_name,
+            edge_color=color,
+            edge_width=2.0,
+            opacity=opacity,
+        )
+        try:
+            layer.visible = bool(visible) and bool(feature.get("visible_default", True))
+        except Exception:
+            pass
+        self._layers.append(layer_name)
 
     # Cavity wireframe + walls are tracked under this role so the dialog
     # toggle can control all three layers as a unit.
