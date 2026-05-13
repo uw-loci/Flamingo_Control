@@ -310,9 +310,32 @@ focus_frame:
   # Calibration preset name
   calibration_preset_name: "Tip of sample mount"
 
+# STEP-based chamber overlay (alternate 3D chamber view)
+# Optional, opt-in. When enabled the rectangular chamber wireframe is hidden
+# and the actual CAD chamber geometry is rendered instead. The "solid metal
+# bulk" sub-layer is hidden by default since it occludes the sample.
+step_chamber:
+  enabled: false
+  features_yaml: "configs/step_chamber_features.yaml"
+  hide_rect_wireframe_when_on: true
+  collision:
+    enabled: false        # safety-gate hook — wire in Phase 2
+    margin_mm: 0.25
+
 # Future multicamera support placeholder
 multicamera:
   enabled: false  # Set to true when implementing X-SPIM support
   max_cameras: 2
   view_fusion_method: "weighted_average"  # "maximum", "deconvolution"
   registration_method: "fiducial"  # "fiducial", "correlation", "manual"
+
+# Sample-holder impact safety gate
+# Before a move or rotation is dispatched, the 3D viewer projects the loaded
+# data's bounding box to its post-move pose and warns if any corner would reach
+# the chamber wall (within margin_mm). A QMessageBox lets the user proceed or
+# abort. Applies uniformly to live tile data, stitched data, session restores,
+# and any other source that populates the voxel_storage display cache.
+safety:
+  enabled: true              # master switch — set false to disable all safety popups
+  margin_mm: 0.5             # treat data within this distance of any wall as "would impact"
+  warn_on_rotation: true     # include R-only changes in the check (pure rotation swings)

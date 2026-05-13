@@ -360,6 +360,42 @@ class ViewerControlsDialog(PersistentDialog):
         elements_group.setLayout(elem_layout)
         layout.addWidget(elements_group)
 
+        # STEP chamber group — alternate 3D chamber rendered from the CAD STEP
+        # file. Off by default. When enabled, the rectangular wireframe is
+        # auto-hidden and replaced by the STEP-derived port/window outlines.
+        step_group = QGroupBox("STEP Chamber Geometry")
+        step_layout = QVBoxLayout()
+
+        self.show_step_chamber_cb = QCheckBox("Show STEP Chamber (replaces wireframe)")
+        self.show_step_chamber_cb.setChecked(False)
+        self.show_step_chamber_cb.toggled.connect(
+            self._on_step_chamber_master_visibility_changed
+        )
+        step_layout.addWidget(self.show_step_chamber_cb)
+
+        # Sub-toggles, each tied to a feature role in step_chamber_features.yaml
+        self._step_subtoggles: dict = {}
+        for label, role, default_on in [
+            ("    Solid metal bulk", "chamber_outer_box", False),
+            ("    Detection objective", "detection_objective_port", True),
+            ("    Sample-entry / front port", "sample_entry_port", True),
+            ("    Illumination ports", "illumination_ports", True),
+            ("    Mounting bolt holes", "rail_mount_bolts", False),
+        ]:
+            cb = QCheckBox(label)
+            cb.setChecked(default_on)
+            cb.setEnabled(False)  # only sensitive when master is on
+            cb.toggled.connect(
+                lambda visible, r=role: self._on_step_chamber_feature_toggled(
+                    r, visible
+                )
+            )
+            step_layout.addWidget(cb)
+            self._step_subtoggles[role] = cb
+
+        step_group.setLayout(step_layout)
+        layout.addWidget(step_group)
+
         # Camera controls group
         camera_group = QGroupBox("Camera")
         camera_layout = QVBoxLayout()
@@ -482,12 +518,15 @@ class ViewerControlsDialog(PersistentDialog):
         self.rendering_mode_changed.emit(mode)
 
     def _on_chamber_visibility_changed(self, visible: bool) -> None:
-        """Toggle chamber wireframe visibility."""
+        """Toggle the rectangular chamber wireframe + reference walls."""
         viewer = self._get_viewer()
-        if viewer:
-            for layer_name in ["Chamber Z-edges", "Chamber Y-edges", "Chamber X-edges"]:
-                if layer_name in viewer.layers:
-                    viewer.layers[layer_name].visible = visible
+        if not viewer:
+            return
+        # The manager creates a single combined "Chamber Wireframe" layer plus
+        # "Back Wall" and "Bottom Wall" reference surfaces.
+        for layer_name in ("Chamber Wireframe", "Back Wall", "Bottom Wall"):
+            if layer_name in viewer.layers:
+                viewer.layers[layer_name].visible = visible
 
     def _on_objective_visibility_changed(self, visible: bool) -> None:
         """Toggle objective indicator visibility."""
@@ -500,6 +539,70 @@ class ViewerControlsDialog(PersistentDialog):
         viewer = self._get_viewer()
         if viewer and "XY Focus Frame" in viewer.layers:
             viewer.layers["XY Focus Frame"].visible = visible
+
+    def _step_overlay(self):
+        """Return the StepChamberOverlay instance (or None if absent)."""
+        if not self.viewer_container:
+            return None
+        chamber_viz = getattr(self.viewer_container, "_chamber_viz", None)
+        if chamber_viz is None:
+            return None
+        return getattr(chamber_viz, "step_overlay", None)
+
+    def _on_step_chamber_master_visibility_changed(self, visible: bool) -> None:
+        """Master toggle: show STEP chamber + hide rectangular wireframe."""
+        overlay = self._step_overlay()
+        viewer = self._get_viewer()
+
+        # Enable / disable sub-checkboxes
+        for cb in self._step_subtoggles.values():
+            cb.setEnabled(visible)
+
+        if overlay:
+            overlay.set_master_visible(visible)
+            # If master ON, sync sub-toggles to the per-feature defaults the
+            # overlay just applied; if OFF, leave their checkbox states.
+            if visible:
+                for role, cb in self._step_subtoggles.items():
+                    layer_name = self._role_to_layer_name(overlay, role)
+                    if layer_name and viewer and layer_name in viewer.layers:
+                        cb.blockSignals(True)
+                        cb.setChecked(viewer.layers[layer_name].visible)
+                        cb.blockSignals(False)
+
+        # Auto-hide rectangular wireframe (and reference walls) when STEP is on
+        if viewer:
+            for name in (
+                "Chamber Wireframe",
+                "Back Wall",
+                "Bottom Wall",
+            ):
+                if name in viewer.layers:
+                    viewer.layers[name].visible = not visible
+
+    def _on_step_chamber_feature_toggled(self, role: str, visible: bool) -> None:
+        """Per-feature sub-toggle. Some labels group multiple roles."""
+        overlay = self._step_overlay()
+        if overlay is None:
+            return
+        roles = self._expand_role(role)
+        for r in roles:
+            overlay.set_feature_visible(r, visible)
+
+    def _expand_role(self, role: str) -> list:
+        """Map a UI sub-toggle role to one or more YAML feature roles."""
+        if role == "illumination_ports":
+            return ["illumination_port_left", "illumination_port_right"]
+        if role == "rail_mount_bolts":
+            return ["rail_mount_bolt_left", "rail_mount_bolt_right"]
+        return [role]
+
+    def _role_to_layer_name(self, overlay, role: str):
+        """Resolve a single role to its napari layer name (first match)."""
+        for f in overlay._features_data.get("features", []):
+            if f.get("role") in self._expand_role(role):
+                return f.get("layer_name")
+        return None
 
     def _on_axes_visibility_changed(self, visible: bool) -> None:
         """Toggle coordinate axes visibility."""
@@ -574,10 +677,10 @@ class ViewerControlsDialog(PersistentDialog):
                 self.rendering_combo.setCurrentText(first_layer.rendering)
                 self.rendering_combo.blockSignals(False)
 
-            # Chamber visibility
+            # Chamber visibility — combined "Chamber Wireframe" layer
             chamber_visible = any(
                 viewer.layers[name].visible
-                for name in ["Chamber Z-edges", "Chamber Y-edges", "Chamber X-edges"]
+                for name in ("Chamber Wireframe", "Back Wall", "Bottom Wall")
                 if name in viewer.layers
             )
             self.show_chamber_cb.blockSignals(True)

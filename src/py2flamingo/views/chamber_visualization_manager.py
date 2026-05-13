@@ -75,6 +75,7 @@ class ChamberVisualizationManager:
         self.current_rotation = {"ry": 0}  # Current rotation angle
         self._on_setup_complete = None  # Callback after deferred setup finishes
         self._embed_start_time = 0  # For deferred timing
+        self.step_overlay = None  # StepChamberOverlay instance (lazy-created)
 
     def embed_viewer(self, placeholder_widget, deferred_setup: bool = True) -> None:
         """Create and embed the napari 3D viewer.
@@ -162,6 +163,10 @@ class ChamberVisualizationManager:
             f"Chamber visualization setup in {t_chamber - t_before_chamber:.2f}s"
         )
 
+        # Optional: load STEP-derived chamber overlay alongside the wireframe.
+        # Layers are added hidden; the user toggles them on via ViewerControlsDialog.
+        self._setup_step_chamber_overlay()
+
         self.setup_data_layers()
         t_layers = time.perf_counter()
         self.logger.info(f"Data layers setup in {t_layers - t_chamber:.2f}s")
@@ -176,6 +181,46 @@ class ChamberVisualizationManager:
 
         # Reset camera after setup
         QTimer.singleShot(100, self.reset_camera)
+
+    def _setup_step_chamber_overlay(self) -> None:
+        """Lazy-create and load the StepChamberOverlay, then add its layers
+        (hidden by default). The user toggles visibility in ViewerControlsDialog.
+        """
+        if not self.viewer:
+            return
+        try:
+            cfg = self._config.get("step_chamber") or {}
+            yaml_rel = cfg.get("features_yaml", "configs/step_chamber_features.yaml")
+            # Resolve relative to src/py2flamingo/ (same as visualization_3d_config.yaml)
+            from pathlib import Path
+
+            here = Path(__file__).resolve().parent.parent  # src/py2flamingo
+            yaml_path = (here / yaml_rel).resolve()
+            if not yaml_path.exists():
+                self.logger.info(
+                    f"STEP chamber YAML not found, overlay disabled: {yaml_path}"
+                )
+                return
+
+            from py2flamingo.views.step_chamber_overlay import StepChamberOverlay
+
+            self.step_overlay = StepChamberOverlay(
+                viewer=self.viewer,
+                features_yaml_path=yaml_path,
+                config=self._config,
+                invert_x=self._invert_x,
+            )
+            if self.step_overlay.load():
+                self.step_overlay.add_layers(master_visible=False)
+                self.logger.info(
+                    f"STEP chamber overlay loaded with "
+                    f"{len(self.step_overlay.feature_layer_names())} layers (hidden)"
+                )
+            else:
+                self.step_overlay = None
+        except Exception as e:
+            self.logger.warning(f"STEP chamber overlay setup failed: {e}")
+            self.step_overlay = None
 
     def _setup_chamber(self) -> None:
         """Setup the fixed chamber wireframe as visual guide.
