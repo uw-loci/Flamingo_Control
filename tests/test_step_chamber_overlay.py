@@ -191,6 +191,54 @@ def test_stadium_slot_renders_when_override_enabled(overlay):
     assert all(len(ring) >= 38 for ring in layer.data)
 
 
+def test_bulk_with_holes_has_more_triangles_than_solid_box(overlay):
+    """The bulk renderer should punch holes for the 4 large bores (detection
+    objective + sample entry + 2 illumination ports). That produces many more
+    triangles than a plain 12-triangle box."""
+    overlay.viewer = _FakeViewer()
+    overlay.add_layers(master_visible=True)
+    bulk = overlay.viewer.layers["STEP Chamber Bulk"]
+    verts, faces, _values = bulk.data
+    # 4 faces with bores × N_ARC=28 quad strips × 2 triangles + 2 faces solid × 2
+    # = 4 × 56 + 4 = 228 triangles. Strictly: at least 100 triangles
+    assert len(faces) > 100, f"expected many triangles, got {len(faces)}"
+    # Sanity: bulk verts must include points away from the AABB corners
+    # (the radial fan creates points along the arcs)
+    assert len(verts) > 24
+
+
+def test_cavity_renders_three_layers(overlay):
+    """chamber_cavity must produce a wireframe + back wall + bottom wall."""
+    overlay.viewer = _FakeViewer()
+    overlay.add_layers(master_visible=True)
+    for name in (
+        "STEP Cavity Wireframe",
+        "STEP Cavity Back Wall",
+        "STEP Cavity Bottom Wall",
+    ):
+        assert name in overlay.viewer.layers, f"missing layer: {name}"
+
+
+def test_cavity_master_toggle_unit(overlay):
+    """set_feature_visible('chamber_cavity', False) hides all three layers."""
+    overlay.viewer = _FakeViewer()
+    overlay.add_layers(master_visible=True)
+    overlay.set_feature_visible("chamber_cavity", False)
+    for name in (
+        "STEP Cavity Wireframe",
+        "STEP Cavity Back Wall",
+        "STEP Cavity Bottom Wall",
+    ):
+        assert overlay.viewer.layers[name].visible is False
+    overlay.set_feature_visible("chamber_cavity", True)
+    for name in (
+        "STEP Cavity Wireframe",
+        "STEP Cavity Back Wall",
+        "STEP Cavity Bottom Wall",
+    ):
+        assert overlay.viewer.layers[name].visible is True
+
+
 def test_chamber_outer_box_uses_outer_planes(overlay):
     """Outer body bounds must come from the actual outer face planes, not
     from the dense cavity interior."""

@@ -376,6 +376,7 @@ class ViewerControlsDialog(PersistentDialog):
         # Sub-toggles, each tied to a feature role in step_chamber_features.yaml
         self._step_subtoggles: dict = {}
         for label, role, default_on in [
+            ("    Interior cavity (walls + back/bottom)", "chamber_cavity", True),
             ("    Solid metal bulk", "chamber_outer_box", False),
             ("    Detection objective", "detection_objective_port", True),
             ("    Sample-entry / front port", "sample_entry_port", True),
@@ -598,7 +599,14 @@ class ViewerControlsDialog(PersistentDialog):
         return [role]
 
     def _role_to_layer_name(self, overlay, role: str):
-        """Resolve a single role to its napari layer name (first match)."""
+        """Resolve a single role to its napari layer name (first match).
+
+        The chamber_cavity role doesn't carry a layer_name in the YAML; it
+        always renders to "STEP Cavity Wireframe" + back/bottom walls. We
+        return the wireframe name so the dialog can probe its current state.
+        """
+        if role == "chamber_cavity":
+            return "STEP Cavity Wireframe"
         for f in overlay._features_data.get("features", []):
             if f.get("role") in self._expand_role(role):
                 return f.get("layer_name")

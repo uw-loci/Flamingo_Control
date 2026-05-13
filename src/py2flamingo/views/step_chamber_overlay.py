@@ -158,9 +158,17 @@ class StepChamberOverlay:
     def _render_feature(self, feature: dict, visible: bool) -> None:
         role = feature.get("role")
         ftype = feature.get("type")
+
+        # Cavity gets a special multi-layer rendering: wireframe + back + bottom
+        # walls. It's the primary "interior walls" view the user uses for
+        # checking holder clearance against the chamber walls.
+        if role == "chamber_cavity":
+            self._render_cavity_wireframe(feature, visible)
+            return
+
         layer_name = feature.get("layer_name")
         if not layer_name:
-            return  # cavity/internal entries don't render
+            return  # internal entries (e.g., unrendered helpers) skip
         color = feature.get("color", "#FFFFFF")
         opacity = feature.get("opacity", 0.8)
 
@@ -171,16 +179,38 @@ class StepChamberOverlay:
         else:
             self.logger.debug(f"Skipping unknown feature type: {ftype}")
 
-    def _render_box(
-        self, feature: dict, layer_name: str, color: str, opacity: float, visible: bool
-    ) -> None:
-        """Render an AABB as a translucent surface (the chamber bulk metal)."""
-        bounds = feature.get("bounds_step", {})
-        x_lo, x_hi = bounds["x"]
-        y_lo, y_hi = bounds["y"]
-        z_lo, z_hi = bounds["z"]
-        # 8 corners of the box in STEP frame
-        corners_step = [
+    # Cavity wireframe + walls are tracked under this role so the dialog
+    # toggle can control all three layers as a unit.
+    CAVITY_LAYER_NAMES = (
+        "STEP Cavity Wireframe",
+        "STEP Cavity Back Wall",
+        "STEP Cavity Bottom Wall",
+    )
+
+    def _render_cavity_wireframe(self, feature: dict, visible: bool) -> None:
+        """Render the chamber interior cavity as three coordinated layers:
+
+          - "STEP Cavity Wireframe": 12 line edges of the cavity AABB.
+          - "STEP Cavity Back Wall":  a faint surface at the cavity's back
+            (low stage Z / high file Y), mirroring the existing rectangular
+            "Back Wall" reference treatment.
+          - "STEP Cavity Bottom Wall": a faint surface at the cavity's
+            bottom (low stage Y / low file Z).
+
+        This is what the user uses to check holder-vs-chamber-wall clearance
+        when the solid bulk is hidden.
+        """
+        bounds = feature.get("bounds_step") or {}
+        try:
+            x_lo, x_hi = bounds["x"]
+            y_lo, y_hi = bounds["y"]
+            z_lo, z_hi = bounds["z"]
+        except (KeyError, ValueError, TypeError):
+            self.logger.warning("chamber_cavity missing bounds_step; skipping")
+            return
+
+        # 8 corners of the cavity AABB in STEP frame
+        c = [
             (x_lo, y_lo, z_lo),
             (x_hi, y_lo, z_lo),
             (x_hi, y_hi, z_lo),
@@ -190,27 +220,217 @@ class StepChamberOverlay:
             (x_hi, y_hi, z_hi),
             (x_lo, y_hi, z_hi),
         ]
-        verts = np.array(
-            [self._step_to_napari(c) for c in corners_step], dtype=np.float32
+        c_napari = [self._step_to_napari(p) for p in c]
+
+        # 12 edges (4 bottom + 4 top + 4 vertical), each as a closed polyline
+        edges = [
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 0),  # bottom face (z_lo)
+            (4, 5),
+            (5, 6),
+            (6, 7),
+            (7, 4),  # top face (z_hi)
+            (0, 4),
+            (1, 5),
+            (2, 6),
+            (3, 7),  # vertical edges
+        ]
+        edge_paths = [
+            np.array([c_napari[a], c_napari[b]], dtype=np.float32) for a, b in edges
+        ]
+        wf = self.viewer.add_shapes(
+            data=edge_paths,
+            shape_type="line",
+            name="STEP Cavity Wireframe",
+            edge_color="#00FFFF",
+            edge_width=2,
+            opacity=0.7,
         )
-        # 12 triangles for the 6 faces (skip the bottom for a "show through" feel)
-        faces = np.array(
+        try:
+            wf.visible = bool(visible)
+        except Exception:
+            pass
+        self._layers.append("STEP Cavity Wireframe")
+
+        # Back wall: the cavity face at the +Y file end (= lowest stage Z =
+        # back of the napari view). Quad in file Y=y_hi plane.
+        back_verts = np.array(
             [
-                [0, 1, 2],
-                [0, 2, 3],  # -Z (file) / bottom-ish face
-                [4, 6, 5],
-                [4, 7, 6],  # +Z file / top-ish face
-                [0, 4, 5],
-                [0, 5, 1],  # -Y file face
-                [3, 2, 6],
-                [3, 6, 7],  # +Y file face
-                [0, 3, 7],
-                [0, 7, 4],  # -X file face
-                [1, 5, 6],
-                [1, 6, 2],  # +X file face
+                self._step_to_napari((x_lo, y_hi, z_lo)),
+                self._step_to_napari((x_hi, y_hi, z_lo)),
+                self._step_to_napari((x_hi, y_hi, z_hi)),
+                self._step_to_napari((x_lo, y_hi, z_hi)),
             ],
-            dtype=np.int32,
+            dtype=np.float32,
         )
+        back_faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
+        back_values = np.ones(len(back_verts), dtype=np.float32)
+        bw = self.viewer.add_surface(
+            (back_verts, back_faces, back_values),
+            name="STEP Cavity Back Wall",
+            colormap="gray",
+            opacity=0.05,
+            shading="none",
+        )
+        try:
+            bw.visible = bool(visible)
+        except Exception:
+            pass
+        self._layers.append("STEP Cavity Back Wall")
+
+        # Bottom wall: the cavity face at the -Z file end (= lowest stage Y =
+        # floor of the chamber).
+        bot_verts = np.array(
+            [
+                self._step_to_napari((x_lo, y_lo, z_lo)),
+                self._step_to_napari((x_hi, y_lo, z_lo)),
+                self._step_to_napari((x_hi, y_hi, z_lo)),
+                self._step_to_napari((x_lo, y_hi, z_lo)),
+            ],
+            dtype=np.float32,
+        )
+        bot_faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
+        bot_values = np.ones(len(bot_verts), dtype=np.float32)
+        bb = self.viewer.add_surface(
+            (bot_verts, bot_faces, bot_values),
+            name="STEP Cavity Bottom Wall",
+            colormap="gray",
+            opacity=0.05,
+            shading="none",
+        )
+        try:
+            bb.visible = bool(visible)
+        except Exception:
+            pass
+        self._layers.append("STEP Cavity Bottom Wall")
+
+    def _render_box(
+        self, feature: dict, layer_name: str, color: str, opacity: float, visible: bool
+    ) -> None:
+        """Render the chamber bulk as 6 faces, punching circular holes where
+        large bore cylinders pierce each face.
+
+        Faces with a bore (axis perpendicular to the face) are rendered as
+        a radial fan strip: N arc points around the hole + N outer points
+        radially projected to the rectangle boundary, giving 2N triangles
+        that visibly show the hole as an open aperture. Faces without bores
+        are rendered as 2 triangles. Small bolt holes (r < 5 mm) are
+        ignored — the mounting plate stays solid.
+        """
+        bounds = feature.get("bounds_step", {})
+        try:
+            x_lo, x_hi = bounds["x"]
+            y_lo, y_hi = bounds["y"]
+            z_lo, z_hi = bounds["z"]
+        except (KeyError, ValueError, TypeError):
+            self.logger.warning(f"{layer_name}: missing bounds_step, skipping")
+            return
+
+        # Catalog holes by which face they pierce.
+        # Key: (axis_idx, sign) where axis_idx is 0/1/2 for file X/Y/Z,
+        # sign is +1 or -1 indicating which face (e.g., (1, -1) = -Y face).
+        # Value: list of (u, v, radius) where (u, v) are the in-plane coords.
+        holes_by_face: dict[tuple[int, int], list[tuple[float, float, float]]] = {}
+        for f in self._features_data.get("features", []):
+            if f.get("type") != "cylinder":
+                continue
+            r = float(f.get("radius_mm", 0.0))
+            if r < 5.0:
+                continue  # skip small (bolt) holes; mounting plate is solid
+            axis = f.get("axis") or [0, 0, 1]
+            axis_idx = max(range(3), key=lambda i: abs(axis[i]))
+            sign = 1 if axis[axis_idx] > 0 else -1
+            center = f.get("center_step")
+            if center is None:
+                continue
+            in_plane = [i for i in range(3) if i != axis_idx]
+            holes_by_face.setdefault((axis_idx, sign), []).append(
+                (center[in_plane[0]], center[in_plane[1]], r)
+            )
+
+        verts_napari: list = []
+        tri_faces: list = []
+
+        def add_quad(p0, p1, p2, p3):
+            i = len(verts_napari)
+            verts_napari.extend([p0, p1, p2, p3])
+            tri_faces.append((i, i + 1, i + 2))
+            tri_faces.append((i, i + 2, i + 3))
+
+        def to_3d(axis_idx, sign, u, v):
+            if axis_idx == 0:
+                return (x_hi if sign > 0 else x_lo, u, v)
+            if axis_idx == 1:
+                return (u, y_hi if sign > 0 else y_lo, v)
+            return (u, v, z_hi if sign > 0 else z_lo)
+
+        def face_uv_bounds(axis_idx):
+            if axis_idx == 0:
+                return (y_lo, y_hi, z_lo, z_hi)
+            if axis_idx == 1:
+                return (x_lo, x_hi, z_lo, z_hi)
+            return (x_lo, x_hi, y_lo, y_hi)
+
+        def project_radially(au, av, cu, cv, u_lo, u_hi, v_lo, v_hi):
+            """Project (au, av) outward from (cu, cv) to the rectangle border."""
+            du, dv = au - cu, av - cv
+            if abs(du) < 1e-9 and abs(dv) < 1e-9:
+                return (u_hi, cv)
+            ts = []
+            if du > 1e-9:
+                ts.append((u_hi - cu) / du)
+            elif du < -1e-9:
+                ts.append((u_lo - cu) / du)
+            if dv > 1e-9:
+                ts.append((v_hi - cv) / dv)
+            elif dv < -1e-9:
+                ts.append((v_lo - cv) / dv)
+            t = min(ts) if ts else 1.0
+            return (cu + t * du, cv + t * dv)
+
+        N_ARC = 28
+        for axis_idx in (0, 1, 2):
+            for sign in (-1, +1):
+                u_lo, u_hi, v_lo, v_hi = face_uv_bounds(axis_idx)
+                face_holes = holes_by_face.get((axis_idx, sign), [])
+                if not face_holes:
+                    # Solid face: two triangles
+                    corners_2d = [
+                        (u_lo, v_lo),
+                        (u_hi, v_lo),
+                        (u_hi, v_hi),
+                        (u_lo, v_hi),
+                    ]
+                    pts = [
+                        self._step_to_napari(to_3d(axis_idx, sign, u, v))
+                        for u, v in corners_2d
+                    ]
+                    add_quad(*pts)
+                    continue
+                # Face with a bore: radial-fan strip around the hole.
+                # If multiple bores exist on one face (none in the current
+                # 'basic windows' file), only the first is punched; the
+                # extras would require a true polygon-with-holes mesher.
+                cu, cv, r = face_holes[0]
+                for j in range(N_ARC):
+                    th0 = 2 * math.pi * j / N_ARC
+                    th1 = 2 * math.pi * (j + 1) / N_ARC
+                    a0 = (cu + r * math.cos(th0), cv + r * math.sin(th0))
+                    a1 = (cu + r * math.cos(th1), cv + r * math.sin(th1))
+                    o0 = project_radially(*a0, cu, cv, u_lo, u_hi, v_lo, v_hi)
+                    o1 = project_radially(*a1, cu, cv, u_lo, u_hi, v_lo, v_hi)
+                    quad = [
+                        self._step_to_napari(to_3d(axis_idx, sign, *a0)),
+                        self._step_to_napari(to_3d(axis_idx, sign, *a1)),
+                        self._step_to_napari(to_3d(axis_idx, sign, *o1)),
+                        self._step_to_napari(to_3d(axis_idx, sign, *o0)),
+                    ]
+                    add_quad(*quad)
+
+        verts = np.array(verts_napari, dtype=np.float32)
+        faces = np.array(tri_faces, dtype=np.int32)
         values = np.ones(len(verts), dtype=np.float32)
         layer = self.viewer.add_surface(
             (verts, faces, values),
@@ -473,6 +693,11 @@ class StepChamberOverlay:
             for f in self._features_data.get("features", [])
             if f.get("layer_name")
         }
+        # Cavity wireframe + walls default ON (the user's primary interior-
+        # walls view) regardless of YAML defaults for the cavity entry.
+        for name in self.CAVITY_LAYER_NAMES:
+            defaults[name] = True
+
         for name in self._layers:
             if name not in self.viewer.layers:
                 continue
@@ -482,8 +707,17 @@ class StepChamberOverlay:
                 self.viewer.layers[name].visible = False
 
     def set_feature_visible(self, role: str, visible: bool) -> None:
-        """Set a single feature's visibility by role name."""
+        """Set a single feature's (or feature group's) visibility by role.
+
+        ``chamber_cavity`` controls three layers as a unit (wireframe + back
+        wall + bottom wall).
+        """
         if self.viewer is None:
+            return
+        if role == "chamber_cavity":
+            for name in self.CAVITY_LAYER_NAMES:
+                if name in self.viewer.layers:
+                    self.viewer.layers[name].visible = visible
             return
         for f in self._features_data.get("features", []):
             if f.get("role") == role:
