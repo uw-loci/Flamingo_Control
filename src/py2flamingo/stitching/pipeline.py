@@ -150,11 +150,30 @@ class _TimeThrottledProgress(_DaskCallback):
     completion. Good enough for triage.
     """
 
-    def __init__(self, logger, label: str = "store", interval_s: float = 30.0):
+    def __init__(
+        self,
+        logger,
+        label: str = "store",
+        interval_s: float = 30.0,
+        progress_fn=None,
+    ):
+        """
+        Args:
+            logger: where to write the heartbeat log line.
+            label: prefix shown in the log / status line.
+            interval_s: minimum seconds between updates.
+            progress_fn: optional ``(int_pct, status_str)`` callback,
+                wired through to ``StitchingPipeline._progress_fn`` so
+                the dialog status line shows the live fuse ETA. The
+                clock-time projection is included in the status string.
+                The int is whatever phase percentage the caller last
+                used, since the dialog currently ignores it.
+        """
         super().__init__()
         self._logger = logger
         self._label = label
         self._interval = interval_s
+        self._progress_fn = progress_fn
         self._completed = 0
         self._total: Optional[int] = None
         self._start_t: Optional[float] = None
@@ -170,6 +189,39 @@ class _TimeThrottledProgress(_DaskCallback):
         self._start_t = time.time()
         self._last_log_t = self._start_t
 
+    def _emit_status(self, pct_local: float, eta_seconds):
+        """Push the live status to the dialog if a progress_fn is set."""
+        if self._progress_fn is None:
+            return
+        if eta_seconds is not None and eta_seconds > 0:
+            from datetime import datetime, timedelta
+
+            seconds = int(round(eta_seconds))
+            if seconds < 60:
+                rem = f"{seconds}s"
+            elif seconds < 3600:
+                rem = f"{seconds // 60}:{seconds % 60:02d}"
+            else:
+                h, rest = divmod(seconds, 3600)
+                rem = f"{h}:{rest // 60:02d}:{rest % 60:02d}"
+            clock = datetime.now() + timedelta(seconds=eta_seconds)
+            eta_str = (
+                clock.strftime("%H:%M")
+                if clock.date() == datetime.now().date()
+                else clock.strftime("%a %H:%M")
+            )
+            tail = f" — {rem} remaining (done ~{eta_str})"
+        else:
+            tail = ""
+        msg = f"{self._label}: {pct_local:.0f}%{tail}"
+        try:
+            # Pct ignored at the receiver (stitching_dialog._on_progress
+            # drops it and renders only the status string), so 0 is fine.
+            self._progress_fn(0, msg)
+        except Exception as e:
+            # Never let a UI hiccup break the dask graph
+            self._logger.debug(f"progress_fn raised: {e}")
+
     def _posttask(self, key, result, dsk, state, worker_id):
         self._completed += 1
         now = time.time()
@@ -179,17 +231,19 @@ class _TimeThrottledProgress(_DaskCallback):
         rate = self._completed / elapsed
         if self._total and rate > 0:
             pct = 100.0 * self._completed / self._total
-            eta_min = (self._total - self._completed) / rate / 60.0
+            eta_seconds = (self._total - self._completed) / rate
             self._logger.info(
                 f"    {self._label} progress: {pct:.1f}% "
                 f"({self._completed}/{self._total} tasks, "
-                f"{rate:.0f} tasks/s, ETA {eta_min:.1f} min)"
+                f"{rate:.0f} tasks/s, ETA {eta_seconds / 60.0:.1f} min)"
             )
+            self._emit_status(pct, eta_seconds)
         else:
             self._logger.info(
                 f"    {self._label} progress: {self._completed} tasks "
                 f"({rate:.0f}/s, {elapsed / 60:.1f} min elapsed)"
             )
+            self._emit_status(0.0, None)
         self._last_log_t = now
 
     def _finish(self, dsk, state, errored):
@@ -1223,7 +1277,104 @@ class StitchingPipeline:
         self.config = config or StitchingConfig()
         self.logger = logging.getLogger(__name__)
         self._cancelled_fn = cancelled_fn or (lambda: False)
-        self._progress_fn = progress_fn or (lambda pct, msg: None)
+        self._raw_progress_fn = progress_fn or (lambda pct, msg: None)
+        self._estimator = None  # built once tile count is known
+
+        # Wrap caller's progress_fn so we (a) classify the phase from
+        # the status message and update the estimator's phase clock,
+        # and (b) append the live ETA to the status string the dialog
+        # sees. Pipeline internal calls keep using `_progress_fn` so
+        # all of them flow through the same hook without per-call-site
+        # changes.
+        def _hooked_progress(pct, msg):
+            self._on_progress_emit(pct, msg)
+
+        self._progress_fn = _hooked_progress
+
+    # ------------------------------------------------------------------
+    # ETA / phase tracking
+    # ------------------------------------------------------------------
+
+    # Map status-message substrings to estimator phase names. Mirrors
+    # the dialog's _STATUS_TO_STEP but uses our six-phase taxonomy
+    # (discover, register, preprocess, fuse, write, metadata). First
+    # match wins; order follows pipeline execution.
+    _STATUS_TO_PHASE = [
+        ("discover", "discover"),
+        ("loading reference", "register"),
+        ("registering", "register"),
+        ("skip registration", "register"),
+        ("loading and preprocessing", "preprocess"),
+        ("applying flat-field", "preprocess"),
+        ("materializing", "preprocess"),
+        ("preprocess", "preprocess"),
+        ("fusing", "fuse"),
+        ("computing channel", "fuse"),
+        ("storing channel", "fuse"),
+        ("channel ", "fuse"),
+        ("writing", "write"),
+        ("finalizing", "write"),
+        ("metadata", "metadata"),
+    ]
+
+    def _classify_phase(self, msg):
+        s = (msg or "").lower()
+        for needle, phase in self._STATUS_TO_PHASE:
+            if needle in s:
+                return phase
+        return None
+
+    def _on_progress_emit(self, pct, msg):
+        """Hook called for every internal progress emit. Drives the
+        estimator's phase transitions and appends a live ETA tail."""
+        if self._estimator is not None:
+            phase = self._classify_phase(msg)
+            if phase and phase != getattr(self._estimator, "_current_phase", None):
+                self._estimator.start_phase(phase)
+            tail = self._estimator.format_label()
+            if tail and tail != "estimating...":
+                msg = f"{msg}  —  {tail}"
+        self._raw_progress_fn(pct, msg)
+
+    def _build_estimator(self, tiles):
+        """Construct the multi-phase estimator from tiles + config.
+
+        Imported lazily so the module is importable in environments
+        without the stitching subpackage's runtime deps.
+        """
+        from py2flamingo.stitching.multi_phase_estimator import (
+            MultiPhaseEstimator,
+        )
+        from py2flamingo.stitching.timing_cache import (
+            StitchingTimingCache,
+            StitchingTimingKey,
+        )
+
+        n_tiles = len(tiles)
+        n_channels = len(sorted({ch for t in tiles for ch in t.channels}))
+        planes = max((t.n_planes for t in tiles), default=1)
+        # pyramid_levels: None means auto -- we still want a stable key,
+        # so we bucket "auto" separately from explicit 0/N.
+        pyramid_levels = (
+            -1
+            if self.config.pyramid_levels is None
+            else int(self.config.pyramid_levels)
+        )
+        fusion_method = (
+            "content_based" if self.config.content_based_fusion else "cosine"
+        )
+        key = StitchingTimingKey(
+            n_tiles=n_tiles,
+            n_channels=n_channels,
+            n_pyramid_levels=pyramid_levels,
+            n_timepoints=1,  # multi-timepoint not yet a config axis
+            output_format=self.config.output_format,
+            fusion_method=fusion_method,
+            skip_registration=bool(self.config.skip_registration),
+            planes_per_tile=planes,
+        )
+        self.logger.info(f"Stitching ETA key: {key.serialize()}")
+        return MultiPhaseEstimator(StitchingTimingCache(), key)
 
     def _build_output_basename(self, acquisition_dir: Path) -> str:
         """Build a descriptive base filename from acquisition path and settings.
@@ -1283,6 +1434,31 @@ class StitchingPipeline:
     ) -> Path:
         """Run the full stitching pipeline.
 
+        Thin wrapper that owns lifecycle of the ETA estimator so
+        ``finalize()`` runs on every exit path -- success, user
+        cancellation, or raised exception. The pipeline body lives
+        in :meth:`_run_impl`.
+        """
+        try:
+            result = self._run_impl(acquisition_dir, output_path, channels, tiles)
+            cancelled = bool(self._cancelled_fn())
+            if self._estimator is not None:
+                self._estimator.finalize(success=not cancelled)
+            return result
+        except BaseException:
+            if self._estimator is not None:
+                self._estimator.finalize(success=False)
+            raise
+
+    def _run_impl(
+        self,
+        acquisition_dir: Path,
+        output_path: Path,
+        channels: Optional[List[int]] = None,
+        tiles: Optional[List[RawTileInfo]] = None,
+    ) -> Path:
+        """Stitching pipeline body.
+
         Produces a single multi-channel (C,Z,Y,X) OME-Zarr/TIFF store
         with shared registration across channels.
 
@@ -1312,6 +1488,18 @@ class StitchingPipeline:
             raise FileNotFoundError(f"No tile folders found in {acquisition_dir}")
 
         self._log_tile_summary(tiles)
+
+        # --- Build the multi-phase ETA estimator ---
+        # Built after discover so we know tile count + planes. The
+        # progress hook already started the "discover" phase when the
+        # first emit went through; we'll start it here too once the
+        # estimator exists, then transition on subsequent emits.
+        try:
+            self._estimator = self._build_estimator(tiles)
+            self._estimator.start_phase("discover")
+        except Exception as e:
+            self.logger.debug(f"ETA estimator unavailable: {e}")
+            self._estimator = None
 
         # Determine which channels to process
         all_channels = sorted(set(ch for t in tiles for ch in t.channels))
@@ -1806,6 +1994,7 @@ class StitchingPipeline:
                     self.logger,
                     label=f"channel {ch_id} store",
                     interval_s=30.0,
+                    progress_fn=self._progress_fn,
                 )
                 with dask.config.set(**scheduler_cfg):
                     with progress_cb:
