@@ -428,6 +428,16 @@ class ViewerControlsDialog(PersistentDialog):
             step_layout.addWidget(cb)
             self._step_subtoggles[role] = cb
 
+        # Fit-camera button: napari's display volume is sized for the
+        # rectangular travel envelope (~11x14x13.5 mm), but the real chamber
+        # is much bigger (~78x60x74 mm). The illumination port rings render
+        # well outside the default display extents. This button calls
+        # viewer.reset_view() so the camera frames everything currently
+        # visible — STEP rings included.
+        self.fit_step_chamber_btn = QPushButton("Fit STEP chamber view")
+        self.fit_step_chamber_btn.clicked.connect(self._on_fit_step_chamber)
+        step_layout.addWidget(self.fit_step_chamber_btn)
+
         step_group.setLayout(step_layout)
         layout.addWidget(step_group)
 
@@ -625,6 +635,18 @@ class ViewerControlsDialog(PersistentDialog):
         roles = self._expand_role(role)
         for r in roles:
             overlay.set_feature_visible(r, visible)
+
+    def _on_fit_step_chamber(self) -> None:
+        """Reset the napari camera so all currently visible layers (including
+        STEP chamber features that render outside the default display volume)
+        fit in the view."""
+        viewer = self._get_viewer()
+        if viewer is None:
+            return
+        try:
+            viewer.reset_view()
+        except Exception as e:
+            self.logger.warning(f"reset_view failed: {e}")
 
     def _expand_role(self, role: str) -> list:
         """Map a UI sub-toggle role to one or more YAML feature roles."""

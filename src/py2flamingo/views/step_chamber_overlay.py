@@ -425,8 +425,12 @@ class StepChamberOverlay:
         # Catalog holes by which face they pierce.
         # Key: (axis_idx, sign) where axis_idx is 0/1/2 for file X/Y/Z,
         # sign is +1 or -1 indicating which face (e.g., (1, -1) = -Y face).
-        # Value: list of (u, v, radius) where (u, v) are the in-plane coords.
-        holes_by_face: dict[tuple[int, int], list[tuple[float, float, float]]] = {}
+        # Value: list of dicts describing the hole shape.
+        # Each dict has either:
+        #   {"kind": "circle", "cu": ..., "cv": ..., "r": ...}
+        #   {"kind": "rect", "u_lo":..., "u_hi":..., "v_lo":..., "v_hi":...}
+        holes_by_face: dict[tuple[int, int], list[dict]] = {}
+        axis_names = ("file_x", "file_y", "file_z")
         for f in self._features_data.get("features", []):
             if f.get("type") != "cylinder":
                 continue
@@ -440,8 +444,29 @@ class StepChamberOverlay:
             if center is None:
                 continue
             in_plane = [i for i in range(3) if i != axis_idx]
+            if f.get("display_as") == "rectangle":
+                ext = f.get("rect_extents_step") or {}
+                u_ext = ext.get(axis_names[in_plane[0]])
+                v_ext = ext.get(axis_names[in_plane[1]])
+                if u_ext and v_ext and len(u_ext) == 2 and len(v_ext) == 2:
+                    holes_by_face.setdefault((axis_idx, sign), []).append(
+                        {
+                            "kind": "rect",
+                            "u_lo": float(u_ext[0]),
+                            "u_hi": float(u_ext[1]),
+                            "v_lo": float(v_ext[0]),
+                            "v_hi": float(v_ext[1]),
+                        }
+                    )
+                    continue
+            # Default: circular hole
             holes_by_face.setdefault((axis_idx, sign), []).append(
-                (center[in_plane[0]], center[in_plane[1]], r)
+                {
+                    "kind": "circle",
+                    "cu": center[in_plane[0]],
+                    "cv": center[in_plane[1]],
+                    "r": r,
+                }
             )
 
         verts_napari: list = []
@@ -503,25 +528,66 @@ class StepChamberOverlay:
                     ]
                     add_quad(*pts)
                     continue
-                # Face with a bore: radial-fan strip around the hole.
-                # If multiple bores exist on one face (none in the current
-                # 'basic windows' file), only the first is punched; the
-                # extras would require a true polygon-with-holes mesher.
-                cu, cv, r = face_holes[0]
-                for j in range(N_ARC):
-                    th0 = 2 * math.pi * j / N_ARC
-                    th1 = 2 * math.pi * (j + 1) / N_ARC
-                    a0 = (cu + r * math.cos(th0), cv + r * math.sin(th0))
-                    a1 = (cu + r * math.cos(th1), cv + r * math.sin(th1))
-                    o0 = project_radially(*a0, cu, cv, u_lo, u_hi, v_lo, v_hi)
-                    o1 = project_radially(*a1, cu, cv, u_lo, u_hi, v_lo, v_hi)
-                    quad = [
-                        self._step_to_napari(to_3d(axis_idx, sign, *a0)),
-                        self._step_to_napari(to_3d(axis_idx, sign, *a1)),
-                        self._step_to_napari(to_3d(axis_idx, sign, *o1)),
-                        self._step_to_napari(to_3d(axis_idx, sign, *o0)),
+                # Face with a bore. Use the first hole; multiple holes per
+                # face would require a true polygon-with-holes mesher.
+                hole = face_holes[0]
+                if hole["kind"] == "rect":
+                    # Punch a rectangular aperture: build a frame around it
+                    # as 4 trapezoid pairs (8 triangles total).
+                    iu_lo = max(u_lo, hole["u_lo"])
+                    iu_hi = min(u_hi, hole["u_hi"])
+                    iv_lo = max(v_lo, hole["v_lo"])
+                    iv_hi = min(v_hi, hole["v_hi"])
+                    # Bottom strip:  outer (u_lo..u_hi, v_lo) → inner (iu_lo..iu_hi, iv_lo)
+                    bot_quad = [
+                        (u_lo, v_lo),
+                        (u_hi, v_lo),
+                        (iu_hi, iv_lo),
+                        (iu_lo, iv_lo),
                     ]
-                    add_quad(*quad)
+                    # Top strip: outer top → inner top
+                    top_quad = [
+                        (iu_lo, iv_hi),
+                        (iu_hi, iv_hi),
+                        (u_hi, v_hi),
+                        (u_lo, v_hi),
+                    ]
+                    # Left strip
+                    left_quad = [
+                        (u_lo, v_lo),
+                        (iu_lo, iv_lo),
+                        (iu_lo, iv_hi),
+                        (u_lo, v_hi),
+                    ]
+                    # Right strip
+                    right_quad = [
+                        (iu_hi, iv_lo),
+                        (u_hi, v_lo),
+                        (u_hi, v_hi),
+                        (iu_hi, iv_hi),
+                    ]
+                    for quad_2d in (bot_quad, top_quad, left_quad, right_quad):
+                        pts = [
+                            self._step_to_napari(to_3d(axis_idx, sign, u, v))
+                            for u, v in quad_2d
+                        ]
+                        add_quad(*pts)
+                else:
+                    cu, cv, r = hole["cu"], hole["cv"], hole["r"]
+                    for j in range(N_ARC):
+                        th0 = 2 * math.pi * j / N_ARC
+                        th1 = 2 * math.pi * (j + 1) / N_ARC
+                        a0 = (cu + r * math.cos(th0), cv + r * math.sin(th0))
+                        a1 = (cu + r * math.cos(th1), cv + r * math.sin(th1))
+                        o0 = project_radially(*a0, cu, cv, u_lo, u_hi, v_lo, v_hi)
+                        o1 = project_radially(*a1, cu, cv, u_lo, u_hi, v_lo, v_hi)
+                        quad = [
+                            self._step_to_napari(to_3d(axis_idx, sign, *a0)),
+                            self._step_to_napari(to_3d(axis_idx, sign, *a1)),
+                            self._step_to_napari(to_3d(axis_idx, sign, *o1)),
+                            self._step_to_napari(to_3d(axis_idx, sign, *o0)),
+                        ]
+                        add_quad(*quad)
 
         verts = np.array(verts_napari, dtype=np.float32)
         faces = np.array(tri_faces, dtype=np.int32)
