@@ -510,6 +510,33 @@ def build_features_yaml(step_path: Path, ent: dict[int, str]) -> dict:
             }
         )
 
+    # USER-EDITABLE PLACEHOLDER: top sample-entry hole (vertical drop-in).
+    # This is NOT in the 'basic windows' STEP file; emitted here so re-running
+    # the extractor doesn't drop the user's customizations. Adjust radius_mm /
+    # center_step to match the production chamber.
+    if body_bbox:
+        x_center = round((body_bbox[0][0] + body_bbox[0][1]) / 2 + 2, 2)
+        y_center = round((body_bbox[1][0] + body_bbox[1][1]) / 2 + 8, 2)
+        z_top = round(body_bbox[2][1], 2)
+        features.append(
+            {
+                "role": "sample_entry_top_hole",
+                "type": "cylinder",
+                "axis": [0, 0, 1],
+                "center_step": [x_center, y_center, z_top],
+                "radius_mm": 10.0,
+                "layer_name": "STEP Top Sample-Entry Hole",
+                "visible_default": True,
+                "napari_kind": "shapes",
+                "color": "#FF4400",
+                "todo": (
+                    "Not present in 'basic windows' STEP file. Edit "
+                    "radius_mm / center to match the production chamber's "
+                    "top sample-entry hole, or set visible_default: false."
+                ),
+            }
+        )
+
     return {
         "source_step_file": str(step_path),
         "units": "mm",
@@ -520,16 +547,20 @@ def build_features_yaml(step_path: Path, ent: dict[int, str]) -> dict:
             "file_z = real-world UP (vertical)"
         ),
         "step_to_stage_transform": {
+            # Detection objective lands at stage_z=12.5 (existing rectangular
+            # Yellow Objective position). Sample-entry / front port lands at
+            # stage_z>26, off the rectangular front. Adjust offsets if the
+            # production CAD changes the detector's file_Y position.
             "axis_permutation": {
                 "stage_x": "file_x",
                 "stage_y": "file_z",
                 "stage_z": "file_y",
             },
-            "sign": {"stage_x": 1, "stage_y": 1, "stage_z": -1},
+            "sign": {"stage_x": 1, "stage_y": 1, "stage_z": 1},
             "offset_mm": {
                 "stage_x": -127.475,
                 "stage_y": -674.02,
-                "stage_z": -170.69,
+                "stage_z": 230.89,
             },
         },
         "features": features,

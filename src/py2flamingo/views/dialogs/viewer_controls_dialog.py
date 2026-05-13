@@ -6,7 +6,7 @@ colormap, opacity, contrast, rendering mode, and display elements.
 
 import logging
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import QSettings, Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -111,6 +111,21 @@ class ViewerControlsDialog(PersistentDialog):
 
         main_layout.addLayout(button_layout)
         self.setLayout(main_layout)
+
+        # If STEP chamber was saved ON, apply the persisted state once the
+        # event loop has a chance to wire up the overlay reference. Deferring
+        # via a 0-timer is the same pattern used by the rest of the viewer
+        # setup.
+        if (
+            hasattr(self, "show_step_chamber_cb")
+            and self.show_step_chamber_cb.isChecked()
+        ):
+            from PyQt5.QtCore import QTimer
+
+            QTimer.singleShot(
+                0,
+                lambda: self._on_step_chamber_master_visibility_changed(True),
+            )
 
     def _create_channel_controls_tab(self) -> QWidget:
         """Create channel controls with Left/Right collapsible sections.
@@ -366,10 +381,20 @@ class ViewerControlsDialog(PersistentDialog):
         step_group = QGroupBox("STEP Chamber Geometry")
         step_layout = QVBoxLayout()
 
+        # Persistence: read previous toggle states from QSettings so the user
+        # doesn't have to re-enable the STEP overlay on every launch.
+        self._step_settings = QSettings("py2flamingo", "viewer_controls")
+        master_default = self._step_settings.value(
+            "step_chamber/master", False, type=bool
+        )
+
         self.show_step_chamber_cb = QCheckBox("Show STEP Chamber (replaces wireframe)")
-        self.show_step_chamber_cb.setChecked(False)
+        self.show_step_chamber_cb.setChecked(master_default)
         self.show_step_chamber_cb.toggled.connect(
             self._on_step_chamber_master_visibility_changed
+        )
+        self.show_step_chamber_cb.toggled.connect(
+            lambda visible: self._step_settings.setValue("step_chamber/master", visible)
         )
         step_layout.addWidget(self.show_step_chamber_cb)
 
@@ -381,14 +406,23 @@ class ViewerControlsDialog(PersistentDialog):
             ("    Detection objective", "detection_objective_port", True),
             ("    Sample-entry / front port", "sample_entry_port", True),
             ("    Illumination ports", "illumination_ports", True),
+            ("    Top sample-entry hole", "sample_entry_top_hole", True),
             ("    Mounting bolt holes", "rail_mount_bolts", False),
         ]:
+            saved = self._step_settings.value(
+                f"step_chamber/{role}", default_on, type=bool
+            )
             cb = QCheckBox(label)
-            cb.setChecked(default_on)
-            cb.setEnabled(False)  # only sensitive when master is on
+            cb.setChecked(saved)
+            cb.setEnabled(master_default)  # only sensitive when master is on
             cb.toggled.connect(
                 lambda visible, r=role: self._on_step_chamber_feature_toggled(
                     r, visible
+                )
+            )
+            cb.toggled.connect(
+                lambda visible, r=role: self._step_settings.setValue(
+                    f"step_chamber/{r}", visible
                 )
             )
             step_layout.addWidget(cb)
@@ -551,7 +585,12 @@ class ViewerControlsDialog(PersistentDialog):
         return getattr(chamber_viz, "step_overlay", None)
 
     def _on_step_chamber_master_visibility_changed(self, visible: bool) -> None:
-        """Master toggle: show STEP chamber + hide rectangular wireframe."""
+        """Master toggle: show STEP chamber + hide rectangular wireframe.
+
+        Sub-toggle checkbox states are the source of truth (they're persisted
+        via QSettings), so when the master flips ON we apply each saved
+        sub-toggle state to the overlay rather than the YAML defaults.
+        """
         overlay = self._step_overlay()
         viewer = self._get_viewer()
 
@@ -560,16 +599,13 @@ class ViewerControlsDialog(PersistentDialog):
             cb.setEnabled(visible)
 
         if overlay:
-            overlay.set_master_visible(visible)
-            # If master ON, sync sub-toggles to the per-feature defaults the
-            # overlay just applied; if OFF, leave their checkbox states.
             if visible:
+                # Apply each sub-toggle's current state to its overlay layer(s)
                 for role, cb in self._step_subtoggles.items():
-                    layer_name = self._role_to_layer_name(overlay, role)
-                    if layer_name and viewer and layer_name in viewer.layers:
-                        cb.blockSignals(True)
-                        cb.setChecked(viewer.layers[layer_name].visible)
-                        cb.blockSignals(False)
+                    overlay.set_feature_visible(role, cb.isChecked())
+            else:
+                # Master OFF hides everything in one call
+                overlay.set_master_visible(False)
 
         # Auto-hide rectangular wireframe (and reference walls) when STEP is on
         if viewer:

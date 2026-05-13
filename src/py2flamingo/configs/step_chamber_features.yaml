@@ -7,6 +7,12 @@ units: mm
 frame: step
 axis_mapping_doc: "file_x = real-world LEFT-RIGHT (illumination axis); file_y = real-world FRONT-BACK (optical axis: +Y front, -Y back); file_z = real-world UP (vertical)"
 step_to_stage_transform:
+  # Detection objective (file_Y=-218.39 BACK end) maps to stage_z=12.5,
+  # which is where the existing yellow Objective ring sits in the
+  # rectangular wireframe — i.e., the napari "back" side. Sample-entry
+  # port (file_Y=-167.02 FRONT end) maps to stage_z>26, off the
+  # rectangular volume to the front. Edit signs/offsets if a different
+  # orientation makes more sense after seeing the result.
   axis_permutation:
     stage_x: file_x
     stage_y: file_z
@@ -14,11 +20,11 @@ step_to_stage_transform:
   sign:
     stage_x: 1
     stage_y: 1
-    stage_z: -1
+    stage_z: 1
   offset_mm:
     stage_x: -127.475
     stage_y: -674.02
-    stage_z: -170.69
+    stage_z: 230.89
 features:
   -
     role: chamber_outer_box
@@ -181,3 +187,33 @@ features:
     visible_default: false
     napari_kind: shapes
     color: "#666666"
+  # ────────────────────────────────────────────────────────────────────
+  # USER-EDITABLE PLACEHOLDERS — not in the "basic windows" STEP file.
+  # Adjust radius_mm / center_step / axis to match the production chamber.
+  # Set visible_default: false to hide an entry without deleting it.
+  # ────────────────────────────────────────────────────────────────────
+  -
+    role: sample_entry_top_hole
+    type: cylinder
+    # axis along file +Z (real-world VERTICAL if the chamber is mounted with
+    # file +Z pointing up). If your chamber's top-hole axis is different,
+    # change this and center_step accordingly.
+    axis:
+      - 0
+      - 0
+      - 1
+    # Initial guess: centered horizontally over the chamber body at the top.
+    # XZ midpoint = (chamber X mid, cavity Y mid, chamber Z_hi).
+    center_step:
+      - 136.13
+      - -189.94
+      - 700.5
+    # Initial guess: 10 mm radius (= 20 mm dia). Production may differ.
+    radius_mm: 10.0
+    layer_name: "STEP Top Sample-Entry Hole"
+    visible_default: true
+    napari_kind: shapes
+    color: "#FF4400"
+    todo: "Not present in 'basic windows' STEP file. Edit radius_mm / center
+           to match the production chamber's top sample-entry hole, or set
+           visible_default: false to hide this placeholder."
