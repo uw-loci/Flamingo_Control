@@ -726,13 +726,16 @@ class ChamberVisualizationManager:
                 "z_range_mm", [12.5, 26]
             )
 
-            # Pick the focal-plane position in stage mm:
-            #   1) explicit calibration ("Tip of sample mount" preset)
-            #   2) cavity center if STEP overlay is loaded (best default until
-            #      the user calibrates against the new chamber geometry)
-            #   3) middle of the stage travel ranges (legacy fallback)
+            # Pick the focal-plane position in stage mm. When STEP is loaded
+            # the stage coordinate origin has been redefined (the cavity is
+            # now centered on the stage range), so any old "Tip of sample
+            # mount" preset values are stale — prefer the cavity center
+            # until the user explicitly re-calibrates against the new
+            # chamber. Outside STEP mode honor the legacy calibration.
             cavity_center_stage = self._cavity_center_stage_mm()
-            if (
+            if cavity_center_stage is not None:
+                focal_x_mm, focal_y_mm, focal_z_mm = cavity_center_stage
+            elif (
                 self.objective_xy_calibration
                 and self.objective_xy_calibration.get("x") is not None
             ):
@@ -741,8 +744,6 @@ class ChamberVisualizationManager:
                     "y", self.STAGE_Y_AT_OBJECTIVE
                 )
                 focal_z_mm = self.objective_xy_calibration["z"]
-            elif cavity_center_stage is not None:
-                focal_x_mm, focal_y_mm, focal_z_mm = cavity_center_stage
             else:
                 focal_x_mm = (x_range[0] + x_range[1]) / 2
                 focal_y_mm = self.STAGE_Y_AT_OBJECTIVE
@@ -823,39 +824,44 @@ class ChamberVisualizationManager:
             if cavity is None:
                 return
             b = cavity["bounds_step"]
-            # Back-bottom-left corner of cavity in STEP frame: smallest x,
-            # back-facing y (the -Y end = chamber back), bottom z.
-            x_anchor = b["x"][0]
-            y_anchor = b["y"][0]
-            z_anchor = b["z"][0]
-            origin_napari = self.step_overlay._step_to_napari(
-                (x_anchor, y_anchor, z_anchor)
+            # Anchor at the cavity back-bottom-left corner (file frame), then
+            # convert to STAGE frame so we can step along each STAGE axis to
+            # build the arrow tips. Stepping in stage frame is what makes the
+            # cyan arrow run along napari Axis 2 (= stage_x, horizontal), the
+            # magenta along Axis 1 (= stage_y, vertical), and the yellow along
+            # Axis 0 (= stage_z, optical depth) — matching napari's built-in
+            # axis-color convention.
+            x_a_step, y_a_step, z_a_step = b["x"][0], b["y"][0], b["z"][0]
+            x_a, y_a, z_a = self.step_overlay._step_to_stage_mm(
+                (x_a_step, y_a_step, z_a_step)
             )
 
-            voxel_size_mm = (
-                self._config.get("display", {}).get("voxel_size_um", [50, 50, 50])[0]
-                / 1000.0
-            )
-            arrow_length_voxels = 5.0 / voxel_size_mm  # 5 mm in voxels
-
-            # Step a small distance along each STEP axis from the anchor; project
-            # via the SAME transform so the arrows are oriented in stage frame.
             arrow_step_mm = 5.0
-            x_tip = self.step_overlay._step_to_napari(
-                (x_anchor + arrow_step_mm, y_anchor, z_anchor)
-            )
-            y_tip = self.step_overlay._step_to_napari(
-                (x_anchor, y_anchor + arrow_step_mm, z_anchor)
-            )
-            z_tip = self.step_overlay._step_to_napari(
-                (x_anchor, y_anchor, z_anchor + arrow_step_mm)
-            )
+
+            origin_napari = self.step_overlay._stage_to_napari(x_a, y_a, z_a)
+            x_tip = self.step_overlay._stage_to_napari(
+                x_a + arrow_step_mm, y_a, z_a
+            )  # stage_x → cyan / Axis 2
+            y_tip = self.step_overlay._stage_to_napari(
+                x_a, y_a + arrow_step_mm, z_a
+            )  # stage_y → magenta / Axis 1
+            z_tip = self.step_overlay._stage_to_napari(
+                x_a, y_a, z_a + arrow_step_mm
+            )  # stage_z → yellow / Axis 0
 
             origin = np.array(origin_napari, dtype=np.float32)
             arrows = [
-                (np.array(x_tip, dtype=np.float32), "#00FFFF", "X (illumination)"),
-                (np.array(y_tip, dtype=np.float32), "#FF00FF", "Y (optical depth)"),
-                (np.array(z_tip, dtype=np.float32), "#FFD700", "Z (vertical)"),
+                (
+                    np.array(x_tip, dtype=np.float32),
+                    "#00FFFF",
+                    "X (stage_x, illumination)",
+                ),
+                (np.array(y_tip, dtype=np.float32), "#FF00FF", "Y (stage_y, vertical)"),
+                (
+                    np.array(z_tip, dtype=np.float32),
+                    "#FFD700",
+                    "Z (stage_z, optical depth)",
+                ),
             ]
             edges = [np.array([origin, tip], dtype=np.float32) for tip, _, _ in arrows]
             colors = [c for _, c, _ in arrows]
@@ -1112,8 +1118,16 @@ class ChamberVisualizationManager:
 
         indicator_color = self._get_rotation_gradient_color(angle_deg)
 
-        # Indicator at Y=0 (top of chamber), follows holder X/Z position
-        y_position = 0
+        # Indicator at the actual chamber top (mirrors _add_sample_holder),
+        # following holder X/Z. With STEP loaded this is the cavity outer
+        # top; without STEP it's the rectangular volume top (napari Y=0).
+        stage_ctrl = self._config.get("stage_control", {})
+        y_range = stage_ctrl.get("y_range_mm", [0.0, 14.0])
+        voxel_size_mm = (
+            self._config.get("display", {}).get("voxel_size_um", [50, 50, 50])[0]
+            / 1000.0
+        )
+        y_position = (y_range[1] - self._chamber_top_stage_y_mm()) / voxel_size_mm
         start = np.array(
             [self.holder_position["z"], y_position, self.holder_position["x"]]
         )
