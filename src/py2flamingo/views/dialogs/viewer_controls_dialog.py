@@ -637,16 +637,34 @@ class ViewerControlsDialog(PersistentDialog):
             overlay.set_feature_visible(r, visible)
 
     def _on_fit_step_chamber(self) -> None:
-        """Reset the napari camera so all currently visible layers (including
-        STEP chamber features that render outside the default display volume)
-        fit in the view."""
+        """Frame the camera tightly on the chamber cavity (where the
+        objectives, illumination windows, and sample-entry hole are), rather
+        than auto-fitting all visible content (which zooms out too far)."""
         viewer = self._get_viewer()
+        overlay = self._step_overlay()
         if viewer is None:
             return
         try:
             viewer.reset_view()
+            if overlay is not None and getattr(overlay, "_loaded", False):
+                cavity = next(
+                    (
+                        f
+                        for f in overlay._features_data.get("features", [])
+                        if f.get("role") == "chamber_cavity"
+                    ),
+                    None,
+                )
+                if cavity is not None:
+                    b = cavity["bounds_step"]
+                    cx = (b["x"][0] + b["x"][1]) / 2
+                    cy = (b["y"][0] + b["y"][1]) / 2
+                    cz = (b["z"][0] + b["z"][1]) / 2
+                    center_napari = overlay._step_to_napari((cx, cy, cz))
+                    viewer.camera.center = tuple(float(c) for c in center_napari)
+                    viewer.camera.zoom = float(viewer.camera.zoom) * 3.0
         except Exception as e:
-            self.logger.warning(f"reset_view failed: {e}")
+            self.logger.warning(f"Fit STEP chamber view failed: {e}")
 
     def _expand_role(self, role: str) -> list:
         """Map a UI sub-toggle role to one or more YAML feature roles."""

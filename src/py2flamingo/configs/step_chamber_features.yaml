@@ -29,16 +29,23 @@ features:
   -
     role: chamber_outer_box
     type: aabb
+    # Chamber body only (~77.7 x 43.0 x 44.0 mm). Derived from the actual
+    # axis-aligned outer-face PLANE entities in the STEP file, EXCLUDING:
+    #   - the detection-objective lens sleeve protruding out of the back
+    #     face (extends y from -210.04 down to -227.65 — that's the sleeve,
+    #     not the chamber body),
+    #   - the octagonal mounting base plate below the chamber body
+    #     (z from 628.82 up to 656.50 — that's the plate, not the chamber).
     bounds_step:
       x:
         - 97.28
         - 174.98
       y:
-        - -227.65
+        - -210.04
         - -167.02
       z:
-        - 628.82
-        - 700.5
+        - 656.50
+        - 700.50
     layer_name: "STEP Chamber Bulk"
     visible_default: false
     napari_kind: surface
@@ -47,25 +54,28 @@ features:
   -
     role: chamber_cavity
     type: aabb
-    # Inner cavity (empty air gap). NOT cubic — derived from the actual inner
-    # wall faces detected in the STEP file:
-    #   x: bounded by the two side-wall inner faces (illumination-port pockets)
-    #   y: bounded by the inner faces of the front (sample-entry) and back
-    #      (detection-objective) walls — taken from the *inner* end of each
-    #      bore's y_extent_step
-    #   z: extends from below the side-window region (chamber floor, above the
-    #      octagonal base plate) up to the inner face of the top wall
-    # Edit these to match the production chamber if the inner walls differ.
+    # Inner cavity — verified against the user's physical measurements:
+    #   width  (excitation-to-excitation, X):  19.35 mm  ✓ (~19.3 mm measured)
+    #   depth  (front-to-back, Y):             26.70 mm  ✓ (26.7 mm measured)
+    #   height (vertical, Z):                  44.00 mm  ✓ (44 mm measured)
+    # Derived from the actual inner-face PLANE entities in the STEP file:
+    #   x = [124.45, 143.80]: inner faces of the two illumination glass
+    #       windows, which protrude ~2 mm into the cavity beyond the side
+    #       walls. The wall-to-wall air gap is wider (23.5 mm, x=122.38..145.88).
+    #   y = [-201.30, -174.60]: inner faces of the back (detection) and
+    #       front (sample-entry) walls.
+    #   z = [656.50, 700.50]: chamber body bottom (above the base plate)
+    #       up through the open top.
     bounds_step:
       x:
-        - 122.38
-        - 145.88
+        - 124.45
+        - 143.80
       y:
-        - -206.39
-        - -179.02
+        - -201.30
+        - -174.60
       z:
-        - 640.0
-        - 692.52
+        - 656.50
+        - 700.50
     _note: "subtractive volume; defines air gap. Not rendered as a solid."
   -
     role: detection_objective_port
@@ -221,11 +231,11 @@ features:
     display_as: rectangle
     rect_extents_step:
       file_x:
-        - 122.38
-        - 145.88    # matches cavity x-extent (23.5 mm)
+        - 124.45
+        - 143.80    # matches cavity x-extent (19.35 mm, sample-accessible)
       file_y:
-        - -206.39
-        - -179.02   # matches cavity y-extent (27.4 mm)
+        - -201.30
+        - -174.60   # matches cavity y-extent (26.7 mm)
     todo: "Not present in 'basic windows' STEP file. Edit radius_mm / center
            to match the production chamber's top sample-entry hole, or set
            visible_default: false to hide this placeholder."

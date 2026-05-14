@@ -263,18 +263,50 @@ def test_cavity_master_toggle_unit(overlay):
 
 
 def test_chamber_outer_box_uses_outer_planes(overlay):
-    """Outer body bounds must come from the actual outer face planes, not
-    from the dense cavity interior."""
+    """Outer chamber body bounds must come from the actual outer face planes
+    of the chamber BODY — excluding the detection-objective lens sleeve that
+    protrudes from the back face (extends y to -227.65) and the octagonal
+    base plate below (extends z down to 628.82).
+
+    User-verified chamber body envelope:
+      width  (X, illumination axis): 77.7 mm  (97.28..174.98)
+      depth  (Y, optical axis):      43.0 mm  (-210.04..-167.02)
+      height (Z, vertical):          44.0 mm  ( 656.50..700.50)
+    """
     feat = next(
         f
         for f in overlay._features_data["features"]
         if f["role"] == "chamber_outer_box"
     )
     bounds = feat["bounds_step"]
-    # Expected outer bounds (from the user's manually verified geometry)
     assert bounds["x"][0] == pytest.approx(97.28, abs=0.5)
     assert bounds["x"][1] == pytest.approx(174.98, abs=0.5)
-    assert bounds["y"][0] == pytest.approx(-227.65, abs=0.5)
+    assert bounds["y"][0] == pytest.approx(-210.04, abs=0.5)
     assert bounds["y"][1] == pytest.approx(-167.02, abs=0.5)
-    assert bounds["z"][0] == pytest.approx(628.82, abs=0.5)
-    assert bounds["z"][1] == pytest.approx(700.5, abs=2.0)
+    assert bounds["z"][0] == pytest.approx(656.50, abs=0.5)
+    assert bounds["z"][1] == pytest.approx(700.50, abs=0.5)
+    # Sanity: dimensions match the user's measurements
+    assert bounds["y"][1] - bounds["y"][0] == pytest.approx(43.02, abs=0.05)
+    assert bounds["z"][1] - bounds["z"][0] == pytest.approx(44.00, abs=0.05)
+
+
+def test_chamber_cavity_matches_user_measurements(overlay):
+    """Inner cavity dimensions must match the user's physical measurements:
+    19.3 mm wide (excitation-to-excitation), 26.7 mm front-to-back, 44 mm tall.
+    """
+    feat = next(
+        f for f in overlay._features_data["features"] if f["role"] == "chamber_cavity"
+    )
+    b = feat["bounds_step"]
+    width = b["x"][1] - b["x"][0]
+    depth = b["y"][1] - b["y"][0]
+    height = b["z"][1] - b["z"][0]
+    assert width == pytest.approx(
+        19.35, abs=0.1
+    ), f"cavity width {width}, expected ~19.3"
+    assert depth == pytest.approx(
+        26.70, abs=0.1
+    ), f"cavity depth {depth}, expected 26.7"
+    assert height == pytest.approx(
+        44.00, abs=0.1
+    ), f"cavity height {height}, expected 44"
