@@ -40,7 +40,7 @@ def get_default_visualization_config() -> dict:
         "sample_chamber": {
             "inner_dimensions_mm": [10, 10, 43],
             "holder_diameter_mm": 1.0,
-            "sample_region_center_um": [6655, 7000, 19250],
+            "sample_region_center_um": [6650, 4480, 19250],
             "sample_region_radius_um": 2000,
         },
         "stage_control": {

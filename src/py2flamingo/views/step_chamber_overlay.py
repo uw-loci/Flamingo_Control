@@ -348,14 +348,17 @@ class StepChamberOverlay:
             pass
         self._layers.append("STEP Cavity Wireframe")
 
-        # Back wall: the cavity face at the +Y file end (= lowest stage Z =
-        # back of the napari view). Quad in file Y=y_hi plane.
+        # Back wall: the cavity face at the -Y file end (= real-world BACK
+        # of the chamber, where the detection objective sits = far side of
+        # the napari view from the user's POV). Matches the convention of
+        # the original rectangular Back Wall, which the user looks AT from
+        # the chamber's open-front side. Rendered as a faint backdrop.
         back_verts = np.array(
             [
-                self._step_to_napari((x_lo, y_hi, z_lo)),
-                self._step_to_napari((x_hi, y_hi, z_lo)),
-                self._step_to_napari((x_hi, y_hi, z_hi)),
-                self._step_to_napari((x_lo, y_hi, z_hi)),
+                self._step_to_napari((x_lo, y_lo, z_lo)),
+                self._step_to_napari((x_hi, y_lo, z_lo)),
+                self._step_to_napari((x_hi, y_lo, z_hi)),
+                self._step_to_napari((x_lo, y_lo, z_hi)),
             ],
             dtype=np.float32,
         )

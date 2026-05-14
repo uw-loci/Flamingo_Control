@@ -1817,6 +1817,251 @@ class SampleView(QWidget):
             real_value = slider.value() / self._slider_scale
             self._send_position_command(axis, real_value)
 
+    def _chamber_bounds_display_voxels(self) -> Optional[np.ndarray]:
+        """Chamber wireframe extent in display voxel coordinates, as a 2x3
+        array [[z_min, y_min, x_min], [z_max, y_max, x_max]].
+
+        Mirrors the math in `chamber_visualization_manager._setup_chamber` so
+        the safety gate tests against exactly the wireframe the user sees.
+        X and Z span the full display volume; Y is the chamber subset derived
+        from `sample_chamber.chamber_below_anchor_mm + chamber_above_anchor_mm`.
+        """
+        if self.voxel_storage is None:
+            return None
+        dims = self.voxel_storage.display_dims  # (Z, Y, X)
+        stage_ctrl = self._config.get("stage_control", {})
+        y_range = stage_ctrl.get("y_range_mm", [0.0, float(dims[1]) * 0.05])
+        vsize_mm = float(self.voxel_storage.config.display_voxel_size[0]) / 1000.0
+        sc = self._config.get("sample_chamber", {})
+        chamber_height_mm = sc.get("chamber_below_anchor_mm", 10.0) + sc.get(
+            "chamber_above_anchor_mm", 5.0
+        )
+        y_top_vox = min(float(y_range[1]) / vsize_mm, float(dims[1]))
+        y_bot_vox = max((float(y_range[1]) - chamber_height_mm) / vsize_mm, 0.0)
+        return np.array(
+            [
+                [0.0, y_bot_vox, 0.0],
+                [float(dims[0]), y_top_vox, float(dims[2])],
+            ]
+        )
+
+    def _chamber_wall_protrusions_vox(
+        self, corners_zyx_vox: np.ndarray, margin_vox: float
+    ) -> np.ndarray:
+        """Per-wall signed distance (in display voxels) by which the AABB
+        corners protrude past each chamber wall, with `margin_vox` applied.
+
+        Positive value on a face means at least one corner is beyond the
+        "safe" side of that wall by that many voxels; negative values are
+        safe. Order: [X low, X high, Y low, Y high, Z low, Z high] — naming
+        refers to the napari voxel axis direction, which is the same frame
+        the chamber wireframe is drawn in.
+        """
+        chamber = self._chamber_bounds_display_voxels()
+        if chamber is None:
+            return np.full(6, -np.inf)
+        z_lo, y_lo, x_lo = chamber[0]
+        z_hi, y_hi, x_hi = chamber[1]
+        zs = corners_zyx_vox[:, 0]
+        ys = corners_zyx_vox[:, 1]
+        xs = corners_zyx_vox[:, 2]
+        return np.array(
+            [
+                (x_lo + margin_vox) - xs.min(),
+                xs.max() - (x_hi - margin_vox),
+                (y_lo + margin_vox) - ys.min(),
+                ys.max() - (y_hi - margin_vox),
+                (z_lo + margin_vox) - zs.min(),
+                zs.max() - (z_hi - margin_vox),
+            ]
+        )
+
+    def _step_chamber_impact_check(self, target_pos) -> Tuple[bool, str]:
+        """Holder-vs-CAD-chamber collision check using the STEP overlay.
+
+        Gated by `step_chamber.collision.enabled` (default false). Returns
+        (True, reason) if the holder shaft would intrude into a chamber
+        surface at the target position by more than the configured margin.
+
+        Conservative: fails open (returns clear) if anything is missing
+        (overlay not loaded, config flag off, no holder dims).
+        """
+        try:
+            step_cfg = self._config.get("step_chamber") or {}
+            coll_cfg = step_cfg.get("collision") or {}
+            if not coll_cfg.get("enabled", False):
+                return False, ""
+            overlay = (
+                getattr(self, "_chamber_viz", None) and self._chamber_viz.step_overlay
+            )
+            if overlay is None:
+                return False, ""
+            holder_diameter_mm = float(
+                self._config.get("sample_chamber", {}).get("holder_diameter_mm", 1.0)
+            )
+            shaft_r = max(holder_diameter_mm / 2.0, 1e-3)
+            margin_mm = float(coll_cfg.get("margin_mm", 0.25))
+            d = overlay.distance_to_holder(
+                target_pos.x,
+                target_pos.y,
+                target_pos.z,
+                shaft_radius_mm=shaft_r,
+            )
+            if d < margin_mm:
+                if d < 0:
+                    reason = f"STEP chamber: holder intrudes by {-d:.2f} mm"
+                else:
+                    reason = (
+                        f"STEP chamber: holder within {margin_mm - d:.2f} mm "
+                        f"of safety margin (clearance {d:.2f} mm)"
+                    )
+                return True, reason
+            return False, ""
+        except Exception as e:
+            self.logger.debug(f"STEP chamber impact check failed: {e}")
+            return False, ""
+
+    def _would_impact_chamber(self, target_pos) -> Tuple[bool, str]:
+        """Predict whether dispatching `target_pos` would push the loaded data's
+        bounding box into (or further into) a chamber wall.
+
+        Works uniformly for every data source — live tile data, stitched
+        data, session restores, test data — because all of them render
+        through `voxel_storage.display_cache` and the same
+        rotation+translation transform.
+
+        Compares pre-move vs post-move AABBs per wall and only flags walls
+        where the move would worsen the protrusion, so samples that already
+        extend outside the chamber for legitimate reasons (e.g. large
+        stitched volumes) don't trigger a popup on every unrelated slider
+        nudge.
+
+        Returns:
+            (would_impact, reason) — reason names the offending wall(s) and
+            the worsening distance in mm.
+        """
+        safety_cfg = self._config.get("safety", {})
+        if not safety_cfg.get("enabled", True):
+            return False, ""
+
+        # Optional STEP-chamber collision check — only runs when both the STEP
+        # overlay is loaded AND its collision check is enabled in config. This
+        # is an additional, geometry-aware check on top of the rectangular
+        # AABB check below; it tests the holder shaft (not the data AABB)
+        # against the actual CAD chamber surfaces.
+        step_hit, step_reason = self._step_chamber_impact_check(target_pos)
+        if step_hit:
+            return True, step_reason
+
+        if not self.voxel_storage:
+            return False, ""
+
+        try:
+            holder_voxels = np.array(
+                [
+                    self.holder_position["x"],
+                    self.holder_position["y"],
+                    self.holder_position["z"],
+                ]
+            )
+        except (AttributeError, KeyError, TypeError):
+            holder_voxels = None
+
+        # Skip R-only moves if warn_on_rotation is disabled
+        current = self.last_stage_position or {"x": 0, "y": 0, "z": 0, "r": 0}
+        pure_rotation = (
+            abs(target_pos.x - current.get("x", 0)) < 1e-4
+            and abs(target_pos.y - current.get("y", 0)) < 1e-4
+            and abs(target_pos.z - current.get("z", 0)) < 1e-4
+            and abs(target_pos.r - current.get("r", 0)) > 1e-4
+        )
+        if pure_rotation and not safety_cfg.get("warn_on_rotation", True):
+            return False, ""
+
+        pre = self.voxel_storage.get_data_aabb_display_voxels(current, holder_voxels)
+        if pre is None:
+            # No data loaded (or reference position unset) — nothing to protect.
+            return False, ""
+
+        target_dict = {
+            "x": target_pos.x,
+            "y": target_pos.y,
+            "z": target_pos.z,
+            "r": target_pos.r,
+        }
+        post = self.voxel_storage.get_data_aabb_display_voxels(
+            target_dict, holder_voxels
+        )
+        if post is None:
+            return False, ""
+
+        # Convert margin from mm to display voxels so the comparison stays in
+        # a single coordinate system.
+        voxel_size_um = float(self.voxel_storage.config.display_voxel_size[0])
+        margin_mm = float(safety_cfg.get("margin_mm", 0.5))
+        margin_vox = margin_mm * 1000.0 / voxel_size_um
+
+        pre_d = self._chamber_wall_protrusions_vox(pre, margin_vox)
+        post_d = self._chamber_wall_protrusions_vox(post, margin_vox)
+
+        face_names = ["X low", "X high", "Y low", "Y high", "Z low", "Z high"]
+        WORSEN_TOL_VOX = 1e-3
+        worsened = []
+        for i, name in enumerate(face_names):
+            if post_d[i] > 0 and post_d[i] > pre_d[i] + WORSEN_TOL_VOX:
+                mm_over = post_d[i] * voxel_size_um / 1000.0
+                worsened.append(f"{name} wall by {mm_over:.2f} mm")
+
+        if worsened:
+            reason = "; ".join(worsened)
+            self.logger.debug(
+                f"Chamber impact predicted for target "
+                f"(X={target_pos.x:.3f}, Y={target_pos.y:.3f}, "
+                f"Z={target_pos.z:.3f}, R={target_pos.r:.1f}°): {reason}"
+            )
+            return True, reason
+        return False, ""
+
+    def _confirm_move_if_risky(self, target_pos) -> bool:
+        """Run the chamber-impact safety check and, on risk, show a confirmation
+        popup. Returns True if the caller should proceed with the move, False
+        to abort. Any exception inside the check is swallowed (fail-open so the
+        viewer never blocks moves because of a safety-code bug).
+        """
+        try:
+            risky, reason = self._would_impact_chamber(target_pos)
+        except Exception as e:
+            self.logger.warning(
+                f"Chamber impact check failed, allowing move: {e}", exc_info=True
+            )
+            return True
+        if not risky:
+            return True
+
+        from PyQt5.QtWidgets import QMessageBox
+
+        reply = QMessageBox.question(
+            self,
+            "Sample Holder Impact Warning",
+            (
+                "Sample may physically impact edge of sample holder.\n\n"
+                f"Predicted protrusion at: {reason}\n\n"
+                "Proceed?"
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            self.logger.warning(f"Move aborted by user (chamber impact risk: {reason})")
+            # Snap sliders/edits back to the last-known good position so the UI
+            # reflects that the move did not happen.
+            lp = self.last_stage_position or {}
+            self._on_position_changed(
+                lp.get("x", 0), lp.get("y", 0), lp.get("z", 0), lp.get("r", 0)
+            )
+            return False
+        return True
+
     def _send_position_command(self, axis: str, value: float) -> None:
         """Send a movement command to the specified axis.
 
@@ -1828,6 +2073,19 @@ class SampleView(QWidget):
             return
 
         try:
+            from py2flamingo.models.hardware.stage import Position
+
+            current = self.last_stage_position or {"x": 0, "y": 0, "z": 0, "r": 0}
+            target = Position(
+                x=current.get("x", 0),
+                y=current.get("y", 0),
+                z=current.get("z", 0),
+                r=current.get("r", 0),
+            )
+            setattr(target, axis, value)
+            if not self._confirm_move_if_risky(target):
+                return
+
             self.movement_controller.move_absolute(axis, value, verify=False)
             self.logger.info(f"Moving {axis.upper()} to {value:.3f}")
         except Exception as e:
@@ -2899,7 +3157,7 @@ class SampleView(QWidget):
 
         # Sample region center ([X, Y, Z] order in config)
         sample_region = self._config.get("sample_chamber", {}).get(
-            "sample_region_center_um", [6655, 7000, 19250]
+            "sample_region_center_um", [6650, 4480, 19250]
         )
         sc_x, sc_y, sc_z = sample_region[0], sample_region[1], sample_region[2]
         chamber_origin = np.array(self.voxel_storage.config.chamber_origin)
@@ -3369,7 +3627,7 @@ class SampleView(QWidget):
 
             # Get sample region center from config
             sample_center = self._config.get("sample_chamber", {}).get(
-                "sample_region_center_um", [6655, 7000, 19250]
+                "sample_region_center_um", [6650, 4480, 19250]
             )
 
             # Get reference position
@@ -4167,6 +4425,13 @@ class SampleView(QWidget):
 
             # Store computed target for stale check
             self._plane_stage_targets[plane] = target
+
+            # Chamber-impact safety gate — click-to-move (especially focal mode,
+            # which computes target = current + (focal - click)) can produce
+            # very large jumps that have historically slammed the sample into
+            # the chamber wall. Confirm with the user before dispatching.
+            if not self._confirm_move_if_risky(target):
+                return
 
             # Use move_to_position for multi-axis move (handles lock properly)
             self.movement_controller.position_controller.move_to_position(
