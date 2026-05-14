@@ -350,9 +350,20 @@ class ViewerControlsDialog(PersistentDialog):
         elements_group = QGroupBox("Display Elements")
         elem_layout = QVBoxLayout()
 
-        self.show_chamber_cb = QCheckBox("Show Chamber Wireframe")
+        # The rectangular travel-envelope wireframe is now a *fallback* used
+        # only when no STEP geometry is available. Probe overlay presence so
+        # we can hide the checkbox in the default (STEP-loaded) case.
+        step_overlay = self._probe_step_overlay()
+        step_loaded = step_overlay is not None and getattr(
+            step_overlay, "_loaded", False
+        )
+
+        self.show_chamber_cb = QCheckBox("Show Chamber Wireframe (fallback)")
         self.show_chamber_cb.setChecked(True)
         self.show_chamber_cb.toggled.connect(self._on_chamber_visibility_changed)
+        # Only expose the rect-wireframe checkbox when STEP geometry isn't
+        # active — otherwise the layer doesn't exist and the toggle is dead.
+        self.show_chamber_cb.setVisible(not step_loaded)
         elem_layout.addWidget(self.show_chamber_cb)
 
         self.show_objective_cb = QCheckBox("Show Objective Position")
@@ -395,9 +406,10 @@ class ViewerControlsDialog(PersistentDialog):
         elements_group.setLayout(elem_layout)
         layout.addWidget(elements_group)
 
-        # STEP chamber group — alternate 3D chamber rendered from the CAD STEP
-        # file. Off by default. When enabled, the rectangular wireframe is
-        # auto-hidden and replaced by the STEP-derived port/window outlines.
+        # STEP chamber group — the default 3D chamber view, rendered from the
+        # CAD STEP file. The group is only shown when the features YAML was
+        # successfully loaded; otherwise we silently fall back to the
+        # rectangular travel-envelope wireframe above.
         step_group = QGroupBox("STEP Chamber Geometry")
         step_layout = QVBoxLayout()
 
@@ -409,7 +421,7 @@ class ViewerControlsDialog(PersistentDialog):
             "step_chamber/master", True, type=bool
         )
 
-        self.show_step_chamber_cb = QCheckBox("Show STEP Chamber (replaces wireframe)")
+        self.show_step_chamber_cb = QCheckBox("Show STEP Chamber")
         self.show_step_chamber_cb.setChecked(master_default)
         self.show_step_chamber_cb.toggled.connect(
             self._on_step_chamber_master_visibility_changed
@@ -469,6 +481,9 @@ class ViewerControlsDialog(PersistentDialog):
         self._on_cavity_center_visibility_changed(cavity_center_default)
 
         step_group.setLayout(step_layout)
+        # Hide the entire STEP Chamber group if no overlay loaded — there's
+        # nothing to toggle and the master checkbox would be a dead control.
+        step_group.setVisible(step_loaded)
         layout.addWidget(step_group)
 
         # Camera controls group
@@ -631,6 +646,12 @@ class ViewerControlsDialog(PersistentDialog):
         if chamber_viz is None:
             return None
         return getattr(chamber_viz, "step_overlay", None)
+
+    def _probe_step_overlay(self):
+        """Same as _step_overlay but safe to call during _setup_ui() — does
+        not assume anything beyond what's already been wired on the
+        viewer_container at construction time."""
+        return self._step_overlay()
 
     def _on_step_chamber_master_visibility_changed(self, visible: bool) -> None:
         """Master toggle: show STEP chamber + hide rectangular wireframe.

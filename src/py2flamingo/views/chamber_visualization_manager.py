@@ -225,97 +225,116 @@ class ChamberVisualizationManager:
             self.step_overlay = None
 
     def _setup_chamber(self) -> None:
-        """Setup the fixed chamber wireframe as visual guide.
+        """Setup the chamber visualization and all in-chamber indicators.
 
-        The wireframe represents the physical sample chamber, which may be
-        smaller than the full display volume (y_range covers full stage travel
-        but the glass cuvette is only ~14mm tall).
+        Two modes:
+        - **STEP loaded (default)**: the chamber geometry is rendered by
+          StepChamberOverlay (already added in _setup_step_chamber_overlay).
+          We skip the rectangular travel-envelope wireframe + reference walls
+          entirely and only add the in-chamber indicators (holder, focus
+          frame, axes, cavity center).
+        - **STEP missing (fallback)**: build the legacy rectangular
+          travel-envelope wireframe + reference walls. Used when the STEP
+          features YAML hasn't been extracted yet.
         """
         if not self.viewer or not self.voxel_storage:
             return
 
         try:
-            dims = self.voxel_storage.display_dims  # (Z, Y, X) order
-
-            # Physical chamber bounds in napari voxel coordinates.
-            # The chamber is 14mm tall (chamber Y 0-14mm), positioned within
-            # the larger display volume that covers the full stage Y range.
-            stage_ctrl = self._config.get("stage_control", {})
-            y_range = stage_ctrl.get("y_range_mm", [0.0, 25.0])
-            voxel_size_mm = (
-                self._config.get("display", {}).get("voxel_size_um", [50, 50, 50])[0]
-                / 1000.0
+            step_loaded = self.step_overlay is not None and getattr(
+                self.step_overlay, "_loaded", False
             )
-            chamber_height_mm = self._config.get("sample_chamber", {}).get(
-                "chamber_below_anchor_mm", 10.0
-            ) + self._config.get("sample_chamber", {}).get(
-                "chamber_above_anchor_mm", 5.0
-            )  # default 15mm
-            # Chamber top is at chamber_y=0, bottom at chamber_y=chamber_height
-            chamber_y_top = int(
-                (y_range[1] - 0) / voxel_size_mm
-            )  # napari Y for chamber_y=0
-            chamber_y_bot = int(
-                (y_range[1] - chamber_height_mm) / voxel_size_mm
-            )  # napari Y for chamber bottom
-            # Clamp to display bounds
-            chamber_y_top = min(chamber_y_top, dims[1] - 1)
-            chamber_y_bot = max(chamber_y_bot, 0)
 
-            # Define the 8 corners of the CHAMBER box in napari (Z, Y, X) order
-            corners = np.array(
-                [
-                    [0, chamber_y_bot, 0],
-                    [dims[0] - 1, chamber_y_bot, 0],
-                    [dims[0] - 1, chamber_y_bot, dims[2] - 1],
-                    [0, chamber_y_bot, dims[2] - 1],
-                    [0, chamber_y_top, 0],
-                    [dims[0] - 1, chamber_y_top, 0],
-                    [dims[0] - 1, chamber_y_top, dims[2] - 1],
-                    [0, chamber_y_top, dims[2] - 1],
+            if not step_loaded:
+                dims = self.voxel_storage.display_dims  # (Z, Y, X) order
+
+                # Physical chamber bounds in napari voxel coordinates.
+                # The chamber is 14mm tall (chamber Y 0-14mm), positioned within
+                # the larger display volume that covers the full stage Y range.
+                stage_ctrl = self._config.get("stage_control", {})
+                y_range = stage_ctrl.get("y_range_mm", [0.0, 25.0])
+                voxel_size_mm = (
+                    self._config.get("display", {}).get("voxel_size_um", [50, 50, 50])[
+                        0
+                    ]
+                    / 1000.0
+                )
+                chamber_height_mm = self._config.get("sample_chamber", {}).get(
+                    "chamber_below_anchor_mm", 10.0
+                ) + self._config.get("sample_chamber", {}).get(
+                    "chamber_above_anchor_mm", 5.0
+                )  # default 15mm
+                # Chamber top is at chamber_y=0, bottom at chamber_y=chamber_height
+                chamber_y_top = int(
+                    (y_range[1] - 0) / voxel_size_mm
+                )  # napari Y for chamber_y=0
+                chamber_y_bot = int(
+                    (y_range[1] - chamber_height_mm) / voxel_size_mm
+                )  # napari Y for chamber bottom
+                # Clamp to display bounds
+                chamber_y_top = min(chamber_y_top, dims[1] - 1)
+                chamber_y_bot = max(chamber_y_bot, 0)
+
+                # Define the 8 corners of the CHAMBER box in napari (Z, Y, X) order
+                corners = np.array(
+                    [
+                        [0, chamber_y_bot, 0],
+                        [dims[0] - 1, chamber_y_bot, 0],
+                        [dims[0] - 1, chamber_y_bot, dims[2] - 1],
+                        [0, chamber_y_bot, dims[2] - 1],
+                        [0, chamber_y_top, 0],
+                        [dims[0] - 1, chamber_y_top, 0],
+                        [dims[0] - 1, chamber_y_top, dims[2] - 1],
+                        [0, chamber_y_top, dims[2] - 1],
+                    ]
+                )
+
+                # All 12 chamber edges combined into single layer for performance
+                # Z edges (yellow), Y edges (magenta), X edges (cyan)
+                all_edges = [
+                    # Z edges (4)
+                    [corners[0], corners[1]],
+                    [corners[3], corners[2]],
+                    [corners[4], corners[5]],
+                    [corners[7], corners[6]],
+                    # Y edges (4)
+                    [corners[0], corners[4]],
+                    [corners[1], corners[5]],
+                    [corners[2], corners[6]],
+                    [corners[3], corners[7]],
+                    # X edges (4)
+                    [corners[0], corners[3]],
+                    [corners[1], corners[2]],
+                    [corners[4], corners[7]],
+                    [corners[5], corners[6]],
                 ]
-            )
 
-            # All 12 chamber edges combined into single layer for performance
-            # Z edges (yellow), Y edges (magenta), X edges (cyan)
-            all_edges = [
-                # Z edges (4)
-                [corners[0], corners[1]],
-                [corners[3], corners[2]],
-                [corners[4], corners[5]],
-                [corners[7], corners[6]],
-                # Y edges (4)
-                [corners[0], corners[4]],
-                [corners[1], corners[5]],
-                [corners[2], corners[6]],
-                [corners[3], corners[7]],
-                # X edges (4)
-                [corners[0], corners[3]],
-                [corners[1], corners[2]],
-                [corners[4], corners[7]],
-                [corners[5], corners[6]],
-            ]
+                # Per-edge colors: 4 yellow (Z), 4 magenta (Y), 4 cyan (X)
+                edge_colors = (
+                    ["#8B8B00"] * 4  # Z edges
+                    + ["#8B008B"] * 4  # Y edges
+                    + ["#008B8B"] * 4  # X edges
+                )
 
-            # Per-edge colors: 4 yellow (Z), 4 magenta (Y), 4 cyan (X)
-            edge_colors = (
-                ["#8B8B00"] * 4  # Z edges
-                + ["#8B008B"] * 4  # Y edges
-                + ["#008B8B"] * 4  # X edges
-            )
+                self.viewer.add_shapes(
+                    data=all_edges,
+                    shape_type="line",
+                    name="Chamber Wireframe",
+                    edge_color=edge_colors,
+                    edge_width=2,
+                    opacity=0.6,
+                )
 
-            self.viewer.add_shapes(
-                data=all_edges,
-                shape_type="line",
-                name="Chamber Wireframe",
-                edge_color=edge_colors,
-                edge_width=2,
-                opacity=0.6,
-            )
+                # Add reference walls (subtle fill for orientation when rotating)
+                self._add_reference_walls(dims, chamber_y_top, chamber_y_bot)
+            else:
+                self.logger.info(
+                    "STEP chamber overlay active; skipping rectangular wireframe"
+                )
 
-            # Add reference walls (subtle fill for orientation when rotating)
-            self._add_reference_walls(dims, chamber_y_top, chamber_y_bot)
-
-            # Add additional visualization elements
+            # In-chamber indicators (added in both modes — they read positions
+            # from the STEP overlay when available, otherwise fall back to
+            # the rectangular envelope).
             self._add_sample_holder()  # sets self.holder_position; no sphere
             self._add_holder_assembly()  # FEP Tube + Holder Stem layers
             self._add_objective_indicator()

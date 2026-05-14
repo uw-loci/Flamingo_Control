@@ -329,12 +329,16 @@ focus_frame:
   # Calibration preset name
   calibration_preset_name: "Tip of sample mount"
 
-# STEP-based chamber overlay (alternate 3D chamber view)
-# Optional, opt-in. When enabled the rectangular chamber wireframe is hidden
-# and the actual CAD chamber geometry is rendered instead. The "solid metal
-# bulk" sub-layer is hidden by default since it occludes the sample.
+# STEP-based chamber overlay (now the DEFAULT 3D chamber view)
+# The features YAML is extracted from the CAD STEP file by
+# scripts/extract_step_chamber.py. When the YAML exists, the rectangular
+# travel-envelope wireframe is NOT created at all — STEP geometry is the
+# chamber view. The rectangular wireframe only appears as a fallback if the
+# STEP features YAML is missing (e.g. fresh checkout before extraction).
+# The "solid metal bulk" sub-layer is hidden by default since it occludes
+# the sample.
 step_chamber:
-  enabled: false
+  enabled: true
   features_yaml: "configs/step_chamber_features.yaml"
   hide_rect_wireframe_when_on: true
   collision:
