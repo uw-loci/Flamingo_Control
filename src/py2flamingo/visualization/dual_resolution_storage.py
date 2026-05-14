@@ -1242,6 +1242,126 @@ class DualResolutionVoxelStorage:
 
         return translated
 
+    def get_loaded_data_bounds_display_voxels(self) -> Optional[np.ndarray]:
+        """Return the union bounding box of all loaded channel data, in display voxel
+        coordinates (Z, Y, X) order.
+
+        Computed from the non-zero extent of each channel's display cache so the
+        result is independent of the source (live tile data, stitched data,
+        session restore, test load). Returns None when nothing is loaded.
+
+        Returns:
+            2x3 array [[z_min, y_min, x_min], [z_max, y_max, x_max]] with the
+            max bounds being exclusive (half-open), or None if no data.
+        """
+        mins = []
+        maxs = []
+        for ch, cache in self.display_cache.items():
+            if cache is None or cache.size == 0:
+                continue
+            # np.any along two axes at a time — short-circuits on first nonzero
+            # and avoids the O(N) cost of np.nonzero on the whole volume.
+            nz_z = np.any(cache, axis=(1, 2))
+            if not nz_z.any():
+                continue
+            nz_y = np.any(cache, axis=(0, 2))
+            nz_x = np.any(cache, axis=(0, 1))
+            z_idx = np.where(nz_z)[0]
+            y_idx = np.where(nz_y)[0]
+            x_idx = np.where(nz_x)[0]
+            mins.append([z_idx[0], y_idx[0], x_idx[0]])
+            maxs.append([z_idx[-1] + 1, y_idx[-1] + 1, x_idx[-1] + 1])
+        if not mins:
+            return None
+        return np.array([np.min(mins, axis=0), np.max(maxs, axis=0)], dtype=np.int64)
+
+    def get_data_aabb_display_voxels(
+        self,
+        current_stage_pos: dict,
+        holder_position_voxels: Optional[np.ndarray] = None,
+    ) -> Optional[np.ndarray]:
+        """Return the 8 corners of the loaded-data AABB, in display voxel
+        space (Z, Y, X order), after applying the same rotation + translation
+        that `get_display_volume_transformed` would apply for `current_stage_pos`.
+
+        Used by the viewer's safety gate to predict where the sample would end
+        up after a prospective move, without materializing the rotated volume.
+
+        Results are in display voxel coordinates — the same coordinate system
+        the napari chamber wireframe lives in — so comparing corners against
+        [0, display_dims] per axis directly tells you whether the sample is
+        protruding past the chamber walls (no confusing stage-vs-display
+        frame conversions along the way).
+
+        The math mirrors `get_display_volume_transformed`: rotation delta
+        `dr = target_r - ref_r` applied around the holder's display voxel
+        (Z, X) using `coord_transformer.rotation_matrix`, followed by
+        `offset = [dz, -dy, dx_display] * 1000 / voxel_size_um` where
+        `dx_display = -dx if invert_x else dx`.
+
+        Args:
+            current_stage_pos: Dict with 'x', 'y', 'z', 'r' (target pose in mm / deg).
+            holder_position_voxels: Optional (X, Y, Z) holder position in display
+                                    voxels. When provided, rotation pivots about
+                                    the holder (same as the real transform).
+
+        Returns:
+            (8, 3) array of corner positions in display voxel space, (Z, Y, X)
+            order, or None if no data is loaded / reference position is not
+            set / coord transformer is missing.
+        """
+        if self.coord_transformer is None:
+            return None
+
+        bounds = self.get_loaded_data_bounds_display_voxels()
+        if bounds is None:
+            return None
+
+        with self._storage_lock:
+            ref = self.reference_stage_position
+            if ref is None:
+                return None
+            ref = ref.copy()
+
+        z0, y0, x0 = bounds[0].astype(np.float64)
+        z1, y1, x1 = bounds[1].astype(np.float64)
+        corners = np.array(
+            [[z, y, x] for z in (z0, z1) for y in (y0, y1) for x in (x0, x1)],
+            dtype=np.float64,
+        )
+
+        center_voxels = self._get_rotation_center_voxels(holder_position_voxels).astype(
+            np.float64
+        )
+
+        dr = current_stage_pos.get("r", 0) - ref["r"]
+        if abs(dr) > 0.01:
+            # Use the same rotation matrix the real transform uses so sign /
+            # handedness match. set_rotation mutates transformer state, so
+            # snapshot and restore to avoid surprising concurrent callers.
+            prev_rotation = self.coord_transformer.current_rotation.copy()
+            try:
+                self.coord_transformer.set_rotation(ry=dr)
+                R = self.coord_transformer.rotation_matrix.copy()
+            finally:
+                self.coord_transformer.set_rotation(
+                    rx=prev_rotation.get("rx", 0),
+                    ry=prev_rotation.get("ry", 0),
+                    rz=prev_rotation.get("rz", 0),
+                )
+            # Forward-transform corners: translate to origin, rotate, translate back.
+            corners = (corners - center_voxels) @ R.T + center_voxels
+
+        dx = current_stage_pos.get("x", 0) - ref["x"]
+        dy = current_stage_pos.get("y", 0) - ref["y"]
+        dz = current_stage_pos.get("z", 0) - ref["z"]
+        dx_display = -dx if self.config.invert_x else dx
+        voxel_size_um = float(self.config.display_voxel_size[0])
+        offset_voxels = np.array([dz, -dy, dx_display]) * 1000.0 / voxel_size_um
+        corners = corners + offset_voxels
+
+        return corners
+
     def _get_rotation_center_voxels(
         self, holder_position_voxels: np.ndarray = None
     ) -> np.ndarray:
