@@ -64,15 +64,17 @@ def test_yaml_loads_all_features(overlay):
     assert "illumination_port_right" in roles
 
 
-def test_cavity_center_maps_to_stage_midrange(overlay):
+def test_cavity_center_maps_to_focal_plane_stage_coords(overlay):
     """The cavity centroid (134.125, -187.95, 678.50) in STEP frame must map
-    to the middle of the stage travel ranges (stage_x~6.655, stage_y~5,
-    stage_z~19.25) — that's how the offsets are calibrated so a sample at
-    the default stage position renders near the cavity center.
+    to the focal-plane stage coords (6.655, 7.0, 19.25) — i.e. the "Tip of
+    sample mount" calibration position. Until we have a separate measurement
+    of how the focal plane is offset from the geometric cavity center, we
+    assume they are the same point, so every dataset acquired against the
+    tip-test reference renders at the cavity center.
     """
     sx, sy, sz = overlay._step_to_stage_mm((134.125, -187.95, 678.50))
-    assert sx == pytest.approx(6.65, abs=1e-2)
-    assert sy == pytest.approx(4.48, abs=1e-2)
+    assert sx == pytest.approx(6.655, abs=1e-2)
+    assert sy == pytest.approx(7.0, abs=1e-2)
     assert sz == pytest.approx(19.25, abs=1e-2)
 
 
@@ -88,9 +90,9 @@ def test_detector_lens_sits_behind_cavity_in_stage_frame(overlay):
 
 def test_focal_point_stage_to_napari_centered(overlay):
     """The cavity centroid in stage coords maps somewhere within the napari
-    display range (or close to it). The cavity is bigger than the
-    rectangular voxel volume so this only checks one axis."""
-    nz, ny, nx = overlay._stage_to_napari(6.65, 4.48, 19.25)
+    display range. The cavity is bigger than the rectangular voxel volume
+    so this only sanity-checks the position is non-degenerate."""
+    nz, ny, nx = overlay._stage_to_napari(6.655, 7.0, 19.25)
     assert nz > 0
     assert 100 < ny < 300
     assert 70 < nx < 160
@@ -98,14 +100,14 @@ def test_focal_point_stage_to_napari_centered(overlay):
 
 def test_holder_at_cavity_center_clear_of_walls(overlay):
     """A point holder at the cavity center should be clear of all surfaces."""
-    d = overlay.distance_to_holder(6.65, 4.48, 19.25, shaft_radius_mm=0.5)
+    d = overlay.distance_to_holder(6.655, 7.0, 19.25, shaft_radius_mm=0.5)
     assert d > 5.0, f"expected >5 mm clearance at cavity center, got {d:.3f}"
 
 
 def test_holder_offset_collides(overlay):
     """A holder placed far outside the cavity in X should report negative
     distance (collision/intrusion)."""
-    d = overlay.distance_to_holder(50.0, 4.48, 19.25, shaft_radius_mm=0.5)
+    d = overlay.distance_to_holder(50.0, 7.0, 19.25, shaft_radius_mm=0.5)
     assert d < 0, f"expected negative (collision) at X=50, got {d:.3f}"
 
 

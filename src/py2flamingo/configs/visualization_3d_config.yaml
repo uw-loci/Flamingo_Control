@@ -77,14 +77,14 @@ sample_chamber:
   sample_region_half_width_x_um: 6000   # ±6mm in X (chamber is ~11mm wide)
   sample_region_half_width_y_um: 12000  # ±12mm in Y (sample can go above chamber)
   sample_region_half_width_z_um: 7000   # ±7mm in Z (chamber is ~13.5mm deep)
-  # Sample region center = focal plane / cavity center in stage mm.
-  # This is the physical anchor that every data-import path centers on:
-  # load session, load stitched, load tile, load TIFF without metadata, etc.
-  # With the STEP chamber as main view, this matches the cavity centroid in
-  # stage coords (X=cavity-X-center, Y=cavity-Y-center, Z=cavity-Z-center),
-  # NOT the stage_control range midpoints (Y midrange is 7.0 mm, but the
-  # cavity Y center in stage coords is ~4.48 mm).
-  sample_region_center_um: [6650, 4480, 19250]  # cavity centroid in stage µm
+  # Sample region center = focal plane in stage mm — the physical anchor
+  # that every data-import path centers on (load session, load stitched,
+  # tile capture, TIFF without metadata, etc). The STEP→stage transform is
+  # calibrated so the cavity geometric center maps to this same stage point
+  # (we assume focal plane = cavity center until measured otherwise), so
+  # every dataset acquired against the tip-test reference (6.655, 7.0,
+  # 19.25 mm) lands at the cavity center automatically.
+  sample_region_center_um: [6655, 7000, 19250]
 
 stage_control:
   # Visualization chamber ranges (in mm) - defines what we display in napari

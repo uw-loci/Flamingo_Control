@@ -257,7 +257,7 @@ class TileProcessingWorker(QObject):
 
         # Get coordinate calculation parameters
         sample_center = self._config.get("sample_chamber", {}).get(
-            "sample_region_center_um", [6650, 4480, 19250]
+            "sample_region_center_um", [6655, 7000, 19250]
         )
 
         z_min = buffer.z_min

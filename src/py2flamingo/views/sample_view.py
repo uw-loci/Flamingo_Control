@@ -3157,7 +3157,7 @@ class SampleView(QWidget):
 
         # Sample region center ([X, Y, Z] order in config)
         sample_region = self._config.get("sample_chamber", {}).get(
-            "sample_region_center_um", [6650, 4480, 19250]
+            "sample_region_center_um", [6655, 7000, 19250]
         )
         sc_x, sc_y, sc_z = sample_region[0], sample_region[1], sample_region[2]
         chamber_origin = np.array(self.voxel_storage.config.chamber_origin)
@@ -3627,7 +3627,7 @@ class SampleView(QWidget):
 
             # Get sample region center from config
             sample_center = self._config.get("sample_chamber", {}).get(
-                "sample_region_center_um", [6650, 4480, 19250]
+                "sample_region_center_um", [6655, 7000, 19250]
             )
 
             # Get reference position

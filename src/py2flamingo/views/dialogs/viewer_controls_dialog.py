@@ -372,6 +372,26 @@ class ViewerControlsDialog(PersistentDialog):
         self.show_axes_cb.toggled.connect(self._on_axes_visibility_changed)
         elem_layout.addWidget(self.show_axes_cb)
 
+        # Cavity Center indicator (magenta point at geometric cavity centroid).
+        # User-toggleable because it sits at the same stage coords as the XY
+        # Focus Frame (we assume focal-plane = cavity-center) and can occlude
+        # the yellow focus frame visually.
+        self._cavity_center_settings = QSettings("py2flamingo", "viewer_controls")
+        cavity_center_default = self._cavity_center_settings.value(
+            "elements/cavity_center", True, type=bool
+        )
+        self.show_cavity_center_cb = QCheckBox("Show Cavity Center")
+        self.show_cavity_center_cb.setChecked(cavity_center_default)
+        self.show_cavity_center_cb.toggled.connect(
+            self._on_cavity_center_visibility_changed
+        )
+        self.show_cavity_center_cb.toggled.connect(
+            lambda visible: self._cavity_center_settings.setValue(
+                "elements/cavity_center", visible
+            )
+        )
+        elem_layout.addWidget(self.show_cavity_center_cb)
+
         elements_group.setLayout(elem_layout)
         layout.addWidget(elements_group)
 
@@ -445,6 +465,8 @@ class ViewerControlsDialog(PersistentDialog):
         # syncs the overlay layers + rectangular wireframe to the persisted
         # master state on launch.
         self._on_step_chamber_master_visibility_changed(master_default)
+        # Same setChecked-before-connect quirk for the cavity-center checkbox.
+        self._on_cavity_center_visibility_changed(cavity_center_default)
 
         step_group.setLayout(step_layout)
         layout.addWidget(step_group)
@@ -592,6 +614,14 @@ class ViewerControlsDialog(PersistentDialog):
         viewer = self._get_viewer()
         if viewer and "XY Focus Frame" in viewer.layers:
             viewer.layers["XY Focus Frame"].visible = visible
+
+    def _on_cavity_center_visibility_changed(self, visible: bool) -> None:
+        """Toggle the magenta Cavity Center point. Sits at the same stage
+        coords as the focus frame (focal plane assumed = cavity center),
+        so the user can hide it when it occludes the yellow focus frame."""
+        viewer = self._get_viewer()
+        if viewer and "Cavity Center" in viewer.layers:
+            viewer.layers["Cavity Center"].visible = visible
 
     def _step_overlay(self):
         """Return the StepChamberOverlay instance (or None if absent)."""

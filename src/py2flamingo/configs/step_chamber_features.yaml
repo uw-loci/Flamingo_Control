@@ -8,13 +8,12 @@ frame: step
 axis_mapping_doc: "file_x = real-world LEFT-RIGHT (illumination axis); file_y = real-world FRONT-BACK (optical axis: +Y front, -Y back); file_z = real-world UP (vertical)"
 step_to_stage_transform:
   # Calibrated so the CAVITY CENTER (134.125, -187.95, 678.50) maps to the
-  # middle of the stage travel ranges: stage_x ~ x_default=6.655,
-  # stage_y ~ y_default=5.0, stage_z ~ z_default=19.25. This places the
-  # cavity inside the stage Z range [12.5, 26] (cavity Z spans stage_z
-  # ~[5.9, 32.6]), so a sample at the default stage position renders
-  # near the cavity center. The detection-objective lens ends up at
-  # stage_z ~ -11.19 (BEHIND the cavity, in chamber-wall space — correct,
-  # since the lens is fixed and looks INTO the chamber from outside).
+  # focal-plane stage coords from the "Tip of sample mount" calibration:
+  # stage (6.655, 7.0, 19.25). We assume cavity center == focal plane in
+  # the absence of a separate measurement, so every dataset acquired
+  # against the tip-test reference renders at the cavity center. The
+  # detection-objective lens lands at stage_z ~ -11 (behind the cavity in
+  # stage Z, correct — the lens is outside the chamber looking inward).
   axis_permutation:
     stage_x: file_x
     stage_y: file_z
@@ -25,7 +24,7 @@ step_to_stage_transform:
     stage_z: 1
   offset_mm:
     stage_x: -127.475
-    stage_y: -674.02
+    stage_y: -671.50
     stage_z: 207.20
 features:
   -
