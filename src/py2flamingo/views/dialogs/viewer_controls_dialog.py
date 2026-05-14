@@ -383,9 +383,10 @@ class ViewerControlsDialog(PersistentDialog):
 
         # Persistence: read previous toggle states from QSettings so the user
         # doesn't have to re-enable the STEP overlay on every launch.
+        # STEP is now the main chamber view — default ON for fresh installs.
         self._step_settings = QSettings("py2flamingo", "viewer_controls")
         master_default = self._step_settings.value(
-            "step_chamber/master", False, type=bool
+            "step_chamber/master", True, type=bool
         )
 
         self.show_step_chamber_cb = QCheckBox("Show STEP Chamber (replaces wireframe)")
@@ -437,6 +438,13 @@ class ViewerControlsDialog(PersistentDialog):
         self.fit_step_chamber_btn = QPushButton("Fit STEP chamber view")
         self.fit_step_chamber_btn.clicked.connect(self._on_fit_step_chamber)
         step_layout.addWidget(self.fit_step_chamber_btn)
+
+        # Apply the persisted master state NOW (after all connections are wired
+        # up). setChecked() above ran before .toggled.connect(), so the initial
+        # toggle didn't fire any callback. Calling the handler explicitly here
+        # syncs the overlay layers + rectangular wireframe to the persisted
+        # master state on launch.
+        self._on_step_chamber_master_visibility_changed(master_default)
 
         step_group.setLayout(step_layout)
         layout.addWidget(step_group)

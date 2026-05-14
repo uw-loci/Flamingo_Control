@@ -156,16 +156,16 @@ class ChamberVisualizationManager:
         """Shared logic for completing viewer setup (chamber + data layers)."""
         t_before_chamber = time.perf_counter()
 
+        # Load STEP overlay FIRST so the chamber setup (sample holder /
+        # rotation indicator positions) can read the real chamber bounds.
+        self._setup_step_chamber_overlay()
+
         # Setup visualization components
         self._setup_chamber()
         t_chamber = time.perf_counter()
         self.logger.info(
             f"Chamber visualization setup in {t_chamber - t_before_chamber:.2f}s"
         )
-
-        # Optional: load STEP-derived chamber overlay alongside the wireframe.
-        # Layers are added hidden; the user toggles them on via ViewerControlsDialog.
-        self._setup_step_chamber_overlay()
 
         self.setup_data_layers()
         t_layers = time.perf_counter()
@@ -319,6 +319,7 @@ class ChamberVisualizationManager:
             self._add_objective_indicator()
             self._add_rotation_indicator()
             self._add_xy_focus_frame()
+            self._add_cavity_center_indicator()
 
         except Exception as e:
             self.logger.warning(f"Failed to setup chamber visualization: {e}")
@@ -464,7 +465,8 @@ class ChamberVisualizationManager:
             # Z is offset from range minimum
             napari_z = int((z_mm - z_range[0]) / voxel_size_mm)
 
-            # Clamp to valid range
+            # Clamp X/Z to display dims; Y can extend ABOVE the display volume
+            # (negative napari_y) so the holder lands at the real chamber top.
             napari_x = max(0, min(dims[2] - 1, napari_x))
             napari_y_tip = max(0, min(dims[1] - 1, napari_y_tip))
             napari_z = max(0, min(dims[0] - 1, napari_z))
@@ -472,9 +474,13 @@ class ChamberVisualizationManager:
             # Store holder TIP position (what matters for extension and sample data)
             self.holder_position = {"x": napari_x, "y": napari_y_tip, "z": napari_z}
 
-            # Create holder indicator at chamber top (Y=0) - the mounting point
-            # Note: The holder_position stores the TIP, but we display at Y=0
-            holder_point = np.array([[napari_z, 0, napari_x]])
+            # Place the holder mounting point at the top of the ACTUAL chamber.
+            # With STEP overlay loaded this is the chamber outer top (stage_y
+            # ~26.5 mm), which lands at a negative napari_y outside the display
+            # volume — napari still renders it as a point in 3D space.
+            chamber_top_stage_y = self._chamber_top_stage_y_mm()
+            napari_y_holder = (y_range[1] - chamber_top_stage_y) / voxel_size_mm
+            holder_point = np.array([[napari_z, napari_y_holder, napari_x]])
 
             self.viewer.add_points(
                 holder_point,
@@ -561,8 +567,19 @@ class ChamberVisualizationManager:
             self.logger.warning(f"Failed to add fine extension: {e}")
 
     def _add_objective_indicator(self) -> None:
-        """Add objective position indicator circle at Z=0 (back wall)."""
+        """Add objective position indicator circle at Z=0 (back wall).
+
+        Skipped when the STEP chamber overlay is loaded — the STEP
+        detection_objective_port renders the real CAD lens position
+        (a 33 mm-dia ring on the actual chamber back wall) and the
+        rectangular back-wall circle becomes a redundant ghost.
+        """
         if not self.viewer or not self.voxel_storage:
+            return
+        if self.step_overlay and getattr(self.step_overlay, "_loaded", False):
+            self.logger.info(
+                "Skipping rectangular Objective ring; STEP detection_objective_port is the canonical indicator"
+            )
             return
 
         try:
@@ -631,8 +648,17 @@ class ChamberVisualizationManager:
             indicator_length = min(dims[0], dims[2]) // 2
             self.rotation_indicator_length = indicator_length
 
-            # Position at Y=0 (top of chamber)
-            y_position = 0
+            # Position at the actual chamber top (matches the sample-holder
+            # mount point). With STEP loaded this is ~napari_y = -250 (above
+            # the display volume); without STEP it falls back to napari Y=0.
+            stage_ctrl = self._config.get("stage_control", {})
+            y_range = stage_ctrl.get("y_range_mm", [0.0, 14.0])
+            voxel_size_mm = (
+                self._config.get("display", {}).get("voxel_size_um", [50, 50, 50])[0]
+                / 1000.0
+            )
+            chamber_top_stage_y = self._chamber_top_stage_y_mm()
+            y_position = (y_range[1] - chamber_top_stage_y) / voxel_size_mm
             holder_z = self.holder_position["z"]
             holder_x = self.holder_position["x"]
 
@@ -757,6 +783,52 @@ class ChamberVisualizationManager:
         except Exception as e:
             self.logger.warning(f"Failed to add XY focus frame: {e}")
 
+    def _add_cavity_center_indicator(self) -> None:
+        """Add a small marker at the geometric cavity centroid.
+
+        Sits alongside the calibrated XY Focus Frame so the user can see
+        both points: the per-microscope calibrated focal plane ("Tip of
+        sample mount" preset) AND the chamber's geometric center. Only
+        rendered when the STEP overlay is loaded.
+        """
+        if not self.viewer or not self.voxel_storage:
+            return
+        center = self._cavity_center_stage_mm()
+        if center is None:
+            return
+        try:
+            x_mm, y_mm, z_mm = center
+            stage_ctrl = self._config.get("stage_control", {})
+            x_range = stage_ctrl.get("x_range_mm", [1.0, 12.31])
+            y_range = stage_ctrl.get("y_range_mm", [0.0, 14.0])
+            z_range = stage_ctrl.get("z_range_mm", [12.5, 26.0])
+            voxel_size_mm = (
+                self._config.get("display", {}).get("voxel_size_um", [50, 50, 50])[0]
+                / 1000.0
+            )
+            if self._invert_x:
+                npx = (x_range[1] - x_mm) / voxel_size_mm
+            else:
+                npx = (x_mm - x_range[0]) / voxel_size_mm
+            npy = (y_range[1] - y_mm) / voxel_size_mm
+            npz = (z_mm - z_range[0]) / voxel_size_mm
+
+            self.viewer.add_points(
+                np.array([[npz, npy, npx]], dtype=np.float32),
+                name="Cavity Center",
+                size=12,
+                face_color="#FF00FF",  # magenta — distinct from yellow focus frame
+                border_color="#FFFFFF",
+                border_width=0.15,
+                opacity=0.9,
+                shading="spherical",
+            )
+            self.logger.info(
+                f"Added cavity-center indicator at stage ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) mm"
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to add cavity-center indicator: {e}")
+
     def _get_rotation_gradient_color(self, angle_degrees: float) -> str:
         """Get color for rotation indicator based on angle."""
         # Normalize angle to 0-360
@@ -789,6 +861,40 @@ class ChamberVisualizationManager:
         # At stage Y = 7.45mm, extension tip is at objective focal plane (Y=7.0mm)
         offset = stage_y_mm - self.STAGE_Y_AT_OBJECTIVE
         return self.OBJECTIVE_CHAMBER_Y_MM + offset
+
+    def _chamber_top_stage_y_mm(self) -> float:
+        """Return the top of the actual chamber in stage_y mm.
+
+        When the STEP chamber overlay is loaded, derive this from the
+        chamber_outer_box's upper Z bound (the chamber's open top face).
+        Otherwise fall back to the rectangular display volume's Y maximum.
+        """
+        if self.step_overlay and getattr(self.step_overlay, "_loaded", False):
+            for f in self.step_overlay._features_data.get("features", []):
+                if f.get("role") == "chamber_outer_box":
+                    tr = self.step_overlay._features_data.get(
+                        "step_to_stage_transform", {}
+                    )
+                    offset_y = tr.get("offset_mm", {}).get("stage_y", 0.0)
+                    sign_y = tr.get("sign", {}).get("stage_y", 1)
+                    z_top_file = f["bounds_step"]["z"][1]
+                    return sign_y * z_top_file + offset_y
+        y_range = self._config.get("stage_control", {}).get("y_range_mm", [0.0, 14.0])
+        return y_range[1]
+
+    def _cavity_center_stage_mm(self) -> tuple | None:
+        """Return the cavity centroid in stage mm (x, y, z), or None if no
+        STEP overlay is loaded."""
+        if not (self.step_overlay and getattr(self.step_overlay, "_loaded", False)):
+            return None
+        for f in self.step_overlay._features_data.get("features", []):
+            if f.get("role") == "chamber_cavity":
+                b = f["bounds_step"]
+                cx = (b["x"][0] + b["x"][1]) / 2
+                cy = (b["y"][0] + b["y"][1]) / 2
+                cz = (b["z"][0] + b["z"][1]) / 2
+                return self.step_overlay._step_to_stage_mm((cx, cy, cz))
+        return None
 
     def update_stage_geometry(self, x_mm: float, y_mm: float, z_mm: float) -> None:
         """Update sample holder position when stage moves.
