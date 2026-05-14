@@ -385,6 +385,23 @@ def apply_stitching_yaml_to_config(config_obj: Any) -> None:
     if psf.get("wavelength_nm") is not None:
         config_obj.deconvolution_wavelength_nm = float(psf["wavelength_nm"])
 
+    # Background zeroing
+    bg = cfg.get("background_zero", {})
+    if bg.get("enabled") is not None:
+        config_obj.background_zero_enabled = bool(bg["enabled"])
+    if bg.get("sanity_cap_fraction") is not None:
+        config_obj.background_zero_sanity_cap_fraction = float(
+            bg["sanity_cap_fraction"]
+        )
+    if bg.get("preview_downsample_xy") is not None:
+        config_obj.background_zero_preview_downsample_xy = int(
+            bg["preview_downsample_xy"]
+        )
+    if bg.get("preview_downsample_z") is not None:
+        config_obj.background_zero_preview_downsample_z = int(
+            bg["preview_downsample_z"]
+        )
+
     # Memory
     mem = cfg.get("memory", {})
     if mem.get("streaming_mode") is not None:

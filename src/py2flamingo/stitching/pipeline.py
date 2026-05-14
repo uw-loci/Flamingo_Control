@@ -189,7 +189,7 @@ class _TimeThrottledProgress(_DaskCallback):
         self._start_t = time.time()
         self._last_log_t = self._start_t
 
-    def _emit_status(self, pct_local: float, eta_seconds):
+    def _emit_status(self, pct_local: float, eta_seconds: Optional[float]):
         """Push the live status to the dialog if a progress_fn is set."""
         if self._progress_fn is None:
             return
@@ -359,6 +359,29 @@ class StitchingConfig:
     deconvolution_wavelength_nm: float = 488.0
     deconvolution_n_immersion: float = 1.33
     deconvolution_psf_path: Optional[str] = None
+
+    # Background zeroing (post-fusion threshold).
+    # Voxels at or below the per-channel threshold are set to 0 in the
+    # fused dask graph immediately before write. Zeroed regions compress
+    # to nearly nothing under blosc/zstd, giving large disk savings on
+    # cleared-tissue acquisitions with empty space around the sample.
+    # Applied once per channel, after illumination fusion and tile
+    # blending, so a single threshold acts on the actual stored
+    # intensities. The user must inspect a downsampled preview before
+    # enabling — see run_preview() and the dialog's Preview button.
+    background_zero_enabled: bool = False
+    # Map of channel id -> threshold (uint16 intensity, inclusive lower bound
+    # to zero). Channels not in the map are written verbatim.
+    background_zero_thresholds: Dict[int, int] = field(default_factory=dict)
+    # Hard safety cap: abort write if the chosen threshold would zero
+    # more than this fraction of voxels in any channel. Protects against
+    # picking a threshold above the entire signal range.
+    background_zero_sanity_cap_fraction: float = 0.99
+    # Downsample factors used by run_preview() — independent of the main
+    # downsample so users can inspect at coarse resolution quickly without
+    # changing the full-res output.
+    background_zero_preview_downsample_xy: int = 8
+    background_zero_preview_downsample_z: int = 4
 
     # Resource constraints
     max_memory_gb: Optional[float] = None  # None = auto (50% of system RAM)
@@ -1317,7 +1340,7 @@ class StitchingPipeline:
         ("metadata", "metadata"),
     ]
 
-    def _classify_phase(self, msg):
+    def _classify_phase(self, msg: str) -> Optional[str]:
         s = (msg or "").lower()
         for needle, phase in self._STATUS_TO_PHASE:
             if needle in s:
@@ -1793,6 +1816,172 @@ class StitchingPipeline:
         )
         return output_path
 
+    def run_preview(
+        self,
+        acquisition_dir: Path,
+        channels: Optional[List[int]] = None,
+        tiles: Optional[List[RawTileInfo]] = None,
+    ) -> Dict[int, np.ndarray]:
+        """Run preprocessing + registration + fusion at preview downsample.
+
+        Returns one fused numpy array per channel WITHOUT writing any
+        output files and WITHOUT applying background zeroing — the user
+        will pick a threshold from these volumes. Background zeroing is
+        intentionally skipped here so the preview shows the un-masked
+        intensities the threshold will act on.
+
+        Output factors are temporarily overridden with
+        ``background_zero_preview_downsample_xy/_z`` so the preview is
+        cheap regardless of the configured full-res downsample. The
+        original config values are restored before return.
+        """
+        import shutil
+        import tempfile
+
+        import dask
+        import dask.array as da
+
+        # Snapshot fields we mutate so this method has no side effects
+        # on the parent config.
+        saved = {
+            "downsample_xy": self.config.downsample_xy,
+            "downsample_z": self.config.downsample_z,
+            "background_zero_enabled": self.config.background_zero_enabled,
+            "streaming_mode": self.config.streaming_mode,
+        }
+        self.config.downsample_xy = int(
+            self.config.background_zero_preview_downsample_xy
+        )
+        self.config.downsample_z = int(self.config.background_zero_preview_downsample_z)
+        # Preview shows intensities BEFORE thresholding so the user can
+        # pick a threshold; never apply background-zero in preview path.
+        self.config.background_zero_enabled = False
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix="stitch_preview_"))
+        try:
+            self.logger.info(
+                f"=== Background-zero preview "
+                f"(downsample XY={self.config.downsample_xy}x "
+                f"Z={self.config.downsample_z}x) ==="
+            )
+
+            # Discover or accept tiles
+            if tiles is None:
+                tiles = discover_tiles(acquisition_dir)
+            if not tiles:
+                raise FileNotFoundError(f"No tiles in {acquisition_dir}")
+
+            all_channels = sorted(set(ch for t in tiles for ch in t.channels))
+            process_channels = (
+                [ch for ch in channels if ch in all_channels]
+                if channels is not None
+                else all_channels
+            )
+
+            z_step_um = self.config.z_step_um
+            if z_step_um is None:
+                z_step_um = tiles[0].z_step_mm * 1000.0
+
+            # Resolve any iso sentinel for the preview run too.
+            if (
+                self.config.downsample_xy == ISO_DOWNSAMPLE
+                or self.config.downsample_z == ISO_DOWNSAMPLE
+            ):
+                iso_xy, iso_z = compute_iso_downsample(
+                    self.config.pixel_size_um, z_step_um
+                )
+                self.config.downsample_xy = iso_xy
+                self.config.downsample_z = iso_z
+
+            ds_xy = self.config.downsample_xy
+            ds_z = self.config.downsample_z
+            voxel_size_um = {
+                "z": z_step_um * ds_z,
+                "y": self.config.pixel_size_um * ds_xy,
+                "x": self.config.pixel_size_um * ds_xy,
+            }
+
+            # Register on reference channel (or skip)
+            if self.config.skip_registration:
+                reg_params = []
+                try:
+                    from multiview_stitcher import io as mvs_io
+
+                    transform_key = mvs_io.METADATA_TRANSFORM_KEY
+                except ImportError:
+                    transform_key = "affine_metadata"
+            else:
+                ref_ch = self.config.reg_channel
+                if ref_ch not in process_channels:
+                    ref_ch = process_channels[0]
+                ref_data = self._load_and_preprocess(tiles, [ref_ch])
+                ref_tile_data = ref_data.get(ref_ch, [])
+                if not ref_tile_data:
+                    raise RuntimeError(f"No tiles for reference channel {ref_ch}")
+                reg_params, transform_key = self._register_tiles(
+                    ref_tile_data, voxel_size_um
+                )
+                del ref_data, ref_tile_data
+                gc.collect()
+
+            # Probe one tile for output shape
+            probe_vol = self._preprocess_single_tile(tiles[0], process_channels[0])
+            expected_tile_shape = probe_vol.shape
+            del probe_vol
+            gc.collect()
+
+            preview: Dict[int, np.ndarray] = {}
+            for ch_id in process_channels:
+                if self._cancelled_fn():
+                    break
+
+                ch_tmp_dir = tmp_dir / f"ch{ch_id:02d}"
+                tile_data = self._materialize_tiles_to_disk(
+                    tiles, ch_id, expected_tile_shape, ch_tmp_dir
+                )
+                if not tile_data:
+                    self.logger.warning(
+                        f"Preview: no data for channel {ch_id}, skipping"
+                    )
+                    shutil.rmtree(ch_tmp_dir, ignore_errors=True)
+                    continue
+
+                fused_sim, _origin = self._fuse_channel(
+                    tile_data, voxel_size_um, reg_params, transform_key
+                )
+                darr = fused_sim.data
+                while darr.ndim > 3:
+                    darr = darr[0]
+                darr = da.clip(darr, 0, 65535).astype(np.uint16)
+
+                fuse_workers = self._pick_fuse_workers(darr)
+                if fuse_workers <= 1:
+                    scheduler_cfg: Dict[str, Any] = {"scheduler": "synchronous"}
+                else:
+                    scheduler_cfg = {
+                        "scheduler": "threads",
+                        "num_workers": fuse_workers,
+                    }
+                with dask.config.set(**scheduler_cfg):
+                    arr = darr.compute()
+                preview[ch_id] = np.asarray(arr, dtype=np.uint16)
+                self.logger.info(
+                    f"  Preview channel {ch_id}: shape={preview[ch_id].shape} "
+                    f"min={preview[ch_id].min()} max={preview[ch_id].max()}"
+                )
+
+                del darr, fused_sim, tile_data
+                gc.collect()
+                shutil.rmtree(ch_tmp_dir, ignore_errors=True)
+
+            return preview
+        finally:
+            self.config.downsample_xy = saved["downsample_xy"]
+            self.config.downsample_z = saved["downsample_z"]
+            self.config.background_zero_enabled = saved["background_zero_enabled"]
+            self.config.streaming_mode = saved["streaming_mode"]
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
     def _run_streaming(
         self,
         process_channels: List[int],
@@ -1944,6 +2133,26 @@ class StitchingPipeline:
                     darr = darr[0]
                 darr = da.clip(darr, 0, 65535).astype(np.uint16)
 
+                # Background zeroing: voxels at or below the per-channel
+                # threshold become 0 so blosc/zstd compresses them away.
+                # Applied as a single dask op; runs per-chunk with no
+                # extra peak memory.
+                bg_threshold = 0
+                if self.config.background_zero_enabled:
+                    bg_threshold = int(
+                        self.config.background_zero_thresholds.get(ch_id, 0)
+                    )
+                    if bg_threshold > 0:
+                        darr = da.where(
+                            darr > np.uint16(bg_threshold),
+                            darr,
+                            np.uint16(0),
+                        )
+                        self.logger.info(
+                            f"  Channel {ch_id}: background zeroing "
+                            f"threshold={bg_threshold}"
+                        )
+
                 self.logger.info(
                     f"  Channel {ch_id}: shape={darr.shape} "
                     f"origin Z={origin_um['z']:.1f} Y={origin_um['y']:.1f} "
@@ -1999,6 +2208,30 @@ class StitchingPipeline:
                 with dask.config.set(**scheduler_cfg):
                     with progress_cb:
                         da.store(darr, stacked[dest_idx], compute=True)
+
+                # Safety cap: if background zeroing was active, verify
+                # the fraction of zeroed voxels stayed below the cap.
+                # Reads the freshly-written memmap (one streaming pass,
+                # cheap) rather than recomputing the dask graph.
+                if bg_threshold > 0:
+                    written = stacked[dest_idx]
+                    n_zero = int(np.count_nonzero(written == 0))
+                    n_total = int(written.size)
+                    zero_frac = n_zero / max(n_total, 1)
+                    cap = float(self.config.background_zero_sanity_cap_fraction)
+                    self.logger.info(
+                        f"  Channel {ch_id}: background-zeroed "
+                        f"{zero_frac * 100:.2f}% of voxels "
+                        f"(threshold={bg_threshold}, cap={cap * 100:.0f}%)"
+                    )
+                    if zero_frac > cap:
+                        raise RuntimeError(
+                            f"Background-zero safety cap exceeded for "
+                            f"channel {ch_id}: threshold {bg_threshold} "
+                            f"would zero {zero_frac * 100:.2f}% of voxels "
+                            f"(cap {cap * 100:.0f}%). Lower the threshold "
+                            f"or disable Background zeroing."
+                        )
 
                 # Drop references to per-tile memmaps so Windows releases
                 # the file locks, then delete the per-channel spill dir.

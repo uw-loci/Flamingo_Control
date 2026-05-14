@@ -4,9 +4,10 @@ Non-modal dialog for stitching raw acquisition tile data into a single volume.
 Operates on saved acquisition data on disk — no microscope connection required.
 """
 
+import json
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from PyQt5.QtCore import QProcess, QSettings, Qt, pyqtSignal
 from PyQt5.QtGui import QColor
@@ -24,10 +25,12 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
+    QWidget,
 )
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
@@ -36,6 +39,180 @@ logger = logging.getLogger(__name__)
 
 # QSettings keys
 _SETTINGS_GROUP = "StitchingDialog"
+
+
+class BackgroundZeroPanel(QWidget):
+    """Per-channel background-zeroing controls for the stitching dialog.
+
+    Lossy preprocessing: voxels at or below the per-channel threshold
+    are zeroed in the fused dask graph. Compresses the empty space
+    around cleared-tissue samples to almost nothing while leaving
+    tissue voxels untouched.
+
+    The user MUST inspect the per-channel preview before running, so
+    the panel exposes a "Preview..." button that emits ``preview_requested``.
+    The hosting dialog runs the pipeline at the configured preview
+    downsample factors and feeds the result into a napari viewer.
+    """
+
+    preview_requested = pyqtSignal()
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent=parent)
+        self._channel_spinboxes: Dict[int, QSpinBox] = {}
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(4)
+
+        self._toggle = QPushButton("▶ Background zeroing (lossy)")
+        self._toggle.setCheckable(True)
+        self._toggle.setStyleSheet(
+            "QPushButton { text-align: left; padding: 4px 8px; "
+            "border: none; font-weight: bold; }"
+        )
+        self._toggle.toggled.connect(self._on_toggle)
+        outer.addWidget(self._toggle)
+
+        self._body = QGroupBox()
+        self._body.setStyleSheet(
+            "QGroupBox { border: 1px solid #ccc; border-radius: 4px; "
+            "margin-top: 0px; padding-top: 6px; }"
+        )
+        body_layout = QVBoxLayout()
+        body_layout.setSpacing(6)
+
+        self._enable_cb = QCheckBox(
+            "Zero voxels at or below per-channel threshold (lossy)"
+        )
+        self._enable_cb.setToolTip(
+            "When ON, voxels with intensity <= the per-channel threshold\n"
+            "are written as 0. Compresses empty space around the sample\n"
+            "to almost nothing under blosc/zstd.\n\n"
+            "LOSSY for the masked region. Click Preview... first to see\n"
+            "what would be zeroed at coarse resolution before committing\n"
+            "to a full-resolution run."
+        )
+        body_layout.addWidget(self._enable_cb)
+
+        warn = QLabel(
+            "⚠ Lossy. Always preview first. The full-res write applies "
+            "the same threshold; if it would zero >99% of voxels in any "
+            "channel the run aborts before any output is written."
+        )
+        warn.setWordWrap(True)
+        warn.setStyleSheet("color: #c25e00; font-size: 11px;")
+        body_layout.addWidget(warn)
+
+        self._channels_container = QWidget()
+        self._channels_layout = QGridLayout(self._channels_container)
+        self._channels_layout.setSpacing(4)
+        self._channels_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.addWidget(self._channels_container)
+        self._render_no_channels_placeholder()
+
+        btn_row = QHBoxLayout()
+        self._preview_btn = QPushButton("Preview…")
+        self._preview_btn.setToolTip(
+            "Run the stitching pipeline at coarse downsample without\n"
+            "writing any output, then open a napari viewer with sliders\n"
+            "to pick per-channel thresholds. Click Apply in the preview\n"
+            "to copy the chosen values back into this panel."
+        )
+        self._preview_btn.clicked.connect(self.preview_requested)
+        btn_row.addWidget(self._preview_btn)
+        btn_row.addStretch()
+        body_layout.addLayout(btn_row)
+
+        self._body.setLayout(body_layout)
+        self._body.setVisible(False)
+        outer.addWidget(self._body)
+
+    def _render_no_channels_placeholder(self) -> None:
+        # Placeholder shown until tiles are discovered.
+        for i in reversed(range(self._channels_layout.count())):
+            item = self._channels_layout.takeAt(i)
+            w = item.widget() if item is not None else None
+            if w is not None:
+                w.deleteLater()
+        self._channel_spinboxes.clear()
+        ph = QLabel("Discover tiles first — channels appear here.")
+        ph.setStyleSheet("color: #888; font-style: italic;")
+        self._channels_layout.addWidget(ph, 0, 0, 1, 2)
+
+    def _on_toggle(self, checked: bool) -> None:
+        self._body.setVisible(checked)
+        self._toggle.setText(("▼ " if checked else "▶ ") + "Background zeroing (lossy)")
+
+    # Public API ----------------------------------------------------------
+    def set_channels(self, channel_ids: List[int]) -> None:
+        """Rebuild the per-channel threshold rows. Preserves any thresholds
+        already set for channels that survive the rebuild.
+        """
+        previous = {ch: sb.value() for ch, sb in self._channel_spinboxes.items()}
+        for i in reversed(range(self._channels_layout.count())):
+            item = self._channels_layout.takeAt(i)
+            w = item.widget() if item is not None else None
+            if w is not None:
+                w.deleteLater()
+        self._channel_spinboxes.clear()
+
+        if not channel_ids:
+            self._render_no_channels_placeholder()
+            return
+
+        header_label = QLabel("Channel")
+        header_label.setStyleSheet("font-weight: bold;")
+        header_thresh = QLabel("Threshold (uint16)")
+        header_thresh.setStyleSheet("font-weight: bold;")
+        self._channels_layout.addWidget(header_label, 0, 0)
+        self._channels_layout.addWidget(header_thresh, 0, 1)
+
+        for row, ch_id in enumerate(channel_ids, start=1):
+            self._channels_layout.addWidget(QLabel(f"ch {ch_id}"), row, 0)
+            sb = QSpinBox()
+            sb.setRange(0, 65535)
+            sb.setSingleStep(10)
+            sb.setValue(previous.get(ch_id, 0))
+            sb.setToolTip(
+                f"Channel {ch_id}: voxels with value <= this threshold "
+                f"will be zeroed in the fused output. 0 disables thresholding "
+                f"for this channel."
+            )
+            self._channels_layout.addWidget(sb, row, 1)
+            self._channel_spinboxes[ch_id] = sb
+
+    def is_enabled(self) -> bool:
+        return self._enable_cb.isChecked()
+
+    def set_enabled_state(self, enabled: bool) -> None:
+        self._enable_cb.setChecked(bool(enabled))
+
+    def thresholds(self) -> Dict[int, int]:
+        # Only include non-zero entries — a zero threshold is a no-op
+        # and we don't want it counted in the safety-cap audit log.
+        return {
+            ch: int(sb.value())
+            for ch, sb in self._channel_spinboxes.items()
+            if sb.value() > 0
+        }
+
+    def set_thresholds(self, thresholds: Dict[int, int]) -> None:
+        """Apply persisted or preview-Applied thresholds. Channels not in
+        ``thresholds`` are left at their current value (typically 0).
+        """
+        for ch, val in thresholds.items():
+            sb = self._channel_spinboxes.get(int(ch))
+            if sb is not None:
+                sb.setValue(int(val))
+
+    def expanded(self) -> bool:
+        return self._toggle.isChecked()
+
+    def set_expanded(self, expanded: bool) -> None:
+        self._toggle.setChecked(bool(expanded))
 
 
 class StitchingDialog(PersistentDialog):
@@ -300,7 +477,18 @@ class StitchingDialog(PersistentDialog):
             "Compression codec for the output file.\n\n"
             "Options depend on the output format:\n"
             "  Zarr: zstd (recommended), lz4 (fastest), blosc, none\n"
-            "  TIFF: zlib (universal), lzw (fast read), zstd (best ratio), none"
+            "  TIFF: zlib (best compatibility), lzw (balanced), "
+            "zstd (best ratio), none\n\n"
+            "Speed vs. storage tradeoff:\n"
+            "• 'None' skips encode on write and decode on read, so it's\n"
+            "  the fastest option on both ends when reading from a fast\n"
+            "  local SSD / NVMe — at the cost of a much larger file.\n"
+            "• Compressed codecs (zstd, lz4, zlib, lzw) produce smaller\n"
+            "  files that can read FASTER than 'None' over slow disks,\n"
+            "  network shares, or external HDDs, because disk I/O — not\n"
+            "  CPU decode — is the bottleneck.\n"
+            "• zstd / lz4 have modern fast decoders; zlib / lzw are the\n"
+            "  universally-readable TIFF fallbacks for older software."
         )
         settings_layout.addWidget(self._compression_combo, 2, 4)
         self._update_compression_options()
@@ -492,30 +680,8 @@ class StitchingDialog(PersistentDialog):
         )
         proc_layout.addWidget(self._reg_binning_combo, 2, 2, 1, 2)
 
-        # Proc Row 3: Depth attenuation
-        self._depth_atten_cb = QCheckBox("Depth attenuation")
-        self._depth_atten_cb.setToolTip(
-            "Correct exponential Z-intensity falloff\n"
-            "(Beer-Lambert scattering/absorption compensation).\n"
-            "Auto-fits decay coefficient from data unless overridden."
-        )
-        proc_layout.addWidget(self._depth_atten_cb, 3, 0)
-
-        self._depth_atten_mu_spin = QDoubleSpinBox()
-        self._depth_atten_mu_spin.setRange(0.0, 1.0)
-        self._depth_atten_mu_spin.setDecimals(5)
-        self._depth_atten_mu_spin.setValue(0.0)
-        self._depth_atten_mu_spin.setSingleStep(0.0001)
-        self._depth_atten_mu_spin.setSpecialValueText("Auto")
-        self._depth_atten_mu_spin.setToolTip(
-            "Decay coefficient \u00b5 (1/\u00b5m). 0 = auto-fit from data."
-        )
-        self._depth_atten_mu_spin.setEnabled(False)
-        self._depth_atten_cb.toggled.connect(self._depth_atten_mu_spin.setEnabled)
-        proc_layout.addWidget(self._depth_atten_mu_spin, 3, 1)
-
-        # Proc Row 4: Fusion chunk size
-        proc_layout.addWidget(QLabel("Fusion chunk size:"), 4, 0)
+        # Proc Row 3: Fusion chunk size
+        proc_layout.addWidget(QLabel("Fusion chunk size:"), 3, 0)
         self._chunk_size_combo = QComboBox()
         # Dask graph granularity for the fuse step. Separate from
         # zarr_chunks (the final storage chunk size that determines
@@ -547,16 +713,21 @@ class StitchingDialog(PersistentDialog):
             "step is unexpectedly slow and you have RAM headroom.\n"
             "Small helps on tight-RAM systems at the cost of throughput."
         )
-        proc_layout.addWidget(self._chunk_size_combo, 4, 1, 1, 3)
+        proc_layout.addWidget(self._chunk_size_combo, 3, 1, 1, 3)
 
-        # Proc Row 5: Legend
+        # Proc Row 4: Legend
         legend = QLabel("\u2731 = significantly increases processing time")
         legend.setStyleSheet("color: #FF8C00; font-style: italic; font-size: 11px;")
-        proc_layout.addWidget(legend, 5, 0, 1, 4)
+        proc_layout.addWidget(legend, 4, 0, 1, 4)
 
         self._proc_widget.setLayout(proc_layout)
         self._proc_widget.setVisible(False)
         layout.addWidget(self._proc_widget)
+
+        # --- Background zeroing (lossy compression aid) ---
+        self._bg_zero_panel = BackgroundZeroPanel()
+        self._bg_zero_panel.preview_requested.connect(self._on_preview_background_zero)
+        layout.addWidget(self._bg_zero_panel)
 
         # --- Action buttons ---
         btn_layout = QHBoxLayout()
@@ -888,6 +1059,24 @@ class StitchingDialog(PersistentDialog):
 
         # Refresh the output-voxel readout now that Z may have auto-filled.
         self._update_voxel_readout()
+
+        # Populate per-channel rows in the background-zero panel once
+        # tiles are known. Use the union of channels across queue items.
+        all_channels: List[int] = sorted(
+            {
+                ch
+                for it in self._queue
+                if it.get("tiles")
+                for t in it["tiles"]
+                for ch in t.channels
+            }
+        )
+        self._bg_zero_panel.set_channels(all_channels)
+        # Replay any thresholds restored before channels were known.
+        pending = getattr(self, "_pending_bg_zero_thresholds", None)
+        if pending:
+            self._bg_zero_panel.set_thresholds(pending)
+            self._pending_bg_zero_thresholds = {}
 
     def _discover_tiles_for_path(self, acq_path: Path):
         """Discover tiles in an acquisition directory.
@@ -1232,12 +1421,6 @@ class StitchingDialog(PersistentDialog):
         config.flat_field_correction = self._flat_field_cb.isChecked()
         config.destripe = self._destripe_cb.isChecked()
         config.destripe_fast = self._destripe_fast_cb.isChecked()
-        config.depth_attenuation = self._depth_atten_cb.isChecked()
-        config.depth_attenuation_mu = (
-            self._depth_atten_mu_spin.value()
-            if self._depth_atten_mu_spin.value() > 0
-            else None
-        )
         config.downsample_xy = self._downsample_xy_combo.currentData()
         config.downsample_z = self._downsample_z_combo.currentData()
         config.deconvolution_enabled = self._deconv_cb.isChecked()
@@ -1250,6 +1433,15 @@ class StitchingDialog(PersistentDialog):
         chunk = self._chunk_size_combo.currentData()
         if chunk:
             config.output_chunksize = dict(chunk)
+
+        # Background zeroing: only forward thresholds when the master
+        # checkbox is on. The pipeline guards on background_zero_enabled
+        # but keep the dialog's intent explicit.
+        config.background_zero_enabled = self._bg_zero_panel.is_enabled()
+        if config.background_zero_enabled:
+            config.background_zero_thresholds = dict(self._bg_zero_panel.thresholds())
+        else:
+            config.background_zero_thresholds = {}
 
         # Set compression based on format
         compression = self._compression_combo.currentData()
@@ -1833,26 +2025,26 @@ class StitchingDialog(PersistentDialog):
 
         if fmt == "ome-tiff":
             # zlib and lzw are always available (built into tifffile/Python)
-            self._compression_combo.addItem("zlib (universal)", "zlib")
-            self._compression_combo.addItem("lzw (fast read)", "lzw")
+            self._compression_combo.addItem("zlib (best compatibility)", "zlib")
+            self._compression_combo.addItem("lzw (balanced)", "lzw")
             # zstd for TIFF requires imagecodecs
             if self._tiff_zstd_available():
                 self._compression_combo.addItem("zstd (best ratio)", "zstd")
-            self._compression_combo.addItem("None (fastest write)", "none")
+            self._compression_combo.addItem("None (no compression)", "none")
             default = "zlib"
         elif fmt in ("ome-zarr-sharded", "ome-zarr-v2"):
             # Zarr codecs are handled by numcodecs, always available
             self._compression_combo.addItem("zstd (recommended)", "zstd")
-            self._compression_combo.addItem("lz4 (fastest)", "lz4")
+            self._compression_combo.addItem("lz4 (fastest codec)", "lz4")
             self._compression_combo.addItem("blosc (compatible)", "blosc")
-            self._compression_combo.addItem("None (fastest write)", "none")
+            self._compression_combo.addItem("None (no compression)", "none")
             default = "zstd"
         else:
             # "both" — show zarr options (tiff will use zlib internally)
             self._compression_combo.addItem("zstd (recommended)", "zstd")
-            self._compression_combo.addItem("lz4 (fastest)", "lz4")
+            self._compression_combo.addItem("lz4 (fastest codec)", "lz4")
             self._compression_combo.addItem("blosc (compatible)", "blosc")
-            self._compression_combo.addItem("None (fastest write)", "none")
+            self._compression_combo.addItem("None (no compression)", "none")
             default = "zstd"
 
         # Restore previous selection if still valid for this format
@@ -2172,6 +2364,135 @@ class StitchingDialog(PersistentDialog):
             self._log(f"\n=== Setup failed (exit code {exit_code}) ===")
             self._log("Check the log above for errors.")
 
+    # --- Background-zero preview ---
+
+    def _on_preview_background_zero(self) -> None:
+        """Run the stitching pipeline at preview downsample on the first
+        discovered queue item, then open a napari viewer for threshold
+        picking. The chosen thresholds are written back into the panel.
+        """
+        from PyQt5.QtCore import QThread
+
+        from py2flamingo.stitching.pipeline import StitchingPipeline
+
+        first = next(
+            (it for it in self._queue if it.get("tiles")),
+            None,
+        )
+        if first is None:
+            QMessageBox.warning(
+                self,
+                "No tiles",
+                "Discover tiles first — the preview needs at least one "
+                "discovered acquisition to run on.",
+            )
+            return
+
+        # Build a config snapshot. Background zeroing itself is forced
+        # off inside run_preview(); the rest of the preprocessing chain
+        # runs as configured so the preview matches the real pipeline.
+        config = self._build_config()
+
+        channels = self._parse_channels()
+        tiles = first["tiles"]
+        acquisition_dir = first["path"]
+
+        self._log(
+            f"\n=== Background-zero preview for {acquisition_dir.name} "
+            f"({len(tiles)} tiles) ==="
+        )
+
+        class _PreviewWorker(QThread):
+            done = pyqtSignal(object, object)  # (result_dict | None, error_str | None)
+
+            def __init__(self, _config, _acq_dir, _channels, _tiles):
+                super().__init__()
+                self._config = _config
+                self._acq_dir = _acq_dir
+                self._channels = _channels
+                self._tiles = _tiles
+
+            def run(self):
+                try:
+                    pipeline = StitchingPipeline(self._config)
+                    result = pipeline.run_preview(
+                        self._acq_dir,
+                        channels=self._channels,
+                        tiles=self._tiles,
+                    )
+                    self.done.emit(result, None)
+                except Exception as exc:  # surface to UI thread
+                    logger.exception("Background-zero preview failed")
+                    self.done.emit(None, str(exc))
+
+        # Lock the panel while the preview is running.
+        self._bg_zero_panel.setEnabled(False)
+        self._discover_btn.setEnabled(False)
+        self._run_btn.setEnabled(False)
+
+        worker = _PreviewWorker(config, acquisition_dir, channels, tiles)
+        # Hold a reference so the QThread is not garbage-collected mid-run.
+        self._bg_preview_worker = worker
+        worker.done.connect(
+            lambda r, e: self._on_preview_done(
+                r, e, current_thresholds=self._bg_zero_panel.thresholds()
+            )
+        )
+        worker.start()
+
+    def _on_preview_done(
+        self,
+        result: Optional[Dict[int, "object"]],
+        error: Optional[str],
+        current_thresholds: Dict[int, int],
+    ) -> None:
+        self._bg_zero_panel.setEnabled(True)
+        self._discover_btn.setEnabled(True)
+        self._update_action_buttons()
+
+        worker = getattr(self, "_bg_preview_worker", None)
+        if worker is not None:
+            worker.deleteLater()
+            self._bg_preview_worker = None
+
+        if error is not None:
+            self._log(f"Preview failed: {error}")
+            QMessageBox.critical(
+                self,
+                "Preview failed",
+                f"Background-zero preview failed:\n\n{error}",
+            )
+            return
+        if not result:
+            self._log("Preview produced no channel data.")
+            return
+
+        for ch_id, vol in result.items():
+            self._log(
+                f"  ch {ch_id}: shape={tuple(vol.shape)} "
+                f"min={int(vol.min())} max={int(vol.max())}"
+            )
+
+        from py2flamingo.views.dialogs.background_zero_preview_dialog import (
+            BackgroundZeroPreviewDialog,
+        )
+
+        dlg = BackgroundZeroPreviewDialog(
+            preview_volumes=result,
+            initial_thresholds=current_thresholds,
+            parent=self,
+        )
+        if dlg.exec_() == dlg.Accepted:
+            chosen = dlg.thresholds()
+            self._log(
+                "Applied thresholds from preview: "
+                + ", ".join(f"ch{ch}={t}" for ch, t in sorted(chosen.items()))
+            )
+            self._bg_zero_panel.set_thresholds(chosen)
+            self._bg_zero_panel.set_enabled_state(True)
+        else:
+            self._log("Preview cancelled — thresholds unchanged.")
+
     # --- Settings persistence ---
 
     def _save_settings(self):
@@ -2190,8 +2511,6 @@ class StitchingDialog(PersistentDialog):
         s.setValue("flat_field", self._flat_field_cb.isChecked())
         s.setValue("destripe", self._destripe_cb.isChecked())
         s.setValue("destripe_fast", self._destripe_fast_cb.isChecked())
-        s.setValue("depth_attenuation", self._depth_atten_cb.isChecked())
-        s.setValue("depth_attenuation_mu", self._depth_atten_mu_spin.value())
         s.setValue("deconvolution", self._deconv_cb.isChecked())
         s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
         s.setValue("chunk_size_idx", self._chunk_size_combo.currentIndex())
@@ -2204,6 +2523,14 @@ class StitchingDialog(PersistentDialog):
         s.setValue("skip_registration", self._skip_reg_cb.isChecked())
         s.setValue("reg_binning", self._reg_binning_combo.currentIndex())
         s.setValue("proc_options_expanded", self._proc_toggle.isChecked())
+        s.setValue("bg_zero_enabled", self._bg_zero_panel.is_enabled())
+        s.setValue("bg_zero_expanded", self._bg_zero_panel.expanded())
+        s.setValue(
+            "bg_zero_thresholds_json",
+            json.dumps(
+                {str(k): int(v) for k, v in self._bg_zero_panel.thresholds().items()}
+            ),
+        )
         s.endGroup()
 
     def _restore_settings(self):
@@ -2268,12 +2595,6 @@ class StitchingDialog(PersistentDialog):
         destripe_fast = s.value("destripe_fast", False, type=bool)
         self._destripe_fast_cb.setChecked(destripe_fast)
 
-        depth_atten = s.value("depth_attenuation", False, type=bool)
-        self._depth_atten_cb.setChecked(depth_atten)
-
-        depth_atten_mu = s.value("depth_attenuation_mu", 0.0, type=float)
-        self._depth_atten_mu_spin.setValue(depth_atten_mu)
-
         deconv = s.value("deconvolution", False, type=bool)
         self._deconv_cb.setChecked(deconv)
 
@@ -2320,6 +2641,24 @@ class StitchingDialog(PersistentDialog):
 
         proc_expanded = s.value("proc_options_expanded", False, type=bool)
         self._proc_toggle.setChecked(proc_expanded)
+
+        bg_zero_enabled = s.value("bg_zero_enabled", False, type=bool)
+        self._bg_zero_panel.set_enabled_state(bg_zero_enabled)
+        bg_zero_expanded = s.value("bg_zero_expanded", False, type=bool)
+        self._bg_zero_panel.set_expanded(bg_zero_expanded)
+        # Per-channel thresholds are persisted as JSON {ch_id: threshold}.
+        # They cannot be applied until set_channels() runs (after Discover),
+        # so stash them and replay after discovery.
+        bg_zero_json = s.value("bg_zero_thresholds_json", "", type=str)
+        self._pending_bg_zero_thresholds: Dict[int, int] = {}
+        if bg_zero_json:
+            try:
+                parsed = json.loads(bg_zero_json)
+                self._pending_bg_zero_thresholds = {
+                    int(k): int(v) for k, v in parsed.items()
+                }
+            except (ValueError, TypeError):
+                pass
 
         s.endGroup()
 
@@ -2407,8 +2746,6 @@ class NativeStitchingDialog(StitchingDialog):
         s.setValue("flat_field", self._flat_field_cb.isChecked())
         s.setValue("destripe", self._destripe_cb.isChecked())
         s.setValue("destripe_fast", self._destripe_fast_cb.isChecked())
-        s.setValue("depth_attenuation", self._depth_atten_cb.isChecked())
-        s.setValue("depth_attenuation_mu", self._depth_atten_mu_spin.value())
         s.setValue("deconvolution", self._deconv_cb.isChecked())
         s.setValue("content_based_fusion", self._content_fusion_cb.isChecked())
         s.setValue("chunk_size_idx", self._chunk_size_combo.currentIndex())
@@ -2421,6 +2758,14 @@ class NativeStitchingDialog(StitchingDialog):
         s.setValue("skip_registration", self._skip_reg_cb.isChecked())
         s.setValue("reg_binning", self._reg_binning_combo.currentIndex())
         s.setValue("proc_options_expanded", self._proc_toggle.isChecked())
+        s.setValue("bg_zero_enabled", self._bg_zero_panel.is_enabled())
+        s.setValue("bg_zero_expanded", self._bg_zero_panel.expanded())
+        s.setValue(
+            "bg_zero_thresholds_json",
+            json.dumps(
+                {str(k): int(v) for k, v in self._bg_zero_panel.thresholds().items()}
+            ),
+        )
         s.endGroup()
 
     def _restore_settings(self):
@@ -2485,12 +2830,6 @@ class NativeStitchingDialog(StitchingDialog):
         destripe_fast = s.value("destripe_fast", False, type=bool)
         self._destripe_fast_cb.setChecked(destripe_fast)
 
-        depth_atten = s.value("depth_attenuation", False, type=bool)
-        self._depth_atten_cb.setChecked(depth_atten)
-
-        depth_atten_mu = s.value("depth_attenuation_mu", 0.0, type=float)
-        self._depth_atten_mu_spin.setValue(depth_atten_mu)
-
         deconv = s.value("deconvolution", False, type=bool)
         self._deconv_cb.setChecked(deconv)
 
@@ -2536,6 +2875,21 @@ class NativeStitchingDialog(StitchingDialog):
 
         proc_expanded = s.value("proc_options_expanded", False, type=bool)
         self._proc_toggle.setChecked(proc_expanded)
+
+        bg_zero_enabled = s.value("bg_zero_enabled", False, type=bool)
+        self._bg_zero_panel.set_enabled_state(bg_zero_enabled)
+        bg_zero_expanded = s.value("bg_zero_expanded", False, type=bool)
+        self._bg_zero_panel.set_expanded(bg_zero_expanded)
+        bg_zero_json = s.value("bg_zero_thresholds_json", "", type=str)
+        self._pending_bg_zero_thresholds: Dict[int, int] = {}
+        if bg_zero_json:
+            try:
+                parsed = json.loads(bg_zero_json)
+                self._pending_bg_zero_thresholds = {
+                    int(k): int(v) for k, v in parsed.items()
+                }
+            except (ValueError, TypeError):
+                pass
 
         s.endGroup()
 

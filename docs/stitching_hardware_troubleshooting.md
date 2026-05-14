@@ -242,7 +242,60 @@ See `claude-reports/lightsheet_stitching_options.md` and the TODO in
 
 ---
 
-## 5. TODOs for Docs / Code
+## 5. Tuning by RAM Tier
+
+The defaults target a 64 GB box. Larger systems get bigger wins from
+**chunk-count reduction** (XL fusion chunks) than from RAM-fed tricks —
+the fuse-store inner loop is dask-task-dispatch-bound at ~35 tasks/s
+per 4 cores regardless of memory.
+
+Reference run for sizing: 66 tiles × 2 channels × 727 Z × 2048² → 215 GB
+output, 6 h 8 min total wall-clock on 192 GB / 28-core / NVMe Gen 5.
+Channel fuse-store dominated (162 + 181 min). Imaris write was 11 min.
+
+| RAM        | Memory Mode | Fusion chunk | preprocess_workers | fuse_workers | Notes                                                                 |
+|------------|-------------|--------------|--------------------|---------------|-----------------------------------------------------------------------|
+| 16–32 GB   | Streaming   | Small (4 MB) | 1–2 (auto)         | 1–2 (auto)    | Memory pill must be green. Expect ~1.5–2× longer than the table below. |
+| 64 GB      | Streaming   | Medium (16 MB) | 2–4 (auto)        | 2–4 (auto)    | Defaults. Safe headroom for 200+ GB outputs.                          |
+| 128 GB     | Streaming   | **Large (32 MB)** | 4 (auto)        | 4 (auto)      | Current default chunk size — sweet spot for usability + speed.       |
+| 192 GB     | Streaming   | Large or XL  | 4 (auto)           | 4 (auto)      | Validated: 6 h 8 min for 215 GB output, Large chunks.                |
+| 256 GB+    | In-memory if output < ½ RAM, else Streaming | XL (128 MB) | 6–8 (manual) | 6–8 (manual) | XL drops chunk count ~4× → fuse-store ~3× faster. Biggest single win.|
+| 512 GB+    | In-memory   | XL (128 MB)  | 8 (manual)         | 8 (manual)    | Skips fused.dat memmap entirely. Saves ~45 min per 200 GB output.    |
+
+**Knob priorities (most-to-least impact for >128 GB systems):**
+
+1. **XL fusion chunks (128 MB).** Dialog → Fusion chunk size → XL.
+   Reduces dask task count ~4× vs Large, ~32× vs Small. The fuse-store
+   `~35 tasks/s` ceiling is per-task, so chunks ÷ 4 ≈ wall-clock ÷ 4 for
+   the fuse phase. *Caveat:* slightly worse zoom/random-access UX in
+   napari/Imaris because each chunk is a 128 MB I/O unit.
+2. **In-memory mode** (Streaming OFF). Skips the 215 GB `fused.dat`
+   round-trip on the output drive. Saves ~20–25 min per channel. Only
+   safe when the green memory pill stays green at full settings.
+3. **Raise `fuse_workers` to 8.** Edit `stitching_config.yaml`
+   (no UI yet). Helps modestly because some tasks block on tile-memmap
+   reads; numpy/scipy contention caps the gain at ~5–15%.
+4. **Raise `preprocess_workers` to 8.** Same YAML. Tiny win — preprocess
+   is already <5% of total wall-time.
+
+**What more RAM does NOT help:**
+
+- The dask scheduler ceiling (~35 tasks/s/4-cores). Pure Python overhead.
+- Imaris write throughput (already I/O-bound at ~325 MB/s on NVMe).
+- Per-chunk numpy/scipy cost in content-based fusion (CPU-bound).
+
+**Recommendation by use case:**
+
+- *Production stitching, exploring in napari/Imaris afterward*: stick with
+  Large chunks, In-memory mode if RAM allows. Best balance of run time
+  and post-stitch usability.
+- *Bulk batch jobs, archive-only output*: XL chunks + In-memory + 8
+  workers. Wall-clock matters more than zoom UX.
+- *Tight RAM (≤64 GB)*: defaults. The auto-pickers are tuned for this case.
+
+---
+
+## 6. TODOs for Docs / Code
 
 * [ ] `StitchingConfig.temp_dir` — let users put `.stitch_tmp/` on a
       separate fast drive from the output drive.

@@ -283,6 +283,35 @@ deconvolution:
   z_slab_size: 0
 
 # ============================================================
+# Background zeroing (post-fusion threshold)
+# ============================================================
+# Voxels at or below the per-channel threshold are set to 0 in the
+# fused dask graph immediately before write. Zeroed regions compress
+# to nearly nothing under blosc/zstd, giving large disk savings on
+# cleared-tissue acquisitions with empty space around the sample.
+#
+# IMPORTANT: lossy for the masked region. Always preview before
+# enabling on a new acquisition — see the "Background zeroing"
+# panel in the stitching dialog and click "Preview..." to inspect
+# the masked volume at coarse resolution before committing.
+background_zero:
+  # Master switch. Off by default; the dialog checkbox flips this
+  # at config-build time.
+  enabled: false
+
+  # Hard safety cap: abort the write if any channel's threshold
+  # would zero more than this fraction of voxels. Protects against
+  # picking a threshold above the entire signal range.
+  # 0.99 = abort if >99% of voxels would be zeroed.
+  sanity_cap_fraction: 0.99
+
+  # Downsample factors used for the in-dialog preview. The preview
+  # runs the full preprocessing + fusion pipeline at these factors,
+  # so it does not change the full-resolution output.
+  preview_downsample_xy: 8
+  preview_downsample_z: 4
+
+# ============================================================
 # Memory management & streaming
 # ============================================================
 memory:
