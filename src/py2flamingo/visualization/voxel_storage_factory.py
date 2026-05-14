@@ -37,9 +37,12 @@ def get_default_visualization_config() -> dict:
             "backend": "sparse",
             "max_memory_mb": 2000,
         },
+        # HARDWARE dimensions (holder_diameter_mm, etc.) are intentionally
+        # omitted from this fallback. They must be set explicitly in the
+        # user's visualization_3d_config.yaml. A wrong holder size could
+        # let an oversized holder collide with the chamber wall undetected.
         "sample_chamber": {
             "inner_dimensions_mm": [10, 10, 43],
-            "holder_diameter_mm": 1.0,
             "sample_region_center_um": [6655, 7000, 19250],
             "sample_region_radius_um": 2000,
         },

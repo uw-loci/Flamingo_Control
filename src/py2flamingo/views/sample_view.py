@@ -1896,9 +1896,19 @@ class SampleView(QWidget):
             )
             if overlay is None:
                 return False, ""
-            holder_diameter_mm = float(
-                self._config.get("sample_chamber", {}).get("holder_diameter_mm", 1.0)
+            # holder_diameter_mm is HARDWARE; never default. A wrong holder
+            # size could miss real wall collisions. Require explicit config.
+            holder_diameter_mm = self._config.get("sample_chamber", {}).get(
+                "holder_diameter_mm"
             )
+            if holder_diameter_mm is None:
+                raise ValueError(
+                    "sample_chamber.holder_diameter_mm is missing from the "
+                    "visualization config. This is a HARDWARE value (no safe "
+                    "default exists) — set it in visualization_3d_config.yaml "
+                    "to the diameter of your installed sample holder in mm."
+                )
+            holder_diameter_mm = float(holder_diameter_mm)
             shaft_r = max(holder_diameter_mm / 2.0, 1e-3)
             margin_mm = float(coll_cfg.get("margin_mm", 0.25))
             d = overlay.distance_to_holder(

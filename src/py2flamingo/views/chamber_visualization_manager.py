@@ -65,8 +65,10 @@ class ChamberVisualizationManager:
         # 3D visualization state
         self.holder_position = {"x": 0, "y": 0, "z": 0}
         self.rotation_indicator_length = 0
-        self.extension_length_mm = 10.0  # Extension extends 10mm upward from tip
-        self.extension_diameter_mm = 0.22  # Fine extension (220 micrometers)
+        # Holder assembly dimensions (HARDWARE) are read from
+        # sample_chamber.{holder_diameter_mm, fep_tube_diameter_mm,
+        # fep_tube_length_mm} via _holder_dimensions(). No defaults — the
+        # user must set them in visualization_3d_config.yaml.
         self.STAGE_Y_AT_OBJECTIVE = 7.45  # mm - stage Y at objective focal plane
         self.OBJECTIVE_CHAMBER_Y_MM = (
             7.0  # mm - objective focal plane in chamber coords
@@ -314,8 +316,8 @@ class ChamberVisualizationManager:
             self._add_reference_walls(dims, chamber_y_top, chamber_y_bot)
 
             # Add additional visualization elements
-            self._add_sample_holder()
-            self._add_fine_extension()
+            self._add_sample_holder()  # sets self.holder_position; no sphere
+            self._add_holder_assembly()  # FEP Tube + Holder Stem layers
             self._add_objective_indicator()
             self._add_rotation_indicator()
             self._add_xy_focus_frame()
@@ -395,31 +397,54 @@ class ChamberVisualizationManager:
         except Exception as e:
             self.logger.warning(f"Failed to add reference walls: {e}")
 
-    def _add_sample_holder(self) -> None:
-        """Add sample holder indicator at the top of the chamber.
+    def _holder_dimensions(self) -> tuple:
+        """Return (holder_diameter_mm, fep_tube_diameter_mm, fep_tube_length_mm)
+        from config. These are HARDWARE values; the config must supply them
+        explicitly — no defaults, because a wrong value could allow an
+        oversized holder to hit the chamber wall undetected, or misposition
+        the visualization of where the sample actually is.
+        """
+        sc = self._config.get("sample_chamber", {})
+        holder_diam = sc.get("holder_diameter_mm")
+        fep_diam = sc.get("fep_tube_diameter_mm")
+        fep_len = sc.get("fep_tube_length_mm")
+        missing = [
+            k
+            for k, v in (
+                ("holder_diameter_mm", holder_diam),
+                ("fep_tube_diameter_mm", fep_diam),
+                ("fep_tube_length_mm", fep_len),
+            )
+            if v is None
+        ]
+        if missing:
+            raise ValueError(
+                "sample_chamber config is missing required HARDWARE values: "
+                + ", ".join(missing)
+                + ". No safe defaults exist — set these in "
+                "src/py2flamingo/configs/visualization_3d_config.yaml to the "
+                "actual installed-component dimensions in mm."
+            )
+        return float(holder_diam), float(fep_diam), float(fep_len)
 
-        The holder is a gray sphere shown at Y=0 (chamber top), representing
-        the mounting point where the sample holder enters the chamber.
+    def _add_sample_holder(self) -> None:
+        """Compute the initial sample-tip position (stored in
+        ``self.holder_position``) used by FEP tube + metal stem + rotation
+        indicator. No sphere is rendered — the assembly is 2 parts:
+        FEP tube (below) and metal stem (above), each in its own layer.
         """
         if not self.viewer or not self.voxel_storage:
             return
 
         try:
-            # Get holder dimensions from config
-            holder_diameter_mm = self._config.get("sample_chamber", {}).get(
-                "holder_diameter_mm", 3.0
-            )
             voxel_size_um = self._config.get("display", {}).get(
                 "voxel_size_um", [50, 50, 50]
             )[0]
-            holder_radius_voxels = int((holder_diameter_mm * 1000 / 2) / voxel_size_um)
             voxel_size_mm = voxel_size_um / 1000.0
 
             dims = self.voxel_storage.display_dims  # (Z, Y, X)
 
-            # Get initial position: prefer _initial_stage_position (set by
-            # SampleView from last_stage_position, which defaults to range
-            # midpoints when disconnected), then sliders, then range midpoints.
+            # Get initial stage position
             stage_ctrl = self._config.get("stage_control", {})
             x_range = stage_ctrl.get("x_range_mm", [1.0, 12.31])
             y_range = stage_ctrl.get("y_range_mm", [0.0, 14.0])
@@ -439,133 +464,122 @@ class ChamberVisualizationManager:
                 stage_y_mm = (y_range[0] + y_range[1]) / 2
                 z_mm = (z_range[0] + z_range[1]) / 2
 
-            # Convert stage Y to chamber Y (where extension tip is)
             chamber_y_tip_mm = self._stage_y_to_chamber_y(stage_y_mm)
 
-            # Get coordinate ranges from config
-            x_range = self._config.get("stage_control", {}).get(
-                "x_range_mm", [1.0, 12.31]
-            )
-            y_range = self._config.get("stage_control", {}).get(
-                "y_range_mm", [0.0, 14.0]
-            )
-            z_range = self._config.get("stage_control", {}).get(
-                "z_range_mm", [12.5, 26.0]
-            )
-
-            # Convert physical mm to napari voxel coordinates
-            # X is inverted in napari if configured
             if self._invert_x:
                 napari_x = int((x_range[1] - x_mm) / voxel_size_mm)
             else:
                 napari_x = int((x_mm - x_range[0]) / voxel_size_mm)
-
-            # Y is inverted in napari (Y=0 at top, increases downward)
             napari_y_tip = int((y_range[1] - chamber_y_tip_mm) / voxel_size_mm)
-
-            # Z is offset from range minimum
             napari_z = int((z_mm - z_range[0]) / voxel_size_mm)
 
-            # Clamp X/Z to display dims; Y can extend ABOVE the display volume
-            # (negative napari_y) so the holder lands at the real chamber top.
             napari_x = max(0, min(dims[2] - 1, napari_x))
             napari_y_tip = max(0, min(dims[1] - 1, napari_y_tip))
             napari_z = max(0, min(dims[0] - 1, napari_z))
 
-            # Store holder TIP position (what matters for extension and sample data)
             self.holder_position = {"x": napari_x, "y": napari_y_tip, "z": napari_z}
-
-            # Place the holder mounting point at the top of the ACTUAL chamber.
-            # With STEP overlay loaded this is the chamber outer top (stage_y
-            # ~26.5 mm), which lands at a negative napari_y outside the display
-            # volume — napari still renders it as a point in 3D space.
-            chamber_top_stage_y = self._chamber_top_stage_y_mm()
-            napari_y_holder = (y_range[1] - chamber_top_stage_y) / voxel_size_mm
-            holder_point = np.array([[napari_z, napari_y_holder, napari_x]])
-
-            self.viewer.add_points(
-                holder_point,
-                name="Sample Holder",
-                size=holder_radius_voxels * 2,
-                face_color="gray",
-                border_color="darkgray",
-                border_width=0.05,
-                opacity=0.6,
-                shading="spherical",
-            )
-
             self.logger.info(
-                f"Added sample holder at napari coords: Z={napari_z}, Y=0, X={napari_x}"
+                f"Initial sample tip: stage ({x_mm:.2f}, {stage_y_mm:.2f}, "
+                f"{z_mm:.2f}) -> napari (Z={napari_z}, Y={napari_y_tip}, X={napari_x})"
             )
-            self.logger.info(
-                f"  Holder TIP position: Y_tip={napari_y_tip} (stage_y={stage_y_mm:.2f}mm, chamber_y={chamber_y_tip_mm:.2f}mm)"
-            )
-
         except Exception as e:
-            self.logger.warning(f"Failed to add sample holder: {e}")
+            self.logger.warning(f"Failed to initialize sample-tip position: {e}")
 
-    def _add_fine_extension(self) -> None:
-        """Add fine extension (thin probe) showing sample position.
-
-        The extension shows where the sample is positioned. The TIP is at the
-        sample location (holder_position['y']), and it extends UPWARD by 10mm
-        (toward chamber top) for visibility.
-
-        In napari coordinates, upward = decreasing Y values.
+    def _holder_assembly_columns(self):
+        """Compute the FEP-tube and metal-stem point columns in napari coords,
+        based on the current ``self.holder_position`` (sample tip) and the
+        chamber-top stage Y. Returns (fep_points, stem_points, fep_size_voxels,
+        stem_size_voxels), each points array shape (N, 3) in (Z, Y, X). Either
+        list may be empty if entirely above the chamber top.
         """
+        holder_diam, fep_diam, fep_len_mm = self._holder_dimensions()
+        voxel_size_um = self._config.get("display", {}).get(
+            "voxel_size_um", [50, 50, 50]
+        )[0]
+        voxel_size_mm = voxel_size_um / 1000.0
+
+        napari_x = self.holder_position["x"]
+        napari_y_tip = self.holder_position["y"]
+        napari_z = self.holder_position["z"]
+
+        # napari Y is inverted: smaller Y == higher in space.
+        y_range = self._config.get("stage_control", {}).get("y_range_mm", [0.0, 14.0])
+        chamber_top_stage_y = self._chamber_top_stage_y_mm()
+        chamber_top_napari_y = (y_range[1] - chamber_top_stage_y) / voxel_size_mm
+
+        fep_len_voxels = fep_len_mm / voxel_size_mm
+        fep_top_napari_y = napari_y_tip - fep_len_voxels  # above tip
+
+        # FEP tube: from tip (bottom) up to FEP top, clipped at chamber top.
+        fep_bottom = napari_y_tip
+        fep_top = max(fep_top_napari_y, chamber_top_napari_y)
+        fep_points = []
+        if fep_top < fep_bottom:
+            # Place points every 2 voxels along the FEP column.
+            n = max(2, int(round(fep_bottom - fep_top)) // 2 + 1)
+            ys = np.linspace(fep_top, fep_bottom, n)
+            fep_points = np.array([[napari_z, float(y), napari_x] for y in ys])
+
+        # Metal stem: from chamber top down to FEP top, only if FEP top is
+        # BELOW chamber top (otherwise the whole stem would be above the
+        # chamber and the user wants it clipped).
+        stem_points = []
+        if fep_top_napari_y > chamber_top_napari_y:
+            n = max(2, int(round(fep_top_napari_y - chamber_top_napari_y)) // 2 + 1)
+            ys = np.linspace(chamber_top_napari_y, fep_top_napari_y, n)
+            stem_points = np.array([[napari_z, float(y), napari_x] for y in ys])
+
+        fep_size_voxels = max(1, fep_diam / voxel_size_mm)
+        stem_size_voxels = max(1, holder_diam / voxel_size_mm)
+        return fep_points, stem_points, fep_size_voxels, stem_size_voxels
+
+    def _add_holder_assembly(self) -> None:
+        """Create the two holder layers — "Holder Stem" (metal, thick) above
+        and "FEP Tube" (thin) below — anchored at the sample tip and clipped
+        at the chamber top. The whole assembly moves with the stage."""
         if not self.viewer or not self.voxel_storage:
             return
-
         try:
-            dims = self.voxel_storage.display_dims
-            voxel_size_um = self._config.get("display", {}).get(
-                "voxel_size_um", [50, 50, 50]
-            )[0]
-            voxel_size_mm = voxel_size_um / 1000.0
+            (
+                fep_points,
+                stem_points,
+                fep_size,
+                stem_size,
+            ) = self._holder_assembly_columns()
 
-            # Get extension TIP position (stored in holder_position)
-            napari_x = self.holder_position["x"]
-            napari_y_tip = self.holder_position[
-                "y"
-            ]  # Extension tip (where sample is attached)
-            napari_z = self.holder_position["z"]
+            # napari Points layers require at least one row; seed with a
+            # single zero-row that will be replaced by _update_holder_assembly
+            # if the assembly is entirely above the chamber top right now.
+            seed = np.zeros((1, 3), dtype=np.float32)
 
-            # Extension extends UPWARD from tip by extension_length_mm (10mm)
-            # Napari Y is inverted: upward = DECREASING Y values
-            extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
-            napari_y_top = (
-                napari_y_tip - extension_length_voxels
-            )  # Top is ABOVE tip (smaller Y)
-
-            # Extension from top (smaller Y) to tip (larger Y)
-            y_start = max(0, napari_y_top)  # Clamp to chamber top if needed
-            y_end = napari_y_tip  # End at tip (sample position)
-
-            # Create vertical line of points for extension
-            # Napari coordinates: (Z, Y, X) order
-            extension_points = []
-            for y in range(y_start, y_end + 1, 2):
-                extension_points.append([napari_z, y, napari_x])
-
-            self.logger.info(
-                f"Extension: {len(extension_points)} points from Y={y_start} (top) to Y={y_end} (tip)"
+            self.viewer.add_points(
+                fep_points if len(fep_points) else seed,
+                name="FEP Tube",
+                size=fep_size,
+                face_color="#FFFF00",
+                border_color="#FFA500",
+                border_width=0.1,
+                opacity=0.9,
+                shading="spherical",
+                visible=bool(len(fep_points)),
             )
-
-            if extension_points:
-                extension_array = np.array(extension_points)
-                self.viewer.add_points(
-                    extension_array,
-                    name="Fine Extension",
-                    size=4,
-                    face_color="#FFFF00",  # Bright yellow
-                    border_color="#FFA500",  # Orange border
-                    border_width=0.1,
-                    opacity=0.9,
-                    shading="spherical",
-                )
-
+            self.viewer.add_points(
+                stem_points if len(stem_points) else seed,
+                name="Holder Stem",
+                size=stem_size,
+                face_color="#AAAAAA",
+                border_color="#555555",
+                border_width=0.1,
+                opacity=0.6,
+                shading="spherical",
+                visible=bool(len(stem_points)),
+            )
+            self.logger.info(
+                f"Holder assembly: FEP={len(fep_points)} pts, "
+                f"Stem={len(stem_points)} pts"
+            )
         except Exception as e:
-            self.logger.warning(f"Failed to add fine extension: {e}")
+            self.logger.warning(f"Failed to add holder assembly: {e}")
 
     def _add_objective_indicator(self) -> None:
         """Add objective position indicator circle at Z=0 (back wall).
@@ -1008,20 +1022,25 @@ class ChamberVisualizationManager:
         return None
 
     def update_stage_geometry(self, x_mm: float, y_mm: float, z_mm: float) -> None:
-        """Update sample holder position when stage moves.
+        """Update sample-tip position when the stage moves.
+
+        Recomputes ``self.holder_position`` (the sample tip in napari coords)
+        and refreshes the holder assembly + rotation indicator. The whole
+        assembly translates rigidly with the stage; the chamber-top clip
+        means the stem shortens as the stage goes up.
 
         Args:
-            x_mm, y_mm, z_mm: Physical stage coordinates in mm (y_mm is stage control value)
+            x_mm, y_mm, z_mm: Physical stage coordinates in mm.
         """
-        if not self.viewer or "Sample Holder" not in self.viewer.layers:
+        if not self.viewer or not self.voxel_storage:
             return
-        if not self.voxel_storage:
+        # FEP Tube is the load-bearing layer (always rendered if assembly
+        # is present); skip update if it's not in the viewer yet.
+        if "FEP Tube" not in self.viewer.layers:
             return
 
-        # Convert stage Y to chamber Y (where extension tip actually is)
         chamber_y_tip_mm = self._stage_y_to_chamber_y(y_mm)
 
-        # Get coordinate conversion parameters from config
         voxel_size_um = self._config.get("display", {}).get(
             "voxel_size_um", [50, 50, 50]
         )[0]
@@ -1031,82 +1050,59 @@ class ChamberVisualizationManager:
         z_range = self._config.get("stage_control", {}).get("z_range_mm", [12.5, 26.0])
         dims = self.voxel_storage.display_dims  # (Z, Y, X)
 
-        # Convert physical mm to napari voxel coordinates
         if self._invert_x:
             napari_x = int((x_range[1] - x_mm) / voxel_size_mm)
         else:
             napari_x = int((x_mm - x_range[0]) / voxel_size_mm)
-
         napari_y_tip = int((y_range[1] - chamber_y_tip_mm) / voxel_size_mm)
         napari_z = int((z_mm - z_range[0]) / voxel_size_mm)
 
-        # Clamp to valid range
         napari_x = max(0, min(dims[2] - 1, napari_x))
         napari_y_tip = max(0, min(dims[1] - 1, napari_y_tip))
         napari_z = max(0, min(dims[0] - 1, napari_z))
 
-        # Update holder TIP position
         self.holder_position = {"x": napari_x, "y": napari_y_tip, "z": napari_z}
 
-        # Holder shown as single ball at chamber top (Y=0) - the mounting point
-        holder_point = np.array([[napari_z, 0, napari_x]])
-        self.viewer.layers["Sample Holder"].data = holder_point
-
         self.logger.debug(
-            f"Updated holder: stage ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) -> "
-            f"napari (Z={napari_z}, Y_tip={napari_y_tip}, X={napari_x})"
+            f"Stage -> tip: ({x_mm:.2f}, {y_mm:.2f}, {z_mm:.2f}) -> "
+            f"napari (Z={napari_z}, Y={napari_y_tip}, X={napari_x})"
         )
 
-        # Update dependent elements
-        self._update_fine_extension()
+        self._update_holder_assembly()
         self._update_rotation_indicator()
 
-    def _update_fine_extension(self) -> None:
-        """Update fine extension position based on current holder position.
-
-        The extension shows where the sample is positioned. The TIP is at the
-        sample location (holder_position['y']), and it extends UPWARD by 10mm
-        (toward chamber top) for visibility.
-
-        In napari coordinates, upward = decreasing Y values.
-        """
-        if not self.viewer or "Fine Extension" not in self.viewer.layers:
+    def _update_holder_assembly(self) -> None:
+        """Refresh the FEP Tube + Holder Stem layers from the current sample-tip
+        position. Both layers move with the stage as a rigid assembly; parts
+        above the chamber top are clipped (not rendered)."""
+        if not self.viewer:
+            return
+        if (
+            "FEP Tube" not in self.viewer.layers
+            or "Holder Stem" not in self.viewer.layers
+        ):
             return
         if not self.voxel_storage:
             return
-
-        # Get current TIP position (where sample is attached)
-        napari_x = self.holder_position["x"]
-        napari_y_tip = self.holder_position["y"]  # Extension tip (sample position)
-        napari_z = self.holder_position["z"]
-
-        # Extension extends UPWARD from tip by extension_length_mm (10mm)
-        # Napari Y is inverted: upward = DECREASING Y values
-        voxel_size_um = self._config.get("display", {}).get(
-            "voxel_size_um", [50, 50, 50]
-        )[0]
-        voxel_size_mm = voxel_size_um / 1000.0
-        extension_length_voxels = int(self.extension_length_mm / voxel_size_mm)
-        napari_y_top = (
-            napari_y_tip - extension_length_voxels
-        )  # Top is ABOVE tip (smaller Y)
-
-        # Extension from top (smaller Y) to tip (larger Y)
-        y_start = max(0, napari_y_top)  # Clamp to chamber top if needed
-        y_end = napari_y_tip  # End at tip (sample position)
-
-        # Create vertical line of points in (Z, Y, X) order
-        extension_points = []
-        for y in range(y_start, y_end + 1, 2):
-            extension_points.append([napari_z, y, napari_x])
-
-        if extension_points:
-            self.viewer.layers["Fine Extension"].data = np.array(extension_points)
-        else:
-            # If no points, show minimal placeholder
-            self.viewer.layers["Fine Extension"].data = np.array(
-                [[napari_z, y_start, napari_x]]
-            )
+        try:
+            fep_points, stem_points, _, _ = self._holder_assembly_columns()
+            seed = np.zeros((1, 3), dtype=np.float32)
+            fep_layer = self.viewer.layers["FEP Tube"]
+            stem_layer = self.viewer.layers["Holder Stem"]
+            if len(fep_points):
+                fep_layer.data = fep_points
+                fep_layer.visible = True
+            else:
+                fep_layer.data = seed
+                fep_layer.visible = False
+            if len(stem_points):
+                stem_layer.data = stem_points
+                stem_layer.visible = True
+            else:
+                stem_layer.data = seed
+                stem_layer.visible = False
+        except Exception as e:
+            self.logger.debug(f"Holder assembly update skipped: {e}")
 
     def _update_rotation_indicator(self) -> None:
         """Update rotation indicator based on current rotation angle and holder position."""

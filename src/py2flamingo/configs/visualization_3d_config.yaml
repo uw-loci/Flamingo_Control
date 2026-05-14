@@ -58,9 +58,23 @@ sample_chamber:
   chamber_depth_z_mm: 13.5   # Z dimension (depth, toward objective)
   chamber_z_offset_mm: 12.5  # Z minimum position
 
-  # Sample holder dimensions
-  holder_diameter_mm: 1.0  # Diameter of the cylindrical holder
-  # Holder extends from chamber top down to Y_min (and beyond, but we only display visible portion)
+  # Sample-holder HARDWARE dimensions. These are required (no fallback
+  # defaults in code) because a wrong value here could let an oversized
+  # holder collide with the chamber wall undetected, or misposition the
+  # 3D rendering of the assembly. Set them to the actual installed parts:
+  #
+  #   holder_diameter_mm    — diameter of the thick metal stem
+  #   fep_tube_diameter_mm  — diameter of the FEP tube ("fine extension")
+  #   fep_tube_length_mm    — length of the FEP tube below the metal stem;
+  #                           sample tip sits at the bottom of this segment.
+  #
+  # Assembly geometry from sample tip up to chamber top:
+  #   - sample tip is at the focus-frame Y (current stage Y)
+  #   - FEP tube extends UP from tip by fep_tube_length_mm
+  #   - metal stem extends UP from FEP top to the chamber top (clipped)
+  holder_diameter_mm: 1.0
+  fep_tube_diameter_mm: 0.25
+  fep_tube_length_mm: 10.0
 
   # Visualization wall thickness (just for display, not physical)
   wall_thickness_mm: 1.0

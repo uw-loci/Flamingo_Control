@@ -900,16 +900,19 @@ class StepChamberOverlay:
         y_mm: float,
         z_mm: float,
         shaft_radius_mm: float,
-        nub_radius_mm: float = 0.125,
-        nub_length_mm: float = 1.0,
     ) -> float:
-        """Signed distance from the holder swept volume to the nearest chamber
+        """Signed distance from the holder shaft to the nearest chamber
         surface, in mm. Negative = collision/intrusion; positive = clearance.
 
-        The holder is modeled as a vertical cylinder (shaft) plus a thinner
-        nub at the tip. Position arguments are in stage mm; the holder shaft
-        runs along stage Y (vertical). Conservative approximation: the
-        minimum signed distance across all primitive surfaces.
+        ``shaft_radius_mm`` is HARDWARE — pass the actual measured radius
+        of the installed holder. The caller is responsible for obtaining
+        this from config (no safe default exists).
+
+        Position arguments are in stage mm; the holder shaft runs along
+        stage Y (vertical). Conservative approximation: the minimum signed
+        distance across all primitive surfaces. The nub at the tip is not
+        modelled separately — the shaft dominates the binding constraint
+        and the nub is too small to alter the worst-case.
         """
         # Convert stage point to STEP-frame point so we can intersect with
         # chamber primitives in STEP frame directly. Inverse of _step_to_stage_mm.
