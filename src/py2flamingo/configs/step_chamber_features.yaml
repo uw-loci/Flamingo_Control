@@ -29,17 +29,21 @@ features:
   -
     role: chamber_outer_box
     type: aabb
-    # Chamber body only (~77.7 x 43.0 x 44.0 mm). Derived from the actual
+    # Chamber body only (~31.7 x 43.0 x 44.0 mm). Derived from the actual
     # axis-aligned outer-face PLANE entities in the STEP file, EXCLUDING:
     #   - the detection-objective lens sleeve protruding out of the back
     #     face (extends y from -210.04 down to -227.65 — that's the sleeve,
     #     not the chamber body),
     #   - the octagonal mounting base plate below the chamber body
-    #     (z from 628.82 up to 656.50 — that's the plate, not the chamber).
+    #     (z from 628.82 up to 656.50 — that's the plate, not the chamber),
+    #   - the L/R mounting tabs / flanges at x=97.28 and x=174.98 (those are
+    #     external features, not the chamber walls). The actual chamber body
+    #     width (between the two illumination-objective mount faces) is
+    #     ~31.7 mm — matches the user's eyeball measurement.
     bounds_step:
       x:
-        - 97.28
-        - 174.98
+        - 118.28
+        - 149.98
       y:
         - -210.04
         - -167.02

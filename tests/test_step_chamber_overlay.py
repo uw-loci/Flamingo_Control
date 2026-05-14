@@ -263,15 +263,16 @@ def test_cavity_master_toggle_unit(overlay):
 
 
 def test_chamber_outer_box_uses_outer_planes(overlay):
-    """Outer chamber body bounds must come from the actual outer face planes
-    of the chamber BODY — excluding the detection-objective lens sleeve that
-    protrudes from the back face (extends y to -227.65) and the octagonal
-    base plate below (extends z down to 628.82).
+    """Outer chamber body bounds must come from the actual chamber-body faces
+    in the STEP file — excluding non-body features:
+      - detection-objective lens sleeve (y down to -227.65)
+      - octagonal base plate (z down to 628.82)
+      - L/R mounting tabs / flanges (x out to 97.28 and 174.98)
 
     User-verified chamber body envelope:
-      width  (X, illumination axis): 77.7 mm  (97.28..174.98)
-      depth  (Y, optical axis):      43.0 mm  (-210.04..-167.02)
-      height (Z, vertical):          44.0 mm  ( 656.50..700.50)
+      width  (X, between illumination mount faces): 31.7 mm  (118.28..149.98)
+      depth  (Y, optical axis):                     43.0 mm  (-210.04..-167.02)
+      height (Z, vertical):                         44.0 mm  ( 656.50..700.50)
     """
     feat = next(
         f
@@ -279,13 +280,14 @@ def test_chamber_outer_box_uses_outer_planes(overlay):
         if f["role"] == "chamber_outer_box"
     )
     bounds = feat["bounds_step"]
-    assert bounds["x"][0] == pytest.approx(97.28, abs=0.5)
-    assert bounds["x"][1] == pytest.approx(174.98, abs=0.5)
+    assert bounds["x"][0] == pytest.approx(118.28, abs=0.5)
+    assert bounds["x"][1] == pytest.approx(149.98, abs=0.5)
     assert bounds["y"][0] == pytest.approx(-210.04, abs=0.5)
     assert bounds["y"][1] == pytest.approx(-167.02, abs=0.5)
     assert bounds["z"][0] == pytest.approx(656.50, abs=0.5)
     assert bounds["z"][1] == pytest.approx(700.50, abs=0.5)
-    # Sanity: dimensions match the user's measurements
+    # Sanity: dimensions match the user's eyeball measurements
+    assert bounds["x"][1] - bounds["x"][0] == pytest.approx(31.70, abs=0.1)
     assert bounds["y"][1] - bounds["y"][0] == pytest.approx(43.02, abs=0.05)
     assert bounds["z"][1] - bounds["z"][0] == pytest.approx(44.00, abs=0.05)
 

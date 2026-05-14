@@ -320,6 +320,7 @@ class ChamberVisualizationManager:
             self._add_rotation_indicator()
             self._add_xy_focus_frame()
             self._add_cavity_center_indicator()
+            self._add_chamber_axes_arrows()
 
         except Exception as e:
             self.logger.warning(f"Failed to setup chamber visualization: {e}")
@@ -725,33 +726,37 @@ class ChamberVisualizationManager:
                 "z_range_mm", [12.5, 26]
             )
 
-            # Use calibration if available, otherwise center of ranges
-            if self.objective_xy_calibration:
-                focal_x_mm = self.objective_xy_calibration.get(
-                    "x", (x_range[0] + x_range[1]) / 2
+            # Pick the focal-plane position in stage mm:
+            #   1) explicit calibration ("Tip of sample mount" preset)
+            #   2) cavity center if STEP overlay is loaded (best default until
+            #      the user calibrates against the new chamber geometry)
+            #   3) middle of the stage travel ranges (legacy fallback)
+            cavity_center_stage = self._cavity_center_stage_mm()
+            if (
+                self.objective_xy_calibration
+                and self.objective_xy_calibration.get("x") is not None
+            ):
+                focal_x_mm = self.objective_xy_calibration["x"]
+                focal_y_mm = self.objective_xy_calibration.get(
+                    "y", self.STAGE_Y_AT_OBJECTIVE
                 )
-                focal_z_mm = self.objective_xy_calibration.get(
-                    "z", (z_range[0] + z_range[1]) / 2
-                )
+                focal_z_mm = self.objective_xy_calibration["z"]
+            elif cavity_center_stage is not None:
+                focal_x_mm, focal_y_mm, focal_z_mm = cavity_center_stage
             else:
                 focal_x_mm = (x_range[0] + x_range[1]) / 2
+                focal_y_mm = self.STAGE_Y_AT_OBJECTIVE
                 focal_z_mm = (z_range[0] + z_range[1]) / 2
 
-            # Convert physical Z to napari Z (offset from range minimum)
-            napari_z = int((focal_z_mm - z_range[0]) / voxel_size_mm)
-            napari_z = min(max(0, napari_z), dims[0] - 1)
-
-            # Y at objective focal plane (7mm in chamber coordinates)
-            # Y is inverted in napari (Y=0 at top)
-            napari_y = int((y_range[1] - self.OBJECTIVE_CHAMBER_Y_MM) / voxel_size_mm)
-            napari_y = min(max(0, napari_y), dims[1] - 1)
-
-            # X from calibration or center, with proper coordinate conversion
+            # Stage -> napari (don't clamp to display dims so the frame can
+            # render inside the larger STEP cavity even when that cavity
+            # extends outside the rectangular voxel-storage volume)
+            napari_z = (focal_z_mm - z_range[0]) / voxel_size_mm
+            napari_y = (y_range[1] - focal_y_mm) / voxel_size_mm
             if self._invert_x:
-                napari_x = int((x_range[1] - focal_x_mm) / voxel_size_mm)
+                napari_x = (x_range[1] - focal_x_mm) / voxel_size_mm
             else:
-                napari_x = int((focal_x_mm - x_range[0]) / voxel_size_mm)
-            napari_x = min(max(0, napari_x), dims[2] - 1)
+                napari_x = (focal_x_mm - x_range[0]) / voxel_size_mm
 
             # Frame corners
             half_fov_x = fov_x_voxels / 2
@@ -782,6 +787,106 @@ class ChamberVisualizationManager:
 
         except Exception as e:
             self.logger.warning(f"Failed to add XY focus frame: {e}")
+
+    def _add_chamber_axes_arrows(self) -> None:
+        """Draw custom XYZ axis arrows anchored at the cavity wireframe corner.
+
+        napari's built-in viewer.axes is anchored at the data origin (napari
+        0,0,0), which for the new chamber is far outside the chamber and
+        useless as a visual reference. We hide it when the STEP overlay is
+        loaded and draw our own axis arrows at the back-bottom-left corner
+        of the cavity wireframe so the user can read XYZ orientation
+        relative to the chamber.
+
+        Arrow lengths:  5 mm
+        Colors:  X = cyan, Y = magenta, Z = yellow (matches napari's default
+                 axis colors so the legend reads the same).
+        """
+        if not self.viewer:
+            return
+        if not (self.step_overlay and getattr(self.step_overlay, "_loaded", False)):
+            return  # without STEP, leave napari's built-in axes alone
+        try:
+            # Hide napari's default axes — anchored at world (0,0,0), which is
+            # not near the chamber after the STEP-coord redefinition.
+            if hasattr(self.viewer, "axes"):
+                self.viewer.axes.visible = False
+
+            cavity = next(
+                (
+                    f
+                    for f in self.step_overlay._features_data.get("features", [])
+                    if f.get("role") == "chamber_cavity"
+                ),
+                None,
+            )
+            if cavity is None:
+                return
+            b = cavity["bounds_step"]
+            # Back-bottom-left corner of cavity in STEP frame: smallest x,
+            # back-facing y (the -Y end = chamber back), bottom z.
+            x_anchor = b["x"][0]
+            y_anchor = b["y"][0]
+            z_anchor = b["z"][0]
+            origin_napari = self.step_overlay._step_to_napari(
+                (x_anchor, y_anchor, z_anchor)
+            )
+
+            voxel_size_mm = (
+                self._config.get("display", {}).get("voxel_size_um", [50, 50, 50])[0]
+                / 1000.0
+            )
+            arrow_length_voxels = 5.0 / voxel_size_mm  # 5 mm in voxels
+
+            # Step a small distance along each STEP axis from the anchor; project
+            # via the SAME transform so the arrows are oriented in stage frame.
+            arrow_step_mm = 5.0
+            x_tip = self.step_overlay._step_to_napari(
+                (x_anchor + arrow_step_mm, y_anchor, z_anchor)
+            )
+            y_tip = self.step_overlay._step_to_napari(
+                (x_anchor, y_anchor + arrow_step_mm, z_anchor)
+            )
+            z_tip = self.step_overlay._step_to_napari(
+                (x_anchor, y_anchor, z_anchor + arrow_step_mm)
+            )
+
+            origin = np.array(origin_napari, dtype=np.float32)
+            arrows = [
+                (np.array(x_tip, dtype=np.float32), "#00FFFF", "X (illumination)"),
+                (np.array(y_tip, dtype=np.float32), "#FF00FF", "Y (optical depth)"),
+                (np.array(z_tip, dtype=np.float32), "#FFD700", "Z (vertical)"),
+            ]
+            edges = [np.array([origin, tip], dtype=np.float32) for tip, _, _ in arrows]
+            colors = [c for _, c, _ in arrows]
+
+            self.viewer.add_shapes(
+                data=edges,
+                shape_type="line",
+                name="Chamber Axes",
+                edge_color=colors,
+                edge_width=3,
+                opacity=0.95,
+            )
+            # A point at each arrow tip serves as a visible head — napari's
+            # Shapes layer doesn't render arrowheads.
+            tip_points = np.array([tip for tip, _, _ in arrows], dtype=np.float32)
+            self.viewer.add_points(
+                tip_points,
+                name="Chamber Axes Tips",
+                size=8,
+                face_color=colors,
+                border_color="white",
+                border_width=0.1,
+                opacity=0.95,
+                shading="spherical",
+            )
+            self.logger.info(
+                f"Chamber axes anchored at file ({x_anchor:.2f}, {y_anchor:.2f}, {z_anchor:.2f}) "
+                f"= napari {tuple(round(v, 1) for v in origin_napari)}"
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to add chamber axes arrows: {e}")
 
     def _add_cavity_center_indicator(self) -> None:
         """Add a small marker at the geometric cavity centroid.
