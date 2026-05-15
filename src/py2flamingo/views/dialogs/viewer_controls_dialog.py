@@ -346,9 +346,19 @@ class ViewerControlsDialog(PersistentDialog):
         render_group.setLayout(render_layout)
         layout.addWidget(render_group)
 
-        # Display elements group
+        # Display elements group.
+        # Every checkbox in this group persists its state via QSettings
+        # (shared instance `self._settings`) and the matching layer state
+        # is also applied by ChamberVisualizationManager at startup so the
+        # viewer reflects persisted choices without the user needing to
+        # open this dialog first.
         elements_group = QGroupBox("Display Elements")
         elem_layout = QVBoxLayout()
+
+        # Shared QSettings instance for all viewer-controls persistence.
+        # Keys: "elements/<name>" for Display Elements, "step_chamber/<role>"
+        # for STEP toggles. Same store ChamberVisualizationManager reads from.
+        self._settings = QSettings("py2flamingo", "viewer_controls")
 
         # The rectangular travel-envelope wireframe is now a *fallback* used
         # only when no STEP geometry is available. Probe overlay presence so
@@ -358,37 +368,56 @@ class ViewerControlsDialog(PersistentDialog):
             step_overlay, "_loaded", False
         )
 
+        chamber_default = self._settings.value("elements/chamber", True, type=bool)
         self.show_chamber_cb = QCheckBox("Show Chamber Wireframe (fallback)")
-        self.show_chamber_cb.setChecked(True)
+        self.show_chamber_cb.setChecked(chamber_default)
         self.show_chamber_cb.toggled.connect(self._on_chamber_visibility_changed)
+        self.show_chamber_cb.toggled.connect(
+            lambda v: self._settings.setValue("elements/chamber", v)
+        )
         # Only expose the rect-wireframe checkbox when STEP geometry isn't
         # active — otherwise the layer doesn't exist and the toggle is dead.
         self.show_chamber_cb.setVisible(not step_loaded)
         elem_layout.addWidget(self.show_chamber_cb)
 
+        objective_default = self._settings.value("elements/objective", True, type=bool)
         self.show_objective_cb = QCheckBox("Show Objective Position")
-        self.show_objective_cb.setChecked(True)
+        self.show_objective_cb.setChecked(objective_default)
         self.show_objective_cb.toggled.connect(self._on_objective_visibility_changed)
+        self.show_objective_cb.toggled.connect(
+            lambda v: self._settings.setValue("elements/objective", v)
+        )
+        # When STEP is loaded the Objective layer isn't created
+        # (chamber-anchored arrows + cavity-center indicator make the
+        # standalone Objective ring redundant), so hide the dead toggle.
+        self.show_objective_cb.setVisible(not step_loaded)
         elem_layout.addWidget(self.show_objective_cb)
 
+        focus_default = self._settings.value("elements/focus_frame", True, type=bool)
         self.show_focus_frame_cb = QCheckBox("Show XY Focus Frame")
-        self.show_focus_frame_cb.setChecked(True)
+        self.show_focus_frame_cb.setChecked(focus_default)
         self.show_focus_frame_cb.toggled.connect(
             self._on_focus_frame_visibility_changed
         )
+        self.show_focus_frame_cb.toggled.connect(
+            lambda v: self._settings.setValue("elements/focus_frame", v)
+        )
         elem_layout.addWidget(self.show_focus_frame_cb)
 
+        axes_default = self._settings.value("elements/axes", True, type=bool)
         self.show_axes_cb = QCheckBox("Show Coordinate Axes")
-        self.show_axes_cb.setChecked(True)
+        self.show_axes_cb.setChecked(axes_default)
         self.show_axes_cb.toggled.connect(self._on_axes_visibility_changed)
+        self.show_axes_cb.toggled.connect(
+            lambda v: self._settings.setValue("elements/axes", v)
+        )
         elem_layout.addWidget(self.show_axes_cb)
 
         # Cavity Center indicator (magenta point at geometric cavity centroid).
         # User-toggleable because it sits at the same stage coords as the XY
         # Focus Frame (we assume focal-plane = cavity-center) and can occlude
         # the yellow focus frame visually.
-        self._cavity_center_settings = QSettings("py2flamingo", "viewer_controls")
-        cavity_center_default = self._cavity_center_settings.value(
+        cavity_center_default = self._settings.value(
             "elements/cavity_center", True, type=bool
         )
         self.show_cavity_center_cb = QCheckBox("Show Cavity Center")
@@ -397,9 +426,7 @@ class ViewerControlsDialog(PersistentDialog):
             self._on_cavity_center_visibility_changed
         )
         self.show_cavity_center_cb.toggled.connect(
-            lambda visible: self._cavity_center_settings.setValue(
-                "elements/cavity_center", visible
-            )
+            lambda visible: self._settings.setValue("elements/cavity_center", visible)
         )
         elem_layout.addWidget(self.show_cavity_center_cb)
 
@@ -413,13 +440,9 @@ class ViewerControlsDialog(PersistentDialog):
         step_group = QGroupBox("STEP Chamber Geometry")
         step_layout = QVBoxLayout()
 
-        # Persistence: read previous toggle states from QSettings so the user
-        # doesn't have to re-enable the STEP overlay on every launch.
         # STEP is now the main chamber view — default ON for fresh installs.
-        self._step_settings = QSettings("py2flamingo", "viewer_controls")
-        master_default = self._step_settings.value(
-            "step_chamber/master", True, type=bool
-        )
+        # Persistence uses the same self._settings store as Display Elements.
+        master_default = self._settings.value("step_chamber/master", True, type=bool)
 
         self.show_step_chamber_cb = QCheckBox("Show STEP Chamber")
         self.show_step_chamber_cb.setChecked(master_default)
@@ -427,7 +450,7 @@ class ViewerControlsDialog(PersistentDialog):
             self._on_step_chamber_master_visibility_changed
         )
         self.show_step_chamber_cb.toggled.connect(
-            lambda visible: self._step_settings.setValue("step_chamber/master", visible)
+            lambda visible: self._settings.setValue("step_chamber/master", visible)
         )
         step_layout.addWidget(self.show_step_chamber_cb)
 
@@ -442,9 +465,7 @@ class ViewerControlsDialog(PersistentDialog):
             ("    Top sample-entry hole", "sample_entry_top_hole", True),
             ("    Mounting bolt holes", "rail_mount_bolts", False),
         ]:
-            saved = self._step_settings.value(
-                f"step_chamber/{role}", default_on, type=bool
-            )
+            saved = self._settings.value(f"step_chamber/{role}", default_on, type=bool)
             cb = QCheckBox(label)
             cb.setChecked(saved)
             cb.setEnabled(master_default)  # only sensitive when master is on
@@ -454,7 +475,7 @@ class ViewerControlsDialog(PersistentDialog):
                 )
             )
             cb.toggled.connect(
-                lambda visible, r=role: self._step_settings.setValue(
+                lambda visible, r=role: self._settings.setValue(
                     f"step_chamber/{r}", visible
                 )
             )
@@ -669,9 +690,14 @@ class ViewerControlsDialog(PersistentDialog):
 
         if overlay:
             if visible:
-                # Apply each sub-toggle's current state to its overlay layer(s)
+                # Apply each sub-toggle's current state to its overlay layer(s).
+                # Route through _on_step_chamber_feature_toggled so grouped
+                # UI roles like "illumination_ports" / "rail_mount_bolts" are
+                # expanded to the YAML roles (illumination_port_left/right).
+                # Calling overlay.set_feature_visible("illumination_ports", …)
+                # directly was a no-op — no YAML feature carries that role.
                 for role, cb in self._step_subtoggles.items():
-                    overlay.set_feature_visible(role, cb.isChecked())
+                    self._on_step_chamber_feature_toggled(role, cb.isChecked())
             else:
                 # Master OFF hides everything in one call
                 overlay.set_master_visible(False)
@@ -748,10 +774,32 @@ class ViewerControlsDialog(PersistentDialog):
         return None
 
     def _on_axes_visibility_changed(self, visible: bool) -> None:
-        """Toggle coordinate axes visibility."""
+        """Toggle coordinate axes visibility.
+
+        Two distinct things show XYZ orientation:
+        - napari's built-in `viewer.axes` corner indicator, anchored at the
+          world origin.
+        - The "Chamber Axes" / "Chamber Axes Tips" layers added by
+          ChamberVisualizationManager when STEP is loaded, anchored at the
+          cavity-corner so they sit inside the chamber.
+
+        When STEP is loaded the built-in indicator is intentionally hidden
+        (its anchor is far outside the chamber), so this toggle controls
+        only the chamber-anchored arrows. Otherwise it falls back to the
+        built-in.
+        """
         viewer = self._get_viewer()
-        if viewer and hasattr(viewer, "axes"):
-            viewer.axes.visible = visible
+        if viewer is None:
+            return
+        overlay = self._step_overlay()
+        step_loaded = overlay is not None and getattr(overlay, "_loaded", False)
+        if step_loaded:
+            for name in ("Chamber Axes", "Chamber Axes Tips"):
+                if name in viewer.layers:
+                    viewer.layers[name].visible = visible
+        else:
+            if hasattr(viewer, "axes"):
+                viewer.axes.visible = visible
 
     def _on_reset_view(self) -> None:
         """Reset camera orientation and zoom to defaults."""

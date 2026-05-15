@@ -164,6 +164,11 @@ class ChamberVisualizationManager:
 
         # Setup visualization components
         self._setup_chamber()
+        # Apply user's last-session visibility choices to the freshly-created
+        # layers. Without this, the viewer would come up with whichever
+        # defaults the setup code chose, and the persisted state wouldn't
+        # take effect until the user opened the Viewer Controls dialog.
+        self._apply_persisted_visibility()
         t_chamber = time.perf_counter()
         self.logger.info(
             f"Chamber visualization setup in {t_chamber - t_before_chamber:.2f}s"
@@ -345,6 +350,96 @@ class ChamberVisualizationManager:
 
         except Exception as e:
             self.logger.warning(f"Failed to setup chamber visualization: {e}")
+
+    def _apply_persisted_visibility(self) -> None:
+        """Apply the user's last-session visibility choices to the napari
+        layers, reading from the same QSettings store ViewerControlsDialog
+        writes to. Called after layer creation so the viewer reflects
+        persisted state without waiting for the dialog to open.
+
+        Settings keys are the contract between this method and the dialog:
+            elements/chamber, elements/objective, elements/focus_frame,
+            elements/axes, elements/cavity_center,
+            step_chamber/master, step_chamber/<role>
+        """
+        if not self.viewer:
+            return
+        try:
+            from PyQt5.QtCore import QSettings
+
+            s = QSettings("py2flamingo", "viewer_controls")
+
+            step_loaded = self.step_overlay is not None and getattr(
+                self.step_overlay, "_loaded", False
+            )
+
+            # Fallback rect wireframe + reference walls — only present when
+            # STEP isn't loaded.
+            if not step_loaded:
+                chamber_vis = s.value("elements/chamber", True, type=bool)
+                for name in ("Chamber Wireframe", "Back Wall", "Bottom Wall"):
+                    if name in self.viewer.layers:
+                        self.viewer.layers[name].visible = chamber_vis
+                obj_vis = s.value("elements/objective", True, type=bool)
+                if "Objective" in self.viewer.layers:
+                    self.viewer.layers["Objective"].visible = obj_vis
+
+            focus_vis = s.value("elements/focus_frame", True, type=bool)
+            if "XY Focus Frame" in self.viewer.layers:
+                self.viewer.layers["XY Focus Frame"].visible = focus_vis
+
+            # Axes: when STEP is loaded, the chamber-anchored arrow layers
+            # are the user-visible axes (napari's built-in viewer.axes is
+            # hidden by _add_chamber_axes_arrows because its anchor sits
+            # outside the chamber). When STEP isn't loaded, control the
+            # built-in indicator.
+            axes_vis = s.value("elements/axes", True, type=bool)
+            if step_loaded:
+                for name in ("Chamber Axes", "Chamber Axes Tips"):
+                    if name in self.viewer.layers:
+                        self.viewer.layers[name].visible = axes_vis
+            elif hasattr(self.viewer, "axes"):
+                self.viewer.axes.visible = axes_vis
+
+            cavity_vis = s.value("elements/cavity_center", True, type=bool)
+            if "Cavity Center" in self.viewer.layers:
+                self.viewer.layers["Cavity Center"].visible = cavity_vis
+
+            # STEP overlay master + sub-feature visibility. The defaults
+            # mirror the labels in ViewerControlsDialog._create_display_settings_tab.
+            if step_loaded and self.step_overlay is not None:
+                master_vis = s.value("step_chamber/master", True, type=bool)
+                if not master_vis:
+                    self.step_overlay.set_master_visible(False)
+                else:
+                    sub_defaults = {
+                        "chamber_cavity": True,
+                        "chamber_outer_box": False,
+                        "detection_objective_port": True,
+                        "sample_entry_port": True,
+                        "illumination_ports": True,
+                        "sample_entry_top_hole": True,
+                        "rail_mount_bolts": False,
+                    }
+                    for role, default_on in sub_defaults.items():
+                        vis = s.value(f"step_chamber/{role}", default_on, type=bool)
+                        # Expand UI grouping roles to YAML feature roles.
+                        if role == "illumination_ports":
+                            expanded = (
+                                "illumination_port_left",
+                                "illumination_port_right",
+                            )
+                        elif role == "rail_mount_bolts":
+                            expanded = (
+                                "rail_mount_bolt_left",
+                                "rail_mount_bolt_right",
+                            )
+                        else:
+                            expanded = (role,)
+                        for r in expanded:
+                            self.step_overlay.set_feature_visible(r, vis)
+        except Exception as e:
+            self.logger.warning(f"Failed to apply persisted visibility: {e}")
 
     def _add_reference_walls(self, dims, chamber_y_top, chamber_y_bot) -> None:
         """Add subtle filled walls for orientation when rotating the 3D view.
