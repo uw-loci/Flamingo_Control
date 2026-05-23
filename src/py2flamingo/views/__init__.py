@@ -7,6 +7,7 @@ Views are responsible for displaying data and capturing user interactions.
 
 from .connection_view import ConnectionView
 from .image_controls_window import ImageControlsWindow
+from .jog_panel import JogPanelWindow
 from .sample_info_view import SampleInfoView
 from .sample_view import SampleView
 from .stage_control_view import StageControlView
@@ -18,5 +19,6 @@ __all__ = [
     "SampleInfoView",
     "StageControlView",
     "ImageControlsWindow",
+    "JogPanelWindow",
     "SampleView",
 ]

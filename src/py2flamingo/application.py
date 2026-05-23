@@ -118,6 +118,7 @@ class FlamingoApplication(QObject):
         self.camera_live_viewer = None
         self.image_controls_window = None
         self.sample_view = None  # Unified sample viewing interface
+        self.jog_panel = None  # Non-modal keyboard/button stage jog panel
         self.voxel_storage = None  # DualResolutionVoxelStorage for 3D visualization
 
         # Pipeline layer components
@@ -311,6 +312,55 @@ class FlamingoApplication(QObject):
         if self.stage_control_view:
             self.stage_control_view._set_controls_enabled(False)
 
+    def _show_jog_panel(self):
+        """Open the non-modal, always-on-top Stage Jog Panel.
+
+        Creates the JogPanelWindow on first use, wires connection/acquisition
+        state, then shows and raises it. Opening the panel arms keyboard
+        jogging (W/A/S/D = XY, Q/E = Z); closing it disarms.
+        """
+        from py2flamingo.views import JogPanelWindow
+
+        self.logger.info("Opening Stage Jog Panel")
+
+        if self.jog_panel is None:
+            self.jog_panel = JogPanelWindow(
+                movement_controller=self.movement_controller,
+                geometry_manager=self.geometry_manager,
+                sample_view=self.sample_view,
+            )
+
+            # Wire connection state
+            if self.connection_view:
+                self.connection_view.connection_established.connect(
+                    lambda: self.jog_panel.set_connection_state(True)
+                )
+                self.connection_view.connection_closed.connect(
+                    lambda: self.jog_panel.set_connection_state(False)
+                )
+
+            # Lock jogging during acquisition
+            self.acquisition_started.connect(
+                lambda: self.jog_panel.set_jog_controls_enabled(False)
+            )
+            self.acquisition_stopped.connect(
+                lambda: self.jog_panel.set_jog_controls_enabled(True)
+            )
+
+            connected = (
+                self.connection_service.is_connected()
+                if self.connection_service
+                else False
+            )
+            self.jog_panel.set_connection_state(connected)
+        else:
+            # Keep the SampleView reference fresh for safety-gated moves.
+            self.jog_panel.set_sample_view(self.sample_view)
+
+        self.jog_panel.show()
+        self.jog_panel.raise_()
+        self.jog_panel.activateWindow()
+
     def _open_sample_view(self):
         """Open the integrated Sample View window.
 
@@ -359,6 +409,10 @@ class FlamingoApplication(QObject):
                 else False
             )
             self.sample_view.set_connection_state(connected)
+
+        # Let the Jog Panel route through the Sample View safety gate.
+        if self.jog_panel is not None:
+            self.jog_panel.set_sample_view(self.sample_view)
 
         self.sample_view.show()
         self.sample_view.raise_()

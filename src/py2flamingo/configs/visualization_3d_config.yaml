@@ -128,6 +128,24 @@ stage_control:
   rotation_range_deg: [-180, 180]   # Allowed rotation range
   rotation_default_deg: 0.0         # Starting rotation angle
 
+jog:
+  # Keyboard / panel stage jogging (the "Stage Jog Panel" window).
+  # While that window is open: W/A/S/D jog XY, Q/E jog Z. The panel also has
+  # clickable jog buttons and adjustable per-axis movement amounts.
+  xy_amount_mm: 0.05          # default XY step per key press / button click
+  z_amount_mm: 0.02           # default Z step
+  r_amount_deg: 5.0           # default rotation step (panel buttons only)
+  adjust_percent: 20          # the up/down arrows scale an amount by this percentage
+  amount_min_mm: 0.001        # smallest settable XY/Z amount
+  amount_max_mm: 5.0          # largest settable XY/Z amount
+  r_amount_min_deg: 0.1       # smallest settable rotation amount
+  r_amount_max_deg: 90.0      # largest settable rotation amount
+  # Per-axis manual sign override, applied on top of display alignment.
+  # Flip one of these if a key/button moves the sample the wrong way at the bench.
+  invert_x: false
+  invert_y: false
+  invert_z: false
+
 coordinate_mapping:
   # Napari origin definition (internal pixel coordinate system)
   napari_origin: "back_upper_left"  # (0,0,0) position in napari viewer

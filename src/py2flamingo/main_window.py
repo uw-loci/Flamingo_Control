@@ -253,6 +253,15 @@ class MainWindow(QMainWindow):
             image_controls_action.triggered.connect(self._show_image_controls)
             view_menu.addAction(image_controls_action)
 
+        # Stage Jog Panel action (non-modal, always-on-top; works disconnected)
+        jog_panel_action = QAction("Stage &Jog Panel...", self)
+        jog_panel_action.setShortcut("Ctrl+J")
+        jog_panel_action.setStatusTip(
+            "Open the stage jog panel (W/A/S/D = XY, Q/E = Z while it is open)"
+        )
+        jog_panel_action.triggered.connect(self._show_jog_panel)
+        view_menu.addAction(jog_panel_action)
+
         # Tools menu (requires connection)
         tools_menu = menubar.addMenu("&Tools")
 
@@ -507,6 +516,11 @@ class MainWindow(QMainWindow):
             self.image_controls_window.show()
             self.image_controls_window.raise_()  # Bring to front
             self.image_controls_window.activateWindow()  # Give it focus
+
+    def _show_jog_panel(self):
+        """Open the Stage Jog Panel (delegates to FlamingoApplication)."""
+        if self.app is not None:
+            self.app._show_jog_panel()
 
     # ========== Tools Menu Handlers ==========
 
