@@ -2,6 +2,8 @@
 # Hand-editable. Re-run the extractor to regenerate after a STEP update.
 # Fields prefixed with _ are notes; the runtime ignores them.
 
+# display_name labels this profile in the Viewer Controls "Chamber profile" dropdown.
+display_name: "25x ASLM - basic windows (default)"
 source_step_file: "/home/msnelson/LSControl/OtherDocuments/25x-Chamber-for-ASLM (basic windows) (2).STEP"
 units: mm
 frame: step

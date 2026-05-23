@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSlider,
@@ -440,6 +441,35 @@ class ViewerControlsDialog(PersistentDialog):
         step_group = QGroupBox("STEP Chamber Geometry")
         step_layout = QVBoxLayout()
 
+        # Chamber profile selector — switch between pre-extracted chamber
+        # YAMLs (the config default + configs/chambers/*.yaml) live, without
+        # a restart. Each profile bundles its own geometry and transform.
+        self._chamber_profiles = self._discover_chamber_profiles()
+        if len(self._chamber_profiles) >= 1:
+            profile_row = QHBoxLayout()
+            profile_row.addWidget(QLabel("Chamber profile:"))
+            self.chamber_profile_combo = QComboBox()
+            for label, _rel, _abs in self._chamber_profiles:
+                self.chamber_profile_combo.addItem(label)
+            # Pre-select whichever profile the overlay actually loaded.
+            active_abs = ""
+            if step_overlay is not None:
+                active_abs = str(getattr(step_overlay, "features_yaml_path", "") or "")
+            for i, (_label, _rel, abs_path) in enumerate(self._chamber_profiles):
+                if abs_path == active_abs:
+                    self.chamber_profile_combo.setCurrentIndex(i)
+                    break
+            # Connect AFTER setCurrentIndex so initial selection doesn't reload.
+            self.chamber_profile_combo.currentIndexChanged.connect(
+                self._on_chamber_profile_changed
+            )
+            self.chamber_profile_combo.setToolTip(
+                "Switch the 3D chamber geometry. Add more profiles by saving "
+                "extracted feature YAMLs into configs/chambers/."
+            )
+            profile_row.addWidget(self.chamber_profile_combo, 1)
+            step_layout.addLayout(profile_row)
+
         # STEP is now the main chamber view — default ON for fresh installs.
         # Persistence uses the same self._settings store as Display Elements.
         master_default = self._settings.value("step_chamber/master", True, type=bool)
@@ -673,6 +703,77 @@ class ViewerControlsDialog(PersistentDialog):
         not assume anything beyond what's already been wired on the
         viewer_container at construction time."""
         return self._step_overlay()
+
+    def _discover_chamber_profiles(self):
+        """Find selectable chamber profiles.
+
+        Returns a list of ``(label, rel_path, abs_path_str)`` — the config
+        default first, then every YAML in ``configs/chambers/``, deduped by
+        resolved path. ``label`` is the YAML's ``display_name`` if present,
+        otherwise the file stem.
+        """
+        from pathlib import Path
+
+        import yaml as _yaml
+
+        py2f = Path(__file__).resolve().parents[2]  # src/py2flamingo
+        candidates = []
+        default_rel = (self._config.get("step_chamber") or {}).get(
+            "features_yaml", "configs/step_chamber_features.yaml"
+        )
+        candidates.append(default_rel)
+        chambers_dir = py2f / "configs" / "chambers"
+        if chambers_dir.is_dir():
+            for f in sorted(chambers_dir.glob("*.yaml")):
+                candidates.append("configs/chambers/" + f.name)
+
+        entries = []
+        seen = set()
+        for rel in candidates:
+            abs_path = (py2f / rel).resolve()
+            key = str(abs_path)
+            if key in seen or not abs_path.exists():
+                continue
+            seen.add(key)
+            label = abs_path.stem
+            try:
+                with abs_path.open() as fh:
+                    data = _yaml.safe_load(fh) or {}
+                if isinstance(data, dict) and data.get("display_name"):
+                    label = str(data["display_name"])
+            except Exception as e:
+                self.logger.debug(f"Chamber profile {rel}: label fallback ({e})")
+            entries.append((label, rel, key))
+        return entries
+
+    def _on_chamber_profile_changed(self, index: int) -> None:
+        """Switch the live 3D chamber to the selected profile."""
+        if index < 0 or index >= len(self._chamber_profiles):
+            return
+        label, rel_path, _abs = self._chamber_profiles[index]
+        container = self.viewer_container
+        if not hasattr(container, "reload_chamber_profile"):
+            self.logger.warning(
+                "Viewer container has no reload_chamber_profile; cannot switch."
+            )
+            return
+        ok = False
+        try:
+            ok = container.reload_chamber_profile(rel_path)
+        except Exception as e:
+            self.logger.error(f"Chamber profile switch failed: {e}")
+        if ok:
+            # Persist only on success so a bad profile isn't sticky.
+            self._settings.setValue("step_chamber/profile", rel_path)
+            self.logger.info(f"Switched chamber profile to: {label}")
+        else:
+            QMessageBox.warning(
+                self,
+                "Chamber profile",
+                f"Could not load chamber profile '{label}'.\n\n"
+                "Check the features YAML. The 3D view may need an app "
+                "restart to recover.",
+            )
 
     def _on_step_chamber_master_visibility_changed(self, visible: bool) -> None:
         """Master toggle: show STEP chamber + hide rectangular wireframe.

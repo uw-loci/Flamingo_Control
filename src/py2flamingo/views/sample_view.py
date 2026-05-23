@@ -3864,6 +3864,37 @@ class SampleView(QWidget):
         """Update XY focus frame (delegated to manager)."""
         self._chamber_viz.update_focus_frame()
 
+    def reload_chamber_profile(self, yaml_path: str) -> bool:
+        """Switch the 3D viewer's STEP chamber profile live (no restart).
+
+        Delegates the layer rebuild to ChamberVisualizationManager, then
+        re-applies the current stage position, rotation, and focus frame so
+        the holder assembly and indicators land at the right place under the
+        new chamber's transform.
+
+        Args:
+            yaml_path: Profile YAML, relative to src/py2flamingo/ or absolute.
+
+        Returns:
+            True if the new chamber profile loaded successfully.
+        """
+        if not getattr(self, "_chamber_viz", None):
+            return False
+        if not self._chamber_viz.reload_step_chamber(yaml_path):
+            return False
+        try:
+            pos = self.last_stage_position or {}
+            self._chamber_viz.update_stage_geometry(
+                pos.get("x", 0.0), pos.get("y", 0.0), pos.get("z", 0.0)
+            )
+            self._chamber_viz.set_rotation(pos.get("r", 0.0))
+            self._chamber_viz.update_focus_frame()
+        except Exception as e:
+            self.logger.warning(
+                f"Re-applying stage geometry after chamber reload failed: {e}"
+            )
+        return True
+
     def _process_pending_stage_update(self):
         """Process pending stage position update for 3D visualization.
 

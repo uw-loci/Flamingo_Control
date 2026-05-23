@@ -153,6 +153,10 @@ Edit `src/py2flamingo/configs/visualization_3d_config.yaml` to adjust:
 - **Channel settings**: Colors, update strategies, visibility (8 channels: 4 left + 4 right)
 - **Memory limits**: `storage.max_memory_mb`
 
+The 3D chamber itself is drawn from a CAD-derived **chamber profile**. To switch
+chambers (e.g. for a different objective) or create a new profile, see the
+[Sample Chamber Profiles guide](step_chamber_profiles.md).
+
 ## Integration with Main Application
 
 From the Flamingo Control main window:

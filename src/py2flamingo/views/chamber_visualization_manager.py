@@ -38,7 +38,25 @@ class ChamberVisualizationManager:
         reset_camera() - reset viewer camera zoom
         load_objective_calibration() - load from PositionPresetService
         set_objective_calibration(x, y, z, r) - set + save calibration, update focus frame
+        reload_step_chamber(yaml_path) - swap the STEP chamber profile live
     """
+
+    # Named layers created by _setup_chamber's indicator helpers + the
+    # fallback rectangular wireframe. reload_step_chamber removes these
+    # (plus the StepChamberOverlay's own layers) before rebuilding.
+    _CHAMBER_LAYER_NAMES = (
+        "Chamber Wireframe",
+        "Back Wall",
+        "Bottom Wall",
+        "FEP Tube",
+        "Holder Stem",
+        "Objective",
+        "Rotation Indicator",
+        "XY Focus Frame",
+        "Chamber Axes",
+        "Chamber Axes Tips",
+        "Cavity Center",
+    )
 
     def __init__(
         self, voxel_storage, config, invert_x, position_sliders=None, slider_scale=1000
@@ -189,24 +207,59 @@ class ChamberVisualizationManager:
         # Reset camera after setup
         QTimer.singleShot(100, self.reset_camera)
 
-    def _setup_step_chamber_overlay(self) -> None:
+    def _resolve_step_yaml_path(self, explicit_path=None):
+        """Resolve which STEP chamber features YAML to load.
+
+        Priority: explicit_path (a live profile switch) > persisted profile
+        (QSettings ``step_chamber/profile``) > config default
+        (``step_chamber.features_yaml``). Relative paths resolve against
+        src/py2flamingo/.
+        """
+        from pathlib import Path
+
+        here = Path(__file__).resolve().parent.parent  # src/py2flamingo
+
+        def _resolve(rel_or_abs):
+            p = Path(rel_or_abs)
+            return p if p.is_absolute() else (here / p).resolve()
+
+        if explicit_path:
+            return _resolve(explicit_path)
+
+        # Persisted profile selection (set by ViewerControlsDialog).
+        try:
+            from PyQt5.QtCore import QSettings
+
+            saved = QSettings("py2flamingo", "viewer_controls").value(
+                "step_chamber/profile", "", type=str
+            )
+            if saved:
+                cand = _resolve(saved)
+                if cand.exists():
+                    return cand
+        except Exception:
+            pass
+
+        cfg = self._config.get("step_chamber") or {}
+        return _resolve(cfg.get("features_yaml", "configs/step_chamber_features.yaml"))
+
+    def _setup_step_chamber_overlay(self, explicit_path=None) -> None:
         """Lazy-create and load the StepChamberOverlay, then add its layers
         (hidden by default). The user toggles visibility in ViewerControlsDialog.
+
+        Args:
+            explicit_path: When given, load this profile instead of the
+                persisted/config default — used by reload_step_chamber.
         """
         if not self.viewer:
             return
         try:
-            cfg = self._config.get("step_chamber") or {}
-            yaml_rel = cfg.get("features_yaml", "configs/step_chamber_features.yaml")
-            # Resolve relative to src/py2flamingo/ (same as visualization_3d_config.yaml)
-            from pathlib import Path
-
-            here = Path(__file__).resolve().parent.parent  # src/py2flamingo
-            yaml_path = (here / yaml_rel).resolve()
+            yaml_path = self._resolve_step_yaml_path(explicit_path)
             if not yaml_path.exists():
                 self.logger.info(
                     f"STEP chamber YAML not found, overlay disabled: {yaml_path}"
                 )
+                self.step_overlay = None
                 return
 
             from py2flamingo.views.step_chamber_overlay import StepChamberOverlay
@@ -220,7 +273,7 @@ class ChamberVisualizationManager:
             if self.step_overlay.load():
                 self.step_overlay.add_layers(master_visible=False)
                 self.logger.info(
-                    f"STEP chamber overlay loaded with "
+                    f"STEP chamber overlay loaded from {yaml_path.name} with "
                     f"{len(self.step_overlay.feature_layer_names())} layers (hidden)"
                 )
             else:
@@ -228,6 +281,58 @@ class ChamberVisualizationManager:
         except Exception as e:
             self.logger.warning(f"STEP chamber overlay setup failed: {e}")
             self.step_overlay = None
+
+    def reload_step_chamber(self, yaml_path) -> bool:
+        """Swap the active STEP chamber profile and rebuild the chamber view.
+
+        Tears down the current STEP overlay plus every in-chamber indicator
+        layer, reloads geometry from ``yaml_path``, and re-runs chamber setup.
+        Data / channel layers are left untouched.
+
+        The caller should re-apply the current stage position and rotation
+        afterwards (see SampleView.reload_chamber_profile) so the holder
+        assembly lands correctly.
+
+        Args:
+            yaml_path: Profile YAML, absolute or relative to src/py2flamingo/.
+
+        Returns:
+            True if the new STEP overlay loaded successfully.
+        """
+        if not self.viewer:
+            return False
+        try:
+            # Tear down the existing STEP overlay (it tracks its own layers).
+            if self.step_overlay is not None:
+                try:
+                    self.step_overlay.remove_layers()
+                except Exception:
+                    pass
+                self.step_overlay = None
+
+            # Remove indicator + fallback-wireframe layers by name.
+            for name in self._CHAMBER_LAYER_NAMES:
+                if name in self.viewer.layers:
+                    try:
+                        self.viewer.layers.remove(name)
+                    except Exception:
+                        pass
+
+            # Rebuild from the new profile.
+            self._setup_step_chamber_overlay(explicit_path=yaml_path)
+            self._setup_chamber()
+            self._apply_persisted_visibility()
+
+            loaded = self.step_overlay is not None and getattr(
+                self.step_overlay, "_loaded", False
+            )
+            self.logger.info(
+                f"Chamber profile reloaded: {yaml_path} (STEP loaded={loaded})"
+            )
+            return loaded
+        except Exception as e:
+            self.logger.error(f"Chamber profile reload failed: {e}")
+            return False
 
     def _setup_chamber(self) -> None:
         """Setup the chamber visualization and all in-chamber indicators.
