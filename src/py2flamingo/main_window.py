@@ -455,8 +455,18 @@ class MainWindow(QMainWindow):
             )
             from py2flamingo.views.dialogs.settings_dialog import SettingsDialog
 
-            # Get or create the settings service
-            if not hasattr(self, "_settings_service") or self._settings_service is None:
+            # Prefer the application-wide MicroscopeSettingsService (from
+            # config_service) so notification + stage-limit edits stay in sync
+            # with the rest of the app. Fall back to a private instance only
+            # if the app's settings service is unavailable.
+            app_settings = (
+                self.app.microscope_settings if self.app is not None else None
+            )
+            if app_settings is not None:
+                self._settings_service = app_settings
+            elif (
+                not hasattr(self, "_settings_service") or self._settings_service is None
+            ):
                 # Try to get microscope name from connection view
                 microscope_name = "n7"  # Default
                 if hasattr(self.connection_view, "get_current_microscope_name"):
@@ -470,8 +480,20 @@ class MainWindow(QMainWindow):
                     microscope_name, base_path
                 )
 
+            notification_service = None
+            if self.app is not None and hasattr(self.app, "notification_service"):
+                notification_service = self.app.notification_service
+            if notification_service is None:
+                from py2flamingo.services.notification_service import (
+                    NotificationService,
+                )
+
+                notification_service = NotificationService(self._settings_service)
+
             dialog = SettingsDialog(
-                settings_service=self._settings_service, parent=self
+                settings_service=self._settings_service,
+                notification_service=notification_service,
+                parent=self,
             )
             dialog.exec_()
 

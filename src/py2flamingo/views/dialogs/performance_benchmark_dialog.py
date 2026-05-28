@@ -592,6 +592,22 @@ class PerformanceBenchmarkDialog(PersistentDialog):
             self.worker.cancel()
             self._status_label.setText("Cancelling...")
 
+        try:
+            from py2flamingo.services.notification_service import (
+                get_notification_service,
+            )
+
+            svc = get_notification_service(self)
+            if svc is not None:
+                svc.notify(
+                    "errors",
+                    title="Flamingo: benchmark cancelled",
+                    message="Benchmark was cancelled before finishing.",
+                    tags="no_entry_sign",
+                )
+        except Exception:
+            pass
+
     def _on_progress(self, percentage: int, status: str):
         """Handle progress updates."""
         self._progress_bar.setValue(percentage)
@@ -636,8 +652,29 @@ class PerformanceBenchmarkDialog(PersistentDialog):
         self._export_csv_btn.setEnabled(has_results)
         self._export_json_btn.setEnabled(has_results)
 
+        try:
+            from py2flamingo.services.notification_service import (
+                get_notification_service,
+            )
+
+            svc = get_notification_service(self)
+            if svc is not None:
+                svc.notify(
+                    "benchmark_completed",
+                    title="Flamingo: benchmark done",
+                    message=f"Benchmark run finished ({len(self.results)} result(s)).",
+                    tags="bar_chart",
+                )
+        except Exception:
+            pass
+
     def _on_error(self, error_msg: str):
-        """Handle benchmark error."""
+        """Handle benchmark error.
+
+        ntfy: no manual notify here — the benchmark worker calls
+        `logger.exception("Benchmark error")` first, which the
+        NtfyLogHandler attached to the root logger captures.
+        """
         self._status_label.setText(f"Error: {error_msg}")
         self._restore_controls()
         QMessageBox.critical(self, "Benchmark Error", error_msg)

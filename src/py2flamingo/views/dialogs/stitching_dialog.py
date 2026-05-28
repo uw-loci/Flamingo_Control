@@ -1738,6 +1738,17 @@ class StitchingDialog(PersistentDialog):
                 item["status"] = "cancelled"
         self._update_queue_table()
 
+        from py2flamingo.services.notification_service import get_notification_service
+
+        svc = get_notification_service(self)
+        if svc is not None:
+            svc.notify(
+                "errors",
+                title="Flamingo: stitching cancelled",
+                message="Stitching was cancelled before finishing.",
+                tags="no_entry_sign",
+            )
+
     # Step-list colours. Kept here so a11y changes are one place.
     _STEP_COLORS = {
         "todo": ("#FFC107", "#5D4200"),  # yellow pill, dark text
@@ -1869,8 +1880,25 @@ class StitchingDialog(PersistentDialog):
             self._update_queue_table()
         self._log(f"\n\u2713 Completed: {Path(output_path).parent.name}")
 
+        from py2flamingo.services.notification_service import get_notification_service
+
+        svc = get_notification_service(self)
+        if svc is not None:
+            acq_name = Path(output_path).parent.name
+            svc.notify(
+                "stitching_item_completed",
+                title="Flamingo: stitched acquisition done",
+                message=f"Stitched output written: {acq_name}",
+                tags="card_file_box",
+            )
+
     def _on_item_error(self, error_msg: str):
-        """Handle error in one queue item."""
+        """Handle error in one queue item.
+
+        ntfy: no manual notify here \u2014 the stitching worker calls
+        `logger.exception("Stitching pipeline error")` first, which the
+        NtfyLogHandler attached to the root logger captures.
+        """
         if 0 <= self._queue_index < len(self._queue):
             item = self._queue[self._queue_index]
             item["status"] = "error"
@@ -1895,6 +1923,29 @@ class StitchingDialog(PersistentDialog):
 
     def _on_batch_complete(self):
         """Handle completion of all queue items."""
+        from py2flamingo.services.notification_service import get_notification_service
+
+        svc = get_notification_service(self)
+        if svc is not None:
+            n_success = sum(1 for _, ok, _ in self._batch_results if ok)
+            n_error = sum(1 for _, ok, _ in self._batch_results if not ok)
+            total = len(self._batch_results)
+            if n_error:
+                svc.notify(
+                    "stitching_batch_completed",
+                    title="Flamingo: stitching batch finished (with errors)",
+                    message=f"{n_success}/{total} succeeded, {n_error} failed.",
+                    priority="high",
+                    tags="warning",
+                )
+            else:
+                svc.notify(
+                    "stitching_batch_completed",
+                    title="Flamingo: stitching batch done",
+                    message=f"All {total} acquisition(s) stitched successfully.",
+                    tags="white_check_mark",
+                )
+
         self._batch_running = False
         self._queue_index = -1
         self._batch_config = None

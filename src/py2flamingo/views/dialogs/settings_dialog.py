@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -31,6 +32,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from py2flamingo.services.notification_service import DEFAULT_EVENTS
 from py2flamingo.services.window_geometry_manager import PersistentDialog
 
 # Downsample factor presets (storage to display ratio)
@@ -55,16 +57,18 @@ class SettingsDialog(PersistentDialog):
     Settings are loaded from and saved to the microscope-specific JSON file.
     """
 
-    def __init__(self, settings_service=None, parent=None):
+    def __init__(self, settings_service=None, notification_service=None, parent=None):
         """Initialize the settings dialog.
 
         Args:
             settings_service: MicroscopeSettingsService instance for load/save
+            notification_service: NotificationService for the "Send Test" button
             parent: Parent widget
         """
         super().__init__(parent)
         self._logger = logging.getLogger(__name__)
         self._settings_service = settings_service
+        self._notification_service = notification_service
         self._original_settings = {}
 
         self.setWindowTitle("Settings")
@@ -88,6 +92,7 @@ class SettingsDialog(PersistentDialog):
         self._tabs.addTab(self._create_display_tab(), "Display")
         self._tabs.addTab(self._create_paths_tab(), "Paths")
         self._tabs.addTab(self._create_general_tab(), "General")
+        self._tabs.addTab(self._create_notifications_tab(), "Notifications")
 
         layout.addWidget(self._tabs)
 
@@ -407,6 +412,141 @@ class SettingsDialog(PersistentDialog):
         layout.addStretch()
         return tab
 
+    def _create_notifications_tab(self) -> QWidget:
+        """Create the Notifications (ntfy.sh) settings tab."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(12)
+
+        # ntfy server group
+        server_group = QGroupBox("ntfy.sh Server")
+        server_grid = QGridLayout()
+        server_grid.setSpacing(8)
+
+        self._notif_enabled = QCheckBox("Enable push notifications")
+        self._notif_enabled.setToolTip(
+            "Master switch. When off, no notifications are sent regardless of "
+            "the per-event checkboxes below."
+        )
+        server_grid.addWidget(self._notif_enabled, 0, 0, 1, 3)
+
+        server_grid.addWidget(QLabel("ntfy URL:"), 1, 0)
+        self._ntfy_url = QLineEdit()
+        self._ntfy_url.setPlaceholderText("https://ntfy.sh/your-topic-name")
+        self._ntfy_url.setToolTip(
+            "Full topic URL. Use a hard-to-guess topic name (anyone with the "
+            "URL can read messages on the public ntfy.sh server)."
+        )
+        server_grid.addWidget(self._ntfy_url, 1, 1)
+
+        test_btn = QPushButton("Send Test")
+        test_btn.setToolTip("Send a test notification to the URL above.")
+        test_btn.clicked.connect(self._on_send_test_notification)
+        server_grid.addWidget(test_btn, 1, 2)
+
+        ntfy_info = QLabel(
+            "Subscribe to this topic from the ntfy mobile app or "
+            "https://ntfy.sh in a browser to receive alerts."
+        )
+        ntfy_info.setStyleSheet("color: gray; font-size: 9pt;")
+        ntfy_info.setWordWrap(True)
+        server_grid.addWidget(ntfy_info, 2, 0, 1, 3)
+
+        server_group.setLayout(server_grid)
+        layout.addWidget(server_group)
+
+        # Per-event checkboxes
+        events_group = QGroupBox("Send a notification when…")
+        events_layout = QVBoxLayout()
+        events_layout.setSpacing(6)
+
+        self._notif_event_checkboxes = {}
+        event_labels = [
+            (
+                "workflow_queue_completed",
+                "Workflow queue completes",
+                "Fires after the last workflow in a queue finishes (single runs "
+                "and multi-tile batches both go through the workflow queue).",
+            ),
+            (
+                "stitching_item_completed",
+                "Each stitched acquisition finishes",
+                "One notification per acquisition when its stitched output is "
+                "written. Useful for long overnight batches.",
+            ),
+            (
+                "stitching_batch_completed",
+                "Stitching batch (all queued items) finishes",
+                "Single notification after the whole stitching queue is done.",
+            ),
+            (
+                "tile_collection_completed",
+                "Tile collection finishes",
+                "Sent when the multi-tile workflow batch (from the Tile "
+                "Collection dialog) completes.",
+            ),
+            (
+                "benchmark_completed",
+                "Performance benchmark finishes",
+                "Sent when the rendering benchmark dialog's run completes.",
+            ),
+            (
+                "errors",
+                "Errors or cancellations (stopped before finishing)",
+                "Fires on any logged error across the app (every "
+                "logger.error/exception call), plus user-initiated cancellations "
+                "of workflows, stitching, and benchmarks. Rate-limited to one "
+                "notification per 10 seconds to prevent floods.",
+            ),
+        ]
+        for key, label, tooltip in event_labels:
+            cb = QCheckBox(label)
+            cb.setToolTip(tooltip)
+            events_layout.addWidget(cb)
+            self._notif_event_checkboxes[key] = cb
+
+        events_group.setLayout(events_layout)
+        layout.addWidget(events_group)
+
+        layout.addStretch()
+        return tab
+
+    def _on_send_test_notification(self) -> None:
+        """Send a test ntfy notification to the URL in the form field."""
+        url = self._ntfy_url.text().strip()
+        if not url:
+            QMessageBox.warning(
+                self,
+                "Missing URL",
+                "Enter an ntfy topic URL before sending a test "
+                "(e.g. https://ntfy.sh/your-topic-name).",
+            )
+            return
+        if self._notification_service is None:
+            QMessageBox.warning(
+                self,
+                "Notification service unavailable",
+                "The notification service was not provided to this dialog. "
+                "Test cannot be sent.",
+            )
+            return
+        thread = self._notification_service.send_test(url)
+        thread.sent.connect(self._on_test_notification_result)
+
+    def _on_test_notification_result(self, success: bool, info: str) -> None:
+        if success:
+            QMessageBox.information(
+                self,
+                "Test sent",
+                "Test notification dispatched. Check your ntfy subscription.",
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "Test failed",
+                f"Could not send test notification:\n\n{info}",
+            )
+
     def _browse_directory(self, line_edit: QLineEdit) -> None:
         """Open directory browser and set result to line edit."""
         current = line_edit.text() or str(Path.home())
@@ -491,6 +631,14 @@ class SettingsDialog(PersistentDialog):
             self._workflows_dir.setText(paths.get("workflows_dir", ""))
             self._sessions_dir.setText(paths.get("sessions_dir", ""))
 
+            # Notifications
+            notif = self._settings_service.get_setting("notifications", {}) or {}
+            self._notif_enabled.setChecked(bool(notif.get("enabled", True)))
+            self._ntfy_url.setText(str(notif.get("ntfy_url", "")))
+            events = notif.get("events", {}) or {}
+            for key, cb in self._notif_event_checkboxes.items():
+                cb.setChecked(bool(events.get(key, DEFAULT_EVENTS.get(key, False))))
+
             self._update_voxel_info()
             self._logger.info("Settings loaded successfully")
 
@@ -564,6 +712,18 @@ class SettingsDialog(PersistentDialog):
                     "paths.sessions_dir", self._sessions_dir.text()
                 )
 
+            # Notifications
+            self._settings_service.update_setting(
+                "notifications.enabled", self._notif_enabled.isChecked()
+            )
+            self._settings_service.update_setting(
+                "notifications.ntfy_url", self._ntfy_url.text().strip()
+            )
+            for key, cb in self._notif_event_checkboxes.items():
+                self._settings_service.update_setting(
+                    f"notifications.events.{key}", cb.isChecked()
+                )
+
             # Update timestamp
             import time
 
@@ -625,6 +785,12 @@ class SettingsDialog(PersistentDialog):
             self._output_dir.clear()
             self._workflows_dir.clear()
             self._sessions_dir.clear()
+
+            # Notifications: master on, URL cleared, defaults restored
+            self._notif_enabled.setChecked(True)
+            self._ntfy_url.clear()
+            for key, cb in self._notif_event_checkboxes.items():
+                cb.setChecked(DEFAULT_EVENTS.get(key, False))
 
             self._update_voxel_info()
 

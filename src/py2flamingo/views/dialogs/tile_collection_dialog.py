@@ -1605,6 +1605,25 @@ class TileCollectionDialog(PersistentDialog):
             )
             progress._current_label.setText("Complete!")
             progress._current_bar.setValue(100)
+
+            try:
+                from py2flamingo.services.notification_service import (
+                    get_notification_service,
+                )
+
+                svc = get_notification_service(self)
+                if svc is not None:
+                    svc.notify(
+                        "tile_collection_completed",
+                        title="Flamingo: tile collection done",
+                        message=(
+                            f"Tile collection finished "
+                            f"({total_workflows} workflow(s))."
+                        ),
+                        tags="white_check_mark",
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to send tile-collection notification: {e}")
             try:
                 wf_saved = per_workflow_est.finalize()
                 img_saved = per_image_est.finalize()

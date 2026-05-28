@@ -224,7 +224,55 @@ class FlamingoApplication(QObject):
         self.pipeline_service = pipeline["pipeline_service"]
         self.pipeline_controller = pipeline["pipeline_controller"]
 
+        # --- Notifications: hook workflow queue completion ---
+        self._wire_notification_hooks()
+
         self.logger.info("Application dependencies setup complete")
+
+    def _wire_notification_hooks(self) -> None:
+        """Subscribe NotificationService to global signals + logging.
+
+        - Attaches NtfyLogHandler to the root logger so every logger.error /
+          logger.exception across the codebase produces an "errors"
+          notification (gated by the matching checkbox). This replaces
+          per-call-site error wiring.
+        - Hooks WorkflowQueueService completion + cancellation signals.
+        - Per-dialog signals (stitching, tile collection, benchmark) are
+          hooked locally in those dialogs.
+        """
+        try:
+            svc = self.notification_service
+            if svc is None:
+                return
+
+            # Cross-cutting error capture via stdlib logging.
+            root = logging.getLogger()
+            handler = svc.make_log_handler()
+            handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+            root.addHandler(handler)
+            self._notification_log_handler = handler
+
+            if self.workflow_queue_service is None:
+                return
+
+            self.workflow_queue_service.queue_completed.connect(
+                lambda: svc.notify(
+                    "workflow_queue_completed",
+                    title="Flamingo: workflow queue done",
+                    message="The workflow queue has finished.",
+                    tags="white_check_mark",
+                )
+            )
+            self.workflow_queue_service.queue_cancelled.connect(
+                lambda: svc.notify(
+                    "errors",
+                    title="Flamingo: workflow queue cancelled",
+                    message="The workflow queue was cancelled before finishing.",
+                    tags="no_entry_sign",
+                )
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to wire notification hooks: {e}")
 
     def _on_stage_connection_established(self):
         """Handle connection established event for enhanced stage control view.
@@ -560,6 +608,28 @@ class FlamingoApplication(QObject):
         if hasattr(self, "config_service") and self.config_service:
             return self.config_service.microscope_settings
         return None
+
+    @property
+    def notification_service(self):
+        """Get the ntfy push-notification service, creating it on first access.
+
+        Backed by `microscope_settings` for persistence, so the same JSON file
+        that holds stage limits also holds the notification URL + per-event
+        checkboxes.
+
+        Returns:
+            NotificationService instance, or None if microscope_settings unavailable
+        """
+        existing = getattr(self, "_notification_service", None)
+        if existing is not None:
+            return existing
+        settings = self.microscope_settings
+        if settings is None:
+            return None
+        from py2flamingo.services.notification_service import NotificationService
+
+        self._notification_service = NotificationService(settings)
+        return self._notification_service
 
     # -------------------------------------------------------------------------
     # Acquisition State Management
