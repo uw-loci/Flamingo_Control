@@ -176,7 +176,7 @@ class TestMVCConnectionService(unittest.TestCase):
     def test_send_command_success(self):
         """Test sending command successfully."""
         from py2flamingo.models.command import Command
-        from py2flamingo.models.connection import ConnectionConfig, ConnectionState
+        from py2flamingo.models.connection import ConnectionConfig
 
         # Connect first
         config = ConnectionConfig("192.168.1.100", 53717)
@@ -185,25 +185,16 @@ class TestMVCConnectionService(unittest.TestCase):
         self.mock_tcp.connect.return_value = (mock_cmd_sock, mock_live_sock)
         self.service.connect(config)
 
-        # Mock encoder
-        encoded_cmd = b"\x00" * 128
-        self.mock_encoder.encode_command.return_value = encoded_cmd
+        # send_command delegates to the underlying MicroscopeCommandService.
+        expected_response = b"\x01" * 128
+        self.service._command_service = Mock()
+        self.service._command_service.send_command.return_value = expected_response
 
-        # Mock socket response
-        mock_cmd_sock.recv.return_value = b"\x01" * 128
-
-        # Create and send command
         cmd = Command(code=12292)
         response = self.service.send_command(cmd)
 
-        # Verify encoding
-        self.mock_encoder.encode_command.assert_called_once()
-
-        # Verify send
-        mock_cmd_sock.sendall.assert_called_once_with(encoded_cmd)
-
-        # Verify response
-        self.assertEqual(len(response), 128)
+        self.service._command_service.send_command.assert_called_once_with(cmd, 5.0)
+        self.assertEqual(response, expected_response)
 
     def test_send_command_not_connected(self):
         """Test sending command when not connected."""
@@ -229,17 +220,19 @@ class TestMVCConnectionService(unittest.TestCase):
         self.mock_tcp.connect.return_value = (mock_cmd_sock, mock_live_sock)
         self.service.connect(config)
 
-        # Mock socket error
-        mock_cmd_sock.sendall.side_effect = socket.error("Connection lost")
+        # send_command delegates to MicroscopeCommandService; simulate a
+        # ConnectionError there to verify it propagates out of send_command.
+        self.service._command_service = Mock()
+        self.service._command_service.send_command.side_effect = ConnectionError(
+            "Connection lost"
+        )
 
-        # Create and send command
         cmd = Command(code=12292)
 
-        # Should raise ConnectionError
         with self.assertRaises(ConnectionError) as ctx:
             self.service.send_command(cmd)
 
-        self.assertIn("Failed to send command", str(ctx.exception))
+        self.assertIn("Connection lost", str(ctx.exception))
 
     def test_get_status(self):
         """Test get_status method."""
@@ -253,13 +246,17 @@ class TestMVCWorkflowService(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
-        # Mock connection service
+        # Mock connection service and event manager
         self.mock_conn_service = Mock()
+        self.mock_event_manager = Mock()
 
         # Import and create service (direct import to avoid numpy dependency)
         from py2flamingo.services.workflow_service import MVCWorkflowService
 
-        self.service = MVCWorkflowService(connection_service=self.mock_conn_service)
+        self.service = MVCWorkflowService(
+            connection_service=self.mock_conn_service,
+            event_manager=self.mock_event_manager,
+        )
 
         # Create temp workflow file
         self.temp_workflow = Path("/tmp/test_workflow.txt")
@@ -772,7 +769,7 @@ class TestServiceIntegration(unittest.TestCase):
 
         # Create services
         conn_service = MVCConnectionService(mock_tcp, mock_encoder)
-        workflow_service = MVCWorkflowService(conn_service)
+        workflow_service = MVCWorkflowService(conn_service, Mock())
 
         # Verify workflow service has connection service
         self.assertIs(workflow_service.connection_service, conn_service)
@@ -809,7 +806,7 @@ class TestServiceIntegration(unittest.TestCase):
 
         # Create services
         conn_service = MVCConnectionService(mock_tcp, mock_encoder)
-        workflow_service = MVCWorkflowService(conn_service)
+        workflow_service = MVCWorkflowService(conn_service, Mock())
         status_service = StatusService(conn_service)
 
         # Connect

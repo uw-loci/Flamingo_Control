@@ -21,6 +21,44 @@ from py2flamingo.utils import file_handlers as fh
 from .communication.thread_manager import ThreadManager
 
 
+def _receive_full_bytes(
+    sock: socket.socket, expected_size: int, timeout: float
+) -> bytes:
+    """Receive ``expected_size`` bytes from ``sock`` within ``timeout`` seconds.
+
+    Handles partial recvs and restores the socket's original timeout on exit.
+    Shared by ConnectionService and MVCConnectionService.
+    """
+    data = b""
+    start_time = time.time()
+    original_timeout = sock.gettimeout()
+    try:
+        while len(data) < expected_size:
+            elapsed = time.time() - start_time
+            remaining_time = timeout - elapsed
+            if remaining_time <= 0:
+                raise socket.timeout(
+                    f"Partial receive timeout: got {len(data)}/{expected_size} bytes"
+                )
+            sock.settimeout(min(remaining_time, 1.0))
+            try:
+                chunk = sock.recv(expected_size - len(data))
+            except socket.timeout:
+                if time.time() - start_time >= timeout:
+                    raise socket.timeout(
+                        f"Receive timeout: got {len(data)}/{expected_size} bytes after {timeout}s"
+                    )
+                continue
+            if not chunk:
+                raise ConnectionError(
+                    f"Connection closed during receive: got {len(data)}/{expected_size} bytes"
+                )
+            data += chunk
+        return data
+    finally:
+        sock.settimeout(original_timeout)
+
+
 class ConnectionService:
     """
     Service for managing connections to the microscope.
@@ -207,9 +245,7 @@ class ConnectionService:
             )
 
             # Wait for 128-byte response with timeout
-            response = self._receive_full_response(
-                self.nuc_client, 128, timeout=timeout
-            )
+            response = _receive_full_bytes(self.nuc_client, 128, timeout=timeout)
 
             # Verify we got a valid response (check start/end markers)
             if len(response) >= 128:
@@ -1065,68 +1101,6 @@ class MVCConnectionService:
                 self._update_error_state(str(e))
             raise
 
-    def _receive_full_response(
-        self, sock: socket.socket, expected_size: int, timeout: float
-    ) -> bytes:
-        """
-        Receive full response, handling partial receives.
-
-        Args:
-            sock: Socket to receive from
-            expected_size: Expected number of bytes
-            timeout: Maximum time to wait
-
-        Returns:
-            Complete response bytes
-
-        Raises:
-            socket.timeout: If timeout expires
-            socket.error: If receive fails
-        """
-        import time
-
-        data = b""
-        start_time = time.time()
-        original_timeout = sock.gettimeout()
-
-        try:
-            while len(data) < expected_size:
-                # Check overall timeout
-                elapsed = time.time() - start_time
-                remaining_time = timeout - elapsed
-                if remaining_time <= 0:
-                    raise socket.timeout(
-                        f"Partial receive timeout: got {len(data)}/{expected_size} bytes"
-                    )
-
-                # Set socket timeout to remaining time (capped at 1 second for responsiveness)
-                sock.settimeout(min(remaining_time, 1.0))
-
-                # Receive chunk
-                try:
-                    remaining = expected_size - len(data)
-                    chunk = sock.recv(remaining)
-                except socket.timeout:
-                    # Check if overall timeout exceeded
-                    if time.time() - start_time >= timeout:
-                        raise socket.timeout(
-                            f"Receive timeout: got {len(data)}/{expected_size} bytes after {timeout}s"
-                        )
-                    continue  # Keep trying within overall timeout
-
-                if not chunk:
-                    # Connection closed
-                    raise ConnectionError(
-                        f"Connection closed during receive: got {len(data)}/{expected_size} bytes"
-                    )
-
-                data += chunk
-
-            return data
-        finally:
-            # Restore original socket timeout
-            sock.settimeout(original_timeout)
-
     def _update_error_state(self, error_msg: str) -> None:
         """Update model to ERROR state."""
         try:
@@ -1209,9 +1183,7 @@ class MVCConnectionService:
             self.logger.debug(f"Sent command {cmd.code}, reading text response...")
 
             # Read 128-byte acknowledgment first
-            ack_data = self._receive_full_response(
-                self._command_socket, 128, timeout=2.0
-            )
+            ack_data = _receive_full_bytes(self._command_socket, 128, timeout=2.0)
             self.logger.debug("Received 128-byte ack")
 
             # Check for additional data using select (like old code's bytes_waiting)

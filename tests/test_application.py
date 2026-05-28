@@ -57,91 +57,51 @@ class TestFlamingoApplicationInit(unittest.TestCase):
 class TestFlamingoApplicationDependencyInjection(unittest.TestCase):
     """Test dependency injection and component creation."""
 
+    @classmethod
+    def setUpClass(cls):
+        """Ensure QApplication exists for widget creation in setup_dependencies."""
+        cls._qapp = QApplication.instance() or QApplication([])
+
     def setUp(self):
         """Set up test fixtures."""
         self.app = FlamingoApplication()
 
-    @patch("py2flamingo.application.LiveFeedView")
-    @patch("py2flamingo.application.ConnectionView")
-    @patch("py2flamingo.application.WorkflowView")
-    def _setup_dependencies_with_mocks(
-        self, mock_workflow_view, mock_connection_view, mock_live_feed_view
-    ):
-        """Helper to setup dependencies with mocked views."""
-        self.app.setup_dependencies()
-        return mock_connection_view, mock_workflow_view
-
-    @patch("py2flamingo.application.LiveFeedView")
-    @patch("py2flamingo.application.ConnectionView")
-    @patch("py2flamingo.application.WorkflowView")
-    def test_setup_dependencies_creates_core_layer(
-        self, mock_workflow_view, mock_connection_view, mock_live_feed_view
-    ):
+    def test_setup_dependencies_creates_core_layer(self):
         """Test that setup_dependencies creates core components."""
         self.app.setup_dependencies()
 
-        # Core layer
         self.assertIsNotNone(self.app.tcp_connection)
         self.assertIsNotNone(self.app.protocol_encoder)
 
-    @patch("py2flamingo.application.LiveFeedView")
-    @patch("py2flamingo.application.ConnectionView")
-    @patch("py2flamingo.application.WorkflowView")
-    def test_setup_dependencies_creates_models_layer(
-        self, mock_workflow_view, mock_connection_view, mock_live_feed_view
-    ):
+    def test_setup_dependencies_creates_models_layer(self):
         """Test that setup_dependencies creates model components."""
         self.app.setup_dependencies()
 
-        # Models layer
         self.assertIsNotNone(self.app.connection_model)
 
-    @patch("py2flamingo.application.LiveFeedView")
-    @patch("py2flamingo.application.ConnectionView")
-    @patch("py2flamingo.application.WorkflowView")
-    def test_setup_dependencies_creates_services_layer(
-        self, mock_workflow_view, mock_connection_view, mock_live_feed_view
-    ):
+    def test_setup_dependencies_creates_services_layer(self):
         """Test that setup_dependencies creates service components."""
         self.app.setup_dependencies()
 
-        # Services layer
         self.assertIsNotNone(self.app.connection_service)
         self.assertIsNotNone(self.app.workflow_service)
         self.assertIsNotNone(self.app.status_service)
 
-    @patch("py2flamingo.application.LiveFeedView")
-    @patch("py2flamingo.application.ConnectionView")
-    @patch("py2flamingo.application.WorkflowView")
-    def test_setup_dependencies_creates_controllers_layer(
-        self, mock_workflow_view, mock_connection_view, mock_live_feed_view
-    ):
+    def test_setup_dependencies_creates_controllers_layer(self):
         """Test that setup_dependencies creates controller components."""
         self.app.setup_dependencies()
 
-        # Controllers layer
         self.assertIsNotNone(self.app.connection_controller)
         self.assertIsNotNone(self.app.workflow_controller)
 
-    @patch("py2flamingo.application.LiveFeedView")
-    @patch("py2flamingo.application.ConnectionView")
-    @patch("py2flamingo.application.WorkflowView")
-    def test_setup_dependencies_creates_views_layer(
-        self, mock_workflow_view, mock_connection_view, mock_live_feed_view
-    ):
+    def test_setup_dependencies_creates_views_layer(self):
         """Test that setup_dependencies creates view components."""
         self.app.setup_dependencies()
 
-        # Views layer (these are the mock instances now)
-        mock_connection_view.assert_called_once()
-        mock_workflow_view.assert_called_once()
+        self.assertIsNotNone(self.app.connection_view)
+        self.assertIsNotNone(self.app.workflow_view)
 
-    @patch("py2flamingo.application.LiveFeedView")
-    @patch("py2flamingo.application.ConnectionView")
-    @patch("py2flamingo.application.WorkflowView")
-    def test_setup_dependencies_wiring(
-        self, mock_workflow_view, mock_connection_view, mock_live_feed_view
-    ):
+    def test_setup_dependencies_wiring(self):
         """Test that components are properly wired together."""
         self.app.setup_dependencies()
 
@@ -161,164 +121,106 @@ class TestFlamingoApplicationDependencyInjection(unittest.TestCase):
             self.app.status_service.connection_service, self.app.connection_service
         )
 
-    @patch("py2flamingo.application.LiveFeedView")
-    @patch("py2flamingo.application.ConnectionView")
-    @patch("py2flamingo.application.WorkflowView")
-    def test_setup_dependencies_sets_default_connection_info(
-        self, mock_workflow_view, mock_connection_view, mock_live_feed_view
-    ):
+    def test_setup_dependencies_sets_default_connection_info(self):
         """Test that default connection info is set in view."""
         self.app.default_ip = "10.0.0.1"
         self.app.default_port = 9999
 
-        # Create a mock instance to return from ConnectionView()
-        mock_view_instance = Mock()
-        mock_connection_view.return_value = mock_view_instance
-
         self.app.setup_dependencies()
 
-        # Should have called set_connection_info with default values
-        mock_view_instance.set_connection_info.assert_called_once_with("10.0.0.1", 9999)
+        # Connection view should have the defaults applied
+        self.assertEqual(self.app.connection_view.ip_input.text(), "10.0.0.1")
+        self.assertEqual(self.app.connection_view.port_input.text(), "9999")
 
 
 class TestFlamingoApplicationMainWindow(unittest.TestCase):
     """Test main window creation."""
 
+    @classmethod
+    def setUpClass(cls):
+        cls._qapp = QApplication.instance() or QApplication([])
+
     def setUp(self):
         """Set up test fixtures."""
         self.app = FlamingoApplication()
 
     @patch("py2flamingo.main_window.MainWindow")
-    @patch("py2flamingo.application.LiveFeedView")
-    @patch("py2flamingo.application.ConnectionView")
-    @patch("py2flamingo.application.WorkflowView")
-    def test_create_main_window(
-        self,
-        mock_workflow_view,
-        mock_connection_view,
-        mock_live_feed_view,
-        mock_main_window,
-    ):
+    def test_create_main_window(self, mock_main_window):
         """Test that create_main_window creates MainWindow instance."""
         self.app.setup_dependencies()
         self.app.create_main_window()
 
-        # Should have called MainWindow constructor
         mock_main_window.assert_called_once()
 
     @patch("py2flamingo.main_window.MainWindow")
-    @patch("py2flamingo.application.LiveFeedView")
-    @patch("py2flamingo.application.ConnectionView")
-    @patch("py2flamingo.application.WorkflowView")
-    def test_main_window_has_views(
-        self,
-        mock_workflow_view,
-        mock_connection_view,
-        mock_live_feed_view,
-        mock_main_window,
-    ):
-        """Test that main window receives view instances."""
-        # Setup mocks
-        mock_conn_view_instance = Mock()
-        mock_work_view_instance = Mock()
-        mock_live_feed_view_instance = Mock()
-        mock_connection_view.return_value = mock_conn_view_instance
-        mock_workflow_view.return_value = mock_work_view_instance
-        mock_live_feed_view.return_value = mock_live_feed_view_instance
-
+    def test_main_window_has_views(self, mock_main_window):
+        """Test that main window receives the view instances."""
         self.app.setup_dependencies()
         self.app.create_main_window()
 
-        # Main window should be called with view instances (including live feed)
-        mock_main_window.assert_called_once_with(
-            mock_conn_view_instance,
-            mock_work_view_instance,
-            mock_live_feed_view_instance,
-        )
+        # MainWindow is constructed with keyword args from the views layer
+        kwargs = mock_main_window.call_args.kwargs
+        self.assertIs(kwargs["connection_view"], self.app.connection_view)
+        self.assertIs(kwargs["workflow_view"], self.app.workflow_view)
+        self.assertIs(kwargs["sample_info_view"], self.app.sample_info_view)
+        self.assertIs(kwargs["camera_live_viewer"], self.app.camera_live_viewer)
 
     @patch("py2flamingo.main_window.MainWindow")
-    @patch("py2flamingo.application.LiveFeedView")
-    @patch("py2flamingo.application.ConnectionView")
-    @patch("py2flamingo.application.WorkflowView")
-    def test_main_window_has_title(
-        self,
-        mock_workflow_view,
-        mock_connection_view,
-        mock_live_feed_view,
-        mock_main_window,
-    ):
+    def test_main_window_has_title(self, mock_main_window):
         """Test that main window title is set."""
-        mock_window_instance = Mock()
+        mock_window_instance = MagicMock()
         mock_main_window.return_value = mock_window_instance
 
         self.app.setup_dependencies()
         self.app.create_main_window()
 
-        # Should have called setWindowTitle
         mock_window_instance.setWindowTitle.assert_called_once()
-        call_args = mock_window_instance.setWindowTitle.call_args[0][0]
-        self.assertIn("Flamingo", call_args)
+        title = mock_window_instance.setWindowTitle.call_args[0][0]
+        self.assertIn("Flamingo", title)
 
 
 class TestFlamingoApplicationShutdown(unittest.TestCase):
     """Test application shutdown."""
 
+    @classmethod
+    def setUpClass(cls):
+        cls._qapp = QApplication.instance() or QApplication([])
+
     def setUp(self):
         """Set up test fixtures."""
         self.app = FlamingoApplication()
 
-    @patch("py2flamingo.application.LiveFeedView")
-    @patch("py2flamingo.application.ConnectionView")
-    @patch("py2flamingo.application.WorkflowView")
-    def test_shutdown_disconnects_if_connected(
-        self, mock_workflow_view, mock_connection_view, mock_live_feed_view
-    ):
+    def test_shutdown_disconnects_if_connected(self):
         """Test that shutdown disconnects if connected."""
         self.app.setup_dependencies()
 
-        # Mock connection service
         self.app.connection_service.is_connected = Mock(return_value=True)
         self.app.connection_service.disconnect = Mock()
 
         self.app.shutdown()
 
-        # Should have called disconnect
         self.app.connection_service.disconnect.assert_called_once()
 
-    @patch("py2flamingo.application.LiveFeedView")
-    @patch("py2flamingo.application.ConnectionView")
-    @patch("py2flamingo.application.WorkflowView")
-    def test_shutdown_no_disconnect_if_not_connected(
-        self, mock_workflow_view, mock_connection_view, mock_live_feed_view
-    ):
+    def test_shutdown_no_disconnect_if_not_connected(self):
         """Test that shutdown doesn't disconnect if not connected."""
         self.app.setup_dependencies()
 
-        # Mock connection service
         self.app.connection_service.is_connected = Mock(return_value=False)
         self.app.connection_service.disconnect = Mock()
 
         self.app.shutdown()
 
-        # Should not have called disconnect
         self.app.connection_service.disconnect.assert_not_called()
 
-    @patch("py2flamingo.application.LiveFeedView")
-    @patch("py2flamingo.application.ConnectionView")
-    @patch("py2flamingo.application.WorkflowView")
-    def test_shutdown_handles_disconnect_error(
-        self, mock_workflow_view, mock_connection_view, mock_live_feed_view
-    ):
+    def test_shutdown_handles_disconnect_error(self):
         """Test that shutdown handles disconnect errors gracefully."""
         self.app.setup_dependencies()
 
-        # Mock connection service to raise error on disconnect
         self.app.connection_service.is_connected = Mock(return_value=True)
         self.app.connection_service.disconnect = Mock(
             side_effect=Exception("Test error")
         )
 
-        # Should not raise exception
         try:
             self.app.shutdown()
         except Exception:

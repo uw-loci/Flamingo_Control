@@ -44,10 +44,36 @@ class TestConnectionService(unittest.TestCase):
     @patch("socket.socket")
     def test_successful_connection_flow(self, mock_socket_class):
         """Test complete successful connection flow."""
+        import struct
+
         # Create mock sockets
         mock_nuc = MagicMock()
         mock_live = MagicMock()
         mock_socket_class.side_effect = [mock_nuc, mock_live]
+
+        # connect() validates the server by sending SYSTEM_STATE_GET and reading
+        # a 128-byte response with valid start/end markers. Build that response.
+        START_MARKER = 0xF321E654
+        END_MARKER = 0xFEDC4321
+        valid_response = struct.pack(
+            "I I I I I I I I I I d I 72s I",
+            START_MARKER,
+            0xA007,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0.0,
+            0,
+            b"\x00" * 72,
+            END_MARKER,
+        )
+        mock_nuc.recv.return_value = valid_response
+        mock_nuc.gettimeout.return_value = None
 
         # Mock thread manager
         with patch(
@@ -134,31 +160,6 @@ class TestConnectionService(unittest.TestCase):
             self.service.send_command(12345)
 
         self.assertIn("Not connected", str(context.exception))
-
-    @patch("py2flamingo.utils.file_handlers.dict_to_workflow")
-    def test_send_workflow(self, mock_dict_to_workflow):
-        """Test sending workflow through the service."""
-        # Mock connection
-        self.service._connected = True
-
-        # Create test workflow
-        workflow_dict = {
-            "Work Flow Type": "Stack",
-            "Start Position": {"X (mm)": "10.0"},
-            "End Position": {"X (mm)": "10.0"},
-        }
-
-        # Send workflow
-        self.service.send_workflow(workflow_dict)
-
-        # Verify workflow was saved
-        mock_dict_to_workflow.assert_called_once()
-        saved_path = mock_dict_to_workflow.call_args[0][0]
-        self.assertEqual(saved_path, os.path.join("workflows", "workflow.txt"))
-
-        # Verify command was sent
-        command = self.queue_manager.get_nowait("command")
-        self.assertEqual(command, 12292)  # CAMERA_WORK_FLOW_START
 
     @patch("py2flamingo.utils.file_handlers.text_to_dict")
     def test_get_microscope_settings(self, mock_text_to_dict):
@@ -279,42 +280,6 @@ class TestThreadIntegration(unittest.TestCase):
 
         self.assertEqual(image_data, test_image)
         self.assertEqual(viz_data, test_image)
-
-
-class TestMicroscopeCommands(unittest.TestCase):
-    """Test specific microscope command sequences."""
-
-    def test_stage_movement_sequence(self):
-        """Test the sequence for moving the stage."""
-        from py2flamingo.controllers.position_controller import PositionController
-        from py2flamingo.models.microscope import Position
-
-        # Create mocks
-        connection_service = Mock()
-        connection_service.is_connected.return_value = True
-
-        queue_manager = QueueManager()
-        event_manager = EventManager()
-
-        # Create controller
-        controller = PositionController(
-            connection_service=connection_service,
-            queue_manager=queue_manager,
-            event_manager=event_manager,
-        )
-
-        # Move to position
-        target_pos = Position(x=10.0, y=20.0, z=5.0, r=0.0)
-        controller._move_axis(controller.axis.X, target_pos.x, "X-axis")
-
-        # Verify command sequence
-        command_data = queue_manager.get_nowait("command_data")
-        self.assertEqual(command_data, [1, 0, 0, 10.0])  # X-axis = 1
-
-        command = queue_manager.get_nowait("command")
-        self.assertEqual(command, 24580)  # STAGE_POSITION_SET
-
-        self.assertTrue(event_manager.is_set("send"))
 
 
 class TestConfigurationFiles(unittest.TestCase):

@@ -515,7 +515,7 @@ class TestWorkflowController(unittest.TestCase):
     def test_init(self):
         """Test controller initialization."""
         self.assertIsNotNone(self.controller)
-        self.assertEqual(self.controller._service, self.mock_service)
+        self.assertEqual(self.controller._workflow_service, self.mock_service)
         self.assertEqual(self.controller._connection_model, self.mock_connection_model)
         self.assertIsNone(self.controller._current_workflow_path)
 
@@ -529,14 +529,13 @@ class TestWorkflowController(unittest.TestCase):
             temp_path = f.name
 
         try:
-            self.mock_service.load_workflow.return_value = None
-
             success, message = self.controller.load_workflow(temp_path)
 
             self.assertTrue(success)
             self.assertIn("loaded successfully", message.lower())
-            self.mock_service.load_workflow.assert_called_once()
+            # Controller reads the file directly; data is cached for start_workflow
             self.assertIsNotNone(self.controller._current_workflow_path)
+            self.assertIsNotNone(self.controller._current_workflow_data)
         finally:
             Path(temp_path).unlink()
 
@@ -601,9 +600,10 @@ class TestWorkflowController(unittest.TestCase):
             last_error=None,
         )
 
-        # Load a workflow first
+        # Load a workflow first (controller caches both path and data)
         self.controller._current_workflow_path = Path("/fake/workflow.txt")
-        self.mock_service.start_workflow.return_value = None
+        self.controller._current_workflow_data = b"Test workflow content"
+        self.mock_service.start_workflow.return_value = True
 
         success, message = self.controller.start_workflow()
 
@@ -654,6 +654,7 @@ class TestWorkflowController(unittest.TestCase):
             last_error=None,
         )
         self.controller._current_workflow_path = Path("/fake/workflow.txt")
+        self.controller._current_workflow_data = b"Test workflow content"
         self.mock_service.start_workflow.side_effect = ConnectionError(
             "Lost connection"
         )
@@ -672,7 +673,7 @@ class TestWorkflowController(unittest.TestCase):
             connected_at=datetime.now(),
             last_error=None,
         )
-        self.mock_service.stop_workflow.return_value = None
+        self.mock_service.stop_workflow.return_value = True
 
         success, message = self.controller.stop_workflow()
 
