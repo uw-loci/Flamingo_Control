@@ -718,7 +718,7 @@ class ViewerControlsDialog(PersistentDialog):
 
         py2f = Path(__file__).resolve().parents[2]  # src/py2flamingo
         candidates = []
-        default_rel = (self._config.get("step_chamber") or {}).get(
+        default_rel = (self.config.get("step_chamber") or {}).get(
             "features_yaml", "configs/step_chamber_features.yaml"
         )
         candidates.append(default_rel)
