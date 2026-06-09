@@ -35,6 +35,12 @@ multiview-stitcher>=0.1.37,<0.2
 # and ngff-zarr PR #480.  TODO: relax pin once ngff-zarr releases the fix.
 dask[array]>=2024.1.0,!=2025.12.0,!=2026.1.0,!=2026.1.1,!=2026.2.0,!=2026.3.0,<2027
 
+# Stitching pipeline — the stitching code is now the standalone flamingo_stitcher
+# package (github.com/uw-loci/flamingo-stitcher); py2flamingo.stitching is a thin
+# compatibility shim that re-exports it (single source of truth). Pinned to a
+# built + released tag. PyQt5/napari for its GUI are already provided above.
+flamingo-stitcher @ git+https://github.com/uw-loci/flamingo-stitcher.git@v0.1.2
+
 # Stitching pipeline — preprocessing
 # pystripe installed separately (see update_and_run.bat) to avoid resolver backtracking
 

@@ -968,7 +968,10 @@ class MainWindow(QMainWindow):
         logger.info("Tile Stitching menu action triggered")
 
         try:
-            from py2flamingo.views.dialogs.stitching_dialog import StitchingDialog
+            # Stitching now lives in the standalone flamingo_stitcher package
+            # (github.com/uw-loci/flamingo-stitcher) — single source of truth
+            # shared with the standalone app.
+            from flamingo_stitcher.gui import StitchingDialog
 
             # Reuse existing dialog if still open
             if (
@@ -980,7 +983,9 @@ class MainWindow(QMainWindow):
                 self._stitching_dialog.activateWindow()
                 return
 
-            self._stitching_dialog = StitchingDialog(parent=None)
+            self._stitching_dialog = StitchingDialog(
+                parent=None, geometry_manager=self._geometry_manager
+            )
             self._stitching_dialog.load_stitched_requested.connect(
                 self._on_load_stitched_from_dialog
             )
@@ -998,9 +1003,7 @@ class MainWindow(QMainWindow):
         logger.info("Tile Stitching (Single Workflow) menu action triggered")
 
         try:
-            from py2flamingo.views.dialogs.stitching_dialog import (
-                NativeStitchingDialog,
-            )
+            from flamingo_stitcher.gui import NativeStitchingDialog
 
             # Reuse existing dialog if still open
             if (
@@ -1012,7 +1015,9 @@ class MainWindow(QMainWindow):
                 self._stitching_native_dialog.activateWindow()
                 return
 
-            self._stitching_native_dialog = NativeStitchingDialog(parent=None)
+            self._stitching_native_dialog = NativeStitchingDialog(
+                parent=None, geometry_manager=self._geometry_manager
+            )
             self._stitching_native_dialog.load_stitched_requested.connect(
                 self._on_load_stitched_from_dialog
             )
