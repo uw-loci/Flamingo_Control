@@ -72,19 +72,85 @@ class _NtfyPostThread(QThread):
                 data=self._message.encode("utf-8"),
                 method="POST",
             )
+            # ntfy ignores non-ASCII characters in HTTP header values by
+            # default. RFC 8187 encoding is required for unicode titles —
+            # ntfy supports it as "Title*=utf-8''..." but the simpler route
+            # is the X-Title header which it also accepts and which urllib
+            # will pass through as latin-1 (works for the BMP). Try plain
+            # ASCII fallback to avoid encode errors.
             if self._title:
-                req.add_header("Title", self._title)
+                req.add_header("Title", _ascii_safe(self._title))
             if self._priority:
                 req.add_header("Priority", self._priority)
             if self._tags:
                 req.add_header("Tags", self._tags)
             with urllib.request.urlopen(req, timeout=10) as resp:
-                resp.read()
-            self.sent.emit(True, "ok")
+                status = resp.status
+                body = resp.read(512).decode("utf-8", errors="replace")
+            # Surface the target URL (whole thing — topic IS the URL on ntfy,
+            # there's no "secret" to hide) and the HTTP status so a 200-OK
+            # against the wrong topic is obvious.
+            self.sent.emit(
+                True,
+                f"HTTP {status} from {self._url} | body: {body.strip()[:200]}",
+            )
+        except urllib.error.HTTPError as e:
+            try:
+                body = e.read(512).decode("utf-8", errors="replace")
+            except Exception:
+                body = ""
+            self.sent.emit(
+                False,
+                f"HTTP {e.code} from {self._url}: {e.reason} | body: {body.strip()[:200]}",
+            )
         except urllib.error.URLError as e:
-            self.sent.emit(False, f"network error: {e.reason}")
+            self.sent.emit(False, f"network error to {self._url}: {e.reason}")
         except Exception as e:
             self.sent.emit(False, f"{type(e).__name__}: {e}")
+
+
+def _validate_ntfy_url(url: str) -> Optional[str]:
+    """Return None if `url` looks like a valid ntfy publish URL, else a reason.
+
+    Catches the common mistakes that produce a "200 OK to nowhere":
+    - empty / whitespace
+    - bare topic name with no scheme ("my-topic")
+    - scheme + host but no topic path ("https://ntfy.sh", "https://ntfy.sh/")
+    - URL has a query string that strips the topic
+    """
+    if not url or not url.strip():
+        return "empty URL"
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in ("http", "https"):
+        return (
+            "missing scheme — paste the full URL, "
+            "e.g. https://ntfy.sh/your-topic-name"
+        )
+    if not parsed.netloc:
+        return "no host in URL"
+    topic = parsed.path.strip("/").split("/")[0] if parsed.path else ""
+    if not topic:
+        return (
+            "no topic in URL — add a topic name after the host, "
+            "e.g. https://ntfy.sh/your-topic-name"
+        )
+    return None
+
+
+def _ascii_safe(text: str) -> str:
+    """Replace characters that can't go in an HTTP header verbatim.
+
+    urllib's HTTP header values are encoded as latin-1; characters above
+    U+00FF (and some control characters) raise UnicodeEncodeError on send.
+    Replace them with '?' rather than erroring out.
+    """
+    try:
+        text.encode("latin-1")
+        return text
+    except UnicodeEncodeError:
+        return text.encode("latin-1", errors="replace").decode("latin-1")
 
 
 class NotificationService(QObject):
@@ -131,8 +197,9 @@ class NotificationService(QObject):
         if not self.is_event_enabled(event_key):
             return False
         url = self.get_ntfy_url()
-        if not url:
-            self._logger.debug("ntfy URL not configured; skipping notification")
+        problem = _validate_ntfy_url(url)
+        if problem:
+            self._logger.warning("ntfy URL not usable: %s (got %r)", problem, url)
             return False
         self._dispatch(url, message, title, priority, tags)
         return True
@@ -141,9 +208,27 @@ class NotificationService(QObject):
         """Send a test notification to the given URL, bypassing checkbox gating.
 
         Returns the thread so a UI caller can connect to its `sent` signal.
+        The thread emits a synthetic failure if `url` is malformed, so the
+        caller's "Test failed" popup shows a useful reason instead of a
+        misleading "HTTP 200 ok" on a wrong URL.
         """
+        cleaned = (url or "").strip()
+        problem = _validate_ntfy_url(cleaned)
+        if problem:
+            # Synthesize a failed-send so the UI handler still fires.
+            thread = _NtfyPostThread(cleaned, "", None, None, None)
+
+            def _emit_failure():
+                thread.sent.emit(False, f"URL check failed: {problem}")
+                thread.finished.emit()
+
+            from PyQt5.QtCore import QTimer
+
+            QTimer.singleShot(0, _emit_failure)
+            return thread
+
         thread = self._dispatch(
-            url.strip(),
+            cleaned,
             "Test notification from Flamingo Control. If you see this, ntfy is wired up correctly.",
             title="Flamingo: test",
             priority="default",
@@ -180,7 +265,7 @@ class NotificationService(QObject):
 
     def _on_sent(self, success: bool, info: str) -> None:
         if success:
-            self._logger.info("ntfy notification sent")
+            self._logger.info("ntfy notification sent: %s", info)
         else:
             self._logger.warning("ntfy notification failed: %s", info)
 
