@@ -1003,6 +1003,27 @@ def _load_multichannel_store(
                 "voxel_size_um": voxel_size_um.copy(),
             }
         )
+    elif volume.ndim == 2:
+        # Single channel, single Z plane (Y, X). This happens when the source
+        # tiles contain only one plane each (e.g. the acquisition captured a
+        # single slice despite the workflow naming a multi-plane Z stack), so
+        # the stitched OME-TIFF collapses to 2D. Promote to (1, Y, X) so the
+        # rest of the viewer handles it as a normal 1-plane volume instead of
+        # rejecting it.
+        ch_id = channel_ids[0] if channel_ids else 0
+        logger.warning(
+            f"  Stitched output is a single 2D plane {volume.shape} — loading "
+            f"as a 1-plane volume. The source tiles likely contained only one "
+            f"Z plane each; check the acquisition if you expected a Z stack."
+        )
+        channels.append(
+            {
+                "ch_id": ch_id,
+                "volume": volume[np.newaxis, ...],
+                "origin_um": origin_um.copy(),
+                "voxel_size_um": voxel_size_um.copy(),
+            }
+        )
     else:
         raise ValueError(f"Unexpected volume shape: {volume.shape}")
 

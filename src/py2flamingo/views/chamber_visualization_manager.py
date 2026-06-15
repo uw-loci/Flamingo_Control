@@ -1121,7 +1121,7 @@ class ChamberVisualizationManager:
                 shading="spherical",
             )
             self.logger.info(
-                f"Chamber axes anchored at file ({x_anchor:.2f}, {y_anchor:.2f}, {z_anchor:.2f}) "
+                f"Chamber axes anchored at file ({x_a_step:.2f}, {y_a_step:.2f}, {z_a_step:.2f}) "
                 f"= napari {tuple(round(v, 1) for v in origin_napari)}"
             )
         except Exception as e:
