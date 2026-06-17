@@ -51,6 +51,24 @@ except Exception:
 DOWNSAMPLE_TARGET = 100
 
 
+def _resolve_frame_dims(file_size: int, n_planes: int):
+    """Infer the raw frame (camera AOI) dimensions from the file size.
+
+    ``file_size / (n_planes * 2)`` is the exact pixel count per uint16 plane.
+    Flamingo AOIs are square, so the side is its integer square root. Falls back
+    to the hardware-config default (FRAME_WIDTH/HEIGHT) when the size is not a
+    clean square (e.g. unexpected truncation or non-square AOI).
+    """
+    import math
+
+    if n_planes > 0 and file_size > 0:
+        px_per_plane = file_size // (n_planes * 2)
+        side = math.isqrt(px_per_plane)
+        if side > 0 and side * side == px_per_plane:
+            return side, side
+    return FRAME_WIDTH, FRAME_HEIGHT
+
+
 @dataclass
 class DiskTileInfo:
     """Parsed metadata for a single tile folder on disk."""
@@ -237,17 +255,23 @@ def _read_raw_frames_to_buffer(
     """Read raw Z-stack file frame-by-frame, downsample, and append to buffer.
 
     Uses np.memmap to avoid loading the entire file (~3 GB) into memory.
-    Each frame is 2048x2048 uint16 (8 MB), downsampled to ~100x100.
+    Frames are square uint16; the frame size (camera AOI) is resolved from the
+    actual file size so cropped acquisitions (e.g. 1024x1024) are not misread
+    as a truncated full-frame (2048x2048) stack.
     """
     file_size = raw_path.stat().st_size
-    expected_size = FRAME_WIDTH * FRAME_HEIGHT * n_planes * 2  # uint16 = 2 bytes
+    # Resolve the true frame size from the file: bytes / (planes * 2) is the
+    # exact pixel count per plane. The on-disk data is authoritative; the
+    # hardware-config default (FRAME_WIDTH/HEIGHT) is only a fallback.
+    frame_w, frame_h = _resolve_frame_dims(file_size, n_planes)
+    expected_size = frame_w * frame_h * n_planes * 2  # uint16 = 2 bytes
     if file_size != expected_size:
+        # Frame size was inferred as square; recompute planes from the file.
+        n_planes = file_size // (frame_w * frame_h * 2)
         logger.warning(
-            f"File size mismatch for {raw_path.name}: "
-            f"expected {expected_size}, got {file_size}"
+            f"{raw_path.name}: frame {frame_w}x{frame_h}, "
+            f"recomputed {n_planes} planes from file size {file_size}"
         )
-        # Recalculate planes from actual file size
-        n_planes = file_size // (FRAME_WIDTH * FRAME_HEIGHT * 2)
         if n_planes == 0:
             logger.error(f"File too small: {raw_path.name}")
             return
@@ -257,10 +281,10 @@ def _read_raw_frames_to_buffer(
         raw_path,
         dtype=np.uint16,
         mode="r",
-        shape=(n_planes, FRAME_HEIGHT, FRAME_WIDTH),
+        shape=(n_planes, frame_h, frame_w),
     )
 
-    factor = DOWNSAMPLE_TARGET / max(FRAME_WIDTH, FRAME_HEIGHT)
+    factor = DOWNSAMPLE_TARGET / max(frame_w, frame_h)
 
     # Sample a few frames for raw-vs-downsampled signal comparison
     sample_indices = {
