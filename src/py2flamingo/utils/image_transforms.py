@@ -227,6 +227,120 @@ def apply_colormap(image: np.ndarray, colormap: Colormap) -> np.ndarray:
     return img_rgb
 
 
+def named_colormap_lut(colormap_name: str) -> np.ndarray:
+    """
+    Build a 256x3 uint8 lookup table for a GUI colormap name.
+
+    Accepts the human-readable names used by the Live Display controls
+    ("Grayscale", "Hot", "Jet", "Viridis", "Plasma", "Inferno", "Magma",
+    "Turbo"). Unknown names fall back to grayscale. These are self-contained
+    approximations so no matplotlib dependency is required for live display.
+
+    Args:
+        colormap_name: Colormap name (case-sensitive GUI label)
+
+    Returns:
+        np.ndarray of shape (256, 3), dtype uint8
+    """
+    lut = np.zeros((256, 3), dtype=np.uint8)
+
+    if colormap_name == "Hot":
+        # black -> red -> yellow -> white
+        for i in range(256):
+            if i < 85:
+                lut[i] = [i * 3, 0, 0]
+            elif i < 170:
+                lut[i] = [255, (i - 85) * 3, 0]
+            else:
+                lut[i] = [255, 255, (i - 170) * 3]
+
+    elif colormap_name == "Jet":
+        # blue -> cyan -> green -> yellow -> red
+        for i in range(256):
+            if i < 32:
+                lut[i] = [0, 0, 128 + i * 4]
+            elif i < 96:
+                lut[i] = [0, (i - 32) * 4, 255]
+            elif i < 160:
+                lut[i] = [(i - 96) * 4, 255, 255 - (i - 96) * 4]
+            elif i < 224:
+                lut[i] = [255, 255 - (i - 160) * 4, 0]
+            else:
+                lut[i] = [255 - (i - 224) * 4, 0, 0]
+
+    elif colormap_name == "Viridis":
+        # purple -> blue -> green -> yellow
+        for i in range(256):
+            t = i / 255.0
+            lut[i] = [
+                int(255 * (0.267 + 0.529 * t)),
+                int(255 * (0.005 + 0.839 * t - 0.135 * t * t)),
+                int(255 * (0.329 - 0.329 * t)),
+            ]
+
+    elif colormap_name == "Plasma":
+        # purple -> pink -> orange -> yellow
+        for i in range(256):
+            t = i / 255.0
+            lut[i] = [
+                int(255 * (0.5 + 0.5 * t)),
+                int(255 * (0.0 + 0.8 * t * t)),
+                int(255 * (0.8 - 0.8 * t)),
+            ]
+
+    elif colormap_name == "Inferno":
+        # black -> purple -> red -> yellow
+        for i in range(256):
+            t = i / 255.0
+            lut[i] = [
+                int(255 * t),
+                int(255 * (t * t)),
+                int(255 * max(0, 3 * t - 2)),
+            ]
+
+    elif colormap_name == "Magma":
+        # black -> purple -> pink -> white
+        for i in range(256):
+            t = i / 255.0
+            lut[i] = [
+                int(255 * t),
+                int(255 * (t * t * t)),
+                int(255 * max(0, 4 * t - 3)),
+            ]
+
+    elif colormap_name == "Turbo":
+        # blue -> cyan -> green -> yellow -> red
+        for i in range(256):
+            t = i / 255.0
+            lut[i] = [
+                int(255 * min(1.0, max(0.0, 1.5 * t - 0.25))),
+                int(255 * min(1.0, max(0.0, -abs(2 * t - 1) + 1))),
+                int(255 * min(1.0, max(0.0, -1.5 * t + 1.25))),
+            ]
+
+    else:
+        # Default / "Grayscale": identity ramp on all three channels
+        ramp = np.arange(256, dtype=np.uint8)
+        lut = np.stack([ramp, ramp, ramp], axis=1)
+
+    return lut
+
+
+def apply_named_colormap(grayscale: np.ndarray, colormap_name: str) -> np.ndarray:
+    """
+    Map an 8-bit grayscale image to RGB using a named GUI colormap.
+
+    Args:
+        grayscale: uint8 image of shape (H, W)
+        colormap_name: GUI colormap name (see ``named_colormap_lut``)
+
+    Returns:
+        uint8 RGB image of shape (H, W, 3)
+    """
+    lut = named_colormap_lut(colormap_name)
+    return lut[grayscale]
+
+
 def apply_transforms(
     image: np.ndarray,
     rotation: Rotation = Rotation.NONE,

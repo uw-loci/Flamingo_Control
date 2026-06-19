@@ -131,6 +131,13 @@ class SampleView(QWidget):
         self._intensity_min = 0
         self._intensity_max = 65535
 
+        # Image transformation state (driven by the Live View Settings /
+        # Image Controls window). Applied in _update_live_display().
+        self._rotation = 0  # 0, 90, 180, 270
+        self._flip_horizontal = False
+        self._flip_vertical = False
+        self._show_crosshair = False
+
         # Auto-contrast algorithm parameters
         self._auto_contrast_interval = 1.0  # seconds between adjustments
         self._saturation_threshold = 0.20  # 20% of pixels saturated triggers raise
@@ -1453,6 +1460,20 @@ class SampleView(QWidget):
         if self.movement_controller:
             self.movement_controller.position_changed.connect(self._on_position_changed)
 
+        # Image Controls / Live View Settings window -> live display transforms.
+        # The same window also drives the standalone CameraLiveViewer; Qt allows
+        # a signal to fan out to multiple receivers, so both stay in sync.
+        if self.image_controls_window:
+            icw = self.image_controls_window
+            icw.rotation_changed.connect(self.set_rotation)
+            icw.flip_horizontal_changed.connect(self.set_flip_horizontal)
+            icw.flip_vertical_changed.connect(self.set_flip_vertical)
+            icw.colormap_changed.connect(self.set_colormap)
+            icw.crosshair_changed.connect(self.set_crosshair)
+            icw.auto_scale_changed.connect(self.set_auto_scale)
+            icw.intensity_range_changed.connect(self.set_intensity_range)
+            self.logger.info("Connected Image Controls window to Sample View live feed")
+
         self.logger.info("SampleView signals connected")
 
     def _init_stage_limits(self) -> None:
@@ -1609,18 +1630,41 @@ class SampleView(QWidget):
         self._update_live_display()
 
     def _update_live_display(self) -> None:
-        """Update the live image display."""
+        """Update the live image display.
+
+        Applies the transformation pipeline in order:
+        flip -> rotation -> intensity scaling -> colormap -> crosshair.
+        These are driven by the inline range controls and by the Live View
+        Settings (Image Controls) window.
+        """
         if self._current_image is None:
             return
 
         try:
+            from py2flamingo.utils.image_processing import draw_center_crosshair
+            from py2flamingo.utils.image_transforms import apply_named_colormap
+
             image = self._current_image
 
-            # Apply intensity scaling
+            # 1. Geometry: flips then rotation (matches CameraLiveViewer order).
+            #    Histogram is unchanged by these, so intensity scaling is unaffected.
+            transformed = image
+            if self._flip_horizontal:
+                transformed = np.fliplr(transformed)
+            if self._flip_vertical:
+                transformed = np.flipud(transformed)
+            if self._rotation == 90:
+                transformed = np.rot90(transformed, k=1)
+            elif self._rotation == 180:
+                transformed = np.rot90(transformed, k=2)
+            elif self._rotation == 270:
+                transformed = np.rot90(transformed, k=3)
+
+            # 2. Intensity scaling
             if self._auto_scale:
                 # Use stabilized auto-contrast (adjusts at most once per interval)
                 img_min = 0  # Always use 0 as min for consistency
-                img_max = self._calculate_auto_contrast(image)
+                img_max = self._calculate_auto_contrast(transformed)
             else:
                 img_min = self._intensity_min
                 img_max = self._intensity_max
@@ -1628,19 +1672,39 @@ class SampleView(QWidget):
             # Normalize to 0-255
             if img_max > img_min:
                 normalized = (
-                    ((image.astype(np.float32) - img_min) / (img_max - img_min) * 255)
+                    (
+                        (transformed.astype(np.float32) - img_min)
+                        / (img_max - img_min)
+                        * 255
+                    )
                     .clip(0, 255)
                     .astype(np.uint8)
                 )
             else:
-                normalized = np.zeros_like(image, dtype=np.uint8)
+                normalized = np.zeros_like(transformed, dtype=np.uint8)
 
-            # Convert to QImage and display
-            height, width = normalized.shape
-            bytes_per_line = width
-            qimage = QImage(
-                normalized.data, width, height, bytes_per_line, QImage.Format_Grayscale8
-            )
+            # 3. Colormap (grayscale -> RGB) and convert to QImage
+            if self._colormap and self._colormap != "Grayscale":
+                rgb = apply_named_colormap(normalized, self._colormap)
+                rgb = np.ascontiguousarray(rgb)
+                height, width, _ = rgb.shape
+                qimage = QImage(
+                    rgb.data, width, height, width * 3, QImage.Format_RGB888
+                )
+            else:
+                normalized = np.ascontiguousarray(normalized)
+                height, width = normalized.shape
+                qimage = QImage(
+                    normalized.data,
+                    width,
+                    height,
+                    width,
+                    QImage.Format_Grayscale8,
+                )
+
+            # 4. Crosshair overlay
+            if self._show_crosshair:
+                qimage = draw_center_crosshair(qimage)
 
             # Scale to fit label while maintaining aspect ratio
             pixmap = QPixmap.fromImage(qimage)
@@ -2151,6 +2215,85 @@ class SampleView(QWidget):
         self.max_intensity_spinbox.setValue(max_val)
         self.min_intensity_spinbox.blockSignals(False)
         self.max_intensity_spinbox.blockSignals(False)
+        self._update_live_display()
+
+    # ----- Image transformation setters (driven by Image Controls window) -----
+
+    @pyqtSlot(int)
+    def set_rotation(self, angle: int) -> None:
+        """Set live-display rotation (0, 90, 180, 270) and redisplay."""
+        if angle in (0, 90, 180, 270):
+            self._rotation = angle
+            self._update_live_display()
+
+    @pyqtSlot(bool)
+    def set_flip_horizontal(self, enabled: bool) -> None:
+        """Set horizontal flip for the live display and redisplay."""
+        self._flip_horizontal = bool(enabled)
+        self._update_live_display()
+
+    @pyqtSlot(bool)
+    def set_flip_vertical(self, enabled: bool) -> None:
+        """Set vertical flip for the live display and redisplay."""
+        self._flip_vertical = bool(enabled)
+        self._update_live_display()
+
+    @pyqtSlot(str)
+    def set_colormap(self, colormap: str) -> None:
+        """Set the live-display colormap and redisplay.
+
+        Keeps the inline colormap combo in sync (without re-emitting).
+        """
+        self._colormap = colormap
+        if hasattr(self, "colormap_combo"):
+            self.colormap_combo.blockSignals(True)
+            self.colormap_combo.setCurrentText(colormap)
+            self.colormap_combo.blockSignals(False)
+        self._update_live_display()
+
+    @pyqtSlot(bool)
+    def set_crosshair(self, enabled: bool) -> None:
+        """Toggle the center crosshair overlay on the live display."""
+        self._show_crosshair = bool(enabled)
+        self._update_live_display()
+
+    @pyqtSlot(bool)
+    def set_auto_scale(self, enabled: bool) -> None:
+        """Set auto-scale state and redisplay.
+
+        Keeps the inline auto-scale checkbox and manual range controls in sync.
+        """
+        self._auto_scale = bool(enabled)
+        if hasattr(self, "auto_scale_checkbox"):
+            self.auto_scale_checkbox.blockSignals(True)
+            self.auto_scale_checkbox.setChecked(self._auto_scale)
+            self.auto_scale_checkbox.blockSignals(False)
+        manual = not self._auto_scale
+        for name in ("min_intensity_spinbox", "max_intensity_spinbox", "range_slider"):
+            if hasattr(self, name):
+                getattr(self, name).setEnabled(manual)
+        self._update_live_display()
+
+    @pyqtSlot(int, int)
+    def set_intensity_range(self, min_val: int, max_val: int) -> None:
+        """Set the manual intensity range and redisplay.
+
+        Keeps the inline spinboxes/range slider in sync (without re-emitting).
+        """
+        self._intensity_min = min_val
+        self._intensity_max = max_val
+        if hasattr(self, "min_intensity_spinbox"):
+            self.min_intensity_spinbox.blockSignals(True)
+            self.min_intensity_spinbox.setValue(min_val)
+            self.min_intensity_spinbox.blockSignals(False)
+        if hasattr(self, "max_intensity_spinbox"):
+            self.max_intensity_spinbox.blockSignals(True)
+            self.max_intensity_spinbox.setValue(max_val)
+            self.max_intensity_spinbox.blockSignals(False)
+        if hasattr(self, "range_slider"):
+            self.range_slider.blockSignals(True)
+            self.range_slider.setValue((min_val, max_val))
+            self.range_slider.blockSignals(False)
         self._update_live_display()
 
     def _on_led_group_toggled(self, checked: bool) -> None:
@@ -4296,9 +4439,14 @@ class SampleView(QWidget):
         viewer = self._get_viewer()
         if viewer and hasattr(viewer, "camera"):
             viewer.reset_view()  # Reset orientation to napari defaults
-            viewer.camera.zoom = 1.57  # Set zoom after reset
+            zoom = (
+                self._chamber_viz.default_camera_zoom()
+            )  # display.default_camera_zoom
+            viewer.camera.zoom = zoom  # Set zoom after reset
             self._update_zoom_display()
-            self.logger.info("Reset camera view to defaults (orientation + zoom=1.57)")
+            self.logger.info(
+                "Reset camera view to defaults (orientation + zoom=%s)", zoom
+            )
 
     def _update_info_displays(self) -> None:
         """Periodically update zoom, FPS, and data stats displays."""

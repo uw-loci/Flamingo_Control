@@ -747,6 +747,9 @@ class CameraLiveViewer(QWidget):
         """
         Apply color map to grayscale image.
 
+        Delegates to the shared ``apply_named_colormap`` helper so the live
+        viewer and the Sample View use identical lookup tables.
+
         Args:
             grayscale: Grayscale image (uint8)
             colormap_name: Name of color map to apply
@@ -754,98 +757,9 @@ class CameraLiveViewer(QWidget):
         Returns:
             RGB image (uint8) with shape (H, W, 3)
         """
-        # Simple built-in color maps without matplotlib dependency
-        # Each is a 256x3 lookup table
+        from py2flamingo.utils.image_transforms import apply_named_colormap
 
-        if colormap_name == "Hot":
-            # Hot colormap: black -> red -> yellow -> white
-            lut = np.zeros((256, 3), dtype=np.uint8)
-            for i in range(256):
-                if i < 85:
-                    lut[i] = [i * 3, 0, 0]
-                elif i < 170:
-                    lut[i] = [255, (i - 85) * 3, 0]
-                else:
-                    lut[i] = [255, 255, (i - 170) * 3]
-
-        elif colormap_name == "Jet":
-            # Jet colormap: blue -> cyan -> green -> yellow -> red
-            lut = np.zeros((256, 3), dtype=np.uint8)
-            for i in range(256):
-                if i < 32:
-                    lut[i] = [0, 0, 128 + i * 4]
-                elif i < 96:
-                    lut[i] = [0, (i - 32) * 4, 255]
-                elif i < 160:
-                    lut[i] = [(i - 96) * 4, 255, 255 - (i - 96) * 4]
-                elif i < 224:
-                    lut[i] = [255, 255 - (i - 160) * 4, 0]
-                else:
-                    lut[i] = [255 - (i - 224) * 4, 0, 0]
-
-        elif colormap_name == "Viridis":
-            # Simplified Viridis: purple -> blue -> green -> yellow
-            lut = np.zeros((256, 3), dtype=np.uint8)
-            for i in range(256):
-                t = i / 255.0
-                lut[i] = [
-                    int(255 * (0.267 + 0.529 * t)),
-                    int(255 * (0.005 + 0.839 * t - 0.135 * t * t)),
-                    int(255 * (0.329 - 0.329 * t)),
-                ]
-
-        elif colormap_name == "Plasma":
-            # Simplified Plasma: purple -> pink -> orange -> yellow
-            lut = np.zeros((256, 3), dtype=np.uint8)
-            for i in range(256):
-                t = i / 255.0
-                lut[i] = [
-                    int(255 * (0.5 + 0.5 * t)),
-                    int(255 * (0.0 + 0.8 * t * t)),
-                    int(255 * (0.8 - 0.8 * t)),
-                ]
-
-        elif colormap_name == "Inferno":
-            # Simplified Inferno: black -> purple -> red -> yellow
-            lut = np.zeros((256, 3), dtype=np.uint8)
-            for i in range(256):
-                t = i / 255.0
-                lut[i] = [
-                    int(255 * t),
-                    int(255 * (t * t)),
-                    int(255 * max(0, 3 * t - 2)),
-                ]
-
-        elif colormap_name == "Magma":
-            # Simplified Magma: black -> purple -> pink -> white
-            lut = np.zeros((256, 3), dtype=np.uint8)
-            for i in range(256):
-                t = i / 255.0
-                lut[i] = [
-                    int(255 * t),
-                    int(255 * (t * t * t)),
-                    int(255 * max(0, 4 * t - 3)),
-                ]
-
-        elif colormap_name == "Turbo":
-            # Simplified Turbo: blue -> cyan -> green -> yellow -> red
-            lut = np.zeros((256, 3), dtype=np.uint8)
-            for i in range(256):
-                t = i / 255.0
-                lut[i] = [
-                    int(255 * min(1.0, max(0.0, 1.5 * t - 0.25))),
-                    int(255 * min(1.0, max(0.0, -abs(2 * t - 1) + 1))),
-                    int(255 * min(1.0, max(0.0, -1.5 * t + 1.25))),
-                ]
-
-        else:
-            # Default: grayscale
-            lut = np.stack([np.arange(256)] * 3, axis=1).astype(np.uint8)
-
-        # Apply LUT to image
-        rgb = lut[grayscale]
-
-        return rgb
+        return apply_named_colormap(grayscale, colormap_name)
 
     def _add_crosshair(self, qimage: QImage) -> QImage:
         """
@@ -857,30 +771,9 @@ class CameraLiveViewer(QWidget):
         Returns:
             QImage with crosshair
         """
-        from PyQt5.QtCore import QPoint
-        from PyQt5.QtGui import QPainter, QPen
+        from py2flamingo.utils.image_processing import draw_center_crosshair
 
-        # Create a copy to draw on
-        result = qimage.copy()
-
-        painter = QPainter(result)
-        pen = QPen(Qt.red)
-        pen.setWidth(2)
-        painter.setPen(pen)
-
-        # Draw crosshair at center
-        center_x = result.width() // 2
-        center_y = result.height() // 2
-        size = 20
-
-        # Vertical line
-        painter.drawLine(center_x, center_y - size, center_x, center_y + size)
-        # Horizontal line
-        painter.drawLine(center_x - size, center_y, center_x + size, center_y)
-
-        painter.end()
-
-        return result
+        return draw_center_crosshair(qimage)
 
     # ===== Image transformation setters (called by Image Controls window) =====
 
