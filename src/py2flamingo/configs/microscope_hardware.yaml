@@ -17,20 +17,26 @@ camera:
   sensor_height_px: 2048
 
 optics:
-  # Nominal objective magnification 
+  # --- FALLBACK ONLY: auto-synced from the microscope on connect ---
+  # The objective and tube lens change per objective/project, and the scope
+  # reports them in ScopeSettings.txt (downloaded on connect). At runtime,
+  # get_hardware_config() OVERLAYS the scope-reported values (and a measured
+  # pixel_calibration.json, if present) on top of these. So you normally do
+  # NOT need to hand-edit the three values below — they are only used when
+  # running disconnected/offline with no ScopeSettings.txt available.
+  #
+  # NOTE: ScopeSettings.txt folds the system magnification into its
+  # "Objective lens magnification" field with the tube lens against a 200 mm
+  # reference; the split below (bare objective x tube/reference) is just this
+  # file's own parameterization of the same system magnification.
   objective_magnification: 5.0
 
-  # Tube lens design focal length in mm.
-  # Standard microscope tube lenses are 200mm, but light-sheet systems
-  # often use non-standard tube lenses. The Flamingo uses a ~321mm
-  # tube lens, giving a system magnification of 16 * (321/200) = 25.68x.
-  #
-  # Set to 200.0 if your system uses a standard tube lens.
+  # Tube lens design focal length in mm (Flamingo uses ~321mm -> system
+  # magnification 16 * (321/200) = 25.68x). Set 200.0 for a standard tube lens.
   tube_lens_focal_length_mm: 321.0
 
-  # Reference tube lens focal length (mm) for magnification calculation.
-  # System magnification = objective_mag * (tube_lens / reference_tube_lens)
-  # For most microscope objectives, this is 200mm.
+  # Reference tube lens focal length (mm): system_mag = objective_mag *
+  # (tube_lens / reference_tube_lens). Usually 200mm.
   reference_tube_lens_mm: 200.0
 
   # Numerical aperture of the detection objective.

@@ -1309,6 +1309,18 @@ class MVCConnectionService:
             self.logger.debug(f"Writing {len(settings_data)} bytes to {settings_path}")
             settings_path.write_text(settings_data, encoding="utf-8")
 
+            # The scope just told us its current objective + tube lens; drop the
+            # cached hardware config so derived pixel size / FOV pick up the
+            # freshly-written ScopeSettings.txt instead of the stale YAML values.
+            try:
+                from py2flamingo.configs.config_loader import (
+                    invalidate_hardware_config,
+                )
+
+                invalidate_hardware_config()
+            except Exception:
+                self.logger.debug("Could not invalidate hardware config", exc_info=True)
+
             if not settings_path.exists():
                 self.logger.error(f"Settings file not found: {settings_path}")
                 raise FileNotFoundError(

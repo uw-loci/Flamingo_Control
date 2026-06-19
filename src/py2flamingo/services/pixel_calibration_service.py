@@ -365,6 +365,17 @@ class PixelCalibrationService:
             with open(self._file, "w") as f:
                 json.dump(payload, f, indent=2)
             logger.info("Saved pixel calibration to %s", self._file)
+            # config_loader reads pixel_calibration.json as the top-priority
+            # pixel-size source; drop its cache so the new value takes effect
+            # without needing a reconnect.
+            try:
+                from py2flamingo.configs.config_loader import (
+                    invalidate_hardware_config,
+                )
+
+                invalidate_hardware_config()
+            except Exception:
+                logger.debug("Could not invalidate hardware config", exc_info=True)
         except Exception as e:
             logger.error("Error saving pixel calibration: %s", e, exc_info=True)
             raise

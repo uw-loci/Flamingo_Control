@@ -57,6 +57,17 @@ class HardwareConfig:
     immersion_refractive_index: float = 1.33
     camera_x_inverted: bool = True
 
+    # Provenance of the optics values actually in effect, set by the overlay
+    # logic in get_hardware_config(): "calibration" > "scope" > "yaml".
+    # The objective and tube lens change per objective/project and are reported
+    # by the microscope (ScopeSettings.txt), so the YAML values are only a
+    # last-resort fallback for disconnected/offline use.
+    optics_source: str = "yaml"
+    # Measured image-plane pixel size (um/px) from the Pixel Calibrator. When
+    # set it overrides the magnification-derived pixel size (it is the most
+    # accurate source).
+    pixel_size_override_um: Optional[float] = None
+
     # Channel wavelengths
     channel_wavelengths_nm: Dict[int, float] = field(
         default_factory=lambda: {0: 405.0, 1: 488.0, 2: 561.0, 3: 640.0}
@@ -87,18 +98,19 @@ class HardwareConfig:
 
     @property
     def effective_pixel_size_um(self) -> float:
-        """Image-plane pixel size in micrometers (sensor_pixel / system_mag)."""
+        """Image-plane pixel size in micrometers.
+
+        Prefers the measured calibration override when present; otherwise
+        ``sensor_pixel / system_mag``.
+        """
+        if self.pixel_size_override_um:
+            return self.pixel_size_override_um
         return self.sensor_pixel_size_um / self.system_magnification
 
     @property
     def fov_mm(self) -> float:
-        """Field of view in mm (sensor_pixel * sensor_width / system_mag / 1000)."""
-        return (
-            self.sensor_pixel_size_um
-            * self.sensor_width_px
-            / self.system_magnification
-            / 1000.0
-        )
+        """Field of view in mm (sensor_width * effective_pixel_size / 1000)."""
+        return self.sensor_width_px * self.effective_pixel_size_um / 1000.0
 
     @property
     def fov_um(self) -> float:
@@ -149,17 +161,83 @@ class HardwareConfig:
         )
 
 
+# Runtime sources for the optics that override the static YAML. Paths are
+# CWD-relative to match the rest of the app (connection_service writes
+# ScopeSettings.txt to ``microscope_settings/`` relative to the working dir).
+def _scope_settings_path() -> Path:
+    return Path("microscope_settings") / "ScopeSettings.txt"
+
+
+def _pixel_calibration_path() -> Path:
+    return Path("microscope_settings") / "pixel_calibration.json"
+
+
+def _read_scope_optics(path: Optional[Path] = None) -> Optional[Dict[str, float]]:
+    """Read the microscope-reported optics from ScopeSettings.txt.
+
+    ScopeSettings.txt is downloaded from the scope on connect and folds the
+    system magnification into ``Objective lens magnification`` with the tube
+    lens expressed against a 200 mm reference (matching the pixel-size formula
+    in ``connection_service.get_microscope_settings``). Returns
+    ``{objective_magnification, tube_lens_focal_length_mm,
+    reference_tube_lens_mm}`` or None when the file/fields are absent.
+    """
+    import re
+
+    path = path or _scope_settings_path()
+    try:
+        if not path.exists():
+            return None
+        text = path.read_text(errors="ignore")
+        mag_m = re.search(r"Objective lens magnification\s*=\s*([\d.]+)", text)
+        if not mag_m:
+            return None
+        tube_m = re.search(r"Tube lens design focal length \(mm\)\s*=\s*([\d.]+)", text)
+        return {
+            "objective_magnification": float(mag_m.group(1)),
+            # Scope expresses the tube lens against a 200 mm reference.
+            "tube_lens_focal_length_mm": float(tube_m.group(1)) if tube_m else 200.0,
+            "reference_tube_lens_mm": 200.0,
+        }
+    except Exception:
+        logger.debug("Could not read scope optics from %s", path, exc_info=True)
+        return None
+
+
+def _read_calibrated_pixel_size_um(path: Optional[Path] = None) -> Optional[float]:
+    """Read the measured mean pixel size (um/px) from pixel_calibration.json."""
+    import json
+
+    path = path or _pixel_calibration_path()
+    try:
+        if not path.exists():
+            return None
+        cal = (json.loads(path.read_text()) or {}).get("calibration") or {}
+        val = cal.get("mean_pixel_size_um")
+        return float(val) if val else None
+    except Exception:
+        logger.debug("Could not read calibration from %s", path, exc_info=True)
+        return None
+
+
 def get_hardware_config(force_reload: bool = False) -> HardwareConfig:
     """Load (or return cached) microscope hardware configuration.
 
-    Reads ``configs/microscope_hardware.yaml`` on first call and caches
-    the result.  Falls back to built-in defaults if the file is missing.
+    The static ``configs/microscope_hardware.yaml`` supplies fixed hardware
+    (sensor, NA, stage limits) and *fallback* optics. The objective and tube
+    lens change per objective/project and are reported by the microscope, so
+    they are overlaid, highest priority first:
+
+      1. ``microscope_settings/pixel_calibration.json`` — measured pixel size.
+      2. ``microscope_settings/ScopeSettings.txt`` — scope-reported optics
+         (refreshed on every connect).
+      3. the YAML values — last resort for disconnected/offline use.
 
     Args:
-        force_reload: If True, re-read the YAML file even if already cached.
+        force_reload: If True, re-read the YAML and overlays even if cached.
 
     Returns:
-        HardwareConfig with base and derived values.
+        HardwareConfig with base, overlaid, and derived values.
     """
     global _hardware_config
     if _hardware_config is not None and not force_reload:
@@ -170,26 +248,56 @@ def get_hardware_config(force_reload: bool = False) -> HardwareConfig:
         try:
             with open(yaml_path, "r") as f:
                 data = yaml.safe_load(f)
-            _hardware_config = HardwareConfig.from_dict(data or {})
-            logger.info(
-                "Loaded microscope hardware config from %s "
-                "(system_mag=%.2fx, pixel=%.4fum, FOV=%.4fmm)",
-                yaml_path,
-                _hardware_config.system_magnification,
-                _hardware_config.effective_pixel_size_um,
-                _hardware_config.fov_mm,
-            )
+            cfg = HardwareConfig.from_dict(data or {})
         except Exception:
             logger.exception("Error loading %s, using defaults", yaml_path)
-            _hardware_config = HardwareConfig()
+            cfg = HardwareConfig()
     else:
         logger.warning(
             "microscope_hardware.yaml not found at %s, using built-in defaults",
             yaml_path,
         )
-        _hardware_config = HardwareConfig()
+        cfg = HardwareConfig()
 
+    _apply_optics_overlays(cfg)
+    _hardware_config = cfg
+    logger.info(
+        "Hardware config ready (optics_source=%s, system_mag=%.2fx, "
+        "pixel=%.4fum, FOV=%.4fmm)",
+        cfg.optics_source,
+        cfg.system_magnification,
+        cfg.effective_pixel_size_um,
+        cfg.fov_mm,
+    )
     return _hardware_config
+
+
+def _apply_optics_overlays(cfg: HardwareConfig) -> None:
+    """Overlay scope-reported optics and measured pixel size onto ``cfg``.
+
+    Mutates ``cfg`` in place, setting ``optics_source`` to the winning source.
+    """
+    scope = _read_scope_optics()
+    if scope:
+        cfg.objective_magnification = scope["objective_magnification"]
+        cfg.tube_lens_focal_length_mm = scope["tube_lens_focal_length_mm"]
+        cfg.reference_tube_lens_mm = scope["reference_tube_lens_mm"]
+        cfg.optics_source = "scope"
+
+    measured = _read_calibrated_pixel_size_um()
+    if measured:
+        cfg.pixel_size_override_um = measured
+        cfg.optics_source = "calibration"
+
+
+def invalidate_hardware_config() -> None:
+    """Drop the cached HardwareConfig so the next call re-reads all sources.
+
+    Call after the scope's ScopeSettings.txt is refreshed (on connect) or a
+    new pixel calibration is saved, so the overlaid optics take effect.
+    """
+    global _hardware_config
+    _hardware_config = None
 
 
 # ---------------------------------------------------------------------------
