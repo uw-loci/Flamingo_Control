@@ -17,8 +17,8 @@ camera:
   sensor_height_px: 2048
 
 optics:
-  # Nominal objective magnification (engraved on the objective barrel)
-  objective_magnification: 16.0
+  # Nominal objective magnification 
+  objective_magnification: 5.0
 
   # Tube lens design focal length in mm.
   # Standard microscope tube lenses are 200mm, but light-sheet systems
