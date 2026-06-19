@@ -907,7 +907,8 @@ class ViewerControlsDialog(PersistentDialog):
         viewer = self._get_viewer()
         if viewer:
             viewer.reset_view()  # Reset orientation to napari defaults
-            viewer.camera.zoom = 1.57  # Set zoom after reset
+            zoom = float(self.config.get("display", {}).get("default_camera_zoom", 0.4))
+            viewer.camera.zoom = zoom  # Set zoom after reset
 
     def _sync_from_viewer(self) -> None:
         """Sync dialog controls with current napari viewer state."""

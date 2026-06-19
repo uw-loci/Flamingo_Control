@@ -6,6 +6,10 @@ display:
   # Display resolution (what the user sees in napari)
   voxel_size_um: [50, 50, 50]  # micrometers per display voxel (larger = fewer voxels = better performance)
 
+  # Default napari camera zoom for the 3D Volume View. Used for the initial
+  # view and by every "Reset View" action. Lower = more zoomed out.
+  default_camera_zoom: 0.4
+
   # Rendering settings
   fps_target: 30
   downsample_factor: 4  # Downsample live camera feed by this factor

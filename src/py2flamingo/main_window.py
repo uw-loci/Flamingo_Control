@@ -406,6 +406,17 @@ class MainWindow(QMainWindow):
         )
         extensions_menu.addAction(self.load_webcam_overview_action)
 
+        extensions_menu.addSeparator()
+
+        self.pixel_calibrator_action = QAction("XY &Pixel Calibrator...", self)
+        self.pixel_calibrator_action.setStatusTip(
+            "Measure the true XY pixel size by moving the stage and tracking "
+            "image shift (MicroManager-style)"
+        )
+        self.pixel_calibrator_action.triggered.connect(self._on_pixel_calibrator)
+        self.pixel_calibrator_action.setEnabled(False)
+        extensions_menu.addAction(self.pixel_calibrator_action)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -563,6 +574,9 @@ class MainWindow(QMainWindow):
         sample_view_open = self.app is not None and self.app.sample_view is not None
         self.led_2d_overview_action.setEnabled(connected and sample_view_open)
         self.union_thresholder_action.setEnabled(connected and sample_view_open)
+
+        # Pixel Calibrator needs the microscope (stage + camera), not Sample View
+        self.pixel_calibrator_action.setEnabled(connected)
 
     def _on_voxel_test(self):
         """Handle 3D voxel rotation test menu action."""
@@ -1061,6 +1075,39 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error opening Webcam Overview: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to open Webcam Overview:\n{e}")
+
+    def _on_pixel_calibrator(self):
+        """Handle XY Pixel Calibrator menu action."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.info("XY Pixel Calibrator menu action triggered")
+
+        try:
+            from py2flamingo.views.dialogs.pixel_calibrator_dialog import (
+                PixelCalibratorDialog,
+            )
+
+            # Reuse existing dialog if still open
+            if (
+                hasattr(self, "_pixel_calibrator_dialog")
+                and self._pixel_calibrator_dialog is not None
+            ):
+                self._pixel_calibrator_dialog.show()
+                self._pixel_calibrator_dialog.raise_()
+                self._pixel_calibrator_dialog.activateWindow()
+                return
+
+            self._pixel_calibrator_dialog = PixelCalibratorDialog(
+                app=self.app, parent=None
+            )
+            self._pixel_calibrator_dialog.show()
+
+        except Exception as e:
+            logger.error(f"Error opening Pixel Calibrator: {e}", exc_info=True)
+            QMessageBox.critical(
+                self, "Error", f"Failed to open Pixel Calibrator:\n{e}"
+            )
 
     def _on_load_webcam_overview(self):
         """Handle Load Webcam Overview Session menu action."""

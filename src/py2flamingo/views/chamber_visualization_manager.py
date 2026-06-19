@@ -130,7 +130,7 @@ class ChamberVisualizationManager:
 
             # Set initial camera orientation
             self.viewer.camera.angles = (0, 0, 180)
-            self.viewer.camera.zoom = 1.57
+            self.viewer.camera.zoom = self.default_camera_zoom()
 
             # Get the napari Qt widget
             napari_window = self.viewer.window
@@ -1623,12 +1623,17 @@ class ChamberVisualizationManager:
             f"Repaired {repaired} channel layers with missing vispy visuals"
         )
 
+    def default_camera_zoom(self) -> float:
+        """Default 3D Volume View zoom (display.default_camera_zoom in config)."""
+        return float(self._config.get("display", {}).get("default_camera_zoom", 0.4))
+
     def reset_camera(self) -> None:
         """Reset the napari viewer camera zoom (preserves orientation from 3D window)."""
         if self.viewer and hasattr(self.viewer, "camera"):
             # Only set zoom - don't override camera.angles as 3D window has correct orientation
-            self.viewer.camera.zoom = 1.57
-            self.logger.info("Reset viewer camera zoom to 1.57")
+            zoom = self.default_camera_zoom()
+            self.viewer.camera.zoom = zoom
+            self.logger.info("Reset viewer camera zoom to %s", zoom)
 
     def load_objective_calibration(self, config=None) -> None:
         """Load objective XY calibration from position presets.
