@@ -191,3 +191,9 @@ workflows/*
 
 # Test output data (generated at runtime)
 tests/voxel_test_results/
+
+# Runtime-generated stitching ETA timing cache (machine/run-specific)
+microscope_settings/stitching_timing_cache.json
+
+# uv lockfile (repo uses pyproject.toml + requirements*.txt, not uv)
+uv.lock
