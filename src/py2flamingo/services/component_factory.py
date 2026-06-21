@@ -169,12 +169,15 @@ def create_controllers_layer(
     )
     logger.info("WorkflowQueueService created for sequential multi-tile execution")
 
-    position_controller = PositionController(connection_service)
+    # Shared configuration service (stage limits, laser/LED settings). Created
+    # once here and injected so PositionController doesn't load settings twice.
+    config_service = ConfigurationService()
+
+    position_controller = PositionController(
+        connection_service, config_service=config_service
+    )
 
     movement_controller = MovementController(connection_service, position_controller)
-
-    # Configuration service for laser/LED settings
-    config_service = ConfigurationService()
 
     # Laser/LED service and controller
     laser_led_service = LaserLEDService(connection_service, config_service)

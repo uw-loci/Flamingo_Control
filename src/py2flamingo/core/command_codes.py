@@ -150,8 +150,14 @@ class CameraCommands:
     EXPOSURE_SET = 0x3001  # 12289 - Set exposure time
     EXPOSURE_GET = 0x300A  # 12298 - Get exposure time (returns int32Data0 in us)
     IMAGE_SIZE_GET = 0x3027  # 12327 - Get image dimensions
-    PIXEL_SIZE_GET = 0x3042  # 12354 - Get pixel size in micrometers
-    FIELD_OF_VIEW_GET = 0x3043  # 12355 - Get field of view
+    # Code actually sent at runtime for the per-pixel field of view (mm/px);
+    # see services/camera_service.py CameraCommandCode.PIXEL_FIELD_OF_VIEW_GET
+    # and connection_service. NOTE: this differs from PIXEL_SIZE_GET/
+    # FIELD_OF_VIEW_GET below (0x3042/0x3043), which appear unused — the
+    # firmware answers 0x3037. Kept here so log names resolve (was "Unknown").
+    PIXEL_FIELD_OF_VIEW_GET = 0x3037  # 12343 - Get per-pixel FOV (mm/px)
+    PIXEL_SIZE_GET = 0x3042  # 12354 - Get pixel size in micrometers (unused?)
+    FIELD_OF_VIEW_GET = 0x3043  # 12355 - Get field of view (unused?)
 
     # Workflow commands
     WORKFLOW_START = 0x3004  # 12292 - Start image acquisition workflow

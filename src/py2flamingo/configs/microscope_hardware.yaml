@@ -25,15 +25,20 @@ optics:
   # NOT need to hand-edit the three values below — they are only used when
   # running disconnected/offline with no ScopeSettings.txt available.
   #
-  # NOTE: ScopeSettings.txt folds the system magnification into its
+  # NOTE: ScopeSettings.txt reports the SYSTEM magnification in its
   # "Objective lens magnification" field with the tube lens against a 200 mm
-  # reference; the split below (bare objective x tube/reference) is just this
-  # file's own parameterization of the same system magnification.
+  # reference. So for these fallback values, set objective_magnification to the
+  # system magnification the scope reports and keep tube == reference (200) to
+  # avoid double-counting the tube-lens factor.
+  #
+  # n7 currently: scope reports 5.0x with tube=200 -> effective pixel
+  # = 6.5 / 5.0 = 1.30 um (validated against real stitching data).
   objective_magnification: 5.0
 
-  # Tube lens design focal length in mm (Flamingo uses ~321mm -> system
-  # magnification 16 * (321/200) = 25.68x). Set 200.0 for a standard tube lens.
-  tube_lens_focal_length_mm: 321.0
+  # Tube lens design focal length in mm. Keep equal to reference_tube_lens_mm
+  # (200) unless a project genuinely changes the tube lens AND the scope reports
+  # the bare objective magnification (n7 reports system mag, so leave at 200).
+  tube_lens_focal_length_mm: 200.0
 
   # Reference tube lens focal length (mm): system_mag = objective_mag *
   # (tube_lens / reference_tube_lens). Usually 200mm.

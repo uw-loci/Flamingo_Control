@@ -50,12 +50,15 @@ class PositionController:
     COMMAND_CODES_STAGE_POSITION_SET = 24580
     COMMAND_CODES_STAGE_POSITION_GET = 24584
 
-    def __init__(self, connection_service):
+    def __init__(self, connection_service, config_service=None):
         """
         Initialize the position controller.
 
         Args:
             connection_service: MVCConnectionService for microscope communication
+            config_service: Shared ConfigurationService (for stage limits). If
+                None, one is constructed — but prefer injecting the shared
+                instance to avoid a redundant settings load at startup.
         """
         self.connection = connection_service
         self.logger = logging.getLogger(__name__)
@@ -71,10 +74,16 @@ class PositionController:
         # Callback for motion complete notifications
         self._motion_complete_callback: Optional[Callable] = None
 
-        # Cache configuration service for stage limits
-        from py2flamingo.services.configuration_service import ConfigurationService
+        # Cache configuration service for stage limits (shared instance
+        # preferred; construct one only as a fallback to avoid a duplicate
+        # settings load at startup).
+        if config_service is None:
+            from py2flamingo.services.configuration_service import (
+                ConfigurationService,
+            )
 
-        self._config_service = ConfigurationService()
+            config_service = ConfigurationService()
+        self._config_service = config_service
 
         # Position preset service for saved locations
         from py2flamingo.services.position_preset_service import PositionPresetService

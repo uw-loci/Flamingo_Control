@@ -287,7 +287,8 @@ class StageService(MicroscopeCommandService):
 
                 # Log position from hardware - trust the hardware response
                 # Stage limits vary by microscope and should not be hardcoded here
-                self.logger.info(f"{axis_name}-axis position: {position:.3f} mm")
+                unit = "deg" if str(axis_name).upper() == "R" else "mm"
+                self.logger.info(f"{axis_name}-axis position: {position:.3f} {unit}")
                 return float(position)
             except Exception as e:
                 self.logger.error(
