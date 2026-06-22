@@ -834,8 +834,8 @@ class SampleView(QWidget):
                     direction_texts = {"x": x_text}
                 else:
                     direction_texts = {
-                        "y": "Bottom \u2190\u2500\u2500\u2500\u2192 Top",
-                        "z": "Far \u2190\u2500\u2500\u2500\u2192 Near",
+                        "y": "Lower Sample \u2190\u2500\u2500\u2500\u2192 Raise Sample",
+                        "z": "Toward Detector \u2190\u2500\u2500\u2500\u2192 Toward LED/Front",
                     }
                 dir_label = QLabel(direction_texts[axis_id])
                 dir_label.setStyleSheet(
