@@ -84,6 +84,10 @@ class PixelCalibration:
     moves: List[CalibrationMove] = field(default_factory=list)
     magnification_at_capture: Optional[float] = None
     min_quality: float = 0.0
+    # Optics signature (HardwareConfig.optics_signature) at capture time, used
+    # to decide whether this calibration still applies after an objective/tube
+    # change. None for calibrations created before signatures existed.
+    optics_signature: Optional[str] = None
 
     @property
     def mean_pixel_size_um(self) -> float:
@@ -124,6 +128,7 @@ class PixelCalibration:
             "moves": [m.to_dict() for m in self.moves],
             "magnification_at_capture": self.magnification_at_capture,
             "min_quality": self.min_quality,
+            "optics_signature": self.optics_signature,
         }
 
     @classmethod
@@ -143,4 +148,5 @@ class PixelCalibration:
             moves=[CalibrationMove.from_dict(m) for m in data.get("moves", [])],
             magnification_at_capture=data.get("magnification_at_capture"),
             min_quality=data.get("min_quality", 0.0),
+            optics_signature=data.get("optics_signature"),
         )

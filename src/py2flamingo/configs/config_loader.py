@@ -117,6 +117,18 @@ class HardwareConfig:
         """Field of view in micrometers."""
         return self.fov_mm * 1000.0
 
+    @property
+    def optics_signature(self) -> str:
+        """Stable descriptor of the optics that determine pixel size.
+
+        Built from the magnification path (objective x tube/ref) and the sensor
+        pixel size — deliberately NOT from ``pixel_size_override_um``, so it
+        describes the *hardware* configuration independent of any measured
+        calibration. Used to detect objective/tube/camera changes and to decide
+        whether a saved pixel calibration still applies.
+        """
+        return f"{self.system_magnification:.3f}|{self.sensor_pixel_size_um:.3f}"
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "HardwareConfig":
         """Create from a nested YAML dict."""
@@ -204,17 +216,19 @@ def _read_scope_optics(path: Optional[Path] = None) -> Optional[Dict[str, float]
         return None
 
 
-def _read_calibrated_pixel_size_um(path: Optional[Path] = None) -> Optional[float]:
-    """Read the measured mean pixel size (um/px) from pixel_calibration.json."""
+def _read_calibration(path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    """Read pixel_calibration.json -> the ``calibration`` dict, or None.
+
+    Returns the dict containing at least ``mean_pixel_size_um`` and (for newer
+    files) ``optics_signature``.
+    """
     import json
 
     path = path or _pixel_calibration_path()
     try:
         if not path.exists():
             return None
-        cal = (json.loads(path.read_text()) or {}).get("calibration") or {}
-        val = cal.get("mean_pixel_size_um")
-        return float(val) if val else None
+        return (json.loads(path.read_text()) or {}).get("calibration") or None
     except Exception:
         logger.debug("Could not read calibration from %s", path, exc_info=True)
         return None
@@ -284,10 +298,25 @@ def _apply_optics_overlays(cfg: HardwareConfig) -> None:
         cfg.reference_tube_lens_mm = scope["reference_tube_lens_mm"]
         cfg.optics_source = "scope"
 
-    measured = _read_calibrated_pixel_size_um()
-    if measured:
-        cfg.pixel_size_override_um = measured
-        cfg.optics_source = "calibration"
+    # A measured calibration is the most accurate pixel size, BUT only if it
+    # was taken at the current optics. Applying a stale calibration (e.g. from a
+    # previous objective) would silently override the correct scope value — so
+    # gate it on the optics signature. Calibrations written before signatures
+    # existed (no signature stored) are applied for backward compatibility.
+    cal = _read_calibration()
+    if cal and cal.get("mean_pixel_size_um"):
+        cal_sig = cal.get("optics_signature")
+        cur_sig = cfg.optics_signature
+        if cal_sig is None or cal_sig == cur_sig:
+            cfg.pixel_size_override_um = float(cal["mean_pixel_size_um"])
+            cfg.optics_source = "calibration"
+        else:
+            logger.warning(
+                "Ignoring pixel calibration: measured at optics %s but scope "
+                "now reports %s. Re-measure or accept the scope value.",
+                cal_sig,
+                cur_sig,
+            )
 
 
 def invalidate_hardware_config() -> None:

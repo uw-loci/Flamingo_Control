@@ -406,6 +406,14 @@ class PixelCalibratorDialog(PersistentDialog):
             return
         try:
             self.service.save(self._result)
+            # If an optics mismatch had blocked acquisition, a calibration saved
+            # for the current optics should clear it.
+            guard = getattr(self.app, "optics_guard", None) if self.app else None
+            if guard is not None:
+                try:
+                    guard.note_calibration_saved()
+                except Exception:
+                    logger.debug("optics guard re-check failed", exc_info=True)
             QMessageBox.information(
                 self, "Saved", f"Calibration saved to\n{self.service._file}"
             )

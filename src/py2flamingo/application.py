@@ -82,6 +82,11 @@ class FlamingoApplication(QObject):
         # When True, microscope controls should be disabled to prevent interference
         self._acquisition_in_progress = False
 
+        # Optics-mismatch guard (blocks acquisition when the scope optics no
+        # longer match the active pixel calibration). Created lazily on first
+        # use / on connect.
+        self.optics_guard = None
+
         # Qt application
         self.qt_app: Optional[QApplication] = None
         self.main_window = None
@@ -303,6 +308,10 @@ class FlamingoApplication(QObject):
         settings retrieval that pauses the SocketReader.
         """
         self.logger.info("Settings loaded - querying initial position from hardware")
+
+        # ScopeSettings.txt was just refreshed and the hardware config cache
+        # invalidated; re-evaluate whether the optics match the calibration.
+        self._check_optics_guard(show_dialog=True)
 
         # Query position in background thread to avoid blocking GUI
         # StageService.get_position() uses blocking socket I/O
@@ -666,10 +675,70 @@ class FlamingoApplication(QObject):
             )
             return False
 
+        # Optics guard: refuse acquisition if the scope optics no longer match
+        # the active pixel calibration (the Pixel Calibrator itself is NOT
+        # gated — only acquisition). Show the resolution dialog and bail.
+        if (
+            self.optics_guard is not None
+            and not self.optics_guard.is_acquisition_allowed()
+        ):
+            self.logger.warning(
+                "Acquisition '%s' blocked: %s", source, self.optics_guard.reason
+            )
+            self._show_optics_mismatch_dialog()
+            return False
+
         self._acquisition_in_progress = True
         self.logger.info(f"Acquisition started: {source}")
         self.acquisition_started.emit()
         return True
+
+    def _check_optics_guard(self, show_dialog: bool = False) -> None:
+        """Re-evaluate the optics guard; optionally show the dialog on mismatch."""
+        try:
+            if self.optics_guard is None:
+                from py2flamingo.services.optics_guard_service import (
+                    OpticsGuardService,
+                )
+
+                self.optics_guard = OpticsGuardService()
+            mismatch = self.optics_guard.check()
+            if mismatch and show_dialog:
+                self._show_optics_mismatch_dialog()
+        except Exception:
+            self.logger.exception("Optics guard check failed")
+
+    def _show_optics_mismatch_dialog(self) -> None:
+        """Show the optics-mismatch resolution dialog (measure / accept scope)."""
+        guard = self.optics_guard
+        if guard is None or guard.mismatch is None:
+            return
+        try:
+            from py2flamingo.views.dialogs.optics_mismatch_dialog import (
+                OpticsMismatchDialog,
+            )
+
+            def on_measure():
+                # Open the Pixel Calibrator; acquisition stays blocked until a
+                # matching calibration is saved (calibrator dialog re-checks).
+                if self.main_window and hasattr(
+                    self.main_window, "_on_pixel_calibrator"
+                ):
+                    self.main_window._on_pixel_calibrator()
+
+            def on_accept_scope():
+                guard.acknowledge_current()
+
+            dlg = OpticsMismatchDialog(
+                mismatch=guard.mismatch,
+                reason=guard.reason,
+                on_measure=on_measure,
+                on_accept_scope=on_accept_scope,
+                parent=self.main_window,
+            )
+            dlg.exec_()
+        except Exception:
+            self.logger.exception("Failed to show optics mismatch dialog")
 
     def stop_acquisition(self, source: str = "unknown"):
         """Signal that an acquisition process has ended.

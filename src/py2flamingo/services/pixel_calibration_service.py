@@ -358,6 +358,15 @@ class PixelCalibrationService:
         cal = calibration or self._calibration
         if cal is None:
             raise ValueError("No calibration to save")
+        # Stamp the current optics signature so config_loader can tell whether
+        # this calibration still applies after an objective/tube change.
+        if not cal.optics_signature:
+            try:
+                from py2flamingo.configs.config_loader import get_hardware_config
+
+                cal.optics_signature = get_hardware_config().optics_signature
+            except Exception:
+                logger.debug("Could not stamp optics signature", exc_info=True)
         self._calibration = cal
         try:
             self._file.parent.mkdir(parents=True, exist_ok=True)
