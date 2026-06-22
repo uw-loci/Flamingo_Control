@@ -726,9 +726,10 @@ class MVCConnectionService:
         notification. Returns True on success, False on failure.
         """
         if self._last_config is None:
-            self.logger.error(
-                "reconnect_last() called but no previous config is stored"
-            )
+            # Not an error: this happens before the first manual connect (e.g.
+            # Sample View opened while disconnected). Log at INFO so it doesn't
+            # trip ERROR-level alerting (ntfy).
+            self.logger.info("reconnect_last(): no previous connection to restore yet")
             return False
 
         config = self._last_config

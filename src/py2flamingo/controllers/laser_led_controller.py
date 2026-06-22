@@ -221,6 +221,17 @@ class LaserLEDController(QObject):
         the GUI displays the actual hardware state rather than defaults.
         Queries each laser and updates the cached power values.
         """
+        # Skip when disconnected (Sample View can open before connecting).
+        # Querying anyway triggers a futile reconnect cascade and error noise.
+        conn = getattr(self.laser_led_service, "connection", None)
+        if (
+            conn is not None
+            and hasattr(conn, "is_connected")
+            and not conn.is_connected()
+        ):
+            self.logger.debug("Not connected — skipping laser power load from hardware")
+            return
+
         self.logger.info("Loading laser powers from hardware...")
         for laser in self.get_available_lasers():
             actual_power = self.laser_led_service.query_laser_power(laser.index)
