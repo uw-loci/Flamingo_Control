@@ -129,23 +129,58 @@ class LED2DOverviewWorkflow(QObject):
                 logger.error("Camera service not available - cannot determine FOV")
                 return None
 
-            # Get pixel size from camera service
-            pixel_size_mm = self._app.camera_service.get_pixel_field_of_view()
-
-            # Get frame size from camera service
+            # Frame size (px) from the camera — honours any cropped AOI, which the
+            # static config does not know about.
             width, height = self._app.camera_service.get_image_size()
             frame_size = min(width, height)  # Use smaller dimension for FOV
 
-            # Validate values - camera might return 0 if not properly initialized
             if frame_size <= 0:
                 logger.error(
                     f"Invalid frame size from camera: {frame_size} - cannot determine FOV"
                 )
                 return None
 
+            # Pixel size: prefer the calibration-aware hardware config so a measured
+            # Pixel Calibrator result (and the scope/YAML fallback chain) governs tile
+            # spacing.  The firmware value is objective-magnification-derived only and
+            # ignores any saved calibration, so trusting it blindly causes tile overlap
+            # (duplicated structure) whenever the true sample-plane pixel size differs
+            # from sensor_pixel / objective_mag.  Fall back to the firmware value only
+            # if the config is unavailable.
+            pixel_size_mm = 0.0
+            try:
+                from py2flamingo.configs.config_loader import get_hardware_config
+
+                hw = get_hardware_config()
+                pixel_size_mm = hw.effective_pixel_size_um / 1000.0
+                logger.info(
+                    f"Pixel size from hardware config: {hw.effective_pixel_size_um:.4f} "
+                    f"um/px (source={hw.optics_source}"
+                    f"{', calibrated' if hw.pixel_size_override_um else ''})"
+                )
+            except Exception as cfg_err:  # noqa: BLE001 - config is best-effort here
+                logger.warning(
+                    f"Hardware config unavailable ({cfg_err}); "
+                    "falling back to firmware pixel field of view"
+                )
+
+            # Cross-check / fallback against the firmware-reported value.
+            firmware_pixel_mm = self._app.camera_service.get_pixel_field_of_view()
+            if pixel_size_mm <= 0:
+                pixel_size_mm = firmware_pixel_mm
+            elif firmware_pixel_mm > 0:
+                ratio = pixel_size_mm / firmware_pixel_mm
+                if ratio < 0.8 or ratio > 1.25:
+                    logger.warning(
+                        f"Effective pixel size {pixel_size_mm * 1000:.4f} um/px differs "
+                        f"from firmware {firmware_pixel_mm * 1000:.4f} um/px "
+                        f"(ratio {ratio:.2f}); using the calibration-aware value. If "
+                        "tiles still overlap, re-run the XY Pixel Calibrator."
+                    )
+
             if pixel_size_mm <= 0:
                 logger.error(
-                    f"Invalid pixel size from camera: {pixel_size_mm} - cannot determine FOV"
+                    f"Invalid pixel size: {pixel_size_mm} - cannot determine FOV"
                 )
                 return None
 
@@ -594,6 +629,56 @@ class LED2DOverviewWorkflow(QObject):
             self.scan_error.emit(str(e))
             self._running = False
 
+    def _wait_for_axes_settled(
+        self,
+        stage_service,
+        targets: dict,
+        tolerance_mm: float = 0.01,
+        timeout_s: float = 10.0,
+        poll_interval_s: float = 0.03,
+    ) -> bool:
+        """Block until each axis reaches its target (within tolerance) or timeout.
+
+        ``StageService.move_to_position`` is asynchronous, so callers that grab
+        frames immediately afterwards would capture the stage mid-move. Polling
+        the real per-axis position here guarantees the stage has physically
+        arrived before imaging. Returns True if all axes settled, False on
+        timeout (a short fallback delay is applied so the scan still proceeds).
+
+        Args:
+            stage_service: StageService used to query axis positions.
+            targets: {axis_code: target_mm} for the axes to wait on.
+            tolerance_mm: Arrival window (default 10 um).
+            timeout_s: Max wait before giving up and proceeding.
+            poll_interval_s: Delay between position polls.
+        """
+        deadline = time.monotonic() + timeout_s
+        remaining = dict(targets)
+        while remaining and time.monotonic() < deadline:
+            if self._cancelled:
+                return False
+            settled = []
+            for axis, target in remaining.items():
+                try:
+                    pos = stage_service.get_axis_position(axis)
+                except Exception:  # noqa: BLE001 - transient comm hiccup; keep polling
+                    pos = None
+                if pos is not None and abs(pos - target) <= tolerance_mm:
+                    settled.append(axis)
+            for axis in settled:
+                remaining.pop(axis, None)
+            if remaining:
+                time.sleep(poll_interval_s)
+
+        if remaining:
+            logger.warning(
+                f"Axes did not confirm settle within {timeout_s:.0f}s "
+                f"(pending axes: {sorted(remaining)}); proceeding after fallback delay"
+            )
+            time.sleep(0.3)
+            return False
+        return True
+
     def _scan_tiles_continuous(self):
         """Scan all tiles using continuous Z sweeps - much faster than step-by-step.
 
@@ -667,13 +752,24 @@ class LED2DOverviewWorkflow(QObject):
                     self._finish_cancelled()
                     return
 
-                # Move to XY position
+                # Move to XY and the Z-stack start, then WAIT for the stage to
+                # physically arrive before sweeping. move_to_position is
+                # asynchronous; without settling, the continuous Z sweep below
+                # grabs frames while the stage is still translating laterally
+                # (~2.7 mm between tiles), bleeding the previous tile's content
+                # into this one and producing duplicated/ghosted structure in the
+                # projection. X was commanded at the top of the column loop, Y and
+                # Z just now — wait for all three.
                 stage_service.move_to_position(AxisCode.Y_AXIS, y_pos)
-                time.sleep(0.02)
-
-                # Continuous Z sweep: move to start, then sweep while grabbing frames
                 stage_service.move_to_position(AxisCode.Z_AXIS, z_min)
-                time.sleep(0.02)
+                self._wait_for_axes_settled(
+                    stage_service,
+                    {
+                        AxisCode.X_AXIS: x_pos,
+                        AxisCode.Y_AXIS: y_pos,
+                        AxisCode.Z_AXIS: z_min,
+                    },
+                )
 
                 # Grab frames during Z sweep
                 frames = []  # List of (z_approx, image, focus_score)
@@ -842,12 +938,16 @@ class LED2DOverviewWorkflow(QObject):
         # Get stage service for direct movement (bypasses position_controller lock)
         stage_service = StageService(self._app.connection_service)
 
-        # Move to XY position using stage service directly
+        # Move to XY position using stage service directly, then wait for the
+        # stage to physically arrive. move_to_position is asynchronous, so a fixed
+        # delay can leave the stage still translating when frames are captured
+        # (duplicated/ghosted content between tiles).
         logger.debug(f"Moving to tile position X={x:.3f}, Y={y:.3f}")
         stage_service.move_to_position(AxisCode.X_AXIS, x)
-        time.sleep(0.05)  # Brief pause for command processing
         stage_service.move_to_position(AxisCode.Y_AXIS, y)
-        time.sleep(0.1)  # Wait for XY moves to complete
+        self._wait_for_axes_settled(
+            stage_service, {AxisCode.X_AXIS: x, AxisCode.Y_AXIS: y}
+        )
 
         # Calculate Z positions for stack using effective bounding box Z range
         # (For rotated view, this is the original X range swapped to Z)
