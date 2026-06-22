@@ -49,8 +49,34 @@ class TilingPanel(QWidget):
         """
         super().__init__(parent)
         self._logger = logging.getLogger(__name__)
-        self._tile_size_um = 520.0  # Default tile size in microns (camera FOV ~0.52mm)
+        # Static last-resort fallback only. The live tile size (camera FOV) is
+        # read lazily from the calibration-aware hardware config via
+        # _current_tile_size_um() so scan-area estimates and two-point tile
+        # counts stay correct across objective/tube changes. An explicit
+        # set_tile_size() call pins an override.
+        self._tile_size_um = 520.0
+        self._tile_size_override_um = None
         self._setup_ui()
+
+    def _current_tile_size_um(self) -> float:
+        """Tile size (camera FOV) in microns.
+
+        Prefers an explicit override set via :meth:`set_tile_size`; otherwise
+        reads the live, calibration-aware hardware FOV (calibration > scope >
+        YAML). Falls back to the static default only if the config is
+        unavailable.
+        """
+        if self._tile_size_override_um is not None:
+            return self._tile_size_override_um
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            fov_um = get_hardware_config().fov_um
+            if fov_um and fov_um > 0:
+                return fov_um
+        except Exception as exc:  # noqa: BLE001 - config best-effort; keep UI alive
+            self._logger.debug(f"Hardware FOV unavailable for tiling panel: {exc}")
+        return self._tile_size_um
 
     def _setup_ui(self) -> None:
         """Create and layout UI components."""
@@ -160,12 +186,13 @@ class TilingPanel(QWidget):
 
         # Scan area calculation
         # Each tile covers tile_size_um, minus overlap with previous tile
-        effective_tile_x = self._tile_size_um * (1 - overlap)
-        effective_tile_y = self._tile_size_um * (1 - overlap)
+        tile_size_um = self._current_tile_size_um()
+        effective_tile_x = tile_size_um * (1 - overlap)
+        effective_tile_y = tile_size_um * (1 - overlap)
 
         # Total scan area
-        scan_x_um = self._tile_size_um + (tiles_x - 1) * effective_tile_x
-        scan_y_um = self._tile_size_um + (tiles_y - 1) * effective_tile_y
+        scan_x_um = tile_size_um + (tiles_x - 1) * effective_tile_x
+        scan_y_um = tile_size_um + (tiles_y - 1) * effective_tile_y
 
         scan_x_mm = scan_x_um / 1000.0
         scan_y_mm = scan_y_um / 1000.0
@@ -215,12 +242,19 @@ class TilingPanel(QWidget):
 
     def set_tile_size(self, tile_size_um: float) -> None:
         """
-        Set the tile size for scan area calculations.
+        Pin an explicit tile size (camera FOV) override for scan-area
+        calculations and two-point tile counts.
+
+        Pass a value > 0 to override the live hardware-config FOV; pass 0 or a
+        negative value to clear the override and resume reading the live,
+        calibration-aware FOV.
 
         Args:
             tile_size_um: Tile size in micrometers (typically camera FOV)
         """
-        self._tile_size_um = tile_size_um
+        self._tile_size_override_um = (
+            tile_size_um if tile_size_um and tile_size_um > 0 else None
+        )
         self._update_calculations()
 
     def get_tiles_x(self) -> int:
@@ -246,11 +280,12 @@ class TilingPanel(QWidget):
         tiles_y = self._tiles_y.value()
         overlap = self._overlap.value() / 100.0
 
-        effective_tile_x = self._tile_size_um * (1 - overlap)
-        effective_tile_y = self._tile_size_um * (1 - overlap)
+        tile_size_um = self._current_tile_size_um()
+        effective_tile_x = tile_size_um * (1 - overlap)
+        effective_tile_y = tile_size_um * (1 - overlap)
 
-        scan_x_um = self._tile_size_um + (tiles_x - 1) * effective_tile_x
-        scan_y_um = self._tile_size_um + (tiles_y - 1) * effective_tile_y
+        scan_x_um = tile_size_um + (tiles_x - 1) * effective_tile_x
+        scan_y_um = tile_size_um + (tiles_y - 1) * effective_tile_y
 
         return (scan_x_um / 1000.0, scan_y_um / 1000.0)
 
@@ -305,8 +340,8 @@ class TilingPanel(QWidget):
         x_range_mm = abs(x_max - x_min)
         y_range_mm = abs(y_max - y_min)
 
-        # FOV is tile size (from camera)
-        fov_mm = self._tile_size_um / 1000.0
+        # FOV is tile size (from the calibration-aware hardware config)
+        fov_mm = self._current_tile_size_um() / 1000.0
         overlap_factor = 1.0 - self._overlap.value() / 100.0
         effective_step = fov_mm * overlap_factor
 
