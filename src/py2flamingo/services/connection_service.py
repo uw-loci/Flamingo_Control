@@ -388,10 +388,13 @@ class ConnectionService:
             try:
                 from py2flamingo.configs.config_loader import get_hardware_config
 
-                cam_um = get_hardware_config().sensor_pixel_size_um
+                _hw = get_hardware_config()
+                cam_um = _hw.sensor_pixel_size_um
+                ref_tube = _hw.reference_tube_lens_mm
             except Exception:
                 cam_um = 6.5
-            image_pixel_size = (cam_um / (obj * (tube / 200))) / 1000.0  # mm
+                ref_tube = 200.0
+            image_pixel_size = (cam_um / (obj * (tube / ref_tube))) / 1000.0  # mm
         return image_pixel_size, scope_settings
 
     def _create_socket(self) -> socket.socket:
@@ -1365,16 +1368,19 @@ class MVCConnectionService:
                             get_hardware_config,
                         )
 
-                        _hw_default_cam = get_hardware_config().sensor_pixel_size_um
+                        _hw = get_hardware_config()
+                        _hw_default_cam = _hw.sensor_pixel_size_um
+                        _ref_tube = _hw.reference_tube_lens_mm
                     except Exception:
                         _hw_default_cam = 6.5
+                        _ref_tube = 200.0
                     cam_um = float(
                         scope_settings.get("Camera", {}).get(
                             "Physical pixel size (\u00b5m)", _hw_default_cam
                         )
                     )
                     image_pixel_size = (
-                        cam_um / (obj * (tube / 200))
+                        cam_um / (obj * (tube / _ref_tube))
                     ) / 1000.0  # Convert to mm
                     self.logger.info(
                         f"Calculated pixel size: {image_pixel_size:.6f} mm "

@@ -13,7 +13,6 @@ This view provides stage control including:
 """
 
 import logging
-import os
 from typing import Optional
 
 from PyQt5.QtCore import Qt, pyqtSlot
@@ -200,18 +199,11 @@ class StageControlView(QWidget):
         self.movement_controller = movement_controller
         self.logger = logging.getLogger(__name__)
 
-        # Load camera and magnification parameters
-        self.magnification = self._load_magnification()
-        try:
-            from py2flamingo.configs.config_loader import get_hardware_config
-
-            _hw = get_hardware_config()
-            self.sensor_pixels = _hw.sensor_width_px
-            self.pixel_size_um = _hw.sensor_pixel_size_um
-        except Exception:
-            self.sensor_pixels = 2048
-            self.pixel_size_um = 6.5
-        self.fov_mm = self._calculate_fov()
+        # Camera / optics parameters come from the calibration-aware hardware
+        # config (calibration > scope > YAML). The FOV — and the jog step sizes
+        # derived from it — therefore track objective/tube changes and any saved
+        # pixel calibration. No objective-specific constants are baked in here.
+        self._load_optics()
 
         # Track jog button references for dynamic updates
         self.x_minus_btn = None
@@ -266,65 +258,37 @@ class StageControlView(QWidget):
         main_layout.addStretch()
         self.setLayout(main_layout)
 
-    def _load_magnification(self) -> float:
+    def _load_optics(self) -> None:
+        """Populate optics parameters from the calibration-aware hardware config.
+
+        Sources magnification, sensor size, pixel size and FOV from
+        ``get_hardware_config()`` (calibration > scope > YAML), which is itself
+        robust (it falls back to YAML / built-in defaults internally and does not
+        raise). The previous implementation parsed ``ScopeSettings.txt`` with its
+        own reader and recomputed the FOV from hardcoded sensor/pixel constants
+        and a 25.0x default magnification — that bypassed any saved pixel
+        calibration and went stale on an objective swap.
         """
-        Load magnification from ScopeSettings.txt.
+        from py2flamingo.configs.config_loader import get_hardware_config
 
-        Returns:
-            Magnification value (default 25.0 if not found)
-        """
-        try:
-            # Try to find ScopeSettings.txt relative to this file
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(
-                os.path.dirname(os.path.dirname(current_dir))
-            )
-            settings_path = os.path.join(
-                project_root, "microscope_settings", "ScopeSettings.txt"
-            )
-
-            if not os.path.exists(settings_path):
-                self.logger.warning(
-                    f"ScopeSettings.txt not found at {settings_path}, using default magnification"
-                )
-                return 25.0
-
-            with open(settings_path, "r") as f:
-                for line in f:
-                    if "Objective lens magnification" in line:
-                        # Parse line like: "Objective lens magnification = 25.69"
-                        parts = line.split("=")
-                        if len(parts) == 2:
-                            mag = float(parts[1].strip())
-                            self.logger.info(
-                                f"Loaded magnification: {mag}x from {settings_path}"
-                            )
-                            return mag
-
-            self.logger.warning(
-                "Magnification not found in ScopeSettings.txt, using default"
-            )
-            return 25.0
-
-        except Exception as e:
-            self.logger.error(f"Error loading magnification: {e}", exc_info=True)
-            return 25.0
-
-    def _calculate_fov(self) -> float:
-        """
-        Calculate field of view in mm.
-
-        FOV formula: (sensor_pixels * pixel_size_um) / (magnification * 1000)
-
-        Returns:
-            FOV in millimeters
-        """
-        fov_mm = (self.sensor_pixels * self.pixel_size_um) / (self.magnification * 1000)
+        hw = get_hardware_config()
+        self.magnification = hw.system_magnification
+        self.sensor_pixels = hw.sensor_width_px
+        self.pixel_size_um = hw.effective_pixel_size_um
+        self.fov_mm = hw.fov_mm
         self.logger.info(
-            f"Calculated FOV: {fov_mm:.4f} mm "
-            f"(sensor: {self.sensor_pixels}px, pixel: {self.pixel_size_um}um, mag: {self.magnification}x)"
+            f"Stage FOV: {self.fov_mm:.4f} mm "
+            f"(sensor: {self.sensor_pixels}px, pixel: {self.pixel_size_um:.4f}um, "
+            f"mag: {self.magnification:.2f}x, source: {hw.optics_source})"
         )
-        return fov_mm
+
+    def refresh_optics(self) -> None:
+        """Re-read optics from the (possibly updated) hardware config.
+
+        Call after connect (ScopeSettings.txt refreshed) or after a pixel
+        calibration is saved so the FOV and jog steps pick up the new values.
+        """
+        self._load_optics()
 
     def _create_position_display(self) -> QGroupBox:
         """Create current position display group (compact)."""

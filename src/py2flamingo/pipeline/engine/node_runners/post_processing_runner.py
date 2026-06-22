@@ -46,8 +46,17 @@ class PostProcessingRunner(AbstractNodeRunner):
 
         # Build config from node properties
         cfg = node.config
+        # When the node doesn't pin a pixel size, default to the calibration-aware
+        # hardware pixel size rather than an objective-specific constant (0.406 was
+        # the old 16x value). 0.406 remains only as a last-resort fallback.
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            _default_pixel_um = get_hardware_config().effective_pixel_size_um
+        except Exception:
+            _default_pixel_um = 0.406
         config = StitchingConfig(
-            pixel_size_um=float(cfg.get("pixel_size_um", 0.406)),
+            pixel_size_um=float(cfg.get("pixel_size_um", _default_pixel_um)),
             z_step_um=float(cfg.get("z_step_um", 0)) or None,
             illumination_fusion=cfg.get("illumination_fusion", "max"),
             destripe=bool(cfg.get("destripe", False)),
