@@ -142,6 +142,18 @@ After clicking **Start Scan**:
 5. Second rotation tiles are captured
 6. Results window opens automatically
 
+**Motion behaviour (fast mode):**
+- The stage is **settled** (position confirmed) before each tile's Z sweep
+  begins, so frames are never grabbed mid-move. This costs a little time per
+  tile but prevents duplicated/ghosted structure between tiles.
+- The Z sweep is **serpentined**: alternate tiles sweep `z_min→z_max` and
+  `z_max→z_min`, so the stage never travels the full stack back between tiles.
+- **Stage-limit handling:** if the requested region overruns a stage soft limit,
+  the whole tiling is shifted to sit flush against the nearest reachable edge
+  (limit − 0.25 mm), preserving coverage. If the region is larger than the stage
+  can travel at all, the scan is **not started** and a warning dialog asks you to
+  choose a smaller region (or edit the configured positions).
+
 **Progress Tracking:**
 - Start button shows percentage: "In Progress... 45%"
 - Cancel button appears during scan
