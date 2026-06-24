@@ -112,6 +112,12 @@ class SampleView(QWidget):
         self.camera_controller = camera_controller
         self.movement_controller = movement_controller
         self.laser_led_controller = laser_led_controller
+        # Position-control enable state is the AND of three conditions; each is
+        # tracked separately so motion_stopped can't re-enable controls that
+        # should stay locked during acquisition or while disconnected.
+        self._connected = False
+        self._acquisition_locked = False
+        self._stage_moving = False
         self.voxel_storage = voxel_storage
         self.image_controls_window = image_controls_window
         self._geometry_manager = geometry_manager
@@ -712,7 +718,9 @@ class SampleView(QWidget):
 
     def _create_position_sliders(self) -> QGroupBox:
         """Create position control sliders for all axes."""
-        group = QGroupBox("Position Sliders")
+        self._position_sliders_title = "Position Sliders"
+        group = QGroupBox(self._position_sliders_title)
+        self._position_sliders_group = group
         layout = QVBoxLayout()
         layout.setSpacing(6)
 
@@ -1460,6 +1468,15 @@ class SampleView(QWidget):
         # Movement signals
         if self.movement_controller:
             self.movement_controller.position_changed.connect(self._on_position_changed)
+            # Grey out position controls while the stage is moving so the user
+            # can't queue commands that would be ignored (and snap the slider
+            # back). motion_started/stopped carry the axis name; we ignore it.
+            self.movement_controller.motion_started.connect(
+                self._on_stage_motion_started
+            )
+            self.movement_controller.motion_stopped.connect(
+                self._on_stage_motion_stopped
+            )
 
         # Image Controls / Live View Settings window -> live display transforms.
         # The same window also drives the standalone CameraLiveViewer; Qt allows
@@ -5050,7 +5067,51 @@ class SampleView(QWidget):
             f"intensity={state.get('intensity_min')}-{state.get('intensity_max')}"
         )
 
-    # ========== Acquisition Lock Controls ==========
+    # ========== Acquisition Lock / Motion Controls ==========
+
+    def _apply_stage_control_state(self) -> None:
+        """Enable position controls only when idle, connected and unlocked.
+
+        Position sliders/edits are enabled only when all three hold: connected,
+        not acquisition-locked, and not mid-motion. Centralising this keeps the
+        three independent sources (connection, acquisition lock, stage motion)
+        from clobbering each other.
+        """
+        enabled = (
+            self._connected and not self._acquisition_locked and not self._stage_moving
+        )
+        if hasattr(self, "position_sliders"):
+            for slider in self.position_sliders.values():
+                slider.setEnabled(enabled)
+        if hasattr(self, "position_edits"):
+            for edit in self.position_edits.values():
+                edit.setEnabled(enabled)
+        self._update_motion_indicator()
+
+    def _update_motion_indicator(self) -> None:
+        """Show a 'stage moving' cue on the Position Sliders group box."""
+        group = getattr(self, "_position_sliders_group", None)
+        if group is None:
+            return
+        base = getattr(self, "_position_sliders_title", "Position Sliders")
+        if self._stage_moving:
+            group.setTitle(f"{base} — ⟳ Stage moving…")
+            group.setStyleSheet(
+                "QGroupBox::title { color: #d17a00; font-weight: bold; }"
+            )
+        else:
+            group.setTitle(base)
+            group.setStyleSheet("")
+
+    def _on_stage_motion_started(self, axis_name: str = "") -> None:
+        """Stage started moving — grey out position controls."""
+        self._stage_moving = True
+        self._apply_stage_control_state()
+
+    def _on_stage_motion_stopped(self, axis_name: str = "") -> None:
+        """Stage stopped — re-enable position controls if otherwise allowed."""
+        self._stage_moving = False
+        self._apply_stage_control_state()
 
     def set_stage_controls_enabled(self, enabled: bool) -> None:
         """Enable or disable stage movement controls.
@@ -5068,15 +5129,8 @@ class SampleView(QWidget):
             f"Stage controls {'enabled' if enabled else 'disabled'} (acquisition lock)"
         )
 
-        # Disable/enable position sliders
-        if hasattr(self, "position_sliders"):
-            for slider in self.position_sliders.values():
-                slider.setEnabled(enabled)
-
-        # Disable/enable position edit fields
-        if hasattr(self, "position_edits"):
-            for edit in self.position_edits.values():
-                edit.setEnabled(enabled)
+        self._acquisition_locked = not enabled
+        self._apply_stage_control_state()
 
         # Disable/enable illumination controls during acquisition
         # (acquisition controls the LED, user shouldn't change it)
@@ -5097,6 +5151,8 @@ class SampleView(QWidget):
             f"Connection state: {'connected' if connected else 'not connected'}"
         )
 
+        self._connected = connected
+
         # Update connection status indicator
         if hasattr(self, "_connection_status_label"):
             if connected:
@@ -5110,13 +5166,8 @@ class SampleView(QWidget):
                     "color: gray; font-size: 9pt; font-style: italic;"
                 )
 
-        # Stage position controls
-        if hasattr(self, "position_sliders"):
-            for slider in self.position_sliders.values():
-                slider.setEnabled(connected)
-        if hasattr(self, "position_edits"):
-            for edit in self.position_edits.values():
-                edit.setEnabled(connected)
+        # Stage position controls (also gated by acquisition lock / motion)
+        self._apply_stage_control_state()
 
         # Illumination controls
         if hasattr(self, "laser_led_panel") and self.laser_led_panel:
