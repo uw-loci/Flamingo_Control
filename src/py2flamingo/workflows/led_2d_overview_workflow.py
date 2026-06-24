@@ -679,6 +679,24 @@ class LED2DOverviewWorkflow(QObject):
             return False
         return True
 
+    @staticmethod
+    def _z_sweep_positions(z_min, z_max, z_step, ascending):
+        """Z-plane positions for one tile's sweep, in stage-travel order.
+
+        Ascending tiles sweep z_min -> z_max; alternate tiles sweep the *same*
+        planes in reverse (serpentine in Z) so the stage never has to travel the
+        full stack back to z_min between tiles. The overview output is a
+        Z-collapsed projection, so the sweep direction does not affect it.
+        """
+        positions = []
+        z = z_min
+        while z <= z_max:
+            positions.append(z)
+            z += z_step
+        if not ascending:
+            positions.reverse()
+        return positions
+
     def _scan_tiles_continuous(self):
         """Scan all tiles using continuous Z sweeps - much faster than step-by-step.
 
@@ -731,6 +749,10 @@ class LED2DOverviewWorkflow(QObject):
         # Scan in serpentine pattern
         tile_idx = 0
         rotation_result = self._results[self._current_rotation_idx]
+        # Serpentine in Z as well as Y: alternate the Z sweep direction each tile
+        # so the stage never travels the full stack back to z_min between tiles
+        # (that ~full-range reset was the slow, settle-timeout-prone step).
+        z_sweep_up = True
 
         for x_idx, x_pos in enumerate(x_positions):
             if self._cancelled:
@@ -760,23 +782,29 @@ class LED2DOverviewWorkflow(QObject):
                 # into this one and producing duplicated/ghosted structure in the
                 # projection. X was commanded at the top of the column loop, Y and
                 # Z just now — wait for all three.
+                # Serpentine Z: start this tile's sweep at whichever end the
+                # previous tile finished on, so there is no full-stack Z reset.
+                z_start = z_min if z_sweep_up else z_max
+
                 stage_service.move_to_position(AxisCode.Y_AXIS, y_pos)
-                stage_service.move_to_position(AxisCode.Z_AXIS, z_min)
+                stage_service.move_to_position(AxisCode.Z_AXIS, z_start)
                 self._wait_for_axes_settled(
                     stage_service,
                     {
                         AxisCode.X_AXIS: x_pos,
                         AxisCode.Y_AXIS: y_pos,
-                        AxisCode.Z_AXIS: z_min,
+                        AxisCode.Z_AXIS: z_start,
                     },
                 )
 
-                # Grab frames during Z sweep
+                # Grab frames during Z sweep. Planes are visited in travel order
+                # (reversed on alternate tiles); the output is a Z-collapsed
+                # projection, so direction does not change it.
                 frames = []  # List of (z_approx, image, focus_score)
                 z_step = self._config.z_step_size
-                z_pos = z_min
+                z_values = self._z_sweep_positions(z_min, z_max, z_step, z_sweep_up)
 
-                while z_pos <= z_max:
+                for z_pos in z_values:
                     # Check for cancellation during Z sweep
                     if self._cancelled:
                         self._finish_cancelled()
@@ -792,8 +820,6 @@ class LED2DOverviewWorkflow(QObject):
                         image = frame_data[0]
                         focus_score = variance_of_laplacian(image)
                         frames.append((z_pos, image.copy(), focus_score))
-
-                    z_pos += z_step
 
                 # Compute projections from captured frames
                 if frames:
@@ -819,6 +845,8 @@ class LED2DOverviewWorkflow(QObject):
                     rotation_result.tiles.append(tile_result)
 
                 tile_idx += 1
+                # Alternate Z sweep direction for the next tile (serpentine in Z).
+                z_sweep_up = not z_sweep_up
 
                 # Emit tile_completed signal for progress tracking
                 logger.info(
