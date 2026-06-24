@@ -53,6 +53,10 @@ class WorkflowController(QObject):
     # Signals for thread-safe tile position updates (callbacks run in worker threads)
     _tile_position_requested = pyqtSignal(dict)
     _tile_position_clear_requested = pyqtSignal()
+    # Emitted (with "ip:port") when an auto-reconnect after a connection loss
+    # succeeds, so a recovery/all-clear notification can be sent to pair with
+    # the error that was raised when the connection dropped.
+    reconnected = pyqtSignal(str)
 
     def __init__(
         self,
@@ -559,6 +563,7 @@ class WorkflowController(QObject):
 
             if self._is_connected():
                 self._logger.info("Reconnected successfully")
+                self.reconnected.emit(f"{status.ip}:{status.port}")
                 return (True, "Reconnected successfully")
             else:
                 return (False, "Reconnection failed - please reconnect manually")

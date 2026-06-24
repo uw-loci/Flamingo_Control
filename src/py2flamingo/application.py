@@ -276,6 +276,20 @@ class FlamingoApplication(QObject):
                     tags="no_entry_sign",
                 )
             )
+
+            # Pair the connection-loss error alert with a recovery/all-clear when
+            # the auto-reconnect succeeds.
+            if self.workflow_controller is not None:
+                self.workflow_controller.reconnected.connect(
+                    lambda addr: svc.notify_recovery(
+                        title="Flamingo: reconnected",
+                        message=(
+                            f"Connection to the microscope was restored ({addr}) "
+                            "after a loss. Check that the interrupted run resumed "
+                            "correctly."
+                        ),
+                    )
+                )
         except Exception as e:
             self.logger.warning(f"Failed to wire notification hooks: {e}")
 

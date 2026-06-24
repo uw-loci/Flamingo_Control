@@ -204,6 +204,17 @@ class NotificationService(QObject):
         self._dispatch(url, message, title, priority, tags)
         return True
 
+    def notify_recovery(self, title: str, message: str) -> bool:
+        """Send a recovery / all-clear notification.
+
+        Gated by the same "errors" checkbox as error notifications, so a user
+        who receives error alerts also receives the recovery (e.g. a successful
+        reconnect after a connection loss). Tagged with a check mark.
+        """
+        return self.notify(
+            "errors", title=title, message=message, tags="white_check_mark"
+        )
+
     def send_test(self, url: str) -> "_NtfyPostThread":
         """Send a test notification to the given URL, bypassing checkbox gating.
 

@@ -875,6 +875,21 @@ class CameraService(MicroscopeCommandService):
                 )
                 continue
 
+            except OSError as e:
+                # The live socket was closed out from under this thread — almost
+                # always a disconnect/reconnect tearing it down while the receiver
+                # was still reading (e.g. WinError 10038 "not a socket"). That is a
+                # teardown race, not a fault: exit quietly. Logging it as ERROR
+                # here would fire a spurious ntfy alert and a traceback, even
+                # though the actual connection loss is already reported by the
+                # command/queue paths (and the reconnect by the recovery alert).
+                if self._streaming:
+                    self.logger.warning(
+                        f"Live data socket closed during read "
+                        f"(disconnect/reconnect in progress): {e}"
+                    )
+                break
+
             except Exception as e:
                 if self._streaming:  # Only log if we're supposed to be streaming
                     self.logger.error(f"Error in data receiver: {e}")
