@@ -82,7 +82,7 @@ class StageService(MicroscopeCommandService):
         axis_names = {1: "X", 2: "Y", 3: "Z", 4: "R"}
         axis_name = axis_names.get(axis, f"Unknown({axis})")
 
-        self.logger.info(f"Querying {axis_name}-axis position from hardware...")
+        self.logger.debug(f"Querying {axis_name}-axis position from hardware...")
 
         # CRITICAL: params[3] (int32Data0) must specify the axis to query
         result = self._query_command(
@@ -288,7 +288,7 @@ class StageService(MicroscopeCommandService):
                 # Log position from hardware - trust the hardware response
                 # Stage limits vary by microscope and should not be hardcoded here
                 unit = "deg" if str(axis_name).upper() == "R" else "mm"
-                self.logger.info(f"{axis_name}-axis position: {position:.3f} {unit}")
+                self.logger.debug(f"{axis_name}-axis position: {position:.3f} {unit}")
                 return float(position)
             except Exception as e:
                 self.logger.error(
@@ -362,7 +362,7 @@ class StageService(MicroscopeCommandService):
             >>> # Stage begins moving asynchronously
             >>> # Wait for motion stopped callback or poll is_motion_stopped()
         """
-        self.logger.info(f"Moving axis {axis} to {position_mm} mm...")
+        self.logger.debug(f"Moving axis {axis} to {position_mm} mm...")
 
         result = self._send_movement_command(
             StageCommandCode.POSITION_SET_SLIDER,  # Use slider variant from logs
@@ -376,10 +376,10 @@ class StageService(MicroscopeCommandService):
                 f"Failed to move stage: {result.get('error', 'Unknown error')}"
             )
 
-        self.logger.info(
+        self.logger.debug(
             f"Stage movement command sent (axis {axis} → {position_mm} mm)"
         )
-        self.logger.info(
+        self.logger.debug(
             "Motion is asynchronous - use motion monitoring to detect completion"
         )
 

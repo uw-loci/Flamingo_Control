@@ -264,11 +264,11 @@ class ProtocolEncoder:
             if code == 24580:  # POSITION_SET_MOVE
                 axis_names = {1: "X", 2: "Y", 3: "Z", 4: "R"}
                 axis = axis_names.get(params[3], f"?{params[3]}")
-                logger.info(f"[TX] POSITION_SET_MOVE: Axis={axis}, Value={value:.3f}")
+                logger.debug(f"[TX] POSITION_SET_MOVE: Axis={axis}, Value={value:.3f}")
             elif code == 24584:  # POSITION_GET
                 axis_names = {1: "X", 2: "Y", 3: "Z", 4: "R"}
                 axis = axis_names.get(params[3], f"?{params[3]}")
-                logger.info(f"[TX] POSITION_GET: Axis={axis}")
+                logger.debug(f"[TX] POSITION_GET: Axis={axis}")
             else:
                 # Summary at INFO, full dump at DEBUG
                 logger.info(

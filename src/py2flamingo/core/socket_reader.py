@@ -262,7 +262,7 @@ class MessageDispatcher:
                     self._stats["responses_dispatched"] += 1
                     # Remove from pending after delivering
                     del self._pending_requests[command_code]
-                    logger.info(
+                    logger.debug(
                         f"[RX] Dispatched response for 0x{command_code:04X} to waiting caller"
                     )
                     return

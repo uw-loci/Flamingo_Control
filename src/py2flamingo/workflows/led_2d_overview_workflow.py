@@ -635,7 +635,7 @@ class LED2DOverviewWorkflow(QObject):
         targets: dict,
         tolerance_mm: float = 0.01,
         timeout_s: float = 10.0,
-        poll_interval_s: float = 0.03,
+        poll_interval_s: float = 0.1,
     ) -> bool:
         """Block until each axis reaches its target (within tolerance) or timeout.
 

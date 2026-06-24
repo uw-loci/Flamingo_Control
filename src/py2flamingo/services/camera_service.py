@@ -835,8 +835,14 @@ class CameraService(MicroscopeCommandService):
                     buf_max = self._frame_buffer.maxlen
                     if buf_len >= buf_max:
                         self._dropped_frame_count += 1
+                        # Dropping live frames is EXPECTED whenever the buffer
+                        # isn't being drained as fast as it fills (e.g. the LED 2D
+                        # overview only samples frames at sweep points), so keep
+                        # this at DEBUG to avoid flooding the log. A genuine
+                        # live-view stall still shows via the high-water-mark
+                        # warning below in tile mode.
                         if self._dropped_frame_count % 50 == 1:
-                            self.logger.warning(
+                            self.logger.debug(
                                 f"Frame buffer full (maxlen={buf_max}), "
                                 f"dropping oldest frame ({self._dropped_frame_count} total dropped)"
                             )
