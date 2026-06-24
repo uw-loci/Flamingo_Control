@@ -36,8 +36,59 @@ from py2flamingo.visualization.tile_processing_worker import TileFrameBuffer
 
 logger = logging.getLogger(__name__)
 
-# Pattern: S000_t000000_V000_R0000_X000_Y000_C{ch}_I0_D1_P{planes}.raw
-RAW_FILE_PATTERN = re.compile(r"S\d+_.*_C(\d+)_.*_P(\d+)\.raw$")
+# Raw-stack filename fields (see claude-reports/acquisition_folder_format.md):
+#   S{series} t{timepoint} V{view} R{rotation} X{tileX} Y{tileY}
+#   C{channel} I{illumination-side} D{detection} P{planes}.raw
+# Example: S000_t000000_V000_R0000_X000_Y000_C03_I0_D1_P04260.raw
+# Every field is parsed (even ones the live viewer doesn't use) so a time
+# series, multi-view, or multi-rotation acquisition is never silently collapsed
+# onto a single stack the way I0/I1 (illumination side) previously were.
+_RAW_FIELD_PATTERNS = {
+    "series": r"S(\d+)",
+    "timepoint": r"_t(\d+)",
+    "view": r"_V(\d+)",
+    "rotation": r"_R(\d+)",
+    "tile_x": r"_X(\d+)",
+    "tile_y": r"_Y(\d+)",
+    "channel": r"_C(\d+)",
+    "illum": r"_I(\d+)",
+    "detection": r"_D(\d+)",
+    "planes": r"_P(\d+)",
+}
+# channel + planes are required; any other absent field defaults to 0.
+_RAW_REQUIRED_FIELDS = ("channel", "planes")
+
+
+def parse_raw_filename(name: str) -> Optional[Dict[str, int]]:
+    """Parse every field of a raw-stack filename, or None if not a raw file.
+
+    Returns a dict with keys series, timepoint, view, rotation, tile_x, tile_y,
+    channel, illum, detection, planes. Missing optional fields default to 0;
+    ``channel`` and ``planes`` are required (None if either is absent).
+    """
+    if not name.endswith(".raw"):
+        return None
+    fields: Dict[str, int] = {}
+    for key, pat in _RAW_FIELD_PATTERNS.items():
+        m = re.search(pat, name)
+        if m is None:
+            if key in _RAW_REQUIRED_FIELDS:
+                return None
+            fields[key] = 0
+        else:
+            fields[key] = int(m.group(1))
+    return fields
+
+
+def _raw_file_key(channel: int, illum: int) -> int:
+    """Map (channel C, illumination side I) to the channel-scheme slot.
+
+    Left side (I0) -> channel; right side (I1) -> channel + 4. This matches the
+    +4 offset applied to right-side entries in ``channels`` so left/right (and
+    each channel) occupy distinct slots instead of colliding on the C-number.
+    """
+    return channel + 4 * illum
+
 
 try:
     from py2flamingo.configs.config_loader import get_hardware_config as _get_hw
@@ -127,20 +178,46 @@ def parse_tile_folder(folder: Path) -> Optional[DiskTileInfo]:
     else:
         illumination_side = "left"
 
-    # Find raw files
+    # Parse every raw file, capturing all fields.
+    parsed = []
+    for f in folder.iterdir():
+        fields = parse_raw_filename(f.name)
+        if fields is not None:
+            parsed.append((f, fields))
+
+    if not parsed:
+        raise FileNotFoundError(f"No .raw files in {folder.name}")
+
+    # This loader visualises ONE (timepoint, view, rotation). If the folder
+    # holds more than one — a time series, multiple views, or multiple
+    # rotations — load the first group and WARN rather than silently collapsing
+    # them onto each other.
+    groups = sorted({(p["timepoint"], p["view"], p["rotation"]) for _, p in parsed})
+    primary = groups[0]
+    if len(groups) > 1:
+        logger.warning(
+            f"{folder.name}: found {len(groups)} (timepoint, view, rotation) "
+            f"groups {groups}; loading only {primary}. Multi-timepoint/view/"
+            f"rotation display is not yet supported, so the other groups are "
+            f"NOT loaded."
+        )
+
+    # Key files by the channel scheme (left I0 -> C, right I1 -> C+4) so the
+    # two illumination sides land in distinct slots.
     raw_files: Dict[int, Path] = {}
     n_planes = 0
-
-    for f in folder.iterdir():
-        match = RAW_FILE_PATTERN.match(f.name)
-        if match:
-            ch_idx = int(match.group(1))  # C-number from filename = 0-based channel_id
-            planes = int(match.group(2))
-            raw_files[ch_idx] = f
-            n_planes = max(n_planes, planes)
-
-    if not raw_files:
-        raise FileNotFoundError(f"No .raw files in {folder.name}")
+    for f, p in parsed:
+        if (p["timepoint"], p["view"], p["rotation"]) != primary:
+            continue
+        file_key = _raw_file_key(p["channel"], p["illum"])
+        if file_key in raw_files:
+            logger.warning(
+                f"{folder.name}: duplicate raw file for C{p['channel']:02d} "
+                f"I{p['illum']} ({f.name}); keeping {raw_files[file_key].name}."
+            )
+            continue
+        raw_files[file_key] = f
+        n_planes = max(n_planes, p["planes"])
 
     logger.info(
         f"Tile {folder.name}: pos=({x}, {y}), z=[{z_min}, {z_max}], "
@@ -196,9 +273,9 @@ def load_tile_to_buffer(
         reference_position=ref_pos,
     )
 
-    # Load each channel's raw file.
-    # For right-only illumination, channels are offset by +4 (e.g. [2,3] → [6,7])
-    # but raw file C-numbers are always the original 0-based IDs (C02, C03...).
+    # raw_files is keyed by the same channel scheme as `channels` (left side
+    # I0 -> C, right side I1 -> C+4), so the file key IS the channel_id — no
+    # offset reversal needed, and left/right read their own distinct files.
     logger.info(
         f"Channel mapping: channels={tile_info.channels}, "
         f"raw_file_keys={sorted(tile_info.raw_files.keys())}, "
@@ -206,21 +283,12 @@ def load_tile_to_buffer(
     )
 
     for channel_id in tile_info.channels:
-        # Reverse the +4 offset for right-side channels to get the raw file C-number
-        # Both "right" and "both" modes have right-side channels 4-7 mapped from C00-C03 files
-        if tile_info.illumination_side == "right":
-            file_key = channel_id - 4
-        elif tile_info.illumination_side == "both" and channel_id >= 4:
-            file_key = channel_id - 4
-        else:
-            file_key = channel_id
-
-        raw_path = tile_info.raw_files.get(file_key)
+        raw_path = tile_info.raw_files.get(channel_id)
         if raw_path is None:
             logger.warning(
-                f"No raw file for channel {channel_id} (file_key={file_key}) "
+                f"No raw file for channel {channel_id} "
                 f"in {tile_info.folder_path.name}. "
-                f"Available: {sorted(tile_info.raw_files.keys())}"
+                f"Available keys: {sorted(tile_info.raw_files.keys())}"
             )
             continue
 
@@ -236,7 +304,8 @@ def load_tile_to_buffer(
             total_pixels = ch_frames[0][0].size
             frames_with_signal = sum(1 for m in maxvals if m > 0)
             logger.info(
-                f"  Channel {channel_id} (file C{file_key:02d}): "
+                f"  Channel {channel_id} "
+                f"(C{channel_id % 4:02d} I{channel_id // 4}, {raw_path.name}): "
                 f"{frames_added} frames, "
                 f"{frames_with_signal}/{frames_added} have signal, "
                 f"max pixel range [{min(maxvals)}-{max(maxvals)}], "
