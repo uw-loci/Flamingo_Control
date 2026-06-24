@@ -75,6 +75,8 @@ class LED2DOverviewWorkflow(QObject):
         self._config = config
         self._running = False
         self._cancelled = False
+        # Cached stage soft limits {axis: {'min','max'}} for the tile-position guard.
+        self._stage_limits_cache = None
 
         # Results storage
         self._results: List[RotationResult] = []
@@ -405,6 +407,11 @@ class LED2DOverviewWorkflow(QObject):
             y_positions.append(y)
             y += step
 
+        # Drop tile centers the stage cannot reach (otherwise the firmware clamps
+        # the move and out-of-range tiles duplicate the edge position).
+        x_positions = self._filter_positions_within_limit(x_positions, "x", "X")
+        y_positions = self._filter_positions_within_limit(y_positions, "y", "Y")
+
         self._tiles_x = len(x_positions)
         self._tiles_y = len(y_positions)
 
@@ -679,6 +686,44 @@ class LED2DOverviewWorkflow(QObject):
             return False
         return True
 
+    def _get_stage_limits(self) -> dict:
+        """Stage soft limits {axis: {'min','max'}}, cached. Empty if unavailable."""
+        if self._stage_limits_cache is not None:
+            return self._stage_limits_cache
+        limits = {}
+        try:
+            if self._app and getattr(self._app, "microscope_settings", None):
+                limits = self._app.microscope_settings.get_stage_limits() or {}
+        except Exception as exc:  # noqa: BLE001 - guard is best-effort
+            logger.warning(
+                f"Could not load stage limits ({exc}); skipping tile-limit guard"
+            )
+        self._stage_limits_cache = limits
+        return limits
+
+    def _filter_positions_within_limit(self, positions, axis_key, axis_label):
+        """Drop tile centers outside the stage soft limit for one axis.
+
+        Commanding an out-of-range position makes the firmware clamp the move, so
+        the stage stalls at the limit and every out-of-range tile images the same
+        spot (duplicated tiles at the edge of the assembled overview). Dropping +
+        warning is correct — we cannot image beyond the stage's reach.
+        """
+        lim = self._get_stage_limits().get(axis_key)
+        if not lim or not positions:
+            return positions
+        lo, hi = lim["min"], lim["max"]
+        kept = [p for p in positions if lo - 1e-6 <= p <= hi + 1e-6]
+        dropped = len(positions) - len(kept)
+        if dropped:
+            logger.warning(
+                f"{axis_label}-axis: dropped {dropped} tile position(s) outside "
+                f"stage limit [{lo:.2f}, {hi:.2f}] mm (requested "
+                f"[{min(positions):.2f}, {max(positions):.2f}]). "
+                f"Scan truncated on {axis_label} to avoid duplicate clamped tiles."
+            )
+        return kept
+
     @staticmethod
     def _z_sweep_positions(z_min, z_max, z_step, ascending):
         """Z-plane positions for one tile's sweep, in stage-travel order.
@@ -721,6 +766,13 @@ class LED2DOverviewWorkflow(QObject):
         fov = self._actual_fov_mm
         z_min = eff_bbox.z_min
         z_max = eff_bbox.z_max
+
+        # Clamp the Z sweep to the stage Z soft limit so we never command an
+        # out-of-range Z (the firmware would clamp it, corrupting the sweep).
+        z_lim = self._get_stage_limits().get("z")
+        if z_lim:
+            z_min = max(z_min, z_lim["min"])
+            z_max = min(z_max, z_lim["max"])
         z_center = (z_min + z_max) / 2
 
         # Generate X positions
@@ -736,6 +788,12 @@ class LED2DOverviewWorkflow(QObject):
         while y <= eff_bbox.tile_y_max + fov / 2:
             y_positions.append(y)
             y += fov
+
+        # Drop tile centers the stage cannot reach. Without this, the firmware
+        # clamps each out-of-range move and every clamped tile images the same
+        # spot — the duplicated rows seen at high Y.
+        x_positions = self._filter_positions_within_limit(x_positions, "x", "X")
+        y_positions = self._filter_positions_within_limit(y_positions, "y", "Y")
 
         tiles_x = len(x_positions)
         tiles_y = len(y_positions)
@@ -796,6 +854,12 @@ class LED2DOverviewWorkflow(QObject):
                         AxisCode.Z_AXIS: z_start,
                     },
                 )
+
+                # Flush frames buffered before/during the move to this tile so the
+                # sweep below captures only fresh frames. The live buffer is small
+                # and perpetually full during the overview, so without this the
+                # first planes can carry over the previous tile's content.
+                camera_controller.clear_buffer()
 
                 # Grab frames during Z sweep. Planes are visited in travel order
                 # (reversed on alternate tiles); the output is a Z-collapsed
