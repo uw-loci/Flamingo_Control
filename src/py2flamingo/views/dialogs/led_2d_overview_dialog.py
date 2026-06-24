@@ -1506,13 +1506,15 @@ class LED2DOverviewDialog(PersistentDialog):
             self._save_led_settings()
 
     def _on_workflow_error(self, error_msg: str) -> None:
-        """Handle workflow error - stop live view."""
+        """Handle workflow error - stop live view and surface it to the user."""
         self._logger.error(f"Workflow error: {error_msg} - stopping live view")
         self._set_scan_in_progress(False)
         self._stop_sample_view_live()
         self._reset_sample_view_progress()
         # Skip cache update on error -- partial-run timings would skew it
         self._estimator = None
+        # Surface the error as a dialog (previously errors were only logged).
+        QMessageBox.warning(self, "LED 2D Overview", error_msg)
 
     def _finalize_estimator(self) -> None:
         if self._estimator is None:

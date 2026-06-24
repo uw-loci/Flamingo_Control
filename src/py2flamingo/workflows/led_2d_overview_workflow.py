@@ -407,10 +407,13 @@ class LED2DOverviewWorkflow(QObject):
             y_positions.append(y)
             y += step
 
-        # Drop tile centers the stage cannot reach (otherwise the firmware clamps
-        # the move and out-of-range tiles duplicate the edge position).
-        x_positions = self._filter_positions_within_limit(x_positions, "x", "X")
-        y_positions = self._filter_positions_within_limit(y_positions, "y", "Y")
+        # Fit the tiling within the stage soft limits (shift to fit, preserving
+        # coverage). Abort with a warning if a span exceeds the reachable travel.
+        x_positions, x_ok = self._fit_positions_to_limits(x_positions, "x")
+        y_positions, y_ok = self._fit_positions_to_limits(y_positions, "y")
+        if not (x_ok and y_ok):
+            self._abort_unsafe_region({"X": x_ok, "Y": y_ok})
+            return []
 
         self._tiles_x = len(x_positions)
         self._tiles_y = len(y_positions)
@@ -701,28 +704,75 @@ class LED2DOverviewWorkflow(QObject):
         self._stage_limits_cache = limits
         return limits
 
-    def _filter_positions_within_limit(self, positions, axis_key, axis_label):
-        """Drop tile centers outside the stage soft limit for one axis.
+    def _fit_positions_to_limits(self, positions, axis_key, margin_mm=0.25):
+        """Shift tile centers as a block to fit the stage soft limit (minus margin).
 
-        Commanding an out-of-range position makes the firmware clamp the move, so
-        the stage stalls at the limit and every out-of-range tile images the same
-        spot (duplicated tiles at the edge of the assembled overview). Dropping +
-        warning is correct — we cannot image beyond the stage's reach.
+        If the requested tiling overruns a limit, the whole set is translated so
+        it sits flush against the nearest reachable edge (``limit - margin``),
+        preserving the requested span/coverage rather than dropping tiles. The
+        common case (already in range) is a no-op.
+
+        Returns ``(positions, fits)``. ``fits`` is False when the requested span
+        is larger than the reachable travel — i.e. it overruns *both* ends and no
+        shift can contain it; the caller should warn and not acquire. As a safety
+        backstop the returned list still has any unreachable centers removed, so
+        it is always safe to command.
         """
         lim = self._get_stage_limits().get(axis_key)
         if not lim or not positions:
-            return positions
-        lo, hi = lim["min"], lim["max"]
-        kept = [p for p in positions if lo - 1e-6 <= p <= hi + 1e-6]
-        dropped = len(positions) - len(kept)
-        if dropped:
+            return positions, True
+        lo, hi = lim["min"] + margin_mm, lim["max"] - margin_mm
+        usable = hi - lo
+        span = max(positions) - min(positions)
+        fits = usable > 0 and span <= usable + 1e-6
+        pos = list(positions)
+        if fits:
+            shift = 0.0
+            if min(pos) < lo:
+                shift = lo - min(pos)
+            elif max(pos) > hi:
+                shift = hi - max(pos)
+            if abs(shift) > 1e-6:
+                pos = [p + shift for p in pos]
+                logger.info(
+                    f"{axis_key.upper()}-axis: shifted overview tiling by "
+                    f"{shift:+.3f} mm to fit stage limit "
+                    f"[{lim['min']:.2f}, {lim['max']:.2f}] mm "
+                    f"(margin {margin_mm:.2f} mm)"
+                )
+        else:
+            # Too big to fit even when shifted; drop unreachable centers so we
+            # never command them (the caller will also abort on fits=False).
+            pos = [p for p in pos if lo - 1e-6 <= p <= hi + 1e-6]
             logger.warning(
-                f"{axis_label}-axis: dropped {dropped} tile position(s) outside "
-                f"stage limit [{lo:.2f}, {hi:.2f}] mm (requested "
-                f"[{min(positions):.2f}, {max(positions):.2f}]). "
-                f"Scan truncated on {axis_label} to avoid duplicate clamped tiles."
+                f"{axis_key.upper()}-axis: requested span {span:.2f} mm exceeds "
+                f"reachable travel {max(usable, 0.0):.2f} mm "
+                f"(limit [{lim['min']:.2f}, {lim['max']:.2f}] mm minus "
+                f"{margin_mm:.2f} mm margin)."
             )
-        return kept
+        return pos, fits
+
+    def _abort_unsafe_region(self, oks):
+        """Abort the scan with a user-facing warning when a region won't fit.
+
+        ``oks`` maps axis label -> bool (True = fits). Emits scan_error (shown as
+        a dialog by the dialog's error handler) and unwinds acquisition state
+        without commanding any unsafe move.
+        """
+        bad = [axis for axis, ok in oks.items() if not ok]
+        msg = (
+            "The requested overview area requires unsafe stage movement on "
+            f"{', '.join(bad)}: the span is larger than the stage can travel. "
+            "No acquisition was started.\n\n"
+            "Choose a smaller area, or edit the configured positions in the "
+            "config file."
+        )
+        logger.error(msg)
+        self._running = False
+        if self._app:
+            self._app.stop_acquisition("LED 2D Overview")
+        self._disable_led()
+        self.scan_error.emit(msg)
 
     @staticmethod
     def _z_sweep_positions(z_min, z_max, z_step, ascending):
@@ -767,14 +817,6 @@ class LED2DOverviewWorkflow(QObject):
         z_min = eff_bbox.z_min
         z_max = eff_bbox.z_max
 
-        # Clamp the Z sweep to the stage Z soft limit so we never command an
-        # out-of-range Z (the firmware would clamp it, corrupting the sweep).
-        z_lim = self._get_stage_limits().get("z")
-        if z_lim:
-            z_min = max(z_min, z_lim["min"])
-            z_max = min(z_max, z_lim["max"])
-        z_center = (z_min + z_max) / 2
-
         # Generate X positions
         x_positions = []
         x = eff_bbox.tile_x_min
@@ -789,11 +831,18 @@ class LED2DOverviewWorkflow(QObject):
             y_positions.append(y)
             y += fov
 
-        # Drop tile centers the stage cannot reach. Without this, the firmware
-        # clamps each out-of-range move and every clamped tile images the same
-        # spot — the duplicated rows seen at high Y.
-        x_positions = self._filter_positions_within_limit(x_positions, "x", "X")
-        y_positions = self._filter_positions_within_limit(y_positions, "y", "Y")
+        # Fit the tiling within the stage soft limits: shift the whole scan to sit
+        # flush against the nearest reachable edge if it overruns, preserving
+        # coverage. If a span is larger than the stage can travel at all, abort
+        # with a warning dialog instead of commanding unsafe moves.
+        x_positions, x_ok = self._fit_positions_to_limits(x_positions, "x")
+        y_positions, y_ok = self._fit_positions_to_limits(y_positions, "y")
+        z_pair, z_ok = self._fit_positions_to_limits([z_min, z_max], "z")
+        if not (x_ok and y_ok and z_ok):
+            self._abort_unsafe_region({"X": x_ok, "Y": y_ok, "Z": z_ok})
+            return
+        z_min, z_max = z_pair[0], z_pair[-1]
+        z_center = (z_min + z_max) / 2
 
         tiles_x = len(x_positions)
         tiles_y = len(y_positions)
