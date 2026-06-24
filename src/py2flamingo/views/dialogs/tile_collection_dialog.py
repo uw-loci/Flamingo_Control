@@ -1500,7 +1500,7 @@ class TileCollectionDialog(PersistentDialog):
                     if clock.date() == _dt.now().date()
                     else clock.strftime("%a %H:%M")
                 )
-                return f"{_format_duration(seconds)} remaining (done ~{eta_str})"
+                return f"{_format_duration(seconds)} remaining (Done at ~{eta_str})"
             return per_workflow_est.format_label()
 
         def update_sample_view(status, pct):

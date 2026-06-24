@@ -167,7 +167,7 @@ class TestProgressEstimator:
             est.tick(est.completed + 1)
         label = est.format_label()
         assert "remaining" in label
-        assert "done ~" in label
+        assert "Done at ~" in label
 
     def test_reset_clears_state(self, clock):
         est = ProgressEstimator(total_units=10)

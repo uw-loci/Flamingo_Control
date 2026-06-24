@@ -273,7 +273,8 @@ class TestMultiPhaseEstimator:
         est.start()
         label = est.format_label()
         assert "remaining" in label
-        assert "done ~" in label
+        # Casing-robust: the stitcher emits "done at ~"; the app uses "Done at ~".
+        assert "done at ~" in label.lower()
 
     def test_no_cache_extrapolates_from_phase_count(self, clock, tmp_path: Path):
         cache = StitchingTimingCache(path=tmp_path / "c.json")

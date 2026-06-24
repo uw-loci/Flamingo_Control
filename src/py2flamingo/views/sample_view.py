@@ -1294,11 +1294,12 @@ class SampleView(QWidget):
         self.workflow_progress_bar.setFormat("%p%")
         layout.addWidget(self.workflow_progress_bar, stretch=1)
 
-        # Time remaining — set by callers via update_workflow_progress.
-        # Width sized to fit "MM:SS remaining (done ~HH:MM)".
+        # Time remaining — set by callers via update_workflow_progress
+        # (throttled there to reduce flicker).
+        # Width sized to fit "MM:SS remaining (Done at ~HH:MM)".
         self.time_remaining_label = QLabel("--:--")
         self.time_remaining_label.setStyleSheet("color: #666;")
-        self.time_remaining_label.setMinimumWidth(220)
+        self.time_remaining_label.setMinimumWidth(240)
         self.time_remaining_label.setToolTip(
             "Estimated time remaining and projected completion clock time. "
             "Refines as more progress is observed."
@@ -4874,14 +4875,23 @@ class SampleView(QWidget):
             status: Status text (e.g., "Running Step 3 of 10")
             progress: Progress percentage (0-100)
             time_remaining: Time remaining string (e.g., "02:30 remaining
-                (done ~14:07)"). Pass ``None`` to leave the existing
+                (Done at ~14:07)"). Pass ``None`` to leave the existing
                 value alone -- useful for callers that drive the bar
-                from a different signal than the ETA source.
+                from a different signal than the ETA source. The label is
+                throttled to update at most once every 2 s to reduce flicker.
         """
         self.workflow_status_label.setText(f"Workflow: {status}")
         self.workflow_progress_bar.setValue(progress)
         if time_remaining is not None:
-            self.time_remaining_label.setText(time_remaining)
+            # The ETA refines on every tick and visually flickers, so throttle
+            # the label to at most once every 2 s. Always update on the very
+            # first tick and at completion so it never shows a stale/placeholder
+            # value. (Status + progress bar still update every call.)
+            now = time.monotonic()
+            last = getattr(self, "_eta_label_last_update", 0.0)
+            if last == 0.0 or progress >= 100 or (now - last) >= 2.0:
+                self.time_remaining_label.setText(time_remaining)
+                self._eta_label_last_update = now
 
     # ========== Window Events ==========
 

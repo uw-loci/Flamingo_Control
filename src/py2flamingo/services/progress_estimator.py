@@ -266,7 +266,7 @@ class ProgressEstimator:
         return clock.strftime("%a %H:%M")
 
     def format_label(self) -> str:
-        """Combined human label: ``"02:34 remaining (done ~14:07)"``.
+        """Combined human label: ``"02:34 remaining (Done at ~14:07)"``.
 
         Returns ``"estimating..."`` until the rolling window has
         enough samples (or a cache seed is available).
@@ -274,7 +274,7 @@ class ProgressEstimator:
         rem = self.remaining_seconds()
         if rem is None:
             return "estimating..."
-        return f"{_format_duration(rem)} remaining (done ~{self.format_eta()})"
+        return f"{_format_duration(rem)} remaining (Done at ~{self.format_eta()})"
 
     # ------------------------------------------------------------------
     # Persistence
