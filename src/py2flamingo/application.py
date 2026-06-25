@@ -31,6 +31,11 @@ from py2flamingo.services.component_factory import (
 from py2flamingo.services.signal_wiring import wire_all_signals
 from py2flamingo.visualization.voxel_storage_factory import create_voxel_storage
 
+# An error logged within this many seconds of the operator's last direct UI
+# interaction is treated as something they are watching happen on screen, so it
+# does not also raise a push notification (see _error_notify_gate).
+_INTERACTION_SUPPRESS_WINDOW_S = 10.0
+
 
 class FlamingoApplication(QObject):
     """Main application class handling dependency injection and lifecycle.
@@ -235,26 +240,43 @@ class FlamingoApplication(QObject):
         self.logger.info("Application dependencies setup complete")
 
     def _error_notify_gate(self, record) -> bool:
-        """Return True only while a server-driven acquisition is running.
+        """Decide whether an error log record should become a push notification.
 
-        Used to gate the root-logger ntfy handler so error pushes fire only when
-        the operator is likely away (mid acquisition / tile-collection queue).
-        Idle interactive errors — e.g. "failed to load stitched data", a file
-        dialog cancel, a visualization hiccup — are visible on screen to the
-        operator standing at the scope and don't warrant a push. Explicit
-        notifications (queue done, stitching done, reconnect recovery) are sent
-        directly via notify()/notify_recovery() and are unaffected by this gate.
+        The only thing we suppress is an error that is the *immediate result of
+        the operator interacting with the screen* — e.g. they click "Load
+        Stitched" and it fails. They see that on the spot, so a simultaneous
+        phone push is just noise. Everything else notifies:
+
+        - errors during an unattended acquisition / tile-collection queue, and
+        - background failures (e.g. a save worker dying) that happen while the
+          operator is not actively clicking/typing.
+
+        Explicit notifications (queue done, stitching done, reconnect recovery)
+        bypass this handler entirely and are unaffected.
         """
         try:
+            # Always notify during a server-driven acquisition run — those errors
+            # matter even if the operator happens to be clicking around, and they
+            # may step away at any moment.
             q = getattr(self, "workflow_queue_service", None)
             if q is not None and getattr(q, "_is_running", False):
                 return True
             wc = getattr(self, "workflow_controller", None)
             if wc is not None and getattr(wc, "is_executing", False):
                 return True
+
+            # Otherwise suppress only if the operator just interacted with the UI
+            # (they are watching the result). Background / idle errors still push.
+            tracker = getattr(self, "_interaction_tracker", None)
+            if (
+                tracker is not None
+                and tracker.seconds_since_interaction() < _INTERACTION_SUPPRESS_WINDOW_S
+            ):
+                return False
+            return True
         except Exception:
-            return False
-        return False
+            # Fail open: better a stray push than silently swallowing a real error.
+            return True
 
     def _wire_notification_hooks(self) -> None:
         """Subscribe NotificationService to global signals + logging.
@@ -272,11 +294,10 @@ class FlamingoApplication(QObject):
             if svc is None:
                 return
 
-            # Cross-cutting error capture via stdlib logging, but only push when
-            # an acquisition is actually running. When idle, the operator is at
-            # the microscope and already sees interactive errors (failed data
-            # load, a dialog action, etc.) on screen — a push would just be
-            # noise. During an unattended run, errors still go out.
+            # Cross-cutting error capture via stdlib logging. The gate suppresses
+            # only errors the operator is watching happen on screen (logged just
+            # after they clicked/typed); background failures and errors during an
+            # unattended acquisition still push. See _error_notify_gate.
             root = logging.getLogger()
             handler = svc.make_log_handler(gate=self._error_notify_gate)
             handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
@@ -584,6 +605,14 @@ class FlamingoApplication(QObject):
         self.qt_app = QApplication(sys.argv)
         self.qt_app.setOrganizationName("UW-LOCI")
         self.qt_app.setApplicationName("Flamingo Microscope Control")
+
+        # Track direct UI interaction so error notifications can suppress pushes
+        # for errors the operator is clearly watching happen on screen (see
+        # _error_notify_gate). Installed app-wide; never consumes events.
+        from py2flamingo.services.interaction_tracker import InteractionTracker
+
+        self._interaction_tracker = InteractionTracker()
+        self.qt_app.installEventFilter(self._interaction_tracker)
 
         # Setup all dependencies
         self.setup_dependencies()
