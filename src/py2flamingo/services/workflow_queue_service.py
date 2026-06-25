@@ -148,6 +148,15 @@ class WorkflowQueueService(QObject):
         # Callbacks for tile position (for Sample View integration)
         self._on_workflow_start_callback: Optional[Callable[[Path, Dict], None]] = None
 
+        # Return-to-origin: remember where the stage is before the first queued
+        # workflow and send it back when the whole batch finishes, so a run never
+        # leaves the stage parked at the last tile. The firmware drives the stage
+        # during each workflow, so we only ever move it at queue_completed (after
+        # SYSTEM_STATE_IDLE confirmed the last workflow finished) — never between
+        # items, and never on cancel (the stage may still be settling). Best-effort.
+        self._return_to_origin_after_queue = True
+        self._origin_position: Optional[tuple] = None
+
         logger.info(
             "WorkflowQueueService initialized (callback-based completion detection)"
         )
@@ -235,6 +244,126 @@ class WorkflowQueueService(QObject):
             self._workflow_controller.stop_workflow()
         except Exception as e:
             logger.warning(f"Error stopping current workflow: {e}")
+
+    # =========================================================================
+    # Return-to-origin (stage parked back at its pre-run position)
+    # =========================================================================
+
+    def _capture_origin_position(self) -> None:
+        """Record the live stage position before the first queued workflow.
+
+        Stored as (x, y, z, r) so :meth:`_return_to_origin` can send the stage
+        back when the batch finishes. Best-effort: if the position can't be read
+        the auto-return is simply skipped (logged), never raised. The system is
+        idle at this point (no workflow has been sent yet), so this read does not
+        contend with firmware-driven motion.
+        """
+        self._origin_position = None
+        if self._connection_service is None:
+            return
+        try:
+            from py2flamingo.services.stage_service import StageService
+
+            pos = StageService(self._connection_service).get_position()
+        except Exception as exc:  # noqa: BLE001 - best-effort
+            logger.warning(
+                f"Could not read pre-run stage position ({exc}); "
+                "stage will not auto-return after the queue"
+            )
+            return
+
+        if pos is None:
+            logger.warning(
+                "Could not read pre-run stage position; "
+                "stage will not auto-return after the queue"
+            )
+            return
+
+        self._origin_position = (pos.x, pos.y, pos.z, pos.r)
+        logger.info(
+            f"Captured pre-run stage position X={pos.x:.3f} Y={pos.y:.3f} "
+            f"Z={pos.z:.3f} R={pos.r:.1f}"
+        )
+
+    def _return_to_origin(self) -> None:
+        """Move the stage back to the position captured before the queue ran.
+
+        Only ever called from the completion path (firmware idle), never between
+        items or on cancel. Best-effort — a failure here (e.g. dropped
+        connection) is logged, not raised, and never blocks ``queue_completed``.
+        """
+        if self._origin_position is None or self._connection_service is None:
+            return
+
+        x, y, z, r = self._origin_position
+        try:
+            from py2flamingo.services.stage_service import AxisCode, StageService
+
+            stage_service = StageService(self._connection_service)
+        except Exception as exc:  # noqa: BLE001 - best-effort
+            logger.warning(f"Could not return stage to pre-run position: {exc}")
+            return
+
+        logger.info(
+            f"Returning stage to pre-run position X={x:.3f} Y={y:.3f} "
+            f"Z={z:.3f} R={r:.1f}"
+        )
+        total = len(self._queue)
+        self.progress_updated.emit(total, total, "Returning to start position...")
+
+        try:
+            # move_to_position is asynchronous; commands are accepted in order.
+            stage_service.move_to_position(AxisCode.ROTATION, r)
+            stage_service.move_to_position(AxisCode.X_AXIS, x)
+            stage_service.move_to_position(AxisCode.Y_AXIS, y)
+            stage_service.move_to_position(AxisCode.Z_AXIS, z)
+            # Block (best-effort) until the linear axes physically arrive so the
+            # batch is reported complete only once the stage is actually home.
+            self._wait_for_stage_settle(
+                stage_service,
+                {AxisCode.X_AXIS: x, AxisCode.Y_AXIS: y, AxisCode.Z_AXIS: z},
+            )
+        except Exception as exc:  # noqa: BLE001 - return-home is best-effort
+            logger.warning(f"Could not return stage to pre-run position: {exc}")
+
+    def _wait_for_stage_settle(
+        self,
+        stage_service,
+        targets: Dict[int, float],
+        tolerance_mm: float = 0.02,
+        timeout_s: float = 60.0,
+        poll_interval_s: float = 0.25,
+    ) -> bool:
+        """Poll axis positions until each target is reached or a timeout elapses.
+
+        Returns True if all axes settled, False on timeout/cancel. Best-effort:
+        the return move proceeds regardless of the result.
+        """
+        deadline = time.monotonic() + timeout_s
+        remaining = dict(targets)
+        while remaining and time.monotonic() < deadline:
+            if self._cancel_requested:
+                return False
+            settled = []
+            for axis, target in remaining.items():
+                try:
+                    pos = stage_service.get_axis_position(axis)
+                except Exception:  # noqa: BLE001 - transient hiccup; keep polling
+                    pos = None
+                if pos is not None and abs(pos - target) <= tolerance_mm:
+                    settled.append(axis)
+            for axis in settled:
+                remaining.pop(axis, None)
+            if remaining:
+                time.sleep(poll_interval_s)
+
+        if remaining:
+            logger.warning(
+                f"Stage did not confirm return within {timeout_s:.0f}s "
+                f"(pending axes: {sorted(remaining)})"
+            )
+            return False
+        return True
 
     @property
     def is_running(self) -> bool:
@@ -418,6 +547,11 @@ class WorkflowQueueService(QObject):
             # Register callbacks for completion detection
             self._register_callbacks()
 
+            # Remember the stage position before any workflow runs so we can
+            # return it here once the whole batch is done (system is idle now).
+            if self._return_to_origin_after_queue:
+                self._capture_origin_position()
+
             total = len(self._queue)
             logger.info(f"Queue contains {total} workflows to execute")
 
@@ -504,6 +638,10 @@ class WorkflowQueueService(QObject):
                 f"=== Queue loop finished, cancel_requested={self._cancel_requested} ==="
             )
             if not self._cancel_requested:
+                # Firmware is idle now (last workflow reached SYSTEM_STATE_IDLE),
+                # so it is safe to drive the stage back to where it started.
+                if self._return_to_origin_after_queue:
+                    self._return_to_origin()
                 self.queue_completed.emit()
                 logger.info(f"Queue execution completed: {total} workflows")
 

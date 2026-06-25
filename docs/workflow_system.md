@@ -370,6 +370,20 @@ the server can only create single-level directories.
 
 ## Workflow Execution Flow
 
+### Return to start position (queued / tile-collection runs)
+
+Tile collection and any batch executed through `WorkflowQueueService` record the
+stage position **before** the first workflow is sent and return the stage there
+once the whole batch finishes. Because the firmware drives the stage during a
+workflow, the client only ever issues this return move at `queue_completed` —
+i.e. after `SYSTEM_STATE_IDLE` confirms the last workflow is done — so it never
+interferes with the run, and never moves between queued items. It is skipped on
+cancellation (the stage may still be settling after a stop). Best-effort: if the
+position can't be read, or a move fails, the batch still completes normally.
+
+> Standalone single-workflow runs started from the Workflow panel ("Start") do
+> not go through the queue and are not auto-returned.
+
 ### Startup Sequence
 
 1. **WorkflowControl::startWorkflow()** - Entry point
