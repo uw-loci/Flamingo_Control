@@ -30,7 +30,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from typing import Optional
+from typing import Callable, Optional
 
 from PyQt5.QtCore import QObject, QThread, pyqtSignal
 
@@ -284,21 +284,33 @@ class NotificationService(QObject):
         self,
         level: int = logging.ERROR,
         min_interval_s: float = 10.0,
+        gate: Optional["Callable[[logging.LogRecord], bool]"] = None,
     ) -> "NtfyLogHandler":
         """Build a logging.Handler that forwards records to ntfy.
 
         Attaching this to the root logger captures every logger.error /
         logger.exception in the codebase — no per-call-site wiring needed.
+
+        ``gate`` is an optional predicate ``(record) -> bool``: when supplied and
+        it returns False, the record is dropped (no notification). Use it to
+        restrict error pushes to situations where the operator is likely away
+        (e.g. during an unattended acquisition), so interactive errors the
+        operator can already see on screen don't generate push noise.
         """
-        return NtfyLogHandler(self, level=level, min_interval_s=min_interval_s)
+        return NtfyLogHandler(
+            self, level=level, min_interval_s=min_interval_s, gate=gate
+        )
 
 
 class NtfyLogHandler(logging.Handler):
     """Promote log records (ERROR+ by default) to ntfy notifications.
 
     Cross-cutting error capture: any code that calls `logger.error(...)` or
-    `logger.exception(...)` anywhere in the app produces a notification,
-    gated by the "errors" checkbox in Settings → Notifications.
+    `logger.exception(...)` anywhere in the app can produce a notification,
+    gated by the "errors" checkbox in Settings → Notifications AND by the
+    optional ``gate`` predicate (the app restricts pushes to times when an
+    acquisition is running, so idle interactive errors the operator can see on
+    screen don't generate noise).
 
     Rate-limited so a tight error-logging loop can't flood the topic. Only
     skips the *send*; records still propagate to other handlers (console,
@@ -319,12 +331,14 @@ class NtfyLogHandler(logging.Handler):
         notification_service: NotificationService,
         level: int = logging.ERROR,
         min_interval_s: float = 10.0,
+        gate: Optional["Callable[[logging.LogRecord], bool]"] = None,
     ):
         super().__init__(level=level)
         self._svc = notification_service
         self._min_interval = float(min_interval_s)
         self._last_sent_at = 0.0
         self._lock = threading.Lock()
+        self._gate = gate
 
     def emit(self, record: logging.LogRecord) -> None:  # noqa: D401
         try:
@@ -333,6 +347,15 @@ class NtfyLogHandler(logging.Handler):
                 for n in self._IGNORED_LOGGERS
             ):
                 return
+            # Caller-supplied gate (e.g. "only while an acquisition is running").
+            # Checked before the rate-limit so a dropped record doesn't consume
+            # the interval budget that a later, notify-worthy error would need.
+            if self._gate is not None:
+                try:
+                    if not self._gate(record):
+                        return
+                except Exception:  # noqa: BLE001 - a bad gate must not block logging
+                    return
             # Don't even check the URL / gating if the rate-limit blocks us.
             with self._lock:
                 now = time.monotonic()

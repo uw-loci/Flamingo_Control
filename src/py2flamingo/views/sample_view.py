@@ -1390,13 +1390,57 @@ class SampleView(QWidget):
         self.export_data_btn.clicked.connect(self._on_export_data_clicked)
         nav_row.addWidget(self.export_data_btn)
 
-        # Save Session button
-        self.save_session_btn = QPushButton("Save Session")
+        # Session (temporary viewer data) — Save/Load shown together as a
+        # visually distinct pair, with a (?) note clarifying that these persist
+        # whatever is currently loaded in the 3D viewer (e.g. tiles from an
+        # Overview run), NOT the raw acquisition the microscope writes to disk.
+        session_frame = QFrame()
+        session_frame.setObjectName("sessionGroup")
+        session_frame.setStyleSheet(
+            "QFrame#sessionGroup { border: 1px solid #7E9CC0; border-radius: 4px; "
+            "background-color: rgba(126, 156, 192, 0.12); }"
+        )
+        session_box = QHBoxLayout(session_frame)
+        session_box.setContentsMargins(8, 3, 8, 3)
+        session_box.setSpacing(6)
+
+        session_label = QLabel("Session")
+        session_label.setStyleSheet("font-weight: bold;")
+        session_box.addWidget(session_label)
+
+        _session_btn_style = (
+            "QPushButton { background-color: #5C6BC0; color: white; "
+            "padding: 4px 10px; border-radius: 3px; }"
+            "QPushButton:hover { background-color: #3F51B5; }"
+        )
+
+        self.save_session_btn = QPushButton("Save")
+        self.save_session_btn.setStyleSheet(_session_btn_style)
         self.save_session_btn.setToolTip(
-            "Save current 3D data and settings to OME-Zarr session"
+            "Save the data currently loaded in the 3D viewer to an OME-Zarr session"
         )
         self.save_session_btn.clicked.connect(self._on_save_session_clicked)
-        nav_row.addWidget(self.save_session_btn)
+        session_box.addWidget(self.save_session_btn)
+
+        self.load_session_btn = QPushButton("Load")
+        self.load_session_btn.setStyleSheet(_session_btn_style)
+        self.load_session_btn.setToolTip("Load a previously saved OME-Zarr session")
+        self.load_session_btn.clicked.connect(self._on_load_session_clicked)
+        session_box.addWidget(self.load_session_btn)
+
+        session_help = QLabel("(?)")
+        session_help.setStyleSheet("color: #1976D2; font-weight: bold;")
+        session_help.setCursor(Qt.WhatsThisCursor)
+        session_help.setToolTip(
+            "Session Save/Load is for temporary data loaded into the viewer — for "
+            "example tiles from an Overview run, or data you've opened for "
+            "inspection. It saves and restores the viewer's contents as an "
+            "OME-Zarr session, separate from the raw acquisition the microscope "
+            "writes to disk."
+        )
+        session_box.addWidget(session_help)
+
+        nav_row.addWidget(session_frame)
 
         nav_row.addStretch()
         layout.addLayout(nav_row)
@@ -1411,19 +1455,13 @@ class SampleView(QWidget):
         self.load_test_data_btn.clicked.connect(self._on_load_test_data_clicked)
         perf_row.addWidget(self.load_test_data_btn)
 
-        # Load Tiles from Disk button
-        self.load_tiles_btn = QPushButton("Load Tiles")
+        # Load Raw Data from Disk button
+        self.load_tiles_btn = QPushButton("Load Raw Data")
         self.load_tiles_btn.setToolTip(
             "Load raw tiled acquisition data from disk for diagnostic comparison"
         )
         self.load_tiles_btn.clicked.connect(self._on_load_tiles_from_disk_clicked)
         perf_row.addWidget(self.load_tiles_btn)
-
-        # Load Session button
-        self.load_session_btn = QPushButton("Load Session")
-        self.load_session_btn.setToolTip("Load a saved OME-Zarr session")
-        self.load_session_btn.clicked.connect(self._on_load_session_clicked)
-        perf_row.addWidget(self.load_session_btn)
 
         # Load Stitched button
         self.load_stitched_btn = QPushButton("Load Stitched")
@@ -5329,7 +5367,7 @@ class SampleView(QWidget):
         if not local_path:
             self.logger.warning(
                 "No local path configured — cannot resolve tile folder from disk. "
-                "Use 'Load Tiles' button after acquisition to load manually."
+                "Use 'Load Raw Data' button after acquisition to load manually."
             )
             return None
 
@@ -5617,7 +5655,7 @@ class SampleView(QWidget):
         return 500  # Rough fallback
 
     def _start_loading_pulse(self):
-        """Start a pulsing orange animation on the Load Tiles button."""
+        """Start a pulsing orange animation on the Load Raw Data button."""
         self._pulse_on = False
         if not hasattr(self, "_pulse_timer"):
             self._pulse_timer = QTimer(self)
@@ -5906,7 +5944,7 @@ class SampleView(QWidget):
             self._move_data_to_focus_cb.setChecked(True)
 
         # Restore button and fusion combo
-        self.load_tiles_btn.setText("Load Tiles")
+        self.load_tiles_btn.setText("Load Raw Data")
         self.load_tiles_btn.setEnabled(True)
         if hasattr(self, "_fusion_combo"):
             self._fusion_combo.setEnabled(True)

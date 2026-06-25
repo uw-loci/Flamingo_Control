@@ -234,6 +234,28 @@ class FlamingoApplication(QObject):
 
         self.logger.info("Application dependencies setup complete")
 
+    def _error_notify_gate(self, record) -> bool:
+        """Return True only while a server-driven acquisition is running.
+
+        Used to gate the root-logger ntfy handler so error pushes fire only when
+        the operator is likely away (mid acquisition / tile-collection queue).
+        Idle interactive errors — e.g. "failed to load stitched data", a file
+        dialog cancel, a visualization hiccup — are visible on screen to the
+        operator standing at the scope and don't warrant a push. Explicit
+        notifications (queue done, stitching done, reconnect recovery) are sent
+        directly via notify()/notify_recovery() and are unaffected by this gate.
+        """
+        try:
+            q = getattr(self, "workflow_queue_service", None)
+            if q is not None and getattr(q, "_is_running", False):
+                return True
+            wc = getattr(self, "workflow_controller", None)
+            if wc is not None and getattr(wc, "is_executing", False):
+                return True
+        except Exception:
+            return False
+        return False
+
     def _wire_notification_hooks(self) -> None:
         """Subscribe NotificationService to global signals + logging.
 
@@ -250,9 +272,13 @@ class FlamingoApplication(QObject):
             if svc is None:
                 return
 
-            # Cross-cutting error capture via stdlib logging.
+            # Cross-cutting error capture via stdlib logging, but only push when
+            # an acquisition is actually running. When idle, the operator is at
+            # the microscope and already sees interactive errors (failed data
+            # load, a dialog action, etc.) on screen — a push would just be
+            # noise. During an unattended run, errors still go out.
             root = logging.getLogger()
-            handler = svc.make_log_handler()
+            handler = svc.make_log_handler(gate=self._error_notify_gate)
             handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
             root.addHandler(handler)
             self._notification_log_handler = handler
@@ -711,9 +737,7 @@ class FlamingoApplication(QObject):
         """Re-evaluate the optics guard; optionally show the dialog on mismatch."""
         try:
             if self.optics_guard is None:
-                from py2flamingo.services.optics_guard_service import (
-                    OpticsGuardService,
-                )
+                from py2flamingo.services.optics_guard_service import OpticsGuardService
 
                 self.optics_guard = OpticsGuardService()
             mismatch = self.optics_guard.check()

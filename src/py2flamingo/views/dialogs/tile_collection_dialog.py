@@ -1229,7 +1229,7 @@ class TileCollectionDialog(PersistentDialog):
             if not getattr(self, "_local_path", None):
                 logger.warning(
                     "3D volume building disabled — no local path configured. "
-                    "Use 'Load Tiles' in Sample View after acquisition."
+                    "Use 'Load Raw Data' in Sample View after acquisition."
                 )
                 add_to_sample_view = False
 

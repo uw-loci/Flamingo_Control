@@ -389,7 +389,7 @@ def _read_raw_frames_to_buffer(
 
 
 # ---------------------------------------------------------------------------
-# DiskTileLoader class (used by manual "Load Tiles" button)
+# DiskTileLoader class (used by manual "Load Raw Data" button)
 # ---------------------------------------------------------------------------
 
 
