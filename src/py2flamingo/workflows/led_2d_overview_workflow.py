@@ -78,6 +78,29 @@ class LED2DOverviewWorkflow(QObject):
         # Cached stage soft limits {axis: {'min','max'}} for the tile-position guard.
         self._stage_limits_cache = None
 
+        # Live stage-position broadcast to the UI. The C++ GUI sliders track the
+        # stage continuously while scanning; the overview drives the stage through
+        # StageService directly (not movement_controller), so nothing else emits
+        # position updates during the scan and the Sample View sliders / 3D view
+        # would otherwise sit frozen. We re-emit movement_controller.position_changed
+        # from the scan loop (SampleView already wires it to the sliders + a
+        # throttled 3D refresh), reusing positions we already read/command — no
+        # extra socket traffic. Throttled so the per-plane Z sweep cannot flood it.
+        self._movement_controller = None  # cached lazily for position_changed emits
+        self._last_pos_broadcast = 0.0
+        self._pos_broadcast_interval_s = 0.1  # ~10 Hz
+        self._last_xyz = [
+            0.0,
+            0.0,
+            0.0,
+        ]  # last broadcast x/y/z (mm), for partial updates
+
+        # Pre-scan stage position (x, y, z, r). Captured before the first move so
+        # the stage can be returned there at the end of the scan instead of being
+        # left parked at the last tile.
+        self._origin_position = None
+        self._origin_restored = False
+
         # Results storage
         self._results: List[RotationResult] = []
         self._current_rotation_idx = 0
@@ -539,6 +562,10 @@ class LED2DOverviewWorkflow(QObject):
         self._results = []
         self._current_rotation_idx = 0
 
+        # Record where the stage is right now, before any scan move, so we can
+        # return it here when the scan ends (completion, cancel, or error).
+        self._capture_origin_position()
+
         # Calculate total tiles across both rotations using actual FOV
         total_tiles = 0
         fov = self._actual_fov_mm
@@ -638,6 +665,157 @@ class LED2DOverviewWorkflow(QObject):
             logger.error(f"Error moving to rotation: {e}")
             self.scan_error.emit(str(e))
             self._running = False
+            self._return_to_origin()
+
+    def _capture_origin_position(self) -> None:
+        """Read and remember the live stage position before any scan move.
+
+        Stored as (x, y, z, r) so :meth:`_return_to_origin` can send the stage
+        back where it started. Best-effort: if the position can't be read the
+        auto-return is simply skipped (logged), never raised.
+        """
+        self._origin_position = None
+        self._origin_restored = False
+        try:
+            from py2flamingo.services.stage_service import StageService
+
+            pos = StageService(self._app.connection_service).get_position()
+        except Exception as exc:  # noqa: BLE001 - best-effort
+            logger.warning(
+                f"Could not read pre-scan stage position ({exc}); "
+                "stage will not auto-return at the end of the scan"
+            )
+            return
+
+        if pos is None:
+            logger.warning(
+                "Could not read pre-scan stage position; "
+                "stage will not auto-return at the end of the scan"
+            )
+            return
+
+        self._origin_position = (pos.x, pos.y, pos.z, pos.r)
+        logger.info(
+            f"Captured pre-scan stage position X={pos.x:.3f} Y={pos.y:.3f} "
+            f"Z={pos.z:.3f} R={pos.r:.1f}"
+        )
+
+    def _return_to_origin(self) -> None:
+        """Return the stage to the position it held just before the scan started.
+
+        Called from every terminal path (completion, cancellation, error) so a
+        scan never leaves the stage parked at the last tile. Idempotent (guarded
+        so a single run restores at most once) and best-effort — a failure here
+        (e.g. a dropped connection) is logged, not raised.
+        """
+        if self._origin_restored or self._origin_position is None:
+            self._origin_restored = True
+            return
+        self._origin_restored = True
+
+        x, y, z, r = self._origin_position
+        try:
+            from py2flamingo.services.stage_service import AxisCode, StageService
+
+            stage_service = StageService(self._app.connection_service)
+        except Exception as exc:  # noqa: BLE001 - best-effort
+            logger.warning(f"Could not return stage to pre-scan position: {exc}")
+            return
+
+        logger.info(
+            f"Returning stage to pre-scan position X={x:.3f} Y={y:.3f} "
+            f"Z={z:.3f} R={r:.1f}"
+        )
+
+        mc = None
+        try:
+            mc, _, _ = self._get_controllers()
+        except Exception:  # noqa: BLE001 - sample view may be gone
+            mc = None
+
+        try:
+            # Rotation via movement_controller (matching the start-of-scan
+            # rotation move), then the linear axes via the stage service.
+            if mc is not None:
+                mc.move_absolute("r", r)
+            stage_service.move_to_position(AxisCode.X_AXIS, x)
+            stage_service.move_to_position(AxisCode.Y_AXIS, y)
+            stage_service.move_to_position(AxisCode.Z_AXIS, z)
+            # Streams the live travel home to the sliders / 3D view as it settles.
+            self._wait_for_axes_settled(
+                stage_service,
+                {AxisCode.X_AXIS: x, AxisCode.Y_AXIS: y, AxisCode.Z_AXIS: z},
+            )
+        except Exception as exc:  # noqa: BLE001 - return-home is best-effort
+            logger.warning(f"Could not return stage to pre-scan position: {exc}")
+
+        # Reflect the final resting position (with the restored rotation) on the UI.
+        self._last_xyz = [x, y, z]
+        if mc is not None:
+            try:
+                mc.position_changed.emit(x, y, z, r)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _broadcast_stage_position(
+        self,
+        x=None,
+        y=None,
+        z=None,
+        *,
+        throttle: bool = True,
+        process_events: bool = True,
+    ) -> None:
+        """Push the live stage position to the Sample View sliders + 3D view.
+
+        Mirrors the C++ GUI, whose position sliders follow the stage continuously
+        during a scan. We re-emit ``movement_controller.position_changed`` (already
+        wired in SampleView to update the sliders and queue a throttled 3D refresh).
+        Any axis passed as ``None`` keeps its last broadcast value, so partial
+        updates (e.g. just Z during the sweep) do not jerk the other sliders.
+
+        Throttled to ~10 Hz so the tight per-plane Z loop does not flood the UI;
+        ``throttle=False`` forces an immediate emit (e.g. once a tile has settled).
+        """
+        now = time.monotonic()
+        if (
+            throttle
+            and (now - self._last_pos_broadcast) < self._pos_broadcast_interval_s
+        ):
+            return
+        self._last_pos_broadcast = now
+
+        if x is not None:
+            self._last_xyz[0] = float(x)
+        if y is not None:
+            self._last_xyz[1] = float(y)
+        if z is not None:
+            self._last_xyz[2] = float(z)
+
+        mc = self._movement_controller
+        if mc is None:
+            try:
+                mc, _, _ = self._get_controllers()
+            except Exception:  # noqa: BLE001 - sample view may be unavailable
+                return
+            self._movement_controller = mc
+
+        try:
+            r = float(self._rotation_angles[self._current_rotation_idx])
+        except Exception:  # noqa: BLE001
+            r = 0.0
+
+        try:
+            mc.position_changed.emit(
+                self._last_xyz[0], self._last_xyz[1], self._last_xyz[2], r
+            )
+        except Exception:  # noqa: BLE001 - a UI update must never break the scan
+            return
+
+        if process_events:
+            app = QApplication.instance()
+            if app is not None:
+                app.processEvents()
 
     def _wait_for_axes_settled(
         self,
@@ -646,6 +824,7 @@ class LED2DOverviewWorkflow(QObject):
         tolerance_mm: float = 0.01,
         timeout_s: float = 10.0,
         poll_interval_s: float = 0.1,
+        broadcast: bool = True,
     ) -> bool:
         """Block until each axis reaches its target (within tolerance) or timeout.
 
@@ -664,19 +843,34 @@ class LED2DOverviewWorkflow(QObject):
         """
         deadline = time.monotonic() + timeout_s
         remaining = dict(targets)
+        # Map stage axis code (X=1, Y=2, Z=3) to the _last_xyz index so the real
+        # positions polled below can be streamed to the sliders as the stage moves.
+        axis_to_idx = {1: 0, 2: 1, 3: 2}
         while remaining and time.monotonic() < deadline:
             if self._cancelled:
                 return False
             settled = []
+            latest = {}
             for axis, target in remaining.items():
                 try:
                     pos = stage_service.get_axis_position(axis)
                 except Exception:  # noqa: BLE001 - transient comm hiccup; keep polling
                     pos = None
-                if pos is not None and abs(pos - target) <= tolerance_mm:
-                    settled.append(axis)
+                if pos is not None:
+                    latest[axis] = pos
+                    if abs(pos - target) <= tolerance_mm:
+                        settled.append(axis)
             for axis in settled:
                 remaining.pop(axis, None)
+            # Stream the real (in-transit) position to the UI so the sliders and
+            # 3D view follow the stage as it travels between tiles, not just once
+            # it arrives.
+            if broadcast:
+                for axis, val in latest.items():
+                    idx = axis_to_idx.get(axis)
+                    if idx is not None:
+                        self._last_xyz[idx] = float(val)
+                self._broadcast_stage_position(process_events=True)
             if remaining:
                 time.sleep(poll_interval_s)
 
@@ -772,6 +966,7 @@ class LED2DOverviewWorkflow(QObject):
         if self._app:
             self._app.stop_acquisition("LED 2D Overview")
         self._disable_led()
+        self._return_to_origin()
         self.scan_error.emit(msg)
 
     @staticmethod
@@ -893,6 +1088,10 @@ class LED2DOverviewWorkflow(QObject):
                 # previous tile finished on, so there is no full-stack Z reset.
                 z_start = z_min if z_sweep_up else z_max
 
+                # Seed the broadcast baseline so the settle poll below can stream
+                # the live X/Y/Z travel to the sliders without jerking any axis.
+                self._last_xyz = [x_pos, y_pos, z_start]
+
                 stage_service.move_to_position(AxisCode.Y_AXIS, y_pos)
                 stage_service.move_to_position(AxisCode.Z_AXIS, z_start)
                 self._wait_for_axes_settled(
@@ -925,6 +1124,8 @@ class LED2DOverviewWorkflow(QObject):
 
                     # Move Z (non-blocking conceptually - we grab frame immediately)
                     stage_service.move_to_position(AxisCode.Z_AXIS, z_pos)
+                    # Follow the sweep on the sliders + 3D view (throttled ~10 Hz).
+                    self._broadcast_stage_position(z=z_pos)
                     time.sleep(0.015)  # Minimal delay
 
                     # Grab frame
@@ -1055,6 +1256,7 @@ class LED2DOverviewWorkflow(QObject):
             logger.error(f"Error capturing tile: {e}", exc_info=True)
             self.scan_error.emit(str(e))
             self._running = False
+            self._return_to_origin()
 
     def _capture_tile(
         self, x: float, y: float, z_center: float, tile_x_idx: int, tile_y_idx: int
@@ -1084,6 +1286,9 @@ class LED2DOverviewWorkflow(QObject):
         # delay can leave the stage still translating when frames are captured
         # (duplicated/ghosted content between tiles).
         logger.debug(f"Moving to tile position X={x:.3f}, Y={y:.3f}")
+        # Seed the broadcast baseline (incl. this tile's Z) so the settle poll can
+        # stream the live X/Y travel to the Sample View sliders + 3D view.
+        self._last_xyz = [x, y, z_center]
         stage_service.move_to_position(AxisCode.X_AXIS, x)
         stage_service.move_to_position(AxisCode.Y_AXIS, y)
         self._wait_for_axes_settled(
@@ -1120,6 +1325,8 @@ class LED2DOverviewWorkflow(QObject):
         for z_pos in z_positions:
             # Move to Z using stage service directly
             stage_service.move_to_position(AxisCode.Z_AXIS, z_pos)
+            # Follow the Z-stack on the sliders + 3D view (throttled ~10 Hz).
+            self._broadcast_stage_position(z=z_pos)
             time.sleep(0.02)  # Minimal delay - just grab live frame
 
             # Capture frame from live view
@@ -1442,6 +1649,9 @@ class LED2DOverviewWorkflow(QObject):
         # Disable LED
         self._disable_led()
 
+        # Return the stage to where it was before the scan started.
+        self._return_to_origin()
+
         # Log summary
         total_tiles = sum(len(r.tiles) for r in self._results)
         logger.info(
@@ -1469,6 +1679,9 @@ class LED2DOverviewWorkflow(QObject):
 
         # Disable LED
         self._disable_led()
+
+        # Return the stage to where it was before the scan started.
+        self._return_to_origin()
 
         logger.info("LED 2D Overview cancelled")
         self.scan_cancelled.emit()

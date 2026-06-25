@@ -153,6 +153,13 @@ After clicking **Start Scan**:
   (limit − 0.25 mm), preserving coverage. If the region is larger than the stage
   can travel at all, the scan is **not started** and a warning dialog asks you to
   choose a smaller region (or edit the configured positions).
+- **Live position tracking:** the Sample View position sliders and 3D view
+  follow the stage as it scans — the inter-tile X/Y/Z travel and each Z sweep are
+  streamed to the UI (throttled to ~10 Hz), mirroring how the C++ GUI sliders
+  track the stage. This applies to both fast and step modes.
+- **Return to start:** the stage position (X/Y/Z/R) is recorded *before* the scan
+  begins and restored when the scan ends — on normal completion, on **Cancel**,
+  and on error — so a scan never leaves the stage parked at the last tile.
 
 **Progress Tracking:**
 - Start button shows percentage: "In Progress... 45%"

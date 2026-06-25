@@ -31,6 +31,14 @@ def _bare_workflow():
     # Bypass __init__ (needs an app/QObject wiring) — we only test pure logic.
     wf = LED2DOverviewWorkflow.__new__(LED2DOverviewWorkflow)
     wf._cancelled = False
+    # Minimal state for the live-position broadcast that settle now performs. With
+    # no _app, _broadcast_stage_position returns early (no sample view), so the
+    # poll logic under test runs unchanged.
+    wf._app = None
+    wf._movement_controller = None
+    wf._last_xyz = [0.0, 0.0, 0.0]
+    wf._last_pos_broadcast = 0.0
+    wf._pos_broadcast_interval_s = 0.1
     return wf
 
 
