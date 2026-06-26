@@ -98,6 +98,10 @@ class PixelCalibratorDialog(PersistentDialog):
         self.service = PixelCalibrationService()
         self._latest_frame: Optional[np.ndarray] = None
         self._worker: Optional[_SweepWorker] = None
+        # True once *we* started live view (so we can restore the prior state on
+        # close instead of leaving the system half-changed: live view running
+        # with the light source the user wasn't aware we left it in).
+        self._started_live_view = False
         self._result: Optional[PixelCalibration] = self.service.calibration
 
         self._setup_ui()
@@ -340,11 +344,14 @@ class PixelCalibratorDialog(PersistentDialog):
                 self, "Not connected", "Connect to the microscope first."
             )
             return
-        # Ensure live view is running so frames arrive.
+        # Ensure live view is running so frames arrive. Remember that we were the
+        # one to start it, so we can restore the prior state when the dialog
+        # closes (see _restore_camera_state).
         cc = self._camera_controller()
         if cc is not None and not cc.is_live_view_active():
             try:
                 cc.start_live_view()
+                self._started_live_view = True
             except Exception as e:  # noqa: BLE001
                 QMessageBox.warning(
                     self,
@@ -487,10 +494,40 @@ class PixelCalibratorDialog(PersistentDialog):
         self._patch_btn.setEnabled(has_result)
         self._run_btn.setEnabled(self._is_connected())
 
+    def _restore_camera_state(self) -> None:
+        """Leave the camera/illumination as we found it.
+
+        If the calibrator started live view, stop it on the way out. Going
+        through ``stop_live_view`` also disables the light sources and emits the
+        ``state_changed`` / ``preview_disabled`` signals, so the Live Viewer,
+        Sample View live toggle, and the laser/LED panels all resync to a clean,
+        consistent state — rather than being left showing "live + LED on" while
+        the hardware is actually half-off.
+        """
+        if not self._started_live_view:
+            return
+        self._started_live_view = False
+        cc = self._camera_controller()
+        try:
+            if cc is not None and cc.is_live_view_active():
+                logger.info("Pixel calibrator: stopping the live view it started")
+                cc.stop_live_view()
+        except Exception:  # noqa: BLE001 - cleanup must not raise on close
+            logger.debug("could not restore camera state on close", exc_info=True)
+
     def closeEvent(self, event):
         try:
             if self._worker is not None and self._worker.isRunning():
                 self._worker.wait(2000)
         except Exception:
             pass
+        # Stop consuming live frames and restore the pre-calibration state so the
+        # Live Viewer / Sample View reflect reality after the dialog closes.
+        cc = self._camera_controller()
+        if cc is not None and hasattr(cc, "new_image"):
+            try:
+                cc.new_image.disconnect(self._on_new_image)
+            except Exception:
+                pass
+        self._restore_camera_state()
         super().closeEvent(event)
