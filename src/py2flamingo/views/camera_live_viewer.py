@@ -17,6 +17,7 @@ from PyQt5.QtCore import QEvent, Qt, QTimer, pyqtSlot
 from PyQt5.QtGui import QCloseEvent, QHideEvent, QImage, QPixmap, QShowEvent
 from PyQt5.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -194,6 +195,27 @@ class CameraLiveViewer(QWidget):
 
         exp_layout.addStretch()
         controls_layout.addLayout(exp_layout)
+
+        # Live AOI (camera ROI) control — centered squares only. Sets a hardware
+        # crop on the PCO sensor so the low-res light sheet can run at 1024 (or
+        # smaller) instead of full 2048. Changing the ROI stops/restarts live.
+        aoi_layout = QHBoxLayout()
+        aoi_layout.addWidget(QLabel("Live AOI:"))
+        self.aoi_combo = QComboBox()
+        # (label, side_px). Full frame first.
+        for label, side in (("Full (2048)", 2048), ("1024", 1024), ("512", 512)):
+            self.aoi_combo.addItem(label, side)
+        aoi_layout.addWidget(self.aoi_combo)
+        self.apply_aoi_btn = QPushButton("Apply AOI")
+        self.apply_aoi_btn.setToolTip(
+            "Set a centered square camera ROI (stops and restarts live view)"
+        )
+        self.apply_aoi_btn.clicked.connect(self._on_apply_aoi_clicked)
+        aoi_layout.addWidget(self.apply_aoi_btn)
+        self.aoi_result_label = QLabel("")
+        aoi_layout.addWidget(self.aoi_result_label)
+        aoi_layout.addStretch()
+        controls_layout.addLayout(aoi_layout)
 
         # Image Controls button
         image_controls_layout = QVBoxLayout()
@@ -617,6 +639,64 @@ class CameraLiveViewer(QWidget):
         """Handle exposure time change."""
         self.camera_controller.set_exposure_time(value)
         self.exposure_ms_label.setText(f"{value/1000:.2f} ms")
+
+    def _on_apply_aoi_clicked(self) -> None:
+        """Apply a centered-square camera ROI (live AOI).
+
+        The firmware drops the camera recording state to change the ROI, so we
+        stop live view first and restart it after. The result label shows the
+        size the camera actually reports back, which confirms (or refutes) that
+        the ROI took effect.
+        """
+        side = int(self.aoi_combo.currentData())
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            sensor_px = int(get_hardware_config().sensor_width_px)
+        except Exception:  # noqa: BLE001 - fall back to the known full sensor
+            sensor_px = 2048
+
+        was_live = self.camera_controller.is_live_view_active()
+        self.apply_aoi_btn.setEnabled(False)
+        self.aoi_result_label.setText("Applying…")
+        try:
+            if was_live:
+                self.camera_controller.stop_live_view()
+
+            result = self.camera_controller.camera_service.set_centered_square_aoi(
+                side, sensor_px=sensor_px
+            )
+
+            if was_live:
+                self.camera_controller.start_live_view()
+
+            if not result.get("success"):
+                msg = result.get("error", "unknown error")
+                self.aoi_result_label.setText(f"Failed: {msg}")
+                QMessageBox.warning(self, "Set AOI failed", f"Could not set AOI: {msg}")
+                return
+
+            w, h = result.get("width"), result.get("height")
+            if result.get("applied"):
+                self.aoi_result_label.setText(f"AOI now {w}×{h}")
+            else:
+                self.aoi_result_label.setText(
+                    f"Requested {side}×{side}, camera reports {w}×{h}"
+                )
+                QMessageBox.information(
+                    self,
+                    "AOI read-back mismatch",
+                    f"Requested {side}×{side} but the camera reports {w}×{h}. "
+                    "The ROI commands were sent; the firmware may use different "
+                    "ROI semantics than expected (see the log).",
+                )
+            self.logger.info(f"Apply AOI result: {result}")
+        except Exception as exc:  # noqa: BLE001 - surface, don't crash the viewer
+            self.logger.error(f"Error applying AOI: {exc}", exc_info=True)
+            self.aoi_result_label.setText("Error")
+            QMessageBox.warning(self, "Set AOI error", str(exc))
+        finally:
+            self.apply_aoi_btn.setEnabled(True)
 
     def _on_image_controls_clicked(self) -> None:
         """Handle image controls button click - show the Image Controls window."""

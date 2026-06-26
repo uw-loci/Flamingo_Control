@@ -10,7 +10,7 @@ import struct
 import threading
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import numpy as np
 
@@ -87,6 +87,18 @@ class CameraCommandCode:
     LIVE_VIEW_STOP = 12296  # 0x3008 - stop continuous imaging
     WORKFLOW_START = 12292  # 0x3004
     WORKFLOW_STOP = 12293  # 0x3005
+
+    # Camera ROI / AOI (hardware crop on the PCO sensor). Codes per
+    # oldcodereference/CommandCodes_Reference.txt, which matches our active
+    # functions/command_list.txt (IMAGE_SIZE_GET=12327, PIXEL_FIELD=12343).
+    # This firmware exposes only LEFT and TOP edges: the PCO Edge enforces a
+    # SYMMETRIC ROI, so setting the left inset mirrors the right edge and the top
+    # inset mirrors the bottom — together they define a CENTERED square. The
+    # edge value (1-indexed pixel) is carried in int32Data0 (params[3]).
+    ROI_LEFT_SET = 12303  # 0x300F
+    ROI_LEFT_GET = 12304  # 0x3010
+    ROI_TOP_SET = 12305  # 0x3011
+    ROI_TOP_GET = 12306  # 0x3012
 
 
 class CameraService(MicroscopeCommandService):
@@ -227,6 +239,99 @@ class CameraService(MicroscopeCommandService):
             f"Pixel field of view: {pixel_fov} mm/pixel ({pixel_fov * 1000:.3f} µm/pixel)"
         )
         return pixel_fov
+
+    @staticmethod
+    def _centered_roi_edges(sensor_px: int, side_px: int) -> Tuple[int, int]:
+        """1-indexed left/top inset for a centered square ROI of ``side_px``.
+
+        The PCO Edge enforces a symmetric ROI, so the left inset also fixes the
+        right edge (and top fixes bottom); only left/top are commanded. For a
+        centered square of side S on a ``sensor_px``-wide sensor the inset is
+        ``(sensor_px - side_px) / 2`` and the 1-indexed edge is ``inset + 1`` (so
+        a full-frame ROI is edge 1).
+        """
+        inset = (sensor_px - side_px) // 2
+        return inset + 1, inset + 1
+
+    def set_centered_square_aoi(
+        self, side_px: int, sensor_px: int = 2048
+    ) -> Dict[str, Any]:
+        """Set a CENTERED SQUARE camera ROI (live AOI) of ``side_px`` pixels.
+
+        Sends ROI_LEFT_SET + ROI_TOP_SET (the symmetric PCO ROI mirrors the
+        right/bottom edges) and re-reads the resulting image size to confirm.
+
+        IMPORTANT: the firmware drops the camera's recording state to change the
+        ROI, so callers should stop live view before calling and restart it
+        afterwards.
+
+        Returns a dict: ``success``, ``requested_side``, the actual
+        ``width``/``height`` reported after the change, and ``applied`` (whether
+        the read-back matches the request).
+        """
+        if side_px <= 0 or side_px > sensor_px:
+            return {
+                "success": False,
+                "error": f"AOI side {side_px} out of range (1..{sensor_px})",
+            }
+
+        left, top = self._centered_roi_edges(sensor_px, side_px)
+        self.logger.info(
+            f"Setting centered square AOI {side_px}x{side_px} on a {sensor_px}px "
+            f"sensor (ROI left={left}, top={top})"
+        )
+
+        def _send_edge(code: int, name: str, edge_value: int) -> Dict[str, Any]:
+            # int32Data0 (params[3]) carries the edge value, matching how the
+            # firmware's PCOBase::ROIset reads scmd.int32Data0.
+            return self._send_command(
+                command_code=code,
+                command_name=name,
+                params=[0, 0, 0, int(edge_value), 0, 0, 0],
+                value=0.0,
+            )
+
+        left_res = _send_edge(
+            CameraCommandCode.ROI_LEFT_SET, "CAMERA_ROI_LEFT_SET", left
+        )
+        if not left_res.get("success"):
+            return {
+                "success": False,
+                "error": f"ROI_LEFT_SET failed: {left_res.get('error')}",
+            }
+        top_res = _send_edge(CameraCommandCode.ROI_TOP_SET, "CAMERA_ROI_TOP_SET", top)
+        if not top_res.get("success"):
+            return {
+                "success": False,
+                "error": f"ROI_TOP_SET failed: {top_res.get('error')}",
+            }
+
+        # Confirm the camera actually applied the crop.
+        try:
+            width, height = self.get_image_size()
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "success": True,
+                "requested_side": side_px,
+                "width": None,
+                "height": None,
+                "applied": False,
+                "warning": f"ROI commands sent but could not read back size: {exc}",
+            }
+
+        applied = width == side_px and height == side_px
+        if not applied:
+            self.logger.warning(
+                f"AOI read-back {width}x{height} does not match requested "
+                f"{side_px}x{side_px} — the firmware may use different ROI semantics"
+            )
+        return {
+            "success": True,
+            "requested_side": side_px,
+            "width": width,
+            "height": height,
+            "applied": applied,
+        }
 
     def get_exposure(self) -> float:
         """
