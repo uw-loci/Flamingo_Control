@@ -256,6 +256,17 @@ class MovementController(QObject):
             elif axis == "r":
                 self.position_controller.jog_rotation(delta_mm)
 
+            # The jog is asynchronous: it sends the command and a background
+            # thread holds the movement lock until the hardware confirms the new
+            # position. When the caller asked to verify, block until that is done
+            # so (a) an immediately-following move doesn't hit "Movement already
+            # in progress", and (b) get_position() returns the new value, not the
+            # stale pre-move one. Without this, callers that step the stage and
+            # read back position in a tight loop (e.g. the XY Pixel Calibrator)
+            # both crash and compute deltas from stale positions.
+            if verify:
+                self.position_controller.wait_for_movement_complete(timeout=15.0)
+
             return True
 
         except Exception as e:
