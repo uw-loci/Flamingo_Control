@@ -2206,6 +2206,22 @@ class SampleView(QWidget):
             from py2flamingo.models.hardware.stage import Position
 
             current = self.last_stage_position or {"x": 0, "y": 0, "z": 0, "r": 0}
+
+            # No-op guard: skip moves to the position we are already at. The
+            # value QLineEdit fields fire editingFinished on every focus change
+            # (not just real edits, and Qt can re-emit it), which otherwise
+            # issues a stream of "move to current position" commands. Those
+            # collide with any genuine in-flight move and surface as scary
+            # "Movement already in progress" errors. (axis is mm except r=deg.)
+            current_value = current.get(axis, 0.0)
+            tolerance = 1e-2 if axis == "r" else 1e-3
+            if abs(value - current_value) < tolerance:
+                self.logger.debug(
+                    f"Skipping no-op {axis.upper()} move (target {value:.3f} "
+                    f"== current {current_value:.3f})"
+                )
+                return
+
             target = Position(
                 x=current.get("x", 0),
                 y=current.get("y", 0),
@@ -2219,7 +2235,13 @@ class SampleView(QWidget):
             self.movement_controller.move_absolute(axis, value, verify=False)
             self.logger.info(f"Moving {axis.upper()} to {value:.3f}")
         except Exception as e:
-            self.logger.error(f"Error moving {axis}: {e}")
+            # A rejected concurrent move ("Movement already in progress") is an
+            # expected race, not a fault — log it quietly so it doesn't trigger
+            # an ERROR-level push notification. Real failures stay at ERROR.
+            if "already in progress" in str(e).lower():
+                self.logger.warning(f"Move {axis.upper()} skipped: {e}")
+            else:
+                self.logger.error(f"Error moving {axis}: {e}")
 
     def _on_colormap_changed(self, colormap: str) -> None:
         """Handle colormap selection change."""
