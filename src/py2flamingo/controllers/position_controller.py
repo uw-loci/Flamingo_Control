@@ -744,33 +744,24 @@ class PositionController:
             self.logger.error(error_msg)
             raise RuntimeError(error_msg)
 
-        # Validate bounds if requested
+        # Keep the target inside the soft limits. Previously an out-of-range
+        # target raised ValueError, which surfaced as an unhandled error from the
+        # UI "go to position" controls (presets, click-to-move, overview tile
+        # navigation). Clamp to the nearest valid position and log instead, so a
+        # move never throws on bounds.
         if validate:
             limits = self.get_stage_limits()
-
-            x_min, x_max = limits["x"]["min"], limits["x"]["max"]
-            if not (x_min <= position.x <= x_max):
-                raise ValueError(
-                    f"X position {position.x:.3f}mm is outside valid range [{x_min:.3f}, {x_max:.3f}]"
+            cx = min(max(position.x, limits["x"]["min"]), limits["x"]["max"])
+            cy = min(max(position.y, limits["y"]["min"]), limits["y"]["max"])
+            cz = min(max(position.z, limits["z"]["min"]), limits["z"]["max"])
+            cr = min(max(position.r, limits["r"]["min"]), limits["r"]["max"])
+            if (cx, cy, cz, cr) != (position.x, position.y, position.z, position.r):
+                self.logger.warning(
+                    "Target position clamped to stage soft limits: "
+                    f"({position.x:.3f}, {position.y:.3f}, {position.z:.3f}, "
+                    f"{position.r:.2f}) -> ({cx:.3f}, {cy:.3f}, {cz:.3f}, {cr:.2f})"
                 )
-
-            y_min, y_max = limits["y"]["min"], limits["y"]["max"]
-            if not (y_min <= position.y <= y_max):
-                raise ValueError(
-                    f"Y position {position.y:.3f}mm is outside valid range [{y_min:.3f}, {y_max:.3f}]"
-                )
-
-            z_min, z_max = limits["z"]["min"], limits["z"]["max"]
-            if not (z_min <= position.z <= z_max):
-                raise ValueError(
-                    f"Z position {position.z:.3f}mm is outside valid range [{z_min:.3f}, {z_max:.3f}]"
-                )
-
-            r_min, r_max = limits["r"]["min"], limits["r"]["max"]
-            if not (r_min <= position.r <= r_max):
-                raise ValueError(
-                    f"Rotation {position.r:.2f}° is outside valid range [{r_min}, {r_max}]"
-                )
+                position = Position(x=cx, y=cy, z=cz, r=cr)
 
         # Try to acquire movement lock (non-blocking)
         if not self._movement_lock.acquire(blocking=False):

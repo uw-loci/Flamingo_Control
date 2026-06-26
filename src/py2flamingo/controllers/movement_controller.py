@@ -188,7 +188,7 @@ class MovementController(QObject):
             True if command sent successfully
 
         Raises:
-            ValueError: If axis invalid or position out of bounds
+            ValueError: If axis invalid
             RuntimeError: If not connected or movement fails
         """
         axis = axis.lower()
@@ -196,6 +196,13 @@ class MovementController(QObject):
 
         if axis not in axis_map:
             raise ValueError(f"Invalid axis '{axis}', must be one of: x, y, z, r")
+
+        # Clamp to the soft limits instead of raising on an out-of-range target.
+        position_mm, was_clamped = self._clamp_to_limits(axis, position_mm)
+        if was_clamped:
+            self.logger.info(
+                f"{axis_map[axis]} target clamped to soft limit ({position_mm:.3f})"
+            )
 
         self._current_motion_axis = axis_map[axis]
         self.motion_started.emit(axis_map[axis])
@@ -221,9 +228,31 @@ class MovementController(QObject):
             self.error_occurred.emit(str(e))
             raise
 
+    def _axis_limits(self, axis: str):
+        """Soft limits ``(min, max)`` for an axis, or None if unavailable."""
+        try:
+            lim = self.position_controller.get_stage_limits().get(axis.lower())
+            if lim:
+                return float(lim["min"]), float(lim["max"])
+        except Exception:  # noqa: BLE001 - unknown limits -> caller skips clamping
+            pass
+        return None
+
+    def _clamp_to_limits(self, axis: str, value: float):
+        """Clamp ``value`` to the axis soft limits. Returns (clamped, was_clamped)."""
+        lim = self._axis_limits(axis)
+        if lim is None:
+            return value, False
+        lo, hi = lim
+        clamped = min(max(value, lo), hi)
+        return clamped, abs(clamped - value) > 1e-9
+
     def move_relative(self, axis: str, delta_mm: float, verify: bool = True) -> bool:
         """
         Move single axis by relative amount.
+
+        Out-of-range jogs are clamped to the stage soft limits rather than
+        raising; a jog issued while already at the limit is ignored cleanly.
 
         Args:
             axis: Axis name ('x', 'y', 'z', 'r')
@@ -234,7 +263,7 @@ class MovementController(QObject):
             True if command sent successfully
 
         Raises:
-            ValueError: If axis invalid or resulting position out of bounds
+            ValueError: If axis invalid
             RuntimeError: If not connected or movement fails
         """
         axis = axis.lower()
@@ -242,6 +271,26 @@ class MovementController(QObject):
 
         if axis not in axis_map:
             raise ValueError(f"Invalid axis '{axis}', must be one of: x, y, z, r")
+
+        # Keep linear jogs inside the soft limits. A button-held jog near the edge
+        # should stop at the edge, not abort with an out-of-range error. (Rotation
+        # wraps, so it is left to jog_rotation.)
+        if axis in ("x", "y", "z"):
+            cur = self.get_position(axis)
+            if cur is not None:
+                target, was_clamped = self._clamp_to_limits(axis, cur + delta_mm)
+                if was_clamped:
+                    # Only adjust the delta when we actually clamped, so an
+                    # in-range jog keeps its exact requested distance.
+                    delta_mm = target - cur
+                    if abs(delta_mm) < 1e-6:
+                        self.logger.info(
+                            f"{axis_map[axis]} already at soft limit; jog ignored"
+                        )
+                        return True
+                    self.logger.info(
+                        f"{axis_map[axis]} jog clamped to soft limit ({target:.3f} mm)"
+                    )
 
         self._current_motion_axis = axis_map[axis]
         self.motion_started.emit(axis_map[axis])

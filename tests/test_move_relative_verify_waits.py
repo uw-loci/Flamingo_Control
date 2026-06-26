@@ -26,6 +26,17 @@ class _FakePositionController:
         self.jogs = []
         self.waits = 0
 
+    def get_current_position(self):
+        # Mid-range so the clamp leaves the requested jog untouched.
+        class _P:
+            x = y = z = 15.0
+            r = 0.0
+
+        return _P()
+
+    def get_stage_limits(self):
+        return {a: {"min": 5.0, "max": 25.0} for a in ("x", "y", "z", "r")}
+
     def jog_x(self, d):
         self.jogs.append(("x", d))
 
