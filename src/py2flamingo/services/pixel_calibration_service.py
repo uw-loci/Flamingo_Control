@@ -235,6 +235,8 @@ class PixelCalibrationService:
         settle: Optional[Callable[[], None]] = None,
         magnification: Optional[float] = None,
         progress: Optional[Callable[[str, float], None]] = None,
+        get_limits: Optional[Callable[[str], Optional[Tuple[float, float]]]] = None,
+        limit_margin_mm: float = 0.05,
     ) -> PixelCalibration:
         """Drive an automated calibration sweep and fit the result.
 
@@ -251,6 +253,10 @@ class PixelCalibrationService:
             settle: optional callable invoked after each move (e.g. sleep).
             magnification: objective magnification at capture (for the record).
             progress: ``(message, fraction)`` UI callback.
+            get_limits: optional ``(axis) -> (min_mm, max_mm)`` soft limits. When
+                given, moves are planned in a direction with headroom and clamped
+                so the sweep never commands an out-of-range move.
+            limit_margin_mm: keep-out margin from each soft limit.
         """
 
         def _say(msg: str, frac: float) -> None:
@@ -272,52 +278,116 @@ class PixelCalibrationService:
         ox = float(get_position("x"))
         oy = float(get_position("y"))
 
-        # Planned offsets from the origin: pure +X, pure +Y, and one diagonal.
+        # Plan within the stage soft limits. Cropping/objective swaps aside, the
+        # stage often starts near a limit (e.g. Y at 24.96 of a 5..25 range), so a
+        # fixed +offset sweep would command an out-of-range move that the stage
+        # layer hard-rejects and aborts the run. Instead, pick a direction with
+        # headroom per axis and clamp each target; the fit uses read-back deltas,
+        # so a flipped or shortened move is still valid data.
+        margin = max(0.0, float(limit_margin_mm))
+        max_off = (max(fractions) if fractions else 1.0) * nominal_mm
+
+        def _limits(axis: str) -> Optional[Tuple[float, float]]:
+            if get_limits is None:
+                return None
+            try:
+                lim = get_limits(axis)
+            except Exception:  # noqa: BLE001 - treat unreadable limits as unknown
+                return None
+            return (float(lim[0]), float(lim[1])) if lim else None
+
+        def _axis_sign(origin: float, axis: str) -> float:
+            lim = _limits(axis)
+            if lim is None:
+                return 1.0
+            lo, hi = lim
+            if origin + max_off <= hi - margin:
+                return 1.0
+            if origin - max_off >= lo + margin:
+                return -1.0
+            # Neither direction fits the full sweep — head toward the side with
+            # more room; individual moves are clamped below.
+            return 1.0 if (hi - margin - origin) >= (origin - lo - margin) else -1.0
+
+        def _clamp(origin: float, target: float, axis: str) -> float:
+            lim = _limits(axis)
+            if lim is None:
+                return target
+            lo, hi = lim
+            return min(max(target, lo + margin), hi - margin)
+
+        lx, ly = _limits("x"), _limits("y")
+        room_x = max(lx[1] - margin - ox, ox - lx[0] - margin) if lx else max_off
+        room_y = max(ly[1] - margin - oy, oy - ly[0] - margin) if ly else max_off
+        smallest = (min(fractions) if fractions else 1.0) * nominal_mm
+        if room_x < smallest and room_y < smallest:
+            raise RuntimeError(
+                "Not enough stage travel at the current position "
+                f"(X={ox:.3f}, Y={oy:.3f} mm) to run the calibration sweep. "
+                "Move the stage toward the centre of its range and retry."
+            )
+
+        sx = _axis_sign(ox, "x")
+        sy = _axis_sign(oy, "y")
+
+        # Planned offsets from the origin: pure X, pure Y, and one diagonal, each
+        # in the chosen (limit-safe) direction.
         plan: List[Tuple[float, float, str]] = []
         for f in fractions:
-            plan.append((f * nominal_mm, 0.0, "x"))
+            plan.append((sx * f * nominal_mm, 0.0, "x"))
         for f in fractions:
-            plan.append((0.0, f * nominal_mm, "y"))
-        plan.append((nominal_mm, nominal_mm, "xy"))
+            plan.append((0.0, sy * f * nominal_mm, "y"))
+        plan.append((sx * nominal_mm, sy * nominal_mm, "xy"))
 
         moves: List[CalibrationMove] = []
         n = len(plan)
-        for i, (offx, offy, axis) in enumerate(plan):
-            frac = 0.05 + 0.9 * (i / max(n, 1))
-            _say(
-                f"Move {i + 1}/{n} ({axis}, target +{offx*1000:.1f},"
-                f"+{offy*1000:.1f} µm)",
-                frac,
-            )
-            # Move each axis to origin+offset using the read-back position, so
-            # the actual delta is used (robust to backlash / step rounding).
-            tgt_x, tgt_y = ox + offx, oy + offy
-            dx_cmd = tgt_x - float(get_position("x"))
-            dy_cmd = tgt_y - float(get_position("y"))
-            if abs(dx_cmd) > 1e-9:
-                move_relative("x", dx_cmd)
-            if abs(dy_cmd) > 1e-9:
-                move_relative("y", dy_cmd)
-            if settle:
-                settle()
+        try:
+            for i, (offx, offy, axis) in enumerate(plan):
+                frac = 0.05 + 0.9 * (i / max(n, 1))
+                _say(
+                    f"Move {i + 1}/{n} ({axis}, target {offx*1000:+.1f},"
+                    f"{offy*1000:+.1f} µm)",
+                    frac,
+                )
+                # Move each axis to (clamped) origin+offset using the read-back
+                # position, so the actual delta is used (robust to backlash).
+                tgt_x = _clamp(ox, ox + offx, "x")
+                tgt_y = _clamp(oy, oy + offy, "y")
+                dx_cmd = tgt_x - float(get_position("x"))
+                dy_cmd = tgt_y - float(get_position("y"))
+                try:
+                    if abs(dx_cmd) > 1e-6:
+                        move_relative("x", dx_cmd)
+                    if abs(dy_cmd) > 1e-6:
+                        move_relative("y", dy_cmd)
+                except (
+                    Exception
+                ) as exc:  # noqa: BLE001 - a rejected move skips, never crashes
+                    _say(f"  skipped (move rejected: {exc})", frac)
+                    continue
+                if settle:
+                    settle()
 
-            frame = np.asarray(grab_frame())
-            act_dx = float(get_position("x")) - ox
-            act_dy = float(get_position("y")) - oy
-            su, sv, q = self.measure_shift(ref, frame, crop=crop)
-            if q < quality_threshold:
-                _say(f"  dropped (quality {q:.2f} < {quality_threshold})", frac)
-                continue
-            moves.append(CalibrationMove(act_dx, act_dy, su, sv, q, axis=axis))
-
-        # Return to the starting position.
-        _say("Returning to origin", 0.97)
-        rx = ox - float(get_position("x"))
-        ry = oy - float(get_position("y"))
-        if abs(rx) > 1e-9:
-            move_relative("x", rx)
-        if abs(ry) > 1e-9:
-            move_relative("y", ry)
+                frame = np.asarray(grab_frame())
+                act_dx = float(get_position("x")) - ox
+                act_dy = float(get_position("y")) - oy
+                su, sv, q = self.measure_shift(ref, frame, crop=crop)
+                if q < quality_threshold:
+                    _say(f"  dropped (quality {q:.2f} < {quality_threshold})", frac)
+                    continue
+                moves.append(CalibrationMove(act_dx, act_dy, su, sv, q, axis=axis))
+        finally:
+            # Always try to return to the starting position (even on error/cancel).
+            _say("Returning to origin", 0.97)
+            try:
+                rx = ox - float(get_position("x"))
+                ry = oy - float(get_position("y"))
+                if abs(rx) > 1e-6:
+                    move_relative("x", rx)
+                if abs(ry) > 1e-6:
+                    move_relative("y", ry)
+            except Exception as exc:  # noqa: BLE001 - best-effort restore
+                logger.warning("[pixel-cal] could not return to origin: %s", exc)
 
         if len(moves) < 2:
             raise RuntimeError(

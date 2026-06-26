@@ -65,10 +65,14 @@ class _SweepWorker(QThread):
                 nominal_move_um=self._params["nominal_move_um"],
                 initial_pixel_um=self._params["initial_pixel_um"],
                 quality_threshold=self._params["quality_threshold"],
+                get_limits=self._dlg._get_limits,
             )
             self.finished_ok.emit(cal)
         except Exception as e:  # noqa: BLE001 - surface to UI
-            logger.exception("Pixel calibration sweep failed")
+            # Expected, user-actionable failures (e.g. not enough travel) get a
+            # clean one-line log + a dialog; the traceback stays at debug level.
+            logger.error("Pixel calibration sweep failed: %s", e)
+            logger.debug("sweep failure traceback", exc_info=True)
             self.failed.emit(str(e))
 
     def _grab_frame(self) -> np.ndarray:
@@ -249,6 +253,24 @@ class PixelCalibratorDialog(PersistentDialog):
         if val is None:
             raise RuntimeError(f"Could not read stage {axis} position")
         return float(val)
+
+    def _get_limits(self, axis: str):
+        """Soft limits ``(min_mm, max_mm)`` for an axis, or None if unavailable.
+
+        Lets the sweep plan moves that stay within the stage range instead of
+        commanding an out-of-bounds move (which the stage layer hard-rejects).
+        """
+        mc = self._movement_controller()
+        pc = getattr(mc, "position_controller", None) if mc else None
+        if pc is None:
+            return None
+        try:
+            lim = pc.get_stage_limits().get(axis.lower())
+            if lim is not None:
+                return (float(lim["min"]), float(lim["max"]))
+        except Exception:  # noqa: BLE001 - unknown limits -> caller falls back
+            return None
+        return None
 
     # ================================================================
     # Live frame

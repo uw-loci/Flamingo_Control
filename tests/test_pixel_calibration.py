@@ -113,20 +113,38 @@ class _FakeStage:
     content shift, exactly the relationship the calibrator should recover.
     """
 
-    def __init__(self, texture: np.ndarray, M: np.ndarray, origin=(10.0, 12.0)):
+    def __init__(
+        self, texture: np.ndarray, M: np.ndarray, origin=(10.0, 12.0), limits=None
+    ):
         self.tex = texture
         self.M = M
         self.x, self.y = origin
         self.ox, self.oy = origin
+        # {'x': (lo, hi), 'y': (lo, hi)} or None. When set, an out-of-range move
+        # raises ValueError, mirroring position_controller.move_x/move_y.
+        self.limits = limits
 
     def move_relative(self, axis: str, delta_mm: float) -> None:
+        target = (self.x if axis == "x" else self.y) + delta_mm
+        if self.limits and axis in self.limits:
+            lo, hi = self.limits[axis]
+            if not (lo <= target <= hi):
+                raise ValueError(
+                    f"{axis} position {target:.3f}mm is outside valid range "
+                    f"[{lo:.3f}, {hi:.3f}]"
+                )
         if axis == "x":
-            self.x += delta_mm
+            self.x = target
         elif axis == "y":
-            self.y += delta_mm
+            self.y = target
 
     def get_position(self, axis: str) -> float:
         return self.x if axis == "x" else self.y
+
+    def get_limits(self, axis: str):
+        if self.limits and axis in self.limits:
+            return self.limits[axis]
+        return None
 
     def grab_frame(self) -> np.ndarray:
         dx, dy = self.x - self.ox, self.y - self.oy
@@ -168,6 +186,60 @@ class TestSweep(unittest.TestCase):
                 px_um,
                 delta=0.05,
             )
+
+
+class TestSweepLimits(unittest.TestCase):
+    """The sweep must stay within stage soft limits and never crash on a move."""
+
+    @staticmethod
+    def _identity_M(px_um: float = 1.30) -> np.ndarray:
+        s = px_um / 1000.0
+        return (1.0 / s) * np.eye(2)
+
+    def test_flips_direction_near_limit(self):
+        # Origin Y near the max of a 5..25 range; a +Y sweep would overrun, so
+        # the planner must flip to -Y. No exception, and the stage returns home.
+        stage = _FakeStage(
+            _texture(512, seed=9),
+            self._identity_M(),
+            origin=(15.0, 24.96),
+            limits={"x": (5.0, 25.0), "y": (5.0, 25.0)},
+        )
+        with tempfile.TemporaryDirectory() as d:
+            svc = PixelCalibrationService(calibration_file=str(Path(d) / "cal.json"))
+            cal = svc.run_sweep(
+                move_relative=stage.move_relative,
+                get_position=stage.get_position,
+                grab_frame=stage.grab_frame,
+                get_limits=stage.get_limits,
+                nominal_move_um=40.0,
+                crop=384,
+            )
+            self.assertIsNotNone(cal)
+            self.assertAlmostEqual(cal.pixel_size_x_um, 1.30, delta=0.1)
+            # Returned to origin (no out-of-range exception aborted the finally).
+            self.assertAlmostEqual(stage.x, 15.0, places=6)
+            self.assertAlmostEqual(stage.y, 24.96, places=6)
+
+    def test_not_enough_travel_raises_clean_message(self):
+        stage = _FakeStage(
+            _texture(64, seed=1),
+            self._identity_M(),
+            origin=(10.0, 10.0),
+            limits={"x": (9.999, 10.001), "y": (9.999, 10.001)},
+        )
+        with tempfile.TemporaryDirectory() as d:
+            svc = PixelCalibrationService(calibration_file=str(Path(d) / "cal.json"))
+            with self.assertRaises(RuntimeError) as ctx:
+                svc.run_sweep(
+                    move_relative=stage.move_relative,
+                    get_position=stage.get_position,
+                    grab_frame=stage.grab_frame,
+                    get_limits=stage.get_limits,
+                    nominal_move_um=40.0,
+                    crop=48,
+                )
+            self.assertIn("Not enough stage travel", str(ctx.exception))
 
 
 class TestConfigPatch(unittest.TestCase):
