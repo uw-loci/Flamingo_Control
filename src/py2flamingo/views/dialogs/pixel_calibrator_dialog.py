@@ -152,6 +152,11 @@ class PixelCalibratorDialog(PersistentDialog):
         self._quality_spin.setRange(0.0, 1.0)
         self._quality_spin.setSingleStep(0.05)
         self._quality_spin.setValue(0.30)
+        self._quality_spin.setToolTip(
+            "Minimum normalized cross-correlation (0–1) between the reference and "
+            "the moved frame for a step to be used. Real samples typically score "
+            "~0.5–0.7; lower this if good steps are being dropped."
+        )
         form.addRow("Min quality:", self._quality_spin)
         self._settle_spin = QDoubleSpinBox()
         self._settle_spin.setRange(0.0, 5.0)

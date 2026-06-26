@@ -116,7 +116,13 @@ class PixelCalibrationService:
             except TypeError:  # older skimage without the kwarg
                 shift, error, _ = phase_cross_correlation(ref, mov, upsample_factor=100)
             dy, dx = float(shift[0]), float(shift[1])
-            quality = float(max(0.0, 1.0 - error))
+            # skimage's `error` (normalization=None) is sqrt(1 - NCC^2), where NCC
+            # is the normalized cross-correlation at the detected shift. Report NCC
+            # itself as the quality: the standard, interpretable match confidence.
+            # The old `1 - error` was far too pessimistic on real data — a perfectly
+            # good NCC≈0.66 match scored only 0.25 and was dropped by a 0.3 cutoff,
+            # which made every move on a real (brain-edge) sample fail.
+            quality = float(np.sqrt(max(0.0, 1.0 - float(error) * float(error))))
         except Exception:
             dy, dx, quality = cls._fft_cross_correlation(ref, mov)
 
@@ -128,19 +134,28 @@ class PixelCalibrationService:
     def _fft_cross_correlation(
         ref: np.ndarray, mov: np.ndarray
     ) -> Tuple[float, float, float]:
-        """Integer-pixel shift via normalized FFT cross-correlation."""
+        """Integer-pixel shift via FFT cross-correlation.
+
+        Shift is located from the phase-correlation peak (sharp, unambiguous);
+        quality is the normalized cross-correlation coefficient (NCC, 0..1) at
+        that shift, to match the skimage path's metric.
+        """
         f = np.fft.fft2(ref)
         g = np.fft.fft2(mov)
-        r = f * np.conj(g)
-        r /= np.abs(r) + 1e-12  # phase correlation
-        corr = np.fft.ifft2(r).real
-        peak = np.unravel_index(int(np.argmax(corr)), corr.shape)
-        h, w = corr.shape
+        cross = f * np.conj(g)
+        # Phase correlation (whitened) for a sharp peak -> shift.
+        phase = cross / (np.abs(cross) + 1e-12)
+        pcorr = np.fft.ifft2(phase).real
+        peak = np.unravel_index(int(np.argmax(pcorr)), pcorr.shape)
+        h, w = pcorr.shape
         dy = peak[0] if peak[0] <= h // 2 else peak[0] - h
         dx = peak[1] if peak[1] <= w // 2 else peak[1] - w
-        # Quality: peak height relative to the correlation's std.
-        std = float(corr.std()) or 1e-12
-        quality = float(min(1.0, (corr.max() - corr.mean()) / (std * 10.0)))
+        # NCC at the detected shift = (un-whitened cross-correlation peak) /
+        # (||ref|| * ||mov||). Frames are mean-subtracted in _prep, so this is the
+        # Pearson correlation coefficient.
+        cc = np.fft.ifft2(cross).real
+        denom = float(np.linalg.norm(ref) * np.linalg.norm(mov)) or 1e-12
+        quality = float(np.clip(cc[peak] / denom, 0.0, 1.0))
         return float(dy), float(dx), quality
 
     # ================================================================

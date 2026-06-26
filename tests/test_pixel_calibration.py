@@ -101,9 +101,27 @@ class TestMeasureShift(unittest.TestCase):
         sy, sx = 12.0, -7.0
         moved = ndimage.shift(ref, (sy, sx), order=1, mode="nearest")
         out_x, out_y, q = PixelCalibrationService.measure_shift(ref, moved, crop=384)
-        self.assertGreater(q, 0.5)
+        # Quality is now the normalized cross-correlation (NCC): a clean shift
+        # scores near 1 (the old 1 - error metric capped this around 0.86).
+        self.assertGreater(q, 0.9)
         self.assertAlmostEqual(out_x, sx, delta=0.5)
         self.assertAlmostEqual(out_y, sy, delta=0.5)
+
+    def test_degraded_match_still_clears_default_threshold(self):
+        # A real-data-like step: shifted content plus independent structure
+        # entering the frame lowers the correlation, but a correct shift must
+        # still clear the 0.3 default (the old metric wrongly dropped these).
+        rng = np.random.default_rng(11)
+        ref = _texture(512, seed=5)
+        sy, sx = 9.0, 9.0
+        shifted = ndimage.shift(ref, (sy, sx), order=1, mode="nearest")
+        intruder = ndimage.gaussian_filter(rng.random((512, 512)), 1.5) * 1500.0
+        moved = shifted + intruder  # degrade the match
+        out_x, out_y, q = PixelCalibrationService.measure_shift(ref, moved, crop=384)
+        self.assertGreater(q, 0.3)  # would be dropped under the old 1 - error
+        self.assertLess(q, 0.99)  # but clearly not a perfect match
+        self.assertAlmostEqual(out_x, sx, delta=1.0)
+        self.assertAlmostEqual(out_y, sy, delta=1.0)
 
 
 class _FakeStage:
