@@ -94,6 +94,53 @@ class TestFitMath(unittest.TestCase):
             PixelCalibrationService.fit_calibration(moves, 100, 100)
 
 
+class TestOutlierRejection(unittest.TestCase):
+    """fit_calibration drops a gross outlier step when there is redundancy."""
+
+    @staticmethod
+    def _good_moves(px_um=1.30):
+        M = np.eye(2) * (1000.0 / px_um)  # px/mm, no rotation
+        deltas = [(0.05, 0.0), (0.10, 0.0), (0.0, 0.05), (0.0, 0.10), (0.08, 0.08)]
+        moves = []
+        for dx, dy in deltas:
+            su, sv = M @ np.array([dx, dy])
+            moves.append(CalibrationMove(dx, dy, float(su), float(sv), 0.9))
+        return M, moves
+
+    def test_single_gross_outlier_dropped(self):
+        px_um = 1.30
+        M, moves = self._good_moves(px_um)
+        # A step whose measured shift is ~120 px off the true map (passed the
+        # quality cutoff but is wrong, e.g. an aperture-problem edge move).
+        su, sv = M @ np.array([0.06, 0.0])
+        moves.append(CalibrationMove(0.06, 0.0, float(su) + 120.0, float(sv), 0.5))
+
+        cal = PixelCalibrationService.fit_calibration(moves, 2048, 2048)
+        self.assertEqual(cal.n_points, 5)  # outlier removed
+        self.assertAlmostEqual(cal.pixel_size_x_um, px_um, delta=0.02)
+        self.assertAlmostEqual(cal.pixel_size_y_um, px_um, delta=0.02)
+        self.assertLess(cal.residual_px, 1.0)  # clean fit on the survivors
+
+    def test_no_trim_when_all_consistent(self):
+        _, moves = self._good_moves()
+        cal = PixelCalibrationService.fit_calibration(moves, 2048, 2048)
+        self.assertEqual(cal.n_points, 5)  # nothing dropped
+        self.assertLess(cal.residual_px, 1e-6)
+
+    def test_keeps_minimum_three_points(self):
+        # Only 3 points: no redundancy to spare, so a poor one is still kept.
+        px_um = 1.30
+        M = np.eye(2) * (1000.0 / px_um)
+        bad = M @ np.array([0.05, 0.05])
+        moves = [
+            CalibrationMove(0.10, 0.0, *(M @ np.array([0.10, 0.0])), 0.9),
+            CalibrationMove(0.0, 0.10, *(M @ np.array([0.0, 0.10])), 0.9),
+            CalibrationMove(0.05, 0.05, float(bad[0]) + 60.0, float(bad[1]), 0.5),
+        ]
+        cal = PixelCalibrationService.fit_calibration(moves, 2048, 2048)
+        self.assertEqual(cal.n_points, 3)
+
+
 class TestMeasureShift(unittest.TestCase):
     def test_shift_sign_and_magnitude(self):
         ref = _texture(512)

@@ -163,6 +163,30 @@ class PixelCalibrationService:
     # ================================================================
 
     @staticmethod
+    def _solve_map(D: np.ndarray, S: np.ndarray) -> np.ndarray:
+        """Least-squares 2x2 stage->pixel map M (px/mm) for ``S = D @ M^T``.
+
+        Raises ValueError if the moves are collinear (rank-deficient) or the
+        resulting map is singular.
+        """
+        if np.linalg.matrix_rank(D, tol=1e-9) < 2:
+            raise ValueError(
+                "Stage moves are collinear; need moves along two independent "
+                "directions (e.g. X and Y) to solve the 2-D map."
+            )
+        mt, *_ = np.linalg.lstsq(D, S, rcond=None)
+        M = mt.T
+        if abs(np.linalg.det(M)) < 1e-12:
+            raise ValueError("Degenerate fit (singular map); check measurements.")
+        return M
+
+    @staticmethod
+    def _per_move_residuals(D: np.ndarray, S: np.ndarray, M: np.ndarray) -> np.ndarray:
+        """Per-move residual magnitude (px) of predicted vs measured shift."""
+        pred = D @ M.T
+        return np.sqrt(np.sum((pred - S) ** 2, axis=1))
+
+    @staticmethod
     def fit_calibration(
         moves: Sequence[CalibrationMove],
         image_width: int,
@@ -175,25 +199,53 @@ class PixelCalibrationService:
         Requires >= 2 non-collinear moves. Solves ``S = D @ M^T`` in a
         least-squares sense (D = stage deltas mm, S = pixel shifts), then
         derives X/Y pixel size, rotation, shear, and the RMS residual.
+
+        A single bad step (e.g. an edge-parallel "aperture problem" move that
+        slipped past the quality cutoff) can skew the whole fit, so when there is
+        redundancy we iteratively drop the worst-fitting move while it is a clear
+        outlier (robust MAD test + an absolute floor) and at least 3 moves remain.
         """
         if len(moves) < 2:
             raise ValueError(f"Need >= 2 moves to fit, have {len(moves)}")
 
+        moves = list(moves)
+        D_all = np.array([[m.dx_mm, m.dy_mm] for m in moves], dtype=np.float64)
+        S_all = np.array(
+            [[m.shift_x_px, m.shift_y_px] for m in moves], dtype=np.float64
+        )
+
+        # Iteratively trim outliers. Keep >= 3 points (so the fit stays
+        # over-determined); never trim below that or break non-collinearity.
+        idx = list(range(len(moves)))
+        while len(idx) > 3:
+            D, S = D_all[idx], S_all[idx]
+            try:
+                M_try = PixelCalibrationService._solve_map(D, S)
+            except ValueError:
+                break
+            r = PixelCalibrationService._per_move_residuals(D, S, M_try)
+            med = float(np.median(r))
+            spread = max(float(np.median(np.abs(r - med))) * 1.4826, 0.5)
+            worst = int(np.argmax(r))
+            # Outlier only if it stands well above the rest AND is more than a
+            # pixel or so off (don't trim already sub-pixel-accurate fits).
+            if not (r[worst] > med + 3.0 * spread and r[worst] > 1.5):
+                break
+            trial = idx[:worst] + idx[worst + 1 :]
+            if np.linalg.matrix_rank(D_all[trial], tol=1e-9) < 2:
+                break  # dropping it would make the rest collinear
+            logger.info(
+                "[pixel-cal] dropping outlier move (residual %.2f px, others ~%.2f)",
+                float(r[worst]),
+                med,
+            )
+            idx = trial
+
+        moves = [moves[i] for i in idx]
         D = np.array([[m.dx_mm, m.dy_mm] for m in moves], dtype=np.float64)
         S = np.array([[m.shift_x_px, m.shift_y_px] for m in moves], dtype=np.float64)
 
-        if np.linalg.matrix_rank(D, tol=1e-9) < 2:
-            raise ValueError(
-                "Stage moves are collinear; need moves along two independent "
-                "directions (e.g. X and Y) to solve the 2-D map."
-            )
-
-        # M^T = lstsq(D, S)  ->  M is 2x2 px/mm (stage delta -> pixel shift).
-        mt, *_ = np.linalg.lstsq(D, S, rcond=None)
-        M = mt.T  # 2x2
-
-        if abs(np.linalg.det(M)) < 1e-12:
-            raise ValueError("Degenerate fit (singular map); check measurements.")
+        M = PixelCalibrationService._solve_map(D, S)
         P = np.linalg.inv(M)  # mm/px
 
         # Pixel sizes = length of each image-axis basis vector in stage space.
