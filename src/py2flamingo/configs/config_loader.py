@@ -34,6 +34,12 @@ _CONFIGS_DIR = Path(__file__).parent
 # Cached singleton — loaded once per process
 _hardware_config: Optional["HardwareConfig"] = None
 
+# Live camera AOI (width, height) in pixels, pushed from the camera service as
+# frames arrive (and on explicit image-size queries). Overlaid onto
+# HardwareConfig so FOV-derived acquisition sizing tracks a cropped sensor.
+# None until the camera reports a size.
+_camera_aoi: Optional["tuple[int, int]"] = None
+
 
 @dataclass
 class HardwareConfig:
@@ -67,6 +73,14 @@ class HardwareConfig:
     # set it overrides the magnification-derived pixel size (it is the most
     # accurate source).
     pixel_size_override_um: Optional[float] = None
+    # Live camera AOI (active area of interest) in pixels. The camera can be
+    # cropped (e.g. 1024x1024 for the low-mag light sheet) on the Mac C++ side
+    # or via our Live AOI control. Pixel size is AOI-independent, but the field
+    # of view is AOI x pixel_size, so anything that *sizes an acquisition* by
+    # FOV (tiling, scan area, jog steps) must use the active AOI, not the full
+    # sensor. None => not yet known; callers fall back to the full sensor.
+    aoi_width_px: Optional[int] = None
+    aoi_height_px: Optional[int] = None
 
     # Channel wavelengths
     channel_wavelengths_nm: Dict[int, float] = field(
@@ -108,14 +122,40 @@ class HardwareConfig:
         return self.sensor_pixel_size_um / self.system_magnification
 
     @property
+    def active_width_px(self) -> int:
+        """Active image width (px): the live AOI when known, else full sensor."""
+        return int(self.aoi_width_px) if self.aoi_width_px else self.sensor_width_px
+
+    @property
+    def active_height_px(self) -> int:
+        """Active image height (px): the live AOI when known, else full sensor."""
+        return int(self.aoi_height_px) if self.aoi_height_px else self.sensor_height_px
+
+    @property
     def fov_mm(self) -> float:
-        """Field of view in mm (sensor_width * effective_pixel_size / 1000)."""
-        return self.sensor_width_px * self.effective_pixel_size_um / 1000.0
+        """Field of view (width) in mm at the *active AOI*.
+
+        ``active_width_px * effective_pixel_size``. Tracks a cropped sensor so
+        acquisition sizing (tiling, scan area, jog steps) stays correct; use
+        :attr:`fov_full_sensor_mm` for acquisitions that always use the whole
+        frame (e.g. the LED overview).
+        """
+        return self.active_width_px * self.effective_pixel_size_um / 1000.0
+
+    @property
+    def fov_height_mm(self) -> float:
+        """Field of view (height) in mm at the active AOI."""
+        return self.active_height_px * self.effective_pixel_size_um / 1000.0
 
     @property
     def fov_um(self) -> float:
-        """Field of view in micrometers."""
+        """Field of view (width) in micrometers at the active AOI."""
         return self.fov_mm * 1000.0
+
+    @property
+    def fov_full_sensor_mm(self) -> float:
+        """Field of view (width) in mm across the full sensor, ignoring crop."""
+        return self.sensor_width_px * self.effective_pixel_size_um / 1000.0
 
     @property
     def optics_signature(self) -> str:
@@ -318,6 +358,12 @@ def _apply_optics_overlays(cfg: HardwareConfig) -> None:
                 cur_sig,
             )
 
+    # Overlay the live camera AOI (crop) so the field of view tracks it. Pixel
+    # size is AOI-independent, so this is deliberately separate from the optics
+    # overlays above and never affects the optics signature.
+    if _camera_aoi:
+        cfg.aoi_width_px, cfg.aoi_height_px = _camera_aoi
+
 
 def invalidate_hardware_config() -> None:
     """Drop the cached HardwareConfig so the next call re-reads all sources.
@@ -327,6 +373,35 @@ def invalidate_hardware_config() -> None:
     """
     global _hardware_config
     _hardware_config = None
+
+
+def set_camera_aoi(width: int, height: int) -> None:
+    """Record the live camera AOI (pixels) and refresh FOV-derived values.
+
+    Called by the camera service whenever it learns the active image size
+    (first live frame, or an explicit IMAGE_SIZE_GET) — this captures AOI
+    changes made on the Mac C++ side as well as via our Live AOI control.
+    Invalidates the cached :class:`HardwareConfig` so the next
+    :func:`get_hardware_config` reflects the new field of view. No-op when the
+    size is unchanged or non-positive.
+    """
+    global _camera_aoi
+    try:
+        w, h = int(width), int(height)
+    except (TypeError, ValueError):
+        return
+    if w <= 0 or h <= 0:
+        return
+    if _camera_aoi == (w, h):
+        return
+    _camera_aoi = (w, h)
+    logger.info("Camera AOI set to %dx%d px; field of view will track the crop", w, h)
+    invalidate_hardware_config()
+
+
+def get_camera_aoi() -> Optional["tuple[int, int]"]:
+    """Return the last-known live camera AOI (width, height) in px, or None."""
+    return _camera_aoi
 
 
 # ---------------------------------------------------------------------------

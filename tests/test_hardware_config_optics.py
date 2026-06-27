@@ -106,5 +106,62 @@ class TestOpticsOverlay(unittest.TestCase):
         self.assertAlmostEqual(hw2.system_magnification, 5.0, places=3)
 
 
+class TestCameraAoiFov(unittest.TestCase):
+    """The live camera AOI overlays onto the FOV (pixel size is AOI-independent)."""
+
+    def setUp(self):
+        self._cwd = os.getcwd()
+        self._tmp = tempfile.TemporaryDirectory()
+        os.chdir(self._tmp.name)
+        # Deterministic pixel size: objective 5x, tube == ref -> 1.3 µm/px.
+        _write_scope_settings(Path.cwd(), objective_mag=5.0, tube_mm=200.0)
+        config_loader._camera_aoi = None
+        config_loader.invalidate_hardware_config()
+
+    def tearDown(self):
+        os.chdir(self._cwd)
+        self._tmp.cleanup()
+        config_loader._camera_aoi = None
+        config_loader.invalidate_hardware_config()
+
+    def test_full_sensor_when_no_aoi(self):
+        hw = config_loader.get_hardware_config(force_reload=True)
+        self.assertEqual(hw.active_width_px, hw.sensor_width_px)
+        self.assertAlmostEqual(hw.fov_mm, hw.fov_full_sensor_mm, places=6)
+        self.assertAlmostEqual(hw.fov_mm, 2048 * 1.3 / 1000.0, places=4)
+
+    def test_crop_halves_fov_but_not_pixel_size(self):
+        config_loader.set_camera_aoi(1024, 1024)  # invalidates internally
+        hw = config_loader.get_hardware_config()
+        self.assertEqual(hw.active_width_px, 1024)
+        self.assertAlmostEqual(hw.fov_mm, 1024 * 1.3 / 1000.0, places=4)
+        self.assertAlmostEqual(hw.fov_height_mm, 1024 * 1.3 / 1000.0, places=4)
+        # Pixel size and full-sensor FOV are unchanged by the crop.
+        self.assertAlmostEqual(hw.effective_pixel_size_um, 1.3, places=3)
+        self.assertAlmostEqual(hw.fov_full_sensor_mm, 2048 * 1.3 / 1000.0, places=4)
+
+    def test_aoi_does_not_change_optics_signature(self):
+        sig0 = config_loader.get_hardware_config(force_reload=True).optics_signature
+        config_loader.set_camera_aoi(1024, 1024)
+        sig1 = config_loader.get_hardware_config().optics_signature
+        self.assertEqual(sig0, sig1)
+
+    def test_setter_invalidates_cache(self):
+        hw0 = config_loader.get_hardware_config(force_reload=True)
+        config_loader.set_camera_aoi(1024, 1024)
+        # No explicit force_reload — the setter must have dropped the cache.
+        self.assertIsNot(config_loader.get_hardware_config(), hw0)
+        self.assertEqual(config_loader.get_camera_aoi(), (1024, 1024))
+
+    def test_noop_on_invalid_or_unchanged(self):
+        config_loader.set_camera_aoi(1024, 1024)
+        hw = config_loader.get_hardware_config()
+        # Same value -> cache not dropped.
+        self.assertIs(config_loader.get_hardware_config(), hw)
+        # Non-positive -> ignored.
+        config_loader.set_camera_aoi(0, 512)
+        self.assertEqual(config_loader.get_camera_aoi(), (1024, 1024))
+
+
 if __name__ == "__main__":
     unittest.main()

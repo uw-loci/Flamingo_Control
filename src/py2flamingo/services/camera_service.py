@@ -157,6 +157,21 @@ class CameraService(MicroscopeCommandService):
         # Cached image size from live streaming (when camera query returns 0x0)
         self._cached_image_size: Optional[Tuple[int, int]] = None
 
+    def _note_image_size(self, width: int, height: int) -> None:
+        """Cache the active image size and publish it to the hardware config.
+
+        The camera AOI can change (Mac C++ side or our Live AOI control); FOV
+        sizing for tiling/scan-area/jogs must track it. Best-effort: never
+        raises from this path (it runs in the live-stream loop).
+        """
+        self._cached_image_size = (width, height)
+        try:
+            from py2flamingo.configs.config_loader import set_camera_aoi
+
+            set_camera_aoi(width, height)
+        except Exception:
+            self.logger.debug("could not publish camera AOI to config", exc_info=True)
+
     def get_image_size(self) -> Tuple[int, int]:
         """
         Get camera image dimensions in pixels.
@@ -201,7 +216,7 @@ class CameraService(MicroscopeCommandService):
                 self.logger.warning("Camera returned 0x0 and no cached size available")
         else:
             # Update cache with fresh value
-            self._cached_image_size = (width, height)
+            self._note_image_size(width, height)
 
         self.logger.info(f"Camera image size: {width}x{height} pixels")
         return (width, height)
@@ -899,12 +914,11 @@ class CameraService(MicroscopeCommandService):
                     self.logger.info(
                         f"First frame received! Size: {header.image_width}x{header.image_height}, {header.image_size} bytes"
                     )
-                    # Cache the image size for later use when query returns 0x0
+                    # Cache the image size for later use when query returns 0x0,
+                    # and publish it so FOV-derived sizing tracks the live AOI
+                    # (incl. crops set on the Mac C++ side).
                     if header.image_width > 0 and header.image_height > 0:
-                        self._cached_image_size = (
-                            header.image_width,
-                            header.image_height,
-                        )
+                        self._note_image_size(header.image_width, header.image_height)
                         self.logger.debug(
                             f"Cached image size: {header.image_width}x{header.image_height}"
                         )

@@ -153,19 +153,26 @@ class TilingPanel(QWidget):
         self._end_y_label = QLabel("+5.53 mm")
         grid.addWidget(self._end_y_label, 5, 3)
 
-        # Info text
-        info_label = QLabel(
-            "Tile scan will acquire a mosaic of images. "
-            "End position is calculated from start position + scan area."
-        )
-        info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: gray; font-size: 9pt;")
-        grid.addWidget(info_label, 6, 0, 1, 4)
+        # Info text (also reports the live per-tile camera FOV / AOI so the
+        # field of view is visible when sizing an acquisition).
+        self._info_label = QLabel()
+        self._info_label.setWordWrap(True)
+        self._info_label.setStyleSheet("color: gray; font-size: 9pt;")
+        grid.addWidget(self._info_label, 6, 0, 1, 4)
 
         group.setLayout(grid)
         layout.addWidget(group)
 
         # Initial calculation
+        self._update_calculations()
+
+    def refresh(self) -> None:
+        """Recompute the scan area / tile FOV from the current hardware config.
+
+        Call when the camera AOI may have changed (e.g. after applying a new
+        Live AOI, or when the panel becomes visible) so the displayed field of
+        view and scan-area estimates track the live crop.
+        """
         self._update_calculations()
 
     def _on_settings_changed(self) -> None:
@@ -202,6 +209,28 @@ class TilingPanel(QWidget):
 
         self._end_x_label.setText(f"+{scan_x_mm:.2f} mm")
         self._end_y_label.setText(f"+{scan_y_mm:.2f} mm")
+
+        self._info_label.setText(self._info_text(tile_size_um))
+
+    def _info_text(self, tile_size_um: float) -> str:
+        """Status line: the per-tile camera FOV and the AOI it derives from."""
+        base = (
+            "Tile scan acquires a mosaic of images; end position = start "
+            "+ scan area. "
+        )
+        if self._tile_size_override_um is not None:
+            return base + f"Tile FOV (pinned): {tile_size_um / 1000.0:.4f} mm."
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            hw = get_hardware_config()
+            aoi = "full sensor" if hw.aoi_width_px is None else "cropped AOI"
+            return base + (
+                f"Tile FOV: {hw.fov_mm:.4f} × {hw.fov_height_mm:.4f} mm "
+                f"@ {hw.active_width_px}×{hw.active_height_px} px ({aoi})."
+            )
+        except Exception:  # noqa: BLE001 - keep the panel alive without config
+            return base + f"Tile FOV: {tile_size_um / 1000.0:.4f} mm."
 
     def get_settings(self) -> TileSettings:
         """

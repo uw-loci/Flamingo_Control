@@ -1019,7 +1019,9 @@ class LED2DOverviewResultWindow(PersistentWidget):
         try:
             from py2flamingo.configs.config_loader import get_hardware_config
 
-            fov = get_hardware_config().fov_mm
+            # The LED overview is acquired full-frame, so use the full-sensor FOV
+            # even when the live camera is cropped to a smaller AOI.
+            fov = get_hardware_config().fov_full_sensor_mm
         except Exception:
             fov = 0.5182  # mm fallback
 

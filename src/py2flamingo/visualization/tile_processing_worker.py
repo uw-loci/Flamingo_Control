@@ -271,15 +271,15 @@ class TileProcessingWorker(QObject):
         H, W = first_frame.shape
         y_indices, x_indices = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
 
+        # Pixel size is AOI-independent (a crop changes the FOV, not µm/px), so
+        # use it directly rather than FOV/W — the latter is wrong whenever the
+        # data's frame width W differs from the full sensor (i.e. cropped AOI).
         try:
             from py2flamingo.configs.config_loader import get_hardware_config
 
-            _hw = get_hardware_config()
-            FOV_mm = _hw.fov_mm
+            pixel_size_um = get_hardware_config().effective_pixel_size_um
         except Exception:
-            FOV_mm = 0.5182
-        FOV_um = FOV_mm * 1000
-        pixel_size_um = FOV_um / W
+            pixel_size_um = 0.5182 * 1000 / W  # legacy full-frame fallback
 
         camera_x = (x_indices - W / 2) * pixel_size_um
         camera_y = (y_indices - H / 2) * pixel_size_um
