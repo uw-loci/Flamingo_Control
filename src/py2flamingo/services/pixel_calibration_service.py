@@ -473,6 +473,81 @@ class PixelCalibrationService:
         )
         return cal
 
+    # ================================================================
+    # Magnification / field-of-view report
+    # ================================================================
+
+    def magnification_report(
+        self,
+        calibration: Optional[PixelCalibration] = None,
+        hardware_config=None,
+    ) -> dict:
+        """Derive the magnification and field of view implied by a calibration.
+
+        The acquisition server (and its automatic tiling) sizes each tile from
+        the **objective magnification** it is told. If that estimate is wrong,
+        the computed field of view is wrong and adjacent tiles are spaced
+        incorrectly — too-low a magnification overestimates the FOV and leaves
+        gaps between tiles. This turns the measured sample-plane pixel size into
+        the magnification numbers to enter server-side, plus the field of view
+        (the convention-independent figure that actually drives tile spacing).
+
+        Returns a dict with:
+
+        * ``objective_magnification`` — value for the server's *Objective lens
+          magnification* (folds out the tube-lens factor, matching this app's
+          and ``config_loader``'s convention).
+        * ``system_magnification`` — total magnification (= ``sensor /
+          measured``); use this if the server treats its magnification field as
+          ``sensor_pixel / mag`` directly (no separate tube-lens term).
+        * ``fov_x_mm`` / ``fov_y_mm`` — field of view at the calibration's AOI.
+        * ``full_sensor_fov_x_mm`` / ``..._y_mm`` — FOV across the full sensor
+          (AOI-independent), for comparison with the server's tile pitch.
+        * the sensor pixel size, tube ratio, AOI, and the previous objective
+          magnification (for an old→new comparison).
+        """
+        cal = calibration or self._calibration
+        if cal is None:
+            raise ValueError("No calibration available for a magnification report")
+
+        hw = hardware_config
+        if hw is None:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            hw = get_hardware_config()
+
+        sensor = float(getattr(hw, "sensor_pixel_size_um", 6.5))
+        tube = float(getattr(hw, "tube_lens_focal_length_mm", 200.0))
+        ref = float(getattr(hw, "reference_tube_lens_mm", 200.0)) or 200.0
+        tube_ratio = (tube / ref) if ref else 1.0
+        sensor_w = int(getattr(hw, "sensor_width_px", 2048))
+        sensor_h = int(getattr(hw, "sensor_height_px", 2048))
+
+        measured = float(cal.mean_pixel_size_um)
+        system_mag = sensor / measured if measured > 1e-9 else float("nan")
+        objective_mag = system_mag / tube_ratio if tube_ratio else float("nan")
+
+        width = int(cal.image_width) or sensor_w
+        height = int(cal.image_height) or sensor_h
+
+        return {
+            "measured_pixel_um": measured,
+            "pixel_size_x_um": float(cal.pixel_size_x_um),
+            "pixel_size_y_um": float(cal.pixel_size_y_um),
+            "sensor_pixel_um": sensor,
+            "tube_ratio": tube_ratio,
+            "system_magnification": system_mag,
+            "objective_magnification": objective_mag,
+            "previous_objective_magnification": float(
+                getattr(hw, "objective_magnification", 0.0)
+            ),
+            "aoi_px": (width, height),
+            "fov_x_mm": width * float(cal.pixel_size_x_um) / 1000.0,
+            "fov_y_mm": height * float(cal.pixel_size_y_um) / 1000.0,
+            "full_sensor_fov_x_mm": sensor_w * measured / 1000.0,
+            "full_sensor_fov_y_mm": sensor_h * measured / 1000.0,
+        }
+
     def calibrate_z(self, *args, **kwargs):  # pragma: no cover - deferred
         """TODO: Z (axial) pixel-size calibration.
 
@@ -608,7 +683,9 @@ class PixelCalibrationService:
                     "new": new_mag,
                     "note": (
                         f"Set so derived effective_pixel_size_um = {measured} µm "
-                        f"(sensor {sensor} µm, tube/ref {tube}/{ref})."
+                        f"(sensor {sensor} µm, tube/ref {tube}/{ref}). This is the "
+                        f"'Objective lens magnification' to enter on the acquisition "
+                        f"server so its automatic tiling spaces tiles correctly."
                     ),
                 }
             )

@@ -408,7 +408,7 @@ class PixelCalibratorDialog(PersistentDialog):
         QMessageBox.critical(self, "Calibration failed", err)
 
     def _show_result(self, cal: PixelCalibration):
-        self._result_label.setText(
+        text = (
             f"<b>Pixel size:  X = {cal.pixel_size_x_um:.4f}   "
             f"Y = {cal.pixel_size_y_um:.4f} µm/px</b>  "
             f"(mean {cal.mean_pixel_size_um:.4f})<br>"
@@ -418,6 +418,8 @@ class PixelCalibratorDialog(PersistentDialog):
             f"Residual: {cal.residual_px:.2f} px   "
             f"Points: {cal.n_points}   Min quality: {cal.min_quality:.2f}"
         )
+        text += self._magnification_html(cal)
+        self._result_label.setText(text)
         self._table.setRowCount(len(cal.moves))
         for r, m in enumerate(cal.moves):
             vals = [
@@ -430,6 +432,36 @@ class PixelCalibratorDialog(PersistentDialog):
             ]
             for c, v in enumerate(vals):
                 self._table.setItem(r, c, QTableWidgetItem(str(v)))
+
+    def _magnification_html(self, cal: PixelCalibration) -> str:
+        """A magnification / FOV block for the result label, or '' on failure.
+
+        Turns the measured pixel size into the magnification to enter on the
+        acquisition server (whose automatic tiling needs it to space tiles
+        correctly) plus the resulting field of view.
+        """
+        try:
+            rep = self.service.magnification_report(cal)
+        except Exception as e:  # noqa: BLE001 - report is advisory, never fatal
+            logger.debug("magnification report unavailable: %s", e)
+            return ""
+        prev = rep["previous_objective_magnification"]
+        prev_str = f"  (was {prev:.3f})" if prev else ""
+        wpx, hpx = rep["aoi_px"]
+        return (
+            "<br><br><b>Magnification (for the acquisition server)</b><br>"
+            f"Objective lens magnification: <b>{rep['objective_magnification']:.3f}×</b>"
+            f"{prev_str}<br>"
+            f"<span style='color:#888'>System magnification "
+            f"{rep['system_magnification']:.3f}× "
+            f"(sensor {rep['sensor_pixel_um']:.3f} µm, tube/ref "
+            f"{rep['tube_ratio']:.3f})</span><br>"
+            f"Field of view @ {wpx}×{hpx} px AOI: "
+            f"{rep['fov_x_mm']:.4f} × {rep['fov_y_mm']:.4f} mm<br>"
+            f"<span style='color:#888'>Full sensor: "
+            f"{rep['full_sensor_fov_x_mm']:.4f} × "
+            f"{rep['full_sensor_fov_y_mm']:.4f} mm</span>"
+        )
 
     # ================================================================
     # Save / patch

@@ -362,5 +362,63 @@ class TestConfigPatch(unittest.TestCase):
             self.assertIn("tube_lens_focal_length_mm: 321.0", hw_txt)
 
 
+class TestMagnificationReport(unittest.TestCase):
+    """magnification_report turns measured pixel size into server magnification."""
+
+    class _HW:
+        sensor_pixel_size_um = 6.5
+        sensor_width_px = 2048
+        sensor_height_px = 2048
+        objective_magnification = 5.0
+        tube_lens_focal_length_mm = 321.0
+        reference_tube_lens_mm = 200.0
+
+    def _make_cal(self):
+        # ~1.30 µm/px isotropic at 2048², via two orthogonal moves.
+        moves = [
+            CalibrationMove(0.10, 0.0, 0.10 / 1.30e-3, 0.0, 0.9),
+            CalibrationMove(0.0, 0.10, 0.0, 0.10 / 1.30e-3, 0.9),
+        ]
+        return PixelCalibrationService.fit_calibration(moves, 2048, 2048)
+
+    def test_report_matches_patch_convention(self):
+        svc = PixelCalibrationService(
+            calibration_file=str(Path(tempfile.gettempdir()) / "mag_cal.json")
+        )
+        cal = self._make_cal()
+        rep = svc.magnification_report(cal, hardware_config=self._HW())
+        # system mag = 6.5 / 1.30 = 5.0
+        self.assertAlmostEqual(rep["system_magnification"], 5.0, places=2)
+        # objective mag = 5.0 / (321/200) = 3.115...  (matches propose_config_patch)
+        self.assertAlmostEqual(rep["objective_magnification"], 3.115, places=2)
+        # FOV at full 2048 AOI = 2048 * 1.30 / 1000 = 2.6624 mm
+        self.assertAlmostEqual(rep["fov_x_mm"], 2.6624, places=3)
+        self.assertAlmostEqual(rep["full_sensor_fov_x_mm"], 2.6624, places=3)
+        self.assertEqual(rep["aoi_px"], (2048, 2048))
+        self.assertAlmostEqual(rep["previous_objective_magnification"], 5.0)
+
+    def test_objective_mag_equals_patch_value(self):
+        """The displayed objective mag must equal what Patch Configs writes."""
+        with tempfile.TemporaryDirectory() as d:
+            cdir = Path(d)
+            (cdir / "microscope_hardware.yaml").write_text(
+                "camera:\n"
+                "  sensor_pixel_size_um: 6.5\n"
+                "optics:\n"
+                "  objective_magnification: 5.0\n"
+                "  tube_lens_focal_length_mm: 321.0\n"
+                "  reference_tube_lens_mm: 200.0\n"
+            )
+            svc = PixelCalibrationService(calibration_file=str(cdir / "cal.json"))
+            cal = self._make_cal()
+            rep = svc.magnification_report(cal, hardware_config=self._HW())
+            patches = {p["key"]: p for p in svc.propose_config_patch(cal, cdir)}
+            self.assertAlmostEqual(
+                rep["objective_magnification"],
+                patches["objective_magnification"]["new"],
+                places=2,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
