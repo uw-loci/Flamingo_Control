@@ -78,6 +78,14 @@ fps = camera_service.get_frame_rate()
 - `error_occurred(str)`: Error message
 - `frame_rate_updated(float)`: FPS update
 
+> **State-sync note:** `stop_live_view()` also **disables all light sources**
+> (lasers + LED) via `laser_led_controller.disable_all_light_sources()`, which
+> emits `preview_disabled`. Together with `state_changed`, this keeps the Live
+> Viewer buttons, the Sample View live toggle, and the laser/LED panels in sync.
+> Any dialog that starts live view itself (e.g. the XY Pixel Calibrator) should
+> stop it again on close so the GUI reflects the real hardware state rather than a
+> stale "live + LED on".
+
 **Key Methods**:
 ```python
 # Control live view
@@ -106,10 +114,21 @@ frames = controller.get_buffered_frames()
 **Controls Group**:
 - Start/Stop Live View buttons
 - Exposure time spinbox (µs) with ms conversion
+- **Live AOI** combo (Full 2048 / 1024 / 512) + **Apply AOI** button
 - Auto-scale intensity checkbox
 - Min/Max intensity sliders (0-65535)
 - Crosshair toggle
 - Zoom control (100%-400%)
+
+**Live AOI (camera ROI)**:
+The Apply AOI button sets a **centered-square hardware ROI** on the camera so the
+low-res light sheet can run cropped (e.g. 1024², which looks much better than the
+full frame). This is a real PCO sensor crop, not a software crop. Applying it
+stops live view, sends the ROI, restarts live view, and shows the size the camera
+actually reports back (warning if it does not match the request). Implemented via
+`CameraService.set_centered_square_aoi(side, sensor_px)`, which sends the firmware
+`ROI_LEFT_SET` / `ROI_TOP_SET` commands (the PCO Edge enforces a symmetric ROI, so
+left+top insets define a centered square) and re-reads `IMAGE_SIZE_GET` to confirm.
 
 **Display Group**:
 - QLabel showing live image
