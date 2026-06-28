@@ -215,6 +215,10 @@ class FlamingoApplication(QObject):
         # Set app reference for save drive persistence
         self.workflow_view.set_app(self)
 
+        # Route live acquisition progress + run-state to the Workflow tab and
+        # Sample View, for direct Workflow-tab runs (not only queue runs).
+        self._wire_workflow_progress()
+
         # --- Voxel storage for 3D visualization ---
         self.logger.debug("Creating voxel storage for 3D visualization...")
         bundle = create_voxel_storage()
@@ -277,6 +281,70 @@ class FlamingoApplication(QObject):
         except Exception:
             # Fail open: better a stray push than silently swallowing a real error.
             return True
+
+    def _wire_workflow_progress(self) -> None:
+        """Wire acquisition progress + run-state to the Workflow tab / Sample View.
+
+        A workflow started directly from the Workflow tab does NOT go through the
+        WorkflowQueueService, so its progress callbacks were never registered and
+        nothing updated the progress bar or the Sample View status. Here we:
+          * register a persistent UI_SET_GAUGE_VALUE progress listener on every
+            connect, so the queue service emits ``workflow_progress`` for direct
+            runs too;
+          * feed that to the Workflow-tab progress bar and the Sample View;
+          * reflect workflow start/stop in the Sample View status label.
+        """
+        try:
+            qs = self.workflow_queue_service
+            if qs is not None and self.connection_view is not None:
+                self.connection_view.connection_established.connect(
+                    qs.register_progress_monitoring
+                )
+                self.connection_view.connection_closed.connect(
+                    qs.stop_progress_monitoring
+                )
+                # If already connected at wire time, start now.
+                if self.connection_service and self.connection_service.is_connected():
+                    qs.register_progress_monitoring()
+            if qs is not None:
+                qs.workflow_progress.connect(self._on_acquisition_progress)
+            if self.workflow_view is not None:
+                self.workflow_view.workflow_started.connect(
+                    self._on_workflow_run_started
+                )
+                self.workflow_view.workflow_stopped.connect(
+                    self._on_workflow_run_stopped
+                )
+        except Exception as e:  # noqa: BLE001 - wiring is best-effort
+            self.logger.warning(f"Failed to wire workflow progress: {e}")
+
+    def _on_acquisition_progress(self, acquired: int, expected: int) -> None:
+        """Forward an image-count progress callback to the workflow/sample UIs."""
+        pct = int(acquired / expected * 100) if expected > 0 else 0
+        pct = max(0, min(100, pct))
+        try:
+            if self.workflow_view is not None:
+                self.workflow_view.update_acquisition_progress(acquired, expected)
+            if self.sample_view is not None:
+                self.sample_view.update_workflow_progress(
+                    f"Acquiring {acquired}/{expected}", pct, None
+                )
+        except Exception:  # noqa: BLE001
+            self.logger.debug("progress UI update failed", exc_info=True)
+
+    def _on_workflow_run_started(self) -> None:
+        if self.sample_view is not None:
+            try:
+                self.sample_view.update_workflow_progress("Running...", 0, None)
+            except Exception:  # noqa: BLE001
+                self.logger.debug("sample-view start status failed", exc_info=True)
+
+    def _on_workflow_run_stopped(self) -> None:
+        if self.sample_view is not None:
+            try:
+                self.sample_view.update_workflow_progress("Not Running", 0, None)
+            except Exception:  # noqa: BLE001
+                self.logger.debug("sample-view stop status failed", exc_info=True)
 
     def _wire_notification_hooks(self) -> None:
         """Subscribe NotificationService to global signals + logging.

@@ -138,6 +138,12 @@ class WorkflowQueueService(QObject):
         self._completion_event = threading.Event()
         self._completion_data: Optional[Dict] = None
         self._workflow_running = False  # Set True when we confirm workflow is executing
+        # When True, the UI_SET_GAUGE_VALUE progress callback is registered
+        # persistently (across connects) so the UI updates for ANY running
+        # workflow, including a single direct run from the Workflow tab — not
+        # only queue runs. Coordinated with _register/_unregister_callbacks so
+        # the queue path doesn't double-register or tear it down.
+        self._progress_monitoring = False
 
         # Connection health tracking for poll-based reconnection
         self._consecutive_poll_failures = 0
@@ -489,6 +495,38 @@ class WorkflowQueueService(QObject):
             f"Acquiring... {acquired}/{expected} images",
         )
 
+    def register_progress_monitoring(self) -> None:
+        """Persistently listen for acquisition-progress callbacks.
+
+        Registers the ``UI_SET_GAUGE_VALUE`` (0x9004) handler so progress
+        signals are emitted for ANY running workflow — including a single direct
+        run started from the Workflow tab, which does not go through the queue.
+        Call once per connection (e.g. on connection-established); re-call after
+        a reconnect since the socket's callbacks are recreated. Idempotent within
+        a single connection.
+        """
+        if not self._connection_service:
+            return
+        try:
+            self._connection_service.register_callback(
+                UI_SET_GAUGE_VALUE, self._on_progress_update
+            )
+            self._progress_monitoring = True
+            logger.info("[QUEUE] Persistent acquisition-progress monitoring active")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Could not register progress monitoring: %s", e)
+
+    def stop_progress_monitoring(self) -> None:
+        """Drop the persistent progress callback (e.g. on disconnect)."""
+        if self._progress_monitoring and self._connection_service:
+            try:
+                self._connection_service.unregister_callback(
+                    UI_SET_GAUGE_VALUE, self._on_progress_update
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        self._progress_monitoring = False
+
     def _register_callbacks(self) -> None:
         """Register callback handlers with connection service."""
         if not self._connection_service:
@@ -504,10 +542,12 @@ class WorkflowQueueService(QObject):
             self._connection_service.register_callback(
                 CAMERA_STACK_COMPLETE, self._on_stack_complete
             )
-            # Progress tracking
-            self._connection_service.register_callback(
-                UI_SET_GAUGE_VALUE, self._on_progress_update
-            )
+            # Progress tracking — skip if already registered persistently (see
+            # register_progress_monitoring) to avoid a double callback.
+            if not self._progress_monitoring:
+                self._connection_service.register_callback(
+                    UI_SET_GAUGE_VALUE, self._on_progress_update
+                )
             logger.info(
                 "Registered callbacks for SYSTEM_STATE_IDLE, STACK_COMPLETE, and progress updates"
             )
@@ -526,9 +566,11 @@ class WorkflowQueueService(QObject):
             self._connection_service.unregister_callback(
                 CAMERA_STACK_COMPLETE, self._on_stack_complete
             )
-            self._connection_service.unregister_callback(
-                UI_SET_GAUGE_VALUE, self._on_progress_update
-            )
+            # Keep the progress callback if it is registered persistently.
+            if not self._progress_monitoring:
+                self._connection_service.unregister_callback(
+                    UI_SET_GAUGE_VALUE, self._on_progress_update
+                )
             logger.info("Unregistered workflow callbacks")
         except Exception as e:
             logger.warning(f"Failed to unregister callbacks: {e}")

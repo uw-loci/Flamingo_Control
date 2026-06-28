@@ -1080,6 +1080,19 @@ class WorkflowView(QWidget):
         if message:
             self._status_label.setText(message)
 
+    def update_acquisition_progress(self, acquired: int, expected: int) -> None:
+        """Drive the progress bar from the microscope's image-count callback.
+
+        Connected to ``WorkflowQueueService.workflow_progress`` so a workflow
+        started directly from this tab shows live progress (not just queue runs).
+        """
+        pct = int(acquired / expected * 100) if expected > 0 else 0
+        pct = max(0, min(100, pct))
+        if not self._progress_bar.isVisible():
+            self._progress_bar.setVisible(True)
+        self._progress_bar.setValue(pct)
+        self._status_label.setText(f"Workflow running... {acquired}/{expected} images")
+
     def get_workflow_dict(self) -> Dict[str, Any]:
         """
         Get complete workflow configuration as dictionary.
