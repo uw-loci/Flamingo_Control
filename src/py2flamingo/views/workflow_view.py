@@ -303,35 +303,32 @@ class WorkflowView(QWidget):
         # presets folder for one-click reuse (a preset's description lives in the
         # file's Comments field, so no separate template format is needed).
         template_layout = QHBoxLayout()
-        template_layout.addWidget(QLabel("Preset:"))
+        template_layout.addWidget(QLabel("Workflow:"))
 
         self._template_combo = QComboBox()
         self._template_combo.setMinimumWidth(150)
         self._template_combo.addItem("(None)")
+        self._template_combo.setToolTip(
+            "Saved workflow.txt files in the workflows folder — select one to load it"
+        )
         self._template_combo.currentIndexChanged.connect(self._on_template_selected)
         template_layout.addWidget(self._template_combo, 1)
 
         self._load_txt_btn = QPushButton("Load…")
-        self._load_txt_btn.setToolTip("Load a workflow.txt file into the tab")
+        self._load_txt_btn.setToolTip("Open any workflow.txt file into the tab")
         self._load_txt_btn.clicked.connect(self._on_load_txt_clicked)
         template_layout.addWidget(self._load_txt_btn)
 
         self._save_txt_btn = QPushButton("Save…")
         self._save_txt_btn.setToolTip(
-            "Save the current settings to a workflow.txt file"
+            "Save the current settings to a workflow.txt file. Saving into the "
+            "workflows folder makes it appear in this list."
         )
         self._save_txt_btn.clicked.connect(self._on_save_txt_clicked)
         template_layout.addWidget(self._save_txt_btn)
 
-        self._save_template_btn = QPushButton("Save As Preset…")
-        self._save_template_btn.setToolTip(
-            "Save the current settings as a named preset (workflow.txt) in the "
-            "presets folder"
-        )
-        self._save_template_btn.clicked.connect(self._on_save_template_clicked)
-        template_layout.addWidget(self._save_template_btn)
-
         self._delete_template_btn = QPushButton("Delete")
+        self._delete_template_btn.setToolTip("Delete the selected workflow file")
         self._delete_template_btn.setEnabled(False)
         self._delete_template_btn.clicked.connect(self._on_delete_template_clicked)
         template_layout.addWidget(self._delete_template_btn)
@@ -402,6 +399,10 @@ class WorkflowView(QWidget):
         """)
         self._stop_btn.clicked.connect(self._on_stop_clicked)
         btn_layout.addWidget(self._stop_btn)
+
+        # Let the buttons take their natural width instead of stretching across
+        # the whole tab.
+        btn_layout.addStretch()
 
         layout.addLayout(btn_layout)
 
@@ -990,7 +991,11 @@ class WorkflowView(QWidget):
             self._apply_workflow_file(Path(path))
 
     def _on_save_txt_clicked(self) -> None:
-        """Browse for a destination and save the current settings as workflow.txt."""
+        """Save the current settings as a workflow.txt.
+
+        Defaults to the workflows folder; a file saved there appears in the
+        Workflow dropdown (so this single Save doubles as "save a preset").
+        """
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Save workflow.txt",
@@ -1001,20 +1006,17 @@ class WorkflowView(QWidget):
             return
         if not path.lower().endswith(".txt"):
             path += ".txt"
-        self._write_workflow_file(Path(path))
-
-    def _on_save_template_clicked(self) -> None:
-        """Save the current settings as a named preset (workflow.txt)."""
-        dialog = SaveTemplateDialog(self)
-        if dialog.exec_() != QDialog.Accepted:
+        saved = Path(path)
+        if not self._write_workflow_file(saved):
             return
-        name, description = dialog.get_values()
-        if not name:
-            return
-        filename = name if name.lower().endswith(".txt") else f"{name}.txt"
-        if self._write_workflow_file(self._presets_dir() / filename, description):
+        # If it landed in the workflows folder, surface it in the dropdown.
+        try:
+            in_presets = saved.resolve().parent == self._presets_dir().resolve()
+        except Exception:  # noqa: BLE001
+            in_presets = False
+        if in_presets:
             self.refresh_presets()
-            idx = self._template_combo.findText(filename)
+            idx = self._template_combo.findText(saved.name)
             if idx >= 0:
                 self._template_combo.blockSignals(True)
                 self._template_combo.setCurrentIndex(idx)
@@ -1445,45 +1447,6 @@ class WorkflowView(QWidget):
         """
         dialog = ValidationResultDialog(result, self)
         dialog.exec_()
-
-
-class SaveTemplateDialog(PersistentDialog):
-    """Dialog for saving a workflow template with name and description."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Save Workflow Template")
-        self.setMinimumWidth(400)
-
-        layout = QVBoxLayout(self)
-
-        # Form
-        form_layout = QFormLayout()
-
-        self._name_edit = QComboBox()
-        self._name_edit.setEditable(True)
-        self._name_edit.setMinimumWidth(250)
-        form_layout.addRow("Template Name:", self._name_edit)
-
-        self._description_edit = QTextEdit()
-        self._description_edit.setMaximumHeight(80)
-        self._description_edit.setPlaceholderText("Optional description...")
-        form_layout.addRow("Description:", self._description_edit)
-
-        layout.addLayout(form_layout)
-
-        # Buttons
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def get_values(self) -> tuple:
-        """Get the entered name and description."""
-        return (
-            self._name_edit.currentText().strip(),
-            self._description_edit.toPlainText().strip(),
-        )
 
 
 class ValidationResultDialog(PersistentDialog):
