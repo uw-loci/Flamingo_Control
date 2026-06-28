@@ -28,7 +28,6 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSplitter,
-    QStackedWidget,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
@@ -221,12 +220,13 @@ class WorkflowView(QWidget):
         self._camera_panel.settings_changed.connect(self._on_camera_settings_changed)
         container_layout.addWidget(self._camera_panel)
 
-        # Type-specific settings (stacked widget)
-        self._type_settings_stack = QStackedWidget()
-
-        # Index 0: Snapshot (minimal info)
-        snapshot_panel = QWidget()
-        snapshot_layout = QVBoxLayout(snapshot_panel)
+        # Type-specific settings. Unlike a stacked widget (one panel at a time),
+        # these are shown/hidden per workflow type — so the Z-Stack panel (Z step,
+        # number of planes, Z range) can stay visible for Tile and Multi-Angle,
+        # which each acquire a Z-stack per tile/angle. Visibility is set in
+        # _update_type_panels().
+        self._snapshot_panel = QWidget()
+        snapshot_layout = QVBoxLayout(self._snapshot_panel)
         snapshot_info = QLabel(
             "Snapshot mode: Single image at current position.\n"
             "No additional acquisition settings needed."
@@ -234,26 +234,22 @@ class WorkflowView(QWidget):
         snapshot_info.setStyleSheet("color: gray; font-style: italic; padding: 10px;")
         snapshot_layout.addWidget(snapshot_info)
         snapshot_layout.addStretch()
-        self._type_settings_stack.addWidget(snapshot_panel)
+        container_layout.addWidget(self._snapshot_panel)
 
-        # Index 1: Z-Stack
         self._zstack_panel = ZStackPanel()
-        self._type_settings_stack.addWidget(self._zstack_panel)
+        container_layout.addWidget(self._zstack_panel)
 
-        # Index 2: Time-Lapse
         self._timelapse_panel = TimeLapsePanel()
-        self._type_settings_stack.addWidget(self._timelapse_panel)
+        container_layout.addWidget(self._timelapse_panel)
 
-        # Index 3: Tiling
         self._tiling_panel = TilingPanel()
-        self._type_settings_stack.addWidget(self._tiling_panel)
+        container_layout.addWidget(self._tiling_panel)
 
-        # Index 4: Multi-Angle
         self._multiangle_panel = MultiAnglePanel()
-        self._type_settings_stack.addWidget(self._multiangle_panel)
+        container_layout.addWidget(self._multiangle_panel)
 
-        container_layout.addWidget(self._type_settings_stack)
         container_layout.addStretch()
+        self._update_type_panels(self._current_type)
 
         scroll.setWidget(container)
         layout.addWidget(scroll)
@@ -425,6 +421,25 @@ class WorkflowView(QWidget):
 
         return frame
 
+    def _update_type_panels(self, workflow_type: WorkflowType) -> None:
+        """Show the acquisition panels relevant to the workflow type.
+
+        The Z-Stack panel (Z step, number of planes, Z range) is shared by
+        Z-Stack, Tile, and Multi-Angle — each acquires a Z-stack per tile/angle —
+        so it stays visible for all three, with the Tile / Multi-Angle panels
+        adding their extra controls below it.
+        """
+        zstack_types = (
+            WorkflowType.ZSTACK,
+            WorkflowType.TILE,
+            WorkflowType.MULTI_ANGLE,
+        )
+        self._snapshot_panel.setVisible(workflow_type == WorkflowType.SNAPSHOT)
+        self._zstack_panel.setVisible(workflow_type in zstack_types)
+        self._timelapse_panel.setVisible(workflow_type == WorkflowType.TIME_LAPSE)
+        self._tiling_panel.setVisible(workflow_type == WorkflowType.TILE)
+        self._multiangle_panel.setVisible(workflow_type == WorkflowType.MULTI_ANGLE)
+
     def _on_type_changed(self, index: int) -> None:
         """Handle workflow type selection change."""
         if index < 0 or index >= len(WORKFLOW_TYPES):
@@ -434,8 +449,8 @@ class WorkflowView(QWidget):
         self._current_type = workflow_type
         self._type_description.setText(description)
 
-        # Switch to appropriate settings panel
-        self._type_settings_stack.setCurrentIndex(index)
+        # Show the settings panels relevant to this type
+        self._update_type_panels(workflow_type)
 
         # Apply visibility matrix based on workflow type
         self._apply_visibility_matrix(workflow_type)
@@ -499,9 +514,10 @@ class WorkflowView(QWidget):
         show_rotational = workflow_type == WorkflowType.MULTI_ANGLE
         self._zstack_panel.set_rotational_velocity_visible(show_rotational)
 
-        # Tile settings: only when Tile type selected
-        show_tiles = workflow_type == WorkflowType.TILE
-        self._zstack_panel.set_tile_settings_visible(show_tiles)
+        # The dedicated Tiling panel owns the Tiles X/Y controls now, so keep the
+        # Z-Stack panel's redundant internal tile fields hidden (they used to be
+        # the only place tiles showed when the Z-Stack panel was swapped out).
+        self._zstack_panel.set_tile_settings_visible(False)
 
     def _configure_two_point_mode(self, workflow_type: WorkflowType) -> None:
         """
