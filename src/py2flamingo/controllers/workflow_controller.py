@@ -735,51 +735,79 @@ class WorkflowController(QObject):
         """
         estimates = {}
 
-        # Get parameters
-        stack = workflow_dict.get("Stack Settings", {})
-        camera = workflow_dict.get("Camera Settings", {})
+        stack = workflow_dict.get("Stack Settings", {}) or {}
+        camera = workflow_dict.get("Camera Settings", {}) or {}
+        exp = workflow_dict.get("Experiment Settings", {}) or {}
 
-        num_planes = int(stack.get("Number of planes", 1))
-        z_step_mm = float(stack.get("Change in Z axis (mm)", 0))
-        z_velocity = float(stack.get("Z stage velocity (mm/s)", 0.1))
-        exposure_us = float(camera.get("Exposure time (us)", 1000))
-        aoi_width = int(camera.get("AOI width", 2048))
-        aoi_height = int(camera.get("AOI height", 2048))
+        def _f(d, key, default):
+            try:
+                return float(str(d.get(key, default)).replace(",", ""))
+            except (TypeError, ValueError):
+                return float(default)
 
-        # Z range
-        z_range_um = (num_planes - 1) * (z_step_mm * 1000) if num_planes > 1 else 0
-        estimates["z_range_um"] = z_range_um
+        def _i(d, key, default):
+            try:
+                return int(round(float(str(d.get(key, default)).replace(",", ""))))
+            except (TypeError, ValueError):
+                return int(default)
+
+        num_planes = max(1, _i(stack, "Number of planes", 1))
+        # "Change in Z axis (mm)" is the TOTAL Z range (planes * step), NOT the
+        # per-plane step. (The previous code treated it as the step and then did
+        # (planes-1) * it, inflating the range ~hundredfold -> absurd times.)
+        z_range_mm = _f(stack, "Change in Z axis (mm)", 0.0)
+        z_velocity = _f(stack, "Z stage velocity (mm/s)", 0.1) or 0.1
+        # Exposure lives under Camera Settings, but real files often leave it
+        # blank there and store it under Experiment Settings.
+        exposure_us = _f(camera, "Exposure time (us)", 0.0) or _f(
+            exp, "Exposure time (us)", 1000.0
+        )
+        aoi_width = _i(camera, "AOI width", 2048)
+        aoi_height = _i(camera, "AOI height", 2048)
+
+        # Number of independent stacks (these MULTIPLY the per-stack cost — the
+        # previous estimate ignored them entirely, undercounting data by N).
+        stack_option = str(stack.get("Stack option", "")).strip().lower()
+        if stack_option == "tile":
+            num_stacks = max(1, _i(stack, "Stack option settings 1", 1)) * max(
+                1, _i(stack, "Stack option settings 2", 1)
+            )
+        elif "Number of angles" in exp:
+            num_stacks = max(1, _i(exp, "Number of angles", 1))
+        else:
+            num_stacks = 1
+        timepoints = self._timepoints_from_exp(exp)
+        num_channels = self._count_enabled_lasers(workflow_dict)  # >= 1
+
+        z_step_um = (z_range_mm * 1000.0 / num_planes) if num_planes > 0 else 0.0
         estimates["num_planes"] = num_planes
-        estimates["z_step_um"] = z_step_mm * 1000
+        estimates["z_range_um"] = z_range_mm * 1000.0
+        estimates["z_step_um"] = z_step_um
+        estimates["num_tiles"] = num_stacks
+        estimates["num_channels"] = num_channels
+        estimates["num_timepoints"] = timepoints
 
-        # Total images
-        estimates["total_images"] = num_planes
+        images_per_stack = num_planes * num_channels
+        total_images = images_per_stack * num_stacks * timepoints
+        estimates["total_images"] = total_images
 
-        # Data size (16-bit grayscale)
-        bytes_per_image = aoi_width * aoi_height * 2  # 16-bit = 2 bytes
-        total_bytes = bytes_per_image * num_planes
-        estimates["data_size_gb"] = total_bytes / (1024**3)
+        bytes_per_image = aoi_width * aoi_height * 2  # 16-bit
+        estimates["data_size_gb"] = bytes_per_image * total_images / (1024**3)
 
-        # Acquisition time estimate
-        z_range_mm = z_range_um / 1000
-        z_move_time = z_range_mm / z_velocity if z_velocity > 0 else 0
-        exposure_time_total = num_planes * exposure_us / 1_000_000  # Convert to seconds
-        settle_time = num_planes * 0.001  # 1ms settle per plane
-        return_time = (
-            z_range_mm / z_velocity if z_velocity > 0 else 0
-        )  # Return to start
+        # Time per stack: an exposure for every image + Z travel out and back.
+        exposure_total = images_per_stack * exposure_us / 1_000_000.0
+        settle_time = images_per_stack * 0.001  # ~1 ms settle per frame
+        z_travel = (2.0 * z_range_mm / z_velocity) if z_velocity > 0 else 0.0
+        theoretical_time = (
+            (exposure_total + settle_time + z_travel) * num_stacks * timepoints
+        )
 
-        theoretical_time = z_move_time + exposure_time_total + settle_time + return_time
-
-        # Apply learned correction if timing service is available
         if self._timing_service:
-            # Count lasers from illumination settings
-            num_lasers = self._count_enabled_lasers(workflow_dict)
             corrected_time, sample_count = self._timing_service.get_corrected_estimate(
                 theoretical_time=theoretical_time,
                 num_planes=num_planes,
-                num_lasers=num_lasers,
-                total_z_travel_mm=z_range_mm * 2,  # Round trip
+                num_lasers=num_channels,
+                total_z_travel_mm=z_range_mm * 2 * num_stacks * timepoints,
             )
             estimates["acquisition_time"] = corrected_time
             estimates["sample_count"] = sample_count
@@ -787,7 +815,50 @@ class WorkflowController(QObject):
             estimates["acquisition_time"] = theoretical_time
             estimates["sample_count"] = 0
 
+        self._logger.info(
+            "Workflow estimate [%s]: %d planes x %d channels x %d stacks x %d "
+            "timepoints = %d images @ %dx%d -> %.2f GB, ~%.0f s (%.2f h); "
+            "z_range=%.3f mm, step=%.2f um, exposure=%.0f us",
+            stack_option or "single",
+            num_planes,
+            num_channels,
+            num_stacks,
+            timepoints,
+            total_images,
+            aoi_width,
+            aoi_height,
+            estimates["data_size_gb"],
+            estimates["acquisition_time"],
+            estimates["acquisition_time"] / 3600.0,
+            z_range_mm,
+            z_step_um,
+            exposure_us,
+        )
         return estimates
+
+    @staticmethod
+    def _timepoints_from_exp(exp: Dict[str, Any]) -> int:
+        """Number of time-lapse timepoints from Duration/Interval, else 1."""
+        dur = exp.get("Duration (dd:hh:mm:ss)")
+        intv = exp.get("Interval (dd:hh:mm:ss)")
+        if not dur or not intv:
+            return 1
+
+        def _secs(value):
+            try:
+                parts = [int(float(p)) for p in str(value).split(":")]
+            except (TypeError, ValueError):
+                return 0
+            while len(parts) < 4:
+                parts.insert(0, 0)
+            d, h, m, s = parts[-4:]
+            return d * 86400 + h * 3600 + m * 60 + s
+
+        duration_s = _secs(dur)
+        interval_s = _secs(intv)
+        if interval_s <= 0:
+            return 1
+        return max(1, duration_s // interval_s + 1)
 
     def _count_enabled_lasers(self, workflow_dict: Dict[str, Any]) -> int:
         """Count number of enabled lasers in workflow."""
@@ -808,11 +879,10 @@ class WorkflowController(QObject):
         camera = workflow_dict.get("Camera Settings", {})
 
         num_planes = int(stack.get("Number of planes", 1))
-        z_step_mm = float(stack.get("Change in Z axis (mm)", 0))
+        # "Change in Z axis (mm)" is the total Z range, not the per-plane step.
+        z_range_mm = float(stack.get("Change in Z axis (mm)", 0))
         z_velocity = float(stack.get("Z stage velocity (mm/s)", 0.1))
         exposure_us = float(camera.get("Exposure time (us)", 1000))
-
-        z_range_mm = (num_planes - 1) * z_step_mm if num_planes > 1 else 0
 
         return {
             "workflow_type": "ZSTACK" if num_planes > 1 else "SNAPSHOT",

@@ -1522,7 +1522,17 @@ class ValidationResultDialog(PersistentDialog):
                 est_text.append(f"• Data Size: ~{estimates['data_size_gb']:.1f} GB")
 
             if "total_images" in estimates:
-                est_text.append(f"• Total Images: {estimates['total_images']}")
+                est_text.append(f"• Total Images: {estimates['total_images']:,}")
+
+            breakdown = []
+            if estimates.get("num_tiles", 1) > 1:
+                breakdown.append(f"{estimates['num_tiles']} tiles")
+            if estimates.get("num_channels", 1) > 1:
+                breakdown.append(f"{estimates['num_channels']} channels")
+            if estimates.get("num_timepoints", 1) > 1:
+                breakdown.append(f"{estimates['num_timepoints']} timepoints")
+            if breakdown:
+                est_text.append("• Acquisition: " + " × ".join(breakdown))
 
             if "z_range_um" in estimates:
                 z_um = estimates["z_range_um"]

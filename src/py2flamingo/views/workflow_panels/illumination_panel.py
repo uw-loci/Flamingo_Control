@@ -6,6 +6,7 @@ Compact layout with Advanced settings dialog for rarely-used options.
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from PyQt5.QtCore import Qt, pyqtSignal
@@ -447,17 +448,38 @@ class IlluminationPanel(QWidget):
             row.set_enabled(False)
         self._led_enable.setChecked(False)
 
-        # Parse laser settings
+        # Parse laser settings. The panel's key is e.g. "Laser 1 405 nm", but the
+        # microscope writes "Laser 1 1: 405 nm MLE" (and bare "Laser 5" for
+        # unlabelled slots), so an exact key match misses every laser. Fall back
+        # to matching by the leading laser-slot number, which both formats share.
+        def _laser_num(key):
+            m = re.match(r"\s*Laser\s+(\d+)", str(key))
+            return int(m.group(1)) if m else None
+
+        file_by_num = {}
+        for k, v in illumination_dict.items():
+            n = _laser_num(k)
+            if n is not None and n not in file_by_num:
+                file_by_num[n] = v
+
         for i, (_, workflow_key, default_power) in enumerate(self._laser_channels):
-            if workflow_key in illumination_dict:
-                value_str = illumination_dict[workflow_key]
-                parts = value_str.split()
-                if len(parts) == 2:
+            value_str = illumination_dict.get(workflow_key)
+            if value_str is None:
+                n = _laser_num(workflow_key)
+                if n is not None:
+                    value_str = file_by_num.get(n)
+            if not value_str:
+                continue
+            parts = str(value_str).split()
+            if len(parts) >= 2:
+                try:
                     power = float(parts[0])
                     enabled = int(parts[1]) == 1
-                    if enabled:
-                        self._laser_rows[i].set_enabled(True)
-                        self._laser_rows[i].set_power(power)
+                except ValueError:
+                    continue
+                if enabled:
+                    self._laser_rows[i].set_enabled(True)
+                    self._laser_rows[i].set_power(power)
 
         # Parse LED settings
         if "LED_RGB_Board" in illumination_dict:
