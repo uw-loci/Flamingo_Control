@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QGroupBox,
@@ -37,6 +38,7 @@ from PyQt5.QtWidgets import (
 from py2flamingo.models.data.workflow import (
     IlluminationSettings,
     StackSettings,
+    TileSettings,
     Workflow,
     WorkflowType,
 )
@@ -49,6 +51,11 @@ from py2flamingo.services.tiff_size_validator import (
 from py2flamingo.services.window_geometry_manager import (
     PersistentDialog,
     _default_geometry_manager,
+)
+from py2flamingo.utils.workflow_parser import (
+    dict_to_workflow_text,
+    infer_workflow_type,
+    parse_workflow_file,
 )
 from py2flamingo.views.colors import ERROR_COLOR, SUCCESS_BG, SUCCESS_COLOR, WARNING_BG
 from py2flamingo.views.workflow_panels import (
@@ -294,9 +301,13 @@ class WorkflowView(QWidget):
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        # Template controls row
+        # Workflow.txt controls row. The Workflow tab reads and writes the same
+        # workflow.txt format the microscope uses and generates — Load…/Save…
+        # browse any file; the Preset dropdown lists workflow.txt files in the
+        # presets folder for one-click reuse (a preset's description lives in the
+        # file's Comments field, so no separate template format is needed).
         template_layout = QHBoxLayout()
-        template_layout.addWidget(QLabel("Template:"))
+        template_layout.addWidget(QLabel("Preset:"))
 
         self._template_combo = QComboBox()
         self._template_combo.setMinimumWidth(150)
@@ -304,7 +315,23 @@ class WorkflowView(QWidget):
         self._template_combo.currentIndexChanged.connect(self._on_template_selected)
         template_layout.addWidget(self._template_combo, 1)
 
-        self._save_template_btn = QPushButton("Save As...")
+        self._load_txt_btn = QPushButton("Load…")
+        self._load_txt_btn.setToolTip("Load a workflow.txt file into the tab")
+        self._load_txt_btn.clicked.connect(self._on_load_txt_clicked)
+        template_layout.addWidget(self._load_txt_btn)
+
+        self._save_txt_btn = QPushButton("Save…")
+        self._save_txt_btn.setToolTip(
+            "Save the current settings to a workflow.txt file"
+        )
+        self._save_txt_btn.clicked.connect(self._on_save_txt_clicked)
+        template_layout.addWidget(self._save_txt_btn)
+
+        self._save_template_btn = QPushButton("Save As Preset…")
+        self._save_template_btn.setToolTip(
+            "Save the current settings as a named preset (workflow.txt) in the "
+            "presets folder"
+        )
         self._save_template_btn.clicked.connect(self._on_save_template_clicked)
         template_layout.addWidget(self._save_template_btn)
 
@@ -314,6 +341,7 @@ class WorkflowView(QWidget):
         template_layout.addWidget(self._delete_template_btn)
 
         layout.addLayout(template_layout)
+        self.refresh_presets()
 
         # Check and Start/Stop buttons row
         btn_layout = QHBoxLayout()
@@ -889,41 +917,134 @@ class WorkflowView(QWidget):
         else:
             self._message_label.setStyleSheet(f"color: {SUCCESS_COLOR};")
 
-    # Template handlers
+    # Workflow.txt load / save + preset handlers
+
+    def _presets_dir(self) -> Path:
+        """Folder scanned for workflow.txt presets (created on first save)."""
+        return Path("workflows")
+
+    def refresh_presets(self) -> None:
+        """Repopulate the preset dropdown from workflow.txt files on disk."""
+        combo = self._template_combo
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItem("(None)")
+            try:
+                presets = sorted(
+                    p.name for p in self._presets_dir().glob("*.txt") if p.is_file()
+                )
+            except Exception:  # noqa: BLE001 - missing folder => no presets
+                presets = []
+            for name in presets:
+                combo.addItem(name)
+        finally:
+            combo.blockSignals(False)
+        self._delete_template_btn.setEnabled(False)
+
+    def _apply_workflow_file(self, path: Path) -> bool:
+        """Parse a workflow.txt and populate every panel. Returns success."""
+        try:
+            workflow_dict = parse_workflow_file(path)
+            wtype = infer_workflow_type(workflow_dict)
+            self.set_workflow_dict(workflow_dict, wtype)
+            self._show_message(f"Loaded {path.name}")
+            self._logger.info("Loaded workflow file: %s (type=%s)", path, wtype)
+            return True
+        except Exception as e:  # noqa: BLE001 - surface to the user
+            self._logger.error("Failed to load workflow %s: %s", path, e, exc_info=True)
+            self._show_message(f"Failed to load {path.name}: {e}", is_error=True)
+            return False
+
+    def _write_workflow_file(self, path: Path, description: str = "") -> bool:
+        """Write the current settings to a workflow.txt. Returns success."""
+        try:
+            workflow_dict = self.get_workflow_dict()
+            if description:
+                exp = workflow_dict.setdefault("Experiment Settings", {})
+                exp["Comments"] = description
+            text = dict_to_workflow_text(workflow_dict)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+            self._show_message(f"Saved {path.name}")
+            self._logger.info("Saved workflow file: %s", path)
+            return True
+        except Exception as e:  # noqa: BLE001 - surface to the user
+            self._logger.error("Failed to save workflow %s: %s", path, e, exc_info=True)
+            self._show_message(f"Failed to save {path.name}: {e}", is_error=True)
+            return False
 
     def _on_template_selected(self, index: int) -> None:
-        """Handle template selection from dropdown."""
-        # Enable delete button only if a template is selected (not "(None)")
+        """Load the selected preset workflow.txt into the tab."""
         self._delete_template_btn.setEnabled(index > 0)
+        if index <= 0:
+            return
+        name = self._template_combo.currentText()
+        self._apply_workflow_file(self._presets_dir() / name)
 
-        if index > 0:
-            template_name = self._template_combo.currentText()
-            self.template_load_requested.emit(template_name)
-            self._logger.info(f"Template selected: {template_name}")
+    def _on_load_txt_clicked(self) -> None:
+        """Browse for any workflow.txt and load it into the tab."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load workflow.txt",
+            str(self._presets_dir()),
+            "Workflow files (*.txt);;All files (*)",
+        )
+        if path:
+            self._apply_workflow_file(Path(path))
+
+    def _on_save_txt_clicked(self) -> None:
+        """Browse for a destination and save the current settings as workflow.txt."""
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save workflow.txt",
+            str(self._presets_dir() / "workflow.txt"),
+            "Workflow files (*.txt);;All files (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".txt"):
+            path += ".txt"
+        self._write_workflow_file(Path(path))
 
     def _on_save_template_clicked(self) -> None:
-        """Handle save template button click."""
+        """Save the current settings as a named preset (workflow.txt)."""
         dialog = SaveTemplateDialog(self)
-        if dialog.exec_() == QDialog.Accepted:
-            name, description = dialog.get_values()
-            if name:
-                self.template_save_requested.emit(name, description)
-                self._logger.info(f"Save template requested: {name}")
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        name, description = dialog.get_values()
+        if not name:
+            return
+        filename = name if name.lower().endswith(".txt") else f"{name}.txt"
+        if self._write_workflow_file(self._presets_dir() / filename, description):
+            self.refresh_presets()
+            idx = self._template_combo.findText(filename)
+            if idx >= 0:
+                self._template_combo.blockSignals(True)
+                self._template_combo.setCurrentIndex(idx)
+                self._template_combo.blockSignals(False)
+                self._delete_template_btn.setEnabled(True)
 
     def _on_delete_template_clicked(self) -> None:
-        """Handle delete template button click."""
-        template_name = self._template_combo.currentText()
-        if template_name and template_name != "(None)":
-            reply = QMessageBox.question(
-                self,
-                "Delete Template",
-                f"Are you sure you want to delete template '{template_name}'?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if reply == QMessageBox.Yes:
-                self.template_delete_requested.emit(template_name)
-                self._logger.info(f"Delete template requested: {template_name}")
+        """Delete the selected preset workflow.txt from disk."""
+        name = self._template_combo.currentText()
+        if not name or name == "(None)":
+            return
+        reply = QMessageBox.question(
+            self,
+            "Delete Preset",
+            f"Delete preset file '{name}'?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        try:
+            (self._presets_dir() / name).unlink(missing_ok=True)
+            self._logger.info("Deleted preset: %s", name)
+        except Exception as e:  # noqa: BLE001
+            self._show_message(f"Could not delete {name}: {e}", is_error=True)
+        self.refresh_presets()
 
     def _on_check_clicked(self) -> None:
         """Handle check stack button click."""
@@ -1124,30 +1245,13 @@ class WorkflowView(QWidget):
     # Template management public API
 
     def update_template_list(self, template_names: List[str]) -> None:
+        """Deprecated: the dropdown now lists workflow.txt presets from disk.
+
+        Kept so the existing startup wiring (which passes legacy ``.json``
+        template names) is harmless — it just triggers a presets refresh and
+        ignores the names. The Workflow tab uses a single format (workflow.txt).
         """
-        Update the template dropdown with available templates.
-
-        Args:
-            template_names: List of template names to display
-        """
-        # Block signals while updating
-        self._template_combo.blockSignals(True)
-        current = self._template_combo.currentText()
-
-        self._template_combo.clear()
-        self._template_combo.addItem("(None)")
-        for name in template_names:
-            self._template_combo.addItem(name)
-
-        # Try to restore previous selection
-        index = self._template_combo.findText(current)
-        if index >= 0:
-            self._template_combo.setCurrentIndex(index)
-        else:
-            self._template_combo.setCurrentIndex(0)
-
-        self._template_combo.blockSignals(False)
-        self._delete_template_btn.setEnabled(self._template_combo.currentIndex() > 0)
+        self.refresh_presets()
 
     def set_workflow_dict(
         self, workflow_dict: Dict[str, Any], workflow_type: str
@@ -1156,73 +1260,177 @@ class WorkflowView(QWidget):
         Apply a workflow dictionary to all panels (for loading templates).
 
         Args:
-            workflow_dict: Complete workflow settings dictionary
-            workflow_type: Workflow type string (SNAPSHOT, ZSTACK, etc.)
-        """
-        try:
-            # Set workflow type
-            type_index = -1
-            for i, (name, wtype, _) in enumerate(WORKFLOW_TYPES):
-                if wtype.value == workflow_type:
-                    type_index = i
-                    break
-            if type_index >= 0:
-                self._type_combo.setCurrentIndex(type_index)
+            workflow_dict: Complete workflow settings dictionary (the section-keyed
+                form produced by ``get_workflow_dict`` or ``parse_workflow_file``)
+            workflow_type: Workflow type string (snapshot, zstack, etc.)
 
-            # Apply settings to each panel
+        The values from a parsed workflow.txt are strings, and each panel expects
+        a different input shape (internal-key dict, dataclass object, or the
+        workflow-dict consumer), so this method translates per section. Each
+        section is isolated so one bad/absent section doesn't abort the rest.
+        """
+
+        def _num(v, default=0.0):
+            # workflow.txt may use a thousands comma (e.g. "9,002" us).
+            try:
+                return float(str(v).strip().replace(",", ""))
+            except (TypeError, ValueError):
+                return default
+
+        def _int(v, default=0):
+            try:
+                return int(round(float(str(v).strip().replace(",", ""))))
+            except (TypeError, ValueError):
+                return default
+
+        def _bool(v, default=False):
+            s = str(v).strip().lower()
+            if s in ("true", "1", "yes"):
+                return True
+            if s in ("false", "0", "no"):
+                return False
+            return default
+
+        def _section(key):
+            sec = workflow_dict.get(key)
+            return sec if isinstance(sec, dict) else {}
+
+        # --- Workflow type ---
+        for i, (_name, wtype, _) in enumerate(WORKFLOW_TYPES):
+            if wtype.value == workflow_type:
+                self._type_combo.setCurrentIndex(i)
+                break
+
+        stack = _section("Stack Settings")
+        exp = _section("Experiment Settings")
+        cam = _section("Camera Settings")
+
+        # --- Positions ---
+        try:
             if "Start Position" in workflow_dict:
-                pos = workflow_dict["Start Position"]
+                p = _section("Start Position")
                 self._position_panel.set_position_a(
                     Position(
-                        x=float(pos.get("X (mm)", 0)),
-                        y=float(pos.get("Y (mm)", 0)),
-                        z=float(pos.get("Z (mm)", 0)),
-                        r=float(pos.get("Angle (degrees)", 0)),
+                        x=_num(p.get("X (mm)")),
+                        y=_num(p.get("Y (mm)")),
+                        z=_num(p.get("Z (mm)")),
+                        r=_num(p.get("Angle (degrees)")),
                     )
                 )
-
             if "End Position" in workflow_dict:
-                pos = workflow_dict["End Position"]
+                p = _section("End Position")
                 self._position_panel.set_position_b(
                     Position(
-                        x=float(pos.get("X (mm)", 0)),
-                        y=float(pos.get("Y (mm)", 0)),
-                        z=float(pos.get("Z (mm)", 0)),
-                        r=float(pos.get("Angle (degrees)", 0)),
+                        x=_num(p.get("X (mm)")),
+                        y=_num(p.get("Y (mm)")),
+                        z=_num(p.get("Z (mm)")),
+                        r=_num(p.get("Angle (degrees)")),
                     )
                 )
+        except Exception:  # noqa: BLE001
+            self._logger.warning("Could not apply positions", exc_info=True)
 
-            if "Camera Settings" in workflow_dict:
-                cam = workflow_dict["Camera Settings"]
-                self._camera_panel.set_settings(cam)
+        # --- Camera (translate display keys + capture fields -> internal keys) ---
+        # Exposure / frame rate are written under Experiment Settings in real
+        # files (Camera Settings often leaves them blank), so fall back to it.
+        try:
+            if cam or stack or exp:
+                exposure_us = cam.get("Exposure time (us)") or exp.get(
+                    "Exposure time (us)"
+                )
+                frame_rate = cam.get("Frame rate (f/s)") or exp.get("Frame rate (f/s)")
+                self._camera_panel.set_settings(
+                    {
+                        "exposure_us": _num(exposure_us, 0.0),
+                        "frame_rate": _num(frame_rate, 0.0),
+                        "aoi_width": _int(cam.get("AOI width"), 2048),
+                        "aoi_height": _int(cam.get("AOI height"), 2048),
+                        "cam1_capture_percentage": _int(
+                            stack.get("Camera 1 capture percentage"), 100
+                        ),
+                        "cam1_capture_mode": _int(
+                            stack.get("Camera 1 capture mode"), 0
+                        ),
+                        "cam2_capture_percentage": _int(
+                            stack.get("Camera 2 capture percentage"), 100
+                        ),
+                        "cam2_capture_mode": _int(
+                            stack.get("Camera 2 capture mode"), 0
+                        ),
+                    }
+                )
+        except Exception:  # noqa: BLE001
+            self._logger.warning("Could not apply camera settings", exc_info=True)
 
-            if "Stack Settings" in workflow_dict:
-                stack = workflow_dict["Stack Settings"]
-                self._zstack_panel.set_settings(stack)
+        # --- Z-stack (build a StackSettings; z step prefers Plane spacing) ---
+        try:
+            if stack:
+                num_planes = _int(stack.get("Number of planes"), 1)
+                z_range_mm = _num(stack.get("Change in Z axis (mm)"), 0.0)
+                if exp.get("Plane spacing (um)") is not None:
+                    z_step_um = _num(exp.get("Plane spacing (um)"), 1.0)
+                elif num_planes > 1:
+                    z_step_um = z_range_mm * 1000.0 / (num_planes - 1)
+                else:
+                    z_step_um = 1.0
+                self._zstack_panel.set_settings(
+                    StackSettings(
+                        num_planes=num_planes,
+                        z_step_um=z_step_um,
+                        z_velocity_mm_s=_num(stack.get("Z stage velocity (mm/s)"), 0.4),
+                        bidirectional=str(stack.get("Stack option", "")).strip().lower()
+                        == "bidirectional",
+                    )
+                )
+        except Exception:  # noqa: BLE001
+            self._logger.warning("Could not apply z-stack settings", exc_info=True)
 
+        # --- Tiling (counts; overlap isn't stored in workflow.txt, keep current) ---
+        try:
+            if str(stack.get("Stack option", "")).strip().lower() == "tile":
+                current_overlap = self._tiling_panel.get_settings().overlap_percent
+                self._tiling_panel.set_settings(
+                    TileSettings(
+                        num_tiles_x=_int(stack.get("Stack option settings 1"), 1),
+                        num_tiles_y=_int(stack.get("Stack option settings 2"), 1),
+                        overlap_percent=current_overlap,
+                    )
+                )
+        except Exception:  # noqa: BLE001
+            self._logger.warning("Could not apply tiling settings", exc_info=True)
+
+        # --- Illumination (use the dedicated workflow-dict consumer) ---
+        try:
             if "Illumination Source" in workflow_dict:
-                illum = workflow_dict["Illumination Source"]
-                self._illumination_panel.set_settings(illum)
+                self._illumination_panel.set_settings_from_workflow_dict(
+                    _section("Illumination Source"),
+                    _section("Illumination Options") or None,
+                )
+        except Exception:  # noqa: BLE001
+            self._logger.warning("Could not apply illumination", exc_info=True)
 
-            if "Experiment Settings" in workflow_dict:
-                exp = workflow_dict["Experiment Settings"]
-                self._save_panel.set_settings(exp)
+        # --- Save / experiment (translate workflow keys -> save panel keys) ---
+        try:
+            if exp:
+                self._save_panel.set_settings(
+                    {
+                        "save_enabled": str(exp.get("Save image data", "")).strip()
+                        == "Saved",
+                        "save_drive": exp.get("Save image drive", ""),
+                        "save_directory": exp.get("Save image directory", ""),
+                        "sample_name": exp.get("Sample", ""),
+                        "region": exp.get("Region", ""),
+                        "save_mip": _bool(exp.get("Save max projection")),
+                        "display_mip": _bool(exp.get("Display max projection")),
+                        "save_subfolders": _bool(exp.get("Save to subfolders")),
+                        "live_view": _bool(exp.get("Work flow live view enabled")),
+                        "comments": exp.get("Comments", ""),
+                    }
+                )
+        except Exception:  # noqa: BLE001
+            self._logger.warning("Could not apply save settings", exc_info=True)
 
-                # Time-lapse settings
-                if "Duration (dd:hh:mm:ss)" in exp:
-                    self._timelapse_panel.set_settings(exp)
-
-                # Multi-angle settings
-                if "Number of angles" in exp:
-                    self._multiangle_panel.set_settings(exp)
-
-            self._logger.info(
-                f"Applied workflow template settings (type: {workflow_type})"
-            )
-
-        except Exception as e:
-            self._logger.error(f"Error applying workflow dict: {e}", exc_info=True)
-            self._show_message(f"Error loading template: {str(e)}", is_error=True)
+        self._logger.info("Applied workflow settings (type: %s)", workflow_type)
 
     def get_current_workflow_type(self) -> str:
         """Get current workflow type as string."""

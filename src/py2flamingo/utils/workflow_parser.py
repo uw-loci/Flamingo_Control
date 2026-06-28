@@ -56,6 +56,37 @@ def parse_workflow_file(path: Union[str, Path]) -> Dict[str, Any]:
     return workflow_dict
 
 
+def infer_workflow_type(workflow_dict: Dict[str, Any]) -> str:
+    """Infer the workflow-type string from a parsed workflow dict.
+
+    Returns one of the ``WorkflowType`` *values* ("snapshot", "zstack", "tile",
+    "multi_angle", "time_lapse") so the result can be passed straight to
+    ``WorkflowView.set_workflow_dict``. The type is encoded in
+    ``Stack Settings → Stack option`` (None / ZStack / Tile / OPT); a "None"
+    stack is disambiguated between snapshot and time-lapse by the presence of a
+    Duration field in the experiment settings.
+    """
+    stack = workflow_dict.get("Stack Settings", {}) or {}
+    exp = workflow_dict.get("Experiment Settings", {}) or {}
+    option = str(stack.get("Stack option", "")).strip().lower()
+
+    if option == "zstack":
+        return "zstack"
+    if option == "tile":
+        return "tile"
+    if option == "opt":
+        return "multi_angle"
+
+    # "None"/blank stack option: snapshot vs. time-lapse vs. multi-angle by the
+    # experiment fields each one writes.
+    exp_keys = [str(k).lower() for k in exp]
+    if any("duration" in k for k in exp_keys):
+        return "time_lapse"
+    if any("number of angles" in k for k in exp_keys):
+        return "multi_angle"
+    return "snapshot"
+
+
 def validate_workflow(workflow_dict: Dict[str, Any]) -> Tuple[bool, List[str]]:
     """Validate a workflow dictionary structure.
 
