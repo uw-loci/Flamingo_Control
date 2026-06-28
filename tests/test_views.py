@@ -18,6 +18,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication
 
 from py2flamingo.views import ConnectionView, WorkflowView
+from py2flamingo.views.colors import ERROR_COLOR, SUCCESS_COLOR
 
 # Fixtures
 
@@ -37,6 +38,15 @@ def mock_connection_controller():
     controller = Mock()
     controller.connect = Mock(return_value=(True, "Connected successfully"))
     controller.disconnect = Mock(return_value=(True, "Disconnected successfully"))
+    # A successful connect() drives _load_and_display_settings(), which calls
+    # get_microscope_settings() and then iterates/len()s the result. Return a
+    # real dict so the success path runs (a bare Mock breaks len()/iteration and
+    # would push the view into its error/"Communication Error" branch).
+    controller.get_microscope_settings = Mock(
+        return_value={"Stage": {"X": 0.0, "Y": 0.0, "Z": 0.0}}
+    )
+    # ConnectionView routes connection-loss notifications through these; the
+    # default Mock auto-creates them, so nothing extra is needed here.
     return controller
 
 
@@ -44,9 +54,12 @@ def mock_connection_controller():
 def mock_workflow_controller():
     """Create mock WorkflowController."""
     controller = Mock()
-    controller.load_workflow = Mock(return_value=(True, "Workflow loaded"))
-    controller.start_workflow = Mock(return_value=(True, "Workflow started"))
+    controller.start_workflow_from_ui = Mock(return_value=(True, "Workflow started"))
     controller.stop_workflow = Mock(return_value=(True, "Workflow stopped"))
+    # WorkflowView pulls connection_service off the controller and the SavePanel
+    # queries it for available drives. Return a real list so the panel does not
+    # try to iterate a bare Mock.
+    controller._connection_service.query_available_drives = Mock(return_value=[])
     return controller
 
 
@@ -235,265 +248,154 @@ class TestConnectionViewHelperMethods:
         assert connection_view.message_label.text() == ""
 
     def test_show_error_message_color(self, connection_view):
-        """Test error messages are displayed in red."""
+        """Test error messages use the shared error color constant."""
         connection_view._show_message("Error occurred", is_error=True)
-        # Check that red color is in style
-        assert "red" in connection_view.message_label.styleSheet().lower()
+        assert ERROR_COLOR in connection_view.message_label.styleSheet()
 
     def test_show_success_message_color(self, connection_view):
-        """Test success messages are displayed in green."""
+        """Test success messages use the shared success color constant."""
         connection_view._show_message("Operation successful", is_error=False)
-        # Check that green color is in style
-        assert "green" in connection_view.message_label.styleSheet().lower()
+        assert SUCCESS_COLOR in connection_view.message_label.styleSheet()
 
 
 # WorkflowView Tests
+
+
+# NOTE: The old "load a workflow file by typing/browsing a path" flow
+# (file_path_input, browse_btn, get_workflow_path, clear_workflow,
+# _update_status(workflow_loaded=..., workflow_running=...)) was removed. The
+# current WorkflowView is a comprehensive workflow *builder* with private
+# widgets (_start_btn, _stop_btn, _status_label, _message_label), a Start/Stop
+# flow that calls controller.start_workflow_from_ui / stop_workflow, and a
+# workflow.txt Load…/Save…/preset flow (_template_combo, refresh_presets,
+# get_workflow_dict / set_workflow_dict). Tests below reflect that API.
 
 
 class TestWorkflowViewCreation:
     """Test WorkflowView UI creation and initialization."""
 
     def test_view_creates_widgets(self, workflow_view):
-        """Test that all widgets are created."""
-        assert workflow_view.file_path_input is not None
-        assert workflow_view.browse_btn is not None
-        assert workflow_view.start_btn is not None
-        assert workflow_view.stop_btn is not None
-        assert workflow_view.status_label is not None
-        assert workflow_view.message_label is not None
-
-    def test_file_path_input_readonly(self, workflow_view):
-        """Test file path input is read-only."""
-        assert workflow_view.file_path_input.isReadOnly()
+        """Test that the core action widgets are created."""
+        assert workflow_view._start_btn is not None
+        assert workflow_view._stop_btn is not None
+        assert workflow_view._status_label is not None
+        assert workflow_view._message_label is not None
+        assert workflow_view._template_combo is not None
 
     def test_initial_button_state(self, workflow_view):
-        """Test initial button enabled/disabled state."""
-        assert workflow_view.browse_btn.isEnabled()
-        assert not workflow_view.start_btn.isEnabled()
-        assert not workflow_view.stop_btn.isEnabled()
+        """Stop is disabled until a workflow starts; Start is available."""
+        assert not workflow_view._stop_btn.isEnabled()
+        assert workflow_view._start_btn.isEnabled()
 
     def test_initial_status_text(self, workflow_view):
         """Test initial status label text."""
-        assert "No workflow loaded" in workflow_view.status_label.text()
+        assert "Ready to configure workflow" in workflow_view._status_label.text()
 
-    def test_initial_workflow_path_none(self, workflow_view):
-        """Test initial workflow path is None."""
-        assert workflow_view.get_workflow_path() is None
-
-
-class TestWorkflowViewFileSelection:
-    """Test file selection in WorkflowView."""
-
-    def test_browse_button_exists(self, workflow_view):
-        """Test browse button is created."""
-        assert workflow_view.browse_btn is not None
-
-    def test_load_workflow_success_updates_status(
-        self, workflow_view, mock_workflow_controller
-    ):
-        """Test successful workflow load updates status."""
-        # Simulate file selection (can't actually click file dialog in test)
-        workflow_path = Path("/test/workflow.txt")
-        workflow_view._current_workflow_path = workflow_path
-        workflow_view.file_path_input.setText(str(workflow_path))
-
-        # Simulate controller call
-        success, message = mock_workflow_controller.load_workflow(workflow_path)
-        workflow_view._show_message(message, is_error=not success)
-        workflow_view._update_status(workflow_loaded=True, workflow_running=False)
-
-        # Verify status updated
-        assert "Workflow loaded" in workflow_view.status_label.text()
-        assert workflow_view.start_btn.isEnabled()
-
-    def test_load_workflow_updates_path_display(self, workflow_view):
-        """Test workflow path is displayed after selection."""
-        workflow_path = Path("/test/workflow.txt")
-        workflow_view._current_workflow_path = workflow_path
-        workflow_view.file_path_input.setText(str(workflow_path))
-
-        assert str(workflow_path) in workflow_view.file_path_input.text()
+    def test_default_workflow_type_is_tile(self, workflow_view):
+        """The builder defaults to the Tile Scan workflow type."""
+        assert workflow_view.get_current_workflow_type() == "tile"
 
 
 class TestWorkflowViewStartStop:
-    """Test workflow start/stop operations."""
+    """Test workflow start/stop operations against the controller."""
 
-    def test_start_without_file_shows_error(self, workflow_view, qtbot):
-        """Test starting without file shows error."""
-        # Enable start button manually (normally would be disabled)
-        workflow_view.start_btn.setEnabled(True)
-
-        # Click start with no file
-        qtbot.mouseClick(workflow_view.start_btn, Qt.LeftButton)
-
-        # Should show error
-        assert "No workflow file selected" in workflow_view.message_label.text()
-
-    def test_start_with_file_calls_controller(
+    def test_start_calls_controller_and_updates_ui(
         self, workflow_view, mock_workflow_controller, qtbot
     ):
-        """Test starting workflow calls controller."""
-        # Setup workflow
-        workflow_view._current_workflow_path = Path("/test/workflow.txt")
-        workflow_view._update_status(workflow_loaded=True, workflow_running=False)
+        """A successful start calls start_workflow_from_ui and enters running state."""
+        # Bypass UI build/validation and drive the start handler directly so the
+        # test does not depend on every sub-panel being populated.
+        workflow_view._build_workflow = Mock(return_value=Mock())
+        workflow_view._validate_workflow = Mock(return_value=[])
 
-        # Click start
-        qtbot.mouseClick(workflow_view.start_btn, Qt.LeftButton)
+        qtbot.mouseClick(workflow_view._start_btn, Qt.LeftButton)
 
-        # Verify controller called
-        mock_workflow_controller.start_workflow.assert_called_once()
+        mock_workflow_controller.start_workflow_from_ui.assert_called_once()
+        assert "running" in workflow_view._status_label.text().lower()
+        assert not workflow_view._start_btn.isEnabled()
+        assert workflow_view._stop_btn.isEnabled()
 
-    def test_start_success_updates_ui(
+    def test_start_validation_error_does_not_call_controller(
         self, workflow_view, mock_workflow_controller, qtbot
     ):
-        """Test successful workflow start updates UI."""
-        # Setup
-        workflow_view._current_workflow_path = Path("/test/workflow.txt")
-        workflow_view._update_status(workflow_loaded=True, workflow_running=False)
+        """Validation errors block the controller call and surface a message."""
+        workflow_view._build_workflow = Mock(return_value=Mock())
+        workflow_view._validate_workflow = Mock(return_value=["No illumination"])
 
-        # Start
-        qtbot.mouseClick(workflow_view.start_btn, Qt.LeftButton)
+        qtbot.mouseClick(workflow_view._start_btn, Qt.LeftButton)
 
-        # Verify UI
-        assert "Workflow running" in workflow_view.status_label.text()
-        assert not workflow_view.start_btn.isEnabled()
-        assert workflow_view.stop_btn.isEnabled()
-        assert not workflow_view.browse_btn.isEnabled()
+        mock_workflow_controller.start_workflow_from_ui.assert_not_called()
+        assert "No illumination" in workflow_view._message_label.text()
 
-    def test_stop_calls_controller(
+    def test_stop_calls_controller_and_restores_ui(
         self, workflow_view, mock_workflow_controller, qtbot
     ):
-        """Test stopping workflow calls controller."""
-        # Setup running workflow
-        workflow_view._current_workflow_path = Path("/test/workflow.txt")
-        workflow_view._update_status(workflow_loaded=True, workflow_running=True)
+        """Stopping calls stop_workflow and returns to the ready state."""
+        # Put the view into the running state first.
+        workflow_view._set_running_state(True)
 
-        # Click stop
-        qtbot.mouseClick(workflow_view.stop_btn, Qt.LeftButton)
+        qtbot.mouseClick(workflow_view._stop_btn, Qt.LeftButton)
 
-        # Verify controller called
         mock_workflow_controller.stop_workflow.assert_called_once()
-
-    def test_stop_success_updates_ui(
-        self, workflow_view, mock_workflow_controller, qtbot
-    ):
-        """Test successful workflow stop updates UI."""
-        # Setup running workflow
-        workflow_view._current_workflow_path = Path("/test/workflow.txt")
-        workflow_view._update_status(workflow_loaded=True, workflow_running=True)
-
-        # Stop
-        qtbot.mouseClick(workflow_view.stop_btn, Qt.LeftButton)
-
-        # Verify UI restored to loaded state
-        assert "Workflow loaded" in workflow_view.status_label.text()
-        assert workflow_view.start_btn.isEnabled()
-        assert not workflow_view.stop_btn.isEnabled()
-        assert workflow_view.browse_btn.isEnabled()
+        assert workflow_view._start_btn.isEnabled()
+        assert not workflow_view._stop_btn.isEnabled()
 
 
 class TestWorkflowViewConnectionState:
     """Test workflow view response to connection state changes."""
 
-    def test_disconnected_disables_start(self, workflow_view):
-        """Test disconnection disables start button."""
-        # Setup with workflow loaded
-        workflow_view._current_workflow_path = Path("/test/workflow.txt")
-        workflow_view._update_status(workflow_loaded=True, workflow_running=False)
-
-        # Simulate disconnection
+    def test_disconnected_updates_status(self, workflow_view):
+        """Disconnection surfaces a 'not connected' prompt in the status label."""
         workflow_view.update_for_connection_state(connected=False)
+        assert "Not connected" in workflow_view._status_label.text()
 
-        # Start should be disabled
-        assert not workflow_view.start_btn.isEnabled()
-
-    def test_connected_with_workflow_enables_start(self, workflow_view):
-        """Test connection with loaded workflow enables start."""
-        # Setup with workflow loaded
-        workflow_view._current_workflow_path = Path("/test/workflow.txt")
-
-        # Simulate connection
+    def test_connected_enables_start(self, workflow_view):
+        """Connection enables the Start button."""
         workflow_view.update_for_connection_state(connected=True)
-
-        # Start should be enabled
-        assert workflow_view.start_btn.isEnabled()
-
-    def test_connected_without_workflow_keeps_start_disabled(self, workflow_view):
-        """Test connection without workflow keeps start disabled."""
-        # No workflow loaded
-        workflow_view.update_for_connection_state(connected=True)
-
-        # Start should still be disabled
-        assert not workflow_view.start_btn.isEnabled()
+        assert workflow_view._start_btn.isEnabled()
 
 
 class TestWorkflowViewHelperMethods:
     """Test helper methods in WorkflowView."""
 
-    def test_get_workflow_path(self, workflow_view):
-        """Test getting workflow path."""
-        test_path = Path("/test/workflow.txt")
-        workflow_view._current_workflow_path = test_path
-
-        assert workflow_view.get_workflow_path() == test_path
-
-    def test_clear_workflow(self, workflow_view):
-        """Test clearing workflow."""
-        # Setup workflow
-        workflow_view._current_workflow_path = Path("/test/workflow.txt")
-        workflow_view.file_path_input.setText("/test/workflow.txt")
-
-        # Clear
-        workflow_view.clear_workflow()
-
-        # Verify cleared
-        assert workflow_view.get_workflow_path() is None
-        assert workflow_view.file_path_input.text() == ""
-        assert "No workflow loaded" in workflow_view.status_label.text()
-
     def test_clear_message(self, workflow_view):
         """Test clearing message display."""
-        workflow_view.message_label.setText("Test message")
+        workflow_view._message_label.setText("Test message")
         workflow_view.clear_message()
-        assert workflow_view.message_label.text() == ""
+        assert workflow_view._message_label.text() == ""
 
     def test_show_error_message_color(self, workflow_view):
-        """Test error messages are displayed in red."""
+        """Error messages use the shared error color constant."""
         workflow_view._show_message("Error occurred", is_error=True)
-        assert "red" in workflow_view.message_label.styleSheet().lower()
+        assert ERROR_COLOR in workflow_view._message_label.styleSheet()
 
     def test_show_success_message_color(self, workflow_view):
-        """Test success messages are displayed in green."""
+        """Success messages use the shared success color constant."""
         workflow_view._show_message("Operation successful", is_error=False)
-        assert "green" in workflow_view.message_label.styleSheet().lower()
+        assert SUCCESS_COLOR in workflow_view._message_label.styleSheet()
 
 
-class TestWorkflowViewStatusUpdates:
-    """Test status update logic in WorkflowView."""
+class TestWorkflowViewWorkflowFile:
+    """Test the workflow.txt load/save + preset flow (replaces path-based load)."""
 
-    def test_status_no_workflow(self, workflow_view):
-        """Test status display with no workflow."""
-        workflow_view._update_status(workflow_loaded=False, workflow_running=False)
+    def test_preset_combo_has_none_entry(self, workflow_view):
+        """The preset dropdown always offers a '(None)' entry."""
+        assert workflow_view._template_combo.findText("(None)") >= 0
 
-        assert "No workflow loaded" in workflow_view.status_label.text()
-        assert not workflow_view.start_btn.isEnabled()
-        assert not workflow_view.stop_btn.isEnabled()
+    def test_refresh_presets_runs(self, workflow_view):
+        """refresh_presets repopulates the dropdown without error."""
+        workflow_view.refresh_presets()
+        assert workflow_view._template_combo.count() >= 1
 
-    def test_status_workflow_loaded(self, workflow_view):
-        """Test status display with workflow loaded."""
-        workflow_view._update_status(workflow_loaded=True, workflow_running=False)
-
-        assert "Workflow loaded" in workflow_view.status_label.text()
-        assert workflow_view.start_btn.isEnabled()
-        assert not workflow_view.stop_btn.isEnabled()
-
-    def test_status_workflow_running(self, workflow_view):
-        """Test status display with workflow running."""
-        workflow_view._update_status(workflow_loaded=True, workflow_running=True)
-
-        assert "Workflow running" in workflow_view.status_label.text()
-        assert not workflow_view.start_btn.isEnabled()
-        assert workflow_view.stop_btn.isEnabled()
+    def test_workflow_dict_round_trips(self, workflow_view):
+        """get_workflow_dict returns a section-keyed dict accepted by set_workflow_dict."""
+        wf_dict = workflow_view.get_workflow_dict()
+        assert "Start Position" in wf_dict
+        assert "Stack Settings" in wf_dict
+        # Applying it back should not raise.
+        workflow_view.set_workflow_dict(
+            wf_dict, workflow_view.get_current_workflow_type()
+        )
 
 
 # Integration-style tests
@@ -512,7 +414,7 @@ class TestViewsIntegration:
         """Test workflow view works independently."""
         # Should be able to create and interact with workflow view alone
         assert workflow_view is not None
-        assert workflow_view.browse_btn.isEnabled()
+        assert workflow_view._start_btn.isEnabled()
 
     def test_both_views_can_coexist(
         self, qapp, mock_connection_controller, mock_workflow_controller, qtbot

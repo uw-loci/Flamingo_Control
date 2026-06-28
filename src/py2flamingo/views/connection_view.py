@@ -386,11 +386,7 @@ class ConnectionView(QWidget):
         # Keep IP/port disabled (still have TCP connection)
         self.ip_input.setEnabled(False)
         self.port_input.setEnabled(False)
-
-        # Disable features that require working microscope communication
-        # Note: sample_view_btn stays enabled — it works without connection
-        self.test_workflow_file_btn.setEnabled(False)
-        self.test_workflow_gen_btn.setEnabled(False)
+        # (sample_view_btn stays enabled — it works without connection)
 
     def _on_sample_view_clicked(self) -> None:
         """Handle Sample View button click - emit signal to open Sample View."""
