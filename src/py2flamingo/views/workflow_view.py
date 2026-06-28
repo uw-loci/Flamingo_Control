@@ -104,9 +104,6 @@ class WorkflowView(QWidget):
     workflow_stopped = pyqtSignal()
     start_requested = pyqtSignal()
     stop_requested = pyqtSignal()
-    template_save_requested = pyqtSignal(str, str)  # name, description
-    template_load_requested = pyqtSignal(str)  # name
-    template_delete_requested = pyqtSignal(str)  # name
     check_workflow_requested = pyqtSignal()
 
     def __init__(self, controller):
@@ -1241,17 +1238,6 @@ class WorkflowView(QWidget):
         """Get multi-angle panel."""
         return self._multiangle_panel
 
-    # Template management public API
-
-    def update_template_list(self, template_names: List[str]) -> None:
-        """Deprecated: the dropdown now lists workflow.txt presets from disk.
-
-        Kept so the existing startup wiring (which passes legacy ``.json``
-        template names) is harmless — it just triggers a presets refresh and
-        ignores the names. The Workflow tab uses a single format (workflow.txt).
-        """
-        self.refresh_presets()
-
     def set_workflow_dict(
         self, workflow_dict: Dict[str, Any], workflow_type: str
     ) -> None:
@@ -1485,12 +1471,6 @@ class SaveTemplateDialog(PersistentDialog):
             self._name_edit.currentText().strip(),
             self._description_edit.toPlainText().strip(),
         )
-
-    def set_existing_templates(self, names: List[str]) -> None:
-        """Set existing template names for overwrite selection."""
-        self._name_edit.clear()
-        self._name_edit.addItems(names)
-        self._name_edit.setCurrentText("")
 
 
 class ValidationResultDialog(PersistentDialog):

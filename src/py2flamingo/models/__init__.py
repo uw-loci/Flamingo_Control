@@ -50,7 +50,6 @@ from .workflow import (
     WorkflowModel,
     WorkflowType,
 )
-from .workflow_template import WorkflowTemplate
 
 __all__ = [
     # Microscope
@@ -99,7 +98,6 @@ __all__ = [
     # Image Display
     "ImageDisplayModel",
     # Workflow Templates
-    "WorkflowTemplate",
     # Acquisition Timing
     "AcquisitionTimingRecord",
     "LearnedOverheadComponents",

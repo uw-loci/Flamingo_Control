@@ -48,7 +48,6 @@ from .window_geometry_manager import (
 from .workflow_execution_service import WorkflowExecutionService
 from .workflow_queue_service import WorkflowQueueService
 from .workflow_service import MVCWorkflowService
-from .workflow_template_service import WorkflowTemplateService
 
 # Legacy services (require numpy/scipy) - import with try/except
 try:
@@ -84,7 +83,6 @@ __all__ = [
     "MicroscopeInitializationService",
     "InitializationData",
     "ImageAcquisitionService",
-    "WorkflowTemplateService",
     "AcquisitionTimingService",
     "WorkflowQueueService",
     # TIFF size validation

@@ -25,7 +25,6 @@ if TYPE_CHECKING:
         AcquisitionTimingService,
         MVCConnectionService,
         MVCWorkflowService,
-        WorkflowTemplateService,
     )
 
 
@@ -43,7 +42,6 @@ class WorkflowController(QObject):
         _connection_model: Connection model to check connection status
         _workflow_model: Optional workflow model for state tracking
         _connection_service: Optional MVCConnectionService for querying drives
-        _template_service: Optional WorkflowTemplateService for template management
         _timing_service: Optional AcquisitionTimingService for time estimation
         _text_formatter: WorkflowTextFormatter for dict-to-text conversion
         _logger: Logger instance
@@ -65,7 +63,6 @@ class WorkflowController(QObject):
         workflow_model: Optional[WorkflowModel] = None,
         workflows_dir: Optional[Path] = None,
         connection_service: Optional["MVCConnectionService"] = None,
-        template_service: Optional["WorkflowTemplateService"] = None,
         timing_service: Optional["AcquisitionTimingService"] = None,
     ):
         """
@@ -77,7 +74,6 @@ class WorkflowController(QObject):
             workflow_model: Optional workflow model for state tracking
             workflows_dir: Directory for saving workflow files (default: "workflows")
             connection_service: Optional MVCConnectionService for querying drives
-            template_service: Optional WorkflowTemplateService for template management
             timing_service: Optional AcquisitionTimingService for time estimation
         """
         super().__init__()
@@ -86,7 +82,6 @@ class WorkflowController(QObject):
         self._workflow_model = workflow_model
         self._workflows_dir = workflows_dir or Path("workflows")
         self._connection_service = connection_service
-        self._template_service = template_service
         self._timing_service = timing_service
         self._text_formatter = WorkflowTextFormatter()
         self._logger = logging.getLogger(__name__)
@@ -584,109 +579,6 @@ class WorkflowController(QObject):
         return self._is_executing
 
     # Template Management Methods
-
-    def set_template_service(self, template_service: "WorkflowTemplateService") -> None:
-        """Set the template service for template management."""
-        self._template_service = template_service
-
-    def get_template_names(self) -> List[str]:
-        """
-        Get list of available template names.
-
-        Returns:
-            List of template names, empty if no template service
-        """
-        if self._template_service is None:
-            return []
-        return self._template_service.get_template_names()
-
-    def save_template(
-        self,
-        name: str,
-        workflow_type: str,
-        workflow_dict: Dict[str, Any],
-        description: str = "",
-    ) -> Tuple[bool, str]:
-        """
-        Save current workflow settings as a template.
-
-        Args:
-            name: Name for the template
-            workflow_type: Type of workflow (SNAPSHOT, ZSTACK, etc.)
-            workflow_dict: Complete workflow settings dictionary
-            description: Optional description
-
-        Returns:
-            Tuple of (success, message)
-        """
-        if self._template_service is None:
-            return (False, "Template service not available")
-
-        try:
-            self._template_service.save_template(
-                name, workflow_type, workflow_dict, description
-            )
-            self._logger.info(f"Saved template: {name}")
-            return (True, f"Template '{name}' saved successfully")
-        except ValueError as e:
-            return (False, str(e))
-        except Exception as e:
-            self._logger.error(f"Error saving template: {e}", exc_info=True)
-            return (False, f"Error saving template: {str(e)}")
-
-    def load_template(self, name: str) -> Tuple[bool, Optional[Dict[str, Any]], str]:
-        """
-        Load a template by name.
-
-        Args:
-            name: Template name to load
-
-        Returns:
-            Tuple of (success, template_data, message)
-            template_data is dict with 'workflow_type' and 'settings' keys
-        """
-        if self._template_service is None:
-            return (False, None, "Template service not available")
-
-        try:
-            template = self._template_service.get_template(name)
-            if template is None:
-                return (False, None, f"Template '{name}' not found")
-
-            template_data = {
-                "workflow_type": template.workflow_type,
-                "settings": template.settings,
-                "description": template.description,
-            }
-            self._logger.info(f"Loaded template: {name}")
-            return (True, template_data, f"Template '{name}' loaded")
-        except Exception as e:
-            self._logger.error(f"Error loading template: {e}", exc_info=True)
-            return (False, None, f"Error loading template: {str(e)}")
-
-    def delete_template(self, name: str) -> Tuple[bool, str]:
-        """
-        Delete a template by name.
-
-        Args:
-            name: Template name to delete
-
-        Returns:
-            Tuple of (success, message)
-        """
-        if self._template_service is None:
-            return (False, "Template service not available")
-
-        try:
-            deleted = self._template_service.delete_template(name)
-            if deleted:
-                self._logger.info(f"Deleted template: {name}")
-                return (True, f"Template '{name}' deleted")
-            else:
-                return (False, f"Template '{name}' not found")
-        except Exception as e:
-            self._logger.error(f"Error deleting template: {e}", exc_info=True)
-            return (False, f"Error deleting template: {str(e)}")
 
     # Workflow Validation Methods
 

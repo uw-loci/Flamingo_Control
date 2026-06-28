@@ -116,7 +116,11 @@ class TimeLapsePanel(QWidget):
         interval_layout.addWidget(self._interval_mins)
 
         self._interval_secs = QSpinBox()
-        self._interval_secs.setRange(1, 59)  # At least 1 second interval
+        # The seconds field is one digit of the total dd:hh:mm:ss interval, so it
+        # may legitimately be 0 (e.g. a whole-minute interval — which is how the
+        # microscope's own files store it). The "at least 1 second" floor belongs
+        # on the *total* interval, enforced in _get_interval_seconds(), not here.
+        self._interval_secs.setRange(0, 59)
         self._interval_secs.setSuffix(" s")
         self._interval_secs.setValue(10)  # Default 10 seconds
         self._interval_secs.valueChanged.connect(self._on_settings_changed)
@@ -187,13 +191,14 @@ class TimeLapsePanel(QWidget):
         )
 
     def _get_interval_seconds(self) -> int:
-        """Get interval in seconds."""
-        return (
+        """Get total interval in seconds (floored at 1 s to avoid a zero interval)."""
+        total = (
             self._interval_days.value() * 86400
             + self._interval_hours.value() * 3600
             + self._interval_mins.value() * 60
             + self._interval_secs.value()
         )
+        return max(1, total)
 
     def _format_time(self, total_seconds: int) -> str:
         """Format seconds as dd:hh:mm:ss string."""

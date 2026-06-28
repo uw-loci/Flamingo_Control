@@ -135,48 +135,17 @@ def wire_workflow_signals(
         )
         logger.debug("Connected connection_closed to workflow view")
 
-    # Template management signals
+    # Check-stack validation signal. (Workflow presets are plain workflow.txt
+    # files loaded/saved directly by the view, so no template wiring is needed.)
     if workflow_controller:
-
-        def _on_save_template(name, description):
-            workflow_dict = workflow_view.get_workflow_dict()
-            workflow_type = workflow_view.get_current_workflow_type()
-            success, msg = workflow_controller.save_template(
-                name, workflow_type, workflow_dict, description
-            )
-            if success:
-                # Refresh template list in view
-                names = workflow_controller.get_template_names()
-                workflow_view.update_template_list(names)
-            logger.info(f"Template save: {msg}")
-
-        def _on_load_template(name):
-            success, data, msg = workflow_controller.load_template(name)
-            if success and data:
-                workflow_view.set_workflow_dict(data["settings"], data["workflow_type"])
-            logger.info(f"Template load: {msg}")
-
-        def _on_delete_template(name):
-            success, msg = workflow_controller.delete_template(name)
-            if success:
-                names = workflow_controller.get_template_names()
-                workflow_view.update_template_list(names)
-            logger.info(f"Template delete: {msg}")
 
         def _on_check_workflow():
             workflow_dict = workflow_view.get_workflow_dict()
             result = workflow_controller.check_workflow(workflow_dict)
             workflow_view.show_validation_result(result)
 
-        workflow_view.template_save_requested.connect(_on_save_template)
-        workflow_view.template_load_requested.connect(_on_load_template)
-        workflow_view.template_delete_requested.connect(_on_delete_template)
         workflow_view.check_workflow_requested.connect(_on_check_workflow)
-
-        # Load initial template list
-        names = workflow_controller.get_template_names()
-        workflow_view.update_template_list(names)
-        logger.debug("Connected template and check signals to workflow controller")
+        logger.debug("Connected check-workflow signal to workflow controller")
 
 
 def wire_acquisition_lock_signals(

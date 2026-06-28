@@ -4,7 +4,6 @@
 Service for creating and managing microscope workflows.
 """
 
-import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -24,23 +23,6 @@ class WorkflowService:
     def __init__(self):
         """Initialize workflow service."""
         self.logger = logging.getLogger(__name__)
-        self.workflow_templates = self._load_templates()
-
-    def _load_templates(self) -> Dict[str, dict]:
-        """Load workflow templates."""
-        templates = {}
-        template_dir = Path("workflows/templates")
-
-        if template_dir.exists():
-            for template_file in template_dir.glob("*.json"):
-                try:
-                    with open(template_file, "r") as f:
-                        template = json.load(f)
-                        templates[template_file.stem] = template
-                except Exception as e:
-                    self.logger.error(f"Failed to load template {template_file}: {e}")
-
-        return templates
 
     def create_snapshot_workflow(self, workflow_model: WorkflowModel) -> dict:
         """
@@ -263,39 +245,6 @@ class WorkflowService:
             "WorkflowService.run_workflow is deprecated. "
             "Use WorkflowTransmissionService.execute_workflow_from_dict() instead."
         )
-
-    def save_workflow_template(self, name: str, workflow_dict: dict):
-        """
-        Save workflow as template.
-
-        Args:
-            name: Template name
-            workflow_dict: Workflow to save
-        """
-        template_dir = Path("workflows/templates")
-        template_dir.mkdir(parents=True, exist_ok=True)
-
-        template_file = template_dir / f"{name}.json"
-
-        with open(template_file, "w") as f:
-            json.dump(workflow_dict, f, indent=2)
-
-        self.logger.info(f"Saved workflow template: {name}")
-
-        # Reload templates
-        self.workflow_templates[name] = workflow_dict
-
-    def load_workflow_template(self, name: str) -> Optional[dict]:
-        """
-        Load workflow template.
-
-        Args:
-            name: Template name
-
-        Returns:
-            Workflow dictionary or None
-        """
-        return self.workflow_templates.get(name)
 
 
 # ============================================================================
