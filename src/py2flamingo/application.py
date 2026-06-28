@@ -308,6 +308,8 @@ class FlamingoApplication(QObject):
                     qs.register_progress_monitoring()
             if qs is not None:
                 qs.workflow_progress.connect(self._on_acquisition_progress)
+                # Auto-clear the running state when a direct run returns to idle.
+                qs.workflow_finished.connect(self._on_workflow_finished)
             if self.workflow_view is not None:
                 self.workflow_view.workflow_started.connect(
                     self._on_workflow_run_started
@@ -315,6 +317,15 @@ class FlamingoApplication(QObject):
                 self.workflow_view.workflow_stopped.connect(
                     self._on_workflow_run_stopped
                 )
+                if qs is not None:
+                    # Tell the queue service a direct (non-queue) run is active so
+                    # its persistent idle handler treats the next idle as "done".
+                    self.workflow_view.workflow_started.connect(
+                        qs.mark_direct_run_started
+                    )
+                    self.workflow_view.workflow_stopped.connect(
+                        qs.mark_direct_run_stopped
+                    )
         except Exception as e:  # noqa: BLE001 - wiring is best-effort
             self.logger.warning(f"Failed to wire workflow progress: {e}")
 
@@ -345,6 +356,17 @@ class FlamingoApplication(QObject):
                 self.sample_view.update_workflow_progress("Not Running", 0, None)
             except Exception:  # noqa: BLE001
                 self.logger.debug("sample-view stop status failed", exc_info=True)
+
+    def _on_workflow_finished(self) -> None:
+        """A direct Workflow-tab run returned to idle — clear the running state."""
+        self.logger.info("Direct workflow run finished (system idle) — clearing UI")
+        try:
+            if self.workflow_view is not None:
+                self.workflow_view.on_workflow_finished()
+            if self.sample_view is not None:
+                self.sample_view.update_workflow_progress("Complete", 100, None)
+        except Exception:  # noqa: BLE001
+            self.logger.debug("workflow-finished UI update failed", exc_info=True)
 
     def _wire_notification_hooks(self) -> None:
         """Subscribe NotificationService to global signals + logging.

@@ -318,7 +318,7 @@ class StageService(MicroscopeCommandService):
             >>> if pos:
             >>>     print(f"Stage at X={pos.x}, Y={pos.y}, Z={pos.z}, R={pos.r}")
         """
-        self.logger.info("Querying all axis positions from hardware...")
+        self.logger.debug("Querying all axis positions from hardware...")
 
         # Query each axis individually (0xFF doesn't work, must query one at a time)
         x_pos = self.get_axis_position(AxisCode.X_AXIS)
@@ -339,7 +339,7 @@ class StageService(MicroscopeCommandService):
 
         # Create Position object with all axes
         position = Position(x=x_pos, y=y_pos, z=z_pos, r=r_pos)
-        self.logger.info(f"Complete stage position: {position}")
+        self.logger.debug(f"Complete stage position: {position}")
 
         return position
 

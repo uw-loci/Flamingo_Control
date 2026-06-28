@@ -48,6 +48,8 @@ def _make_service(conn):
     svc._connection_service = conn
     svc._progress_monitoring = False
     svc._workflow_running = False
+    svc._direct_run_active = False
+    svc._is_running = False
     svc._queue = []
     svc._current_index = -1
     return svc
@@ -87,6 +89,67 @@ class TestProgressMonitoring(unittest.TestCase):
         self.assertFalse(svc._progress_monitoring)
         self.assertIn(UI_SET_GAUGE_VALUE, [c for c, _ in conn.unregistered])
 
+    def test_register_includes_idle_and_stack_complete(self):
+        conn = _FakeConn()
+        svc = _make_service(conn)
+        svc.register_progress_monitoring()
+        from py2flamingo.services.workflow_queue_service import (
+            CAMERA_STACK_COMPLETE,
+            SYSTEM_STATE_IDLE,
+        )
+
+        codes = [c for c, _ in conn.registered]
+        self.assertIn(SYSTEM_STATE_IDLE, codes)
+        self.assertIn(CAMERA_STACK_COMPLETE, codes)
+
+
+class TestDirectRunCompletion(unittest.TestCase):
+    def _service(self):
+        conn = _FakeConn()
+        svc = WorkflowQueueService(
+            workflow_controller=MagicMock(), connection_service=conn
+        )
+        svc._is_running = False
+        return svc
+
+    def test_idle_finishes_a_confirmed_direct_run(self):
+        svc = self._service()
+        fired = []
+        svc.workflow_finished.connect(lambda: fired.append(True))
+        svc.mark_direct_run_started()
+        svc._workflow_running = True  # confirmed via progress/stack-complete
+        svc._on_idle_persistent(MagicMock())
+        self.assertEqual(fired, [True])
+        self.assertFalse(svc._direct_run_active)
+
+    def test_idle_ignored_when_no_direct_run(self):
+        svc = self._service()
+        fired = []
+        svc.workflow_finished.connect(lambda: fired.append(True))
+        svc._workflow_running = True
+        svc._on_idle_persistent(MagicMock())  # _direct_run_active is False
+        self.assertEqual(fired, [])
+
+    def test_idle_ignored_before_run_confirmed(self):
+        svc = self._service()
+        fired = []
+        svc.workflow_finished.connect(lambda: fired.append(True))
+        svc.mark_direct_run_started()  # but no progress/stack-complete yet
+        svc._on_idle_persistent(MagicMock())
+        self.assertEqual(fired, [])
+
+    def test_idle_ignored_during_queue_run(self):
+        svc = self._service()
+        fired = []
+        svc.workflow_finished.connect(lambda: fired.append(True))
+        svc.mark_direct_run_started()
+        svc._workflow_running = True
+        svc._is_running = True  # a queue run is active -> _on_system_idle handles it
+        svc._on_idle_persistent(MagicMock())
+        self.assertEqual(fired, [])
+
+
+class TestProgressEmit(unittest.TestCase):
     def test_progress_callback_emits_workflow_progress(self):
         conn = _FakeConn()
         svc = _make_service(conn)

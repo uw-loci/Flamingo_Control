@@ -906,6 +906,19 @@ class WorkflowView(QWidget):
             )
             self._progress_bar.setVisible(False)
 
+    def on_workflow_finished(self) -> None:
+        """The microscope returned to idle after a run — clear the running state.
+
+        Called when a direct Workflow-tab run completes (auto-detected), so the
+        operator no longer has to press Stop. Emits ``workflow_stopped`` so the
+        position polling is also stopped.
+        """
+        self._set_running_state(False)
+        self._status_label.setText("Workflow complete")
+        self._status_label.setStyleSheet(f"color: {SUCCESS_COLOR}; font-weight: bold;")
+        self._show_message("Workflow finished.")
+        self.workflow_stopped.emit()
+
     def _show_message(self, message: str, is_error: bool = False) -> None:
         """Display message with appropriate styling."""
         self._message_label.setText(message)

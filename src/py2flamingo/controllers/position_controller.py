@@ -1204,7 +1204,7 @@ class PositionController:
 
             # If no axes specified, query all axes
             if moved_axes is None or len(moved_axes) == 4:
-                self.logger.info("Querying all axis positions from hardware...")
+                self.logger.debug("Querying all axis positions from hardware...")
                 hardware_position = stage_service.get_position()
                 if hardware_position:
                     return hardware_position

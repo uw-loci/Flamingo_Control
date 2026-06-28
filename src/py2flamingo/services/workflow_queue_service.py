@@ -92,6 +92,10 @@ class WorkflowQueueService(QObject):
     queue_cancelled = pyqtSignal()
     progress_updated = pyqtSignal(int, int, str)  # current, total, message
     error_occurred = pyqtSignal(str)
+    # A direct (non-queue) workflow run finished — the scope returned to idle
+    # after a Workflow-tab Start. Lets the UI auto-clear the running state
+    # instead of waiting for the operator to press Stop.
+    workflow_finished = pyqtSignal()
 
     # Fallback poll interval if callbacks not received (seconds)
     # Increased to reduce server load during workflow execution
@@ -144,6 +148,10 @@ class WorkflowQueueService(QObject):
         # only queue runs. Coordinated with _register/_unregister_callbacks so
         # the queue path doesn't double-register or tear it down.
         self._progress_monitoring = False
+        # True between a direct Workflow-tab Start and its completion, so the
+        # persistent SYSTEM_STATE_IDLE handler knows to treat the next idle as
+        # "this run finished" (and ignores idle when nothing is running).
+        self._direct_run_active = False
 
         # Connection health tracking for poll-based reconnection
         self._consecutive_poll_failures = 0
@@ -508,24 +516,64 @@ class WorkflowQueueService(QObject):
         if not self._connection_service:
             return
         try:
+            # Progress + stack-complete both confirm the run is executing; idle
+            # is how we detect a direct run finished (see _on_idle_persistent).
             self._connection_service.register_callback(
                 UI_SET_GAUGE_VALUE, self._on_progress_update
             )
+            self._connection_service.register_callback(
+                CAMERA_STACK_COMPLETE, self._on_stack_complete
+            )
+            self._connection_service.register_callback(
+                SYSTEM_STATE_IDLE, self._on_idle_persistent
+            )
             self._progress_monitoring = True
-            logger.info("[QUEUE] Persistent acquisition-progress monitoring active")
+            logger.info("[QUEUE] Persistent acquisition monitoring active")
         except Exception as e:  # noqa: BLE001
             logger.debug("Could not register progress monitoring: %s", e)
 
     def stop_progress_monitoring(self) -> None:
-        """Drop the persistent progress callback (e.g. on disconnect)."""
+        """Drop the persistent progress/completion callbacks (e.g. on disconnect)."""
         if self._progress_monitoring and self._connection_service:
-            try:
-                self._connection_service.unregister_callback(
-                    UI_SET_GAUGE_VALUE, self._on_progress_update
-                )
-            except Exception:  # noqa: BLE001
-                pass
+            for code, handler in (
+                (UI_SET_GAUGE_VALUE, self._on_progress_update),
+                (CAMERA_STACK_COMPLETE, self._on_stack_complete),
+                (SYSTEM_STATE_IDLE, self._on_idle_persistent),
+            ):
+                try:
+                    self._connection_service.unregister_callback(code, handler)
+                except Exception:  # noqa: BLE001
+                    pass
         self._progress_monitoring = False
+
+    def mark_direct_run_started(self) -> None:
+        """A workflow was started directly from the Workflow tab (not the queue)."""
+        self._direct_run_active = True
+        self._workflow_running = False  # re-confirm via progress/stack-complete
+
+    def mark_direct_run_stopped(self) -> None:
+        """A direct run was stopped/cleared (manual Stop or completion handled)."""
+        self._direct_run_active = False
+
+    def _on_idle_persistent(self, message) -> None:
+        """Detect completion of a DIRECT (non-queue) Workflow-tab run.
+
+        The scope emits SYSTEM_STATE_IDLE when it returns to idle after a run.
+        A queue run handles its own completion (``_on_system_idle``), so we skip
+        when the queue is active. We only treat idle as "finished" once the run
+        was confirmed executing (a progress or stack-complete callback arrived),
+        which avoids a stale pre-start idle ending it prematurely.
+        """
+        if self._is_running:
+            return  # queue run — _on_system_idle handles completion
+        if not self._direct_run_active:
+            return  # nothing running we care about
+        if not self._workflow_running:
+            return  # not yet confirmed running; ignore this idle
+        self._direct_run_active = False
+        self._workflow_running = False
+        logger.info("[direct-run] SYSTEM_STATE_IDLE — workflow finished")
+        self.workflow_finished.emit()
 
     def _register_callbacks(self) -> None:
         """Register callback handlers with connection service."""
@@ -534,17 +582,19 @@ class WorkflowQueueService(QObject):
             return
 
         try:
-            # Primary completion signal - system returning to idle
+            # Primary completion signal - system returning to idle. (Uses a
+            # different handler from the persistent _on_idle_persistent, which
+            # no-ops during a queue run, so both can be registered.)
             self._connection_service.register_callback(
                 SYSTEM_STATE_IDLE, self._on_system_idle
             )
-            # Acquisition stats (not completion trigger)
-            self._connection_service.register_callback(
-                CAMERA_STACK_COMPLETE, self._on_stack_complete
-            )
-            # Progress tracking — skip if already registered persistently (see
-            # register_progress_monitoring) to avoid a double callback.
+            # Stack-complete + progress — skip if already registered persistently
+            # (register_progress_monitoring uses the same handlers) to avoid a
+            # double callback.
             if not self._progress_monitoring:
+                self._connection_service.register_callback(
+                    CAMERA_STACK_COMPLETE, self._on_stack_complete
+                )
                 self._connection_service.register_callback(
                     UI_SET_GAUGE_VALUE, self._on_progress_update
                 )
@@ -563,11 +613,11 @@ class WorkflowQueueService(QObject):
             self._connection_service.unregister_callback(
                 SYSTEM_STATE_IDLE, self._on_system_idle
             )
-            self._connection_service.unregister_callback(
-                CAMERA_STACK_COMPLETE, self._on_stack_complete
-            )
-            # Keep the progress callback if it is registered persistently.
+            # Keep stack-complete + progress if they are registered persistently.
             if not self._progress_monitoring:
+                self._connection_service.unregister_callback(
+                    CAMERA_STACK_COMPLETE, self._on_stack_complete
+                )
                 self._connection_service.unregister_callback(
                     UI_SET_GAUGE_VALUE, self._on_progress_update
                 )

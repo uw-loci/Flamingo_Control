@@ -4129,7 +4129,7 @@ class SampleView(QWidget):
         stage_pos = self._pending_stage_update
         self._pending_stage_update = None
 
-        self.logger.info(
+        self.logger.debug(
             f"Stage update received: X={stage_pos['x']:.3f}, Y={stage_pos['y']:.3f}, "
             f"Z={stage_pos['z']:.3f}, R={stage_pos['r']:.1f}"
         )
@@ -4178,7 +4178,7 @@ class SampleView(QWidget):
             if has_stitched:
                 self._update_plane_views()
             else:
-                self.logger.info(
+                self.logger.debug(
                     "  Skipping data transform (reference_stage_position not set)"
                 )
             return
