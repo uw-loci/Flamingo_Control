@@ -114,12 +114,10 @@ class TestLoadIntoView(unittest.TestCase):
             int(parsed["Camera Settings"]["AOI width"]),
         )
 
-        # Plane count is recomputed from range/spacing for consistency, so it is
-        # close to (not necessarily identical to) the stored value.
-        self.assertAlmostEqual(
+        # Plane count is preserved exactly (set last, no auto-recompute drift).
+        self.assertEqual(
             int(out["Stack Settings"]["Number of planes"]),
             int(parsed["Stack Settings"]["Number of planes"]),
-            delta=3,
         )
 
     def test_save_after_load_produces_text(self):
@@ -129,6 +127,50 @@ class TestLoadIntoView(unittest.TestCase):
         text = dict_to_workflow_text(out)
         self.assertIn("Experiment Settings", text)
         self.assertIn("Start Position", text)
+
+    def test_plane_count_uses_cpp_convention(self):
+        """planes = round(range/step), range = planes*step (no fencepost +1)."""
+        view = self._WorkflowView(controller=self._MagicMock())
+        view.set_workflow_dict(
+            {
+                "Stack Settings": {"Number of planes": "200", "Stack option": "ZStack"},
+                "Experiment Settings": {"Plane spacing (um)": "2.5"},
+            },
+            "zstack",
+        )
+        out = view.get_workflow_dict()
+        self.assertEqual(int(out["Stack Settings"]["Number of planes"]), 200)
+        # 200 planes * 2.5 um = 0.5 mm (not 199 * 2.5 = 0.4975).
+        self.assertAlmostEqual(
+            float(out["Stack Settings"]["Change in Z axis (mm)"]), 0.5, places=4
+        )
+
+    def test_time_lapse_loads(self):
+        view = self._WorkflowView(controller=self._MagicMock())
+        wf = {
+            "Stack Settings": {"Stack option": "None"},
+            "Experiment Settings": {
+                "Duration (dd:hh:mm:ss)": "01:02:03:04",
+                "Interval (dd:hh:mm:ss)": "00:00:05:10",
+            },
+        }
+        view.set_workflow_dict(wf, infer_workflow_type(wf))
+        self.assertEqual(view.get_current_workflow_type(), "time_lapse")
+        out = view.get_workflow_dict()["Experiment Settings"]
+        self.assertEqual(out.get("Duration (dd:hh:mm:ss)"), "01:02:03:04")
+        self.assertEqual(out.get("Interval (dd:hh:mm:ss)"), "00:00:05:10")
+
+    def test_multi_angle_loads(self):
+        view = self._WorkflowView(controller=self._MagicMock())
+        wf = {
+            "Stack Settings": {"Stack option": "OPT"},
+            "Experiment Settings": {"Number of angles": "72", "Angle step size": "5"},
+        }
+        view.set_workflow_dict(wf, infer_workflow_type(wf))
+        self.assertEqual(view.get_current_workflow_type(), "multi_angle")
+        out = view.get_workflow_dict()["Experiment Settings"]
+        self.assertEqual(int(out.get("Number of angles")), 72)
+        self.assertAlmostEqual(float(out.get("Angle step size")), 5.0, places=3)
 
 
 if __name__ == "__main__":

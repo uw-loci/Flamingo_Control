@@ -37,7 +37,6 @@ from PyQt5.QtWidgets import (
 
 from py2flamingo.models.data.workflow import (
     IlluminationSettings,
-    StackSettings,
     TileSettings,
     Workflow,
     WorkflowType,
@@ -1362,26 +1361,10 @@ class WorkflowView(QWidget):
         except Exception:  # noqa: BLE001
             self._logger.warning("Could not apply camera settings", exc_info=True)
 
-        # --- Z-stack (build a StackSettings; z step prefers Plane spacing) ---
+        # --- Z-stack (exact plane count + step from the file; no auto drift) ---
         try:
             if stack:
-                num_planes = _int(stack.get("Number of planes"), 1)
-                z_range_mm = _num(stack.get("Change in Z axis (mm)"), 0.0)
-                if exp.get("Plane spacing (um)") is not None:
-                    z_step_um = _num(exp.get("Plane spacing (um)"), 1.0)
-                elif num_planes > 1:
-                    z_step_um = z_range_mm * 1000.0 / (num_planes - 1)
-                else:
-                    z_step_um = 1.0
-                self._zstack_panel.set_settings(
-                    StackSettings(
-                        num_planes=num_planes,
-                        z_step_um=z_step_um,
-                        z_velocity_mm_s=_num(stack.get("Z stage velocity (mm/s)"), 0.4),
-                        bidirectional=str(stack.get("Stack option", "")).strip().lower()
-                        == "bidirectional",
-                    )
-                )
+                self._zstack_panel.set_settings_from_workflow_dict(stack, exp)
         except Exception:  # noqa: BLE001
             self._logger.warning("Could not apply z-stack settings", exc_info=True)
 
@@ -1429,6 +1412,20 @@ class WorkflowView(QWidget):
                 )
         except Exception:  # noqa: BLE001
             self._logger.warning("Could not apply save settings", exc_info=True)
+
+        # --- Time-lapse (Duration/Interval) ---
+        try:
+            if exp.get("Duration (dd:hh:mm:ss)") is not None:
+                self._timelapse_panel.set_settings_from_workflow_dict(exp)
+        except Exception:  # noqa: BLE001
+            self._logger.warning("Could not apply time-lapse settings", exc_info=True)
+
+        # --- Multi-angle (angle count / step) ---
+        try:
+            if exp.get("Number of angles") is not None:
+                self._multiangle_panel.set_settings_from_workflow_dict(exp)
+        except Exception:  # noqa: BLE001
+            self._logger.warning("Could not apply multi-angle settings", exc_info=True)
 
         self._logger.info("Applied workflow settings (type: %s)", workflow_type)
 

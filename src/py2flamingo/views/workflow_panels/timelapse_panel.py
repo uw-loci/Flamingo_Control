@@ -217,9 +217,9 @@ class TimeLapsePanel(QWidget):
         )
 
         return TimeLapseSettings(
-            duration_seconds=duration_secs,
-            interval_seconds=interval_secs,
             num_timepoints=timepoints,
+            interval_seconds=interval_secs,
+            total_duration=duration_secs,
         )
 
     def get_workflow_timelapse_dict(self) -> Dict[str, Any]:
@@ -257,6 +257,44 @@ class TimeLapsePanel(QWidget):
         self._interval_hours.setValue((interval % 86400) // 3600)
         self._interval_mins.setValue((interval % 3600) // 60)
         self._interval_secs.setValue(interval % 60)
+
+    def set_settings_from_workflow_dict(self, exp_dict) -> None:
+        """Apply Duration/Interval from a parsed workflow.txt Experiment Settings.
+
+        Both are ``dd:hh:mm:ss`` strings (the format the panel itself writes).
+        """
+
+        def _parse(value):
+            if value is None:
+                return None
+            parts = str(value).strip().split(":")
+            try:
+                nums = [int(float(p)) for p in parts]
+            except (TypeError, ValueError):
+                return None
+            while len(nums) < 4:  # tolerate hh:mm:ss or mm:ss
+                nums.insert(0, 0)
+            return nums[-4], nums[-3], nums[-2], nums[-1]
+
+        def _set(spin, value):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+
+        dur = _parse(exp_dict.get("Duration (dd:hh:mm:ss)"))
+        if dur:
+            _set(self._duration_days, dur[0])
+            _set(self._duration_hours, dur[1])
+            _set(self._duration_mins, dur[2])
+            _set(self._duration_secs, dur[3])
+
+        intv = _parse(exp_dict.get("Interval (dd:hh:mm:ss)"))
+        if intv:
+            _set(self._interval_days, intv[0])
+            _set(self._interval_hours, intv[1])
+            _set(self._interval_mins, intv[2])
+            _set(self._interval_secs, intv[3])
+        self._update_calculations() if hasattr(self, "_update_calculations") else None
 
     def get_timepoints(self) -> int:
         """Get calculated number of timepoints."""

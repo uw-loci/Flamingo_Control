@@ -220,6 +220,35 @@ class MultiAnglePanel(QWidget):
         self._num_angles.setValue(settings.num_angles)
         self._angle_step.setValue(settings.angle_step_degrees)
 
+    def set_settings_from_workflow_dict(self, exp_dict) -> None:
+        """Apply angle count / step from a parsed workflow.txt Experiment Settings."""
+
+        def _num(v, default):
+            try:
+                return float(str(v).strip().replace(",", ""))
+            except (TypeError, ValueError):
+                return default
+
+        def _set(spin, value):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+
+        if exp_dict.get("Number of angles") is not None:
+            _set(
+                self._num_angles,
+                int(
+                    round(
+                        _num(exp_dict.get("Number of angles"), self._num_angles.value())
+                    )
+                ),
+            )
+        if exp_dict.get("Angle step size") is not None:
+            _set(
+                self._angle_step,
+                _num(exp_dict.get("Angle step size"), self._angle_step.value()),
+            )
+
     def get_num_angles(self) -> int:
         """Get number of angles."""
         return self._num_angles.value()

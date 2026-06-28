@@ -168,7 +168,7 @@ class ZStackPanel(QWidget):
         self._auto_num_planes_checkbox.setChecked(False)
         self._auto_num_planes_checkbox.setToolTip(
             "Auto-calculate number of planes from Z range and Z step.\n"
-            "Formula: Num_planes = ceiling(Z_range / Z_step) + 1"
+            "Formula: Num_planes = round(Z_range / Z_step)  (microscope convention)"
         )
         self._auto_num_planes_checkbox.stateChanged.connect(
             self._on_auto_num_planes_changed
@@ -340,7 +340,9 @@ class ZStackPanel(QWidget):
         if self._auto_num_planes and self._z_range_mm is not None:
             z_step_mm = self._z_step.value() / 1000.0
             if z_step_mm > 0:
-                num_planes = math.ceil(self._z_range_mm / z_step_mm) + 1
+                # Match the microscope (C++) convention: planes = round(range /
+                # step), i.e. range = planes * step (no fencepost +1).
+                num_planes = max(1, round(self._z_range_mm / z_step_mm))
 
                 self._updating = True
                 self._num_planes.setValue(num_planes)
@@ -389,8 +391,10 @@ class ZStackPanel(QWidget):
         if self._auto_num_planes:
             z_step_mm = self._z_step.value() / 1000.0
             if z_step_mm > 0:
-                # Formula: Num_planes = ceiling(Z_range / Z_step) + 1
-                num_planes = math.ceil(self._z_range_mm / z_step_mm) + 1
+                # Formula: Num_planes = round(Z_range / Z_step)  (C++ convention)
+                # Match the microscope (C++) convention: planes = round(range /
+                # step), i.e. range = planes * step (no fencepost +1).
+                num_planes = max(1, round(self._z_range_mm / z_step_mm))
 
                 # Update num_planes without triggering recursive updates
                 self._updating = True
@@ -422,7 +426,9 @@ class ZStackPanel(QWidget):
             if self._z_range_mm is not None:
                 z_step_mm = self._z_step.value() / 1000.0
                 if z_step_mm > 0:
-                    num_planes = math.ceil(self._z_range_mm / z_step_mm) + 1
+                    # Match the microscope (C++) convention:
+                    # planes = round(range / step), range = planes * step.
+                    num_planes = max(1, round(self._z_range_mm / z_step_mm))
 
                     self._updating = True
                     self._num_planes.setValue(num_planes)
@@ -576,7 +582,12 @@ class ZStackPanel(QWidget):
         num_planes = self._num_planes.value()
         z_step_um = self._z_step.value()
         z_step_mm = z_step_um / 1000.0
-        z_range_mm = (num_planes - 1) * z_step_mm
+        # Match the microscope (C++) convention: range = planes * step (so
+        # planes = round(range / step) is its exact inverse). Real rig files
+        # follow this (e.g. 476 planes x 2.5 um = 1.190 mm); the old
+        # (num_planes - 1) * step fencepost was one step short and made a
+        # load -> reload drift by a plane.
+        z_range_mm = num_planes * z_step_mm
 
         # Get stack option value
         stack_option = self._stack_option.currentText()
@@ -615,6 +626,77 @@ class ZStackPanel(QWidget):
 
         self._return_to_start.setChecked(settings.return_to_start)
 
+    def set_settings_from_workflow_dict(self, stack_dict, exp_dict=None) -> None:
+        """Apply a parsed workflow.txt Stack Settings (+ Experiment Settings).
+
+        Sets the *exact* plane count and step from the file so a loaded workflow
+        reproduces faithfully without the auto-calculator drifting it. Values may
+        be strings (e.g. a thousands comma). The plane count is set LAST so no
+        side-effecting recompute can overwrite it.
+        """
+        exp_dict = exp_dict or {}
+
+        def _num(v, default=0.0):
+            try:
+                return float(str(v).strip().replace(",", ""))
+            except (TypeError, ValueError):
+                return default
+
+        def _int(v, default=0):
+            try:
+                return int(round(float(str(v).strip().replace(",", ""))))
+            except (TypeError, ValueError):
+                return default
+
+        num_planes = max(1, _int(stack_dict.get("Number of planes"), 1))
+        # Prefer the explicit plane spacing; else derive step = range / planes
+        # (the C++ convention, range = planes * step).
+        if exp_dict.get("Plane spacing (um)") is not None:
+            z_step_um = _num(exp_dict.get("Plane spacing (um)"), self._z_step.value())
+        else:
+            z_range_um = _num(stack_dict.get("Change in Z axis (mm)")) * 1000.0
+            z_step_um = (
+                z_range_um / num_planes if num_planes > 0 else self._z_step.value()
+            )
+
+        self._updating = True
+        try:
+            if z_step_um > 0:
+                self._z_step.setValue(z_step_um)
+            vel = _num(
+                stack_dict.get("Z stage velocity (mm/s)"), self._z_velocity.value()
+            )
+            if vel > 0:
+                self._z_velocity.setValue(vel)
+            if stack_dict.get("Rotational stage velocity (°/s)") is not None:
+                self._rotational_velocity.setValue(
+                    _num(
+                        stack_dict.get("Rotational stage velocity (°/s)"),
+                        self._rotational_velocity.value(),
+                    )
+                )
+            opt = str(stack_dict.get("Stack option", "")).strip()
+            if opt:
+                idx = self._stack_option.findText(opt)
+                if idx >= 0:
+                    self._stack_option.setCurrentIndex(idx)
+            if opt.lower() == "tile":
+                self._tiles_x.setValue(
+                    _int(
+                        stack_dict.get("Stack option settings 1"), self._tiles_x.value()
+                    )
+                )
+                self._tiles_y.setValue(
+                    _int(
+                        stack_dict.get("Stack option settings 2"), self._tiles_y.value()
+                    )
+                )
+            # Exact plane count LAST so nothing recomputes it.
+            self._num_planes.setValue(num_planes)
+        finally:
+            self._updating = False
+        self._update_calculations()
+
     def get_z_range_um(self) -> float:
         """Get total Z range in micrometers."""
         return (self._num_planes.value() - 1) * self._z_step.value()
@@ -642,7 +724,8 @@ class ZStackPanel(QWidget):
         if self._auto_num_planes:
             z_step_mm = self._z_step.value() / 1000.0
             if z_step_mm > 0:
-                num_planes = math.ceil(z_range_mm / z_step_mm) + 1
+                # C++ convention: planes = round(range / step).
+                num_planes = max(1, round(z_range_mm / z_step_mm))
 
                 self._updating = True
                 self._num_planes.setValue(num_planes)
