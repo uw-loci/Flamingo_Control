@@ -1130,6 +1130,16 @@ class WorkflowView(QWidget):
 
         Uses DualPositionPanel positions for start and end positions.
 
+        Field coverage: every user-configurable workflow.txt field is round-tripped
+        (see the per-field audit in
+        ``claude-reports/2026-06-28-workflow-txt-field-coverage-audit.md`` and the
+        omission notes in ``utils.workflow_parser.dict_to_workflow_text``). Less
+        common fields live behind each panel's "Advanced…" dialog rather than the
+        main panel: camera exposure / AOI / capture mode+percentage; save Region /
+        Comments / sub-folders / live-view; illumination LED selection / DAC /
+        multi-laser mode. Runtime/output-only fields (timestamp, saved-plane count,
+        output filename, capture range) are deliberately not authored here.
+
         Returns:
             Dictionary suitable for workflow file generation
         """
@@ -1324,6 +1334,17 @@ class WorkflowView(QWidget):
             sec = workflow_dict.get(key)
             return sec if isinstance(sec, dict) else {}
 
+        def _by_prefix(d, prefix, default=None):
+            # The microscope appends a parenthetical to some keys, e.g.
+            # "Camera 1 capture mode (0 full, 1 from front, ...)", so an exact
+            # lookup misses them. Match the exact key first, then by prefix.
+            if prefix in d:
+                return d[prefix]
+            for k in d:
+                if str(k).startswith(prefix):
+                    return d[k]
+            return default
+
         # --- Workflow type ---
         for i, (_name, wtype, _) in enumerate(WORKFLOW_TYPES):
             if wtype.value == workflow_type:
@@ -1377,14 +1398,17 @@ class WorkflowView(QWidget):
                         "cam1_capture_percentage": _int(
                             stack.get("Camera 1 capture percentage"), 100
                         ),
+                        # Capture-mode keys carry a parenthetical in real files
+                        # ("...capture mode (0 full, 1 from front, ...)"), so match
+                        # by prefix rather than exact key.
                         "cam1_capture_mode": _int(
-                            stack.get("Camera 1 capture mode"), 0
+                            _by_prefix(stack, "Camera 1 capture mode"), 0
                         ),
                         "cam2_capture_percentage": _int(
                             stack.get("Camera 2 capture percentage"), 100
                         ),
                         "cam2_capture_mode": _int(
-                            stack.get("Camera 2 capture mode"), 0
+                            _by_prefix(stack, "Camera 2 capture mode"), 0
                         ),
                     }
                 )

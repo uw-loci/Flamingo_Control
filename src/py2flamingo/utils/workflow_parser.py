@@ -395,6 +395,25 @@ def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:
     Uses the C++ expected format with <Workflow Settings> wrapper,
     4-space indentation, and ` = ` separator.
 
+    Field coverage vs. the microscope's own files (audit 2026-06-28). Every field
+    a USER configures is written. The following rig-file fields are intentionally
+    NOT emitted, because they are runtime/output metadata the microscope itself
+    populates during/after a run, not acquisition inputs:
+
+    * ``Number of planes saved`` — count actually written (an output of the run).
+    * ``Date time stamp`` — stamped by the scope at acquisition time.
+    * ``Stack file name`` — output filename assigned by the scope.
+    * ``Camera 1/2 capture range`` — sub-range used only by the partial capture
+      modes; the tab exposes capture *mode* + *percentage* instead.
+
+    Two fields are written with fixed values rather than from a control:
+    ``Stack index`` (left empty — the firmware indexes stacks) and
+    ``Auto update stack calculations`` (always ``true``). See
+    ``claude-reports/2026-06-28-workflow-txt-field-coverage-audit.md`` for the
+    full per-field table. Note the *step* lives in Experiment Settings as
+    ``Plane spacing (um)``; Stack Settings holds the total range
+    (``Change in Z axis (mm)`` = planes x step) and ``Number of planes``.
+
     Args:
         workflow_dict: Workflow configuration dictionary
 
