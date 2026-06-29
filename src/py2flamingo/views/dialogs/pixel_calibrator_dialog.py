@@ -234,6 +234,10 @@ class PixelCalibratorDialog(PersistentDialog):
     def _movement_controller(self):
         return getattr(self.app, "movement_controller", None) if self.app else None
 
+    def _position_controller(self):
+        mc = self._movement_controller()
+        return getattr(mc, "position_controller", None) if mc else None
+
     def _is_connected(self) -> bool:
         if self.app is None:
             return False
@@ -498,11 +502,31 @@ class PixelCalibratorDialog(PersistentDialog):
             QMessageBox.information(self, "Nothing to patch", "No config files found.")
             return
 
+        # The back-computed objective magnification we'll also push to the
+        # scope so future acquisitions stamp the calibrated value.
+        mag_patch = next(
+            (p for p in patches if p["key"] == "objective_magnification"), None
+        )
+        new_mag = mag_patch["new"] if mag_patch else None
+        push_to_scope = new_mag is not None and self._is_connected()
+
         lines = ["The following config values will be updated:\n"]
         for p in patches:
             fname = p["file"].split("/")[-1]
             lines.append(
                 f"• {fname}: {p['key']}\n    {p['old']} → {p['new']}\n    {p['note']}"
+            )
+        if push_to_scope:
+            lines.append(
+                f"• Microscope: Objective lens magnification → {new_mag}\n"
+                "    Saved to the scope (SCOPE_SETTINGS_SAVE) so future\n"
+                "    acquisitions record the calibrated magnification."
+            )
+        elif new_mag is not None:
+            lines.append(
+                "• Microscope: NOT updated (not connected). Connect and re-run\n"
+                "    the patch, or use 'Save Settings to Microscope', so future\n"
+                "    acquisitions record the calibrated magnification."
             )
         lines.append("\nA .bak backup is written before any change. Proceed?")
         reply = QMessageBox.question(
@@ -516,14 +540,51 @@ class PixelCalibratorDialog(PersistentDialog):
             return
         try:
             written = self.service.apply_config_patch(patches)
-            QMessageBox.information(
-                self,
-                "Configs patched",
-                "Updated:\n" + "\n".join(written) + "\n\n"
-                "Restart the app for hardware-config changes to take effect.",
-            )
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self, "Patch failed", str(e))
+            return
+
+        scope_line = ""
+        if push_to_scope:
+            ok, msg = self._push_magnification_to_scope(new_mag)
+            scope_line = f"\n\nMicroscope: {msg}"
+            if not ok:
+                logger.warning("Pushing magnification to scope failed: %s", msg)
+
+        QMessageBox.information(
+            self,
+            "Configs patched",
+            "Updated:\n" + "\n".join(written) + scope_line + "\n\n"
+            "Restart the app for hardware-config changes to take effect.",
+        )
+
+    def _push_magnification_to_scope(self, new_mag: float):
+        """Write the calibrated objective magnification into the local
+        ScopeSettings.txt and push it to the microscope so future acquisitions
+        record it. Returns ``(ok: bool, message: str)``.
+        """
+        from pathlib import Path
+
+        sp = Path("microscope_settings") / "ScopeSettings.txt"
+        if not sp.exists():
+            return (
+                False,
+                "ScopeSettings.txt not found — connect and load settings first.",
+            )
+        pc = self._position_controller()
+        if pc is None or not hasattr(pc, "debug_save_settings"):
+            return False, "no scope connection available."
+        try:
+            data = self.service.update_scope_settings_magnification(sp, new_mag)
+        except Exception as e:  # noqa: BLE001
+            return False, f"could not update ScopeSettings.txt: {e}"
+        try:
+            result = pc.debug_save_settings(data)
+        except Exception as e:  # noqa: BLE001
+            return False, f"SCOPE_SETTINGS_SAVE failed: {e}"
+        if result.get("success"):
+            return True, f"objective magnification set to {new_mag} on the scope."
+        return False, f"scope rejected the save: {result.get('error', 'unknown error')}"
 
     def _update_button_states(self):
         has_result = self._result is not None

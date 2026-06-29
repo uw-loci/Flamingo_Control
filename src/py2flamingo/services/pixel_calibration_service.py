@@ -692,6 +692,38 @@ class PixelCalibrationService:
         return patches
 
     @staticmethod
+    def update_scope_settings_magnification(
+        scope_settings_path: Path, new_mag: float
+    ) -> bytes:
+        """Set ``Objective lens magnification`` in a ScopeSettings.txt to
+        ``new_mag``, preserving everything else, and return the new file bytes
+        (ready to push to the scope via SCOPE_SETTINGS_SAVE).
+
+        This is what makes a fresh calibration actually reach the acquisition
+        server: the C++ scope stamps its ``Objective lens magnification`` into
+        every acquisition's ScopeSettings.txt, so downstream tools (e.g. the
+        standalone stitcher) read the calibrated value instead of a stale mag.
+
+        Raises FileNotFoundError if the file is missing, ValueError if the
+        magnification field is absent.
+        """
+        path = Path(scope_settings_path)
+        text = path.read_text(encoding="utf-8", errors="replace")
+        # Replace only the number; keep the key, spacing, and the rest of the
+        # file byte-for-byte so the C++ parser sees the same structure.
+        new_text, n = re.subn(
+            r"(Objective lens magnification\s*=\s*)[\d.]+",
+            lambda m: f"{m.group(1)}{new_mag}",
+            text,
+        )
+        if n == 0:
+            raise ValueError(
+                "No 'Objective lens magnification' field found in ScopeSettings.txt"
+            )
+        path.write_text(new_text, encoding="utf-8")
+        return new_text.encode("utf-8")
+
+    @staticmethod
     def apply_config_patch(patches: Sequence[dict]) -> List[str]:
         """Apply patches with a one-time ``.bak`` per file; preserves comments.
 
