@@ -29,6 +29,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -65,6 +66,8 @@ class _SweepWorker(QThread):
                 nominal_move_um=self._params["nominal_move_um"],
                 initial_pixel_um=self._params["initial_pixel_um"],
                 quality_threshold=self._params["quality_threshold"],
+                frames_to_average=self._params["frames_to_average"],
+                refine=self._params["refine"],
                 get_limits=self._dlg._get_limits,
             )
             self.finished_ok.emit(cal)
@@ -164,6 +167,24 @@ class PixelCalibratorDialog(PersistentDialog):
         self._settle_spin.setValue(0.5)
         self._settle_spin.setSuffix(" s settle")
         form.addRow("Settle:", self._settle_spin)
+        self._frames_spin = QSpinBox()
+        self._frames_spin.setRange(1, 16)
+        self._frames_spin.setValue(3)
+        self._frames_spin.setSuffix(" frames")
+        self._frames_spin.setToolTip(
+            "Frames averaged at each position to cut shot noise (only helps if "
+            "the live feed delivers fresh frames between grabs)."
+        )
+        form.addRow("Average:", self._frames_spin)
+        self._refine_check = QCheckBox("Two-stage refine (track large moves)")
+        self._refine_check.setChecked(True)
+        self._refine_check.setToolTip(
+            "After a rough pass, drive the image content far toward the frame "
+            "edges and measure each shift by feature tracking. The long lever "
+            "arm makes the pixel size much more precise and repeatable "
+            "(MicroManager-style). Disable for a quick rough-only estimate."
+        )
+        form.addRow(self._refine_check)
         self._firmware_label = QLabel("Firmware pixel size: —")
         form.addRow(self._firmware_label)
         layout.addWidget(params)
@@ -384,6 +405,8 @@ class PixelCalibratorDialog(PersistentDialog):
             "initial_pixel_um": self._initial_pixel_um(),
             "quality_threshold": self._quality_spin.value(),
             "settle_s": self._settle_spin.value(),
+            "frames_to_average": self._frames_spin.value(),
+            "refine": self._refine_check.isChecked(),
         }
         self._run_btn.setEnabled(False)
         self._progress.setVisible(True)

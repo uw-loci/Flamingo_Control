@@ -159,12 +159,88 @@ class PixelCalibrationService:
         return float(dy), float(dx), quality
 
     # ================================================================
+    # Feature tracking (predicted-displacement measurement, MM-style)
+    # ================================================================
+
+    @staticmethod
+    def _pow2_le(n: int) -> int:
+        """Largest power of two <= n (>= 1)."""
+        if n < 1:
+            return 1
+        return 1 << int(np.floor(np.log2(n)))
+
+    @staticmethod
+    def _to_2d(frame: np.ndarray) -> np.ndarray:
+        arr = np.asarray(frame)
+        if arr.ndim > 2:
+            arr = arr.reshape(-1, *arr.shape[-2:]).mean(axis=0)
+        return arr.astype(np.float64)
+
+    @classmethod
+    def _center_patch(cls, frame: np.ndarray, side: int) -> np.ndarray:
+        """Raw (un-windowed) centred ``side``x``side`` crop of ``frame``."""
+        arr = cls._to_2d(frame)
+        h, w = arr.shape
+        half = side // 2
+        cy, cx = h // 2, w // 2
+        return arr[cy - half : cy + half, cx - half : cx + half]
+
+    @classmethod
+    def measure_shift_tracked(
+        cls,
+        reference_patch: np.ndarray,
+        moved: np.ndarray,
+        predicted: Tuple[float, float],
+        side: int,
+    ) -> Optional[Tuple[float, float, float]]:
+        """Measure a large image shift by tracking, MicroManager-style.
+
+        A direct full-frame cross-correlation degrades badly once the two frames
+        overlap by much less than ~half, so a single big stage move gives a noisy
+        pixel shift even though its long lever arm *should* give the most precise
+        pixel size. MicroManager's trick (``AutomaticCalibrationThread``) is to
+        **predict** the displacement, crop the moved frame in a small box centred
+        on the *predicted* feature location, and cross-correlate only that box
+        against the reference patch — so every correlation measures a near-zero
+        *residual* in the accurate sub-pixel regime, no matter how far the stage
+        moved.
+
+        Args:
+            reference_patch: ``side``x``side`` patch from the origin frame
+                (:meth:`_center_patch`).
+            moved: the full frame after the move.
+            predicted: predicted content shift ``(su, sv)`` in px (image x, y),
+                from a rough calibration applied to the actual stage delta.
+            side: search-box / patch size (px).
+
+        Returns ``(shift_x_px, shift_y_px, quality)`` for the *total* shift, or
+        ``None`` if the predicted box would fall outside the frame.
+        """
+        arr = cls._to_2d(moved)
+        h, w = arr.shape
+        half = side // 2
+        cy, cx = h // 2, w // 2
+        off_u = int(round(predicted[0]))
+        off_v = int(round(predicted[1]))
+        y0, x0 = cy + off_v - half, cx + off_u - half
+        if y0 < 0 or x0 < 0 or y0 + side > h or x0 + side > w:
+            return None
+        box = arr[y0 : y0 + side, x0 : x0 + side]
+        su_r, sv_r, q = cls.measure_shift(reference_patch, box, crop=side)
+        return off_u + su_r, off_v + sv_r, q
+
+    # ================================================================
     # Fit
     # ================================================================
 
     @staticmethod
-    def _solve_map(D: np.ndarray, S: np.ndarray) -> np.ndarray:
+    def _solve_map(
+        D: np.ndarray, S: np.ndarray, weights: Optional[np.ndarray] = None
+    ) -> np.ndarray:
         """Least-squares 2x2 stage->pixel map M (px/mm) for ``S = D @ M^T``.
+
+        ``weights`` (one non-negative scalar per move) lets precise, long-lever
+        moves dominate the fit; ``None`` is an ordinary unweighted solve.
 
         Raises ValueError if the moves are collinear (rank-deficient) or the
         resulting map is singular.
@@ -174,7 +250,13 @@ class PixelCalibrationService:
                 "Stage moves are collinear; need moves along two independent "
                 "directions (e.g. X and Y) to solve the 2-D map."
             )
-        mt, *_ = np.linalg.lstsq(D, S, rcond=None)
+        if weights is not None:
+            rw = np.sqrt(np.clip(np.asarray(weights, dtype=np.float64), 0.0, None))
+            rw = rw.reshape(-1, 1)
+            Dw, Sw = D * rw, S * rw
+        else:
+            Dw, Sw = D, S
+        mt, *_ = np.linalg.lstsq(Dw, Sw, rcond=None)
         M = mt.T
         if abs(np.linalg.det(M)) < 1e-12:
             raise ValueError("Degenerate fit (singular map); check measurements.")
@@ -193,6 +275,7 @@ class PixelCalibrationService:
         image_height: int,
         magnification: Optional[float] = None,
         timestamp: Optional[str] = None,
+        reject_residual_px: Optional[float] = None,
     ) -> PixelCalibration:
         """Fit a 2x2 stage->pixel map (px/mm) through the origin and decompose.
 
@@ -200,10 +283,23 @@ class PixelCalibrationService:
         least-squares sense (D = stage deltas mm, S = pixel shifts), then
         derives X/Y pixel size, rotation, shear, and the RMS residual.
 
-        A single bad step (e.g. an edge-parallel "aperture problem" move that
-        slipped past the quality cutoff) can skew the whole fit, so when there is
-        redundancy we iteratively drop the worst-fitting move while it is a clear
-        outlier (robust MAD test + an absolute floor) and at least 3 moves remain.
+        The final solve is **weighted by displacement magnitude x quality** so a
+        long, clean move (large lever arm -> precise pixel size) dominates over a
+        short or noisy one — short moves carry the same sub-pixel measurement
+        error spread over a much smaller shift, so they are far less informative
+        and weighting them equally just adds variance.
+
+        Two layers of outlier handling:
+
+        * **MAD trim** — a single bad step (e.g. an edge-parallel "aperture
+          problem" move that slipped past the quality cutoff) can skew the whole
+          fit, so when there is redundancy we iteratively drop the worst-fitting
+          move while it is a clear outlier (robust MAD test + an absolute floor)
+          and at least 3 moves remain.
+        * **Residual rejection** — when ``reject_residual_px`` is given (the
+          two-stage sweep passes it), additionally drop any move whose residual
+          exceeds that absolute threshold, MicroManager-style (its
+          ``generateAffineTransformFromPointPairs`` rejects pairs over ~5 px).
         """
         if len(moves) < 2:
             raise ValueError(f"Need >= 2 moves to fit, have {len(moves)}")
@@ -241,11 +337,38 @@ class PixelCalibrationService:
             )
             idx = trial
 
+        # Absolute residual rejection (only when asked, e.g. the refined sweep).
+        if reject_residual_px is not None:
+            while len(idx) > 3:
+                D, S = D_all[idx], S_all[idx]
+                try:
+                    M_try = PixelCalibrationService._solve_map(D, S)
+                except ValueError:
+                    break
+                r = PixelCalibrationService._per_move_residuals(D, S, M_try)
+                worst = int(np.argmax(r))
+                if r[worst] <= float(reject_residual_px):
+                    break
+                trial = idx[:worst] + idx[worst + 1 :]
+                if np.linalg.matrix_rank(D_all[trial], tol=1e-9) < 2:
+                    break
+                logger.info(
+                    "[pixel-cal] rejecting move over %.1f px residual (%.2f px)",
+                    float(reject_residual_px),
+                    float(r[worst]),
+                )
+                idx = trial
+
         moves = [moves[i] for i in idx]
         D = np.array([[m.dx_mm, m.dy_mm] for m in moves], dtype=np.float64)
         S = np.array([[m.shift_x_px, m.shift_y_px] for m in moves], dtype=np.float64)
 
-        M = PixelCalibrationService._solve_map(D, S)
+        # Weight each move by |shift| x quality so long, confident moves dominate.
+        shift_mag = np.hypot(S[:, 0], S[:, 1])
+        qual = np.array([max(m.quality, 1e-3) for m in moves], dtype=np.float64)
+        weights = qual * np.clip(shift_mag, 1e-6, None)
+
+        M = PixelCalibrationService._solve_map(D, S, weights=weights)
         P = np.linalg.inv(M)  # mm/px
 
         # Pixel sizes = length of each image-axis basis vector in stage space.
@@ -295,28 +418,52 @@ class PixelCalibrationService:
         grab_frame: Callable[[], np.ndarray],
         initial_pixel_um: Optional[float] = None,
         nominal_move_um: Optional[float] = None,
-        target_shift_frac: float = 0.25,
-        fractions: Sequence[float] = (0.5, 1.0, 1.5),
+        target_shift_frac: float = 0.15,
+        refine_shift_frac: float = 0.40,
+        fractions: Optional[Sequence[float]] = None,
         quality_threshold: float = 0.3,
         crop: int = _DEFAULT_CROP,
+        frames_to_average: int = 3,
+        refine: bool = True,
+        reject_residual_px: float = 2.0,
         settle: Optional[Callable[[], None]] = None,
         magnification: Optional[float] = None,
         progress: Optional[Callable[[str, float], None]] = None,
         get_limits: Optional[Callable[[str], Optional[Tuple[float, float]]]] = None,
         limit_margin_mm: float = 0.05,
     ) -> PixelCalibration:
-        """Drive an automated calibration sweep and fit the result.
+        """Drive an automated, two-stage calibration sweep and fit the result.
+
+        Modelled on MicroManager's ``AutomaticCalibrationThread``: a **rough
+        pass** of small, symmetric, directly-correlated moves gives a first
+        stage->pixel map, then a **refined pass** drives the image content far
+        out toward the frame edges and measures each shift by *feature tracking*
+        (predict the displacement from the rough map, correlate only a small box
+        around the predicted location — see :meth:`measure_shift_tracked`). The
+        long lever arm of the refined moves is what makes the pixel size precise,
+        and tracking keeps every correlation in the accurate sub-pixel regime.
+        The final fit is weighted toward the long, clean moves and rejects any
+        residual outliers (:meth:`fit_calibration`).
 
         Args:
             move_relative: ``(axis, delta_mm) -> None`` — jog one stage axis.
             get_position: ``(axis) -> float`` — read back an axis position (mm).
             grab_frame: ``() -> ndarray`` — current live frame.
-            initial_pixel_um: rough pixel-size guess used to size moves
-                (defaults to 0.406 if neither this nor ``nominal_move_um`` set).
-            nominal_move_um: explicit nominal move size; overrides the guess.
-            target_shift_frac: desired shift as a fraction of the frame.
-            fractions: multipliers of the nominal move sampled per axis.
+            initial_pixel_um: rough pixel-size guess used to size the rough-pass
+                moves (defaults to 0.406 if neither this nor ``nominal_move_um``).
+            nominal_move_um: explicit rough-pass move size; overrides the guess.
+            target_shift_frac: rough-pass shift as a fraction of the frame (kept
+                small so the direct correlation is reliable).
+            refine_shift_frac: refined-pass shift as a fraction of *half* the
+                frame — how far out the tracked moves push the content.
+            fractions: deprecated/ignored (the old single-pass multiplier list).
             quality_threshold: drop moves whose correlation quality is below.
+            frames_to_average: frames averaged per position to cut shot noise
+                (only helps if ``grab_frame`` yields fresh frames; ``settle`` is
+                invoked between sub-grabs when provided).
+            refine: run the refined tracking pass (set False for rough-only).
+            reject_residual_px: absolute per-move residual rejection threshold
+                for the final fit (MicroManager uses ~5 px).
             settle: optional callable invoked after each move (e.g. sleep).
             magnification: objective magnification at capture (for the record).
             progress: ``(message, fraction)`` UI callback.
@@ -331,10 +478,26 @@ class PixelCalibrationService:
             if progress:
                 progress(msg, frac)
 
-        ref = np.asarray(grab_frame())
+        def _avg_frame() -> np.ndarray:
+            """Average ``frames_to_average`` live grabs (shot-noise reduction)."""
+            n = max(1, int(frames_to_average))
+            acc = self._to_2d(grab_frame())
+            for _ in range(n - 1):
+                if settle:
+                    settle()
+                acc = acc + self._to_2d(grab_frame())
+            return acc / n
+
+        ref = _avg_frame()
         if ref.ndim < 2:
             raise RuntimeError("Live frame is not a 2-D image; cannot calibrate.")
         h, w = ref.shape[-2:]
+
+        # Tracking patch: a power-of-2 square ~1/4 the frame (MM convention),
+        # used as the cross-correlation reference for the tracked refined pass.
+        side = self._pow2_le(min(h, w) // 4)
+        side = int(max(32, min(side, min(h, w))))
+        ref_patch = self._center_patch(ref, side)
 
         if nominal_move_um is None:
             guess = initial_pixel_um or _DEFAULT_PIXEL_UM
@@ -345,14 +508,12 @@ class PixelCalibrationService:
         ox = float(get_position("x"))
         oy = float(get_position("y"))
 
-        # Plan within the stage soft limits. Cropping/objective swaps aside, the
-        # stage often starts near a limit (e.g. Y at 24.96 of a 5..25 range), so a
-        # fixed +offset sweep would command an out-of-range move that the stage
-        # layer hard-rejects and aborts the run. Instead, pick a direction with
-        # headroom per axis and clamp each target; the fit uses read-back deltas,
-        # so a flipped or shortened move is still valid data.
+        # Plan within the stage soft limits. The stage often starts near a limit
+        # (e.g. Y at 24.96 of a 5..25 range), so a fixed +offset sweep would
+        # command an out-of-range move that the stage layer hard-rejects. Pick a
+        # direction with headroom per axis and clamp each target; the fit uses
+        # read-back deltas, so a flipped or shortened move is still valid data.
         margin = max(0.0, float(limit_margin_mm))
-        max_off = (max(fractions) if fractions else 1.0) * nominal_mm
 
         def _limits(axis: str) -> Optional[Tuple[float, float]]:
             if get_limits is None:
@@ -363,19 +524,6 @@ class PixelCalibrationService:
                 return None
             return (float(lim[0]), float(lim[1])) if lim else None
 
-        def _axis_sign(origin: float, axis: str) -> float:
-            lim = _limits(axis)
-            if lim is None:
-                return 1.0
-            lo, hi = lim
-            if origin + max_off <= hi - margin:
-                return 1.0
-            if origin - max_off >= lo + margin:
-                return -1.0
-            # Neither direction fits the full sweep — head toward the side with
-            # more room; individual moves are clamped below.
-            return 1.0 if (hi - margin - origin) >= (origin - lo - margin) else -1.0
-
         def _clamp(origin: float, target: float, axis: str) -> float:
             lim = _limits(axis)
             if lim is None:
@@ -383,66 +531,138 @@ class PixelCalibrationService:
             lo, hi = lim
             return min(max(target, lo + margin), hi - margin)
 
+        def _room(origin: float, sign: float, axis: str) -> float:
+            """Headroom (mm, >= 0) from ``origin`` toward ``sign`` within limits."""
+            lim = _limits(axis)
+            if lim is None:
+                return float("inf")
+            lo, hi = lim
+            return (hi - margin - origin) if sign > 0 else (origin - lo - margin)
+
         lx, ly = _limits("x"), _limits("y")
-        room_x = max(lx[1] - margin - ox, ox - lx[0] - margin) if lx else max_off
-        room_y = max(ly[1] - margin - oy, oy - ly[0] - margin) if ly else max_off
-        smallest = (min(fractions) if fractions else 1.0) * nominal_mm
-        if room_x < smallest and room_y < smallest:
+        room_x = max(lx[1] - margin - ox, ox - lx[0] - margin) if lx else float("inf")
+        room_y = max(ly[1] - margin - oy, oy - ly[0] - margin) if ly else float("inf")
+        if room_x < nominal_mm and room_y < nominal_mm:
             raise RuntimeError(
                 "Not enough stage travel at the current position "
                 f"(X={ox:.3f}, Y={oy:.3f} mm) to run the calibration sweep. "
                 "Move the stage toward the centre of its range and retry."
             )
 
-        sx = _axis_sign(ox, "x")
-        sy = _axis_sign(oy, "y")
-
-        # Planned offsets from the origin: pure X, pure Y, and one diagonal, each
-        # in the chosen (limit-safe) direction.
-        plan: List[Tuple[float, float, str]] = []
-        for f in fractions:
-            plan.append((sx * f * nominal_mm, 0.0, "x"))
-        for f in fractions:
-            plan.append((0.0, sy * f * nominal_mm, "y"))
-        plan.append((sx * nominal_mm, sy * nominal_mm, "xy"))
+        def _goto(offx: float, offy: float) -> Tuple[float, float, np.ndarray]:
+            """Move to clamped origin+offset; return (actual_dx, actual_dy, frame)."""
+            tgt_x = _clamp(ox, ox + offx, "x")
+            tgt_y = _clamp(oy, oy + offy, "y")
+            dx_cmd = tgt_x - float(get_position("x"))
+            dy_cmd = tgt_y - float(get_position("y"))
+            if abs(dx_cmd) > 1e-6:
+                move_relative("x", dx_cmd)
+            if abs(dy_cmd) > 1e-6:
+                move_relative("y", dy_cmd)
+            if settle:
+                settle()
+            frame = _avg_frame()
+            return (
+                float(get_position("x")) - ox,
+                float(get_position("y")) - oy,
+                frame,
+            )
 
         moves: List[CalibrationMove] = []
-        n = len(plan)
         try:
-            for i, (offx, offy, axis) in enumerate(plan):
-                frac = 0.05 + 0.9 * (i / max(n, 1))
-                _say(
-                    f"Move {i + 1}/{n} ({axis}, target {offx*1000:+.1f},"
-                    f"{offy*1000:+.1f} µm)",
-                    frac,
+            # --- Rough pass: small, symmetric, directly-correlated moves ------
+            # +/-X and +/-Y at the nominal size (whichever signs have headroom).
+            rough: List[CalibrationMove] = []
+            rough_plan: List[Tuple[str, float]] = []
+            for axis, room in (("x", room_x), ("y", room_y)):
+                for sign in (1.0, -1.0):
+                    if _room(ox if axis == "x" else oy, sign, axis) >= nominal_mm:
+                        rough_plan.append((axis, sign))
+            for i, (axis, sign) in enumerate(rough_plan):
+                frac = 0.05 + 0.30 * (i / max(len(rough_plan), 1))
+                _say(f"Rough {i + 1}/{len(rough_plan)} ({sign:+.0f}{axis})", frac)
+                offx, offy = (
+                    (sign * nominal_mm, 0.0)
+                    if axis == "x"
+                    else (0.0, sign * nominal_mm)
                 )
-                # Move each axis to (clamped) origin+offset using the read-back
-                # position, so the actual delta is used (robust to backlash).
-                tgt_x = _clamp(ox, ox + offx, "x")
-                tgt_y = _clamp(oy, oy + offy, "y")
-                dx_cmd = tgt_x - float(get_position("x"))
-                dy_cmd = tgt_y - float(get_position("y"))
                 try:
-                    if abs(dx_cmd) > 1e-6:
-                        move_relative("x", dx_cmd)
-                    if abs(dy_cmd) > 1e-6:
-                        move_relative("y", dy_cmd)
-                except (
-                    Exception
-                ) as exc:  # noqa: BLE001 - a rejected move skips, never crashes
+                    adx, ady, frame = _goto(offx, offy)
+                except Exception as exc:  # noqa: BLE001 - skip a rejected move
                     _say(f"  skipped (move rejected: {exc})", frac)
                     continue
-                if settle:
-                    settle()
-
-                frame = np.asarray(grab_frame())
-                act_dx = float(get_position("x")) - ox
-                act_dy = float(get_position("y")) - oy
                 su, sv, q = self.measure_shift(ref, frame, crop=crop)
                 if q < quality_threshold:
                     _say(f"  dropped (quality {q:.2f} < {quality_threshold})", frac)
                     continue
-                moves.append(CalibrationMove(act_dx, act_dy, su, sv, q, axis=axis))
+                rough.append(CalibrationMove(adx, ady, su, sv, q, axis=f"rough-{axis}"))
+
+            try:
+                M0 = (
+                    self._solve_map(
+                        np.array([[m.dx_mm, m.dy_mm] for m in rough], dtype=np.float64),
+                        np.array(
+                            [[m.shift_x_px, m.shift_y_px] for m in rough],
+                            dtype=np.float64,
+                        ),
+                    )
+                    if len(rough) >= 2
+                    else None
+                )
+            except ValueError:
+                M0 = None
+
+            moves.extend(rough)
+
+            # --- Refined pass: large, tracked moves toward the frame edges ----
+            if refine and M0 is not None:
+                P0 = np.linalg.inv(M0)  # mm/px
+                au = refine_shift_frac * (w / 2.0)
+                av = refine_shift_frac * (h / 2.0)
+                # Pixel-space targets: 4 corners + 4 axis points (both signs).
+                targets_px: List[Tuple[float, float]] = []
+                for su_s in (1.0, -1.0):
+                    for sv_s in (1.0, -1.0):
+                        targets_px.append((su_s * au, sv_s * av))
+                for s in (1.0, -1.0):
+                    targets_px.append((s * au, 0.0))
+                    targets_px.append((0.0, s * av))
+
+                half = side // 2
+                cy, cx = h // 2, w // 2
+                fine: List[CalibrationMove] = []
+                for j, tpx in enumerate(targets_px):
+                    frac = 0.35 + 0.6 * (j / max(len(targets_px), 1))
+                    # Stage delta that should produce this pixel displacement.
+                    d = P0 @ np.array(tpx, dtype=np.float64)
+                    adx, ady, frame = _goto(float(d[0]), float(d[1]))
+                    # Predict the *achieved* shift from the rough map + readback.
+                    pred = M0 @ np.array([adx, ady], dtype=np.float64)
+                    # Skip if clamping shrank the lever arm too much, or the
+                    # tracking box would fall outside the frame.
+                    if np.hypot(*pred) < 0.3 * np.hypot(*tpx):
+                        continue
+                    ou, ov = int(round(pred[0])), int(round(pred[1]))
+                    if (
+                        cx + ou - half < 0
+                        or cy + ov - half < 0
+                        or cx + ou + half > w
+                        or cy + ov + half > h
+                    ):
+                        continue
+                    res = self.measure_shift_tracked(ref_patch, frame, pred, side)
+                    if res is None:
+                        continue
+                    su, sv, q = res
+                    _say(
+                        f"Refined {len(fine) + 1} (shift {su:+.0f},{sv:+.0f} px, "
+                        f"q {q:.2f})",
+                        frac,
+                    )
+                    if q < quality_threshold:
+                        continue
+                    fine.append(CalibrationMove(adx, ady, su, sv, q, axis="fine"))
+                moves.extend(fine)
         finally:
             # Always try to return to the starting position (even on error/cancel).
             _say("Returning to origin", 0.97)
@@ -462,13 +682,26 @@ class PixelCalibrationService:
                 f"filtering — check focus, sample texture, and lighting."
             )
 
-        cal = self.fit_calibration(
-            moves, image_width=w, image_height=h, magnification=magnification
-        )
+        try:
+            cal = self.fit_calibration(
+                moves,
+                image_width=w,
+                image_height=h,
+                magnification=magnification,
+                reject_residual_px=reject_residual_px,
+            )
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Calibration fit failed ({exc}). The sweep needs moves along two "
+                "independent directions — check that both X and Y produced usable "
+                "shifts (focus, texture, lighting)."
+            ) from exc
+
         self._calibration = cal
         _say(
             f"Done: {cal.pixel_size_x_um:.4f}/{cal.pixel_size_y_um:.4f} µm/px, "
-            f"rot {cal.rotation_deg:.2f}°, residual {cal.residual_px:.2f}px",
+            f"rot {cal.rotation_deg:.2f}°, residual {cal.residual_px:.2f}px "
+            f"({cal.n_points} pts)",
             1.0,
         )
         return cal
@@ -590,9 +823,7 @@ class PixelCalibrationService:
             # pixel-size source; drop its cache so the new value takes effect
             # without needing a reconnect.
             try:
-                from py2flamingo.configs.config_loader import (
-                    invalidate_hardware_config,
-                )
+                from py2flamingo.configs.config_loader import invalidate_hardware_config
 
                 invalidate_hardware_config()
             except Exception:

@@ -171,6 +171,114 @@ class TestMeasureShift(unittest.TestCase):
         self.assertAlmostEqual(out_y, sy, delta=1.0)
 
 
+class TestMeasureShiftTracked(unittest.TestCase):
+    """measure_shift_tracked recovers a LARGE shift via predicted-box tracking."""
+
+    def test_recovers_large_shift_from_prediction(self):
+        tex = _texture(1024, seed=4)
+        side = 256
+        ref_patch = PixelCalibrationService._center_patch(tex, side)
+        su, sv = 220.0, -180.0  # far past where direct full-frame corr degrades
+        moved = ndimage.shift(tex, (sv, su), order=1, mode="nearest")
+        # A rough prediction a few px off (as a rough affine would give).
+        res = PixelCalibrationService.measure_shift_tracked(
+            ref_patch, moved, (su - 4.0, sv + 3.0), side
+        )
+        self.assertIsNotNone(res)
+        out_x, out_y, q = res
+        self.assertAlmostEqual(out_x, su, delta=0.6)
+        self.assertAlmostEqual(out_y, sv, delta=0.6)
+        self.assertGreater(q, 0.9)
+
+    def test_returns_none_when_box_out_of_frame(self):
+        tex = _texture(512, seed=4)
+        side = 128
+        ref_patch = PixelCalibrationService._center_patch(tex, side)
+        # Predicted center 256 + 600 + 64 > 512 -> box off the frame.
+        res = PixelCalibrationService.measure_shift_tracked(
+            ref_patch, tex, (600.0, 0.0), side
+        )
+        self.assertIsNone(res)
+
+    def test_tracking_beats_direct_when_content_leaves_frame(self):
+        # The core rationale for tracking: once a stage move pushes content out
+        # of the field (zeros enter), a direct full-frame correlation can lock
+        # onto the WRONG peak and return a gross, confident error — injecting an
+        # outlier into the fit. Tracking stays exact because it only ever
+        # correlates a small box around the predicted location.
+        tex = _texture(1024, seed=7)
+        side = 256
+        ref_patch = PixelCalibrationService._center_patch(tex, side)
+        su, sv = 300.0, 220.0  # ~0.5x half-frame: content genuinely leaves
+        moved = ndimage.shift(tex, (sv, su), order=1, mode="constant", cval=0.0)
+
+        dx, dy, _ = PixelCalibrationService.measure_shift(tex, moved, crop=512)
+        direct_err = math.hypot(dx - su, dy - sv)
+        tx, ty, qt = PixelCalibrationService.measure_shift_tracked(
+            ref_patch, moved, (su - 5.0, sv + 5.0), side
+        )
+        tracked_err = math.hypot(tx - su, ty - sv)
+
+        self.assertGreater(direct_err, 50.0)  # direct mis-locks badly
+        self.assertLess(tracked_err, 0.5)  # tracking stays sub-pixel
+        self.assertGreater(qt, 0.9)
+
+
+class TestWeightingAndRejection(unittest.TestCase):
+    """The final fit favours long, clean moves and rejects residual outliers."""
+
+    @staticmethod
+    def _M(px_um=1.30):
+        return np.eye(2) * (1000.0 / px_um)  # px/mm, no rotation
+
+    def test_long_move_dominates_short_noisy_move(self):
+        px = 1.30
+        M = self._M(px)
+        long_x = M @ np.array([0.30, 0.0])
+        short_x = M @ np.array([0.01, 0.0])
+        short_x = short_x + np.array([2.0, 0.0])  # +2 px measurement error
+        long_y = M @ np.array([0.0, 0.30])
+        moves = [
+            CalibrationMove(0.30, 0.0, float(long_x[0]), float(long_x[1]), 0.9),
+            CalibrationMove(0.01, 0.0, float(short_x[0]), float(short_x[1]), 0.9),
+            CalibrationMove(0.0, 0.30, float(long_y[0]), float(long_y[1]), 0.9),
+        ]
+        cal = PixelCalibrationService.fit_calibration(moves, 2048, 2048)
+        # The 2 px error on a 7.7 px shift would badly skew an equal-weight fit
+        # (~0.07 µm off); displacement weighting lets the 230 px move dominate.
+        self.assertAlmostEqual(cal.pixel_size_x_um, px, delta=0.01)
+
+    def test_residual_rejection_tightens_fit(self):
+        px = 1.30
+        M = self._M(px)
+        deltas = [
+            (0.10, 0.0),
+            (-0.10, 0.0),
+            (0.0, 0.10),
+            (0.0, -0.10),
+            (0.08, 0.08),
+            (-0.08, -0.08),
+        ]
+        moves = []
+        for dx, dy in deltas:
+            su, sv = M @ np.array([dx, dy])
+            moves.append(CalibrationMove(dx, dy, float(su), float(sv), 0.9))
+        # Corrupt two moves with moderate (5 px) errors at high quality, so
+        # weighting alone can't suppress them.
+        moves[4] = CalibrationMove(
+            0.08, 0.08, moves[4].shift_x_px + 5.0, moves[4].shift_y_px, 0.9
+        )
+        moves[5] = CalibrationMove(
+            -0.08, -0.08, moves[5].shift_x_px, moves[5].shift_y_px - 5.0, 0.9
+        )
+        rejected = PixelCalibrationService.fit_calibration(
+            moves, 2048, 2048, reject_residual_px=2.0
+        )
+        self.assertLess(rejected.residual_px, 2.0)
+        self.assertLessEqual(rejected.n_points, 4)
+        self.assertAlmostEqual(rejected.pixel_size_x_um, px, delta=0.02)
+
+
 class _FakeStage:
     """In-memory stage whose live frame is the texture shifted by a known map.
 
@@ -251,6 +359,57 @@ class TestSweep(unittest.TestCase):
                 px_um,
                 delta=0.05,
             )
+
+
+class TestTwoStageSweep(unittest.TestCase):
+    """The refined tracking pass runs and yields a tight, low-residual fit."""
+
+    def test_refined_pass_used_and_precise(self):
+        px_um = 1.30
+        rot = math.radians(2.5)
+        s = px_um / 1000.0
+        M = (1.0 / s) * np.array(
+            [[math.cos(rot), -math.sin(rot)], [math.sin(rot), math.cos(rot)]]
+        )
+        # 1024 frame so the refined pass can push content far toward the edges.
+        stage = _FakeStage(_texture(1024, seed=13), M, origin=(12.0, 12.0))
+        with tempfile.TemporaryDirectory() as d:
+            svc = PixelCalibrationService(calibration_file=str(Path(d) / "cal.json"))
+            cal = svc.run_sweep(
+                move_relative=stage.move_relative,
+                get_position=stage.get_position,
+                grab_frame=stage.grab_frame,
+                initial_pixel_um=px_um,  # auto-size the rough moves
+                frames_to_average=1,
+                crop=512,
+            )
+            # Refined (tracked) moves were added beyond the 4 rough ones.
+            self.assertGreaterEqual(cal.n_points, 5)
+            self.assertTrue(any(m.axis == "fine" for m in cal.moves))
+            self.assertAlmostEqual(cal.pixel_size_x_um, px_um, delta=0.02)
+            self.assertAlmostEqual(cal.pixel_size_y_um, px_um, delta=0.02)
+            self.assertAlmostEqual(cal.rotation_deg, 2.5, delta=0.3)
+            self.assertLess(cal.residual_px, 1.0)
+            self.assertAlmostEqual(stage.x, stage.ox, places=6)
+            self.assertAlmostEqual(stage.y, stage.oy, places=6)
+
+    def test_rough_only_when_refine_disabled(self):
+        px_um = 1.30
+        M = np.eye(2) * (1000.0 / px_um)
+        stage = _FakeStage(_texture(512, seed=14), M, origin=(12.0, 12.0))
+        with tempfile.TemporaryDirectory() as d:
+            svc = PixelCalibrationService(calibration_file=str(Path(d) / "cal.json"))
+            cal = svc.run_sweep(
+                move_relative=stage.move_relative,
+                get_position=stage.get_position,
+                grab_frame=stage.grab_frame,
+                nominal_move_um=40.0,
+                refine=False,
+                frames_to_average=1,
+                crop=384,
+            )
+            self.assertFalse(any(m.axis == "fine" for m in cal.moves))
+            self.assertAlmostEqual(cal.pixel_size_x_um, px_um, delta=0.05)
 
 
 class TestSweepLimits(unittest.TestCase):
