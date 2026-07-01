@@ -128,8 +128,8 @@ class ChamberVisualizationManager:
             self.viewer.axes.labels = True
             self.viewer.axes.colored = True
 
-            # Set initial camera orientation
-            self.viewer.camera.angles = (0, 0, 180)
+            # Set initial camera orientation (per-microscope; default (0,0,180))
+            self.viewer.camera.angles = self.default_camera_angles()
             self.viewer.camera.zoom = self.default_camera_zoom()
 
             # Get the napari Qt widget
@@ -1627,13 +1627,39 @@ class ChamberVisualizationManager:
         """Default 3D Volume View zoom (display.default_camera_zoom in config)."""
         return float(self._config.get("display", {}).get("default_camera_zoom", 0.4))
 
+    def default_camera_angles(self) -> tuple:
+        """Default 3D camera orientation (display.default_camera_angles in config).
+
+        Per-microscope: a scope whose detection objective / stage axes are laid
+        out differently (e.g. the ASLM/TSPIM scope with the objective on the
+        right and X along the viewing axis) wants a different default viewpoint.
+        Falls back to the historical (0, 0, 180).
+        """
+        angles = self._config.get("display", {}).get(
+            "default_camera_angles", [0, 0, 180]
+        )
+        try:
+            a = tuple(float(v) for v in angles)
+            if len(a) == 3:
+                return a
+        except (TypeError, ValueError):
+            pass
+        self.logger.warning(
+            "Invalid display.default_camera_angles %r; using (0, 0, 180)", angles
+        )
+        return (0.0, 0.0, 180.0)
+
     def reset_camera(self) -> None:
-        """Reset the napari viewer camera zoom (preserves orientation from 3D window)."""
+        """Reset the napari viewer camera to the per-scope default zoom + angles."""
         if self.viewer and hasattr(self.viewer, "camera"):
-            # Only set zoom - don't override camera.angles as 3D window has correct orientation
             zoom = self.default_camera_zoom()
             self.viewer.camera.zoom = zoom
-            self.logger.info("Reset viewer camera zoom to %s", zoom)
+            self.viewer.camera.angles = self.default_camera_angles()
+            self.logger.info(
+                "Reset viewer camera: zoom %s, angles %s",
+                zoom,
+                self.default_camera_angles(),
+            )
 
     def load_objective_calibration(self, config=None) -> None:
         """Load objective XY calibration from position presets.

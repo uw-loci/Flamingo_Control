@@ -4512,17 +4512,19 @@ class SampleView(QWidget):
             self.zoom_label.setText("Zoom: --")
 
     def _on_reset_zoom_clicked(self) -> None:
-        """Reset camera view to defaults (orientation and zoom)."""
+        """Reset camera view to the per-microscope defaults (orientation + zoom)."""
         viewer = self._get_viewer()
         if viewer and hasattr(viewer, "camera"):
-            viewer.reset_view()  # Reset orientation to napari defaults
-            zoom = (
-                self._chamber_viz.default_camera_zoom()
-            )  # display.default_camera_zoom
-            viewer.camera.zoom = zoom  # Set zoom after reset
+            viewer.reset_view()  # recenter/reset, then apply our per-scope defaults
+            zoom = self._chamber_viz.default_camera_zoom()
+            angles = self._chamber_viz.default_camera_angles()
+            viewer.camera.zoom = zoom
+            viewer.camera.angles = angles  # per-microscope default viewpoint
             self._update_zoom_display()
             self.logger.info(
-                "Reset camera view to defaults (orientation + zoom=%s)", zoom
+                "Reset camera view to per-scope defaults (angles=%s, zoom=%s)",
+                angles,
+                zoom,
             )
 
     def _update_info_displays(self) -> None:

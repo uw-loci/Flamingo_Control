@@ -10,6 +10,13 @@ display:
   # view and by every "Reset View" action. Lower = more zoomed out.
   default_camera_zoom: 0.4
 
+  # Default 3D camera orientation (napari camera.angles) for the initial view
+  # and every "Reset View". PER-MICROSCOPE: a scope with a different physical
+  # layout (e.g. the ASLM/TSPIM scope — detection objective on the right, stage
+  # X along the viewing axis) wants a different default viewpoint. Historical
+  # value is [0, 0, 180]; override per scope in that scope's config overlay.
+  default_camera_angles: [0, 0, 180]
+
   # Rendering settings
   fps_target: 30
   downsample_factor: 4  # Downsample live camera feed by this factor
