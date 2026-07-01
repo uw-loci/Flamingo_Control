@@ -7,7 +7,7 @@ try:
 except Exception:  # PyQt may be unavailable in headless tests
     Application = None
 
-__version__ = "0.6.1"
+__version__ = "0.6.2"
 
 # Only import what's currently working
 try:
