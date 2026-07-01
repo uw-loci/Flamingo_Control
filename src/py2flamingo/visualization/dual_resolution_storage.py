@@ -13,6 +13,7 @@ import numpy as np
 import sparse
 from scipy import ndimage
 
+from py2flamingo.visualization.axis_orientation import AxisOrientation
 from py2flamingo.visualization.coordinate_transforms import TransformQuality
 
 logger = logging.getLogger(__name__)
@@ -184,6 +185,14 @@ class DualResolutionConfig:
 
     # Whether to invert X axis (stage X direction is mirrored in display)
     invert_x: bool = False
+
+    # Per-microscope stage->napari axis orientation. When None, falls back to the
+    # legacy convention parameterized by invert_x (bit-identical to the old code).
+    orientation: Optional[AxisOrientation] = None
+
+    def axis_orientation(self) -> AxisOrientation:
+        """The stage->napari orientation (legacy default from invert_x)."""
+        return self.orientation or AxisOrientation.legacy(invert_x=self.invert_x)
 
     @property
     def resolution_ratio(self) -> Tuple[int, int, int]:
@@ -1207,9 +1216,11 @@ class DualResolutionVoxelStorage:
         #
         # Storage uses opposite signs so storage + display = 0 at capture position
         # (tile appears centered at focal plane when viewed from capture position).
-        dx_display = -dx if self.config.invert_x else dx
+        # Orientation is per-microscope; the legacy default reproduces [+dz,-dy,+/-dx].
         offset_voxels = (
-            np.array([dz, -dy, dx_display]) * 1000 / self.config.display_voxel_size[0]
+            self.config.axis_orientation().delta_offset(dx, dy, dz)
+            * 1000
+            / self.config.display_voxel_size[0]
         )
 
         # Check if translation is significant
@@ -1355,9 +1366,12 @@ class DualResolutionVoxelStorage:
         dx = current_stage_pos.get("x", 0) - ref["x"]
         dy = current_stage_pos.get("y", 0) - ref["y"]
         dz = current_stage_pos.get("z", 0) - ref["z"]
-        dx_display = -dx if self.config.invert_x else dx
         voxel_size_um = float(self.config.display_voxel_size[0])
-        offset_voxels = np.array([dz, -dy, dx_display]) * 1000.0 / voxel_size_um
+        offset_voxels = (
+            self.config.axis_orientation().delta_offset(dx, dy, dz)
+            * 1000.0
+            / voxel_size_um
+        )
         corners = corners + offset_voxels
 
         return corners
