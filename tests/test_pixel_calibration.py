@@ -393,6 +393,37 @@ class TestTwoStageSweep(unittest.TestCase):
             self.assertAlmostEqual(stage.x, stage.ox, places=6)
             self.assertAlmostEqual(stage.y, stage.oy, places=6)
 
+    def test_max_move_caps_excursion_from_stale_guess(self):
+        # A stale/too-large initial pixel guess would over-size the rough move
+        # (it scales linearly with the guess). The max_move ceiling must bound
+        # how far the stage ever gets from its start position (max excursion).
+        px_um = 1.30
+        M = np.eye(2) * (1000.0 / px_um)
+        stage = _FakeStage(_texture(1024, seed=15), M, origin=(12.0, 12.0))
+        excursions = []
+        orig_move = stage.move_relative
+
+        def _spy(axis, delta):
+            orig_move(axis, delta)
+            excursions.append(math.hypot(stage.x - stage.ox, stage.y - stage.oy))
+
+        stage.move_relative = _spy
+        with tempfile.TemporaryDirectory() as d:
+            svc = PixelCalibrationService(calibration_file=str(Path(d) / "cal.json"))
+            svc.run_sweep(
+                move_relative=stage.move_relative,
+                get_position=stage.get_position,
+                grab_frame=stage.grab_frame,
+                initial_pixel_um=8.0,  # wildly too large -> would over-size moves
+                max_move_um=150.0,  # hard ceiling: 0.15 mm excursion
+                frames_to_average=1,
+                crop=512,
+            )
+            # The stage never got more than 0.15 mm from origin (+ float slack).
+            # Uncapped, the 8 µm guess would have commanded a ~1.2 mm rough move.
+            self.assertTrue(excursions)
+            self.assertLessEqual(max(excursions), 0.15 + 1e-6)
+
     def test_rough_only_when_refine_disabled(self):
         px_um = 1.30
         M = np.eye(2) * (1000.0 / px_um)

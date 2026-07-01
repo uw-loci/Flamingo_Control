@@ -426,6 +426,7 @@ class PixelCalibrationService:
         frames_to_average: int = 3,
         refine: bool = True,
         reject_residual_px: float = 2.0,
+        max_move_um: Optional[float] = None,
         settle: Optional[Callable[[], None]] = None,
         magnification: Optional[float] = None,
         progress: Optional[Callable[[str, float], None]] = None,
@@ -464,6 +465,14 @@ class PixelCalibrationService:
             refine: run the refined tracking pass (set False for rough-only).
             reject_residual_px: absolute per-move residual rejection threshold
                 for the final fit (MicroManager uses ~5 px).
+            max_move_um: hard ceiling (µm) on how far the sweep takes the stage
+                from its start position (max excursion), guess-proof. Caps the
+                rough move (so a stale, too-large initial pixel guess can't
+                over-size it) and scales down any refined move that would exceed
+                it — so the content never travels more than this from centre. The
+                sweep never crosses more than a fraction of one field of view
+                anyway; this bounds the pathological case. ``None`` = no absolute
+                cap (limits/frame bounds still apply).
             settle: optional callable invoked after each move (e.g. sleep).
             magnification: objective magnification at capture (for the record).
             progress: ``(message, fraction)`` UI callback.
@@ -503,6 +512,30 @@ class PixelCalibrationService:
             guess = initial_pixel_um or _DEFAULT_PIXEL_UM
             nominal_move_um = target_shift_frac * min(h, w) * guess
         nominal_mm = nominal_move_um / 1000.0
+
+        # Guess-proof safety ceiling: cap the rough move so a stale, too-large
+        # initial pixel-size guess can't balloon it (the move scales with the
+        # guess), and scale down any refined move that would exceed it.
+        cap_mm = (max_move_um / 1000.0) if max_move_um else None
+        if cap_mm is not None and nominal_mm > cap_mm:
+            _say(
+                f"Capping rough move {nominal_move_um:.0f} -> {max_move_um:.0f} µm "
+                "(max-move limit)",
+                0.02,
+            )
+            nominal_mm = cap_mm
+            nominal_move_um = float(max_move_um)
+
+        def _cap_move(offx: float, offy: float) -> Tuple[float, float]:
+            """Scale an (offx, offy) mm move down to the max-move ceiling."""
+            if cap_mm is None:
+                return offx, offy
+            mag = float(np.hypot(offx, offy))
+            if mag > cap_mm and mag > 0:
+                f = cap_mm / mag
+                return offx * f, offy * f
+            return offx, offy
+
         _say(f"Nominal move {nominal_move_um:.1f} µm (frame {w}x{h})", 0.02)
 
         ox = float(get_position("x"))
@@ -553,12 +586,25 @@ class PixelCalibrationService:
             """Move to clamped origin+offset; return (actual_dx, actual_dy, frame)."""
             tgt_x = _clamp(ox, ox + offx, "x")
             tgt_y = _clamp(oy, oy + offy, "y")
-            dx_cmd = tgt_x - float(get_position("x"))
-            dy_cmd = tgt_y - float(get_position("y"))
-            if abs(dx_cmd) > 1e-6:
-                move_relative("x", dx_cmd)
-            if abs(dy_cmd) > 1e-6:
-                move_relative("y", dy_cmd)
+            cur_x = float(get_position("x"))
+            cur_y = float(get_position("y"))
+            dx_cmd = tgt_x - cur_x
+            dy_cmd = tgt_y - cur_y
+            # Since X and Y move sequentially, going between two in-cap points can
+            # transit a corner at up to sqrt(2)x the excursion. Retract the axis
+            # heading back toward origin FIRST so the path never bulges past the
+            # larger endpoint (keeps every transient within the max-move ceiling).
+            retract_x = abs(tgt_x - ox) < abs(cur_x - ox)
+            retract_y = abs(tgt_y - oy) < abs(cur_y - oy)
+            x_first = not (retract_y and not retract_x)
+            seq = (
+                [("x", dx_cmd), ("y", dy_cmd)]
+                if x_first
+                else [("y", dy_cmd), ("x", dx_cmd)]
+            )
+            for ax, dcmd in seq:
+                if abs(dcmd) > 1e-6:
+                    move_relative(ax, dcmd)
             if settle:
                 settle()
             frame = _avg_frame()
@@ -633,9 +679,11 @@ class PixelCalibrationService:
                 fine: List[CalibrationMove] = []
                 for j, tpx in enumerate(targets_px):
                     frac = 0.35 + 0.6 * (j / max(len(targets_px), 1))
-                    # Stage delta that should produce this pixel displacement.
+                    # Stage delta that should produce this pixel displacement,
+                    # bounded by the guess-proof max-move ceiling.
                     d = P0 @ np.array(tpx, dtype=np.float64)
-                    adx, ady, frame = _goto(float(d[0]), float(d[1]))
+                    dx_cap, dy_cap = _cap_move(float(d[0]), float(d[1]))
+                    adx, ady, frame = _goto(dx_cap, dy_cap)
                     # Predict the *achieved* shift from the rough map + readback.
                     pred = M0 @ np.array([adx, ady], dtype=np.float64)
                     # Skip if clamping shrank the lever arm too much, or the

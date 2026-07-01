@@ -68,6 +68,7 @@ class _SweepWorker(QThread):
                 quality_threshold=self._params["quality_threshold"],
                 frames_to_average=self._params["frames_to_average"],
                 refine=self._params["refine"],
+                max_move_um=self._params["max_move_um"],
                 get_limits=self._dlg._get_limits,
             )
             self.finished_ok.emit(cal)
@@ -167,6 +168,19 @@ class PixelCalibratorDialog(PersistentDialog):
         self._settle_spin.setValue(0.5)
         self._settle_spin.setSuffix(" s settle")
         form.addRow("Settle:", self._settle_spin)
+        self._max_move_spin = QDoubleSpinBox()
+        self._max_move_spin.setRange(0.0, 20000.0)
+        self._max_move_spin.setSingleStep(50.0)
+        self._max_move_spin.setValue(600.0)
+        self._max_move_spin.setSuffix(" µm max move")
+        self._max_move_spin.setToolTip(
+            "Hard ceiling on how far the sweep moves the stage from its start "
+            "position. The sweep only pushes content toward the edge of the SAME "
+            "frame (a fraction of one field of view), but this bounds the "
+            "pathological case where a stale pixel-size guess would over-size the "
+            "first move. 0 = no cap."
+        )
+        form.addRow("Max move:", self._max_move_spin)
         self._frames_spin = QSpinBox()
         self._frames_spin.setRange(1, 16)
         self._frames_spin.setValue(3)
@@ -407,6 +421,7 @@ class PixelCalibratorDialog(PersistentDialog):
             "settle_s": self._settle_spin.value(),
             "frames_to_average": self._frames_spin.value(),
             "refine": self._refine_check.isChecked(),
+            "max_move_um": self._max_move_spin.value() or None,
         }
         self._run_btn.setEnabled(False)
         self._progress.setVisible(True)
