@@ -29,6 +29,10 @@ numcodecs>=0.14.0,<1
 
 # Stitching pipeline
 multiview-stitcher>=0.1.37,<0.2
+# multiview-stitcher's registration imports pandas but declares it only as an
+# optional dep, so without this the stitcher silently falls back to metadata-only
+# positions mid-run ("Missing optional dependency 'pandas'").
+pandas>=2.2,<3
 # dask versions 2025.12.0 - 2026.3.0 break ngff-zarr's zarr_format selection,
 # causing version="0.4" writes to silently produce zarr v3 output (zarr.json
 # instead of .zgroup) that Fiji cannot open.  See forum.image.sc topic 120480
