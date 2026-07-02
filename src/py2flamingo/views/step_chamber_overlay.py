@@ -44,10 +44,16 @@ class StepChamberOverlay:
         features_yaml_path: Path | str,
         config: dict,
         invert_x: bool = True,
+        orientation=None,
     ):
         self.viewer = viewer
         self.config = config
         self.invert_x = invert_x
+        # Per-microscope stage->napari orientation. None => legacy convention
+        # (bit-identical to the old fixed formulas), parameterized by invert_x.
+        from py2flamingo.visualization.axis_orientation import AxisOrientation
+
+        self.orientation = orientation or AxisOrientation.legacy(invert_x=invert_x)
         self.features_yaml_path = Path(features_yaml_path)
         self.logger = logging.getLogger(__name__)
 
@@ -108,20 +114,18 @@ class StepChamberOverlay:
         overlay sits in the same display volume as the rectangular wireframe.
         """
         stage_ctrl = self.config.get("stage_control", {})
-        x_range = stage_ctrl.get("x_range_mm", [1.0, 12.31])
-        y_range = stage_ctrl.get("y_range_mm", [0.0, 14.0])
-        z_range = stage_ctrl.get("z_range_mm", [12.5, 26.0])
+        ranges = {
+            "x": stage_ctrl.get("x_range_mm", [1.0, 12.31]),
+            "y": stage_ctrl.get("y_range_mm", [0.0, 14.0]),
+            "z": stage_ctrl.get("z_range_mm", [12.5, 26.0]),
+        }
         voxel_size_mm = (
             self.config.get("display", {}).get("voxel_size_um", [50, 50, 50])[0]
             / 1000.0
         )
-        if self.invert_x:
-            nx = (x_range[1] - x_mm) / voxel_size_mm
-        else:
-            nx = (x_mm - x_range[0]) / voxel_size_mm
-        ny = (y_range[1] - y_mm) / voxel_size_mm
-        nz = (z_mm - z_range[0]) / voxel_size_mm
-        return nz, ny, nx
+        # absolute() returns (depth, vertical, horizontal) = napari (Z, Y, X).
+        # Legacy orientation reproduces the old nz,ny,nx formulas exactly.
+        return self.orientation.absolute(x_mm, y_mm, z_mm, ranges, voxel_size_mm)
 
     def _step_to_napari(self, file_xyz):
         return self._stage_to_napari(*self._step_to_stage_mm(file_xyz))
