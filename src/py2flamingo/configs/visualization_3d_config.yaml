@@ -28,6 +28,25 @@ display:
   objective_indicator_size: 20  # pixels
   rotation_axes_length: 30  # voxels
 
+# Per-microscope stage->napari axis orientation. When ABSENT (the default), the
+# viewer uses the legacy convention (horizontal=stage X, vertical=stage Y,
+# depth=stage Z) parameterized by stage_control.invert_x_default/invert_z_default
+# — i.e. the current scope is unchanged. Uncomment + edit to describe a scope with
+# a different physical layout. Each display axis names the stage axis that drives
+# it and whether it is flipped (flip:true = display coordinate decreases as the
+# stage coordinate increases; napari's y-down is flip:true on vertical).
+#
+# NEW ASLM/TSPIM scope (detection objective on the RIGHT, single-sided illumination,
+# stage X = viewing/depth axis). Confirmed directions: +Z toward the detection
+# objective (right); +X toward the excitation arm (into the screen), -X toward the
+# user; +Y up. This is a 90-degrees-about-vertical swap of X and Z vs the current
+# scope. NOTE: the depth (X) sign is the one thing to eyeball on the rig — if the
+# scene is mirrored front/back, flip depth.flip to true.
+# orientation:
+#   depth:      { stage: x, flip: false }   # viewing axis; +X into screen (excitation arm)
+#   vertical:   { stage: y, flip: true }    # napari y-down
+#   horizontal: { stage: z, flip: false }   # +Z toward detection objective (right)
+
 storage:
   # High-resolution storage (2-3x display resolution)
   # This preserves data quality during rotations
