@@ -263,12 +263,16 @@ class ChamberVisualizationManager:
                 return
 
             from py2flamingo.views.step_chamber_overlay import StepChamberOverlay
+            from py2flamingo.visualization.axis_orientation import AxisOrientation
 
             self.step_overlay = StepChamberOverlay(
                 viewer=self.viewer,
                 features_yaml_path=yaml_path,
                 config=self._config,
                 invert_x=self._invert_x,
+                orientation=AxisOrientation.from_config(
+                    self._config, invert_x=self._invert_x
+                ),
             )
             if self.step_overlay.load():
                 self.step_overlay.add_layers(master_visible=False)

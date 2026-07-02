@@ -116,6 +116,7 @@ def create_voxel_storage(
         config = get_default_visualization_config()
 
     try:
+        from py2flamingo.visualization.axis_orientation import AxisOrientation
         from py2flamingo.visualization.coordinate_transforms import (
             CoordinateTransformer,
             PhysicalToNapariMapper,
@@ -123,6 +124,14 @@ def create_voxel_storage(
         from py2flamingo.visualization.dual_resolution_storage import (
             DualResolutionConfig,
             DualResolutionVoxelStorage,
+        )
+
+        # Per-microscope stage->napari orientation (top-level 'orientation' block
+        # in the viz config; None/absent -> legacy convention from invert flags).
+        orientation = AxisOrientation.from_config(
+            config,
+            invert_x=config["stage_control"]["invert_x_default"],
+            invert_z=config["stage_control"]["invert_z_default"],
         )
 
         # Initialize coordinate mapper
@@ -133,6 +142,7 @@ def create_voxel_storage(
             "voxel_size_um": config["display"]["voxel_size_um"][0],
             "invert_x": config["stage_control"]["invert_x_default"],
             "invert_z": config["stage_control"]["invert_z_default"],
+            "orientation_obj": orientation,
         }
         coord_mapper = PhysicalToNapariMapper(mapper_config)
 
@@ -205,6 +215,7 @@ def create_voxel_storage(
             sample_region_radius=config["sample_chamber"]["sample_region_radius_um"],
             sample_region_half_widths=half_widths,
             invert_x=config["stage_control"]["invert_x_default"],
+            orientation=orientation,
         )
 
         voxel_storage = DualResolutionVoxelStorage(storage_config)
