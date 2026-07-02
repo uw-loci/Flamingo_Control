@@ -129,5 +129,99 @@ class TestNewScopeOrientation(unittest.TestCase):
         self.assertEqual(ori.display_axis_for("x"), 0)
 
 
+class TestInverseAndExtent(unittest.TestCase):
+    RANGES = {"x": (1.0, 12.31), "y": (0.0, 14.0), "z": (12.5, 26.0)}
+    VS_MM = 0.05
+
+    def test_absolute_inverse_round_trip(self):
+        for block in (
+            None,
+            {
+                "orientation": {
+                    "depth": {"stage": "x", "flip": False},
+                    "vertical": {"stage": "y", "flip": True},
+                    "horizontal": {"stage": "z", "flip": False},
+                }
+            },
+        ):
+            ori = (
+                AxisOrientation.legacy(invert_x=True)
+                if block is None
+                else AxisOrientation.from_config(block)
+            )
+            for x, y, z in [(6.655, 7.0, 19.25), (3.2, 5.5, 15.0)]:
+                a0, a1, a2 = ori.absolute(x, y, z, self.RANGES, self.VS_MM)
+                xr, yr, zr = ori.inverse_absolute(a0, a1, a2, self.RANGES, self.VS_MM)
+                self.assertAlmostEqual(xr, x, places=6)
+                self.assertAlmostEqual(yr, y, places=6)
+                self.assertAlmostEqual(zr, z, places=6)
+
+    def test_display_extent_permutes(self):
+        from py2flamingo.visualization.axis_orientation import HORIZONTAL
+
+        legacy = AxisOrientation.legacy(invert_x=True)
+        new = AxisOrientation.from_config(
+            {
+                "orientation": {
+                    "depth": {"stage": "x"},
+                    "vertical": {"stage": "y"},
+                    "horizontal": {"stage": "z"},
+                }
+            }
+        )
+        # Horizontal extent: legacy uses X range (11.31mm), new uses Z (13.5mm).
+        self.assertEqual(
+            legacy.display_extent(HORIZONTAL, self.RANGES, self.VS_MM),
+            int((12.31 - 1.0) / 0.05),
+        )
+        self.assertEqual(
+            new.display_extent(HORIZONTAL, self.RANGES, self.VS_MM),
+            int((26.0 - 12.5) / 0.05),
+        )
+
+
+class TestMapperLegacyParity(unittest.TestCase):
+    """PhysicalToNapariMapper (refactored) matches the old formulas exactly."""
+
+    CFG = {
+        "x_range_mm": [1.0, 12.31],
+        "y_range_mm": [0.0, 14.0],
+        "z_range_mm": [12.5, 26.0],
+        "voxel_size_um": 50.0,
+        "invert_x": True,
+        "invert_z": False,
+    }
+
+    def _old(self, x, y, z):
+        xr, yr, zr = (
+            self.CFG["x_range_mm"],
+            self.CFG["y_range_mm"],
+            self.CFG["z_range_mm"],
+        )
+        vs = 0.05
+        xe = xr[0] + xr[1] - x  # invert_x=True
+        nx = int(round((xe - xr[0]) / vs))
+        ny = int(round((yr[1] - y) / vs))
+        nz = int(round((z - zr[0]) / vs))
+        dims = (
+            int((xr[1] - xr[0]) / vs),
+            int((yr[1] - yr[0]) / vs),
+            int((zr[1] - zr[0]) / vs),
+        )
+        clamp = lambda v, n: min(max(v, 0), n - 1)  # noqa: E731
+        return (clamp(nx, dims[0]), clamp(ny, dims[1]), clamp(nz, dims[2]))
+
+    def test_forward_and_roundtrip(self):
+        from py2flamingo.visualization.coordinate_transforms import (
+            PhysicalToNapariMapper,
+        )
+
+        m = PhysicalToNapariMapper(self.CFG)
+        self.assertEqual(m.napari_dims, (226, 280, 270))
+        for x, y, z in [(6.655, 7.0, 19.25), (1.0, 0.0, 12.5), (3.2, 5.5, 15.0)]:
+            got = m.physical_to_napari(x, y, z)
+            self.assertEqual(tuple(int(v) for v in got), self._old(x, y, z))
+
+
 if __name__ == "__main__":
     unittest.main()

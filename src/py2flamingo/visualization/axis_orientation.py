@@ -155,6 +155,34 @@ class AxisOrientation:
             out.append(v / voxel_size_mm)
         return tuple(out)
 
+    def inverse_absolute(
+        self,
+        a0: float,
+        a1: float,
+        a2: float,
+        ranges: Dict[str, Tuple[float, float]],
+        voxel_size_mm: float,
+    ) -> Tuple[float, float, float]:
+        """Inverse of :meth:`absolute`: napari (a0,a1,a2) voxels -> stage (x,y,z) mm."""
+        a = (a0, a1, a2)
+        pos: Dict[str, float] = {}
+        for i, e in enumerate(self.per_display_axis):
+            lo, hi = ranges[e.stage]
+            pos[e.stage] = (
+                (hi - a[i] * voxel_size_mm) if e.flip else (lo + a[i] * voxel_size_mm)
+            )
+        return pos["x"], pos["y"], pos["z"]
+
+    def display_extent(
+        self,
+        display_axis: int,
+        ranges: Dict[str, Tuple[float, float]],
+        voxel_size_mm: float,
+    ) -> int:
+        """Napari voxel extent of a display axis = extent of its stage axis."""
+        lo, hi = ranges[self.per_display_axis[display_axis].stage]
+        return int((hi - lo) / voxel_size_mm)
+
     def stage_axis_for(self, display_axis: int) -> str:
         return self.per_display_axis[display_axis].stage
 

@@ -518,6 +518,15 @@ class PhysicalToNapariMapper:
         self.invert_x = config.get("invert_x", False)
         self.invert_z = config.get("invert_z", False)
 
+        # Per-microscope stage->napari orientation. When the config carries an
+        # explicit 'orientation' block it is used; otherwise the legacy
+        # convention (parameterized by invert_x/invert_z) — bit-identical.
+        from py2flamingo.visualization.axis_orientation import AxisOrientation
+
+        self.orientation = config.get("orientation_obj") or AxisOrientation.from_config(
+            config, invert_x=self.invert_x, invert_z=self.invert_z
+        )
+
         # Calculate napari dimensions in pixels
         self.napari_dims = self._calculate_napari_dimensions()
 
@@ -529,13 +538,27 @@ class PhysicalToNapariMapper:
         logger.info(f"  Napari dims: {self.napari_dims} pixels")
         logger.info(f"  Inversions: X={self.invert_x}, Z={self.invert_z}")
 
-    def _calculate_napari_dimensions(self) -> Tuple[int, int, int]:
-        """Calculate napari volume dimensions in pixels."""
-        width_x = int((self.x_range_mm[1] - self.x_range_mm[0]) / self.voxel_size_mm)
-        height_y = int((self.y_range_mm[1] - self.y_range_mm[0]) / self.voxel_size_mm)
-        depth_z = int((self.z_range_mm[1] - self.z_range_mm[0]) / self.voxel_size_mm)
+    def _ranges(self) -> Dict[str, Tuple[float, float]]:
+        return {"x": self.x_range_mm, "y": self.y_range_mm, "z": self.z_range_mm}
 
-        return (width_x, height_y, depth_z)
+    def _calculate_napari_dimensions(self) -> Tuple[int, int, int]:
+        """Napari volume dimensions in pixels, ordered (napari_x, napari_y, napari_z).
+
+        Each entry is the extent of whichever stage axis drives that display axis
+        under the current orientation (legacy: horizontal=X, vertical=Y, depth=Z).
+        """
+        from py2flamingo.visualization.axis_orientation import (
+            DEPTH,
+            HORIZONTAL,
+            VERTICAL,
+        )
+
+        r = self._ranges()
+        return (
+            self.orientation.display_extent(HORIZONTAL, r, self.voxel_size_mm),
+            self.orientation.display_extent(VERTICAL, r, self.voxel_size_mm),
+            self.orientation.display_extent(DEPTH, r, self.voxel_size_mm),
+        )
 
     def set_inversions(self, invert_x: bool = None, invert_z: bool = None):
         """
@@ -553,6 +576,14 @@ class PhysicalToNapariMapper:
             self.invert_z = invert_z
             logger.info(f"Z axis inversion set to: {self.invert_z}")
 
+        # Rebuild the legacy orientation from the (possibly changed) invert flags.
+        from py2flamingo.visualization.axis_orientation import AxisOrientation
+
+        self.orientation = AxisOrientation.legacy(
+            invert_x=self.invert_x, invert_z=self.invert_z
+        )
+        self.napari_dims = self._calculate_napari_dimensions()
+
     def physical_to_napari(
         self, x_mm: float, y_mm: float, z_mm: float
     ) -> Tuple[int, int, int]:
@@ -567,19 +598,12 @@ class PhysicalToNapariMapper:
         Returns:
             (napari_x, napari_y, napari_z) in pixel coordinates
         """
-        # Apply inversions to physical coordinates if enabled
-        x_eff = self._apply_x_inversion(x_mm)
-        z_eff = self._apply_z_inversion(z_mm)
-
-        # X: left to right (straightforward mapping)
-        napari_x = (x_eff - self.x_range_mm[0]) / self.voxel_size_mm
-
-        # Y: INVERTED (y_max maps to napari Y=0, y_min maps to napari Y=max)
-        # This makes increasing Y move "up" visually in the display
-        napari_y = (self.y_range_mm[1] - y_mm) / self.voxel_size_mm
-
-        # Z: back to front (objective at Z=0)
-        napari_z = (z_eff - self.z_range_mm[0]) / self.voxel_size_mm
+        # Per-microscope orientation: absolute() returns (depth, vertical,
+        # horizontal) = napari (Z, Y, X). Legacy reproduces the old formulas.
+        a0, a1, a2 = self.orientation.absolute(
+            x_mm, y_mm, z_mm, self._ranges(), self.voxel_size_mm
+        )
+        napari_z, napari_y, napari_x = a0, a1, a2
 
         # Round to nearest pixel
         napari_x = int(round(napari_x))
@@ -607,15 +631,11 @@ class PhysicalToNapariMapper:
         Returns:
             (x_mm, y_mm, z_mm) in physical mm coordinates
         """
-        # Convert pixels to mm
-        x_mm = napari_x * self.voxel_size_mm + self.x_range_mm[0]
-        y_mm = self.y_range_mm[1] - (napari_y * self.voxel_size_mm)  # Y inverted
-        z_mm = napari_z * self.voxel_size_mm + self.z_range_mm[0]
-
-        # Unapply inversions
-        x_mm = self._unapply_x_inversion(x_mm)
-        z_mm = self._unapply_z_inversion(z_mm)
-
+        # Inverse of the orientation mapping. absolute() consumed
+        # (a0,a1,a2)=(napari_z, napari_y, napari_x).
+        x_mm, y_mm, z_mm = self.orientation.inverse_absolute(
+            napari_z, napari_y, napari_x, self._ranges(), self.voxel_size_mm
+        )
         return (x_mm, y_mm, z_mm)
 
     def _apply_x_inversion(self, x_mm: float) -> float:
