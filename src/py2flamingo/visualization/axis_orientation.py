@@ -134,6 +134,19 @@ class AxisOrientation:
             dtype=float,
         )
 
+    def delta_offset_matrix(self) -> np.ndarray:
+        """3x3 signed permutation ``M`` with ``delta_offset(v) == M @ v``.
+
+        Rows are napari display axes (depth, vertical, horizontal); columns are
+        stage axes (x, y, z). Lets callers vectorize the mapping over arrays of
+        stage offsets (e.g. per-pixel camera grids) instead of scalar calls.
+        """
+        col = {"x": 0, "y": 1, "z": 2}
+        m = np.zeros((3, 3), dtype=float)
+        for row, e in enumerate(self.per_display_axis):
+            m[row, col[e.stage]] = -1.0 if e.flip else 1.0
+        return m
+
     def absolute(
         self,
         x: float,

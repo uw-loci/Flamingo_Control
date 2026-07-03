@@ -196,6 +196,62 @@ class TestInverseAndExtent(unittest.TestCase):
         )
 
 
+class TestTileWorldCoordsMath(unittest.TestCase):
+    """The tile-worker world-coord math (base + M@cam + -M@delta) reproduces the
+    old (Z,Y,X) formula for legacy, and permutes for the new scope."""
+
+    SC = [6655.0, 7000.0, 19250.0]  # sample_region_center (X, Y, Z) µm
+
+    @staticmethod
+    def _new(ori, cx, cy, dx, dy, dz):
+        M = ori.delta_offset_matrix()
+        base = np.asarray(
+            ori.order_by_display({"x": 6655.0, "y": 7000.0, "z": 19250.0}),
+            dtype=float,
+        )
+        cam_stage = np.column_stack([cx, -cy, np.zeros(len(cx))])
+        per_pixel_base = base + cam_stage @ M.T
+        tile_disp = -(M @ np.array([dx * 1000.0, dy * 1000.0, dz * 1000.0]))
+        return per_pixel_base + tile_disp  # (N, 3) depth,vert,horiz
+
+    def test_legacy_matches_old_zyx_formula(self):
+        cx = np.array([-100.0, 0.0, 250.0])
+        cy = np.array([50.0, -30.0, 0.0])
+        dx, dy, dz = 0.3, -0.2, 0.15  # mm
+        for invert_x in (False, True):
+            ori = AxisOrientation.legacy(invert_x=invert_x)
+            new = self._new(ori, cx, cy, dx, dy, dz)
+            # Old formula (world Z, Y, X):
+            delta_x_storage = dx if invert_x else -dx
+            camera_x_offset = -cx if invert_x else cx
+            old_z = np.full(len(cx), self.SC[2] - dz * 1000)
+            old_y = self.SC[1] + dy * 1000 + cy
+            old_x = self.SC[0] + delta_x_storage * 1000 + camera_x_offset
+            old = np.column_stack([old_z, old_y, old_x])
+            np.testing.assert_allclose(new, old, atol=1e-6)
+
+    def test_new_scope_puts_zstack_on_horizontal(self):
+        ori = AxisOrientation.from_config(
+            {
+                "orientation": {
+                    "depth": {"stage": "x", "flip": False},
+                    "vertical": {"stage": "y", "flip": True},
+                    "horizontal": {"stage": "z", "flip": False},
+                }
+            }
+        )
+        # A +Z (detection) stage step should move data along HORIZONTAL (axis 2),
+        # not depth. Compare two Z positions, no camera offset, no x/y move.
+        z = np.zeros(1)
+        a = self._new(ori, z, z, 0.0, 0.0, 0.0)[0]
+        b = self._new(ori, z, z, 0.0, 0.0, 0.10)[0]
+        d = b - a
+        self.assertAlmostEqual(d[0], 0.0)  # depth unchanged by a Z move
+        self.assertAlmostEqual(d[1], 0.0)  # vertical unchanged
+        self.assertLess(abs(d[2]), 101)  # horizontal moved (~ -100 µm, sign TBD)
+        self.assertGreater(abs(d[2]), 99)
+
+
 class TestMapperLegacyParity(unittest.TestCase):
     """PhysicalToNapariMapper (refactored) matches the old formulas exactly."""
 

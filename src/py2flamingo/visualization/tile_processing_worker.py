@@ -285,19 +285,44 @@ class TileProcessingWorker(QObject):
         camera_y = (y_indices - H / 2) * pixel_size_um
         camera_coords_2d = np.column_stack([camera_x.ravel(), camera_y.ravel()])
 
-        # All pixels in a single frame are from the same optical slice —
-        # use zero Z offset (Z depth comes from different frames in the stack)
+        # All pixels in a single frame are from the same optical slice.
         num_pixels = len(camera_coords_2d)
-        z_offsets = np.zeros(num_pixels)
 
-        camera_x_offset = (
-            -camera_coords_2d[:, 0] if self._invert_x else camera_coords_2d[:, 0]
-        )
-        camera_offsets_3d = np.column_stack(
-            [z_offsets, camera_coords_2d[:, 1], camera_x_offset]
-        )
+        # Per-microscope stage->napari orientation. Build the tile's world coords
+        # in the oriented (depth, vertical, horizontal) frame via the signed
+        # permutation M (== AxisOrientation.delta_offset as a matrix). The legacy
+        # orientation reproduces the old construction bit-for-bit (verified in
+        # tests/test_axis_orientation.py::TestTileWorldCoordsMath).
+        from py2flamingo.visualization.axis_orientation import AxisOrientation
 
-        # Pre-compute tile position deltas (constant for all frames in this tile)
+        ori = AxisOrientation.from_config(self._config, invert_x=self._invert_x)
+        M = ori.delta_offset_matrix()
+        base_display = np.asarray(
+            ori.order_by_display(
+                {
+                    "x": sample_center[0],
+                    "y": sample_center[1],
+                    "z": sample_center[2],
+                }
+            ),
+            dtype=float,
+        )  # (depth, vertical, horizontal) µm
+
+        # Per-pixel camera contribution (constant for all frames in this tile):
+        # M @ (camera_x, -camera_y, 0). The +M on the camera vector (vs the -M
+        # applied to stage deltas per frame below) encodes the "camera image is
+        # mirrored in X relative to stage motion" handedness the old code wrote
+        # as `-camera_x if invert_x`.
+        cam_stage = np.column_stack(
+            [
+                camera_coords_2d[:, 0],
+                -camera_coords_2d[:, 1],
+                np.zeros(num_pixels),
+            ]
+        )
+        per_pixel_base = base_display + cam_stage @ M.T  # (N, 3) depth,vert,horiz
+
+        # Tile-center stage delta (constant for all frames; delta_z varies below).
         pos_x = buffer.position["x"]
         pos_y = buffer.position["y"]
         if ref is not None:
@@ -305,14 +330,6 @@ class TileProcessingWorker(QObject):
             delta_y = pos_y - ref["y"]
         else:
             delta_x = delta_y = 0.0
-        delta_x_storage = delta_x if self._invert_x else -delta_x
-
-        base_z_um = sample_center[2]
-        base_y_um = sample_center[1]
-        base_x_um = sample_center[0]
-        base_world_yx = np.array(
-            [base_y_um + delta_y * 1000, base_x_um + delta_x_storage * 1000]
-        )
 
         total_voxels = 0
 
@@ -341,15 +358,14 @@ class TileProcessingWorker(QObject):
                 z_fraction = frame_idx / max(1, n_frames - 1) if n_frames > 1 else 0.5
                 z_position = z_min + z_fraction * z_range
 
-                # Only Z delta varies per frame
+                # Only Z delta varies per frame. Storage offset = -(M @ delta):
+                # storage is the negation of the display rigid-shift, so a tile
+                # lands centred at its capture position.
                 delta_z = (z_position - ref["z"]) if ref is not None else 0.0
-                world_center_z = base_z_um - delta_z * 1000
-
-                # Build world coords (reuse pre-computed camera offsets)
-                world_coords_3d = camera_offsets_3d.copy()
-                world_coords_3d[:, 0] += world_center_z
-                world_coords_3d[:, 1] += base_world_yx[0]
-                world_coords_3d[:, 2] += base_world_yx[1]
+                tile_disp = -(
+                    M @ np.array([delta_x * 1000.0, delta_y * 1000.0, delta_z * 1000.0])
+                )
+                world_coords_3d = per_pixel_base + tile_disp
 
                 values = downsampled.ravel()
                 total_voxels += len(values)
