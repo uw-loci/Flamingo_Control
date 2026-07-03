@@ -126,5 +126,28 @@ class TestTwoScopesEndToEnd(unittest.TestCase):
         )
 
 
+class TestPlanMicroscopeChange(unittest.TestCase):
+    """The pure connect-time decision (re-init silently / prompt / do nothing)."""
+
+    def setUp(self):
+        from py2flamingo.views.sample_view import plan_microscope_change
+
+        self.plan = plan_microscope_change
+
+    def test_same_scope_is_noop(self):
+        self.assertEqual(self.plan("ASLM-25x", "ASLM-25x", True), "none")
+        self.assertEqual(self.plan("ASLM-25x", "aslm-25X", True), "none")  # case-insens
+
+    def test_no_new_name_is_noop(self):
+        self.assertEqual(self.plan("A", None, True), "none")
+        self.assertEqual(self.plan("A", "", True), "none")
+
+    def test_change_without_data_reinits_silently(self):
+        self.assertEqual(self.plan("A", "B", False), "reinit")
+
+    def test_change_with_data_prompts(self):
+        self.assertEqual(self.plan("A", "B", True), "ask")
+
+
 if __name__ == "__main__":
     unittest.main()

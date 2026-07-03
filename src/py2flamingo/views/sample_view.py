@@ -71,6 +71,21 @@ from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
 from py2flamingo.views.widgets.slice_plane_viewer import AXIS_COLORS, SlicePlaneViewer
 
 
+def plan_microscope_change(active, new, has_data):
+    """Decide what to do when connecting to microscope ``new``.
+
+    Returns one of:
+      * ``"none"``   — no change needed (same scope, or no name known).
+      * ``"reinit"`` — re-init the viewer for ``new`` silently (no data at risk).
+      * ``"ask"``    — data is loaded; prompt the user before re-initing.
+
+    Pure (no side effects) so the decision is unit-testable without a GUI.
+    """
+    if not new or (active and str(new).lower() == str(active).lower()):
+        return "none"
+    return "ask" if has_data else "reinit"
+
+
 class SampleView(QWidget):
     """
     Integrated sample viewing and interaction window.
@@ -119,6 +134,12 @@ class SampleView(QWidget):
         self._acquisition_locked = False
         self._stage_moving = False
         self.voxel_storage = voxel_storage
+        # Which microscope the data currently in the viewer was collected on
+        # (None when empty). Set when data is loaded/captured; used by the
+        # connect-time reload prompt. `_active_microscope` (the scope the current
+        # orientation is built for) is set in _load_visualization_config.
+        self._data_microscope: Optional[str] = None
+        self._active_microscope: Optional[str] = None
         self.image_controls_window = image_controls_window
         self._geometry_manager = geometry_manager
         self._configuration_service = configuration_service
@@ -297,6 +318,9 @@ class SampleView(QWidget):
                 name = self._configuration_service.get_microscope_name()
         except Exception as e:  # noqa: BLE001 - fall back to the base config
             self.logger.debug(f"Could not read microscope name: {e}")
+        # Record which microscope the current orientation/storage is built for
+        # (used to detect a change on connect — see on_microscope_connected).
+        self._active_microscope = name or "default"
         try:
             from py2flamingo.visualization.voxel_storage_factory import (
                 resolve_visualization_config,
@@ -3254,6 +3278,11 @@ class SampleView(QWidget):
 
         meta_path = output_dir / "stitch_metadata.json"
         metadata = json.loads(meta_path.read_text())
+        # Provenance for the connect-time reload prompt: prefer a microscope name
+        # recorded in the metadata, else attribute to the active scope at load.
+        self.note_data_microscope(
+            metadata.get("microscope") or metadata.get("microscope_name")
+        )
         store_name = metadata.get("store_path", "")
         store_file = output_dir / store_name
         if store_file.exists() and store_file.is_file():
@@ -4126,6 +4155,170 @@ class SampleView(QWidget):
                 f"Re-applying stage geometry after chamber reload failed: {e}"
             )
         return True
+
+    # ================================================================
+    # Per-microscope re-init on connect
+    # ================================================================
+
+    def has_displayed_data(self) -> bool:
+        """True if any 3D data is currently loaded/accumulated in the viewer."""
+        try:
+            if self.voxel_storage is not None:
+                for ch in range(
+                    int(self._config.get("display", {}).get("max_channels", 8))
+                ):
+                    if self.voxel_storage.has_data(ch):
+                        return True
+        except Exception:
+            pass
+        # Loaded stitched layers count as data even if the live store is empty.
+        try:
+            if self.viewer is not None:
+                for layer in self.viewer.layers:
+                    if str(getattr(layer, "name", "")).lower().startswith("stitched"):
+                        return True
+        except Exception:
+            pass
+        return False
+
+    def note_data_microscope(self, name: Optional[str]) -> None:
+        """Record which microscope the currently-shown data was collected on.
+
+        ``None`` (metadata absent) falls back to the scope the viewer's
+        orientation is currently built for.
+        """
+        self._data_microscope = name or self._active_microscope
+
+    def on_microscope_connected(self, name: Optional[str]) -> None:
+        """Handle connecting to microscope ``name``: re-init the viewer for its
+        orientation, prompting first if data collected on another scope is loaded.
+
+        Called after settings load (ScopeSettings.txt available). Guarded so a
+        failure never blocks the connect flow.
+        """
+        try:
+            action = plan_microscope_change(
+                self._active_microscope, name, self.has_displayed_data()
+            )
+            if action == "none":
+                return
+            self.logger.info(
+                "Microscope change: '%s' -> '%s' (data loaded=%s)",
+                self._active_microscope,
+                name,
+                action == "ask",
+            )
+            if action == "reinit":
+                self.reinit_for_microscope(name, reload_data=False)
+                return
+
+            # action == "ask": data collected on another scope is loaded.
+            origin = self._data_microscope or "an unknown microscope"
+            from PyQt5.QtWidgets import QMessageBox
+
+            reply = QMessageBox.question(
+                self,
+                "Reload data for the connected microscope?",
+                (
+                    f"The 3D data currently in the viewer was collected on "
+                    f"'{origin}'.\n\n"
+                    f"You are connecting to '{name}', which may use a different "
+                    f"sample / camera orientation.\n\n"
+                    f"Reload the existing data and re-apply the correct "
+                    f"transformation for '{name}'?\n\n"
+                    f"  • Yes — reload + re-transform the data for '{name}'.\n"
+                    f"  • No — discard it and start fresh for '{name}'."
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            self.reinit_for_microscope(name, reload_data=(reply == QMessageBox.Yes))
+        except Exception as e:
+            self.logger.error(f"on_microscope_connected failed: {e}", exc_info=True)
+
+    def reinit_for_microscope(self, name: Optional[str], reload_data: bool) -> bool:
+        """Rebuild the voxel storage + chamber overlay + camera for microscope
+        ``name`` (its per-scope orientation), clearing current data. When
+        ``reload_data`` and a stitched source is known, reload it under the new
+        orientation. Guarded/best-effort; returns True on success."""
+        try:
+            from py2flamingo.visualization.voxel_storage_factory import (
+                create_voxel_storage,
+            )
+
+            bundle = create_voxel_storage(microscope_name=name)
+            if bundle is None:
+                self.logger.warning(
+                    "reinit_for_microscope: storage rebuild returned None"
+                )
+                return False
+
+            # Remember a reloadable source before clearing.
+            reload_src = None
+            if reload_data and self._configuration_service is not None:
+                try:
+                    reload_src = self._configuration_service.get_stitched_data_path()
+                except Exception:
+                    reload_src = None
+
+            # Clear current data + stitched layers.
+            try:
+                self.clear_data_for_workflows()
+            except Exception as e:
+                self.logger.debug(f"clear before reinit failed: {e}")
+
+            # Swap in the new storage + config + orientation.
+            self.voxel_storage = bundle.voxel_storage
+            self._config = bundle.config
+            self.coord_mapper = bundle.coord_mapper
+            self._invert_x = bool(
+                bundle.config.get("stage_control", {}).get("invert_x_default", False)
+            )
+            if getattr(self, "_chamber_viz", None) is not None:
+                self._chamber_viz.voxel_storage = bundle.voxel_storage
+                self._chamber_viz._config = bundle.config
+                self._chamber_viz._invert_x = self._invert_x
+
+            # Rebuild the chamber overlay (picks up the new orientation) + camera.
+            yaml_path = (bundle.config.get("step_chamber", {}) or {}).get(
+                "features_yaml"
+            )
+            if yaml_path is None and getattr(self, "_chamber_viz", None):
+                overlay = getattr(self._chamber_viz, "step_overlay", None)
+                yaml_path = (
+                    str(getattr(overlay, "features_yaml_path", "") or "") or None
+                )
+            if yaml_path:
+                self.reload_chamber_profile(yaml_path)
+            try:
+                if getattr(self, "_chamber_viz", None):
+                    self._chamber_viz.reset_camera()
+                    self._chamber_viz.ensure_layers_registered()
+            except Exception as e:
+                self.logger.debug(f"post-reinit chamber refresh failed: {e}")
+
+            self._active_microscope = name or "default"
+            self._data_microscope = None
+
+            if reload_src:
+                try:
+                    self._load_stitched_from_path(reload_src)
+                    self._data_microscope = self._active_microscope
+                    self.logger.info(
+                        "Reloaded stitched data for '%s' from %s",
+                        self._active_microscope,
+                        reload_src,
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Reload after reinit failed: {e}")
+
+            self.logger.info(
+                "Re-initialized 3D viewer for microscope '%s'", self._active_microscope
+            )
+            return True
+        except Exception as e:
+            self.logger.error(f"reinit_for_microscope failed: {e}", exc_info=True)
+            return False
 
     def _process_pending_stage_update(self):
         """Process pending stage position update for 3D visualization.

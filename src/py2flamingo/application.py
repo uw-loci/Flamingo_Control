@@ -474,6 +474,18 @@ class FlamingoApplication(QObject):
         # invalidated; re-evaluate whether the optics match the calibration.
         self._check_optics_guard(show_dialog=True)
 
+        # The microscope name is now known (from ScopeSettings.txt). Re-init the
+        # 3D viewer for this scope's orientation if it changed since the viewer
+        # was built (e.g. connected after startup) — prompting first if data
+        # collected on another scope is already loaded.
+        try:
+            if self.sample_view is not None and getattr(self, "config_service", None):
+                self.sample_view.on_microscope_connected(
+                    self.config_service.get_microscope_name()
+                )
+        except Exception as e:  # noqa: BLE001 - never block connect
+            self.logger.error(f"Per-microscope viewer re-init failed: {e}")
+
         # Query position in background thread to avoid blocking GUI
         # StageService.get_position() uses blocking socket I/O
         def query_and_update_position():
