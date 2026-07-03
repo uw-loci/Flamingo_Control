@@ -164,11 +164,17 @@ def create_voxel_storage(
             napari_dims[2] * voxel_size_um,
         )
 
-        # Calculate chamber origin in world coordinates
-        chamber_origin_um = (
-            config["stage_control"]["z_range_mm"][0] * 1000,
-            config["stage_control"]["y_range_mm"][0] * 1000,
-            config["stage_control"]["x_range_mm"][0] * 1000,
+        # Calculate chamber origin in world coordinates, ordered per orientation
+        # so the world/storage frame lines up with the (per-orientation) display
+        # dimensions above. Legacy orientation => (z_min, y_min, x_min) as before.
+        _xr = config["stage_control"]["x_range_mm"]
+        _yr = config["stage_control"]["y_range_mm"]
+        _zr = config["stage_control"]["z_range_mm"]
+        chamber_origin_um = tuple(
+            v * 1000
+            for v in orientation.order_by_display(
+                {"x": _xr[0], "y": _yr[0], "z": _zr[0]}
+            )
         )
 
         # Check for asymmetric bounds
@@ -181,15 +187,20 @@ def create_voxel_storage(
                 "sample_region_half_width_z_um",
             ]
         ):
-            half_widths = (
-                config["sample_chamber"]["sample_region_half_width_z_um"],
-                config["sample_chamber"]["sample_region_half_width_y_um"],
-                config["sample_chamber"]["sample_region_half_width_x_um"],
+            half_widths = orientation.order_by_display(
+                {
+                    "x": config["sample_chamber"]["sample_region_half_width_x_um"],
+                    "y": config["sample_chamber"]["sample_region_half_width_y_um"],
+                    "z": config["sample_chamber"]["sample_region_half_width_z_um"],
+                }
             )
 
-        # Reorder sample_region_center from config's X,Y,Z to storage's Z,Y,X format
+        # Reorder sample_region_center (config X,Y,Z) into display (depth,vert,
+        # horiz) order per orientation. Legacy => (Z, Y, X) as before.
         center_xyz = config["sample_chamber"]["sample_region_center_um"]
-        center_zyx = (center_xyz[2], center_xyz[1], center_xyz[0])
+        center_zyx = orientation.order_by_display(
+            {"x": center_xyz[0], "y": center_xyz[1], "z": center_xyz[2]}
+        )
 
         # Reorder voxel sizes from X,Y,Z to Z,Y,X
         storage_voxel_xyz = config["storage"]["voxel_size_um"]

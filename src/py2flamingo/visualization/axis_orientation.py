@@ -183,6 +183,16 @@ class AxisOrientation:
         lo, hi = ranges[self.per_display_axis[display_axis].stage]
         return int((hi - lo) / voxel_size_mm)
 
+    def order_by_display(self, vals: Dict[str, float]) -> Tuple[float, float, float]:
+        """Reorder a per-stage-axis mapping into napari (depth, vertical, horizontal).
+
+        ``vals`` maps stage axis -> value; returns the values ordered by which
+        stage axis drives each display axis. Used to build the world/storage
+        frame (chamber origin, sample-region center, half-widths) so it lines up
+        with the per-orientation display dimensions. Legacy => (z, y, x) value.
+        """
+        return tuple(vals[e.stage] for e in self.per_display_axis)
+
     def stage_axis_for(self, display_axis: int) -> str:
         return self.per_display_axis[display_axis].stage
 

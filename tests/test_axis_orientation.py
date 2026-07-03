@@ -156,6 +156,22 @@ class TestInverseAndExtent(unittest.TestCase):
                 self.assertAlmostEqual(yr, y, places=6)
                 self.assertAlmostEqual(zr, z, places=6)
 
+    def test_order_by_display(self):
+        legacy = AxisOrientation.legacy(invert_x=True)
+        # depth=z, vertical=y, horizontal=x  ->  (z, y, x)
+        self.assertEqual(legacy.order_by_display({"x": 1, "y": 2, "z": 3}), (3, 2, 1))
+        new = AxisOrientation.from_config(
+            {
+                "orientation": {
+                    "depth": {"stage": "x"},
+                    "vertical": {"stage": "y"},
+                    "horizontal": {"stage": "z"},
+                }
+            }
+        )
+        # depth=x, vertical=y, horizontal=z  ->  (x, y, z)
+        self.assertEqual(new.order_by_display({"x": 1, "y": 2, "z": 3}), (1, 2, 3))
+
     def test_display_extent_permutes(self):
         from py2flamingo.visualization.axis_orientation import HORIZONTAL
 
