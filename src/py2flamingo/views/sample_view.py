@@ -285,20 +285,32 @@ class SampleView(QWidget):
         self.logger.info("SampleView initialized")
 
     def _load_visualization_config(self) -> Dict[str, Any]:
-        """Load visualization config from YAML file."""
-        config_path = (
-            Path(__file__).parent.parent / "configs" / "visualization_3d_config.yaml"
-        )
+        """Load the visualization config, with the per-microscope overlay applied.
+
+        Resolves through the same ``resolve_visualization_config`` the storage
+        factory uses (keyed on ``get_microscope_name()``), so the display and the
+        storage can never disagree on the active orientation.
+        """
+        name = None
         try:
-            if config_path.exists():
-                with open(config_path, "r") as f:
-                    config = yaml.safe_load(f)
-                self.logger.info(f"Loaded visualization config from {config_path}")
-                return config
+            if self._configuration_service is not None:
+                name = self._configuration_service.get_microscope_name()
+        except Exception as e:  # noqa: BLE001 - fall back to the base config
+            self.logger.debug(f"Could not read microscope name: {e}")
+        try:
+            from py2flamingo.visualization.voxel_storage_factory import (
+                resolve_visualization_config,
+            )
+
+            config = resolve_visualization_config(microscope_name=name)
+            self.logger.info(
+                "Loaded visualization config (microscope=%s)", name or "default"
+            )
+            return config
         except Exception as e:
             self.logger.warning(f"Could not load visualization config: {e}")
 
-        # Return default config if file not found
+        # Return default config if anything went wrong
         return {
             "stage_control": {
                 "invert_x_default": False,

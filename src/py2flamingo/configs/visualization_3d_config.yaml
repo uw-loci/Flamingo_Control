@@ -47,6 +47,23 @@ display:
 #   vertical:   { stage: y, flip: true }    # napari y-down
 #   horizontal: { stage: z, flip: false }   # +Z toward detection objective (right)
 
+# Per-microscope overlays. Each key is matched (case-insensitively) against the
+# scope's "Microscope name" from ScopeSettings.txt (get_microscope_name()); the
+# matching entry is deep-merged over this base config, so a scope can override
+# `orientation`, `display.default_camera_angles`, `step_chamber`, ranges, etc.
+# without touching the others. No match (or the default scope) => this base config
+# unchanged. The storage factory and Sample View both resolve through the same
+# path, so they always agree on the active orientation. Example:
+#
+# microscopes:
+#   ASLM-25x:                                 # <-- ScopeSettings.txt Microscope name
+#     orientation:
+#       depth:      { stage: x, flip: false }
+#       vertical:   { stage: y, flip: true }
+#       horizontal: { stage: z, flip: false }
+#     display:
+#       default_camera_angles: [0, 0, 180]    # per-scope default viewpoint
+
 storage:
   # High-resolution storage (2-3x display resolution)
   # This preserves data quality during rotations

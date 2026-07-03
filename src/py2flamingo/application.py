@@ -220,8 +220,18 @@ class FlamingoApplication(QObject):
         self._wire_workflow_progress()
 
         # --- Voxel storage for 3D visualization ---
+        # Resolve the per-microscope config overlay with the SAME name Sample
+        # View uses (get_microscope_name), so storage + display share one
+        # orientation. At startup (scope not yet connected) this is usually
+        # "default" => legacy orientation.
         self.logger.debug("Creating voxel storage for 3D visualization...")
-        bundle = create_voxel_storage()
+        _scope_name = None
+        try:
+            if getattr(self, "config_service", None):
+                _scope_name = self.config_service.get_microscope_name()
+        except Exception as e:  # noqa: BLE001
+            self.logger.debug(f"Could not read microscope name for storage: {e}")
+        bundle = create_voxel_storage(microscope_name=_scope_name)
         if bundle is not None:
             self.voxel_storage = bundle.voxel_storage
             self._visualization_config = bundle.config

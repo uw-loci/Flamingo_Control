@@ -23,6 +23,69 @@ class VoxelStorageBundle:
     coord_transformer: object  # CoordinateTransformer
 
 
+def _default_config_path() -> Path:
+    return Path(__file__).parent.parent / "configs" / "visualization_3d_config.yaml"
+
+
+def _deep_merge(base: dict, overlay: dict) -> dict:
+    """Recursively merge ``overlay`` into a copy of ``base`` (overlay wins).
+
+    Nested dicts merge key-by-key; any non-dict value (incl. lists) replaces
+    the base value wholesale.
+    """
+    out = dict(base)
+    for key, val in (overlay or {}).items():
+        if isinstance(val, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], val)
+        else:
+            out[key] = val
+    return out
+
+
+def resolve_visualization_config(
+    microscope_name: Optional[str] = None,
+    config_path: Optional[str] = None,
+) -> dict:
+    """Load the base viz config and overlay the per-microscope section.
+
+    The base ``visualization_3d_config.yaml`` may carry a ``microscopes:`` map
+    keyed by microscope name. When ``microscope_name`` matches an entry (case-
+    insensitively — the name comes from ``get_microscope_name()``), that entry is
+    **deep-merged over the base**, so a scope can override ``orientation``,
+    ``display.default_camera_angles``, ``step_chamber``, etc. No name / no match
+    => the base config unchanged (legacy scope). The ``microscopes`` map itself is
+    stripped from the returned dict so consumers never see it.
+
+    Both the storage factory and Sample View resolve through this single function
+    so they can never disagree on the active orientation.
+    """
+    import yaml
+
+    path = Path(config_path) if config_path else _default_config_path()
+    try:
+        if path.exists():
+            with open(path, "r") as f:
+                config = yaml.safe_load(f) or {}
+        else:
+            logger.warning("Viz config %s not found; using defaults", path)
+            config = get_default_visualization_config()
+    except Exception as e:  # noqa: BLE001 - fall back rather than crash the viewer
+        logger.warning("Could not load viz config %s: %s", path, e)
+        config = get_default_visualization_config()
+
+    micros = config.get("microscopes") or {}
+    if microscope_name and micros:
+        match = next(
+            (k for k in micros if str(k).lower() == str(microscope_name).lower()),
+            None,
+        )
+        if match is not None:
+            logger.info("Applying per-microscope viz overlay for '%s'", microscope_name)
+            config = _deep_merge(config, micros.get(match) or {})
+    config.pop("microscopes", None)
+    return config
+
+
 def get_default_visualization_config() -> dict:
     """Return default visualization config if YAML not found."""
     return {
@@ -84,6 +147,7 @@ def get_default_visualization_config() -> dict:
 
 def create_voxel_storage(
     config_path: Optional[str] = None,
+    microscope_name: Optional[str] = None,
 ) -> Optional[VoxelStorageBundle]:
     """Create voxel storage for 3D visualization.
 
@@ -93,27 +157,18 @@ def create_voxel_storage(
     Args:
         config_path: Path to visualization_3d_config.yaml.
             Defaults to configs/visualization_3d_config.yaml relative to py2flamingo package.
+        microscope_name: When given, the per-microscope ``microscopes:`` overlay
+            for that scope is applied (orientation, camera, chamber, …) — see
+            :func:`resolve_visualization_config`. Must be the SAME name Sample
+            View resolves with, so storage and display agree on the orientation.
 
     Returns:
         VoxelStorageBundle with all components, or None on failure.
     """
-    import yaml
-
-    # Load visualization config
-    if config_path is None:
-        config_path = (
-            Path(__file__).parent.parent / "configs" / "visualization_3d_config.yaml"
-        )
-    else:
-        config_path = Path(config_path)
-
-    if config_path.exists():
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
-        logger.info(f"Loaded 3D visualization config from {config_path}")
-    else:
-        logger.warning("Using default 3D visualization config")
-        config = get_default_visualization_config()
+    # Load visualization config (with the per-microscope overlay applied).
+    config = resolve_visualization_config(
+        microscope_name=microscope_name, config_path=config_path
+    )
 
     try:
         from py2flamingo.visualization.axis_orientation import AxisOrientation
