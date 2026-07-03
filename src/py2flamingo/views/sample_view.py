@@ -867,21 +867,29 @@ class SampleView(QWidget):
 
             layout.addLayout(row)
 
-            # Direction hint label for X, Y, Z (skip R)
+            # Direction hint label for X, Y, Z (skip R). Per-microscope override
+            # via stage_control.direction_hints in the (resolved) config; falls
+            # back to the legacy strings (the X default depends on invert_x). A
+            # scope whose stage axes read differently to the user (e.g. the ASLM
+            # scope where X is the viewing/depth axis and Z points at the
+            # right-side detector) supplies its own hints in its microscopes:
+            # overlay so the slider descriptions match the rotated scene.
             if axis_id in ("x", "y", "z"):
+                arrow = "\u2190\u2500\u2500\u2500\u2192"
+                _hints = (self._config.get("stage_control", {}) or {}).get(
+                    "direction_hints", {}
+                ) or {}
                 if axis_id == "x":
-                    x_text = (
-                        "Left \u2190\u2500\u2500\u2500\u2192 Right"
+                    default_text = (
+                        f"Left {arrow} Right"
                         if self._invert_x
-                        else "Right \u2190\u2500\u2500\u2500\u2192 Left"
+                        else f"Right {arrow} Left"
                     )
-                    direction_texts = {"x": x_text}
+                elif axis_id == "y":
+                    default_text = f"Lower Sample {arrow} Raise Sample"
                 else:
-                    direction_texts = {
-                        "y": "Lower Sample \u2190\u2500\u2500\u2500\u2192 Raise Sample",
-                        "z": "Toward Detector \u2190\u2500\u2500\u2500\u2192 Toward LED/Front",
-                    }
-                dir_label = QLabel(direction_texts[axis_id])
+                    default_text = f"Toward Detector {arrow} Toward LED/Front"
+                dir_label = QLabel(_hints.get(axis_id, default_text))
                 dir_label.setStyleSheet(
                     f"color: {axis_color}; font-size: 8pt; font-style: italic;"
                 )

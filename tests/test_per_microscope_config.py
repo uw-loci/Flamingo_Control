@@ -51,6 +51,9 @@ def _base_config():
         "ASLM-25x": {
             "orientation": _ASLM_ORI,
             "display": {"default_camera_angles": [10, 20, 30]},
+            "stage_control": {
+                "direction_hints": {"x": "Toward User <-> Toward Excitation Arm"}
+            },
         },
     }
     return cfg
@@ -97,6 +100,19 @@ class TestResolveOverlay(unittest.TestCase):
         # Overlay adds default_camera_angles WITHOUT dropping base display keys.
         self.assertEqual(cfg["display"]["default_camera_angles"], [10, 20, 30])
         self.assertIn("voxel_size_um", cfg["display"])  # sibling preserved
+
+    def test_per_scope_direction_hints_merge_without_clobbering(self):
+        aslm = resolve_visualization_config("ASLM-25x", config_path=self.path)
+        legacy = resolve_visualization_config("scope-legacy", config_path=self.path)
+        # ASLM gets its slider hint; legacy has none (viewer falls back).
+        self.assertEqual(
+            aslm["stage_control"]["direction_hints"]["x"],
+            "Toward User <-> Toward Excitation Arm",
+        )
+        self.assertNotIn("direction_hints", legacy["stage_control"])
+        # The direction_hints overlay must NOT drop sibling stage_control keys.
+        self.assertIn("x_range_mm", aslm["stage_control"])
+        self.assertIn("invert_x_default", aslm["stage_control"])
 
 
 class TestTwoScopesEndToEnd(unittest.TestCase):

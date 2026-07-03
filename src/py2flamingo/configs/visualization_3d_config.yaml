@@ -63,6 +63,14 @@ display:
 #       horizontal: { stage: z, flip: false }
 #     display:
 #       default_camera_angles: [0, 0, 180]    # per-scope default viewpoint
+#     stage_control:
+#       # Per-scope slider direction hints (the axis names X/Y/Z stay; only the
+#       # descriptions change to match this scope's layout). Absent -> legacy
+#       # ("Right<->Left" / "Lower<->Raise" / "Toward Detector<->Toward LED").
+#       direction_hints:
+#         x: "Toward User <-> Toward Excitation Arm"   # X is the viewing/depth axis
+#         y: "Lower Sample <-> Raise Sample"
+#         z: "Away <-> Toward Detector (right)"        # Z points at the detector
 
 storage:
   # High-resolution storage (2-3x display resolution)
