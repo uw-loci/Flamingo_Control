@@ -180,6 +180,27 @@ class TestOrientStitchedVolume(unittest.TestCase):
         np.testing.assert_allclose(wmin, [1 - 25, 2 - 20, 3 - 15])
 
 
+class TestAslmChamberProfile(unittest.TestCase):
+    """The prep ASLM chamber profile is well-formed and single-sided."""
+
+    def test_parses_single_illum_and_has_objective(self):
+        p = _SRC / "py2flamingo" / "configs" / "step_chamber_features_aslm.yaml"
+        self.assertTrue(p.exists())
+        cfg = yaml.safe_load(open(p))
+        self.assertIn("step_to_stage_transform", cfg)
+        feats = cfg.get("features", [])
+        roles = [f.get("role") for f in feats]
+        self.assertIn("detection_objective_port", roles)
+        # Exactly one illumination port visible (single-sided ASLM).
+        illum_visible = [
+            f
+            for f in feats
+            if str(f.get("role", "")).startswith("illumination_port")
+            and f.get("visible_default")
+        ]
+        self.assertEqual(len(illum_visible), 1)
+
+
 class TestPlanMicroscopeChange(unittest.TestCase):
     """The pure connect-time decision (re-init silently / prompt / do nothing)."""
 

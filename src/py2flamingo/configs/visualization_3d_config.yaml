@@ -71,6 +71,10 @@ display:
 #         x: "Toward User <-> Toward Excitation Arm"   # X is the viewing/depth axis
 #         y: "Lower Sample <-> Raise Sample"
 #         z: "Away <-> Toward Detector (right)"        # Z points at the detector
+#     step_chamber:
+#       # ASLM chamber geometry (single-sided illum). PREP profile — its
+#       # step_to_stage_transform still needs rig calibration (see file header).
+#       features_yaml: configs/step_chamber_features_aslm.yaml
 
 storage:
   # High-resolution storage (2-3x display resolution)
