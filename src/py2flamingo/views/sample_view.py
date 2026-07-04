@@ -71,6 +71,49 @@ from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
 from py2flamingo.views.widgets.slice_plane_viewer import AXIS_COLORS, SlicePlaneViewer
 
 
+def orient_stitched_volume(
+    resampled, native_shape_zyx, voxel_um_zyx, sc_xyz, orientation
+):
+    """Place a stitched volume into the per-microscope oriented display frame.
+
+    The stitched volume is stored in stage (Z, Y, X) = (detection, vertical,
+    illumination) order; the display cache is napari (depth, vertical,
+    horizontal). Transpose ``resampled`` so its axes match the display frame,
+    then flip each axis whose orientation is NOT flipped (storage = -display:
+    increasing stage index -> decreasing display index). Also returns the
+    volume's world bbox (µm) ordered per display axis.
+
+    Legacy orientation => identity transpose + the old Z(always)/X(not-invert_x)
+    flips, and world_min/max in (Z, Y, X) order — bit-for-bit unchanged.
+
+    Args:
+        resampled: the display-voxel-resampled array in (Z, Y, X) order.
+        native_shape_zyx / voxel_um_zyx: native volume shape / voxel (for extents).
+        sc_xyz: sample_region_center as (X, Y, Z) µm.
+        orientation: AxisOrientation for the active scope.
+
+    Returns:
+        (oriented_array, world_min, world_max) — arrays in display order.
+    """
+    arr_axis = {"z": 0, "y": 1, "x": 2}
+    perm = tuple(arr_axis[orientation.stage_axis_for(i)] for i in range(3))
+    out = np.transpose(resampled, perm)
+    for i in range(3):
+        if not orientation.per_display_axis[i].flip:
+            out = np.flip(out, axis=i)
+
+    sc = {"x": sc_xyz[0], "y": sc_xyz[1], "z": sc_xyz[2]}
+    ext = {
+        "z": native_shape_zyx[0] * voxel_um_zyx[0],
+        "y": native_shape_zyx[1] * voxel_um_zyx[1],
+        "x": native_shape_zyx[2] * voxel_um_zyx[2],
+    }
+    stages = [orientation.stage_axis_for(i) for i in range(3)]
+    world_min = np.array([sc[s] - ext[s] / 2 for s in stages], dtype=float)
+    world_max = np.array([sc[s] + ext[s] / 2 for s in stages], dtype=float)
+    return out, world_min, world_max
+
+
 def plan_microscope_change(active, new, has_data):
     """Decide what to do when connecting to microscope ``new``.
 
@@ -3492,40 +3535,17 @@ class SampleView(QWidget):
             )
             resampled = np.clip(resampled, 0, 65535).astype(np.uint16)
 
-            # Axis direction: voxel_storage display_cache is indexed such that
-            # increasing index = increasing world coordinate.  Stitched data is
-            # indexed in acquisition order (stage Z increasing = world Z
-            # decreasing, so Z must be flipped; X must be flipped when
-            # invert_x is False).
-            resampled = resampled[::-1]  # Z flip (always)
-            if not self._invert_x:
-                resampled = resampled[:, :, ::-1]  # X flip
-
-            # Compute world bbox of the stitched volume (centered at
-            # sample_region_center when stage is at stitch center)
-            extent_z_um = (
-                sh0[0] * v_z0
-            )  # use channel-0 extent (all channels share geometry)
-            extent_y_um = sh0[1] * v_y0
-            extent_x_um = sh0[2] * v_x0
-            # Channels may in theory have different geometry; use this ch's
-            extent_z_um = volume.shape[0] * voxel_um[0]
-            extent_y_um = volume.shape[1] * voxel_um[1]
-            extent_x_um = volume.shape[2] * voxel_um[2]
-
-            world_min = np.array(
-                [
-                    sc_z - extent_z_um / 2,
-                    sc_y - extent_y_um / 2,
-                    sc_x - extent_x_um / 2,
-                ]
-            )
-            world_max = np.array(
-                [
-                    sc_z + extent_z_um / 2,
-                    sc_y + extent_y_um / 2,
-                    sc_x + extent_x_um / 2,
-                ]
+            # Transpose + flip the stitched volume into the per-microscope
+            # oriented display frame, and get its world bbox (µm) ordered per
+            # display axis. Legacy orientation => the old Z(always)/X(not-invert_x)
+            # flips + (Z,Y,X) bbox, bit-for-bit. chamber_origin is already ordered
+            # per display axis (voxel_storage_factory).
+            resampled, world_min, world_max = orient_stitched_volume(
+                resampled,
+                volume.shape,
+                voxel_um,
+                (sc_x, sc_y, sc_z),
+                self.voxel_storage.config.axis_orientation(),
             )
 
             # Corner in display voxel coordinates (lowest indices)

@@ -142,6 +142,44 @@ class TestTwoScopesEndToEnd(unittest.TestCase):
         )
 
 
+class TestOrientStitchedVolume(unittest.TestCase):
+    """orient_stitched_volume reproduces the old flips for legacy, transposes new."""
+
+    def setUp(self):
+        from py2flamingo.views.sample_view import orient_stitched_volume
+
+        self.orient = orient_stitched_volume
+
+    def test_legacy_matches_old_flip_formula(self):
+        import numpy as np
+
+        resampled = np.arange(3 * 4 * 5).reshape(3, 4, 5).astype(np.uint16)  # Z,Y,X
+        native, voxel, sc = (6, 8, 10), (5.0, 5.0, 5.0), (6655.0, 7000.0, 19250.0)
+        for invert_x in (False, True):
+            ori = AxisOrientation.legacy(invert_x=invert_x)
+            out, wmin, _ = self.orient(resampled, native, voxel, sc, ori)
+            old = resampled[::-1]  # Z flip always
+            if not invert_x:
+                old = old[:, :, ::-1]  # X flip when not invert_x
+            np.testing.assert_array_equal(np.asarray(out), np.asarray(old))
+            ez, ey, ex = 6 * 5, 8 * 5, 10 * 5
+            np.testing.assert_allclose(
+                wmin, [sc[2] - ez / 2, sc[1] - ey / 2, sc[0] - ex / 2]
+            )
+
+    def test_new_scope_transposes_and_orders_bbox(self):
+        import numpy as np
+
+        ori = AxisOrientation.from_config({"orientation": _ASLM_ORI})
+        resampled = np.arange(3 * 4 * 5).reshape(3, 4, 5).astype(np.uint16)
+        out, wmin, _ = self.orient(
+            resampled, (6, 8, 10), (5.0, 5.0, 5.0), (1.0, 2.0, 3.0), ori
+        )
+        self.assertEqual(out.shape, (5, 4, 3))  # transpose (2,1,0): stage X->depth
+        # bbox ordered (depth=x, vert=y, horiz=z): ext_x=50, ext_y=40, ext_z=30
+        np.testing.assert_allclose(wmin, [1 - 25, 2 - 20, 3 - 15])
+
+
 class TestPlanMicroscopeChange(unittest.TestCase):
     """The pure connect-time decision (re-init silently / prompt / do nothing)."""
 
