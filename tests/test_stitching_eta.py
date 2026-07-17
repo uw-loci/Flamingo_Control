@@ -195,23 +195,22 @@ class TestMultiPhaseEstimator:
         # Cached total = 600s, elapsed = 60s -> ~540s remaining
         assert est.remaining_seconds() == pytest.approx(540.0)
 
-    def test_phase_shares_refine_estimate(self, clock, tmp_path: Path):
+    def test_progress_fraction_drives_estimate(self, clock, tmp_path: Path):
+        # The estimator no longer infers the total from a phase's share of a
+        # cached run (that "observed/share" scheme caused wild swings). Once the
+        # pipeline's global progress fraction is fed in, the remaining time is a
+        # straight linear extrapolation: reaching f in `elapsed` implies
+        # elapsed*(1-f)/f left. At f >= 0.25 the live value is used alone, so
+        # the cached prior does not affect it.
         cache = StitchingTimingCache(path=tmp_path / "c.json")
-        cache.record_run(
-            make_key(),
-            1000.0,
-            {"discover": 10.0, "fuse": 500.0, "write": 490.0},
-        )
+        cache.record_run(make_key(), 1000.0, {"fuse": 1000.0})
         est = MultiPhaseEstimator(cache, make_key())
-        est.start_phase("discover")
-        clock.advance(20.0)  # discover actually took 20s -> 2x slower
-        est.start_phase("fuse")
-        # Now we've observed discover share = 20/T_projected. With
-        # cached share 0.01, T_projected = 20 / 0.01 = 2000s.
-        # Elapsed = 20s. Remaining ~ 1980.
+        est.start()
+        clock.advance(100.0)
+        est.update_fraction(0.5)  # halfway in 100s -> ~100s remaining
         rem = est.remaining_seconds()
         assert rem is not None
-        assert 1900 < rem < 2100
+        assert rem == pytest.approx(100.0, abs=1.0)
 
     def test_finalize_records_to_cache(self, clock, tmp_path: Path):
         cache = StitchingTimingCache(path=tmp_path / "c.json")
@@ -253,18 +252,18 @@ class TestMultiPhaseEstimator:
         assert shares["fuse"] == pytest.approx(50.0 / total)
         assert shares["write"] == pytest.approx(10.0 / total)
 
-    def test_in_progress_phase_counted_in_remaining(self, clock, tmp_path: Path):
+    def test_no_progress_signal_falls_back_to_prior(self, clock, tmp_path: Path):
+        # With a cached total but no progress fraction yet, the estimate is the
+        # cold-start prior decremented by elapsed (not a share-division of the
+        # running phase). Cached total 1000s, elapsed 300s -> ~700s remaining.
         cache = StitchingTimingCache(path=tmp_path / "c.json")
         cache.record_run(make_key(), 1000.0, {"fuse": 600.0, "write": 400.0})
         est = MultiPhaseEstimator(cache, make_key())
         est.start_phase("fuse")
-        # Mid-phase, no end_phase yet
-        clock.advance(300.0)
+        clock.advance(300.0)  # mid-phase, no update_fraction fed
         rem = est.remaining_seconds()
         assert rem is not None
-        # Cached fuse share = 0.6. Observed 300s -> projected total
-        # = 300/0.6 = 500s. Elapsed = 300. Remaining = 200.
-        assert 150 < rem < 250
+        assert rem == pytest.approx(700.0, abs=1.0)
 
     def test_format_label_with_cached_total(self, clock, tmp_path: Path):
         cache = StitchingTimingCache(path=tmp_path / "c.json")
@@ -275,17 +274,17 @@ class TestMultiPhaseEstimator:
         assert "remaining" in label
         assert "Done at ~" in label
 
-    def test_no_cache_extrapolates_from_phase_count(self, clock, tmp_path: Path):
+    def test_no_cache_no_progress_is_estimating(self, clock, tmp_path: Path):
+        # With no cached prior AND no progress fraction, there is nothing honest
+        # to extrapolate from — the estimator reports "estimating..." rather than
+        # the old phase-count guess (1/6 phases -> total*6), which was unstable.
         cache = StitchingTimingCache(path=tmp_path / "c.json")
         est = MultiPhaseEstimator(cache, make_key())
         est.start_phase("discover")
         clock.advance(60.0)
         est.start_phase("fuse")  # auto-ends discover
-        # 1 / 6 phases completed in 60s -> projected total 360s,
-        # remaining ~300s. Crude but non-None.
-        rem = est.remaining_seconds()
-        assert rem is not None
-        assert rem > 0
+        assert est.remaining_seconds() is None
+        assert est.format_label() == "estimating..."
 
     def test_short_run_not_recorded(self, clock, tmp_path: Path):
         cache = StitchingTimingCache(path=tmp_path / "c.json")
