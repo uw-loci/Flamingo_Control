@@ -42,6 +42,35 @@ def parse_workflow_position(workflow_file: Path) -> Optional[Dict]:
     return None
 
 
+def read_xy_position_from_workflow(
+    workflow_file: Path,
+) -> Optional[Tuple[float, float]]:
+    """Read the Start Position X, Y (mm) from a Workflow.txt's content.
+
+    Unlike ``parse_workflow_position`` (which reads X/Y from the *filename*),
+    this reads the ``<Start Position>`` block inside the file. That is the only
+    place a Single Workflow acquisition records its stage position — its folder
+    and workflow file are not named ``X..._Y...``.
+
+    Returns:
+        (x_mm, y_mm), or None if the block/fields are absent.
+    """
+    try:
+        with open(workflow_file, "r") as f:
+            content = f.read()
+        x_match = re.search(
+            r"<Start Position>.*?X \(mm\) = ([-\d.]+)", content, re.DOTALL
+        )
+        y_match = re.search(
+            r"<Start Position>.*?Y \(mm\) = ([-\d.]+)", content, re.DOTALL
+        )
+        if x_match and y_match:
+            return float(x_match.group(1)), float(y_match.group(1))
+    except Exception as e:
+        logger.error(f"Failed to read XY position from {workflow_file.name}: {e}")
+    return None
+
+
 def read_z_range_from_workflow(workflow_file: Path) -> Tuple[float, float]:
     """Read Z-stack range from workflow file.
 

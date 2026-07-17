@@ -3364,7 +3364,8 @@ class SampleView(QWidget):
                         QMessageBox.warning(
                             self,
                             "No Data Found",
-                            f"No .ome.zarr or .ome.tif files found in:\n{output_dir}",
+                            f"No .ome.zarr, .ome.tif, or .ims files found in:"
+                            f"\n{output_dir}",
                         )
                         return
                     elif len(candidates) == 1:
@@ -3469,7 +3470,9 @@ class SampleView(QWidget):
         Returns:
             List of channel IDs that were successfully loaded.
         """
-        import scipy.ndimage as ndi
+        from py2flamingo.visualization.session_manager import (
+            downsample_to_voxel_grid,
+        )
 
         if not self.voxel_storage or not channels:
             return []
@@ -3529,10 +3532,12 @@ class SampleView(QWidget):
                 continue
 
             # Resample to display voxel size.  Zoom factors < 1 downsample.
+            # Use the memory-safe downsampler: it strided-decimates the uint16
+            # volume before upcasting, so a huge native-resolution stitched
+            # volume never needs a full-size float32 copy (which for a ~194 GB
+            # uint16 volume would be a 377 GB allocation).
             zoom_factors = voxel_um / display_voxel_um
-            resampled = ndi.zoom(
-                volume.astype(np.float32), zoom_factors, order=1, mode="constant"
-            )
+            resampled = downsample_to_voxel_grid(volume, zoom_factors)
             resampled = np.clip(resampled, 0, 65535).astype(np.uint16)
 
             # Transpose + flip the stitched volume into the per-microscope
@@ -4748,15 +4753,18 @@ class SampleView(QWidget):
         """Reset camera view to the per-microscope defaults (orientation + zoom)."""
         viewer = self._get_viewer()
         if viewer and hasattr(viewer, "camera"):
-            viewer.reset_view()  # recenter/reset, then apply our per-scope defaults
+            viewer.reset_view()  # recenter/reset to napari's default orientation
             zoom = self._chamber_viz.default_camera_zoom()
             angles = self._chamber_viz.default_camera_angles()
+            # Only pin a fixed viewpoint when the scope configured one; otherwise
+            # keep napari's reset_view orientation (user perspective, mount on top).
+            if angles is not None:
+                viewer.camera.angles = angles
             viewer.camera.zoom = zoom
-            viewer.camera.angles = angles  # per-microscope default viewpoint
             self._update_zoom_display()
             self.logger.info(
-                "Reset camera view to per-scope defaults (angles=%s, zoom=%s)",
-                angles,
+                "Reset camera view (angles=%s, zoom=%s)",
+                angles if angles is not None else "napari default",
                 zoom,
             )
 

@@ -7,6 +7,7 @@ Extracted from SampleView to reduce its complexity.
 
 import logging
 import time
+from typing import Optional
 
 import numpy as np
 from PyQt5.QtCore import QTimer
@@ -128,8 +129,12 @@ class ChamberVisualizationManager:
             self.viewer.axes.labels = True
             self.viewer.axes.colored = True
 
-            # Set initial camera orientation (per-microscope; default (0,0,180))
-            self.viewer.camera.angles = self.default_camera_angles()
+            # Set initial camera orientation. Only override napari's default
+            # view when the scope pins a specific viewpoint; otherwise leave
+            # napari's own orientation (user perspective, mount on top).
+            _init_angles = self.default_camera_angles()
+            if _init_angles is not None:
+                self.viewer.camera.angles = _init_angles
             self.viewer.camera.zoom = self.default_camera_zoom()
 
             # Get the napari Qt widget
@@ -1631,17 +1636,23 @@ class ChamberVisualizationManager:
         """Default 3D Volume View zoom (display.default_camera_zoom in config)."""
         return float(self._config.get("display", {}).get("default_camera_zoom", 0.4))
 
-    def default_camera_angles(self) -> tuple:
+    def default_camera_angles(self) -> Optional[tuple]:
         """Default 3D camera orientation (display.default_camera_angles in config).
+
+        Returns ``None`` when the scope has NOT set an explicit override — the
+        caller then uses napari's own ``reset_view()`` default viewpoint (the
+        user-facing orientation, sample mount on top). This is the correct
+        behavior for the standard scope (n7): forcing a fixed angle triple like
+        (0, 0, 180) rolls the chamber upside down.
 
         Per-microscope: a scope whose detection objective / stage axes are laid
         out differently (e.g. the ASLM/TSPIM scope with the objective on the
-        right and X along the viewing axis) wants a different default viewpoint.
-        Falls back to the historical (0, 0, 180).
+        right and X along the viewing axis) can pin a specific viewpoint by
+        setting ``display.default_camera_angles`` in its config overlay.
         """
-        angles = self._config.get("display", {}).get(
-            "default_camera_angles", [0, 0, 180]
-        )
+        angles = self._config.get("display", {}).get("default_camera_angles", None)
+        if angles is None:
+            return None
         try:
             a = tuple(float(v) for v in angles)
             if len(a) == 3:
@@ -1649,20 +1660,30 @@ class ChamberVisualizationManager:
         except (TypeError, ValueError):
             pass
         self.logger.warning(
-            "Invalid display.default_camera_angles %r; using (0, 0, 180)", angles
+            "Invalid display.default_camera_angles %r; using napari default view",
+            angles,
         )
-        return (0.0, 0.0, 180.0)
+        return None
 
     def reset_camera(self) -> None:
-        """Reset the napari viewer camera to the per-scope default zoom + angles."""
+        """Reset the napari viewer camera to the per-scope default zoom + angles.
+
+        When no per-scope angle override is configured, fall back to napari's
+        own ``reset_view()`` orientation (user perspective) rather than forcing
+        a fixed angle triple that would flip the chamber upside down.
+        """
         if self.viewer and hasattr(self.viewer, "camera"):
             zoom = self.default_camera_zoom()
+            angles = self.default_camera_angles()
+            if angles is None:
+                self.viewer.reset_view()  # napari default orientation
+            else:
+                self.viewer.camera.angles = angles
             self.viewer.camera.zoom = zoom
-            self.viewer.camera.angles = self.default_camera_angles()
             self.logger.info(
                 "Reset viewer camera: zoom %s, angles %s",
                 zoom,
-                self.default_camera_angles(),
+                angles if angles is not None else "napari default",
             )
 
     def load_objective_calibration(self, config=None) -> None:

@@ -1239,9 +1239,11 @@ class DualResolutionVoxelStorage:
             not hasattr(self, "_last_logged_offset")
             or self._last_logged_offset != offset_key
         ):
+            # Orientation-aware display offset in µm (napari Z, Y, X order).
+            disp_um = self.config.axis_orientation().delta_offset(dx, dy, dz) * 1000
             logger.info(
                 f"Transform: Applying offset {offset_voxels.astype(int)} voxels (ZYX) "
-                f"= ({dz*1000:.0f}, {-dy*1000:.0f}, {dx_display*1000:.0f}) µm"
+                f"= ({disp_um[0]:.0f}, {disp_um[1]:.0f}, {disp_um[2]:.0f}) µm"
             )
             self._last_logged_offset = offset_key
 
@@ -1306,9 +1308,10 @@ class DualResolutionVoxelStorage:
 
         The math mirrors `get_display_volume_transformed`: rotation delta
         `dr = target_r - ref_r` applied around the holder's display voxel
-        (Z, X) using `coord_transformer.rotation_matrix`, followed by
-        `offset = [dz, -dy, dx_display] * 1000 / voxel_size_um` where
-        `dx_display = -dx if invert_x else dx`.
+        (Z, X) using `coord_transformer.rotation_matrix`, followed by the
+        orientation-aware translation
+        `offset = axis_orientation().delta_offset(dx, dy, dz) * 1000 / voxel_size_um`
+        (the per-microscope stage→napari mapping).
 
         Args:
             current_stage_pos: Dict with 'x', 'y', 'z', 'r' (target pose in mm / deg).

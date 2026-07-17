@@ -30,6 +30,7 @@ from py2flamingo.models.mip_overview import find_tile_folders, parse_coords_from
 from py2flamingo.utils.tile_workflow_parser import (
     read_illumination_path_from_workflow,
     read_laser_channels_from_workflow,
+    read_xy_position_from_workflow,
     read_z_range_from_workflow,
 )
 from py2flamingo.visualization.tile_processing_worker import TileFrameBuffer
@@ -142,6 +143,46 @@ class DiskTileInfo:
 # ---------------------------------------------------------------------------
 
 
+def _folder_has_raw(folder: Path) -> bool:
+    """True if the folder directly contains at least one .raw file."""
+    try:
+        return any(f.is_file() and f.suffix == ".raw" for f in folder.iterdir())
+    except OSError:
+        return False
+
+
+def find_workflow_acquisition_folders(base: Path) -> List[Path]:
+    """Find Single Workflow acquisition folders (no X*_Y* tiling).
+
+    A Single Workflow acquisition writes ``Workflow.txt`` + ``.raw`` files
+    directly into one folder, rather than into ``X{x}_Y{y}`` tile subfolders.
+    Such a folder is not found by ``find_tile_folders``. This checks whether
+    ``base`` itself is such an acquisition, and otherwise returns any immediate
+    subfolders that are (so the user can select either the acquisition folder or
+    a parent containing one or more).
+
+    Args:
+        base: Folder the user selected in "Load Raw Data".
+
+    Returns:
+        List of acquisition folder paths (possibly just ``[base]``), or empty.
+    """
+    base = Path(base)
+    if (base / "Workflow.txt").exists() and _folder_has_raw(base):
+        return [base]
+
+    found: List[Path] = []
+    if base.is_dir():
+        for item in sorted(base.iterdir()):
+            if (
+                item.is_dir()
+                and (item / "Workflow.txt").exists()
+                and _folder_has_raw(item)
+            ):
+                found.append(item)
+    return found
+
+
 def parse_tile_folder(folder: Path) -> Optional[DiskTileInfo]:
     """Parse a tile folder's metadata and find raw files.
 
@@ -155,11 +196,29 @@ def parse_tile_folder(folder: Path) -> Optional[DiskTileInfo]:
     Raises:
         FileNotFoundError: If Workflow.txt or .raw files are missing.
     """
-    x, y = parse_coords_from_folder(folder.name)
-
     workflow_file = folder / "Workflow.txt"
     if not workflow_file.exists():
         raise FileNotFoundError(f"No Workflow.txt in {folder.name}")
+
+    # Tile position: prefer the X..._Y... folder name (tiled acquisitions).
+    # A Single Workflow acquisition's folder is not named that way, so fall
+    # back to the Start Position recorded inside the Workflow.txt.
+    try:
+        x, y = parse_coords_from_folder(folder.name)
+    except ValueError:
+        pos = read_xy_position_from_workflow(workflow_file)
+        if pos is not None:
+            x, y = pos
+            logger.info(
+                f"{folder.name}: no X/Y in folder name; using Workflow.txt "
+                f"Start Position ({x}, {y})"
+            )
+        else:
+            x, y = 0.0, 0.0
+            logger.warning(
+                f"{folder.name}: no X/Y in folder name or Workflow.txt; "
+                f"placing at (0, 0)"
+            )
 
     z_min, z_max = read_z_range_from_workflow(workflow_file)
     channels = read_laser_channels_from_workflow(workflow_file)
@@ -452,10 +511,25 @@ class DiskTileLoader(QObject):
 
     def _do_load(self):
         """Scan folders, parse metadata, load and submit tiles."""
-        # 1. Find tile folders
+        # 1. Find tile folders. Tiled acquisitions use X*_Y* subfolders; a
+        # Single Workflow acquisition instead puts Workflow.txt + .raw directly
+        # in the selected folder (or a descriptively-named subfolder).
         tile_folders = find_tile_folders(self._date_dir)
+        if tile_folders:
+            logger.info(f"Tiled acquisition: {len(tile_folders)} X*_Y* folder(s)")
+        else:
+            tile_folders = find_workflow_acquisition_folders(self._date_dir)
+            if tile_folders:
+                logger.info(
+                    f"Single Workflow acquisition: {len(tile_folders)} folder(s) "
+                    f"with Workflow.txt + .raw"
+                )
         if not tile_folders:
-            self.finished.emit(False, f"No tile folders found in {self._date_dir}")
+            self.finished.emit(
+                False,
+                f"No tile folders (X*_Y*) or Single Workflow acquisition "
+                f"(Workflow.txt + .raw) found in {self._date_dir}",
+            )
             return
 
         # 2. Parse metadata for each folder

@@ -11,11 +11,14 @@ display:
   default_camera_zoom: 0.4
 
   # Default 3D camera orientation (napari camera.angles) for the initial view
-  # and every "Reset View". PER-MICROSCOPE: a scope with a different physical
-  # layout (e.g. the ASLM/TSPIM scope — detection objective on the right, stage
-  # X along the viewing axis) wants a different default viewpoint. Historical
-  # value is [0, 0, 180]; override per scope in that scope's config overlay.
-  default_camera_angles: [0, 0, 180]
+  # and every "Reset View". ABSENT (the default) => use napari's own reset_view
+  # orientation (user perspective, sample mount on top) — correct for the
+  # standard scope. PER-MICROSCOPE: a scope with a different physical layout
+  # (e.g. the ASLM/TSPIM scope — detection objective on the right, stage X along
+  # the viewing axis) can pin a fixed viewpoint by setting this key in its config
+  # overlay (three floats, e.g. [0, 0, 180]). Do NOT set it for the standard
+  # scope: forcing [0, 0, 180] rolls the chamber upside down.
+  # default_camera_angles: [0, 0, 180]   # example — only for scopes that need it
 
   # Rendering settings
   fps_target: 30

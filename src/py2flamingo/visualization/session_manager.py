@@ -148,6 +148,196 @@ def _load_ome_tiff(tiff_path: Path) -> np.ndarray:
     return volume
 
 
+def downsample_to_voxel_grid(volume: np.ndarray, zoom_factors) -> np.ndarray:
+    """Resample a 3D volume to a target voxel grid without upcasting the whole
+    input to float.
+
+    ``scipy.ndimage.zoom(volume.astype(float32), factors)`` allocates a float32
+    copy of the *entire input* before it downsamples — for a large stitched
+    volume that intermediate is hundreds of GB (e.g. a 953x12383x8569 uint16
+    volume is 194 GB, and its float32 copy is 377 GB) even though the display
+    output is tiny. Here we first decimate cheaply with a strided uint16 view
+    (a view, not a copy) so only the small coarse array is ever upcast, then do
+    a fine ``zoom`` to hit the exact target shape.
+
+    Args:
+        volume: 3D array (Z, Y, X), any integer/float dtype.
+        zoom_factors: per-axis output/input size ratio (``< 1`` downsamples).
+
+    Returns:
+        float32 array of shape ``round(volume.shape * zoom_factors)``.
+    """
+    import scipy.ndimage as ndi
+
+    zoom_factors = np.asarray(zoom_factors, dtype=float)
+    src_shape = np.asarray(volume.shape, dtype=float)
+    target = np.maximum(1, np.round(src_shape * zoom_factors).astype(int))
+
+    # Integer decimation stride per axis (only where we downsample). floor(1/f)
+    # keeps the coarse array no smaller than the target so the residual zoom
+    # only interpolates, never has to invent detail.
+    safe = np.clip(zoom_factors, 1e-12, None)
+    strides = np.maximum(1, np.floor(1.0 / safe).astype(int))
+    coarse = volume[:: strides[0], :: strides[1], :: strides[2]]
+
+    coarse_shape = np.asarray(coarse.shape, dtype=float)
+    # Exact residual factor coarse -> target so the output shape matches what a
+    # full-resolution zoom would have produced.
+    residual = target / coarse_shape
+    out = ndi.zoom(coarse.astype(np.float32), residual, order=1, mode="constant")
+    return out
+
+
+def _ims_attr_str(attrs, name: str) -> Optional[str]:
+    """Decode an Imaris HDF5 attribute (stored as an array of single-char bytes)
+    into a Python string. Returns None if absent."""
+    if name not in attrs:
+        return None
+    v = attrs[name]
+    try:
+        if isinstance(v, bytes):
+            return v.decode("ascii", "ignore").strip()
+        if isinstance(v, np.ndarray):
+            # Imaris writes attrs as arrays of S1 (one char each).
+            return (
+                b"".join(c if isinstance(c, bytes) else bytes(c) for c in v.ravel())
+                .decode("ascii", "ignore")
+                .strip()
+            )
+        return str(v).strip()
+    except Exception:
+        return None
+
+
+def _ims_true_size_zyx(channel_group, data_shape) -> Tuple[int, int, int]:
+    """Unpadded (Z, Y, X) size of an Imaris channel. Imaris pads the ``Data``
+    dataset to chunk multiples; the real size is in ``ImageSizeX/Y/Z`` attrs.
+    Falls back to the (possibly padded) dataset shape."""
+    sz = []
+    for axis, dim in (("Z", 0), ("Y", 1), ("X", 2)):
+        s = _ims_attr_str(channel_group.attrs, f"ImageSize{axis}")
+        try:
+            val = int(s) if s is not None else int(data_shape[dim])
+        except (TypeError, ValueError):
+            val = int(data_shape[dim])
+        # Never exceed the stored array.
+        sz.append(min(val, int(data_shape[dim])))
+    return sz[0], sz[1], sz[2]
+
+
+def _load_imaris_channels(
+    store_path: Path, metadata: dict, native_voxel: dict
+) -> List[dict]:
+    """Load an Imaris ``.ims`` (HDF5) stitched volume for napari display.
+
+    Reads a *coarse* pyramid level (Imaris stores a multi-resolution pyramid),
+    so we never pull the 100+ GB full-resolution array into RAM just to shrink
+    it to the 50 µm display grid. The chosen level's larger voxel size is folded
+    into ``voxel_size_um`` so downstream placement stays correct; the stitch
+    corner (``origin_um``) is unchanged.
+
+    Returns per-channel dicts matching the OME-Zarr/TIFF loader's format.
+    """
+    try:
+        import h5py
+    except ImportError:
+        raise ImportError(
+            "h5py is required to load Imaris .ims files. "
+            "Install with: pip install h5py"
+        )
+
+    channel_ids = metadata.get("channel_ids", [])
+    origin_um = np.array(metadata.get("origin_um", [0, 0, 0]), dtype=float)  # z,y,x
+    native_v = np.array(
+        [native_voxel["z"], native_voxel["y"], native_voxel["x"]], dtype=float
+    )
+
+    with h5py.File(str(store_path), "r") as f:
+        if "DataSet" not in f:
+            raise ValueError(
+                f"{store_path.name} is not a readable Imaris file "
+                "(no 'DataSet' group)."
+            )
+        dset = f["DataSet"]
+
+        levels = sorted(
+            (k for k in dset.keys() if k.startswith("ResolutionLevel")),
+            key=lambda s: int(s.split()[-1]),
+        )
+        if not levels:
+            raise ValueError(f"{store_path.name}: no ResolutionLevel groups found.")
+
+        def _timepoint(level_key):
+            g = dset[level_key]
+            # Imaris always writes 'TimePoint 0'; be tolerant of any first TP.
+            tps = [k for k in g.keys() if k.startswith("TimePoint")]
+            return g[sorted(tps, key=lambda s: int(s.split()[-1]))[0]]
+
+        def _channels(level_key):
+            tp = _timepoint(level_key)
+            return sorted(
+                (k for k in tp.keys() if k.startswith("Channel")),
+                key=lambda s: int(s.split()[-1]),
+            )
+
+        # Full-resolution (level 0) true size, to compute the coarse level's
+        # downsample factor and hence its effective voxel size.
+        l0_tp = _timepoint(levels[0])
+        l0_chans = _channels(levels[0])
+        if not l0_chans:
+            raise ValueError(f"{store_path.name}: no Channel groups found.")
+        full_size = np.array(
+            _ims_true_size_zyx(l0_tp[l0_chans[0]], l0_tp[l0_chans[0]]["Data"].shape),
+            dtype=float,
+        )
+
+        # Pick the coarsest level whose largest axis is still >= a display-ish
+        # size, so the read is small but not below the target resolution.
+        MIN_MAX_DIM = 1024
+        chosen = levels[0]
+        for lk in levels:
+            tp = _timepoint(lk)
+            cks = _channels(lk)
+            if not cks:
+                continue
+            sz = _ims_true_size_zyx(tp[cks[0]], tp[cks[0]]["Data"].shape)
+            chosen = lk
+            if max(sz) <= MIN_MAX_DIM:
+                break
+
+        tp = _timepoint(chosen)
+        chan_keys = _channels(chosen)
+        chosen_size = np.array(
+            _ims_true_size_zyx(tp[chan_keys[0]], tp[chan_keys[0]]["Data"].shape),
+            dtype=float,
+        )
+        # Effective voxel size grows by the pyramid downsample factor.
+        factor = full_size / np.maximum(chosen_size, 1)
+        eff_voxel = native_v * factor
+        logger.info(
+            f"  Imaris .ims: {len(chan_keys)} channel(s), level '{chosen}' "
+            f"size(ZYX)={chosen_size.astype(int).tolist()} "
+            f"(full={full_size.astype(int).tolist()}), "
+            f"effective voxel µm={eff_voxel.tolist()}"
+        )
+
+        channels: List[dict] = []
+        for i, ck in enumerate(chan_keys):
+            g = tp[ck]
+            z, y, x = _ims_true_size_zyx(g, g["Data"].shape)
+            data = np.asarray(g["Data"][:z, :y, :x]).astype(np.uint16)
+            ch_id = channel_ids[i] if i < len(channel_ids) else i
+            channels.append(
+                {
+                    "ch_id": ch_id,
+                    "volume": data,
+                    "origin_um": origin_um.copy(),
+                    "voxel_size_um": eff_voxel.copy(),
+                }
+            )
+    return channels
+
+
 @dataclass
 class SessionMetadata:
     """Metadata for a saved session."""
@@ -829,8 +1019,10 @@ def find_stitched_stores(output_dir: Path) -> List[Path]:
     Useful for presenting a choice dialog when multiple stitch runs exist.
     """
     output_dir = Path(output_dir)
-    candidates = list(output_dir.glob("*.ome.zarr")) + list(
-        output_dir.glob("*.ome.tif")
+    candidates = (
+        list(output_dir.glob("*.ome.zarr"))
+        + list(output_dir.glob("*.ome.tif"))
+        + list(output_dir.glob("*.ims"))
     )
     return sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)
 
@@ -943,6 +1135,11 @@ def _load_multichannel_store(
     # Dispatch on file type, with fallback to TIFF if zarr fails
     suffix = store_path.suffix.lower()
     volume = None
+
+    # Imaris .ims is HDF5, not zarr — read it directly (coarse pyramid level)
+    # and return per-channel dicts with the level's effective voxel size.
+    if suffix == ".ims":
+        return _load_imaris_channels(store_path, metadata, native_voxel)
 
     if suffix in (".tif", ".tiff"):
         volume = _load_ome_tiff(store_path)
