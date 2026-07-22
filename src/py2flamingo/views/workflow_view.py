@@ -15,7 +15,6 @@ from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import (
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -47,7 +46,6 @@ from py2flamingo.services.tiff_size_validator import (
     validate_workflow_params,
 )
 from py2flamingo.services.window_geometry_manager import (
-    PersistentDialog,
     _default_geometry_manager,
 )
 from py2flamingo.utils.workflow_parser import (
@@ -355,6 +353,34 @@ class WorkflowView(QWidget):
         self._check_btn.clicked.connect(self._on_check_clicked)
         btn_layout.addWidget(self._check_btn)
 
+        # Diagnostic: compare the client's tile count vs the server's
+        # (CheckStackTile) count for the current corners/overlap, so divergent
+        # inputs can be hunted down before the transmitted-field fix lands.
+        self._check_tiling_btn = QPushButton("Check Tiling")
+        self._check_tiling_btn.setMinimumHeight(40)
+        self._check_tiling_btn.setToolTip(
+            "Show the expected tile count computed two ways — the app's math and "
+            "the server's (CheckStackTile) math — for the current Position A/B, "
+            "overlap and FOV. Use it to find inputs where they differ."
+        )
+        self._check_tiling_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #8e44ad;
+                color: white;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 8px 16px;
+            }
+            QPushButton:hover {
+                background-color: #7d3c98;
+            }
+            QPushButton:disabled {
+                background-color: #95a5a6;
+            }
+        """)
+        self._check_tiling_btn.clicked.connect(self._on_check_tiling_clicked)
+        btn_layout.addWidget(self._check_tiling_btn)
+
         self._start_btn = QPushButton("Start Workflow")
         self._start_btn.setMinimumHeight(40)
         self._start_btn.setStyleSheet("""
@@ -418,6 +444,16 @@ class WorkflowView(QWidget):
         self._message_label = QLabel("")
         self._message_label.setWordWrap(True)
         layout.addWidget(self._message_label)
+
+        # Persistent Check-Stack output. The Check button estimates the run
+        # (tile count, images, data size, time, z-range) plus any validation
+        # warnings/errors; show them here in-tab (read-only, scrollable) instead
+        # of a modal popup that disappears. Hidden until the first Check.
+        self._estimate_display = QTextEdit()
+        self._estimate_display.setReadOnly(True)
+        self._estimate_display.setVisible(False)
+        self._estimate_display.setMaximumHeight(160)
+        layout.addWidget(self._estimate_display)
 
         return frame
 
@@ -935,6 +971,19 @@ class WorkflowView(QWidget):
         self._show_message("Workflow finished.")
         self.workflow_stopped.emit()
 
+    def on_workflow_failed(self, message: str) -> None:
+        """A direct run failed to start or lost connection — clear + inform.
+
+        Auto-detected via SYSTEM_STATE polling (the callback-only path can't see
+        a tile run that never armed its progress callback). Clears the running
+        state and surfaces the reason instead of sitting in "running" forever.
+        """
+        self._set_running_state(False)
+        self._status_label.setText("Workflow failed")
+        self._status_label.setStyleSheet(f"color: {ERROR_COLOR}; font-weight: bold;")
+        self._show_message(message or "Workflow failed.", is_error=True)
+        self.workflow_stopped.emit()
+
     def _show_message(self, message: str, is_error: bool = False) -> None:
         """Display message with appropriate styling."""
         self._message_label.setText(message)
@@ -1077,6 +1126,33 @@ class WorkflowView(QWidget):
         """Handle check stack button click."""
         self.check_workflow_requested.emit()
         self._logger.info("Check workflow requested")
+
+    def _on_check_tiling_clicked(self) -> None:
+        """Show the client-vs-server tile count for the current corners/overlap.
+
+        Diagnostic for the settings-field / count-math mismatch: it does not send
+        anything to the scope, just computes both tile counts locally so divergent
+        inputs can be found and then checked against the real server.
+        """
+        try:
+            x_min, x_max, y_min, y_max = self._position_panel.get_xy_range()
+        except Exception:  # noqa: BLE001
+            x_min = x_max = y_min = y_max = 0.0
+        overlap = self._tiling_panel.get_overlap_percent()
+        fov_mm = self._tiling_panel.get_tile_fov_mm()
+        self._estimate_display.setHtml(
+            format_tiling_comparison_html(x_min, x_max, y_min, y_max, fov_mm, overlap)
+        )
+        self._estimate_display.setVisible(True)
+        self._logger.info(
+            "Check tiling: X[%.3f..%.3f] Y[%.3f..%.3f] overlap=%.1f%% FOV=%.4f mm",
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            overlap,
+            fov_mm,
+        )
 
     # Public API for controller integration
 
@@ -1488,147 +1564,202 @@ class WorkflowView(QWidget):
         return self._current_type.value
 
     def show_validation_result(self, result: Dict[str, Any]) -> None:
-        """
-        Display validation result in a dialog.
+        """Render the Check-Stack estimate + validation into the in-tab panel.
+
+        Replaces the old modal popup: the result (estimates, errors, warnings,
+        hardware validation) is shown as persistent, read-only text at the
+        bottom of the Workflow tab so it stays visible while configuring the run.
 
         Args:
-            result: Dictionary with validation results containing:
-                - valid: bool
-                - errors: List[str]
-                - warnings: List[str]
-                - estimates: Dict with time, data_size, images, z_range
+            result: check_workflow() dict with valid/errors/warnings/estimates/
+                hardware_validation.
         """
-        dialog = ValidationResultDialog(result, self)
-        dialog.exec_()
+        self._estimate_display.setHtml(format_validation_result_html(result))
+        self._estimate_display.setVisible(True)
 
 
-class ValidationResultDialog(PersistentDialog):
-    """Dialog for displaying workflow validation results."""
+def _format_duration(seconds: float) -> str:
+    """Format a duration in seconds to a human-readable string."""
+    if seconds < 60:
+        return f"{seconds:.0f} sec"
+    elif seconds < 3600:
+        mins = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{mins} min {secs} sec"
+    else:
+        hours = int(seconds // 3600)
+        mins = int((seconds % 3600) // 60)
+        return f"{hours} hr {mins} min"
 
-    def __init__(self, result: Dict[str, Any], parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Workflow Validation")
-        self.setMinimumWidth(450)
-        self.setMinimumHeight(300)
 
-        layout = QVBoxLayout(self)
+def format_tiling_comparison_html(
+    x_min: float,
+    x_max: float,
+    y_min: float,
+    y_max: float,
+    fov_mm: float,
+    overlap_percent: float,
+) -> str:
+    """HTML comparing the client vs server (CheckStackTile) tile counts.
 
-        # Status header
-        is_valid = result.get("valid", False)
-        errors = result.get("errors", [])
-        warnings = result.get("warnings", [])
+    Both use the same corners/FOV/overlap so the numbers isolate the *algorithm*
+    difference: the app uses ``floor(range/step)+1``; the server uses
+    ``ceil((range+FOV)/step)`` with the corners as tile centers. When they
+    disagree, this is where to check what the microscope actually produces.
+    """
+    from py2flamingo.utils.tile_geometry import (
+        client_tile_count_1d,
+        compute_tile_geometry,
+    )
 
-        status_text = "Valid" if is_valid else "Invalid"
-        if warnings:
-            status_text += (
-                f" ({len(warnings)} warning{'s' if len(warnings) > 1 else ''})"
-            )
+    x_range = abs(x_max - x_min)
+    y_range = abs(y_max - y_min)
 
-        status_label = QLabel(f"Status: {'✓' if is_valid else '✗'} {status_text}")
-        status_label.setStyleSheet(
-            f"font-size: 14px; font-weight: bold; color: {'#27ae60' if is_valid else '#e74c3c'}; padding: 10px;"
+    client_x = client_tile_count_1d(x_range, fov_mm, overlap_percent)
+    client_y = client_tile_count_1d(y_range, fov_mm, overlap_percent)
+
+    geom = compute_tile_geometry(
+        start_x=x_min,
+        end_x=x_max,
+        start_y=y_min,
+        end_y=y_max,
+        start_z=0.0,
+        end_z=0.0,
+        fov_x_mm=fov_mm,
+        fov_y_mm=fov_mm,
+        x_overlap_percent=overlap_percent,
+        y_overlap_percent=overlap_percent,
+    )
+    server_x, server_y = geom.tiles_x, geom.tiles_y
+
+    differs = (client_x != server_x) or (client_y != server_y)
+
+    def _row(label, gx, gy, color):
+        return (
+            f"<tr><td style='padding:2px 10px 2px 0;color:{color};'><b>{label}</b>"
+            f"</td><td style='padding:2px 10px;'>{gx} × {gy}</td>"
+            f"<td style='padding:2px 10px;'>{gx * gy}</td></tr>"
         )
-        layout.addWidget(status_label)
 
-        # Estimates section
-        estimates = result.get("estimates", {})
-        if estimates:
-            est_group = QGroupBox("Estimates")
-            est_layout = QVBoxLayout(est_group)
+    parts = [
+        "<div style='font-size:9pt;'>",
+        (
+            f"<b>Check Tiling</b> &nbsp; "
+            f"X range {x_range:.3f} mm, Y range {y_range:.3f} mm, "
+            f"FOV {fov_mm:.4f} mm, overlap {overlap_percent:.1f}%"
+        ),
+        "<table style='margin-top:4px;'>",
+        "<tr><td></td><td style='padding:0 10px;'><b>tiles (X×Y)</b></td>"
+        "<td style='padding:0 10px;'><b>total</b></td></tr>",
+        _row("App (client)", client_x, client_y, "#3498db"),
+        _row("Server (CheckStackTile)", server_x, server_y, "#8e44ad"),
+        "</table>",
+    ]
+    if differs:
+        parts.append(
+            "<div style='color:#f39c12;margin-top:4px;'>⚠ Counts differ — "
+            "run this on the microscope and note which matches.</div>"
+        )
+    else:
+        parts.append(
+            "<div style='color:#27ae60;margin-top:4px;'>✓ Both methods agree.</div>"
+        )
+    parts.append("</div>")
+    return "".join(parts)
 
-            est_text = []
-            if "acquisition_time" in estimates:
-                time_str = self._format_duration(estimates["acquisition_time"])
-                sample_count = estimates.get("sample_count", 0)
-                if sample_count > 0:
-                    est_text.append(
-                        f"• Acquisition Time: ~{time_str} (based on {sample_count} similar acquisitions)"
-                    )
-                else:
-                    est_text.append(f"• Acquisition Time: ~{time_str} (theoretical)")
 
-            if "data_size_gb" in estimates:
-                est_text.append(f"• Data Size: ~{estimates['data_size_gb']:.1f} GB")
+def format_validation_result_html(result: Dict[str, Any]) -> str:
+    """Format a ``check_workflow()`` result dict as HTML for the in-tab display.
 
-            if "total_images" in estimates:
-                est_text.append(f"• Total Images: {estimates['total_images']:,}")
+    Mirrors the content of the former ValidationResultDialog (estimates,
+    errors, warnings, hardware validation) as a compact rich-text block.
+    """
+    import html as _html
 
-            breakdown = []
-            if estimates.get("num_tiles", 1) > 1:
-                breakdown.append(f"{estimates['num_tiles']} tiles")
-            if estimates.get("num_channels", 1) > 1:
-                breakdown.append(f"{estimates['num_channels']} channels")
-            if estimates.get("num_timepoints", 1) > 1:
-                breakdown.append(f"{estimates['num_timepoints']} timepoints")
-            if breakdown:
-                est_text.append("• Acquisition: " + " × ".join(breakdown))
+    is_valid = result.get("valid", False)
+    errors = result.get("errors", [])
+    warnings = result.get("warnings", [])
+    estimates = result.get("estimates", {})
+    hw_result = result.get("hardware_validation")
 
-            if "z_range_um" in estimates:
-                z_um = estimates["z_range_um"]
-                planes = estimates.get("num_planes", 0)
-                step = estimates.get("z_step_um", 0)
-                if planes and step:
-                    est_text.append(
-                        f"• Z Range: {z_um:.1f} µm ({planes} planes × {step:.1f} µm)"
-                    )
-                else:
-                    est_text.append(f"• Z Range: {z_um:.1f} µm")
+    parts = []
 
-            est_label = QLabel("\n".join(est_text))
-            est_label.setStyleSheet("padding: 5px;")
-            est_layout.addWidget(est_label)
-            layout.addWidget(est_group)
+    status_text = "Valid" if is_valid else "Invalid"
+    if warnings:
+        status_text += f" ({len(warnings)} warning{'s' if len(warnings) > 1 else ''})"
+    status_color = "#27ae60" if is_valid else "#e74c3c"
+    status_mark = "✓" if is_valid else "✗"
+    parts.append(
+        f"<b style='color:{status_color};'>{status_mark} "
+        f"{_html.escape(status_text)}</b>"
+    )
 
-        # Errors section
-        if errors:
-            err_group = QGroupBox("Errors")
-            err_layout = QVBoxLayout(err_group)
-            err_label = QLabel("\n".join(f"✗ {e}" for e in errors))
-            err_label.setStyleSheet("color: #e74c3c; padding: 5px;")
-            err_label.setWordWrap(True)
-            err_layout.addWidget(err_label)
-            layout.addWidget(err_group)
-
-        # Warnings section
-        if warnings:
-            warn_group = QGroupBox("Warnings")
-            warn_layout = QVBoxLayout(warn_group)
-            warn_label = QLabel("\n".join(f"⚠ {w}" for w in warnings))
-            warn_label.setStyleSheet("color: #f39c12; padding: 5px;")
-            warn_label.setWordWrap(True)
-            warn_layout.addWidget(warn_label)
-            layout.addWidget(warn_group)
-
-        # Hardware validation
-        hw_result = result.get("hardware_validation")
-        if hw_result:
-            hw_group = QGroupBox("Hardware Validation")
-            hw_layout = QVBoxLayout(hw_group)
-            hw_valid = hw_result.get("valid", True)
-            hw_message = hw_result.get("message", "No response")
-            hw_label = QLabel(f"{'✓' if hw_valid else '✗'} {hw_message}")
-            hw_label.setStyleSheet(
-                f"color: {'#27ae60' if hw_valid else '#e74c3c'}; padding: 5px;"
+    if estimates:
+        lines = []
+        if "acquisition_time" in estimates:
+            time_str = _format_duration(estimates["acquisition_time"])
+            sample_count = estimates.get("sample_count", 0)
+            if sample_count > 0:
+                lines.append(
+                    f"Acquisition Time: ~{time_str} "
+                    f"(based on {sample_count} similar acquisitions)"
+                )
+            else:
+                lines.append(f"Acquisition Time: ~{time_str} (theoretical)")
+        if "data_size_gb" in estimates:
+            lines.append(f"Data Size: ~{estimates['data_size_gb']:.1f} GB")
+        if "total_images" in estimates:
+            lines.append(f"Total Images: {estimates['total_images']:,}")
+        breakdown = []
+        if estimates.get("num_tiles", 1) > 1:
+            breakdown.append(f"{estimates['num_tiles']} tiles")
+        if estimates.get("num_channels", 1) > 1:
+            breakdown.append(f"{estimates['num_channels']} channels")
+        if estimates.get("num_timepoints", 1) > 1:
+            breakdown.append(f"{estimates['num_timepoints']} timepoints")
+        if breakdown:
+            lines.append("Acquisition: " + " × ".join(breakdown))
+        if "z_range_um" in estimates:
+            z_um = estimates["z_range_um"]
+            planes = estimates.get("num_planes", 0)
+            step = estimates.get("z_step_um", 0)
+            if planes and step:
+                lines.append(
+                    f"Z Range: {z_um:.1f} µm ({planes} planes × {step:.1f} µm)"
+                )
+            else:
+                lines.append(f"Z Range: {z_um:.1f} µm")
+        if lines:
+            parts.append(
+                "<b>Estimates</b><br>"
+                + "<br>".join("• " + _html.escape(s) for s in lines)
             )
-            hw_layout.addWidget(hw_label)
-            layout.addWidget(hw_group)
 
-        layout.addStretch()
+    if errors:
+        parts.append(
+            "<b style='color:#e74c3c;'>Errors</b><br>"
+            + "<br>".join(
+                f"<span style='color:#e74c3c;'>✗ {_html.escape(e)}</span>"
+                for e in errors
+            )
+        )
+    if warnings:
+        parts.append(
+            "<b style='color:#f39c12;'>Warnings</b><br>"
+            + "<br>".join(
+                f"<span style='color:#f39c12;'>⚠ {_html.escape(w)}</span>"
+                for w in warnings
+            )
+        )
+    if hw_result:
+        hw_valid = hw_result.get("valid", True)
+        hw_message = hw_result.get("message", "No response")
+        hw_color = "#27ae60" if hw_valid else "#e74c3c"
+        hw_mark = "✓" if hw_valid else "✗"
+        parts.append(
+            "<b>Hardware Validation</b><br>"
+            f"<span style='color:{hw_color};'>{hw_mark} "
+            f"{_html.escape(hw_message)}</span>"
+        )
 
-        # OK button
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok)
-        buttons.accepted.connect(self.accept)
-        layout.addWidget(buttons)
-
-    def _format_duration(self, seconds: float) -> str:
-        """Format duration in seconds to human readable string."""
-        if seconds < 60:
-            return f"{seconds:.0f} sec"
-        elif seconds < 3600:
-            mins = int(seconds // 60)
-            secs = int(seconds % 60)
-            return f"{mins} min {secs} sec"
-        else:
-            hours = int(seconds // 3600)
-            mins = int((seconds % 3600) // 60)
-            return f"{hours} hr {mins} min"
+    return "<div style='font-size:9pt;'>" + "<br><br>".join(parts) + "</div>"

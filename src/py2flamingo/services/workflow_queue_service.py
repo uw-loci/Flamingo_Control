@@ -96,6 +96,10 @@ class WorkflowQueueService(QObject):
     # after a Workflow-tab Start. Lets the UI auto-clear the running state
     # instead of waiting for the operator to press Stop.
     workflow_finished = pyqtSignal()
+    # A direct run failed to start or lost connection (message). Lets the UI
+    # clear the running state and tell the operator, instead of sitting in
+    # "running" forever with no feedback.
+    workflow_failed = pyqtSignal(str)
 
     # Fallback poll interval if callbacks not received (seconds)
     # Increased to reduce server load during workflow execution
@@ -152,6 +156,12 @@ class WorkflowQueueService(QObject):
         # persistent SYSTEM_STATE_IDLE handler knows to treat the next idle as
         # "this run finished" (and ignores idle when nothing is running).
         self._direct_run_active = False
+        # SYSTEM_STATE poll monitor for a direct run (confirms start + detects
+        # completion when the tile-suppressed progress callbacks never arrive).
+        self._direct_run_thread: Optional[threading.Thread] = None
+        # Serializes completion between the poll monitor and the IDLE broadcast
+        # so a direct run is only ever finished once.
+        self._direct_run_lock = threading.Lock()
 
         # Connection health tracking for poll-based reconnection
         self._consecutive_poll_failures = 0
@@ -547,13 +557,109 @@ class WorkflowQueueService(QObject):
         self._progress_monitoring = False
 
     def mark_direct_run_started(self) -> None:
-        """A workflow was started directly from the Workflow tab (not the queue)."""
+        """A workflow was started directly from the Workflow tab (not the queue).
+
+        Also starts a SYSTEM_STATE poll monitor. Tile workflows set
+        STAGE_NOT_UPDATE_CLIENT, which suppresses the progress/gauge callbacks
+        the callback-only completion path (_on_idle_persistent) needs to arm
+        itself — so without polling a direct tile run never registers as finished
+        and the UI sits in "running" forever. The monitor confirms the run
+        started and detects its completion via the same system-state mechanism
+        the queue uses (no arbitrary run-duration timeout).
+        """
         self._direct_run_active = True
-        self._workflow_running = False  # re-confirm via progress/stack-complete
+        self._workflow_running = False  # re-confirm via poll/progress/stack-complete
+
+        if self._direct_run_thread is not None and self._direct_run_thread.is_alive():
+            return
+        self._direct_run_thread = threading.Thread(
+            target=self._direct_run_monitor,
+            name="direct-run-monitor",
+            daemon=True,
+        )
+        self._direct_run_thread.start()
 
     def mark_direct_run_stopped(self) -> None:
         """A direct run was stopped/cleared (manual Stop or completion handled)."""
         self._direct_run_active = False
+
+    def _finish_direct_run(self, success: bool, message: str = "") -> None:
+        """Finish a direct run exactly once (poll monitor vs. IDLE broadcast).
+
+        The lock + ``_direct_run_active`` guard makes whichever completion path
+        fires first the winner; the other becomes a no-op.
+        """
+        with self._direct_run_lock:
+            if not self._direct_run_active:
+                return  # already finished (or was never active)
+            self._direct_run_active = False
+            self._workflow_running = False
+
+        if success:
+            logger.info("[direct-run] SYSTEM_STATE idle — workflow finished")
+            self.workflow_finished.emit()
+        else:
+            logger.error("[direct-run] workflow failed: %s", message)
+            self.workflow_failed.emit(message)
+
+    def _direct_run_monitor(self) -> None:
+        """Poll SYSTEM_STATE to confirm a direct run started, then completed.
+
+        1. Confirm the run started (system became busy) within the standard
+           "system not responding" window (MAX_WORKFLOW_START_TIMEOUT) — this is
+           a start/responsiveness check, NOT a cap on how long the run may take.
+        2. Then wait for the system to return to idle => finished.
+
+        Whichever of this poll or the SYSTEM_STATE_IDLE broadcast
+        (``_on_idle_persistent``) reaches ``_finish_direct_run`` first wins.
+        """
+        time.sleep(self.POST_WORKFLOW_SEND_DELAY)
+        start_time = time.time()
+
+        # Phase 1: confirm the workflow actually started.
+        while self._direct_run_active and not self._workflow_running:
+            if time.time() - start_time > self.MAX_WORKFLOW_START_TIMEOUT:
+                self._finish_direct_run(
+                    success=False,
+                    message=(
+                        "Workflow never started — the microscope did not become "
+                        f"busy within {self.MAX_WORKFLOW_START_TIMEOUT:.0f}s. It "
+                        "may have rejected the workflow (for example a tile "
+                        "outside the stage limits)."
+                    ),
+                )
+                return
+            try:
+                busy = not self._is_system_idle()
+            except ConnectionError as e:
+                self._finish_direct_run(
+                    success=False,
+                    message=f"Connection lost before the workflow started: {e}",
+                )
+                return
+            if busy:
+                self._workflow_running = True
+                break
+            time.sleep(self.WORKFLOW_START_POLL_INTERVAL)
+
+        if not self._direct_run_active:
+            return  # stopped, or completed via the IDLE broadcast already
+
+        # Phase 2: wait for return-to-idle => completion.
+        while self._direct_run_active:
+            time.sleep(self.STATE_POLL_INTERVAL)
+            if not self._direct_run_active:
+                return
+            try:
+                idle = self._is_system_idle()
+            except ConnectionError as e:
+                self._finish_direct_run(
+                    success=False, message=f"Connection lost during workflow: {e}"
+                )
+                return
+            if idle:
+                self._finish_direct_run(success=True)
+                return
 
     def _on_idle_persistent(self, message) -> None:
         """Detect completion of a DIRECT (non-queue) Workflow-tab run.
@@ -561,8 +667,9 @@ class WorkflowQueueService(QObject):
         The scope emits SYSTEM_STATE_IDLE when it returns to idle after a run.
         A queue run handles its own completion (``_on_system_idle``), so we skip
         when the queue is active. We only treat idle as "finished" once the run
-        was confirmed executing (a progress or stack-complete callback arrived),
-        which avoids a stale pre-start idle ending it prematurely.
+        was confirmed executing (a progress/stack-complete callback OR the poll
+        monitor set ``_workflow_running``), which avoids a stale pre-start idle
+        ending it prematurely.
         """
         if self._is_running:
             return  # queue run — _on_system_idle handles completion
@@ -570,10 +677,8 @@ class WorkflowQueueService(QObject):
             return  # nothing running we care about
         if not self._workflow_running:
             return  # not yet confirmed running; ignore this idle
-        self._direct_run_active = False
-        self._workflow_running = False
-        logger.info("[direct-run] SYSTEM_STATE_IDLE — workflow finished")
-        self.workflow_finished.emit()
+        logger.info("[direct-run] SYSTEM_STATE_IDLE broadcast — workflow finished")
+        self._finish_direct_run(success=True)
 
     def _register_callbacks(self) -> None:
         """Register callback handlers with connection service."""

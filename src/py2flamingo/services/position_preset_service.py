@@ -13,6 +13,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from PyQt5.QtCore import QObject, pyqtSignal
+
 from py2flamingo.models.microscope import Position
 
 
@@ -46,12 +48,20 @@ class PositionPreset:
         )
 
 
-class PositionPresetService:
+class PositionPresetService(QObject):
     """
     Service for managing position presets.
 
     Presets are stored in a JSON file in the microscope_settings directory.
+
+    Emits ``presets_changed`` whenever the set of presets is mutated (save,
+    delete, clear) so any view listing presets — e.g. the Stage tab and the
+    Workflow tab's Position A/B dropdowns — can refresh live instead of only at
+    startup.
     """
+
+    #: Emitted after the preset set changes (save/delete/clear).
+    presets_changed = pyqtSignal()
 
     def __init__(self, presets_file: Optional[str] = None):
         """
@@ -60,6 +70,7 @@ class PositionPresetService:
         Args:
             presets_file: Path to presets JSON file. If None, uses default location.
         """
+        super().__init__()
         self.logger = logging.getLogger(__name__)
 
         if presets_file is None:
@@ -131,6 +142,7 @@ class PositionPresetService:
         self.logger.info(
             f"Saved preset '{name}': X={position.x:.3f}, Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.2f}"
         )
+        self.presets_changed.emit()
 
     def get_preset(self, name: str) -> Optional[PositionPreset]:
         """
@@ -158,6 +170,7 @@ class PositionPresetService:
             del self._presets[name]
             self._save_presets()
             self.logger.info(f"Deleted preset '{name}'")
+            self.presets_changed.emit()
             return True
         return False
 
@@ -196,3 +209,4 @@ class PositionPresetService:
         self._presets.clear()
         self._save_presets()
         self.logger.warning("Cleared all position presets")
+        self.presets_changed.emit()

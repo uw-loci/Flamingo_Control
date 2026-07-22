@@ -26,6 +26,7 @@ import tifffile
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -235,6 +236,16 @@ class MIPOverviewDialog(PersistentDialog):
         self._one_to_one_btn.clicked.connect(self._on_one_to_one)
         self._one_to_one_btn.setEnabled(False)
         button_layout.addWidget(self._one_to_one_btn)
+
+        # Hide ALL overlays (grid + selection highlights + coordinate labels)
+        # so the raw MIP image can be inspected with nothing drawn on top.
+        self._hide_overlays_cb = QCheckBox("Hide Overlays")
+        self._hide_overlays_cb.setToolTip(
+            "Hide the tile grid, selection highlights, and coordinate labels\n"
+            "to see the underlying MIP image."
+        )
+        self._hide_overlays_cb.toggled.connect(self._on_hide_overlays_toggled)
+        button_layout.addWidget(self._hide_overlays_cb)
 
         button_layout.addStretch()
 
@@ -1041,6 +1052,12 @@ class MIPOverviewDialog(PersistentDialog):
         """Reset to 1:1 zoom."""
         self._left_panel._reset_zoom()
         self._right_panel._reset_zoom()
+
+    def _on_hide_overlays_toggled(self, hidden: bool):
+        """Show/hide ALL overlays (grid, selections, labels) on both panels."""
+        visible = not hidden
+        self._left_panel.set_overlays_visible(visible)
+        self._right_panel.set_overlays_visible(visible)
 
     def _on_save_session(self):
         """Save current session to folder (Zarr if available, TIFF fallback)."""

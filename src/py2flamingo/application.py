@@ -320,6 +320,8 @@ class FlamingoApplication(QObject):
                 qs.workflow_progress.connect(self._on_acquisition_progress)
                 # Auto-clear the running state when a direct run returns to idle.
                 qs.workflow_finished.connect(self._on_workflow_finished)
+                # A direct run that failed to start / lost connection.
+                qs.workflow_failed.connect(self._on_workflow_run_failed)
             if self.workflow_view is not None:
                 self.workflow_view.workflow_started.connect(
                     self._on_workflow_run_started
@@ -377,6 +379,17 @@ class FlamingoApplication(QObject):
                 self.sample_view.update_workflow_progress("Complete", 100, None)
         except Exception:  # noqa: BLE001
             self.logger.debug("workflow-finished UI update failed", exc_info=True)
+
+    def _on_workflow_run_failed(self, message: str) -> None:
+        """A direct run failed to start or lost connection — clear + inform."""
+        self.logger.error("Direct workflow run failed: %s", message)
+        try:
+            if self.workflow_view is not None:
+                self.workflow_view.on_workflow_failed(message)
+            if self.sample_view is not None:
+                self.sample_view.update_workflow_progress("Failed", 0, None)
+        except Exception:  # noqa: BLE001
+            self.logger.debug("workflow-failed UI update failed", exc_info=True)
 
     def _wire_notification_hooks(self) -> None:
         """Subscribe NotificationService to global signals + logging.

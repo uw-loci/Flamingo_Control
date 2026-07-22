@@ -59,6 +59,7 @@ class ZoomableImageLabel(QLabel):
         self._rect_selecting = False  # Shift+drag rectangle selection mode
         self._rect_start = QPoint()  # Start position for rectangle selection
         self._rubber_band: Optional[QRubberBand] = None
+        self._show_labels = True  # Draw per-tile coordinate labels when zoomed
 
         # Deferred smooth scaling timer (fires after interaction stops)
         self._smooth_timer = QTimer()
@@ -156,9 +157,17 @@ class ZoomableImageLabel(QLabel):
         self._interactive = False
         self._update_display()
 
+    def set_labels_visible(self, visible: bool):
+        """Show or hide the per-tile coordinate labels drawn when zoomed in."""
+        self._show_labels = visible
+        self.update()
+
     def paintEvent(self, event: QPaintEvent):
         """Paint the label, then overlay coordinate labels when zoomed in."""
         super().paintEvent(event)
+
+        if not self._show_labels:
+            return
 
         if (
             not self._tile_coords

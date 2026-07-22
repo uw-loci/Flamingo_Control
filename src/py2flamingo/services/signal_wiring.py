@@ -119,6 +119,18 @@ def wire_workflow_signals(
         workflow_view.set_preset_service(position_controller.preset_service)
         logger.debug("Connected workflow view to position preset service")
 
+        # Live refresh: when a preset is added/deleted anywhere (e.g. the Stage
+        # tab), rebuild the Workflow tab's Position A/B dropdowns instead of
+        # only populating them once at startup.
+        preset_service = position_controller.preset_service
+        if hasattr(preset_service, "presets_changed") and hasattr(
+            workflow_view, "refresh_position_presets"
+        ):
+            preset_service.presets_changed.connect(
+                workflow_view.refresh_position_presets
+            )
+            logger.debug("Connected preset presets_changed to workflow view refresh")
+
     # Workflow view connection state enable/disable
     if hasattr(connection_view, "connection_established") and hasattr(
         workflow_view, "update_for_connection_state"

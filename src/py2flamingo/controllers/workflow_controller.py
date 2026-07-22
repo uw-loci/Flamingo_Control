@@ -625,6 +625,16 @@ class WorkflowController(QObject):
         if errors:
             result["valid"] = False
 
+        # 1b. Server-parity tile-grid warnings (settings-field mismatch +
+        # tiles outside the stage hard limits). Best-effort — never break Check.
+        try:
+            tile_geom = self._server_tile_geometry(workflow_dict)
+            result["warnings"].extend(
+                self._tile_geometry_warnings(workflow_dict, tile_geom)
+            )
+        except Exception as e:  # noqa: BLE001
+            self._logger.debug("Tile-geometry warning pass failed: %s", e)
+
         # 2. Calculate estimates
         result["estimates"] = self._calculate_estimates(workflow_dict)
 
@@ -726,6 +736,99 @@ class WorkflowController(QObject):
 
         return errors, warnings
 
+    def _server_tile_geometry(self, workflow_dict: Dict[str, Any]):
+        """Compute the server's true tile grid (CheckStackTile.cpp parity).
+
+        Returns a ``TileGeometry`` or ``None`` when this isn't a tile workflow
+        or the FOV/positions are unavailable.
+
+        DIAGNOSE-FIRST NOTE: the app currently transmits tile *counts* in
+        ``Stack option settings 1/2``, but the server reads those fields as X/Y
+        overlap percent. To predict what the hardware will ACTUALLY do we pass
+        the transmitted values straight through as overlap — so this matches the
+        rig today, before the transmitted-field fix (item 4B follow-up) lands.
+        """
+        stack = workflow_dict.get("Stack Settings", {}) or {}
+        if str(stack.get("Stack option", "")).strip().lower() != "tile":
+            return None
+
+        start = workflow_dict.get("Start Position", {}) or {}
+        end = workflow_dict.get("End Position", start) or start
+
+        def _pf(d, key, default=0.0):
+            try:
+                return float(str(d.get(key, default)).replace(",", ""))
+            except (TypeError, ValueError):
+                return float(default)
+
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+            from py2flamingo.utils.tile_geometry import compute_tile_geometry
+
+            hw = get_hardware_config()
+            fov_x = float(hw.fov_mm)
+            fov_y = float(getattr(hw, "fov_height_mm", hw.fov_mm) or hw.fov_mm)
+            lim = getattr(hw, "stage_limits", {}) or {}
+        except Exception as e:  # config best-effort; never break the estimate
+            self._logger.debug("Tile geometry unavailable: %s", e)
+            return None
+
+        if fov_x <= 0 or fov_y <= 0:
+            return None
+
+        # Transmitted settings 1/2 are read by the server as overlap percent.
+        x_overlap = _pf(stack, "Stack option settings 1", 0.0)
+        y_overlap = _pf(stack, "Stack option settings 2", 0.0)
+
+        return compute_tile_geometry(
+            start_x=_pf(start, "X (mm)"),
+            end_x=_pf(end, "X (mm)"),
+            start_y=_pf(start, "Y (mm)"),
+            end_y=_pf(end, "Y (mm)"),
+            start_z=_pf(start, "Z (mm)"),
+            end_z=_pf(end, "Z (mm)"),
+            fov_x_mm=fov_x,
+            fov_y_mm=fov_y,
+            x_overlap_percent=x_overlap,
+            y_overlap_percent=y_overlap,
+            hard_limit_min_x=lim.get("x_min_mm"),
+            hard_limit_max_x=lim.get("x_max_mm"),
+            hard_limit_min_y=lim.get("y_min_mm"),
+            hard_limit_max_y=lim.get("y_max_mm"),
+        )
+
+    def _tile_geometry_warnings(self, workflow_dict: Dict[str, Any], geom) -> List[str]:
+        """Human-readable warnings from the server-parity tile grid.
+
+        Surfaces (a) the settings-field mismatch — the app sends tile counts in
+        the fields the server treats as overlap — and (b) any tile that lands
+        outside the stage hard limits (which the server would reject).
+        """
+        warnings: List[str] = []
+        if geom is None:
+            return warnings
+
+        stack = workflow_dict.get("Stack Settings", {}) or {}
+        sent_x = str(stack.get("Stack option settings 1", "")).strip()
+        sent_y = str(stack.get("Stack option settings 2", "")).strip()
+        warnings.append(
+            f"Tile fields: the app sends '{sent_x}'/'{sent_y}' in the fields the "
+            f"server reads as X/Y overlap %, so it will image "
+            f"{geom.tiles_x}×{geom.tiles_y} = {geom.total_tiles} tiles at "
+            f"{geom.x_overlap_percent:.0f}%/{geom.y_overlap_percent:.0f}% overlap "
+            f"(FOV {geom.fov_x_mm:.3f}×{geom.fov_y_mm:.3f} mm). "
+            f"Overlap/count semantics fix pending."
+        )
+        shown = geom.violations[:8]
+        for v in shown:
+            warnings.append("Tile outside stage range — " + v.describe())
+        if len(geom.violations) > len(shown):
+            warnings.append(
+                f"... and {len(geom.violations) - len(shown)} more tile(s) "
+                f"outside stage hard limits."
+            )
+        return warnings
+
     def _calculate_estimates(self, workflow_dict: Dict[str, Any]) -> Dict[str, Any]:
         """
         Calculate acquisition estimates from workflow dictionary.
@@ -769,9 +872,18 @@ class WorkflowController(QObject):
         # previous estimate ignored them entirely, undercounting data by N).
         stack_option = str(stack.get("Stack option", "")).strip().lower()
         if stack_option == "tile":
-            num_stacks = max(1, _i(stack, "Stack option settings 1", 1)) * max(
-                1, _i(stack, "Stack option settings 2", 1)
-            )
+            # Use the server's own tile-count math (CheckStackTile parity) rather
+            # than multiplying the two settings fields — those fields are read by
+            # the server as overlap %, not counts, so their product is not the
+            # number of tiles. Fall back to the product if geometry is
+            # unavailable (e.g. no hardware config).
+            geom = self._server_tile_geometry(workflow_dict)
+            if geom is not None:
+                num_stacks = geom.total_tiles
+            else:
+                num_stacks = max(1, _i(stack, "Stack option settings 1", 1)) * max(
+                    1, _i(stack, "Stack option settings 2", 1)
+                )
         elif "Number of angles" in exp:
             num_stacks = max(1, _i(exp, "Number of angles", 1))
         else:

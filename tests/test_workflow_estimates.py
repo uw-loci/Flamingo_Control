@@ -46,6 +46,11 @@ class TestEstimates(unittest.TestCase):
                 "Stack option settings 1": "5",
                 "Stack option settings 2": "5",
             },
+            # A -> B span so the tile count comes from real geometry (the server
+            # derives the grid from the corners + FOV, not the settings product).
+            # A small (1 mm) span keeps the count modest across FOV values.
+            "Start Position": {"X (mm)": "5.0", "Y (mm)": "10.0", "Z (mm)": "12.0"},
+            "End Position": {"X (mm)": "6.0", "Y (mm)": "11.0", "Z (mm)": "13.19"},
             "Camera Settings": {
                 "AOI width": "1024",
                 "AOI height": "1024",
@@ -60,17 +65,21 @@ class TestEstimates(unittest.TestCase):
         }
 
     def test_tile_count_and_channels_multiply_images(self):
+        # Tile count now comes from the server's grid geometry (CheckStackTile
+        # parity) over the A->B span, NOT the raw settings-field product — those
+        # fields are overlap %, not counts. A multi-mm span yields many tiles;
+        # images must scale by that count.
         e = _make_controller()._calculate_estimates(self._tile_wf())
-        # 476 planes * 2 channels * 25 tiles
-        self.assertEqual(e["num_tiles"], 25)
         self.assertEqual(e["num_channels"], 2)
-        self.assertEqual(e["total_images"], 476 * 2 * 25)
+        self.assertGreater(e["num_tiles"], 1)
+        self.assertEqual(e["total_images"], 476 * 2 * e["num_tiles"])
 
     def test_data_size_realistic(self):
+        # Data size scales with the (multi-tile) image count, not a single stack.
         e = _make_controller()._calculate_estimates(self._tile_wf())
-        # 1024*1024*2 bytes * 23800 images ~= 46.5 GB (was ~1.6 GB before).
-        self.assertGreater(e["data_size_gb"], 40)
-        self.assertLess(e["data_size_gb"], 55)
+        expected_gb = 1024 * 1024 * 2 * e["total_images"] / (1024**3)
+        self.assertAlmostEqual(e["data_size_gb"], expected_gb, places=3)
+        self.assertGreater(e["data_size_gb"], 1.5)
 
     def test_z_range_is_the_stored_range_not_planes_times_range(self):
         e = _make_controller()._calculate_estimates(self._tile_wf())

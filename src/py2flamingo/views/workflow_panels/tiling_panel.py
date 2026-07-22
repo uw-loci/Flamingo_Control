@@ -9,7 +9,6 @@ from typing import Any, Dict, Optional
 
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (
-    QComboBox,
     QDoubleSpinBox,
     QFrame,
     QGridLayout,
@@ -120,45 +119,40 @@ class TilingPanel(QWidget):
         self._overlap.valueChanged.connect(self._on_settings_changed)
         grid.addWidget(self._overlap, 1, 3)
 
-        # Scan pattern
-        grid.addWidget(QLabel("Scan Pattern:"), 2, 0)
-        self._pattern = QComboBox()
-        self._pattern.addItems(["Raster", "Snake", "Spiral"])
-        self._pattern.currentIndexChanged.connect(self._on_settings_changed)
-        grid.addWidget(self._pattern, 2, 1)
-
-        # Separator
+        # Separator. (Tile order/scan pattern is not exposed here: the server
+        # expands the A->B rectangle into the grid and drives the traversal, so
+        # a client-side pattern selector had no effect and was removed.)
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
         separator.setFrameShadow(QFrame.Sunken)
-        grid.addWidget(separator, 3, 0, 1, 4)
+        grid.addWidget(separator, 2, 0, 1, 4)
 
         # Calculated scan area
-        grid.addWidget(QLabel("Scan Area X:"), 4, 0)
+        grid.addWidget(QLabel("Scan Area X:"), 3, 0)
         self._area_x_label = QLabel("5.53 mm")
         self._area_x_label.setStyleSheet("font-weight: bold;")
-        grid.addWidget(self._area_x_label, 4, 1)
+        grid.addWidget(self._area_x_label, 3, 1)
 
-        grid.addWidget(QLabel("Scan Area Y:"), 4, 2)
+        grid.addWidget(QLabel("Scan Area Y:"), 3, 2)
         self._area_y_label = QLabel("5.53 mm")
         self._area_y_label.setStyleSheet("font-weight: bold;")
-        grid.addWidget(self._area_y_label, 4, 3)
+        grid.addWidget(self._area_y_label, 3, 3)
 
         # End position (relative)
-        grid.addWidget(QLabel("End Offset X:"), 5, 0)
+        grid.addWidget(QLabel("End Offset X:"), 4, 0)
         self._end_x_label = QLabel("+5.53 mm")
-        grid.addWidget(self._end_x_label, 5, 1)
+        grid.addWidget(self._end_x_label, 4, 1)
 
-        grid.addWidget(QLabel("End Offset Y:"), 5, 2)
+        grid.addWidget(QLabel("End Offset Y:"), 4, 2)
         self._end_y_label = QLabel("+5.53 mm")
-        grid.addWidget(self._end_y_label, 5, 3)
+        grid.addWidget(self._end_y_label, 4, 3)
 
         # Info text (also reports the live per-tile camera FOV / AOI so the
         # field of view is visible when sizing an acquisition).
         self._info_label = QLabel()
         self._info_label.setWordWrap(True)
         self._info_label.setStyleSheet("color: gray; font-size: 9pt;")
-        grid.addWidget(self._info_label, 6, 0, 1, 4)
+        grid.addWidget(self._info_label, 5, 0, 1, 4)
 
         group.setLayout(grid)
         layout.addWidget(group)
@@ -285,6 +279,14 @@ class TilingPanel(QWidget):
             tile_size_um if tile_size_um and tile_size_um > 0 else None
         )
         self._update_calculations()
+
+    def get_overlap_percent(self) -> float:
+        """Current overlap percentage (0-50)."""
+        return self._overlap.value()
+
+    def get_tile_fov_mm(self) -> float:
+        """Live per-tile camera FOV in mm (calibration-aware, or pinned override)."""
+        return self._current_tile_size_um() / 1000.0
 
     def get_tiles_x(self) -> int:
         """Get number of tiles in X."""

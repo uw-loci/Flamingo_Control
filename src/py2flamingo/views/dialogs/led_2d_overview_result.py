@@ -13,6 +13,7 @@ from PyQt5.QtCore import QPoint, QSize, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QAction,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -72,6 +73,7 @@ class ImagePanel(QWidget):
             None  # Cached base (image + grid + coords, no selections)
         )
         self._show_grid = True
+        self._show_selection = True  # Draw the cyan selected-tile rectangles
         self._tiles_x = 0
         self._tiles_y = 0
         self._tile_coords: List[tuple] = (
@@ -525,6 +527,28 @@ class ImagePanel(QWidget):
             self._draw_selection_overlay()
             self.image_label.setPixmap(self._pixmap)
 
+    def set_overlays_visible(self, visible: bool):
+        """Show or hide ALL overlays on this panel at once.
+
+        Covers the three things drawn on top of the overview image: the tile
+        grid lines, the cyan selected-tile rectangles, and the per-tile
+        coordinate labels (shown when zoomed in). Unlike :meth:`set_show_grid`
+        (grid lines only), this lets the raw image be viewed with nothing on
+        top. Selection state is preserved — hiding just stops it being drawn.
+        """
+        self._show_grid = visible
+        self._show_selection = visible
+        self.image_label.set_labels_visible(visible)
+
+        # Grid lives on the cached base pixmap; rebuild it, then reapply the
+        # (possibly hidden) selection overlay — mirrors set_show_grid.
+        self._invalidate_base_pixmap()
+        if self._image is not None:
+            self._rebuild_base_pixmap()
+            self._pixmap = self._base_pixmap.copy()
+            self._draw_selection_overlay()
+            self.image_label.setPixmap(self._pixmap)
+
     def _array_to_pixmap(self, image: np.ndarray) -> QPixmap:
         """Convert numpy array to QPixmap with contrast adjustment."""
         if len(image.shape) == 2:
@@ -622,6 +646,8 @@ class ImagePanel(QWidget):
 
     def _draw_selection_overlay(self):
         """Draw selection highlights on the current pixmap (fast, called on every click)."""
+        if not self._show_selection:
+            return  # Overlays hidden — leave the base image bare
         if self._pixmap is None or self._tiles_x <= 0 or self._tiles_y <= 0:
             logger.debug(
                 f"_draw_selection_overlay: skipping - pixmap={self._pixmap is not None}, "
@@ -879,6 +905,16 @@ class LED2DOverviewResultWindow(PersistentWidget):
         self.grid_btn.setChecked(True)
         self.grid_btn.clicked.connect(self._toggle_grid)
         button_layout.addWidget(self.grid_btn)
+
+        # Hide ALL overlays (grid + selection highlights + coordinate labels)
+        # so the raw overview image can be inspected with nothing drawn on top.
+        self.hide_overlays_cb = QCheckBox("Hide Overlays")
+        self.hide_overlays_cb.setToolTip(
+            "Hide the tile grid, selection highlights, and coordinate labels\n"
+            "to see the underlying overview image."
+        )
+        self.hide_overlays_cb.toggled.connect(self._on_hide_overlays_toggled)
+        button_layout.addWidget(self.hide_overlays_cb)
 
         # Save button with dropdown menu
         self.save_btn = QPushButton("Save ▼")
@@ -1179,6 +1215,16 @@ class LED2DOverviewResultWindow(PersistentWidget):
         show_grid = self.grid_btn.isChecked()
         self.left_panel.set_show_grid(show_grid)
         self.right_panel.set_show_grid(show_grid)
+
+    def _on_hide_overlays_toggled(self, hidden: bool):
+        """Show/hide ALL overlays (grid, selections, labels) on both panels."""
+        visible = not hidden
+        self.left_panel.set_overlays_visible(visible)
+        self.right_panel.set_overlays_visible(visible)
+        # Grid button is meaningless while everything is hidden.
+        self.grid_btn.setEnabled(visible)
+        if visible:
+            self.grid_btn.setChecked(True)
 
     def _on_select_all(self):
         """Select all tiles in both panels."""
