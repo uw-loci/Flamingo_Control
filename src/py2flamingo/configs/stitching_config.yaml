@@ -23,7 +23,7 @@
 # and has been validated on real stitching data. If your stitched data
 # appears the wrong size, check which magnification applies to your raw
 # data files. This value is user-editable in the stitching dialog.
-pixel_size_um: 0.406
+pixel_size_um: 1.0276
 
 # ============================================================
 # Registration

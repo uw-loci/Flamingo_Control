@@ -33,7 +33,7 @@ optics:
   #
   # n7 currently: scope reports 5.0x with tube=200 -> effective pixel
   # = 6.5 / 5.0 = 1.30 um (validated against real stitching data).
-  objective_magnification: 5.0
+  objective_magnification: 6.3254
 
   # Tube lens design focal length in mm. Keep equal to reference_tube_lens_mm
   # (200) unless a project genuinely changes the tube lens AND the scope reports

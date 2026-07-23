@@ -28,6 +28,22 @@
     }
   },
   "version": "1.0",
-  "last_updated": "2025-11-14",
-  "note": "Created for n7 microscope. Stage limits copied from zion settings as starting point - adjust as needed for your specific hardware."
+  "last_updated": "2026-05-28",
+  "note": "Created for n7 microscope. Stage limits copied from zion settings as starting point - adjust as needed for your specific hardware.",
+  "display": {
+    "downsample_factor": 3,
+    "storage_voxel_size_um": 5
+  },
+  "notifications": {
+    "enabled": true,
+    "ntfy_url": "https://ntfy.sh/loci-microscopes-ctlsm1",
+    "events": {
+      "workflow_queue_completed": true,
+      "stitching_item_completed": false,
+      "stitching_batch_completed": true,
+      "tile_collection_completed": true,
+      "benchmark_completed": false,
+      "errors": true
+    }
+  }
 }
