@@ -97,6 +97,11 @@ class StageService(MicroscopeCommandService):
                 0,  # params[5] (int32Data2)
                 0,  # params[6] will be set to TRIGGER_CALL_BACK by _query_command
             ],
+            # A position poll timing out while the server is busy running a
+            # workflow/overview is expected and harmless — the caller already
+            # treats a None return as benign. Keep it at WARNING so it does not
+            # escalate to a high-priority push notification every interval.
+            benign_timeout=True,
         )
 
         if not result["success"]:

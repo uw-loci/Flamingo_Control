@@ -1155,7 +1155,7 @@ class LED2DOverviewDialog(PersistentDialog):
         if points_incomplete:
             self.points_group.setStyleSheet(
                 f"QGroupBox {{ border: 2px solid {WARNING_COLOR}; border-radius: 4px; "
-                "padding-top: 10px; margin-top: 6px; }}"
+                "padding-top: 10px; margin-top: 6px; }"
                 f"QGroupBox::title {{ color: {WARNING_COLOR}; }}"
             )
         else:
@@ -1170,7 +1170,7 @@ class LED2DOverviewDialog(PersistentDialog):
         if imaging_incomplete:
             self.imaging_group.setStyleSheet(
                 f"QGroupBox {{ border: 2px solid {WARNING_COLOR}; border-radius: 4px; "
-                "padding-top: 10px; margin-top: 6px; }}"
+                "padding-top: 10px; margin-top: 6px; }"
                 f"QGroupBox::title {{ color: {WARNING_COLOR}; }}"
             )
         else:
@@ -1188,7 +1188,7 @@ class LED2DOverviewDialog(PersistentDialog):
             self.start_btn.setEnabled(False)
             self.start_btn.setStyleSheet(
                 f"QPushButton {{ background-color: {WARNING_COLOR}; color: black; "
-                "font-weight: bold; padding: 8px 16px; }}"
+                "font-weight: bold; padding: 8px 16px; }"
             )
             self.start_btn.setToolTip(f"Scan is in progress... {percent}% complete")
             self.cancel_btn.setVisible(True)

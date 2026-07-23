@@ -135,6 +135,7 @@ class MicroscopeCommandService:
         command_name: str,
         params: Optional[List[int]] = None,
         value: float = 0.0,
+        benign_timeout: bool = False,
     ) -> Dict[str, Any]:
         """
         Send a query command and return parsed response.
@@ -147,6 +148,10 @@ class MicroscopeCommandService:
             command_name: Human-readable command name for logging
             params: Optional list of parameters (params[6] will be set to TRIGGER_CALL_BACK)
             value: Optional double value
+            benign_timeout: If True, a timeout is expected/harmless (e.g. a
+                position poll while the server is busy with a workflow) and is
+                logged at WARNING rather than ERROR so it does not escalate to a
+                push notification.
 
         Returns:
             Dict with 'success', 'parsed', 'raw_response', etc.
@@ -178,7 +183,11 @@ class MicroscopeCommandService:
                 and self.connection.has_async_reader
             ):
                 return self._send_via_async_reader(
-                    cmd_bytes, command_code, command_name, timeout=3.0
+                    cmd_bytes,
+                    command_code,
+                    command_name,
+                    timeout=3.0,
+                    benign_timeout=benign_timeout,
                 )
 
             # Fall back to synchronous mode
@@ -205,7 +214,13 @@ class MicroscopeCommandService:
         try:
             return _do_query()
         except (socket.timeout, TimeoutError) as e:
-            self.logger.error(f"Timeout waiting for {command_name} response")
+            if benign_timeout:
+                self.logger.warning(
+                    f"Timeout waiting for {command_name} response (expected "
+                    f"while server busy)"
+                )
+            else:
+                self.logger.error(f"Timeout waiting for {command_name} response")
             return {"success": False, "error": "timeout"}
         except (OSError, BrokenPipeError, ConnectionResetError) as e:
             # Stale socket — reconnect + retry once
@@ -710,6 +725,7 @@ class MicroscopeCommandService:
         command_name: str,
         timeout: float = 3.0,
         wait_for_response: bool = True,
+        benign_timeout: bool = False,
     ) -> Dict[str, Any]:
         """
         Send command via async reader and convert response.
@@ -723,6 +739,9 @@ class MicroscopeCommandService:
             command_name: Human-readable name for logging
             timeout: Response timeout in seconds
             wait_for_response: If False, send without waiting (fire-and-forget)
+            benign_timeout: If True, log a timeout at WARNING rather than ERROR
+                (an expected miss, e.g. polling position during a workflow) so
+                it does not escalate to a push notification.
 
         Returns:
             Dict with 'success', 'parsed', 'raw_response' matching
@@ -747,9 +766,15 @@ class MicroscopeCommandService:
             )
 
             if response is None:
-                self.logger.error(
-                    f"Timeout waiting for {command_name} response (async)"
-                )
+                if benign_timeout:
+                    self.logger.warning(
+                        f"Timeout waiting for {command_name} response (async; "
+                        f"expected while server busy)"
+                    )
+                else:
+                    self.logger.error(
+                        f"Timeout waiting for {command_name} response (async)"
+                    )
                 return {"success": False, "error": "timeout"}
 
             self.logger.debug(f"Received {command_name} response (async)")
