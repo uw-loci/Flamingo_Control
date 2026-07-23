@@ -72,16 +72,21 @@ python test_3d_visualization.py  # or any other script
 **IMPORTANT**: This project is tested on a **remote computer** that is physically connected to the microscope hardware, NOT on the local development machine.
 
 **Workflow Requirements:**
-1. **Always commit changes** after making modifications
-2. **Always push to GitHub** immediately after committing
-3. **User tests on remote PC** - changes cannot be tested locally
-4. **Wait for test results** before proceeding with additional changes
+1. **Always work directly on `main` — NEVER create a branch.** Even though this
+   is a public repo, no one else can run the code (they don't have the
+   instruments), so there is no reason to isolate work on a branch. Branches
+   only add a merge step and make the rig `git pull` awkward.
+2. **Always commit changes** after making modifications
+3. **Always push to `main`** immediately after committing (`git push origin main`)
+4. **User tests on remote PC** - changes cannot be tested locally
+5. **Wait for test results** before proceeding with additional changes
 
 **Why This Matters:**
 - The microscope hardware is only accessible from the remote PC
 - Local testing is not possible for hardware-dependent features
 - Changes must be pushed to GitHub for the user to pull and test
 - Do not make multiple sets of changes without getting test feedback
+- The rig pulls `main` — anything left on a branch cannot be tested there
 
 **Best Practice:**
 ```
