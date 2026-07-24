@@ -412,10 +412,26 @@ class FlamingoApplication(QObject):
             # after they clicked/typed); background failures and errors during an
             # unattended acquisition still push. See _error_notify_gate.
             root = logging.getLogger()
-            handler = svc.make_log_handler(gate=self._error_notify_gate)
-            handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
-            root.addHandler(handler)
-            self._notification_log_handler = handler
+            # Idempotent install: drop any NtfyLogHandler a previous app
+            # construction left on the ROOT logger. Without this, repeated
+            # constructions (notably a test suite building the app many times)
+            # accumulate handlers, so a single logger.error() fires every one of
+            # them → N duplicate phone pushes for one error.
+            for _h in list(root.handlers):
+                if _h.__class__.__name__ == "NtfyLogHandler":
+                    root.removeHandler(_h)
+            self._notification_log_handler = None
+
+            # Never attach the push handler under pytest: the suite deliberately
+            # logs errors (mock objects, "Test error", missing-event lookups)
+            # that must not reach a real ntfy topic if the dev/rig machine has one
+            # configured. Everything else in this method (queue-signal wiring)
+            # still runs.
+            if "pytest" not in sys.modules:
+                handler = svc.make_log_handler(gate=self._error_notify_gate)
+                handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+                root.addHandler(handler)
+                self._notification_log_handler = handler
 
             if self.workflow_queue_service is None:
                 return
