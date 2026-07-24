@@ -798,26 +798,26 @@ class WorkflowController(QObject):
         )
 
     def _tile_geometry_warnings(self, workflow_dict: Dict[str, Any], geom) -> List[str]:
-        """Human-readable warnings from the server-parity tile grid.
+        """Human-readable notes from the server-parity tile grid.
 
-        Surfaces (a) the settings-field mismatch — the app sends tile counts in
-        the fields the server treats as overlap — and (b) any tile that lands
-        outside the stage hard limits (which the server would reject).
+        Surfaces (a) how many tiles the server will derive from the requested
+        overlap (the app now sends overlap %, not tile counts, in settings 1/2),
+        and (b) any tile that lands outside the stage hard limits (which the
+        server would reject).
         """
         warnings: List[str] = []
         if geom is None:
             return warnings
 
         stack = workflow_dict.get("Stack Settings", {}) or {}
-        sent_x = str(stack.get("Stack option settings 1", "")).strip()
-        sent_y = str(stack.get("Stack option settings 2", "")).strip()
+        ox = str(stack.get("Stack option settings 1", "")).strip()
+        oy = str(stack.get("Stack option settings 2", "")).strip()
         warnings.append(
-            f"Tile fields: the app sends '{sent_x}'/'{sent_y}' in the fields the "
-            f"server reads as X/Y overlap %, so it will image "
-            f"{geom.tiles_x}×{geom.tiles_y} = {geom.total_tiles} tiles at "
-            f"{geom.x_overlap_percent:.0f}%/{geom.y_overlap_percent:.0f}% overlap "
-            f"(FOV {geom.fov_x_mm:.3f}×{geom.fov_y_mm:.3f} mm). "
-            f"Overlap/count semantics fix pending."
+            f"Tiling: the workflow requests {ox}%/{oy}% X/Y overlap; the server "
+            f"derives the grid from the region + FOV, giving "
+            f"{geom.tiles_x}×{geom.tiles_y} = {geom.total_tiles} tiles "
+            f"(FOV {geom.fov_x_mm:.3f}×{geom.fov_y_mm:.3f} mm). The client "
+            f"count may differ by ±1 tile per axis due to floor-vs-ceil rounding."
         )
         shown = geom.violations[:8]
         for v in shown:

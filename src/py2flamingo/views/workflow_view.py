@@ -6,11 +6,12 @@ microscope workflows including snapshots, z-stacks, time-lapse,
 tiling, and multi-angle acquisitions.
 """
 
+import html
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import (
     QComboBox,
@@ -120,10 +121,28 @@ class WorkflowView(QWidget):
         # Position callback will be set by application
         self._get_position_callback = None
 
+        # Start-button gating state: the button is enabled only when connected,
+        # not already running, and the workflow passes validation. Failure
+        # points are shown so the user knows where the issue is.
+        self._connected = False
+        self._running = False
+
+        # Debounce timer for persisting the whole workflow-tab state so values
+        # survive a restart (see _persist_workflow_state / _restore_workflow_state).
+        self._persist_timer = QTimer(self)
+        self._persist_timer.setSingleShot(True)
+        self._persist_timer.setInterval(600)
+        self._persist_timer.timeout.connect(self._persist_workflow_state)
+
         self._setup_ui()
 
         # Restore persisted workflow type (default: Tile Scan = index 3)
         self._restore_workflow_type()
+        # Restore the last-session values for every panel (save format, tiling,
+        # positions, …) so the tab isn't reset to defaults on each launch.
+        self._restore_workflow_state()
+        # Set the initial Start-button enabled state + any blockers text.
+        self._update_start_enabled()
 
         self._logger.info(
             "WorkflowView initialized with comprehensive workflow builder"
@@ -256,28 +275,19 @@ class WorkflowView(QWidget):
         camera_settings = self._camera_panel.get_settings()
         self._zstack_panel.set_frame_rate(camera_settings["frame_rate"])
 
-        # Wire panels to size estimate updates
-        self._illumination_panel.settings_changed.connect(
-            lambda _: self._update_size_estimate()
-        )
-        self._camera_panel.settings_changed.connect(
-            lambda _: self._update_size_estimate()
-        )
-        self._zstack_panel.settings_changed.connect(
-            lambda _: self._update_size_estimate()
-        )
-        self._tiling_panel.settings_changed.connect(
-            lambda _: self._update_size_estimate()
-        )
-        self._timelapse_panel.settings_changed.connect(
-            lambda _: self._update_size_estimate()
-        )
-        self._multiangle_panel.settings_changed.connect(
-            lambda _: self._update_size_estimate()
-        )
-        self._save_panel.settings_changed.connect(
-            lambda _: self._update_size_estimate()
-        )
+        # Wire every panel's changes to one handler that refreshes the size
+        # estimate, re-gates the Start button (task: disable when the workflow
+        # can't start), and persists the tab state for the next session.
+        for _panel in (
+            self._illumination_panel,
+            self._camera_panel,
+            self._zstack_panel,
+            self._tiling_panel,
+            self._timelapse_panel,
+            self._multiangle_panel,
+            self._save_panel,
+        ):
+            _panel.settings_changed.connect(lambda _=None: self._on_settings_changed())
 
         # Apply initial visibility matrix (Snapshot mode by default)
         self._apply_visibility_matrix(WorkflowType.SNAPSHOT)
@@ -445,6 +455,17 @@ class WorkflowView(QWidget):
         self._message_label.setWordWrap(True)
         layout.addWidget(self._message_label)
 
+        # Start-blocker list. When the Start button is disabled because the
+        # workflow can't start, this shows each failure point so the user knows
+        # exactly where the issue is. Hidden when the workflow is startable.
+        self._start_blockers_label = QLabel("")
+        self._start_blockers_label.setWordWrap(True)
+        self._start_blockers_label.setVisible(False)
+        self._start_blockers_label.setStyleSheet(
+            f"color: {ERROR_COLOR}; padding: 2px 5px;"
+        )
+        layout.addWidget(self._start_blockers_label)
+
         # Persistent Check-Stack output. The Check button estimates the run
         # (tile count, images, data size, time, z-range) plus any validation
         # warnings/errors; show them here in-tab (read-only, scrollable) instead
@@ -500,8 +521,8 @@ class WorkflowView(QWidget):
         # Persist selection
         self._save_workflow_type(index)
 
-        # Update size estimate for new workflow type
-        self._update_size_estimate()
+        # Refresh estimate, re-gate Start, and persist the tab for next session.
+        self._on_settings_changed()
 
     def _save_workflow_type(self, index: int) -> None:
         """Persist workflow type selection."""
@@ -615,6 +636,8 @@ class WorkflowView(QWidget):
             self._update_tiling_from_positions()
         elif self._current_type == WorkflowType.MULTI_ANGLE:
             self._update_zstack_from_positions()
+        # Positions feed validation (Z range, tile edges) and should persist.
+        self._on_settings_changed()
 
     def _update_zstack_from_positions(self) -> None:
         """Update Z-stack panel from dual position Z values."""
@@ -808,12 +831,16 @@ class WorkflowView(QWidget):
 
         return workflow
 
-    def _validate_workflow(self, workflow: Workflow) -> list:
+    def _validate_workflow(self, workflow: Workflow, sanitize: bool = True) -> list:
         """
         Validate workflow configuration.
 
         Args:
             workflow: Workflow to validate
+            sanitize: When True (the click path), auto-fix the save directory in
+                place if it contains path separators. The live Start-button gate
+                passes False so it only reports the problem without rewriting the
+                field while the user is still typing.
 
         Returns:
             List of error messages (empty if valid)
@@ -870,17 +897,24 @@ class WorkflowView(QWidget):
                 if "/" in save_dir or "\\" in save_dir:
                     # Sanitize by replacing path separators with underscores
                     sanitized = save_dir.replace("/", "_").replace("\\", "_")
-                    self._logger.warning(
-                        f"Save directory contains path separators, sanitizing: "
-                        f"'{save_dir}' -> '{sanitized}'"
-                    )
-                    # Update the save panel with sanitized value
-                    self._save_panel.set_save_directory(sanitized)
-                    errors.append(
-                        f"Save directory '{save_dir}' contains path separators.\n"
-                        f"Changed to '{sanitized}' for server compatibility.\n"
-                        "Please review and try again."
-                    )
+                    if sanitize:
+                        self._logger.warning(
+                            f"Save directory contains path separators, sanitizing: "
+                            f"'{save_dir}' -> '{sanitized}'"
+                        )
+                        # Update the save panel with sanitized value
+                        self._save_panel.set_save_directory(sanitized)
+                        errors.append(
+                            f"Save directory '{save_dir}' contains path separators.\n"
+                            f"Changed to '{sanitized}' for server compatibility.\n"
+                            "Please review and try again."
+                        )
+                    else:
+                        errors.append(
+                            "Save directory contains path separators "
+                            "('/' or '\\\\') — the server only creates a single "
+                            "folder. Remove them or they'll be replaced with '_'."
+                        )
 
         return errors
 
@@ -936,8 +970,103 @@ class WorkflowView(QWidget):
 
         return None
 
+    def _on_settings_changed(self) -> None:
+        """Central hook for any workflow-setting change.
+
+        Refreshes the size estimate, re-evaluates whether the workflow can start
+        (gating the Start button), and schedules a debounced save of the whole
+        tab so the values survive a restart.
+        """
+        self._update_size_estimate()
+        self._update_start_enabled()
+        self._schedule_persist()
+
+    def _update_start_enabled(self) -> None:
+        """Enable Start only when the workflow can actually start; else explain.
+
+        The button is disabled — with the reason(s) shown below it and in its
+        tooltip — when not connected, already running, or the workflow fails
+        validation. This is the proactive version of the click-time check.
+        """
+        if self._running:
+            # Running state fully controls the buttons; leave it be.
+            return
+        if not self._connected:
+            self._start_btn.setEnabled(False)
+            self._start_btn.setToolTip(
+                "Connect to the microscope before starting a workflow."
+            )
+            self._clear_start_blockers()
+            return
+        try:
+            workflow = self._build_workflow()
+            errors = self._validate_workflow(workflow, sanitize=False)
+        except Exception as e:  # noqa: BLE001 - a build error is itself a blocker
+            errors = [f"Workflow can't be built: {e}"]
+        if errors:
+            self._start_btn.setEnabled(False)
+            self._start_btn.setToolTip("Cannot start — fix:\n• " + "\n• ".join(errors))
+            self._show_start_blockers(errors)
+        else:
+            self._start_btn.setEnabled(True)
+            self._start_btn.setToolTip("Start the workflow on the microscope.")
+            self._clear_start_blockers()
+
+    def _show_start_blockers(self, errors: list) -> None:
+        """List each reason the workflow can't start, below the Start button."""
+        header = "Can't start — resolve:"
+        items = "".join(f"<li>{html.escape(str(e))}</li>" for e in errors)
+        self._start_blockers_label.setText(f"{header}<ul>{items}</ul>")
+        self._start_blockers_label.setVisible(True)
+
+    def _clear_start_blockers(self) -> None:
+        self._start_blockers_label.clear()
+        self._start_blockers_label.setVisible(False)
+
+    # ---- workflow-tab state persistence (survives restart) ----------------
+    def _schedule_persist(self) -> None:
+        """Debounce a save of the whole tab so rapid edits don't thrash disk."""
+        if hasattr(self, "_persist_timer"):
+            self._persist_timer.start()
+
+    def _persist_workflow_state(self) -> None:
+        """Save every panel's values (type + full workflow dict) for next launch.
+
+        Stored via the shared dialog-state facility (same one the workflow-type
+        selection already uses), so the save format, tiling, positions, camera,
+        illumination, etc. all come back instead of resetting to defaults.
+        """
+        gm = _default_geometry_manager
+        if gm is None:
+            return
+        try:
+            state = {
+                "workflow_type_index": self._type_combo.currentIndex(),
+                "workflow_dict": self.get_workflow_dict(),
+            }
+            gm.save_dialog_state("WorkflowView", state)
+        except Exception as e:  # noqa: BLE001 - persistence is best-effort
+            self._logger.debug("Could not persist workflow state: %s", e)
+
+    def _restore_workflow_state(self) -> None:
+        """Re-apply the last-session panel values saved by _persist_workflow_state."""
+        gm = _default_geometry_manager
+        if gm is None:
+            return
+        try:
+            state = gm.restore_dialog_state("WorkflowView") or {}
+            wf = state.get("workflow_dict")
+            if not wf:
+                return
+            wtype = infer_workflow_type(wf)
+            self.set_workflow_dict(wf, wtype)
+            self._logger.info("Restored last-session workflow tab values")
+        except Exception as e:  # noqa: BLE001 - never let a bad blob break startup
+            self._logger.debug("Could not restore workflow state: %s", e)
+
     def _set_running_state(self, running: bool) -> None:
         """Update UI for running/stopped state."""
+        self._running = running
         self._start_btn.setEnabled(not running)
         self._stop_btn.setEnabled(running)
 
@@ -957,6 +1086,9 @@ class WorkflowView(QWidget):
                 f"color: {SUCCESS_COLOR}; font-weight: bold;"
             )
             self._progress_bar.setVisible(False)
+            # Re-apply the validation gate now the run is over — the button
+            # should re-enable only if the workflow is still startable.
+            self._update_start_enabled()
 
     def on_workflow_finished(self) -> None:
         """The microscope returned to idle after a run — clear the running state.
@@ -1175,11 +1307,13 @@ class WorkflowView(QWidget):
 
     def update_for_connection_state(self, connected: bool) -> None:
         """Update view based on connection state."""
-        self._start_btn.setEnabled(connected)
+        self._connected = connected
         if not connected:
             self._set_running_state(False)
             self._status_label.setText("Not connected - connect to microscope first")
             self._status_label.setStyleSheet("color: gray; font-weight: bold;")
+        # Gate Start on connection + validation (shows blockers when disabled).
+        self._update_start_enabled()
 
     def update_progress(self, progress: float, message: str = "") -> None:
         """Update progress bar and status."""
@@ -1525,10 +1659,18 @@ class WorkflowView(QWidget):
         # --- Save / experiment (translate workflow keys -> save panel keys) ---
         try:
             if exp:
+                # "Save image data" holds the FORMAT (Tiff/BigTiff/Raw) or the
+                # sentinel "NotSaved" when disabled — NOT the literal "Saved".
+                # (The old code compared it to "Saved", so save_enabled was always
+                # False and the format was never restored — hence "keeps shifting
+                # back to Tiff".) Derive both save_enabled and save_format.
+                _fmt = str(exp.get("Save image data", "")).strip()
+                _save_enabled = _fmt not in ("", "NotSaved")
+                _save_format = _fmt if _save_enabled else "Tiff"
                 self._save_panel.set_settings(
                     {
-                        "save_enabled": str(exp.get("Save image data", "")).strip()
-                        == "Saved",
+                        "save_enabled": _save_enabled,
+                        "save_format": _save_format,
                         "save_drive": exp.get("Save image drive", ""),
                         "save_directory": exp.get("Save image directory", ""),
                         "sample_name": exp.get("Sample", ""),

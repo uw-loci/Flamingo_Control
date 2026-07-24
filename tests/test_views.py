@@ -283,9 +283,11 @@ class TestWorkflowViewCreation:
         assert workflow_view._template_combo is not None
 
     def test_initial_button_state(self, workflow_view):
-        """Stop is disabled until a workflow starts; Start is available."""
+        """Stop is disabled; Start is gated (disabled until connected + valid)."""
         assert not workflow_view._stop_btn.isEnabled()
-        assert workflow_view._start_btn.isEnabled()
+        # Start is now gated on connection + validation. At construction the view
+        # is not connected, so Start begins disabled.
+        assert not workflow_view._start_btn.isEnabled()
 
     def test_initial_status_text(self, workflow_view):
         """Test initial status label text."""
@@ -307,6 +309,11 @@ class TestWorkflowViewStartStop:
         # test does not depend on every sub-panel being populated.
         workflow_view._build_workflow = Mock(return_value=Mock())
         workflow_view._validate_workflow = Mock(return_value=[])
+        # Start is gated on connection + validation; satisfy the gate so the
+        # button is clickable.
+        workflow_view._connected = True
+        workflow_view._update_start_enabled()
+        assert workflow_view._start_btn.isEnabled()
 
         qtbot.mouseClick(workflow_view._start_btn, Qt.LeftButton)
 
@@ -315,22 +322,28 @@ class TestWorkflowViewStartStop:
         assert not workflow_view._start_btn.isEnabled()
         assert workflow_view._stop_btn.isEnabled()
 
-    def test_start_validation_error_does_not_call_controller(
-        self, workflow_view, mock_workflow_controller, qtbot
+    def test_start_validation_error_disables_start(
+        self, workflow_view, mock_workflow_controller
     ):
-        """Validation errors block the controller call and surface a message."""
+        """Validation errors disable Start and list each reason; no controller call."""
         workflow_view._build_workflow = Mock(return_value=Mock())
         workflow_view._validate_workflow = Mock(return_value=["No illumination"])
+        workflow_view._connected = True
+        workflow_view._update_start_enabled()
 
-        qtbot.mouseClick(workflow_view._start_btn, Qt.LeftButton)
-
+        # The gate disables Start and points the user at the failure.
+        assert not workflow_view._start_btn.isEnabled()
+        assert "No illumination" in workflow_view._start_blockers_label.text()
         mock_workflow_controller.start_workflow_from_ui.assert_not_called()
-        assert "No illumination" in workflow_view._message_label.text()
 
     def test_stop_calls_controller_and_restores_ui(
         self, workflow_view, mock_workflow_controller, qtbot
     ):
         """Stopping calls stop_workflow and returns to the ready state."""
+        # Make the workflow startable so the gate re-enables Start after the stop.
+        workflow_view._build_workflow = Mock(return_value=Mock())
+        workflow_view._validate_workflow = Mock(return_value=[])
+        workflow_view._connected = True
         # Put the view into the running state first.
         workflow_view._set_running_state(True)
 
@@ -350,9 +363,17 @@ class TestWorkflowViewConnectionState:
         assert "Not connected" in workflow_view._status_label.text()
 
     def test_connected_enables_start(self, workflow_view):
-        """Connection enables the Start button."""
+        """Connection enables Start when the workflow is valid; else it stays off."""
+        workflow_view._build_workflow = Mock(return_value=Mock())
+        workflow_view._validate_workflow = Mock(return_value=[])
         workflow_view.update_for_connection_state(connected=True)
         assert workflow_view._start_btn.isEnabled()
+
+        # An invalid workflow keeps Start disabled and shows the reason.
+        workflow_view._validate_workflow = Mock(return_value=["bad config"])
+        workflow_view._update_start_enabled()
+        assert not workflow_view._start_btn.isEnabled()
+        assert "bad config" in workflow_view._start_blockers_label.text()
 
 
 class TestWorkflowViewHelperMethods:
@@ -412,9 +433,10 @@ class TestViewsIntegration:
 
     def test_workflow_view_independent(self, workflow_view):
         """Test workflow view works independently."""
-        # Should be able to create and interact with workflow view alone
+        # Should be able to create and interact with workflow view alone.
         assert workflow_view is not None
-        assert workflow_view._start_btn.isEnabled()
+        # Start is gated (not connected at construction), so it starts disabled.
+        assert not workflow_view._start_btn.isEnabled()
 
     def test_both_views_can_coexist(
         self, qapp, mock_connection_controller, mock_workflow_controller, qtbot

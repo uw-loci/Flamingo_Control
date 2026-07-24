@@ -651,8 +651,11 @@ class Workflow(ValidatedModel):
         # Tile settings
         if self.tile_settings and self.tile_settings.total_tiles > 1:
             stack_dict["Stack option"] = "Tile"
-            stack_dict["Stack option settings 1"] = self.tile_settings.num_tiles_x
-            stack_dict["Stack option settings 2"] = self.tile_settings.num_tiles_y
+            # Server reads settings 1/2 as X/Y OVERLAP PERCENT (not tile counts)
+            # and derives the grid itself — sending counts made it image the
+            # wrong number of tiles. See models/workflow.py for the full note.
+            stack_dict["Stack option settings 1"] = self.tile_settings.overlap_percent
+            stack_dict["Stack option settings 2"] = self.tile_settings.overlap_percent
         else:
             stack_dict["Stack option"] = "ZStack"
             stack_dict["Stack option settings 1"] = 0

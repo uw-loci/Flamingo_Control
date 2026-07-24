@@ -246,8 +246,15 @@ class WorkflowModel:
         # Tile settings
         if self.tile_settings and self.tile_settings.total_tiles > 1:
             stack_dict["Stack option"] = "Tile"
-            stack_dict["Stack option settings 1"] = self.tile_settings.num_tiles_x
-            stack_dict["Stack option settings 2"] = self.tile_settings.num_tiles_y
+            # The server reads "Stack option settings 1/2" as the X/Y OVERLAP
+            # PERCENT (see WorkflowSettings.cpp getTileX/YOverlapPercent and the
+            # app's own mip_overview parser), then derives the tile grid itself
+            # from the ROI + FOV + overlap. Writing the client tile COUNTS here
+            # made the server read them as tiny overlaps (e.g. "3" -> 3%) and
+            # image the wrong grid. Send the overlap percent instead; the tile
+            # count stays client-side for the estimate.
+            stack_dict["Stack option settings 1"] = self.tile_settings.overlap_percent
+            stack_dict["Stack option settings 2"] = self.tile_settings.overlap_percent
         else:
             stack_dict["Stack option"] = "ZStack"
             stack_dict["Stack option settings 1"] = 0

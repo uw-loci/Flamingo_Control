@@ -1808,6 +1808,10 @@ class SampleView(QWidget):
                 # Use stabilized auto-contrast (adjusts at most once per interval)
                 img_min = 0  # Always use 0 as min for consistency
                 img_max = self._calculate_auto_contrast(transformed)
+                # Reflect the live auto-computed range in the (disabled) min/max
+                # spinboxes and slider so the user can see the values Auto is
+                # using, and where they land if they switch to manual.
+                self._sync_contrast_widgets(img_min, img_max)
             else:
                 img_min = self._intensity_min
                 img_max = self._intensity_max
@@ -2440,13 +2444,16 @@ class SampleView(QWidget):
         self._update_live_display()
 
     @pyqtSlot(int, int)
-    def set_intensity_range(self, min_val: int, max_val: int) -> None:
-        """Set the manual intensity range and redisplay.
+    def _sync_contrast_widgets(self, min_val: int, max_val: int) -> None:
+        """Update the min/max spinboxes + range slider to (min, max).
 
-        Keeps the inline spinboxes/range slider in sync (without re-emitting).
+        Signals are blocked so this never re-triggers the manual handlers /
+        redisplay — safe to call from inside ``_update_live_display`` (e.g. to
+        show the live auto-contrast values). Values are clamped to the widgets'
+        integer range.
         """
-        self._intensity_min = min_val
-        self._intensity_max = max_val
+        min_val = int(round(min_val))
+        max_val = int(round(max_val))
         if hasattr(self, "min_intensity_spinbox"):
             self.min_intensity_spinbox.blockSignals(True)
             self.min_intensity_spinbox.setValue(min_val)
@@ -2459,6 +2466,15 @@ class SampleView(QWidget):
             self.range_slider.blockSignals(True)
             self.range_slider.setValue((min_val, max_val))
             self.range_slider.blockSignals(False)
+
+    def set_intensity_range(self, min_val: int, max_val: int) -> None:
+        """Set the manual intensity range and redisplay.
+
+        Keeps the inline spinboxes/range slider in sync (without re-emitting).
+        """
+        self._intensity_min = min_val
+        self._intensity_max = max_val
+        self._sync_contrast_widgets(min_val, max_val)
         self._update_live_display()
 
     def _on_led_group_toggled(self, checked: bool) -> None:
