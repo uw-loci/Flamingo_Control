@@ -408,6 +408,9 @@ class MainWindow(QMainWindow):
 
         extensions_menu.addSeparator()
 
+        # Light-sheet calibration / QC tools live under one submenu.
+        lightsheet_tests_menu = extensions_menu.addMenu("&Lightsheet Tests")
+
         self.pixel_calibrator_action = QAction("XY &Pixel Calibrator...", self)
         self.pixel_calibrator_action.setStatusTip(
             "Measure the true XY pixel size by moving the stage and tracking "
@@ -415,7 +418,18 @@ class MainWindow(QMainWindow):
         )
         self.pixel_calibrator_action.triggered.connect(self._on_pixel_calibrator)
         self.pixel_calibrator_action.setEnabled(False)
-        extensions_menu.addAction(self.pixel_calibrator_action)
+        lightsheet_tests_menu.addAction(self.pixel_calibrator_action)
+
+        self.stage_repeatability_action = QAction(
+            "Stage &Repeatability Testing...", self
+        )
+        self.stage_repeatability_action.setStatusTip(
+            "Jog the stage out and back N times per axis and measure how "
+            "precisely it returns (image-difference + µm return error)"
+        )
+        self.stage_repeatability_action.triggered.connect(self._on_stage_repeatability)
+        self.stage_repeatability_action.setEnabled(False)
+        lightsheet_tests_menu.addAction(self.stage_repeatability_action)
 
         # Help menu
         help_menu = menubar.addMenu("&Help")
@@ -575,8 +589,9 @@ class MainWindow(QMainWindow):
         self.led_2d_overview_action.setEnabled(connected and sample_view_open)
         self.union_thresholder_action.setEnabled(connected and sample_view_open)
 
-        # Pixel Calibrator needs the microscope (stage + camera), not Sample View
+        # Lightsheet Tests need the microscope (stage + camera), not Sample View
         self.pixel_calibrator_action.setEnabled(connected)
+        self.stage_repeatability_action.setEnabled(connected)
 
     def _on_voxel_test(self):
         """Handle 3D voxel rotation test menu action."""
@@ -1107,6 +1122,39 @@ class MainWindow(QMainWindow):
             logger.error(f"Error opening Pixel Calibrator: {e}", exc_info=True)
             QMessageBox.critical(
                 self, "Error", f"Failed to open Pixel Calibrator:\n{e}"
+            )
+
+    def _on_stage_repeatability(self):
+        """Handle Stage Repeatability Testing menu action."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.info("Stage Repeatability Testing menu action triggered")
+
+        try:
+            from py2flamingo.views.dialogs.stage_repeatability_dialog import (
+                StageRepeatabilityDialog,
+            )
+
+            # Reuse existing dialog if still open
+            if (
+                hasattr(self, "_stage_repeatability_dialog")
+                and self._stage_repeatability_dialog is not None
+            ):
+                self._stage_repeatability_dialog.show()
+                self._stage_repeatability_dialog.raise_()
+                self._stage_repeatability_dialog.activateWindow()
+                return
+
+            self._stage_repeatability_dialog = StageRepeatabilityDialog(
+                app=self.app, parent=None
+            )
+            self._stage_repeatability_dialog.show()
+
+        except Exception as e:
+            logger.error(f"Error opening Stage Repeatability: {e}", exc_info=True)
+            QMessageBox.critical(
+                self, "Error", f"Failed to open Stage Repeatability:\n{e}"
             )
 
     def _on_load_webcam_overview(self):
