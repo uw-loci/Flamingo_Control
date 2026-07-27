@@ -227,15 +227,34 @@ class ProgressEstimator:
     def has_estimate(self) -> bool:
         return self._mean_ms() is not None
 
-    def _mean_ms(self) -> Optional[float]:
-        if len(self._history) >= min(self._window, MIN_SAMPLES_FOR_ESTIMATE):
-            return sum(self._history) / len(self._history)
+    def mean_ms(self, *, lenient: bool = False) -> Optional[float]:
+        """Best per-unit mean, in milliseconds, or ``None``.
+
+        Normally the rolling history must reach quorum
+        (``MIN_SAMPLES_FOR_ESTIMATE``) before a live mean is trusted;
+        before then the prior-run cache seed is returned (or ``None``).
+
+        ``lenient=True`` accepts the history mean from as few as **one**
+        recorded delta. Use it only for *coarse* units whose single
+        sample is already a meaningful whole-unit measurement — e.g. a
+        completed-tile wall time, where one sample beats extrapolating
+        from per-frame cadence and can't be distorted by a single noisy
+        per-frame gauge value. (The very first delta is still excluded
+        from history by ``tick``'s setup-spike guard, so a lenient mean
+        never reflects one-time startup overhead.)
+        """
+        n = len(self._history)
+        if n >= min(self._window, MIN_SAMPLES_FOR_ESTIMATE) or (lenient and n >= 1):
+            return sum(self._history) / n
         # Pre-quorum: prior-run seed if available; otherwise nothing,
         # so the UI shows "estimating..." until enough samples land.
         # We deliberately do NOT fall back to the live recent window
         # here — early deltas (especially the very first one) are
         # noisy and would produce wildly wrong ETAs.
         return self._seed_mean_ms
+
+    def _mean_ms(self) -> Optional[float]:
+        return self.mean_ms()
 
     def remaining_seconds(self) -> Optional[float]:
         mean_ms = self._mean_ms()

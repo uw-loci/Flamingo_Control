@@ -3928,19 +3928,26 @@ class SampleView(QWidget):
                 np.arange(H), np.arange(W), indexing="ij"
             )
 
-            # Pixel size is AOI-independent (a crop changes the FOV, not µm/px),
-            # so use it directly rather than FOV/W — the latter is wrong whenever
-            # the data's frame width W differs from the full sensor (cropped AOI).
+            # World size per STORED pixel. effective_pixel_size_um is µm per
+            # *camera* pixel (AOI-independent), but the stored frame is
+            # downsampled to ~100px, so scale by original/stored dims:
+            #   stored_px_um = effective_pixel_size_um * original_dim / stored_dim
+            # Using the full-res pixel size directly shrank each tile ~20x
+            # (isolated "pips on dice" instead of a connected mosaic).
+            orig_h, orig_w = image.shape[:2]
             try:
                 from py2flamingo.configs.config_loader import get_hardware_config
 
-                pixel_size_um = get_hardware_config().effective_pixel_size_um
+                base_px_um = get_hardware_config().effective_pixel_size_um
+                px_um_x = base_px_um * orig_w / W
+                px_um_y = base_px_um * orig_h / H
             except Exception:
-                pixel_size_um = 0.5182 * 1000 / W  # legacy full-frame fallback
+                px_um_x = 0.5182 * 1000 / W  # legacy full-frame fallback
+                px_um_y = 0.5182 * 1000 / H
 
             # Convert to camera space (micrometers)
-            camera_x = (x_indices - W / 2) * pixel_size_um
-            camera_y = (y_indices - H / 2) * pixel_size_um
+            camera_x = (x_indices - W / 2) * px_um_x
+            camera_y = (y_indices - H / 2) * px_um_y
 
             # Stack into (N, 2) array
             camera_coords_2d = np.column_stack([camera_x.ravel(), camera_y.ravel()])
@@ -4755,6 +4762,33 @@ class SampleView(QWidget):
                 self.live_status_label.setText("Status: Idle")
         except Exception as e:
             self.logger.error(f"Error updating live view state: {e}")
+
+    def sync_ui_for_external_acquisition(self) -> None:
+        """Resync live/LED controls when a workflow takes over the hardware.
+
+        A workflow acquisition drives the camera and illumination in
+        firmware (and turns the manual preview LED off) but sends no
+        camera-state or light-source signals back to us. Without this, the
+        Live button stays red ("Stop Live") and the LED control stays
+        checked at its last percentage, both misrepresenting the hardware.
+
+        This resyncs the GUI ONLY — no hardware commands are sent, so it
+        cannot disturb the running acquisition's own illumination.
+        """
+        try:
+            if (
+                self.camera_controller
+                and self.camera_controller.state == CameraState.LIVE_VIEW
+            ):
+                # GUI-only: set_state just flips the button via state_changed.
+                self.camera_controller.set_state(CameraState.IDLE)
+        except Exception:
+            self.logger.debug("live-state resync failed", exc_info=True)
+        try:
+            if getattr(self, "laser_led_panel", None):
+                self.laser_led_panel.reflect_light_sources_off()
+        except Exception:
+            self.logger.debug("LED resync failed", exc_info=True)
 
     def _update_zoom_display(self) -> None:
         """Update the zoom level display from napari viewer."""
@@ -5885,6 +5919,12 @@ class SampleView(QWidget):
                 f"expected {num_planes} planes/channel x {num_channels} channels"
                 f" = {num_planes * num_channels if num_planes else '?'} total"
             )
+
+        # Record the ORIGINAL frame size so the worker can rescale the stored
+        # (~100px) frames to their true physical footprint (else tiles render
+        # ~20x too small — isolated dots instead of a connected mosaic).
+        if self._current_tile_buffer.source_frame_shape is None:
+            self._current_tile_buffer.source_frame_shape = tuple(image.shape[:2])
 
         # Downsample and buffer (~0.5ms)
         downsampled = self._downsample_for_storage(image)

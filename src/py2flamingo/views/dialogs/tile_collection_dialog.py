@@ -25,6 +25,7 @@ from PyQt5.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -43,6 +44,11 @@ from py2flamingo.services.tiff_size_validator import (
     validate_workflow_params,
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.utils.limited_acquisition import (
+    ArmSelection,
+    choose_illumination_arms,
+    plan_multiview_acquisition,
+)
 from py2flamingo.utils.tile_folder_organizer import reorganize_tile_folders
 from py2flamingo.utils.tile_workflow_parser import (
     parse_workflow_position,
@@ -52,7 +58,10 @@ from py2flamingo.utils.tile_workflow_parser import (
     read_z_range_from_workflow,
     read_z_velocity_from_workflow,
 )
-from py2flamingo.utils.tile_z_range import calculate_tile_z_ranges
+from py2flamingo.utils.tile_z_range import (
+    calculate_tile_z_ranges,
+    estimate_fov_from_tiles,
+)
 from py2flamingo.views.workflow_panels import (
     CameraPanel,
     IlluminationPanel,
@@ -64,6 +73,69 @@ logger = logging.getLogger(__name__)
 
 # Shared timing cache for tile-collection ETAs across runs
 _TIMING_CACHE = TimingCache()
+
+
+def _queue_eta_seconds(
+    *,
+    img_mean_ms: Optional[float],
+    tile_mean_ms: Optional[float],
+    cur_acq: int,
+    cur_exp: int,
+    workflows_remaining: int,
+) -> Optional[float]:
+    """Seconds of tile-queue work remaining, or ``None`` if undetermined.
+
+    The estimate is split into two independent parts so a transient bad
+    per-frame gauge value at a tile boundary can't be amplified across
+    the whole run:
+
+    * **Current tile** — prorated by the per-*frame* cadence
+      (``img_mean_ms``): only the frames left in the tile now being
+      scanned. Bounded by a single tile's worth of work.
+    * **Remaining whole tiles** — costed at the measured *end-to-end*
+      per-tile wall time (``tile_mean_ms``), which already includes the
+      XY stage move onto each tile. This is the robust quantity for
+      future tiles: one completed tile (or a prior-run seed) provides it,
+      and it is immune to per-frame noise.
+
+    The old form ``img_mean_ms * (frames_left + workflows_remaining *
+    cur_exp)`` costed *every* remaining tile at the per-frame rate, so a
+    briefly-inflated ``img_mean_ms`` (cache seed right after a per-tile
+    ``reset()``) or a transient ``cur_exp`` spike multiplied across all
+    remaining tiles could balloon a several-minute run to hours, then
+    recover once the Z scan produced real samples.
+    """
+    workflows_remaining = max(0, workflows_remaining)
+
+    # Current tile's remaining time.
+    if img_mean_ms is not None and cur_exp > 0:
+        cur_secs = img_mean_ms * max(0, cur_exp - cur_acq) / 1000.0
+    elif tile_mean_ms is not None and cur_exp > 0:
+        frac_left = min(1.0, max(0.0, (cur_exp - cur_acq) / cur_exp))
+        cur_secs = tile_mean_ms * frac_left / 1000.0
+    else:
+        cur_secs = 0.0
+
+    # A tile already in progress can't have more work left than one whole
+    # tile. This caps a transient garbage per-frame ``expected`` count
+    # (seen for a single gauge callback right at a tile boundary) so it
+    # can't inflate even the current-tile term.
+    if tile_mean_ms is not None:
+        cur_secs = min(cur_secs, tile_mean_ms / 1000.0)
+
+    # Remaining whole tiles.
+    if tile_mean_ms is not None:
+        future_secs = tile_mean_ms * workflows_remaining / 1000.0
+    elif img_mean_ms is not None and cur_exp > 0:
+        # No per-tile time yet (first tile of a fresh install, no seed).
+        # Approximate each remaining tile by the current tile's frame
+        # count -- still per-frame, but only used until the first tile
+        # completes and a real per-tile time becomes available.
+        future_secs = img_mean_ms * workflows_remaining * cur_exp / 1000.0
+    else:
+        return None
+
+    return cur_secs + future_secs
 
 
 class TileCollectionDialog(PersistentDialog):
@@ -260,6 +332,10 @@ class TileCollectionDialog(PersistentDialog):
         self._illumination_panel = IlluminationPanel(app=self._app)
         container_layout.addWidget(self._illumination_panel)
 
+        # Smart Limited Acquisition (optional near-arm-only collection)
+        smart_group = self._create_smart_acquisition_section()
+        container_layout.addWidget(smart_group)
+
         # Camera panel for exposure/frame rate settings - pass app for auto-detection
         self._camera_panel = CameraPanel(app=self._app)
         self._camera_panel.settings_changed.connect(self._on_camera_settings_changed)
@@ -356,6 +432,201 @@ class TileCollectionDialog(PersistentDialog):
 
         layout.addLayout(button_layout)
         self.setLayout(layout)
+
+    # ------------------------------------------------------------------ #
+    # Smart Limited Acquisition (Mode A: position-based single-arm)
+    # ------------------------------------------------------------------ #
+    def _create_smart_acquisition_section(self) -> QGroupBox:
+        """Optional near-arm-only collection for tiles far from region center."""
+        group = QGroupBox("Smart Limited Acquisition (optional)")
+        layout = QVBoxLayout()
+
+        self._limit_arm_checkbox = QCheckBox(
+            "Fire only the near illumination arm beyond 1 FOV from center"
+        )
+        self._limit_arm_checkbox.setToolTip(
+            "When a tile is more than one field-of-view from the acquisition-region\n"
+            "center along the illumination (X) axis, collect from only the arm on\n"
+            "the near side. The far arm's data would be overwritten by the near\n"
+            "side, so skipping it cuts light-sheet exposure, acquisition time, and\n"
+            "disk use by ~2x in the periphery. Tiles near center still use both arms.\n\n"
+            "Produces asymmetric data (left-only / right-only / both regions); use\n"
+            "the updated stitcher to reassemble it."
+        )
+        self._limit_arm_checkbox.setChecked(False)
+        self._limit_arm_checkbox.toggled.connect(self._update_smart_acq_description)
+        layout.addWidget(self._limit_arm_checkbox)
+
+        self._smart_acq_desc = QLabel()
+        self._smart_acq_desc.setWordWrap(True)
+        self._smart_acq_desc.setStyleSheet("color: #555; font-size: 11px;")
+        layout.addWidget(self._smart_acq_desc)
+
+        # --- Mode C: integrated multi-view (rotation) sectoring ---
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("color: #ccc;")
+        layout.addWidget(sep)
+
+        self._multiview_checkbox = QCheckBox(
+            "Integrated multi-view: collect only the good sector per angle"
+        )
+        self._multiview_checkbox.setToolTip(
+            "Instead of collecting the whole volume at every rotation, physically\n"
+            "rotate the sample and collect only the ~360/N° sector that faces the\n"
+            "optics at each of N angles. 2 angles ≈ two halves (a 180° flip); 4\n"
+            "angles ≈ four quarters. Needs the 'Tip of sample mount' preset as the\n"
+            "rotation center. Produces multi-view data — fuse with the updated\n"
+            "stitcher's multi-view option."
+        )
+        self._multiview_checkbox.setChecked(False)
+        self._multiview_checkbox.toggled.connect(self._update_smart_acq_description)
+        layout.addWidget(self._multiview_checkbox)
+
+        angles_row = QHBoxLayout()
+        angles_row.addWidget(QLabel("Number of angles:"))
+        self._multiview_angles_spin = QSpinBox()
+        self._multiview_angles_spin.setRange(2, 8)
+        self._multiview_angles_spin.setValue(2)
+        self._multiview_angles_spin.valueChanged.connect(
+            self._update_smart_acq_description
+        )
+        angles_row.addWidget(self._multiview_angles_spin)
+        angles_row.addStretch()
+        layout.addLayout(angles_row)
+
+        self._multiview_desc = QLabel()
+        self._multiview_desc.setWordWrap(True)
+        self._multiview_desc.setStyleSheet("color: #555; font-size: 11px;")
+        layout.addWidget(self._multiview_desc)
+
+        group.setLayout(layout)
+        # Populate the descriptions once the widget tree is built.
+        QTimer.singleShot(0, self._update_smart_acq_description)
+        return group
+
+    def _acquisition_center_x_mm(self) -> Optional[float]:
+        """X center of the acquisition region (stage mm), or None if unknown."""
+        bbox = getattr(self._config, "bounding_box", None) if self._config else None
+        if bbox is not None:
+            return (bbox.x_min + bbox.x_max) / 2.0
+        xs = [t.x for t in (self._left_tiles + self._right_tiles)]
+        return (min(xs) + max(xs)) / 2.0 if xs else None
+
+    def _fov_mm_estimate(self) -> float:
+        """FOV (mm) estimated from tile spacing, with a safe default fallback."""
+        return estimate_fov_from_tiles(self._left_tiles, self._right_tiles)
+
+    def _arm_selection_for_tile(self, tile) -> Optional[ArmSelection]:
+        """Per-tile arm choice when limiting is enabled; None => panel default."""
+        checkbox = getattr(self, "_limit_arm_checkbox", None)
+        if checkbox is None or not checkbox.isChecked():
+            return None
+        center_x = self._acquisition_center_x_mm()
+        if center_x is None:
+            return None
+        return choose_illumination_arms(tile.x, center_x, self._fov_mm_estimate())
+
+    def _update_smart_acq_description(self, *_args) -> None:
+        """Refresh both mode descriptions (Mode A arm selection + Mode C multi-view)."""
+        self._update_arm_description()
+        self._update_multiview_description()
+
+    def _update_arm_description(self) -> None:
+        """Refresh the live explanation of near-arm limiting (Mode A)."""
+        label = getattr(self, "_smart_acq_desc", None)
+        if label is None:
+            return
+
+        if not self._limit_arm_checkbox.isChecked():
+            label.setText(
+                "Off — every tile collects with the illumination arms selected above."
+            )
+            return
+
+        center_x = self._acquisition_center_x_mm()
+        if center_x is None:
+            label.setText(
+                "On — but the region center is unknown (no bounding box or tiles), "
+                "so every tile will fall back to both arms."
+            )
+            return
+
+        fov = self._fov_mm_estimate()
+        left_only = right_only = both = 0
+        for tile in self._left_tiles + self._right_tiles:
+            sel = choose_illumination_arms(tile.x, center_x, fov)
+            if sel.left_on and sel.right_on:
+                both += 1
+            elif sel.left_on:
+                left_only += 1
+            else:
+                right_only += 1
+
+        total = left_only + right_only + both
+        label.setText(
+            f"On — center X ≈ {center_x:.2f} mm, FOV ≈ {fov * 1000:.0f} µm. "
+            f"Of {total} tiles: {both} both-arm (near center), "
+            f"{left_only} left-only, {right_only} right-only. "
+            "Peripheral tiles skip the far arm — output is asymmetric; reassemble "
+            "with the updated stitcher."
+        )
+
+    def _source_tiles_for_multiview(self):
+        """Selected tiles as (x, y, z, z_min, z_max) for multi-view planning."""
+        bbox_z_min = self._config.bounding_box.z_min if self._config else 0.0
+        bbox_z_max = self._config.bounding_box.z_max if self._config else 10.0
+        out = []
+        for t in self._left_tiles + self._right_tiles:
+            z_min = t.z_stack_min if t.z_stack_min != t.z_stack_max else bbox_z_min
+            z_max = t.z_stack_max if t.z_stack_min != t.z_stack_max else bbox_z_max
+            out.append((t.x, t.y, t.z, z_min, z_max))
+        return out
+
+    def _build_multiview_plan(self):
+        """Plan the integrated multi-view acquisition, or None if not possible."""
+        tip = self._get_tip_position()
+        if tip is None:
+            return None
+        source = self._source_tiles_for_multiview()
+        if not source:
+            return None
+        n_angles = self._multiview_angles_spin.value()
+        return plan_multiview_acquisition(source, n_angles, tip)
+
+    def _update_multiview_description(self) -> None:
+        """Refresh the live explanation for integrated multi-view (Mode C)."""
+        label = getattr(self, "_multiview_desc", None)
+        if label is None:
+            return
+        if not self._multiview_checkbox.isChecked():
+            label.setText("")
+            return
+
+        n = self._multiview_angles_spin.value()
+        tip = self._get_tip_position()
+        if tip is None:
+            label.setText(
+                "Needs a 'Tip of sample mount' position preset for the rotation "
+                "center — set one, or this mode can't plan the angles."
+            )
+            return
+        plan = self._build_multiview_plan()
+        if not plan:
+            label.setText(f"{n} angles about the sample tip — no tiles to plan yet.")
+            return
+        per_angle = {}
+        for p in plan:
+            per_angle[p.angle_deg] = per_angle.get(p.angle_deg, 0) + 1
+        breakdown = ", ".join(
+            f"{deg:.0f}°: {cnt}" for deg, cnt in sorted(per_angle.items())
+        )
+        label.setText(
+            f"On — {n} angles ({360.0 / n:.0f}° sector each) about tip "
+            f"({tip[0]:.2f}, {tip[1]:.2f}) mm. {len(plan)} workflows — {breakdown}. "
+            "Each angle collects only its good sector; fuse with the stitcher's "
+            "multi-view option. (Rotation sign/center are rig-validated.)"
+        )
 
     def _create_summary_section(self) -> QGroupBox:
         """Create the selected tiles summary section."""
@@ -688,7 +959,25 @@ class TileCollectionDialog(PersistentDialog):
         # - If single view: use all tiles from that view with bounding box Z range
         tiles_to_process = []
 
-        if self._has_dual_view:
+        if self._multiview_checkbox.isChecked():
+            # Integrated multi-view (Mode C): rotate + collect one sector per angle.
+            mv_plan = self._build_multiview_plan()
+            if not mv_plan:
+                QMessageBox.warning(
+                    self,
+                    "Multi-view unavailable",
+                    "Integrated multi-view needs a 'Tip of sample mount' position "
+                    "preset (rotation center) and at least one selected tile. Set "
+                    "the preset or turn the option off.",
+                )
+                return
+            for mvt in mv_plan:
+                tiles_to_process.append((mvt, mvt.angle_deg, mvt.z_min, mvt.z_max))
+            logger.info(
+                f"Multi-view mode: {len(mv_plan)} workflows across "
+                f"{self._multiview_angles_spin.value()} angles"
+            )
+        elif self._has_dual_view:
             # 90-degree overlap mode: use only primary view tiles
             if self._primary_is_left:
                 primary_tiles = self._left_tiles
@@ -787,6 +1076,11 @@ class TileCollectionDialog(PersistentDialog):
             # Create position
             position = Position(x=tile.x, y=tile.y, z=tile.z, r=rotation)
 
+            # Smart limited acquisition: pick near arm for peripheral tiles.
+            arm_sel = self._arm_selection_for_tile(tile)
+            left_override = arm_sel.left_on if arm_sel else None
+            right_override = arm_sel.right_on if arm_sel else None
+
             # Build workflow text with per-tile Z range and per-tile save directory
             workflow_text = self._build_workflow_text(
                 workflow_name,
@@ -795,6 +1089,8 @@ class TileCollectionDialog(PersistentDialog):
                 tile_save_settings,
                 z_min,
                 z_max,
+                left_on_override=left_override,
+                right_on_override=right_override,
             )
 
             # Save to file
@@ -961,6 +1257,8 @@ class TileCollectionDialog(PersistentDialog):
         save_settings: dict,
         z_min: float,
         z_max: float,
+        left_on_override: Optional[bool] = None,
+        right_on_override: Optional[bool] = None,
     ) -> str:
         """Build workflow file text content.
 
@@ -971,6 +1269,9 @@ class TileCollectionDialog(PersistentDialog):
             save_settings: Save settings dict
             z_min: Minimum Z for Z-stack
             z_max: Maximum Z for Z-stack
+            left_on_override: If not None, overrides the panel's Left path flag
+                for this tile (smart limited acquisition).
+            right_on_override: If not None, overrides the panel's Right path flag.
 
         Returns:
             Workflow file content as string
@@ -1148,6 +1449,11 @@ class TileCollectionDialog(PersistentDialog):
         illum_ui_state = self._illumination_panel.get_ui_state()
         left_on = illum_ui_state.get("left_path", True)
         right_on = illum_ui_state.get("right_path", False)
+        # Smart limited acquisition: a per-tile override wins over the panel global.
+        if left_on_override is not None:
+            left_on = left_on_override
+        if right_on_override is not None:
+            right_on = right_on_override
         lines.append(
             f"    Left path = {'ON' if left_on else 'OFF'} {1 if left_on else 0}"
         )
@@ -1468,40 +1774,42 @@ class TileCollectionDialog(PersistentDialog):
         def queue_eta_label() -> str:
             """Format the best available queue ETA.
 
-            Prefer the per-image estimator scaled to remaining work
-            once enough image samples land; fall back to the
-            per-workflow estimator (coarser but available sooner).
+            Current tile is prorated by its per-frame (Z-plane) cadence;
+            remaining whole tiles are costed at the measured end-to-end
+            per-tile time, which already includes the XY move onto each
+            tile. See ``_queue_eta_seconds`` for why the two are kept
+            separate (transient per-frame noise at a tile boundary must
+            not be multiplied across every remaining tile). Falls back to
+            the per-workflow estimator's own label when neither signal is
+            available yet.
             """
-            # Per-image is the higher-resolution signal: total remaining
-            # = images left in current workflow + (images-per-workflow
-            # estimate) * (workflows remaining). We approximate
-            # images-per-workflow with the current workflow's expected count.
-            img_mean_ms = per_image_est._mean_ms()
             wf_idx = queue_service.current_index
-            cur_acq = current_workflow_images[0]
-            cur_exp = current_workflow_images[1]
-            if img_mean_ms is not None and cur_exp > 0:
-                images_remaining_now = max(0, cur_exp - cur_acq)
-                workflows_remaining = max(0, total_workflows - wf_idx - 1)
-                total_images_remaining = (
-                    images_remaining_now + workflows_remaining * cur_exp
-                )
-                seconds = img_mean_ms * total_images_remaining / 1000.0
-                from datetime import datetime as _dt
-                from datetime import timedelta as _td
+            seconds = _queue_eta_seconds(
+                img_mean_ms=per_image_est.mean_ms(),
+                # Lenient: one completed tile (or a prior-run seed) is a
+                # meaningful whole-tile time and beats per-frame guessing.
+                tile_mean_ms=per_workflow_est.mean_ms(lenient=True),
+                cur_acq=current_workflow_images[0],
+                cur_exp=current_workflow_images[1],
+                workflows_remaining=total_workflows - wf_idx - 1,
+            )
+            if seconds is None:
+                return per_workflow_est.format_label()
 
-                from py2flamingo.services.progress_estimator import (
-                    _format_duration,
-                )
+            from datetime import datetime as _dt
+            from datetime import timedelta as _td
 
-                clock = _dt.now() + _td(seconds=seconds)
-                eta_str = (
-                    clock.strftime("%H:%M")
-                    if clock.date() == _dt.now().date()
-                    else clock.strftime("%a %H:%M")
-                )
-                return f"{_format_duration(seconds)} remaining (Done at ~{eta_str})"
-            return per_workflow_est.format_label()
+            from py2flamingo.services.progress_estimator import (
+                _format_duration,
+            )
+
+            clock = _dt.now() + _td(seconds=seconds)
+            eta_str = (
+                clock.strftime("%H:%M")
+                if clock.date() == _dt.now().date()
+                else clock.strftime("%a %H:%M")
+            )
+            return f"{_format_duration(seconds)} remaining (Done at ~{eta_str})"
 
         def update_sample_view(status, pct):
             """Update Sample View's workflow progress display."""
@@ -1761,6 +2069,17 @@ class TileCollectionDialog(PersistentDialog):
             started = queue_service.start()
             logger.info(f"Queue service started: {started}")
 
+            if started:
+                # Resync live/LED controls (GUI only) — the run takes over the
+                # camera/illumination but sends no state signals back, so the
+                # Live button + LED control would otherwise stay stuck "on".
+                try:
+                    sv = self._get_sample_view_instance()
+                    if sv and hasattr(sv, "sync_ui_for_external_acquisition"):
+                        sv.sync_ui_for_external_acquisition()
+                except Exception as e:  # noqa: BLE001
+                    logger.debug(f"live/LED resync failed: {e}")
+
             if not started:
                 update_sample_view("Not Running", 0)
                 progress.close()
@@ -1912,6 +2231,9 @@ class TileCollectionDialog(PersistentDialog):
             "workflow_type": self._type_combo.currentIndex(),
             "name_prefix": self._name_prefix.text(),
             "add_to_sample_view": self._add_to_sample_view_checkbox.isChecked(),
+            "limit_arm_near_side": self._limit_arm_checkbox.isChecked(),
+            "multiview_enabled": self._multiview_checkbox.isChecked(),
+            "multiview_angles": self._multiview_angles_spin.value(),
             # Panel settings (using ui_state methods for raw dict persistence)
             "illumination": self._illumination_panel.get_ui_state(),
             "camera": self._camera_panel.get_settings(),
@@ -1961,6 +2283,15 @@ class TileCollectionDialog(PersistentDialog):
         # Restore add to sample view checkbox
         if "add_to_sample_view" in state:
             self._add_to_sample_view_checkbox.setChecked(state["add_to_sample_view"])
+
+        # Restore smart limited acquisition toggles
+        if "limit_arm_near_side" in state:
+            self._limit_arm_checkbox.setChecked(state["limit_arm_near_side"])
+        if "multiview_angles" in state:
+            self._multiview_angles_spin.setValue(int(state["multiview_angles"]))
+        if "multiview_enabled" in state:
+            self._multiview_checkbox.setChecked(state["multiview_enabled"])
+        self._update_smart_acq_description()
 
         # Restore panel settings
         if "illumination" in state:

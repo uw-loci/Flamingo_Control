@@ -103,21 +103,28 @@ except Exception:
 DOWNSAMPLE_TARGET = 100
 
 
-def _resolve_frame_dims(file_size: int, n_planes: int):
+def _resolve_frame_dims(file_size: int, n_planes: int, aoi=None):
     """Infer the raw frame (camera AOI) dimensions from the file size.
 
     ``file_size / (n_planes * 2)`` is the exact pixel count per uint16 plane.
-    Flamingo AOIs are square, so the side is its integer square root. Falls back
-    to the hardware-config default (FRAME_WIDTH/HEIGHT) when the size is not a
-    clean square (e.g. unexpected truncation or non-square AOI).
+    AOIs are NOT always square, so an ``aoi`` hint ``(width, height)`` — e.g. the
+    live/active AOI from the hardware config — disambiguates non-square frames
+    that a square-root inference cannot recover. Precedence: an ``aoi`` hint that
+    reproduces the file size exactly → square inference → the ``aoi`` hint as-is
+    → the hardware-config default (FRAME_WIDTH/HEIGHT).
     """
     import math
 
     if n_planes > 0 and file_size > 0:
         px_per_plane = file_size // (n_planes * 2)
+        # Trust a non-square AOI hint when it matches the file size exactly.
+        if aoi and aoi[0] and aoi[1] and int(aoi[0]) * int(aoi[1]) == px_per_plane:
+            return int(aoi[0]), int(aoi[1])
         side = math.isqrt(px_per_plane)
         if side > 0 and side * side == px_per_plane:
             return side, side
+        if aoi and aoi[0] and aoi[1]:
+            return int(aoi[0]), int(aoi[1])
     return FRAME_WIDTH, FRAME_HEIGHT
 
 
@@ -389,9 +396,17 @@ def _read_raw_frames_to_buffer(
     """
     file_size = raw_path.stat().st_size
     # Resolve the true frame size from the file: bytes / (planes * 2) is the
-    # exact pixel count per plane. The on-disk data is authoritative; the
-    # hardware-config default (FRAME_WIDTH/HEIGHT) is only a fallback.
-    frame_w, frame_h = _resolve_frame_dims(file_size, n_planes)
+    # exact pixel count per plane. The on-disk data is authoritative; the active
+    # AOI (which may be non-square) disambiguates non-square frames, and the
+    # hardware-config default (FRAME_WIDTH/HEIGHT) is only the last-resort fallback.
+    try:
+        from py2flamingo.configs.config_loader import get_hardware_config
+
+        _hw = get_hardware_config()
+        aoi_hint = (_hw.active_width_px, _hw.active_height_px)
+    except Exception:  # noqa: BLE001 - hint is best-effort
+        aoi_hint = None
+    frame_w, frame_h = _resolve_frame_dims(file_size, n_planes, aoi_hint)
     expected_size = frame_w * frame_h * n_planes * 2  # uint16 = 2 bytes
     if file_size != expected_size:
         # Frame size was inferred as square; recompute planes from the file.
@@ -413,6 +428,12 @@ def _read_raw_frames_to_buffer(
     )
 
     factor = DOWNSAMPLE_TARGET / max(frame_w, frame_h)
+
+    # Record the ORIGINAL (pre-downsample) frame size so the processing worker
+    # can scale the stored (~100px) frames back to their true physical
+    # footprint. Without it, tiles render ~20x too small (isolated dots).
+    if buffer.source_frame_shape is None:
+        buffer.source_frame_shape = (frame_h, frame_w)
 
     # Sample a few frames for raw-vs-downsampled signal comparison
     sample_indices = {

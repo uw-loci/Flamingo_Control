@@ -300,6 +300,27 @@ class TestEstimatorWithCache:
             est.tick(est.completed + 1)
         assert est._mean_ms() == pytest.approx(1000.0)
 
+    def test_lenient_mean_uses_single_sample(self, clock, tmp_path: Path):
+        # One completed unit is a meaningful whole-unit time for coarse
+        # units (a tile). Lenient mode should surface it immediately,
+        # while the default (quorum) mode still returns None/seed.
+        est = ProgressEstimator(total_units=10)
+        est.tick(0)
+        clock.advance(5.0)
+        est.tick(1)  # first delta -> excluded from history (setup guard)
+        clock.advance(30.0)
+        est.tick(2)  # first history sample: a 30 s whole-unit time
+        assert est.mean_ms() is None  # below quorum, no seed
+        assert est.mean_ms(lenient=True) == pytest.approx(30_000.0)
+
+    def test_lenient_mean_prefers_seed_when_no_history(self, clock, tmp_path: Path):
+        cache = TimingCache(path=tmp_path / "cache.json")
+        cache.update("k", 42_000.0)
+        est = ProgressEstimator(total_units=10, cache=cache, cache_key="k")
+        est.tick(0)
+        # No completed units yet -> even lenient falls back to the seed.
+        assert est.mean_ms(lenient=True) == pytest.approx(42_000.0)
+
 
 # ---------------------------------------------------------------------------
 # Formatting

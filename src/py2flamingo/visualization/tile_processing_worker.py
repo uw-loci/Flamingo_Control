@@ -49,6 +49,13 @@ class TileFrameBuffer:
     planes_per_channel: Optional[int] = (
         None  # Expected planes from workflow (authoritative)
     )
+    # Original (pre-downsample) frame shape (H, W) in camera pixels. Needed to
+    # recover the physical footprint: frames are downsampled to ~100px for
+    # storage, so the world extent per stored pixel is
+    # ``effective_pixel_size_um * original_dim / downsampled_dim``. Without
+    # this, downsampled indices multiplied by the full-res pixel size render
+    # each tile ~20x too small (isolated dots instead of a connected mosaic).
+    source_frame_shape: Optional[Tuple[int, int]] = None
     frames: List[Tuple[np.ndarray, int]] = field(
         default_factory=list
     )  # (downsampled_image, z_index)
@@ -271,18 +278,27 @@ class TileProcessingWorker(QObject):
         H, W = first_frame.shape
         y_indices, x_indices = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
 
-        # Pixel size is AOI-independent (a crop changes the FOV, not µm/px), so
-        # use it directly rather than FOV/W — the latter is wrong whenever the
-        # data's frame width W differs from the full sensor (i.e. cropped AOI).
+        # World size per STORED pixel. ``effective_pixel_size_um`` is the µm per
+        # *camera* pixel (AOI-independent), but the frames here are downsampled
+        # to ~100px, so each stored pixel spans several camera pixels. Recover
+        # the true footprint by scaling with original/downsampled dims:
+        #   stored_px_um = effective_pixel_size_um * original_dim / stored_dim
+        # (equivalently FOV_of_this_AOI / stored_dim). Using the full-res pixel
+        # size directly shrank every tile ~20x -> isolated "pips on dice".
+        orig_h, orig_w = buffer.source_frame_shape or (H, W)
         try:
             from py2flamingo.configs.config_loader import get_hardware_config
 
-            pixel_size_um = get_hardware_config().effective_pixel_size_um
+            base_px_um = get_hardware_config().effective_pixel_size_um
+            px_um_x = base_px_um * orig_w / W
+            px_um_y = base_px_um * orig_h / H
         except Exception:
-            pixel_size_um = 0.5182 * 1000 / W  # legacy full-frame fallback
+            # legacy full-frame fallback: FOV(518.2µm) spread over stored dims
+            px_um_x = 0.5182 * 1000 / W
+            px_um_y = 0.5182 * 1000 / H
 
-        camera_x = (x_indices - W / 2) * pixel_size_um
-        camera_y = (y_indices - H / 2) * pixel_size_um
+        camera_x = (x_indices - W / 2) * px_um_x
+        camera_y = (y_indices - H / 2) * px_um_y
         camera_coords_2d = np.column_stack([camera_x.ravel(), camera_y.ravel()])
 
         # All pixels in a single frame are from the same optical slice.

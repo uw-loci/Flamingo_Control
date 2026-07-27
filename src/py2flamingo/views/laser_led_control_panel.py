@@ -635,12 +635,17 @@ class LaserLEDControlPanel(QWidget):
 
     @pyqtSlot()
     def _on_preview_disabled(self) -> None:
-        """
-        Update UI when preview is disabled.
+        """Update UI when preview is disabled (hardware confirmed off)."""
+        self.reflect_light_sources_off()
 
-        Unchecks all checkboxes to reflect actual hardware state.
-        The GUI should always show what's actually active, not what
-        the user previously wanted.
+    def reflect_light_sources_off(self) -> None:
+        """GUI-only: show all light sources as off.
+
+        Unchecks every source checkbox and resets the status label to
+        reflect actual hardware state, WITHOUT sending any hardware
+        command. Safe to call when an external actor (e.g. a workflow
+        acquisition) has taken over illumination — it only resyncs the
+        display, so it can't disturb the running acquisition.
         """
         # Uncheck all checkboxes to reflect actual hardware state
         for button in self._source_button_group.buttons():

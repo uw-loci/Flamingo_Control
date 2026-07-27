@@ -196,19 +196,27 @@ class CameraLiveViewer(QWidget):
         exp_layout.addStretch()
         controls_layout.addLayout(exp_layout)
 
-        # Live AOI (camera ROI) control — centered squares only. Sets a hardware
-        # crop on the PCO sensor so the low-res light sheet can run at 1024 (or
-        # smaller) instead of full 2048. Changing the ROI stops/restarts live.
+        # Live AOI (camera ROI) control. Sets a centered hardware crop on the
+        # PCO sensor (width and height INDEPENDENT — the ROI is symmetric per
+        # axis, so non-square is allowed, e.g. 1024×2048). Changing the ROI
+        # stops/restarts live.
         aoi_layout = QHBoxLayout()
         aoi_layout.addWidget(QLabel("Live AOI:"))
-        self.aoi_combo = QComboBox()
-        # (label, side_px). Full frame first.
-        for label, side in (("Full (2048)", 2048), ("1024", 1024), ("512", 512)):
-            self.aoi_combo.addItem(label, side)
-        aoi_layout.addWidget(self.aoi_combo)
+        _aoi_sizes = (("Full (2048)", 2048), ("1024", 1024), ("512", 512))
+        self.aoi_width_combo = QComboBox()
+        self.aoi_height_combo = QComboBox()
+        for _label, _px in _aoi_sizes:
+            self.aoi_width_combo.addItem(_label, _px)
+            self.aoi_height_combo.addItem(_label, _px)
+        self.aoi_width_combo.setToolTip("AOI width (px)")
+        self.aoi_height_combo.setToolTip("AOI height (px)")
+        aoi_layout.addWidget(self.aoi_width_combo)
+        aoi_layout.addWidget(QLabel("×"))
+        aoi_layout.addWidget(self.aoi_height_combo)
         self.apply_aoi_btn = QPushButton("Apply AOI")
         self.apply_aoi_btn.setToolTip(
-            "Set a centered square camera ROI (stops and restarts live view)"
+            "Set a centered camera ROI, width × height (stops and restarts live "
+            "view). Width and height are independent — non-square is allowed."
         )
         self.apply_aoi_btn.clicked.connect(self._on_apply_aoi_clicked)
         aoi_layout.addWidget(self.apply_aoi_btn)
@@ -641,20 +649,24 @@ class CameraLiveViewer(QWidget):
         self.exposure_ms_label.setText(f"{value/1000:.2f} ms")
 
     def _on_apply_aoi_clicked(self) -> None:
-        """Apply a centered-square camera ROI (live AOI).
+        """Apply a centered camera ROI (live AOI), width × height.
 
-        The firmware drops the camera recording state to change the ROI, so we
-        stop live view first and restart it after. The result label shows the
-        size the camera actually reports back, which confirms (or refutes) that
-        the ROI took effect.
+        Width and height are independent (the PCO ROI is symmetric per axis), so
+        a non-square AOI like 1024×2048 is allowed. The firmware drops the camera
+        recording state to change the ROI, so we stop live view first and restart
+        it after. The result label shows the size the camera actually reports
+        back, which confirms (or refutes) that the ROI took effect.
         """
-        side = int(self.aoi_combo.currentData())
+        width_px = int(self.aoi_width_combo.currentData())
+        height_px = int(self.aoi_height_combo.currentData())
         try:
             from py2flamingo.configs.config_loader import get_hardware_config
 
-            sensor_px = int(get_hardware_config().sensor_width_px)
+            _hw = get_hardware_config()
+            sensor_w = int(_hw.sensor_width_px)
+            sensor_h = int(_hw.sensor_height_px)
         except Exception:  # noqa: BLE001 - fall back to the known full sensor
-            sensor_px = 2048
+            sensor_w = sensor_h = 2048
 
         was_live = self.camera_controller.is_live_view_active()
         self.apply_aoi_btn.setEnabled(False)
@@ -663,8 +675,8 @@ class CameraLiveViewer(QWidget):
             if was_live:
                 self.camera_controller.stop_live_view()
 
-            result = self.camera_controller.camera_service.set_centered_square_aoi(
-                side, sensor_px=sensor_px
+            result = self.camera_controller.camera_service.set_centered_aoi(
+                width_px, height_px, sensor_w=sensor_w, sensor_h=sensor_h
             )
 
             if was_live:
@@ -681,14 +693,14 @@ class CameraLiveViewer(QWidget):
                 self.aoi_result_label.setText(f"AOI now {w}×{h}")
             else:
                 self.aoi_result_label.setText(
-                    f"Requested {side}×{side}, camera reports {w}×{h}"
+                    f"Requested {width_px}×{height_px}, camera reports {w}×{h}"
                 )
                 QMessageBox.information(
                     self,
                     "AOI read-back mismatch",
-                    f"Requested {side}×{side} but the camera reports {w}×{h}. "
-                    "The ROI commands were sent; the firmware may use different "
-                    "ROI semantics than expected (see the log).",
+                    f"Requested {width_px}×{height_px} but the camera reports "
+                    f"{w}×{h}. The ROI commands were sent; the firmware may use "
+                    "different ROI semantics than expected (see the log).",
                 )
             self.logger.info(f"Apply AOI result: {result}")
         except Exception as exc:  # noqa: BLE001 - surface, don't crash the viewer

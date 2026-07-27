@@ -268,32 +268,46 @@ class CameraService(MicroscopeCommandService):
         inset = (sensor_px - side_px) // 2
         return inset + 1, inset + 1
 
-    def set_centered_square_aoi(
-        self, side_px: int, sensor_px: int = 2048
+    def set_centered_aoi(
+        self,
+        width_px: int,
+        height_px: int,
+        sensor_w: int = 2048,
+        sensor_h: int = 2048,
     ) -> Dict[str, Any]:
-        """Set a CENTERED SQUARE camera ROI (live AOI) of ``side_px`` pixels.
+        """Set a CENTERED camera ROI (live AOI) of ``width_px`` × ``height_px``.
 
-        Sends ROI_LEFT_SET + ROI_TOP_SET (the symmetric PCO ROI mirrors the
-        right/bottom edges) and re-reads the resulting image size to confirm.
+        The PCO ROI is symmetric per axis, so ROI_LEFT_SET fixes the width
+        (left edge mirrors the right) and ROI_TOP_SET fixes the height (top
+        mirrors bottom) INDEPENDENTLY — width and height need not be equal.
+        Re-reads the resulting image size to confirm.
 
         IMPORTANT: the firmware drops the camera's recording state to change the
         ROI, so callers should stop live view before calling and restart it
         afterwards.
 
-        Returns a dict: ``success``, ``requested_side``, the actual
-        ``width``/``height`` reported after the change, and ``applied`` (whether
-        the read-back matches the request).
+        Returns a dict: ``success``, ``requested_width``/``requested_height``,
+        the actual ``width``/``height`` reported after the change, and
+        ``applied`` (whether the read-back matches the request).
         """
-        if side_px <= 0 or side_px > sensor_px:
+        if width_px <= 0 or width_px > sensor_w:
             return {
                 "success": False,
-                "error": f"AOI side {side_px} out of range (1..{sensor_px})",
+                "error": f"AOI width {width_px} out of range (1..{sensor_w})",
+            }
+        if height_px <= 0 or height_px > sensor_h:
+            return {
+                "success": False,
+                "error": f"AOI height {height_px} out of range (1..{sensor_h})",
             }
 
-        left, top = self._centered_roi_edges(sensor_px, side_px)
+        # Left inset fixes the width; top inset fixes the height (each axis is
+        # centered/symmetric, so the two are independent).
+        left = self._centered_roi_edges(sensor_w, width_px)[0]
+        top = self._centered_roi_edges(sensor_h, height_px)[0]
         self.logger.info(
-            f"Setting centered square AOI {side_px}x{side_px} on a {sensor_px}px "
-            f"sensor (ROI left={left}, top={top})"
+            f"Setting centered AOI {width_px}x{height_px} on a "
+            f"{sensor_w}x{sensor_h}px sensor (ROI left={left}, top={top})"
         )
 
         def _send_edge(code: int, name: str, edge_value: int) -> Dict[str, Any]:
@@ -327,26 +341,44 @@ class CameraService(MicroscopeCommandService):
         except Exception as exc:  # noqa: BLE001
             return {
                 "success": True,
-                "requested_side": side_px,
+                "requested_width": width_px,
+                "requested_height": height_px,
                 "width": None,
                 "height": None,
                 "applied": False,
                 "warning": f"ROI commands sent but could not read back size: {exc}",
             }
 
-        applied = width == side_px and height == side_px
+        applied = width == width_px and height == height_px
         if not applied:
             self.logger.warning(
                 f"AOI read-back {width}x{height} does not match requested "
-                f"{side_px}x{side_px} — the firmware may use different ROI semantics"
+                f"{width_px}x{height_px} — the firmware may use different ROI "
+                f"semantics"
             )
         return {
             "success": True,
-            "requested_side": side_px,
+            "requested_width": width_px,
+            "requested_height": height_px,
             "width": width,
             "height": height,
             "applied": applied,
         }
+
+    def set_centered_square_aoi(
+        self, side_px: int, sensor_px: int = 2048
+    ) -> Dict[str, Any]:
+        """Set a CENTERED SQUARE camera ROI of ``side_px`` pixels.
+
+        Thin wrapper over :meth:`set_centered_aoi` for callers that only offer a
+        single square size. Returns the same dict plus ``requested_side`` for
+        backward compatibility.
+        """
+        result = self.set_centered_aoi(
+            side_px, side_px, sensor_w=sensor_px, sensor_h=sensor_px
+        )
+        result.setdefault("requested_side", side_px)
+        return result
 
     def get_exposure(self) -> float:
         """

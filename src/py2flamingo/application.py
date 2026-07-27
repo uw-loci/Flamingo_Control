@@ -361,6 +361,14 @@ class FlamingoApplication(QObject):
                 self.sample_view.update_workflow_progress("Running...", 0, None)
             except Exception:  # noqa: BLE001
                 self.logger.debug("sample-view start status failed", exc_info=True)
+            # A workflow takes over the camera + illumination in firmware but
+            # sends no camera-state/light-source signals back, so the Live
+            # button and LED control would otherwise stay stuck "on". Resync
+            # the GUI only (no hardware commands — cannot disturb the run).
+            try:
+                self.sample_view.sync_ui_for_external_acquisition()
+            except Exception:  # noqa: BLE001
+                self.logger.debug("live/LED resync failed", exc_info=True)
 
     def _on_workflow_run_stopped(self) -> None:
         if self.sample_view is not None:

@@ -813,11 +813,11 @@ class WorkflowController(QObject):
         ox = str(stack.get("Stack option settings 1", "")).strip()
         oy = str(stack.get("Stack option settings 2", "")).strip()
         warnings.append(
-            f"Tiling: the workflow requests {ox}%/{oy}% X/Y overlap; the server "
-            f"derives the grid from the region + FOV, giving "
-            f"{geom.tiles_x}×{geom.tiles_y} = {geom.total_tiles} tiles "
-            f"(FOV {geom.fov_x_mm:.3f}×{geom.fov_y_mm:.3f} mm). The client "
-            f"count may differ by ±1 tile per axis due to floor-vs-ceil rounding."
+            f"Tiling looks OK: at {ox}%/{oy}% X/Y overlap the server will image "
+            f"about {geom.tiles_x}×{geom.tiles_y} = {geom.total_tiles} tiles "
+            f"(FOV {geom.fov_x_mm:.3f}×{geom.fov_y_mm:.3f} mm). This is just a "
+            f"heads-up, not a problem — the exact count may land ±1 tile per "
+            f"axis vs. this preview from rounding; the server decides the final grid."
         )
         shown = geom.violations[:8]
         for v in shown:
