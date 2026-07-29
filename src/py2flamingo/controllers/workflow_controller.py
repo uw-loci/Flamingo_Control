@@ -421,6 +421,46 @@ class WorkflowController(QObject):
         else:
             return (True, [])
 
+    def _apply_workflow_aoi(self, workflow_dict: Optional[Dict[str, Any]]) -> None:
+        """Set the camera's centered AOI to match the workflow's Camera Settings.
+
+        The server derives the tile field-of-view from the LIVE camera AOI
+        (``CAMERA_IMAGE_SIZE_GET``), not the transmitted ``AOI width/height``
+        fields, so the sensor must actually be cropped before the run. Best
+        effort: if the camera service is unavailable or the set fails, log and
+        continue (the run still uses whatever the camera currently is). Never
+        raises — a diagnostics helper must not block a workflow start.
+        """
+        if not workflow_dict:
+            return
+        cam = workflow_dict.get("Camera Settings", {}) or {}
+        try:
+            width = int(cam.get("AOI width"))
+            height = int(cam.get("AOI height"))
+        except (TypeError, ValueError):
+            return  # no explicit AOI to apply
+        if width <= 0 or height <= 0:
+            return
+
+        service = getattr(self._camera_controller, "camera_service", None)
+        if service is None or not hasattr(service, "set_centered_aoi"):
+            return
+
+        try:
+            result = service.set_centered_aoi(width, height)
+        except Exception as e:  # never block the run on an AOI set
+            self._logger.warning(
+                f"Could not set camera AOI {width}x{height} before workflow: {e}"
+            )
+            return
+        if isinstance(result, dict) and not result.get("success", False):
+            self._logger.warning(
+                f"Camera AOI {width}x{height} not applied before workflow: "
+                f"{result.get('error')}"
+            )
+        else:
+            self._logger.info(f"Camera AOI set to {width}x{height} for workflow run")
+
     def start_workflow_from_ui(
         self,
         workflow,
@@ -448,16 +488,22 @@ class WorkflowController(QObject):
                 return (False, reconnect_msg)
 
         try:
+            # Resolve the section dict (from the view, or from a Workflow model).
+            if workflow_dict is None:
+                if hasattr(workflow, "to_dict"):
+                    workflow_dict = workflow.to_dict()
+                else:
+                    return (False, "Invalid workflow: no dict or to_dict method")
+
+            # Crop the sensor to the workflow's AOI BEFORE it runs. The server
+            # reads the AOI live from the camera (CAMERA_IMAGE_SIZE_GET), so the
+            # Workflow.txt AOI fields alone do not crop the sensor — without this
+            # the run captures whatever the camera was last set to (e.g. a square
+            # AOI from the Live viewer), which breaks non-square acquisitions.
+            self._apply_workflow_aoi(workflow_dict)
+
             # Convert workflow dict to bytes
-            if workflow_dict is not None:
-                # Use the text formatter to convert dict to text
-                workflow_bytes = self._text_formatter.format_to_bytes(workflow_dict)
-            elif hasattr(workflow, "to_dict"):
-                # Convert Workflow model to dict first
-                workflow_dict = workflow.to_dict()
-                workflow_bytes = self._text_formatter.format_to_bytes(workflow_dict)
-            else:
-                return (False, "Invalid workflow: no dict or to_dict method")
+            workflow_bytes = self._text_formatter.format_to_bytes(workflow_dict)
 
             # Optionally save to disk
             if save_to_disk:

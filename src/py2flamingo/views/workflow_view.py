@@ -54,6 +54,7 @@ from py2flamingo.utils.workflow_parser import (
     infer_workflow_type,
     parse_workflow_file,
 )
+from py2flamingo.utils.workflow_serialization import build_workflow_section_dict
 from py2flamingo.views.colors import ERROR_COLOR, SUCCESS_BG, SUCCESS_COLOR, WARNING_BG
 from py2flamingo.views.workflow_panels import (
     CameraPanel,
@@ -1361,94 +1362,40 @@ class WorkflowView(QWidget):
         )
         camera = self._camera_panel.get_settings()
         save = self._save_panel.get_workflow_save_dict()
+        stack = self._zstack_panel.get_workflow_stack_dict()
 
-        # Build experiment settings
-        experiment_settings = {
-            **save,
-            "Plane spacing (um)": (
-                self._zstack_panel._z_step.value()
-                if self._current_type
-                in (WorkflowType.ZSTACK, WorkflowType.TILE, WorkflowType.MULTI_ANGLE)
-                else 1.0
-            ),
-            "Frame rate (f/s)": camera["frame_rate"],
-            "Exposure time (us)": camera["exposure_us"],
-        }
-
-        # Add time-lapse settings
-        if self._current_type == WorkflowType.TIME_LAPSE:
-            timelapse = self._timelapse_panel.get_workflow_timelapse_dict()
-            experiment_settings.update(timelapse)
-
-        # Add multi-angle settings
-        if self._current_type == WorkflowType.MULTI_ANGLE:
-            multiangle = self._multiangle_panel.get_workflow_multiangle_dict()
-            experiment_settings.update(multiangle)
-
-        workflow_dict = {
-            "Experiment Settings": experiment_settings,
-            "Camera Settings": {
-                "Exposure time (us)": camera["exposure_us"],
-                "Frame rate (f/s)": camera["frame_rate"],
-                "AOI width": camera["aoi_width"],
-                "AOI height": camera["aoi_height"],
-            },
-            "Start Position": {
-                "X (mm)": position_a.x,
-                "Y (mm)": position_a.y,
-                "Z (mm)": position_a.z,
-                "Angle (degrees)": position_a.r,
-            },
-            "Illumination Source": illumination,
-            "Illumination Options": illumination_options,
-        }
-
-        # Add stack settings
-        stack_dict = self._zstack_panel.get_workflow_stack_dict()
-
-        # Override with tiling if that's the type
+        # Per-type extra sections (gathered here; the assembler owns the layout).
+        tiling = None
         if self._current_type == WorkflowType.TILE:
-            tiling = self._tiling_panel.get_workflow_tiling_dict()
-            stack_dict.update(tiling)
+            # Tile counts stay client-side (estimate / tile_geometry); the server
+            # derives the grid from region + FOV + OVERLAP PERCENT, so we hand the
+            # assembler the overlap % — not the counts — for settings 1/2.
+            tiling = {"overlap_percent": self._tiling_panel.get_overlap_percent()}
+        timelapse = (
+            self._timelapse_panel.get_workflow_timelapse_dict()
+            if self._current_type == WorkflowType.TIME_LAPSE
+            else None
+        )
+        multiangle = (
+            self._multiangle_panel.get_workflow_multiangle_dict()
+            if self._current_type == WorkflowType.MULTI_ANGLE
+            else None
+        )
 
-        # Add camera capture settings from camera panel
-        stack_dict["Camera 1 capture percentage"] = camera["cam1_capture_percentage"]
-        stack_dict["Camera 1 capture mode"] = camera["cam1_capture_mode"]
-        stack_dict["Camera 2 capture percentage"] = camera["cam2_capture_percentage"]
-        stack_dict["Camera 2 capture mode"] = camera["cam2_capture_mode"]
-
-        workflow_dict["Stack Settings"] = stack_dict
-
-        # Calculate end position based on workflow type using DualPositionPanel values
-        if self._current_type == WorkflowType.ZSTACK:
-            # Z-Stack: X/Y/R from A, Z from B
-            workflow_dict["End Position"] = {
-                "X (mm)": position_a.x,
-                "Y (mm)": position_a.y,
-                "Z (mm)": position_b.z,
-                "Angle (degrees)": position_a.r,
-            }
-        elif self._current_type == WorkflowType.TILE:
-            # Tiling: X/Y/Z from B, R from A
-            workflow_dict["End Position"] = {
-                "X (mm)": position_b.x,
-                "Y (mm)": position_b.y,
-                "Z (mm)": position_b.z,
-                "Angle (degrees)": position_a.r,
-            }
-        elif self._current_type == WorkflowType.MULTI_ANGLE:
-            # Multi-Angle: X/Y/R from A, Z from B
-            workflow_dict["End Position"] = {
-                "X (mm)": position_a.x,
-                "Y (mm)": position_a.y,
-                "Z (mm)": position_b.z,
-                "Angle (degrees)": position_a.r,
-            }
-        else:
-            # Snapshot, Time-Lapse: same as start
-            workflow_dict["End Position"] = workflow_dict["Start Position"].copy()
-
-        return workflow_dict
+        return build_workflow_section_dict(
+            workflow_type=self._current_type,
+            position_a=position_a,
+            position_b=position_b,
+            camera=camera,
+            save=save,
+            illumination=illumination,
+            illumination_options=illumination_options,
+            stack=stack,
+            plane_spacing_um=self._zstack_panel._z_step.value(),
+            tiling=tiling,
+            timelapse=timelapse,
+            multiangle=multiangle,
+        )
 
     def clear_message(self) -> None:
         """Clear message display."""

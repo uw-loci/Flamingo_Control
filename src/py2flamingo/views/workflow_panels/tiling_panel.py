@@ -239,18 +239,13 @@ class TilingPanel(QWidget):
             overlap_percent=self._overlap.value(),
         )
 
-    def get_workflow_tiling_dict(self) -> Dict[str, Any]:
-        """
-        Get tiling settings as workflow dictionary format.
-
-        Returns:
-            Dictionary for workflow file Stack Settings section
-        """
-        return {
-            "Stack option": "Tile",
-            "Stack option settings 1": self._tiles_x.value(),
-            "Stack option settings 2": self._tiles_y.value(),
-        }
+    # NOTE: the old get_workflow_tiling_dict() lived here and emitted tile COUNTS
+    # into "Stack option settings 1/2". The server reads those fields as X/Y
+    # OVERLAP PERCENT, so it was wrong (and diverged from the model serializers).
+    # Serialization is now centralized in
+    # utils.workflow_serialization.build_workflow_section_dict, which writes the
+    # overlap % (via get_overlap_percent below). Do not reintroduce a per-panel
+    # workflow-dict builder — that is the drift #4 removed.
 
     def set_settings(self, settings: TileSettings) -> None:
         """

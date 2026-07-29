@@ -526,11 +526,21 @@ def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:
     lines.append(
         f"    Camera 1 capture percentage = {stack.get('Camera 1 capture percentage', 100)}"
     )
-    lines.append(f"    Camera 1 capture mode = {stack.get('Camera 1 capture mode', 0)}")
+    # The server matches this field by its FULL label including the parenthetical
+    # (SystemIDs.h ID_CAMERA_OVERLAP_C1_CAPTURE_MODE) — a short "Camera N capture
+    # mode" is not recognized and the mode silently defaults to 0/full. Emit the
+    # exact label. (Our own loader reads it back by prefix, so round-trip is safe.)
+    lines.append(
+        f"    Camera 1 capture mode (0 full, 1 from front, 2 from back, 3 none) ="
+        f" {stack.get('Camera 1 capture mode', 0)}"
+    )
     lines.append(
         f"    Camera 2 capture percentage = {stack.get('Camera 2 capture percentage', 100)}"
     )
-    lines.append(f"    Camera 2 capture mode = {stack.get('Camera 2 capture mode', 0)}")
+    lines.append(
+        f"    Camera 2 capture mode (0 full, 1 from front, 2 from back, 3 none) ="
+        f" {stack.get('Camera 2 capture mode', 0)}"
+    )
     lines.append(f"    Stack option = {stack.get('Stack option', 'None')}")
     lines.append(
         f"    Stack option settings 1 = {stack.get('Stack option settings 1', 0)}"
