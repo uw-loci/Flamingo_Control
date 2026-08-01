@@ -26,6 +26,14 @@ _FLAT_MIP_SERVER_PATTERN = re.compile(
 # Simple pattern: anything_X000_Y000_C00.tif (from post-processing scripts)
 _FLAT_MIP_SIMPLE_PATTERN = re.compile(r"_X(\d+)_Y(\d+)_C(\d+)\.tif$", re.IGNORECASE)
 
+# Tile-folder coordinate pattern (X{mm}_Y{mm}), matched ANYWHERE in the folder
+# name (unanchored) so single-workflow / vendor acquisition folders with
+# timestamped names — e.g. "20260307_041426_SmallTile3_2026-03-07_X6.43_Y18.14" —
+# are discovered too, not only bare "X{mm}_Y{mm}" folders from our own tile
+# collection. Mirrors the stitcher's FOLDER_COORD_PATTERN so the MIP overview and
+# stitching discover the same acquisitions.
+_FOLDER_COORD_PATTERN = re.compile(r"X([-\d.]+)_Y([-\d.]+)")
+
 
 @dataclass
 class MIPTileResult:
@@ -225,7 +233,7 @@ def parse_coords_from_folder(folder_name: str) -> Tuple[float, float]:
     Raises:
         ValueError: If folder name doesn't contain expected pattern
     """
-    match = re.search(r"X([-\d.]+)_Y([-\d.]+)", folder_name)
+    match = _FOLDER_COORD_PATTERN.search(folder_name)
     if match:
         return float(match.group(1)), float(match.group(2))
     raise ValueError(
@@ -285,7 +293,11 @@ def find_date_folders(base_path: Path) -> List[str]:
 def find_tile_folders(date_path: Path) -> List[Path]:
     """Find tile coordinate folders in a date directory.
 
-    Looks for folders matching X{x}_Y{y} pattern.
+    Matches any folder whose name CONTAINS an ``X{x}_Y{y}`` coordinate — both
+    bare ``X12.50_Y8.30`` folders (our tile collection) and timestamped
+    single-workflow / vendor folders like
+    ``20260307_041426_SmallTile3_2026-03-07_X6.43_Y18.14``. Folders without a
+    ``*_MP.tif`` are harmlessly skipped later by the loader.
 
     Args:
         date_path: Date folder to search
@@ -293,12 +305,11 @@ def find_tile_folders(date_path: Path) -> List[Path]:
     Returns:
         List of tile folder paths
     """
-    tile_pattern = re.compile(r"^X[-\d.]+_Y[-\d.]+$")
     tile_folders = []
 
     if date_path.is_dir():
         for item in date_path.iterdir():
-            if item.is_dir() and tile_pattern.match(item.name):
+            if item.is_dir() and _FOLDER_COORD_PATTERN.search(item.name):
                 tile_folders.append(item)
 
     return tile_folders
@@ -415,10 +426,10 @@ def detect_layout_type(directory: Path) -> str:
     if not directory.is_dir():
         return "none"
 
-    # Check for subfolder layout: X*_Y* dirs containing *_MP.tif
-    tile_pattern = re.compile(r"^X[-\d.]+_Y[-\d.]+$")
+    # Check for subfolder layout: a dir whose name carries an X_Y coordinate
+    # (bare or timestamped single-workflow name) and holds a *_MP.tif.
     for item in directory.iterdir():
-        if item.is_dir() and tile_pattern.match(item.name):
+        if item.is_dir() and _FOLDER_COORD_PATTERN.search(item.name):
             if list(item.glob("*_MP.tif")):
                 return "subfolder"
 
