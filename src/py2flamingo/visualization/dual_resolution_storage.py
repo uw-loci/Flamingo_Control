@@ -111,6 +111,202 @@ def _vectorized_accumulate(
         return unique_indices, accumulated
 
 
+# Largest storage-resolution array we will densify for QUALITY smoothing
+# (elements, uint16 -> 1 GiB).
+_MAX_DENSE_REGION = 512_000_000
+
+
+def _default_storage_budget() -> int:
+    """Bytes of sparse voxel storage to allow before refusing more.
+
+    A quarter of physical RAM: the 3D view is a preview, and the same machine
+    is simultaneously holding camera buffers, the display cache and napari's
+    own copies. Falls back to 4 GiB when psutil is unavailable.
+    """
+    try:
+        import psutil
+
+        return int(psutil.virtual_memory().total * 0.25)
+    except Exception:  # noqa: BLE001 - psutil is optional
+        return 4 * 2**30
+
+
+def _reduce_sorted(
+    keys: np.ndarray, values: np.ndarray, mode: str
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Collapse duplicate keys in a *sorted* (keys, values) pair.
+
+    ``keys`` must be sorted ascending and ``values`` must be in the matching
+    order, oldest write first — 'latest' relies on that ordering.
+    """
+    if keys.size == 0:
+        return keys, values
+
+    unique_keys, start = np.unique(keys, return_index=True)
+
+    if mode == "maximum":
+        out = np.maximum.reduceat(values, start)
+    elif mode == "additive":
+        out = np.clip(np.add.reduceat(values.astype(np.int64), start), 0, 65535)
+    else:  # 'latest' — last write for each key wins
+        out = values[np.append(start[1:], values.size) - 1]
+
+    return unique_keys, out.astype(values.dtype, copy=False)
+
+
+class SparseChannelStore:
+    """Occupied voxels for one channel: sorted int64 keys + uint16 values.
+
+    This replaces the three tuple-keyed Python dicts the storage used to carry
+    per channel (data / timestamps / confidence). Between them those cost
+    ~270 bytes per occupied voxel, and a single MIP-overview tile can occupy
+    tens of millions of distinct voxels — 1600 planes x 100x100 stored pixels,
+    with the 5 µm storage grid finer than both the ~8 µm stored-pixel footprint
+    and the Z step, so almost nothing coalesces. One tile could therefore cost
+    several GB, which is where ``MemoryError`` in ``update_storage`` came from.
+    This layout costs 10 bytes per voxel.
+
+    The timestamp and confidence dicts were written on every update and never
+    read anywhere in the codebase, so they are simply gone. 'latest' and
+    'average' do not need them: writes arrive in chronological order, so
+    "newer than the stored timestamp" is always true, and "no timestamp yet"
+    is just "key absent".
+
+    Writes land in an append buffer and are folded into the sorted arrays
+    lazily, so a per-frame write does not re-sort the whole channel.
+    Compaction always builds *new* arrays and never mutates the published
+    ones — that is what makes :meth:`snapshot` safe to hand to the display
+    thread without copying.
+
+    'maximum', 'additive' and 'latest' are associative, so deferring the fold
+    cannot change the answer. 'average' is not, so it keeps a running sum and
+    contribution count per voxel (an extra 12 bytes/voxel, only in that mode)
+    rather than averaging averages — otherwise the result would depend on when
+    compaction happened to land. That also makes it a true mean of every
+    contribution, where the old per-voxel code did ``(old + new) / 2``, an
+    exponentially-weighted mean dominated by the last write.
+    """
+
+    def __init__(self, dtype=np.uint16, min_compact: int = 1_000_000):
+        self._dtype = dtype
+        self._keys = np.empty(0, dtype=np.int64)
+        self._values = np.empty(0, dtype=dtype)
+        # Populated only while update_mode == 'average'.
+        self._sums: Optional[np.ndarray] = None
+        self._counts: Optional[np.ndarray] = None
+        self._pending_keys: List[np.ndarray] = []
+        self._pending_values: List[np.ndarray] = []
+        self._pending_n = 0
+        self._pending_mode: Optional[str] = None
+        self._min_compact = min_compact
+
+    # -- writes ----------------------------------------------------------
+    def merge(self, keys: np.ndarray, values: np.ndarray, mode: str = "maximum"):
+        """Fold a batch of (flat index, value) pairs into the store."""
+        if keys.size == 0:
+            return
+        # A mode change mid-run must not be applied retroactively to writes
+        # that are still pending under the previous mode.
+        if self._pending_mode is not None and mode != self._pending_mode:
+            self.compact()
+        self._pending_mode = mode
+        self._pending_keys.append(np.asarray(keys, dtype=np.int64))
+        self._pending_values.append(np.asarray(values, dtype=self._dtype))
+        self._pending_n += keys.size
+
+        if self._pending_n >= max(self._min_compact, self._keys.size):
+            self.compact()
+
+    def compact(self):
+        """Fold the append buffer into the sorted arrays."""
+        if not self._pending_keys:
+            return
+        mode = self._pending_mode or "maximum"
+        # Existing data first so that, with a stable sort, pending writes are
+        # the later ones — which is what 'latest' means.
+        keys = np.concatenate([self._keys] + self._pending_keys)
+        pending_values = self._pending_values
+        values = np.concatenate([self._values] + pending_values)
+        self._pending_keys = []
+        self._pending_values = []
+        self._pending_n = 0
+        self._pending_mode = None
+
+        order = np.argsort(keys, kind="stable")
+
+        if mode == "average":
+            # Carry sums/counts so the mean is over every contribution ever
+            # written, not over whatever compaction happened to group.
+            if self._counts is None:
+                prev_sums = self._values.astype(np.int64)
+                prev_counts = np.ones(self._keys.size, dtype=np.int64)
+            else:
+                prev_sums, prev_counts = self._sums, self._counts
+            sums = np.concatenate(
+                [prev_sums] + [v.astype(np.int64) for v in pending_values]
+            )
+            counts = np.concatenate(
+                [prev_counts]
+                + [np.ones(v.size, dtype=np.int64) for v in pending_values]
+            )
+            unique_keys, start = np.unique(keys[order], return_index=True)
+            self._keys = unique_keys
+            self._sums = np.add.reduceat(sums[order], start)
+            self._counts = np.add.reduceat(counts[order], start)
+            self._values = np.clip(self._sums // self._counts, 0, 65535).astype(
+                self._dtype
+            )
+        else:
+            self._sums = None
+            self._counts = None
+            self._keys, self._values = _reduce_sorted(keys[order], values[order], mode)
+
+    def clear(self):
+        self._keys = np.empty(0, dtype=np.int64)
+        self._values = np.empty(0, dtype=self._dtype)
+        self._sums = None
+        self._counts = None
+        self._pending_keys = []
+        self._pending_values = []
+        self._pending_n = 0
+        self._pending_mode = None
+
+    # -- reads -----------------------------------------------------------
+    def snapshot(self) -> Tuple[np.ndarray, np.ndarray]:
+        """``(keys, values)``, compacted. Safe to read without the lock."""
+        self.compact()
+        return self._keys, self._values
+
+    @property
+    def is_empty(self) -> bool:
+        """Cheap emptiness check — never triggers a compaction."""
+        return self._keys.size == 0 and self._pending_n == 0
+
+    @property
+    def approx_len(self) -> int:
+        """Occupied voxels, without forcing a compaction.
+
+        An upper bound — writes still sitting in the append buffer are counted
+        even if they land on voxels already stored. Use this for status
+        readouts and log messages, where sharpening the number by compacting
+        (seconds of work, on the GUI thread) is the wrong trade.
+        """
+        return int(self._keys.size + self._pending_n)
+
+    def __len__(self) -> int:
+        self.compact()
+        return int(self._keys.size)
+
+    @property
+    def nbytes(self) -> int:
+        """Actual bytes held, including the not-yet-folded append buffer."""
+        pending = sum(a.nbytes for a in self._pending_keys) + sum(
+            a.nbytes for a in self._pending_values
+        )
+        average = 0 if self._counts is None else self._sums.nbytes + self._counts.nbytes
+        return int(self._keys.nbytes + self._values.nbytes + pending + average)
+
+
 @dataclass
 class DualResolutionConfig:
     """Configuration for dual-resolution storage."""
@@ -244,6 +440,7 @@ class DualResolutionVoxelStorage:
         config: Optional[DualResolutionConfig] = None,
         max_history_blocks: int = 500,
         zarr_path: Optional[str] = None,
+        max_storage_bytes: Optional[int] = None,
     ):
         """Initialize dual-resolution voxel storage.
 
@@ -252,6 +449,8 @@ class DualResolutionVoxelStorage:
             max_history_blocks: Maximum history blocks to keep
             zarr_path: Optional path for persistent Zarr storage. If provided,
                       data will be written to disk as it's acquired.
+            max_storage_bytes: Ceiling on sparse voxel storage. Defaults to a
+                      fraction of system RAM.
         """
         self.config = config or DualResolutionConfig()
 
@@ -259,15 +458,15 @@ class DualResolutionVoxelStorage:
         # get_display_volume which calls downsample_to_display (reentrant chain)
         self._storage_lock = threading.RLock()
 
-        # High-resolution storage (sparse for memory efficiency using dictionaries)
+        # High-resolution sparse storage: channel -> SparseChannelStore
         self.storage_dims = self.config.storage_dimensions
-        self.storage_data: Dict[int, Dict] = {}  # Channel -> dict of (x,y,z) -> value
-        self.storage_timestamps: Dict[int, Dict] = (
-            {}
-        )  # Channel -> dict of (x,y,z) -> timestamp
-        self.storage_confidence: Dict[int, Dict] = (
-            {}
-        )  # Channel -> dict of (x,y,z) -> confidence
+        self.storage_data: Dict[int, SparseChannelStore] = {}
+
+        # Ceiling on sparse storage. Nothing above this class prunes, so a long
+        # tile collection grows storage without bound; past this point we stop
+        # adding rather than let the tile worker die on MemoryError.
+        self.max_storage_bytes = max_storage_bytes or _default_storage_budget()
+        self._storage_budget_exceeded = False
 
         # Low-resolution display cache
         self.display_dims = self.config.display_dimensions
@@ -421,11 +620,9 @@ class DualResolutionVoxelStorage:
         self._session_loaded_channels = set()
 
         for ch in range(self.num_channels):
-            # High-res sparse storage using Python dictionaries (faster than sparse.DOK and no Numba compilation)
-            # Dictionary keys are (x, y, z) tuples, values are the data
-            self.storage_data[ch] = {}
-            self.storage_timestamps[ch] = {}
-            self.storage_confidence[ch] = {}
+            # High-res sparse storage: sorted flat (Z,Y,X) indices + values.
+            # See SparseChannelStore for why this is not a dict of tuples.
+            self.storage_data[ch] = SparseChannelStore()
 
             # Low-res display cache (dense for napari)
             self.display_cache[ch] = np.zeros(self.display_dims, dtype=np.uint16)
@@ -496,130 +693,9 @@ class DualResolutionVoxelStorage:
             timestamp: Acquisition timestamp
             update_mode: 'latest', 'maximum', 'average', 'additive'
         """
-        # Use vectorized path for large batches (10-50x faster)
-        # Threshold of 1000 voxels balances overhead vs speedup
-        VECTORIZED_THRESHOLD = 1000
-
-        if len(world_coords) >= VECTORIZED_THRESHOLD and update_mode in (
-            "maximum",
-            "additive",
-            "average",
-        ):
-            logger.debug(
-                f"Using vectorized storage update for {len(world_coords)} voxels"
-            )
-            return self.update_storage_vectorized(
-                channel_id, world_coords, pixel_values, timestamp, update_mode
-            )
-
-        # Non-vectorized path (< 1000 voxels) — fast enough to hold lock for entire operation
-        # Convert to storage voxel coordinates (pure numpy, no shared state)
-        storage_voxels = self.world_to_storage_voxel(world_coords)
-
-        # Filter valid voxels (within bounds and sample region)
-        valid_mask = np.all(
-            (storage_voxels >= 0) & (storage_voxels < np.array(self.storage_dims)),
-            axis=1,
+        return self.update_storage_vectorized(
+            channel_id, world_coords, pixel_values, timestamp, update_mode
         )
-
-        logger.info(
-            f"STORAGE: Ch {channel_id}: {np.sum(valid_mask)}/{len(storage_voxels)} voxels valid | "
-            f"World range (Z,Y,X): Z=[{world_coords[:,0].min():.0f},{world_coords[:,0].max():.0f}], "
-            f"Y=[{world_coords[:,1].min():.0f},{world_coords[:,1].max():.0f}], "
-            f"X=[{world_coords[:,2].min():.0f},{world_coords[:,2].max():.0f}] µm | "
-            f"Storage voxel range: Z=[{storage_voxels[:,0].min()},{storage_voxels[:,0].max()}], "
-            f"Y=[{storage_voxels[:,1].min()},{storage_voxels[:,1].max()}], "
-            f"X=[{storage_voxels[:,2].min()},{storage_voxels[:,2].max()}]"
-        )
-
-        if not np.any(valid_mask):
-            # Log warning - voxels outside storage array bounds (should be rare)
-            logger.warning(
-                f"Channel {channel_id}: All {len(storage_voxels)} voxels rejected - outside storage bounds"
-            )
-            logger.warning(f"  Storage dims: {self.storage_dims}")
-            logger.warning(
-                f"  Sample region center: {self.config.sample_region_center} µm"
-            )
-            logger.warning(
-                f"  Sample region radius: {self.config.sample_region_radius} µm"
-            )
-            if len(world_coords) > 0:
-                # World coords are in Z,Y,X order per napari convention
-                logger.warning(
-                    f"  Rejected world coords range (ZYX order): Z=[{world_coords[:, 0].min():.1f}, {world_coords[:, 0].max():.1f}], "
-                    f"Y=[{world_coords[:, 1].min():.1f}, {world_coords[:, 1].max():.1f}], "
-                    f"X=[{world_coords[:, 2].min():.1f}, {world_coords[:, 2].max():.1f}] µm"
-                )
-                # Storage voxels should also be in Z,Y,X order
-                logger.warning(
-                    f"  Rejected storage voxel range (ZYX): Z=[{storage_voxels[:, 0].min()}, {storage_voxels[:, 0].max()}], "
-                    f"Y=[{storage_voxels[:, 1].min()}, {storage_voxels[:, 1].max()}], "
-                    f"X=[{storage_voxels[:, 2].min()}, {storage_voxels[:, 2].max()}]"
-                )
-            return  # No valid voxels to update
-
-        valid_voxels = storage_voxels[valid_mask]
-        valid_values = pixel_values[valid_mask]
-
-        # Lock for the dict write loop (< 1000 voxels, so < 50ms lock hold)
-        with self._storage_lock:
-            # Update storage with appropriate strategy
-            data_dict = self.storage_data[channel_id]
-            time_dict = self.storage_timestamps[channel_id]
-            conf_dict = self.storage_confidence[channel_id]
-
-            for voxel_idx, value in zip(valid_voxels, valid_values):
-                key = tuple(voxel_idx)
-
-                old_value = data_dict.get(key, 0)
-                old_time = time_dict.get(key, 0)
-                old_conf = conf_dict.get(key, 0)
-
-                new_value = self._apply_update_strategy(
-                    old_value, value, old_time, timestamp, update_mode
-                )
-
-                data_dict[key] = new_value
-                time_dict[key] = timestamp
-                conf_dict[key] = min(255, old_conf + 1)
-
-            # Update data bounds
-            self._update_bounds(world_coords[valid_mask])
-
-            # Mark display as needing update
-            self.display_dirty[channel_id] = True
-            self._display_epoch[channel_id] = self._display_epoch.get(channel_id, 0) + 1
-
-            # Invalidate transform cache
-            cache_key = f"{channel_id}_rotated"
-            if cache_key in self.transform_cache:
-                del self.transform_cache[cache_key]
-                logger.debug(
-                    f"Transform cache invalidated for channel {channel_id} (new data added)"
-                )
-
-    def _apply_update_strategy(
-        self,
-        old_val: float,
-        new_val: float,
-        old_time: float,
-        new_time: float,
-        mode: str,
-    ) -> float:
-        """Apply the specified update strategy."""
-        if mode == "latest":
-            return new_val if new_time >= old_time else old_val
-        elif mode == "maximum":
-            return max(old_val, new_val)
-        elif mode == "average":
-            if old_time == 0:
-                return new_val
-            return int((old_val + new_val) / 2)
-        elif mode == "additive":
-            return min(65535, old_val + new_val)
-        else:
-            return new_val
 
     def update_storage_vectorized(
         self,
@@ -630,28 +706,25 @@ class DualResolutionVoxelStorage:
         update_mode: str = "maximum",
     ):
         """
-        Vectorized storage update using NumPy 2.x optimizations.
+        Vectorized storage update.
 
-        10-50x faster than per-voxel Python loops for batch updates.
-        Uses np.ravel_multi_index, np.unique, and np.add.at/np.maximum.at
-        for efficient batch accumulation.
-
-        Uses fine-grained locking: numpy computation runs WITHOUT the lock
-        (releases GIL for native code, allowing GUI thread to run), then
-        dict writes happen in small chunks with lock/release between them.
-        This prevents the GUI thread from freezing during background tile
-        processing (which previously held the lock for 30-57 seconds).
+        All the coordinate work runs WITHOUT the storage lock — those numpy
+        calls release the GIL, so the GUI thread keeps draining camera frames
+        while a background tile is being processed. Only the (cheap) handoff
+        to the channel's :class:`SparseChannelStore` takes the lock.
 
         Args:
             channel_id: Channel index (0-3)
             world_coords: (N, 3) array of world coordinates in micrometers
             pixel_values: (N,) array of pixel intensities
-            timestamp: Acquisition timestamp
+            timestamp: Acquisition timestamp (kept for API compatibility; the
+                sparse store does not need it — see SparseChannelStore)
             update_mode: 'latest', 'maximum', 'average', 'additive'
         """
+        if self._storage_budget_exceeded:
+            return
+
         # === Phase 1: Numpy computation WITHOUT lock ===
-        # These operations release the GIL for native code, so the GUI
-        # thread can process camera frames concurrently.
         storage_voxels = self.world_to_storage_voxel(world_coords)
 
         valid_mask = np.all(
@@ -661,8 +734,27 @@ class DualResolutionVoxelStorage:
 
         if not np.any(valid_mask):
             logger.warning(
-                f"Channel {channel_id}: All voxels rejected - outside storage bounds"
+                f"Channel {channel_id}: All {len(storage_voxels)} voxels rejected "
+                "- outside storage bounds"
             )
+            logger.warning(f"  Storage dims: {self.storage_dims}")
+            logger.warning(
+                f"  Sample region center: {self.config.sample_region_center} µm"
+            )
+            if len(world_coords) > 0:
+                # Both ranges are (Z, Y, X) per the napari convention.
+                logger.warning(
+                    f"  Rejected world coords (ZYX): "
+                    f"Z=[{world_coords[:, 0].min():.1f}, {world_coords[:, 0].max():.1f}], "
+                    f"Y=[{world_coords[:, 1].min():.1f}, {world_coords[:, 1].max():.1f}], "
+                    f"X=[{world_coords[:, 2].min():.1f}, {world_coords[:, 2].max():.1f}] µm"
+                )
+                logger.warning(
+                    f"  Rejected storage voxels (ZYX): "
+                    f"Z=[{storage_voxels[:, 0].min()}, {storage_voxels[:, 0].max()}], "
+                    f"Y=[{storage_voxels[:, 1].min()}, {storage_voxels[:, 1].max()}], "
+                    f"X=[{storage_voxels[:, 2].min()}, {storage_voxels[:, 2].max()}]"
+                )
             return
 
         valid_voxels = storage_voxels[valid_mask]
@@ -676,39 +768,14 @@ class DualResolutionVoxelStorage:
             valid_voxels, valid_values, self.storage_dims, update_mode
         )
 
-        z_coords, y_coords, x_coords = np.unravel_index(unique_flat, self.storage_dims)
-
-        # === Phase 2: Dict writes in chunks WITH lock ===
-        # Each chunk holds the lock for ~25-50ms, then releases it so the
-        # GUI thread can read storage (for visualization) or process frames.
-        DICT_CHUNK_SIZE = 5000
-        n_unique = len(z_coords)
-        is_maximum = update_mode == "maximum"
-
-        for chunk_start in range(0, n_unique, DICT_CHUNK_SIZE):
-            chunk_end = min(chunk_start + DICT_CHUNK_SIZE, n_unique)
-            with self._storage_lock:
-                data_dict = self.storage_data[channel_id]
-                time_dict = self.storage_timestamps[channel_id]
-                conf_dict = self.storage_confidence[channel_id]
-
-                for i in range(chunk_start, chunk_end):
-                    key = (int(z_coords[i]), int(y_coords[i]), int(x_coords[i]))
-                    new_value = int(accumulated_values[i])
-
-                    if is_maximum:
-                        old_value = data_dict.get(key, 0)
-                        if new_value > old_value:
-                            data_dict[key] = new_value
-                            time_dict[key] = timestamp
-                            conf_dict[key] = min(255, conf_dict.get(key, 0) + 1)
-                    else:
-                        data_dict[key] = new_value
-                        time_dict[key] = timestamp
-                        conf_dict[key] = min(255, conf_dict.get(key, 0) + 1)
-
-        # === Phase 3: Metadata updates (brief lock) ===
+        # === Phase 2: Handoff WITH lock ===
+        # An append into the store's pending buffer; the periodic compaction
+        # it triggers is the only long hold, and it is amortized (the buffer
+        # doubles, so a channel of N voxels compacts O(log N) times).
         with self._storage_lock:
+            self.storage_data[channel_id].merge(
+                unique_flat, accumulated_values, update_mode
+            )
             self._update_bounds(world_coords[valid_mask])
             self.display_dirty[channel_id] = True
             self._display_epoch[channel_id] = self._display_epoch.get(channel_id, 0) + 1
@@ -716,6 +783,34 @@ class DualResolutionVoxelStorage:
             if cache_key in self.transform_cache:
                 del self.transform_cache[cache_key]
                 logger.debug(f"Transform cache invalidated for channel {channel_id}")
+
+        self._check_storage_budget()
+
+    def _check_storage_budget(self):
+        """Stop growing storage before the process runs out of memory.
+
+        Sparse storage is unbounded by design: it grows with however many
+        tiles get collected, and nothing above it ever prunes. Rather than
+        die with ``MemoryError`` mid-acquisition (which kills the tile worker
+        and leaves the 3D view half-populated with no explanation), refuse
+        further voxels and say so once, loudly. Acquisition and the on-disk
+        data are unaffected — only the 3D preview stops filling in.
+        """
+        if self._storage_budget_exceeded:
+            return
+        used = sum(store.nbytes for store in self.storage_data.values())
+        if used < self.max_storage_bytes:
+            return
+        self._storage_budget_exceeded = True
+        logger.error(
+            f"3D view storage budget reached: {used / 2**30:.1f} GiB of "
+            f"{self.max_storage_bytes / 2**30:.1f} GiB across "
+            f"{self._count_voxels():,} voxels. No further tiles will be added "
+            "to the 3D view; acquisition and saved data are unaffected. "
+            "To fit more, raise storage.voxel_size_um in "
+            "visualization_3d_config.yaml (memory scales as 1/size^3) or "
+            "clear the view between tile batches."
+        )
 
     def _update_bounds(self, world_coords: np.ndarray):
         """Update the data bounds for optimization."""
@@ -751,51 +846,65 @@ class DualResolutionVoxelStorage:
         with self._storage_lock:
             if not force and not self.display_dirty.get(channel_id, True):
                 return self.display_cache[channel_id]
-            # Snapshot the storage dict (shallow copy: keys are tuples, values are ints)
-            # This allows the worker thread to continue writing while we iterate.
-            storage_snapshot = dict(self.storage_data[channel_id])
+            # Snapshot the sparse arrays. compact() inside snapshot() builds new
+            # arrays rather than mutating the published ones, so these two
+            # references stay valid while the worker keeps writing.
+            snapshot_keys, snapshot_values = self.storage_data[channel_id].snapshot()
             # Record the write-epoch so we only clear dirty at the end if no new
             # writes occurred while we were computing (which would mean our cache
             # is stale and needs another pass).
             snapshot_epoch = self._display_epoch.get(channel_id, 0)
 
         # === No lock: all computation on snapshot ===
-        if len(storage_snapshot) == 0:
+        if snapshot_keys.size == 0:
             # No data, return empty display
             self.display_cache[channel_id].fill(0)
             return self.display_cache[channel_id]
 
         logger.debug(
-            f"Downsampling channel {channel_id}: {len(storage_snapshot)} voxels in storage"
+            f"Downsampling channel {channel_id}: {snapshot_keys.size} voxels in storage"
         )
 
-        # Create temporary dense storage array (only for occupied region)
-        # This is more memory efficient than densifying the entire storage
-        occupied_coords = np.array(list(storage_snapshot.keys()))
-        min_coords = np.min(occupied_coords, axis=0)
-        max_coords = np.max(occupied_coords, axis=0) + 1
-
-        # Create dense sub-region
+        z_idx, y_idx, x_idx = np.unravel_index(snapshot_keys, self.storage_dims)
+        min_coords = np.array([z_idx.min(), y_idx.min(), x_idx.min()])
+        max_coords = np.array([z_idx.max(), y_idx.max(), x_idx.max()]) + 1
         region_shape = max_coords - min_coords
-        dense_region = np.zeros(region_shape, dtype=np.uint16)
-
-        # Fill dense region from snapshot (no lock held — worker can write concurrently)
-        for (x, y, z), value in storage_snapshot.items():
-            local_coords = (x - min_coords[0], y - min_coords[1], z - min_coords[2])
-            dense_region[local_coords] = value
-
-        # Apply smoothing to reduce aliasing during downsampling (only in QUALITY mode)
-        if (
-            self._transform_quality == TransformQuality.QUALITY
-            and self.config.resolution_ratio[0] > 1
-        ):
-            # Gaussian filter with sigma proportional to downsampling factor
-            sigma = tuple(r / 3.0 for r in self.config.resolution_ratio)
-            dense_region = ndimage.gaussian_filter(dense_region, sigma)
-
-        # Downsample using block averaging
         ratio = self.config.resolution_ratio
-        downsampled = self._block_reduce(dense_region, ratio)
+
+        # QUALITY mode needs a dense array to run the Gaussian over. That array
+        # covers the whole occupied bounding box at STORAGE resolution, which
+        # for a wide tile mosaic is far larger than the data in it — guard it,
+        # and fall back to the sparse path rather than trading one MemoryError
+        # for another.
+        want_smoothing = (
+            self._transform_quality == TransformQuality.QUALITY and ratio[0] > 1
+        )
+        if want_smoothing and np.prod(region_shape, dtype=np.int64) > _MAX_DENSE_REGION:
+            logger.warning(
+                f"Channel {channel_id}: occupied region {tuple(region_shape)} is "
+                f"{np.prod(region_shape, dtype=np.int64) / 1e9:.1f}G voxels — too "
+                "large to densify for QUALITY smoothing; using the sparse path"
+            )
+            want_smoothing = False
+
+        if want_smoothing:
+            dense_region = np.zeros(region_shape, dtype=np.uint16)
+            dense_region[
+                z_idx - min_coords[0], y_idx - min_coords[1], x_idx - min_coords[2]
+            ] = snapshot_values
+            # Gaussian filter with sigma proportional to downsampling factor
+            sigma = tuple(r / 3.0 for r in ratio)
+            dense_region = ndimage.gaussian_filter(dense_region, sigma)
+            downsampled = self._block_reduce(dense_region, ratio)
+        else:
+            # Scatter straight to display resolution. Equivalent to densifying
+            # the region and calling _block_reduce (which takes the block MAX,
+            # and edge-padding a partial block replicates values already in it),
+            # but it never materialises the storage-resolution array — that is
+            # ratio^3 = 1000x larger for the default 5µm/50µm pair.
+            downsampled = self._scatter_to_display_blocks(
+                z_idx, y_idx, x_idx, snapshot_values, min_coords, region_shape, ratio
+            )
 
         # Map to display coordinates
         # Convert storage region coords to world coords
@@ -913,6 +1022,36 @@ class DualResolutionVoxelStorage:
                 self.display_dirty[channel_id] = False
         return self.display_cache[channel_id]
 
+    @staticmethod
+    def _scatter_to_display_blocks(
+        z_idx: np.ndarray,
+        y_idx: np.ndarray,
+        x_idx: np.ndarray,
+        values: np.ndarray,
+        min_coords: np.ndarray,
+        region_shape: np.ndarray,
+        ratio: Tuple[int, int, int],
+    ) -> np.ndarray:
+        """Max-reduce sparse storage voxels straight into display blocks."""
+        ds_shape = tuple(
+            int(-(-int(region_shape[i]) // int(ratio[i]))) for i in range(3)
+        )
+        out = np.zeros(ds_shape, dtype=values.dtype)
+
+        flat = np.ravel_multi_index(
+            (
+                (z_idx - min_coords[0]) // ratio[0],
+                (y_idx - min_coords[1]) // ratio[1],
+                (x_idx - min_coords[2]) // ratio[2],
+            ),
+            ds_shape,
+        )
+        order = np.argsort(flat, kind="stable")
+        flat_sorted = flat[order]
+        unique_blocks, start = np.unique(flat_sorted, return_index=True)
+        out.reshape(-1)[unique_blocks] = np.maximum.reduceat(values[order], start)
+        return out
+
     def _block_reduce(
         self, data: np.ndarray, block_size: Tuple[int, int, int]
     ) -> np.ndarray:
@@ -974,6 +1113,7 @@ class DualResolutionVoxelStorage:
     def clear(self):
         """Clear all stored data."""
         self._initialize_storage()
+        self._storage_budget_exceeded = False
         self.data_bounds = {
             "min": np.array([np.inf, np.inf, np.inf]),
             "max": np.array([-np.inf, -np.inf, -np.inf]),
@@ -985,10 +1125,16 @@ class DualResolutionVoxelStorage:
         logger.info("Cleared all voxel storage and reset reference position")
 
     def _count_voxels(self) -> int:
-        """Count total voxels across all channels, including session-loaded data."""
+        """Total voxels across all channels, including session-loaded data.
+
+        Uses the non-compacting estimate: this feeds the status bar, and a
+        refresh tick must not be able to trigger a multi-second fold of the
+        append buffer on the GUI thread.
+        """
         storage_voxels = sum(
-            len(self.storage_data[ch]) for ch in range(self.num_channels)
+            self.storage_data[ch].approx_len for ch in range(self.num_channels)
         )
+
         if storage_voxels == 0 and self._session_loaded_channels:
             storage_voxels = sum(
                 int(np.count_nonzero(self.display_cache[ch]))
@@ -997,13 +1143,16 @@ class DualResolutionVoxelStorage:
         return storage_voxels
 
     def get_memory_usage(self) -> Dict[str, float]:
-        """Report memory usage statistics."""
-        # Calculate storage bytes from dictionary sizes
+        """Report memory usage statistics.
+
+        These are the bytes actually held, not an idealised
+        bytes-per-voxel figure. The old version multiplied the voxel count by
+        7 (uint16 + float32 + uint8) while the data lived in tuple-keyed dicts
+        costing ~270 bytes a voxel, so it under-reported by ~39x — which is
+        why nothing warned before the tile worker hit MemoryError.
+        """
         storage_bytes = sum(
-            len(self.storage_data[ch]) * 2  # uint16, number of occupied voxels
-            + len(self.storage_timestamps[ch]) * 4  # float32
-            + len(self.storage_confidence[ch])  # uint8
-            for ch in range(self.num_channels)
+            self.storage_data[ch].nbytes for ch in range(self.num_channels)
         )
 
         display_bytes = sum(
@@ -1016,6 +1165,8 @@ class DualResolutionVoxelStorage:
             "total_mb": (storage_bytes + display_bytes) / (1024 * 1024),
             "storage_voxels": self._count_voxels(),
             "display_voxels": np.prod(self.display_dims) * self.num_channels,
+            "storage_budget_mb": self.max_storage_bytes / (1024 * 1024),
+            "storage_budget_exceeded": self._storage_budget_exceeded,
         }
 
     def add_data_with_position(
@@ -1467,7 +1618,10 @@ class DualResolutionVoxelStorage:
     @_locked
     def has_data(self, channel_id: int) -> bool:
         """Check if a channel has any data."""
-        if len(self.storage_data.get(channel_id, {})) > 0:
+        store = self.storage_data.get(channel_id)
+        # `is_empty` deliberately, not len(): this is called on every refresh
+        # and len() forces a compaction.
+        if store is not None and not store.is_empty:
             return True
         return channel_id in self._session_loaded_channels
 
