@@ -1,0 +1,22 @@
+{
+  "led_2d_overview:led_white:z0.25:tiles~50": {
+    "mean_ms": 8610.3172878705,
+    "samples": 5
+  },
+  "tile_collection:image": {
+    "mean_ms": 18.48687160087747,
+    "samples": 7
+  },
+  "led_2d_overview:led_white:z1.0:tiles~50": {
+    "mean_ms": 4477.762422998203,
+    "samples": 2
+  },
+  "tile_collection:workflow": {
+    "mean_ms": 142925.1299322956,
+    "samples": 4
+  },
+  "led_2d_overview:led_white:z0.25:tiles~200": {
+    "mean_ms": 12693.237420000756,
+    "samples": 1
+  }
+}

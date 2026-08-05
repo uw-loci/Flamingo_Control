@@ -27,13 +27,13 @@
   LED = 4
 </Filter wheel position assignments>
 <Illumination settings>
-  Offset left x-axis = 1500
+  Offset left x-axis = 1400
   Offset left y-axis = -1
   Offset right x-axis = 2300
   Offset right y-axis = -1
-  Amplitude left x-axis = 290
+  Amplitude left x-axis = 100
   Amplitude left y-axis = -1
-  Amplitude right x-axis = 290
+  Amplitude right x-axis = 100
   Amplitude right y-axis = -1
   Alignment center x-axis = 2000
   Alignment center y-axis = -1
@@ -46,7 +46,7 @@
   Hard limit max r-axis = 720.000
   Hard limit min x-axis = 1.000
   Hard limit min y-axis = 5.000
-  Hard limit min z-axis = 11.000
+  Hard limit min z-axis = 8.000
   Hard limit min r-axis = -720.000
   Soft limit max x-axis = 14.999998
   Soft limit max y-axis = 25.000
@@ -56,10 +56,10 @@
   Soft limit min y-axis = 5.000
   Soft limit min z-axis = 11.000
   Soft limit min r-axis = -720.000
-  Home x-axis = 7.463
-  Home y-axis = 23.500
-  Home z-axis = 22.888
-  Home r-axis = 0.000
+  Home x-axis = 8.032
+  Home y-axis = 23.898
+  Home z-axis = 19.753
+  Home r-axis = -217.965
   Unload x-axis = 1.000
   Unload y-axis = 5.000
   Unload z-axis = 11.000
@@ -76,11 +76,11 @@
   Camera 2 capture mode (0: full, 1: from front, 2: from back) = 0
 </Camera overlap settings>
 <LED settings>
-  LED selection (0 red, 1 green, 2 blue, 3 white) = 0
+  LED selection (0 red, 1 green, 2 blue, 3 white) = 1
   Preview on = 0
   Recording on = 0
   Intensity red = 42000
-  Intensity green = 43488
+  Intensity green = 55561
   Intensity blue = 54087
   Intensity white = 54756
   UI slider min (match LED DAC) = 3200000
@@ -92,7 +92,7 @@
   Microscope name = n7
   Microscope address = 10.129.37.22 53717
   Microscope builder = Builder
-  Objective lens magnification = 25.69
+  Objective lens magnification = 6.205
   Tube lens design focal length (mm) = 200
   Tube lens length (mm) = 200
 </Type>
