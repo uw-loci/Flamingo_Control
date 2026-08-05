@@ -14,6 +14,8 @@ psutil>=5.9.0,<7
 # Scientific computing (required for image processing and analysis)
 scipy>=1.14.0,<2
 scikit-learn>=1.7.0,<2
+scikit-image>=0.24,<1  # bead detection (peak_local_max) for PSF analysis
+matplotlib>=3.8,<4  # embedded Gaussian-fit plots (PSF analysis dialog)
 
 # 3D Visualization dependencies
 napari>=0.7.0,<0.8  # Stable 0.7; use bare napari (not [all]) to avoid PyQt6 default

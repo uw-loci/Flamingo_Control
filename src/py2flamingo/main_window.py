@@ -349,6 +349,13 @@ class MainWindow(QMainWindow):
         self.mip_overview_action.triggered.connect(self._on_mip_overview)
         extensions_menu.addAction(self.mip_overview_action)
 
+        self.psf_analysis_action = QAction("&PSF Analysis...", self)
+        self.psf_analysis_action.setStatusTip(
+            "Measure optical resolution (FWHM) from a 3D bead image"
+        )
+        self.psf_analysis_action.triggered.connect(self._on_psf_analysis)
+        extensions_menu.addAction(self.psf_analysis_action)
+
         extensions_menu.addSeparator()
 
         self.union_thresholder_action = QAction("&Union of Thresholders...", self)
@@ -385,6 +392,21 @@ class MainWindow(QMainWindow):
         )
         self.stitching_native_action.triggered.connect(self._on_stitching_native)
         extensions_menu.addAction(self.stitching_native_action)
+
+        # TODO(multiview): re-enable once flamingo_stitcher.gui exports
+        # MultiViewStitchingDialog again (removed by the stitcher's v0.5.4
+        # revert-to-v0.5.0 crash fix). Clicking this would ImportError, so the
+        # menu entry is temporarily disabled while the multiview work is WIP.
+        # self.stitching_multiview_action = QAction(
+        #     "Tile Stitching (&Multi-View)...", self
+        # )
+        # self.stitching_multiview_action.setStatusTip(
+        #     "Stitch multi-angle (rotation) acquisitions into one volume"
+        # )
+        # self.stitching_multiview_action.triggered.connect(
+        #     self._on_stitching_multiview
+        # )
+        # extensions_menu.addAction(self.stitching_multiview_action)
 
         extensions_menu.addSeparator()
 
@@ -918,6 +940,35 @@ class MainWindow(QMainWindow):
             logger.error(f"Error opening MIP Overview: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to open MIP Overview:\n{e}")
 
+    def _on_psf_analysis(self):
+        """Handle PSF Analysis menu action.
+
+        File-based (analyzes a bead image from disk), so it is always available —
+        no microscope connection or Sample View required. If a Sample View is
+        open, the dialog can overlay the detected beads on its viewer.
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.info("PSF Analysis menu action triggered")
+
+        try:
+            from py2flamingo.views.dialogs.psf_analysis_dialog import PSFAnalysisDialog
+
+            dialog = PSFAnalysisDialog(app=self.app, parent=self)
+            dialog.show()
+
+            # Keep reference to prevent garbage collection
+            if not hasattr(self, "_psf_analysis_dialogs"):
+                self._psf_analysis_dialogs = []
+            self._psf_analysis_dialogs.append(dialog)
+
+            logger.info("PSF Analysis dialog opened")
+
+        except Exception as e:
+            logger.error(f"Error opening PSF Analysis: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"Failed to open PSF Analysis:\n{e}")
+
     def _on_union_thresholder(self):
         """Handle Union of Thresholders menu action."""
         import logging
@@ -1058,6 +1109,42 @@ class MainWindow(QMainWindow):
             )
             QMessageBox.critical(
                 self, "Error", f"Failed to open Tile Stitching (Single Workflow):\n{e}"
+            )
+
+    def _on_stitching_multiview(self):
+        """Handle Tile Stitching (Multi-View) menu action."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.info("Tile Stitching (Multi-View) menu action triggered")
+
+        try:
+            from flamingo_stitcher.gui import MultiViewStitchingDialog
+
+            # Reuse existing dialog if still open
+            if (
+                hasattr(self, "_stitching_multiview_dialog")
+                and self._stitching_multiview_dialog is not None
+            ):
+                self._stitching_multiview_dialog.show()
+                self._stitching_multiview_dialog.raise_()
+                self._stitching_multiview_dialog.activateWindow()
+                return
+
+            self._stitching_multiview_dialog = MultiViewStitchingDialog(
+                parent=None, geometry_manager=self._geometry_manager
+            )
+            self._stitching_multiview_dialog.load_stitched_requested.connect(
+                self._on_load_stitched_from_dialog
+            )
+            self._stitching_multiview_dialog.show()
+
+        except Exception as e:
+            logger.error(
+                f"Error opening Tile Stitching (Multi-View): {e}", exc_info=True
+            )
+            QMessageBox.critical(
+                self, "Error", f"Failed to open Tile Stitching (Multi-View):\n{e}"
             )
 
     def _on_webcam_overview(self):

@@ -30,6 +30,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 _UINT16_MAX = 65535
+_FWHM_PER_SIGMA = 2.3548200450309493  # FWHM = 2*sqrt(2*ln2) * sigma
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +80,149 @@ def make_phantom_volume(
     noise = rng.integers(0, 60, size=shape, dtype=np.uint16)
     vol = np.clip(vol.astype(np.int32) + noise, 0, _UINT16_MAX).astype(np.uint16)
     return vol
+
+
+def make_bead_volume(
+    shape: Tuple[int, int, int],
+    *,
+    voxel_size_um: Tuple[float, float, float] = (4.0, 0.406, 0.406),
+    fwhm_um: Tuple[float, float, float] = (12.0, 1.6, 1.6),
+    n_beads: int = 8,
+    value: int = 12000,
+    background: int = 200,
+    noise: int = 40,
+    margin_px: int = 8,
+    min_separation_um: float = 20.0,
+    seed: int = 0,
+) -> Tuple[np.ndarray, List[Dict[str, float]]]:
+    """Build a volume of sub-resolution beads with *known* FWHM, dtype ``uint16``.
+
+    Each bead is an anisotropic 3-D Gaussian point source whose per-axis FWHM is
+    exactly ``fwhm_um`` (converted to pixel sigma with ``voxel_size_um``). This is
+    the ground-truth generator for PSF-analysis tests: run the analyzer and assert
+    the recovered FWHM matches ``fwhm_um``. (The existing ``make_phantom_volume``
+    makes wavy fibers, which are not point-like and cannot validate a PSF fit.)
+
+    Beads are placed on a jittered grid, kept ``margin_px`` from every edge and at
+    least ``min_separation_um`` apart, so a well-behaved analyzer accepts them all.
+
+    Args:
+        shape: ``(Z, Y, X)``.
+        voxel_size_um: ``(z, y, x)`` voxel size, µm.
+        fwhm_um: target ``(z, y, x)`` FWHM, µm.
+        n_beads: number of beads to attempt to place.
+        value: peak bead intensity above background.
+        background: flat background level.
+        noise: amplitude of uniform integer noise added everywhere.
+        margin_px: keep bead centers this many voxels from each edge.
+        min_separation_um: minimum physical spacing between bead centers.
+        seed: RNG seed for reproducible placement.
+
+    Returns:
+        ``(volume, beads)`` where ``beads`` is a list of dicts with keys
+        ``z``/``y``/``x`` (voxel center) and ``fwhm_z_um``/``fwhm_y_um``/
+        ``fwhm_x_um`` (the ground-truth FWHM for that bead).
+    """
+    z, y, x = shape
+    vz, vy, vx = voxel_size_um
+    fz, fy, fx = fwhm_um
+    # Pixel sigma per axis from the target FWHM.
+    sz = fz / (_FWHM_PER_SIGMA * vz)
+    sy = fy / (_FWHM_PER_SIGMA * vy)
+    sx = fx / (_FWHM_PER_SIGMA * vx)
+
+    rng = np.random.default_rng(seed)
+    scale = np.asarray(voxel_size_um, dtype=float)
+    # Clamp the margin per axis so a thin axis (e.g. a 3-plane Z) still leaves a
+    # valid placement band centered in the axis instead of running off the end.
+    dims = (z, y, x)
+    margins = [min(margin_px, max(0, (dim - 1) // 2)) for dim in dims]
+    centers: List[np.ndarray] = []
+    attempts = 0
+    while len(centers) < n_beads and attempts < n_beads * 50:
+        attempts += 1
+        c = np.array(
+            [rng.uniform(m, max(m + 1e-3, dim - m)) for dim, m in zip(dims, margins)]
+        )
+        if any(
+            np.linalg.norm((c - other) * scale) < min_separation_um for other in centers
+        ):
+            continue
+        centers.append(c)
+
+    vol = np.full(shape, float(background), dtype=np.float64)
+    zz = np.arange(z)[:, None, None]
+    yy = np.arange(y)[None, :, None]
+    xx = np.arange(x)[None, None, :]
+    for c in centers:
+        cz, cy, cx = c
+        gauss = np.exp(
+            -(
+                (zz - cz) ** 2 / (2 * sz**2)
+                + (yy - cy) ** 2 / (2 * sy**2)
+                + (xx - cx) ** 2 / (2 * sx**2)
+            )
+        )
+        vol += value * gauss
+
+    if noise > 0:
+        vol += rng.integers(0, noise + 1, size=shape)
+    vol = np.clip(vol, 0, _UINT16_MAX).astype(np.uint16)
+
+    beads = [
+        {
+            "z": float(c[0]),
+            "y": float(c[1]),
+            "x": float(c[2]),
+            "fwhm_z_um": float(fz),
+            "fwhm_y_um": float(fy),
+            "fwhm_x_um": float(fx),
+        }
+        for c in centers
+    ]
+    return vol, beads
+
+
+def write_bead_dataset(
+    out_dir,
+    *,
+    shape: Tuple[int, int, int] = (24, 256, 256),
+    voxel_size_um: Tuple[float, float, float] = (4.0, 0.406, 0.406),
+    fwhm_um: Tuple[float, float, float] = (12.0, 1.6, 1.6),
+    n_beads: int = 8,
+    seed: int = 0,
+) -> Dict[str, object]:
+    """Write a bead phantom as an OME-TIFF with real ``PhysicalSize*`` metadata.
+
+    The TIFF loads directly via :func:`py2flamingo.psf_analysis.io.load_volume`
+    (voxel size round-trips through the OME metadata), so it is the quickest way
+    to exercise the PSF analyzer or the GUI dialog end-to-end.
+
+    Returns:
+        ``{"volume": <tif path>, "beads": [ground-truth dicts]}``.
+    """
+    import tifffile
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    vol, beads = make_bead_volume(
+        shape, voxel_size_um=voxel_size_um, fwhm_um=fwhm_um, n_beads=n_beads, seed=seed
+    )
+    vz, vy, vx = voxel_size_um
+    tif_path = out_dir / "beads.ome.tif"
+    tifffile.imwrite(
+        str(tif_path),
+        vol,
+        metadata={
+            "axes": "ZYX",
+            "PhysicalSizeX": vx,
+            "PhysicalSizeY": vy,
+            "PhysicalSizeZ": vz,
+        },
+    )
+    logger.info("Wrote bead dataset %s (%d beads)", tif_path, len(beads))
+    return {"volume": tif_path, "beads": beads}
 
 
 # ---------------------------------------------------------------------------

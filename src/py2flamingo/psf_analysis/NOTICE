@@ -1,0 +1,28 @@
+psf_analysis — attribution and provenance
+==========================================
+
+The PSF measurement algorithm implemented in this package (detect well-separated
+sub-resolution beads, fit Gaussians per axis, report resolution as
+FWHM = 2.3548 * sigma) is a reimplementation of prior open-source work. We
+reimplemented rather than copied the source, but the method and design are theirs
+and are gratefully credited here:
+
+1. mesoSPIM-PSFanalysis
+   https://github.com/mesoSPIM/mesoSPIM-PSFanalysis
+   License: MIT
+   The light-sheet PSF analysis notebooks that this feature is modeled on.
+
+2. psf (Nick Sofroniew)
+   https://github.com/sofroniewn/psf
+   License: MIT
+   The 2-photon mesoscope PSF package that mesoSPIM-PSFanalysis adapted, and the
+   original source of the detect-beads / fit-Gaussian / FWHM approach.
+
+Notable deviation from the reference: mesoSPIM/psf fit a 2-D Gaussian to the
+lateral max-projection of each bead. This implementation fits an independent 1-D
+Gaussian to a line profile through the bead peak for each of X, Y and Z, keeping
+the three axes fully separate — appropriate for the Flamingo system's strongly
+anisotropic sampling (coarse Z-step relative to the fine XY pixel).
+
+MIT License text for the referenced projects is reproduced by their respective
+repositories; this package is distributed under py2flamingo's own license.
