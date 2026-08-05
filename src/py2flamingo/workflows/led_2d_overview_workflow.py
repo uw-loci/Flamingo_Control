@@ -121,8 +121,15 @@ class LED2DOverviewWorkflow(QObject):
         # Get tip position for rotation axis (required for second rotation)
         self._tip_position = self._get_tip_position()
 
-        # Calculate rotation angles - only include second rotation if tip is calibrated
-        if self._tip_position is not None:
+        # Calculate rotation angles - the user can skip the second view for a
+        # quick test, and it also needs a calibrated tip to be planned at all.
+        if getattr(config, "single_rotation", False):
+            self._rotation_angles = [config.starting_r]
+            logger.info(
+                "Single-rotation quick test requested - scanning only "
+                f"R={config.starting_r}° (second 90° view skipped)"
+            )
+        elif self._tip_position is not None:
             self._rotation_angles = [config.starting_r, config.starting_r + 90.0]
             logger.info(
                 f"Tip position found at X={self._tip_position[0]:.3f}, Z={self._tip_position[1]:.3f} - "

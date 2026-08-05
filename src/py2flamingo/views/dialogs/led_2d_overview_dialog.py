@@ -77,6 +77,10 @@ class ScanConfiguration:
     fast_mode: bool = (
         True  # If True, use continuous scanning (no Z-stacks, much faster)
     )
+    # If True, scan ONLY starting_r and skip the R+90 view. Halves the run for
+    # quick tests; the result then has a single view, so tile collection falls
+    # back to per-tile / manually-set Z instead of the 90° intersection.
+    single_rotation: bool = False
 
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
@@ -426,6 +430,20 @@ class LED2DOverviewDialog(PersistentDialog):
         )
         self.focus_stacking_checkbox.setChecked(False)
         layout.addWidget(self.focus_stacking_checkbox, 2, 0, 1, 3)
+
+        # Single-rotation (quick test) checkbox
+        self.single_rotation_checkbox = QCheckBox(
+            "Skip the second 90° view (quick test)"
+        )
+        self.single_rotation_checkbox.setToolTip(
+            "Scan only the starting rotation instead of R and R+90.\n"
+            "Roughly halves the run — useful for a quick look.\n\n"
+            "The result then has one view, so tile collection can't use the\n"
+            "90° intersection for Z; set the Z range there instead."
+        )
+        self.single_rotation_checkbox.setChecked(False)
+        self.single_rotation_checkbox.toggled.connect(self._update_scan_info)
+        layout.addWidget(self.single_rotation_checkbox, 3, 0, 1, 3)
 
         group.setLayout(layout)
         return group
@@ -923,6 +941,11 @@ class LED2DOverviewDialog(PersistentDialog):
         except Exception:
             return None
 
+    def _skip_second_rotation(self) -> bool:
+        """True when the user asked for the starting rotation only."""
+        checkbox = getattr(self, "single_rotation_checkbox", None)
+        return bool(checkbox is not None and checkbox.isChecked())
+
     def _rotate_point_90(self, x: float, z: float, tip_x: float, tip_z: float):
         """Rotate a point 90° around the tip position."""
         x_new = tip_x + (z - tip_z)
@@ -969,8 +992,10 @@ class LED2DOverviewDialog(PersistentDialog):
         z_depth_r1 = bbox.z_max - bbox.z_min
         z_planes_r1 = max(1, int(z_depth_r1 / z_step) + 1)
 
-        # Check if tip is calibrated for second rotation
-        tip_pos = self._get_tip_position()
+        # Check if tip is calibrated for second rotation. The quick-test
+        # checkbox skips it outright, whether or not the tip is calibrated.
+        skip_second = self._skip_second_rotation()
+        tip_pos = None if skip_second else self._get_tip_position()
 
         if tip_pos is not None:
             tip_x, tip_z = tip_pos
@@ -1009,7 +1034,7 @@ class LED2DOverviewDialog(PersistentDialog):
                 f"Z planes: R={z_planes_r1} ({z_depth_r1:.2f}mm), R+90={z_planes_r2} ({z_depth_r2:.2f}mm)"
             )
         else:
-            # No tip calibrated - single rotation only
+            # Single rotation only - either by choice, or no tip calibrated
             total_frames = tiles_r1 * z_planes_r1
 
             self.tiles_label.setText(
@@ -1018,9 +1043,15 @@ class LED2DOverviewDialog(PersistentDialog):
             self.total_tiles_label.setText(
                 f"Total: {tiles_r1} tiles, {total_frames} frames (1 rotation only)"
             )
-            self.z_planes_label.setText(
-                f"⚠ Tip not calibrated - use Tools > Calibrate for R+90 view"
-            )
+            if skip_second:
+                self.z_planes_label.setText(
+                    "Second 90° view skipped (quick test) — set Z manually when "
+                    "collecting tiles"
+                )
+            else:
+                self.z_planes_label.setText(
+                    "⚠ Tip not calibrated - use Tools > Calibrate for R+90 view"
+                )
 
         self.region_label.setText(
             f"Bbox: X [{bbox.x_min:.2f}, {bbox.x_max:.2f}], "
@@ -1289,6 +1320,7 @@ class LED2DOverviewDialog(PersistentDialog):
             led_intensity=self._current_led_intensity,
             z_step_size=self.z_step_size.value(),
             use_focus_stacking=self.focus_stacking_checkbox.isChecked(),
+            single_rotation=self.single_rotation_checkbox.isChecked(),
         )
 
     def _load_previous_scan(self):
@@ -1375,7 +1407,12 @@ class LED2DOverviewDialog(PersistentDialog):
                 f"Preview not yet implemented.\n\n"
                 f"Configuration:\n"
                 f"- Tiles: {tiles_x} x {tiles_y}\n"
-                f"- Rotations: {config.starting_r}° and {config.starting_r + 90}°",
+                + (
+                    f"- Rotations: {config.starting_r}° only"
+                    if config.single_rotation
+                    else f"- Rotations: {config.starting_r}° and "
+                    f"{config.starting_r + 90}°"
+                ),
             )
 
     def _on_start_clicked(self):
@@ -1402,7 +1439,18 @@ class LED2DOverviewDialog(PersistentDialog):
             )
             return
         tiles_x, tiles_y = tile_count
-        total_tiles = tiles_x * tiles_y * 2
+        num_rotations = 1 if config.single_rotation else 2
+        total_tiles = tiles_x * tiles_y * num_rotations
+
+        if config.single_rotation:
+            rotation_text = (
+                f"Rotations: {config.starting_r}° only "
+                "(second 90° view skipped — quick test)"
+            )
+        else:
+            rotation_text = (
+                f"Rotations: {config.starting_r}° and {config.starting_r + 90}°"
+            )
 
         reply = QMessageBox.question(
             self,
@@ -1412,7 +1460,7 @@ class LED2DOverviewDialog(PersistentDialog):
             f"        Y [{bbox.y_min:.2f} to {bbox.y_max:.2f}] mm\n"
             f"        Z [{bbox.z_min:.2f} to {bbox.z_max:.2f}] mm\n\n"
             f"Tiles: {tiles_x} x {tiles_y} = {tiles_x * tiles_y} per rotation\n"
-            f"Rotations: {config.starting_r}° and {config.starting_r + 90}°\n\n"
+            f"{rotation_text}\n\n"
             f"Total: {total_tiles} tiles\n\n"
             "Continue?",
             QMessageBox.Yes | QMessageBox.No,
