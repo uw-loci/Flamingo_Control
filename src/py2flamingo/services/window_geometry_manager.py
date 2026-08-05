@@ -16,7 +16,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from PyQt5.QtCore import QByteArray
+from PyQt5.QtCore import QByteArray, Qt
 from PyQt5.QtWidgets import QDialog, QMainWindow, QSplitter, QWidget
 
 from py2flamingo.resources import get_app_icon
@@ -455,6 +455,12 @@ class PersistentDialog(QDialog):
     ):
         super().__init__(*args, **kwargs)
         self.setWindowIcon(get_app_icon())
+        # Give every persistent dialog a minimize button. Qt gives QDialog only a
+        # close button by default, so long-running dialogs (MIP Overview, LED 2D
+        # Overview, tile collection…) could not be tucked out of the way while you
+        # work in the main window — you had to close them and lose their state.
+        # OR-ed onto the existing flags so any per-dialog flags survive.
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinimizeButtonHint)
         self._geometry_manager = geometry_manager or _default_geometry_manager
         self._window_id = window_id or self.__class__.__name__
         self._geometry_restored = False
