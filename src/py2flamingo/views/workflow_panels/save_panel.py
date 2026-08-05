@@ -85,6 +85,9 @@ class SavePanel(QWidget):
         self._save_subfolders = False
         self._live_view = True
         self._comments = ""
+        # True while set_settings() is driving the widgets, so restoring a
+        # persisted state cannot be mistaken for the user toggling it off.
+        self._restoring_settings = False
 
         self._setup_ui()
 
@@ -430,7 +433,7 @@ class SavePanel(QWidget):
         """Handle local access checkbox change."""
         enabled = state != 0
         self._browse_local_btn.setEnabled(enabled)
-        if not enabled:
+        if not enabled and not self._restoring_settings:
             # Clear local path when disabled
             self._local_path_display.clear()
             # Remove mapping from config
@@ -693,7 +696,15 @@ class SavePanel(QWidget):
             self._comments = settings["comments"]
 
         if "local_access_enabled" in settings:
-            self._enable_local_access.setChecked(settings["local_access_enabled"])
+            # Restoring a stale "off" must not delete the drive mapping: that
+            # mapping is how post-collection folder reorganization finds the
+            # data, and losing it silently downgrades every later run to the
+            # server's flat layout. Only an explicit user click clears it.
+            self._restoring_settings = True
+            try:
+                self._enable_local_access.setChecked(settings["local_access_enabled"])
+            finally:
+                self._restoring_settings = False
 
         # Update local path display after restoring settings
         self._update_local_path_display()

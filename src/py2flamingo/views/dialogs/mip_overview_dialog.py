@@ -61,6 +61,7 @@ from py2flamingo.models.mip_overview import (
     read_tile_z_range,
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.utils.tile_folder_organizer import infer_local_drive_root
 from py2flamingo.visualization.zarr_2d_session import (
     ZARR_AVAILABLE,
     detect_session_format,
@@ -1055,15 +1056,42 @@ class MIPOverviewDialog(PersistentDialog):
             config=None,  # No ScanConfiguration for MIP overview
             app=self._app,
             parent=self,
-            local_base_folder=(
-                str(self._config.base_folder.parent) if self._config else None
-            ),
+            local_base_folder=self._infer_local_drive_root(),
         )
 
         # Connect to completion signal to reload results
         dialog.accepted.connect(self._on_collection_complete)
 
         dialog.exec_()
+
+    def _infer_local_drive_root(self) -> Optional[str]:
+        """Local mount of the save drive, for post-collection reorganization.
+
+        The drive root is where the server drops ``<timestamp>_<name>``
+        folders. This used to be hardcoded as ``base_folder.parent``, which is
+        only correct when the user browsed to ``<root>/<sample>`` -- browsing
+        straight into a date folder, or loading a flat layout (which lives in
+        the drive root itself), both pointed the reorganizer at the wrong
+        directory, so it found nothing and left the data flat.
+        """
+        if not self._config:
+            return None
+
+        root = infer_local_drive_root(
+            self._config.base_folder,
+            self._config.date_folder,
+            self._config.layout_type,
+        )
+        if root is None:
+            logger.info(
+                "Could not infer the local drive root from "
+                f"{self._config.base_folder} - tile collection will fall back "
+                "to the saved drive mapping"
+            )
+            return None
+
+        logger.info(f"Inferred local drive root for tile collection: {root}")
+        return str(root)
 
     def _on_collection_complete(self):
         """Handle completion of tile collection - reload new MIPs."""

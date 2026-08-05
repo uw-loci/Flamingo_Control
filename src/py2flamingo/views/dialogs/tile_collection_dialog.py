@@ -52,7 +52,11 @@ from py2flamingo.utils.limited_acquisition import (
     choose_illumination_arms,
     plan_multiview_acquisition,
 )
-from py2flamingo.utils.tile_folder_organizer import reorganize_tile_folders
+from py2flamingo.utils.tile_folder_organizer import (
+    ReorganizeResult,
+    reorganization_skip_reason,
+    reorganize_tile_folders,
+)
 from py2flamingo.utils.tile_workflow_parser import (
     parse_workflow_position,
     read_illumination_path_from_workflow,
@@ -1339,6 +1343,15 @@ class TileCollectionDialog(PersistentDialog):
         # Get local path directly from save settings (configured via Browse button)
         self._local_path = save_settings.get("local_path")
         self._local_access_enabled = save_settings.get("local_access_enabled", False)
+        # Logged at run START so a run that ends up flat can be diagnosed from
+        # the log alone, without re-deriving which of the skip conditions hit.
+        _preflight = self._reorganization_preflight(save_settings)
+        logger.info(
+            "Post-collection reorganization: "
+            f"{'READY' if _preflight is None else 'WILL SKIP - ' + _preflight} "
+            f"(drive={self._save_drive}, local_path={self._local_path}, "
+            f"enabled={self._local_access_enabled})"
+        )
 
         created_files = []
         for i, (tile, rotation, z_min, z_max) in enumerate(tiles_to_process):
@@ -1448,6 +1461,25 @@ class TileCollectionDialog(PersistentDialog):
             msg = f"Created {len(created_files)} workflow files in:\n{workflow_folder}\n\n"
             msg += f"Images will be saved to:\n{save_settings['save_drive']}/{base_save_directory}_{date_folder}_X_Y/\n"
             msg += "(Flattened structure for server compatibility)\n\n"
+
+            # Say up front whether the flat folders will be tidied afterwards.
+            # Discovering this only once the run is over means reorganizing by
+            # hand, so surface it while the setting can still be changed.
+            preflight = self._reorganization_preflight(save_settings)
+            if preflight is None:
+                msg += (
+                    "After the run they will be moved to:\n"
+                    f"{save_settings.get('local_path')}/{base_save_directory}/"
+                    f"{date_folder}/X_Y/\n\n"
+                )
+            else:
+                msg += (
+                    "WARNING: folders will NOT be reorganized afterwards, "
+                    f"because {preflight}.\n"
+                    "MIP Overview and stitching expect the nested layout, so "
+                    "you would have to sort them by hand.\n\n"
+                )
+
             msg += "Would you like to execute them now?"
 
             result = QMessageBox.question(
@@ -1648,6 +1680,43 @@ class TileCollectionDialog(PersistentDialog):
             logger.warning(
                 "Sample View does not have prepare_for_tile_workflows method"
             )
+
+    def _reorganize_after_collection(self) -> ReorganizeResult:
+        """Move the server's flat tile folders into the nested layout.
+
+        Every execution path calls this once the run is over (completed,
+        cancelled, or fallback-timed), because the flat layout the server is
+        forced to produce is not what MIP Overview or the stitcher read.
+
+        Failures are contained: this is invoked from Qt slots, where an
+        exception would otherwise unwind into the signal dispatcher and be
+        lost, leaving the data flat with nothing in the log to say why.
+        """
+        try:
+            result = reorganize_tile_folders(
+                getattr(self, "_local_path", None),
+                getattr(self, "_base_save_directory", ""),
+                getattr(self, "_tile_folder_mapping", {}),
+                getattr(self, "_local_access_enabled", False),
+            )
+        except Exception as e:
+            logger.error(f"Folder reorganization failed: {e}", exc_info=True)
+            return ReorganizeResult(skip_reason=f"reorganization raised an error: {e}")
+
+        logger.info(f"Folder reorganization: {result.summary()}")
+        return result
+
+    def _reorganization_preflight(self, save_settings: dict) -> Optional[str]:
+        """Return why post-run reorganization will not happen, or None.
+
+        Checked before the run starts so the user can fix the setting now,
+        rather than discovering a drive full of flat timestamped folders after
+        an hours-long acquisition.
+        """
+        return reorganization_skip_reason(
+            save_settings.get("local_path"),
+            save_settings.get("local_access_enabled", False),
+        )
 
     def _execute_workflows(self, workflow_files: List[Path]):
         """Execute the created workflow files using the workflow queue.
@@ -2038,6 +2107,14 @@ class TileCollectionDialog(PersistentDialog):
 
         def on_queue_completed():
             self._queue_completed = True
+
+            # Reorganize FIRST. queue_completed only fires after every
+            # SYSTEM_STATE_IDLE callback, so all files are on disk by now, and
+            # doing it before the progress/notification/Sample-View bookkeeping
+            # means a hiccup in any of that cosmetic work can no longer leave
+            # the acquisition stranded in the server's flat layout.
+            reorg = self._reorganize_after_collection()
+
             progress._overall_bar.setValue(100)
             progress._overall_label.setText(
                 f"Overall: {total_workflows} / {total_workflows} tiles"
@@ -2097,33 +2174,39 @@ class TileCollectionDialog(PersistentDialog):
                 if sample_view and hasattr(sample_view, "finish_tile_workflows"):
                     sample_view.finish_tile_workflows()
 
-            # Reorganize folders AFTER all workflows confirmed complete
-            # This is safe because queue_completed only fires after all
-            # SYSTEM_STATE_IDLE callbacks have been received
-            reorganized = reorganize_tile_folders(
-                self._local_path,
-                self._base_save_directory,
-                self._tile_folder_mapping,
-                self._local_access_enabled,
-            )
+            # Report the reorganization outcome from the top of this handler.
+            # Staying silent when it was skipped is what made this hard to
+            # notice: the run "succeeded" while the data was left where no
+            # downstream tool looks for it.
+            msg = f"Successfully executed {len(workflow_files)} workflows.\n\n"
+            if reorg.moved:
+                msg += (
+                    f"{reorg.moved} folder(s) reorganized into "
+                    f"{self._base_save_directory}/<date>/X_Y for MIP Overview "
+                    "and stitching."
+                )
+                if reorg.unmatched or reorg.failed:
+                    msg += (
+                        f"\n\n{len(reorg.unmatched)} folder(s) were not found on "
+                        f"disk and {len(reorg.failed)} could not be moved."
+                    )
+            else:
+                msg += (
+                    f"Data was left in the server's flat layout "
+                    f"({self._base_save_directory}_<date>_X_Y):\n{reorg.summary()}"
+                )
 
             # Use None as parent since tile collection dialog is closed
-            if reorganized:
-                QMessageBox.information(
-                    None,
-                    "Execution Complete",
-                    f"Successfully executed {len(workflow_files)} workflows.\n\n"
-                    f"Folders reorganized into nested structure for MIP Overview compatibility.",
-                )
-            else:
-                QMessageBox.information(
-                    None,
-                    "Execution Complete",
-                    f"Successfully executed {len(workflow_files)} workflows.",
-                )
+            QMessageBox.information(None, "Execution Complete", msg)
 
         def on_queue_cancelled():
             self._queue_completed = True
+
+            # Tiles that finished before the cancel are real data -- organize
+            # them too. The glob simply finds nothing for the tiles that never
+            # ran, so a partial run lands in the same layout as a full one.
+            reorg = self._reorganize_after_collection()
+
             update_sample_view("Not Running", 0)
 
             # Clean up signals before closing progress dialog
@@ -2143,9 +2226,13 @@ class TileCollectionDialog(PersistentDialog):
 
             progress.close()  # Close the progress dialog
             # Use None as parent since tile collection dialog is closed
-            QMessageBox.warning(
-                None, "Execution Cancelled", "Workflow queue was cancelled."
-            )
+            cancel_msg = "Workflow queue was cancelled."
+            if reorg.moved:
+                cancel_msg += (
+                    f"\n\n{reorg.moved} completed folder(s) were still "
+                    "reorganized into the nested layout."
+                )
+            QMessageBox.warning(None, "Execution Cancelled", cancel_msg)
 
         def on_error(message):
             self._queue_error = message
@@ -2331,13 +2418,24 @@ class TileCollectionDialog(PersistentDialog):
                 logger.error(f"Error executing {workflow_file.name}: {e}")
 
         progress.setValue(len(workflow_files))
-        QMessageBox.information(
-            self,
-            "Execution Complete",
+
+        # The queue-service path reorganizes on queue_completed; this path had
+        # no equivalent, so a run that fell back to timing-based execution
+        # silently left every folder flat.
+        reorg = self._reorganize_after_collection()
+
+        fallback_msg = (
             f"Executed {len(workflow_files)} workflows.\n\n"
             "Note: Used fallback timing. For better reliability, "
-            "ensure WorkflowQueueService is configured.",
+            "ensure WorkflowQueueService is configured."
         )
+        if reorg.moved:
+            fallback_msg += (
+                f"\n\n{reorg.moved} folder(s) reorganized into the nested layout."
+            )
+        elif reorg.skip_reason:
+            fallback_msg += f"\n\nFolders left in flat layout: {reorg.skip_reason}"
+        QMessageBox.information(self, "Execution Complete", fallback_msg)
 
     def _get_config_service(self):
         """Get ConfigurationService from application."""
