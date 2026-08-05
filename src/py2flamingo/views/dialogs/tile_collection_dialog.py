@@ -12,9 +12,11 @@ from typing import Dict, List, Optional, Tuple
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
     QFrame,
     QGroupBox,
     QHBoxLayout,
@@ -24,6 +26,7 @@ from PyQt5.QtWidgets import (
     QProgressBar,
     QProgressDialog,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QSpinBox,
     QVBoxLayout,
@@ -61,6 +64,7 @@ from py2flamingo.utils.tile_workflow_parser import (
 from py2flamingo.utils.tile_z_range import (
     calculate_tile_z_ranges,
     estimate_fov_from_tiles,
+    summarize_acquired_z,
 )
 from py2flamingo.utils.workflow_parser import dict_to_workflow_text
 from py2flamingo.utils.workflow_serialization import (
@@ -240,13 +244,20 @@ class TileCollectionDialog(PersistentDialog):
 
     def _update_z_ranges(self) -> None:
         """Update Z ranges for tiles based on primary direction and overlap."""
-        # Get fallback Z range from bounding box
+        # Get fallback Z range from bounding box. The MIP Overview path has no
+        # ScanConfiguration, so fall back to what the tiles themselves recorded
+        # -- otherwise the panel and size estimate would size against a
+        # made-up 10 mm depth instead of the acquisition's real one.
         if self._config:
             fallback_z_min = self._config.bounding_box.z_min
             fallback_z_max = self._config.bounding_box.z_max
         else:
-            fallback_z_min = 0.0
-            fallback_z_max = 10.0
+            acquired = summarize_acquired_z(self._all_selected_tiles())
+            if acquired is not None:
+                fallback_z_min, fallback_z_max = acquired[0], acquired[1]
+            else:
+                fallback_z_min = 0.0
+                fallback_z_max = 10.0
 
         # Determine primary and secondary tiles
         if self._primary_is_left:
@@ -295,6 +306,10 @@ class TileCollectionDialog(PersistentDialog):
         Returns:
             Tuple of (z_min, z_max) in mm
         """
+        override = self._z_override_range()
+        if override is not None:
+            return override
+
         key = (tile.tile_x_idx, tile.tile_y_idx)
         if key in self._tile_z_ranges:
             return self._tile_z_ranges[key]
@@ -324,6 +339,9 @@ class TileCollectionDialog(PersistentDialog):
         if self._has_dual_view:
             direction_group = self._create_direction_section()
             container_layout.addWidget(direction_group)
+
+        # Z depth section (per-tile from the data, or one range for all tiles)
+        container_layout.addWidget(self._create_z_depth_section())
 
         # Workflow name section
         name_group = self._create_name_section()
@@ -749,6 +767,231 @@ class TileCollectionDialog(PersistentDialog):
                     f"{z_min:.2f} to {z_max:.2f} mm ({z_range:.2f} mm)"
                 )
 
+    # ------------------------------------------------------------------ #
+    # Z depth (per-tile from the data, or one range applied to every tile)
+    # ------------------------------------------------------------------ #
+    def _create_z_depth_section(self) -> QGroupBox:
+        """Choose where each tile's Z start/end comes from.
+
+        Two states:
+
+        * **Per tile, from the data** -- the existing behaviour. With two views
+          90° apart that is the rotation-geometry intersection (each tile gets
+          its own depth); with a single view it is the Z range recorded in that
+          tile's own acquisition metadata.
+        * **One range for all tiles** -- an explicit Z start/end typed here and
+          applied to every workflow. Needed for single-workflow MIPs (whose
+          recorded range is one fixed depth) and for quick test runs.
+        """
+        group = QGroupBox("Z Depth")
+        layout = QVBoxLayout()
+
+        if self._has_dual_view:
+            auto_text = "Per tile, from the 90° view intersection"
+            auto_tip = (
+                "Each tile's Z range is computed from where the two rotated\n"
+                "views overlap, so tiles get different depths."
+            )
+        else:
+            auto_text = "Per tile, from the acquired data"
+            auto_tip = (
+                "Each tile uses the Z range recorded in its own acquisition\n"
+                "metadata, falling back to the scan bounding box."
+            )
+
+        self._z_mode_group = QButtonGroup(self)
+
+        self._z_auto_radio = QRadioButton(auto_text)
+        self._z_auto_radio.setToolTip(auto_tip)
+        self._z_auto_radio.setChecked(True)
+        self._z_mode_group.addButton(self._z_auto_radio)
+        layout.addWidget(self._z_auto_radio)
+
+        self._z_manual_radio = QRadioButton("Set one Z range for all tiles")
+        self._z_manual_radio.setToolTip(
+            "Every tile is collected over the same Z start/end typed below,\n"
+            "ignoring the per-tile ranges. Use this for single-workflow MIPs\n"
+            "and for quick test acquisitions."
+        )
+        self._z_mode_group.addButton(self._z_manual_radio)
+        layout.addWidget(self._z_manual_radio)
+
+        # Manual Z start / end, plus the acquired values for reference.
+        manual_row = QHBoxLayout()
+        manual_row.setContentsMargins(20, 0, 0, 0)
+
+        manual_row.addWidget(QLabel("Z start:"))
+        self._z_start_spin = self._make_z_spinbox()
+        manual_row.addWidget(self._z_start_spin)
+
+        manual_row.addWidget(QLabel("Z end:"))
+        self._z_end_spin = self._make_z_spinbox()
+        manual_row.addWidget(self._z_end_spin)
+
+        self._z_use_acquired_btn = QPushButton("Use acquired")
+        self._z_use_acquired_btn.setToolTip(
+            "Copy the Z start/end recorded in the selected tiles' acquisition\n"
+            "metadata into the fields on the left."
+        )
+        self._z_use_acquired_btn.clicked.connect(self._on_use_acquired_z)
+        manual_row.addWidget(self._z_use_acquired_btn)
+
+        manual_row.addStretch()
+        layout.addLayout(manual_row)
+
+        # What the acquired data itself recorded (shown next to the fields).
+        self._z_acquired_label = QLabel()
+        self._z_acquired_label.setStyleSheet("color: #555; font-size: 11px;")
+        self._z_acquired_label.setContentsMargins(20, 0, 0, 0)
+        layout.addWidget(self._z_acquired_label)
+
+        self._z_mode_desc = QLabel()
+        self._z_mode_desc.setWordWrap(True)
+        self._z_mode_desc.setStyleSheet("color: #555; font-size: 11px;")
+        layout.addWidget(self._z_mode_desc)
+
+        group.setLayout(layout)
+
+        # Seed the fields from the acquired range (or the per-tile range).
+        acquired = self._acquired_z_range()
+        if acquired is not None:
+            seed_min, seed_max = acquired[0], acquired[1]
+        else:
+            seed_min, seed_max = self._per_tile_representative_z_range()
+        self._z_start_spin.setValue(seed_min)
+        self._z_end_spin.setValue(seed_max)
+
+        self._z_auto_radio.toggled.connect(self._on_z_mode_changed)
+        self._z_start_spin.valueChanged.connect(self._on_manual_z_changed)
+        self._z_end_spin.valueChanged.connect(self._on_manual_z_changed)
+
+        self._refresh_z_section()
+        return group
+
+    def _make_z_spinbox(self) -> QDoubleSpinBox:
+        """A Z position field in mm (absolute stage coordinate, not a depth)."""
+        spin = QDoubleSpinBox()
+        spin.setRange(0.0, 100.0)
+        spin.setDecimals(4)
+        spin.setSingleStep(0.010)
+        spin.setSuffix(" mm")
+        spin.setFixedWidth(110)
+        return spin
+
+    def _all_selected_tiles(self) -> List:
+        """Every tile the user selected, across both panels."""
+        return list(self._left_tiles) + list(self._right_tiles)
+
+    def _acquired_z_range(self) -> Optional[Tuple[float, float, bool]]:
+        """(z_min, z_max, uniform) recorded by the acquisition, or None."""
+        return summarize_acquired_z(self._all_selected_tiles())
+
+    def _z_override_range(self) -> Optional[Tuple[float, float]]:
+        """The single Z range to force on every tile, or None for per-tile."""
+        radio = getattr(self, "_z_manual_radio", None)
+        if radio is None or not radio.isChecked():
+            return None
+        z_a = self._z_start_spin.value()
+        z_b = self._z_end_spin.value()
+        return (min(z_a, z_b), max(z_a, z_b))
+
+    def _on_use_acquired_z(self) -> None:
+        """Copy the acquired Z start/end into the manual fields."""
+        acquired = self._acquired_z_range()
+        if acquired is None:
+            QMessageBox.information(
+                self,
+                "No Acquired Z Range",
+                "The selected tiles carry no Z start/end in their acquisition "
+                "metadata, so there is nothing to copy.",
+            )
+            return
+        self._z_start_spin.setValue(acquired[0])
+        self._z_end_spin.setValue(acquired[1])
+
+    def _on_z_mode_changed(self, _checked: bool = False) -> None:
+        """Switch between per-tile Z and one range for all tiles."""
+        self._refresh_z_section()
+        self._apply_z_range_to_panels()
+
+    def _on_manual_z_changed(self, _value: float = 0.0) -> None:
+        """Manual Z start/end edited."""
+        self._refresh_z_section()
+        if self._z_override_range() is not None:
+            self._apply_z_range_to_panels()
+
+    def _apply_z_range_to_panels(self) -> None:
+        """Push the effective Z range into the Z-stack panel + estimates."""
+        if not hasattr(self, "_zstack_panel"):
+            return  # still building the UI
+        z_min, z_max = self._get_representative_z_range()
+        self._zstack_panel.set_z_range(z_min, z_max)
+        self._update_summary_label()
+        self._update_size_estimate()
+        if hasattr(self, "_type_description"):
+            self._on_type_changed(self._type_combo.currentIndex())
+
+    def _refresh_z_section(self) -> None:
+        """Update the Z section's enabled state and explanatory labels."""
+        manual = getattr(self, "_z_manual_radio", None) is not None and (
+            self._z_manual_radio.isChecked()
+        )
+        for widget in (
+            self._z_start_spin,
+            self._z_end_spin,
+            self._z_use_acquired_btn,
+        ):
+            widget.setEnabled(manual)
+
+        # Acquired-data reference line.
+        acquired = self._acquired_z_range()
+        if acquired is None:
+            self._z_acquired_label.setText("Acquired Z: not recorded for these tiles.")
+        else:
+            z_min, z_max, uniform = acquired
+            depth_um = (z_max - z_min) * 1000.0
+            if uniform:
+                self._z_acquired_label.setText(
+                    f"Acquired Z: {z_min:.4f} → {z_max:.4f} mm "
+                    f"({depth_um:.0f} µm, same for every tile)"
+                )
+            else:
+                self._z_acquired_label.setText(
+                    f"Acquired Z: varies per tile, spanning "
+                    f"{z_min:.4f} → {z_max:.4f} mm ({depth_um:.0f} µm)"
+                )
+
+        # Mode description.
+        if not manual:
+            if self._has_dual_view:
+                self._z_mode_desc.setText(
+                    "Each tile keeps its own depth from the 90° intersection."
+                )
+            else:
+                self._z_mode_desc.setText(
+                    "Each tile keeps the Z range recorded in its acquisition."
+                )
+            return
+
+        override = self._z_override_range()
+        n_tiles = len(self._all_selected_tiles())
+        if override is None:
+            self._z_mode_desc.setText("")
+            return
+        z_min, z_max = override
+        depth_um = (z_max - z_min) * 1000.0
+        if depth_um <= 0:
+            self._z_mode_desc.setText(
+                "⚠ Z start and Z end are the same — set a non-zero range."
+            )
+            self._z_mode_desc.setStyleSheet("color: #c0392b; font-size: 11px;")
+            return
+        self._z_mode_desc.setStyleSheet("color: #555; font-size: 11px;")
+        self._z_mode_desc.setText(
+            f"All {n_tiles} workflow(s) collect {z_min:.4f} → {z_max:.4f} mm "
+            f"({depth_um:.0f} µm), overriding the per-tile ranges."
+        )
+
     def _update_summary_label(self) -> None:
         """Update the summary label with current Z range info."""
         if not hasattr(self, "_summary_label"):
@@ -774,6 +1017,13 @@ class TileCollectionDialog(PersistentDialog):
                 global_z_min = min(z[0] for z in z_values)
                 global_z_max = max(z[1] for z in z_values)
                 summary_text += f"\n\n90° overlap Z range: {global_z_min:.2f} to {global_z_max:.2f} mm"
+
+        override = self._z_override_range()
+        if override is not None:
+            summary_text += (
+                f"\n\nZ range set for ALL tiles: "
+                f"{override[0]:.3f} to {override[1]:.3f} mm"
+            )
 
         self._summary_label.setText(summary_text)
 
@@ -828,7 +1078,9 @@ class TileCollectionDialog(PersistentDialog):
 
             # Update description with Z range info
             z_range_mm = z_max - z_min
-            if self._has_dual_view:
+            if self._z_override_range() is not None:
+                desc = f"Z-stack using the set Z range ({z_range_mm*1000:.0f} µm)"
+            elif self._has_dual_view:
                 desc = f"Z-stack using 90° overlap Z range ({z_range_mm*1000:.0f} µm)"
             else:
                 desc = f"Z-stack using bounding box Z range ({z_range_mm*1000:.0f} µm)"
@@ -836,10 +1088,21 @@ class TileCollectionDialog(PersistentDialog):
             self._zstack_panel.setVisible(True)
 
     def _get_representative_z_range(self) -> Tuple[float, float]:
-        """Get representative Z range from all tiles.
+        """Get the Z range the UI should size itself against.
 
-        Uses the maximum Z range across all tiles since that determines
-        the maximum number of planes needed for complete coverage.
+        With a manual override this is that one range; otherwise it is the
+        largest per-tile range (which determines the maximum plane count).
+
+        Returns:
+            Tuple of (z_min, z_max) in mm
+        """
+        override = self._z_override_range()
+        if override is not None:
+            return override
+        return self._per_tile_representative_z_range()
+
+    def _per_tile_representative_z_range(self) -> Tuple[float, float]:
+        """Largest of the per-tile Z ranges, ignoring any manual override.
 
         Returns:
             Tuple of (z_min, z_max) in mm
@@ -922,6 +1185,18 @@ class TileCollectionDialog(PersistentDialog):
         if not name_prefix:
             QMessageBox.warning(
                 self, "Missing Name", "Please enter a workflow name prefix."
+            )
+            return
+
+        # A manual Z range must actually span something, or every workflow
+        # would be a zero-depth stack.
+        z_override = self._z_override_range()
+        if z_override is not None and (z_override[1] - z_override[0]) <= 0:
+            QMessageBox.warning(
+                self,
+                "Invalid Z Range",
+                "Z start and Z end are the same. Set a non-zero Z range, or "
+                "switch back to the per-tile Z depth.",
             )
             return
 
@@ -1027,6 +1302,17 @@ class TileCollectionDialog(PersistentDialog):
                     else bbox_z_max
                 )
                 tiles_to_process.append((tile, self._right_rotation, z_min, z_max))
+
+        # One Z range for every tile, whichever mode produced the list above.
+        if z_override is not None:
+            tiles_to_process = [
+                (tile, rotation, z_override[0], z_override[1])
+                for tile, rotation, _z_min, _z_max in tiles_to_process
+            ]
+            logger.info(
+                f"Z override: all {len(tiles_to_process)} workflows collect "
+                f"{z_override[0]:.4f} to {z_override[1]:.4f} mm"
+            )
 
         total = len(tiles_to_process)
         if total == 0:
@@ -2077,6 +2363,9 @@ class TileCollectionDialog(PersistentDialog):
             "name_prefix": self._name_prefix.text(),
             "add_to_sample_view": self._add_to_sample_view_checkbox.isChecked(),
             "limit_arm_near_side": self._limit_arm_checkbox.isChecked(),
+            "z_manual_mode": self._z_manual_radio.isChecked(),
+            "z_manual_start": self._z_start_spin.value(),
+            "z_manual_end": self._z_end_spin.value(),
             "multiview_enabled": self._multiview_checkbox.isChecked(),
             "multiview_angles": self._multiview_angles_spin.value(),
             # Panel settings (using ui_state methods for raw dict persistence)
@@ -2114,6 +2403,16 @@ class TileCollectionDialog(PersistentDialog):
             return
 
         logger.debug("Restoring TileCollectionDialog state")
+
+        # Restore Z depth mode first — the workflow-type restore below reads
+        # the effective Z range to size its plane count and description.
+        if "z_manual_start" in state:
+            self._z_start_spin.setValue(float(state["z_manual_start"]))
+        if "z_manual_end" in state:
+            self._z_end_spin.setValue(float(state["z_manual_end"]))
+        if state.get("z_manual_mode"):
+            self._z_manual_radio.setChecked(True)
+        self._refresh_z_section()
 
         # Restore workflow type
         if "workflow_type" in state:

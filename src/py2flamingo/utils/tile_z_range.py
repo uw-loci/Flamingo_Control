@@ -10,6 +10,11 @@ from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Two Z values closer than this (mm) are treated as the same value -- 0.1 µm,
+# far below any real stage step, so float noise in parsed metadata can't make
+# an otherwise-uniform acquisition look like it varies per tile.
+_Z_EQUAL_TOL_MM = 1e-4
+
 
 def calculate_tile_z_ranges(
     primary_tiles: List,
@@ -159,6 +164,45 @@ def _estimate_rotation_offset(primary_tiles: List, secondary_tiles: List) -> flo
         f"(primary Z midpoint={primary_z_mid:.4f}, secondary X midpoint={secondary_x_mid:.4f})"
     )
     return offset
+
+
+def summarize_acquired_z(tiles: List) -> Optional[Tuple[float, float, bool]]:
+    """Summarise the Z start/end recorded in the tiles' own acquisition metadata.
+
+    A tile carries ``z_stack_min``/``z_stack_max`` only when the acquisition it
+    came from recorded them (a ``*_Settings.txt`` companion, or the LED 2D
+    overview's own scan). Tiles where the two are equal carry no range and are
+    ignored.
+
+    Args:
+        tiles: TileResult-like objects with ``z_stack_min``/``z_stack_max``.
+
+    Returns:
+        ``(z_min, z_max, uniform)`` over the tiles that DO carry a range --
+        ``uniform`` is True when every one of them recorded the same range (a
+        single Z depth for the whole acquisition), False when they differ (so
+        the pair is the enclosing span). ``None`` when no tile recorded one.
+    """
+    ranges = []
+    for tile in tiles:
+        z_min = getattr(tile, "z_stack_min", 0.0)
+        z_max = getattr(tile, "z_stack_max", 0.0)
+        if z_min is None or z_max is None:
+            continue
+        if abs(z_max - z_min) <= _Z_EQUAL_TOL_MM:
+            continue  # no range recorded for this tile
+        ranges.append((min(z_min, z_max), max(z_min, z_max)))
+
+    if not ranges:
+        return None
+
+    first_min, first_max = ranges[0]
+    uniform = all(
+        abs(z_min - first_min) <= _Z_EQUAL_TOL_MM
+        and abs(z_max - first_max) <= _Z_EQUAL_TOL_MM
+        for z_min, z_max in ranges
+    )
+    return (min(r[0] for r in ranges), max(r[1] for r in ranges), uniform)
 
 
 def estimate_fov_from_tiles(primary_tiles: List, secondary_tiles: List) -> float:

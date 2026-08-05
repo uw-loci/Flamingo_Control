@@ -53,9 +53,12 @@ from py2flamingo.models.mip_overview import (
     export_overview_with_labels,
     find_date_folders,
     find_tile_folders,
+    is_mip_file,
     load_invert_x_setting,
+    load_tile_mip,
     parse_coords_from_folder,
     read_tile_overlap_from_workflow,
+    read_tile_z_range,
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.visualization.zarr_2d_session import (
@@ -70,6 +73,26 @@ from py2flamingo.visualization.zarr_2d_session import (
 from .led_2d_overview_result import ImagePanel
 
 logger = logging.getLogger(__name__)
+
+
+def _pick_tile_source(tile_folder: Path) -> Optional[Path]:
+    """The file to project a subfolder-layout tile from.
+
+    A pre-computed ``*_MP.tif`` always wins — recomputing a projection from a
+    multi-gigabyte stack when the acquisition already wrote one is pure waste.
+    Falls back to a plain TIFF stack in the folder, which ``load_tile_mip``
+    projects page-by-page. ``.raw`` stacks are not projected here: their shape
+    isn't self-describing, and the server always writes an ``_MP`` beside them.
+    """
+    mips = sorted(tile_folder.glob("*_MP.tif")) + sorted(tile_folder.glob("*_MP.tiff"))
+    if mips:
+        return mips[0]
+    stacks = [
+        p
+        for p in sorted(tile_folder.glob("*.tif")) + sorted(tile_folder.glob("*.tiff"))
+        if not is_mip_file(p)
+    ]
+    return stacks[0] if stacks else None
 
 
 class MIPOverviewDialog(PersistentDialog):
@@ -433,31 +456,40 @@ class MIPOverviewDialog(PersistentDialog):
                 skipped += 1
                 continue
 
-            mip_files = list(tile_folder.glob("*_MP.tif"))
-            if not mip_files:
-                logger.warning(f"No *_MP.tif file in {tile_folder}")
+            # Always prefer the pre-computed projection in this folder. Only
+            # when the acquisition didn't write one do we fall back to
+            # projecting a TIFF stack (much slower, so it's logged).
+            mip_file = _pick_tile_source(tile_folder)
+            if mip_file is None:
+                logger.warning(f"No *_MP.tif or TIFF stack in {tile_folder}")
                 skipped += 1
                 continue
 
-            mip_file = mip_files[0]
-            try:
-                image = tifffile.imread(str(mip_file))
-                logger.debug(
-                    f"Loaded {mip_file.name}: shape={image.shape}, dtype={image.dtype}"
-                )
-            except Exception as e:
-                logger.error(f"Failed to load {mip_file}: {e}")
+            image = load_tile_mip(mip_file)
+            if image is None:
+                logger.error(f"Failed to load {mip_file}")
                 skipped += 1
                 continue
+            logger.debug(
+                f"Loaded {mip_file.name}: shape={image.shape}, dtype={image.dtype}"
+            )
+
+            # The folder name carries only X and Y; the Z depth the tile was
+            # acquired over comes from its *_Settings.txt companion (used by
+            # tile collection to show / reuse the acquired Z range).
+            z_range = read_tile_z_range(tile_folder)
+            z_min, z_max = z_range if z_range else (0.0, 0.0)
 
             tile = MIPTileResult(
                 x=x,
                 y=y,
-                z=0.0,
+                z=(z_min + z_max) / 2 if z_range else 0.0,
                 tile_x_idx=0,
                 tile_y_idx=0,
                 image=image,
                 folder_path=tile_folder,
+                z_stack_min=z_min,
+                z_stack_max=z_max,
             )
             tiles.append(tile)
 
@@ -627,17 +659,13 @@ class MIPOverviewDialog(PersistentDialog):
                     )
                     continue
 
-            # Read from disk
-            try:
-                image = tifffile.imread(str(fi.channel_files[channel_id]))
-                if image.ndim == 3:
-                    image = (
-                        image[0] if image.shape[0] < image.shape[-1] else image[:, :, 0]
-                    )
-            except Exception as e:
+            # Read from disk — uses the tile's *_MP.tif companion when one
+            # exists, and only projects a stack when it doesn't.
+            image = load_tile_mip(fi.channel_files[channel_id])
+            if image is None:
                 logger.warning(
                     f"Failed to load MIP for tile X{fi.x_idx}_Y{fi.y_idx} "
-                    f"C{channel_id}: {e}"
+                    f"C{channel_id}"
                 )
                 continue
 

@@ -23,8 +23,13 @@ logger = logging.getLogger(__name__)
 _FLAT_MIP_SERVER_PATTERN = re.compile(
     r"S\d+_t\d+_V\d+_R\d+_X(\d+)_Y(\d+)_C(\d+).*_MP\.tif$", re.IGNORECASE
 )
-# Simple pattern: anything_X000_Y000_C00.tif (from post-processing scripts)
-_FLAT_MIP_SIMPLE_PATTERN = re.compile(r"_X(\d+)_Y(\d+)_C(\d+)\.tif$", re.IGNORECASE)
+# Simple pattern: anything_X000_Y000_C00.tif (from post-processing scripts).
+# Also matches the "_MP" companion of the same name so a directory holding BOTH
+# a full stack and its projection is discovered by either file — which one is
+# actually read is decided by _prefer_mip_file (the projection always wins).
+_FLAT_MIP_SIMPLE_PATTERN = re.compile(
+    r"_X(\d+)_Y(\d+)_C(\d+)(?:_MP)?\.tif$", re.IGNORECASE
+)
 
 # Tile-folder coordinate pattern (X{mm}_Y{mm}), matched ANYWHERE in the folder
 # name (unanchored) so single-workflow / vendor acquisition folders with
@@ -315,6 +320,39 @@ def find_tile_folders(date_path: Path) -> List[Path]:
     return tile_folders
 
 
+def read_tile_z_range(tile_folder: Path) -> Optional[Tuple[float, float]]:
+    """Read a subfolder-layout tile's acquired Z start/end from its metadata.
+
+    The folder name only carries X and Y, so the Z depth the tile was actually
+    collected over has to come from the acquisition's own ``*_Settings.txt``
+    companion. Used to show (and optionally reuse) the acquired Z range when
+    re-collecting tiles.
+
+    Args:
+        tile_folder: A single tile's folder (``X*_Y*`` or timestamped variant)
+
+    Returns:
+        ``(z_min_mm, z_max_mm)``, or None when no usable range is recorded.
+    """
+    settings_files = sorted(tile_folder.glob("*_Settings.txt"))
+    if not settings_files:
+        return None
+
+    try:
+        from py2flamingo.stitching.pipeline import _read_position_from_settings
+
+        pos = _read_position_from_settings(settings_files[0])
+    except Exception as e:
+        logger.debug(f"Failed to read Z range from {settings_files[0]}: {e}")
+        return None
+
+    z_min = pos.get("z_min_mm", 0.0)
+    z_max = pos.get("z_max_mm", 0.0)
+    if z_min == z_max:
+        return None
+    return (min(z_min, z_max), max(z_min, z_max))
+
+
 def load_invert_x_setting() -> bool:
     """Load the X-axis inversion setting from visualization config.
 
@@ -370,6 +408,94 @@ def _parse_flat_mip_filename(filename: str) -> Optional[Tuple[int, int, int]]:
     if m:
         return int(m.group(1)), int(m.group(2)), int(m.group(3))
     return None
+
+
+def is_mip_file(path: Path) -> bool:
+    """True when this file is already a ``*_MP.tif`` projection."""
+    return path.stem.upper().endswith("_MP")
+
+
+def find_mip_companion(path: Path) -> Optional[Path]:
+    """The ``*_MP.tif`` projection that belongs to ``path``, if it exists.
+
+    The acquisition server writes a max projection next to every stack, so a
+    tile that looks like ``..._P363.tif`` normally has ``..._P363_MP.tif``
+    beside it. Reading that costs one small image instead of pulling a
+    multi-gigabyte stack through RAM to recompute what is already on disk.
+
+    Args:
+        path: A tile file (stack or projection).
+
+    Returns:
+        The companion projection, or None when ``path`` IS the projection or
+        no companion exists.
+    """
+    if is_mip_file(path):
+        return None
+    for suffix in (".tif", ".tiff"):
+        candidate = path.with_name(path.stem + "_MP" + suffix)
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _prefer_mip_file(path: Path) -> Path:
+    """``path``'s ``*_MP.tif`` companion when there is one, else ``path``."""
+    return find_mip_companion(path) or path
+
+
+def load_tile_mip(path: Path) -> Optional[np.ndarray]:
+    """Load a tile's max projection, preferring the pre-computed ``*_MP.tif``.
+
+    Order:
+
+    1. If a ``*_MP.tif`` companion sits next to ``path``, read that — no
+       projection work, no large allocation.
+    2. Otherwise read ``path``. If it turns out to be a Z stack, project it
+       page-by-page with a running maximum so an arbitrarily deep stack costs
+       one frame of RAM rather than the whole volume.
+
+    Returns:
+        A 2-D projection, or None if nothing could be read.
+    """
+    import tifffile
+
+    target = _prefer_mip_file(path)
+    if target != path:
+        logger.debug(f"Using existing projection {target.name} instead of {path.name}")
+
+    try:
+        with tifffile.TiffFile(str(target)) as tf:
+            pages = tf.series[0].pages if tf.series else tf.pages
+            n_pages = len(pages)
+            if n_pages <= 1:
+                image = np.asarray(tf.asarray())
+                return _flatten_to_2d(image)
+            # A real stack: running max keeps peak RAM at one frame.
+            logger.info(
+                f"No projection companion for {path.name} — projecting "
+                f"{n_pages} planes (slower; a *_MP.tif would be used directly)"
+            )
+            projection = np.asarray(pages[0].asarray())
+            for i in range(1, n_pages):
+                np.maximum(projection, np.asarray(pages[i].asarray()), out=projection)
+            return _flatten_to_2d(projection)
+    except Exception as e:
+        logger.warning(f"Failed to load MIP from {target}: {e}")
+        return None
+
+
+def _flatten_to_2d(image: np.ndarray) -> np.ndarray:
+    """Reduce a stray 3-D array to 2-D by projecting its shortest axis.
+
+    Guards the case where a single "page" is itself multi-plane (or RGB): the
+    old code took plane 0, which silently showed one slice of a stack instead
+    of its projection.
+    """
+    if image.ndim <= 2:
+        return image
+    axis = int(np.argmin(image.shape))
+    return np.max(image, axis=axis)
 
 
 def read_tile_overlap_from_workflow(directory: Path) -> Optional[Tuple[float, float]]:
@@ -458,7 +584,10 @@ def discover_flat_mip_tiles(directory: Path) -> List[FlatMIPTileInfo]:
     if not directory.is_dir():
         return []
 
-    # Group MIP files by (x_idx, y_idx)
+    # Group MIP files by (x_idx, y_idx). When a directory holds BOTH a stack
+    # and its projection for the same tile+channel, keep the projection — it
+    # is what we want to read, and relying on filename sort order to decide
+    # that was luck, not a rule.
     tile_groups: Dict[Tuple[int, int], Dict[int, Path]] = {}
     for item in sorted(directory.iterdir()):
         if not item.is_file():
@@ -469,7 +598,10 @@ def discover_flat_mip_tiles(directory: Path) -> List[FlatMIPTileInfo]:
             key = (x_idx, y_idx)
             if key not in tile_groups:
                 tile_groups[key] = {}
-            tile_groups[key][ch] = item
+            existing = tile_groups[key].get(ch)
+            if existing is not None and is_mip_file(existing) and not is_mip_file(item):
+                continue  # already holding the projection for this tile
+            tile_groups[key][ch] = _prefer_mip_file(item)
 
     if not tile_groups:
         logger.warning(f"No flat-layout MIP TIFFs found in {directory}")
@@ -643,12 +775,10 @@ def export_overview_with_labels(
                 if flat_info is None or ch_id not in flat_info.channel_files:
                     continue
 
-                try:
-                    img = tifffile.imread(str(flat_info.channel_files[ch_id]))
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to read {flat_info.channel_files[ch_id]}: {e}"
-                    )
+                # Prefers the tile's *_MP.tif companion; only projects a stack
+                # when no projection exists.
+                img = load_tile_mip(flat_info.channel_files[ch_id])
+                if img is None:
                     continue
             else:
                 if ch_idx > 0:
@@ -656,8 +786,7 @@ def export_overview_with_labels(
                 img = tile.image
 
             # Downsample to target size
-            if img.ndim == 3:
-                img = img[0] if img.shape[0] < img.shape[-1] else img[:, :, 0]
+            img = _flatten_to_2d(img)
             factor = max(1, img.shape[0] // downsample_size)
             if factor > 1:
                 ds = block_reduce(img, block_size=(factor, factor), func=np.mean)
