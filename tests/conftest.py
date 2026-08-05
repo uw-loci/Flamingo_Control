@@ -1,5 +1,17 @@
+import os
 import sys
 from pathlib import Path
+
+# Force Qt's offscreen backend for the whole suite, before anything can import
+# PyQt5. Without it, constructing a widget on a headless box (WSL, CI, ssh)
+# SEGFAULTS the whole pytest process — you get a bare "Extension modules: …"
+# faulthandler dump and no test results, which reads like a catastrophic
+# failure rather than a missing display. Individual test modules used to set
+# this themselves, so whether the run survived depended on which file imported
+# Qt first; conftest is loaded before every test module, so this covers all of
+# them. setdefault, so an explicit QT_QPA_PLATFORM still wins (e.g. running a
+# GUI test on a real display).
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 # Ensure the src directory is on the Python path for imports
 ROOT = Path(__file__).resolve().parents[1]
