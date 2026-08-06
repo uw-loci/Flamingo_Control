@@ -220,7 +220,9 @@ class TestMemoryFootprint(unittest.TestCase):
         self.assertLess(store.nbytes, 400 * 2**20, f"{store.nbytes / 2**20:.0f} MiB")
 
     def test_memory_usage_reports_real_bytes_not_an_idealised_count(self):
-        storage = DualResolutionVoxelStorage(DualResolutionConfig())
+        storage = DualResolutionVoxelStorage(
+            DualResolutionConfig(chamber_dimensions=(1000, 1000, 1000))
+        )
         keys = np.arange(100_000, dtype=np.int64)
         storage.storage_data[0].merge(keys, np.ones(keys.size, np.uint16), "maximum")
 
@@ -315,7 +317,9 @@ class TestDisplayDownsampleEquivalence(unittest.TestCase):
     """
 
     def _reference(self, z, y, x, values, min_coords, region_shape, ratio):
-        storage = DualResolutionVoxelStorage(DualResolutionConfig())
+        storage = DualResolutionVoxelStorage(
+            DualResolutionConfig(chamber_dimensions=(1000, 1000, 1000))
+        )
         dense = np.zeros(region_shape, dtype=np.uint16)
         dense[z - min_coords[0], y - min_coords[1], x - min_coords[2]] = values
         return storage._block_reduce(dense, ratio)
@@ -369,13 +373,13 @@ class TestDisplayDownsampleEquivalence(unittest.TestCase):
             storage_voxel_size=(5, 5, 5),
             display_voxel_size=(50, 50, 50),
             sample_region_radius=1000,
-            chamber_dimensions=(20000, 20000, 20000),
+            chamber_dimensions=(4000, 4000, 4000),
             chamber_origin=(0, 0, 0),
-            sample_region_center=(10000, 10000, 10000),
+            sample_region_center=(2000, 2000, 2000),
         )
         storage = DualResolutionVoxelStorage(config)
         rng = np.random.default_rng(23)
-        coords = np.array([10000.0, 10000.0, 10000.0]) + rng.uniform(
+        coords = np.array([2000.0, 2000.0, 2000.0]) + rng.uniform(
             -300, 300, size=(5000, 3)
         )
         storage.update_storage(
@@ -394,3 +398,376 @@ class TestDisplayDownsampleEquivalence(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAS_HEAVY_DEPS, "requires scipy/sparse")
+class TestMemoryEfficientDisplay(unittest.TestCase):
+    """8-bit display caches, with raw counts still recoverable."""
+
+    def _storage(self):
+        config = DualResolutionConfig(
+            storage_voxel_size=(5, 5, 5),
+            display_voxel_size=(50, 50, 50),
+            sample_region_radius=1000,
+            chamber_dimensions=(4000, 4000, 4000),
+            chamber_origin=(0, 0, 0),
+            sample_region_center=(2000, 2000, 2000),
+        )
+        return DualResolutionVoxelStorage(config)
+
+    def _fill(self, storage, channel=0, value=4321, n=5000):
+        rng = np.random.default_rng(23)
+        coords = np.array([2000.0, 2000.0, 2000.0]) + rng.uniform(
+            -300, 300, size=(n, 3)
+        )
+        storage.update_storage(
+            channel_id=channel,
+            world_coords=coords,
+            pixel_values=np.full(n, value, dtype=np.uint16),
+            timestamp=1.0,
+            update_mode="maximum",
+        )
+
+    def test_display_cache_halves(self):
+        storage = self._storage()
+        before = storage.display_bytes()
+
+        self.assertTrue(storage.set_memory_efficient(True))
+
+        self.assertEqual(storage.display_bytes(), before // 2)
+        self.assertEqual(storage.display_cache[0].dtype, np.uint8)
+
+    def test_toggling_is_reversible_and_reports_no_change_when_idempotent(self):
+        storage = self._storage()
+        self.assertTrue(storage.set_memory_efficient(True))
+        self.assertFalse(storage.set_memory_efficient(True))
+        self.assertTrue(storage.set_memory_efficient(False))
+
+        self.assertEqual(storage.display_cache[0].dtype, np.uint16)
+
+    def test_a_dim_channel_survives_the_conversion(self):
+        """The whole reason for rescaling instead of >> 8.
+
+        A channel already inside 0-255 is passed through untouched — the scale
+        only ever divides, never stretches. Stretching 235 to 255 would invent
+        contrast that is not in the data and would make raw_from_display()
+        lossy for no gain.
+        """
+        storage = self._storage()
+        storage.set_memory_efficient(True)
+        self._fill(storage, value=235)  # the dim channel from the rig log
+
+        volume = storage.downsample_to_display(0, force=True)
+
+        self.assertEqual(volume.dtype, np.uint8)
+        self.assertEqual(int(volume.max()), 235)  # a straight >> 8 gives 0
+        self.assertEqual(storage.channel_display_scale[0], 1.0)
+        self.assertEqual(storage.raw_from_display(0, 235), 235)  # still exact
+
+    def test_raw_counts_are_recoverable_from_the_display_value(self):
+        storage = self._storage()
+        storage.set_memory_efficient(True)
+        self._fill(storage, value=40000)
+
+        volume = storage.downsample_to_display(0, force=True)
+        recovered = storage.raw_from_display(0, int(volume.max()))
+
+        # Quantised to one display step (scale = 40000/255 ~ 157), not exact.
+        self.assertAlmostEqual(recovered, 40000, delta=200)
+
+    def test_sixteen_bit_mode_leaves_values_untouched(self):
+        storage = self._storage()
+        self._fill(storage, value=40000)
+
+        volume = storage.downsample_to_display(0, force=True)
+
+        self.assertEqual(volume.dtype, np.uint16)
+        self.assertEqual(int(volume.max()), 40000)
+        self.assertEqual(storage.raw_from_display(0, 40000), 40000)
+
+    def test_store_display_volume_rescales_instead_of_wrapping(self):
+        """A raw uint16 volume assigned straight in would wrap modulo 256."""
+        storage = self._storage()
+        storage.set_memory_efficient(True)
+        data = np.zeros(storage.display_dims, dtype=np.uint16)
+        data[0, 0, 0] = 4096  # 4096 % 256 == 0 — the wrap would look like zero
+
+        storage.store_display_volume(0, data)
+
+        self.assertEqual(storage.display_cache[0].dtype, np.uint8)
+        self.assertEqual(int(storage.display_cache[0][0, 0, 0]), 255)
+        self.assertAlmostEqual(storage.raw_from_display(0, 255), 4096, delta=20)
+
+    def test_switching_modes_does_not_strand_a_stale_scale(self):
+        storage = self._storage()
+        storage.set_memory_efficient(True)
+        self._fill(storage, value=40000)
+        storage.downsample_to_display(0, force=True)
+        self.assertNotEqual(storage.channel_display_scale[0], 1.0)
+
+        storage.set_memory_efficient(False)
+
+        self.assertEqual(storage.channel_display_scale[0], 1.0)
+        self.assertEqual(int(storage.downsample_to_display(0, force=True).max()), 40000)
+
+
+@unittest.skipUnless(HAS_HEAVY_DEPS, "requires scipy/sparse")
+class TestIsotropicGrid(unittest.TestCase):
+    """Snap the storage grid to the coarsest axis the data actually resolves."""
+
+    def _storage(self, storage_um=5.0, display_um=50.0):
+        config = DualResolutionConfig(
+            storage_voxel_size=(storage_um,) * 3,
+            display_voxel_size=(display_um,) * 3,
+            sample_region_half_widths=(6000, 12000, 7000),
+        )
+        return DualResolutionVoxelStorage(config)
+
+    def test_coarsens_to_the_worst_axis(self):
+        storage = self._storage()
+        # The rig case: 8.3 µm stored pixel laterally, 1.25 µm Z step.
+        self.assertTrue(storage.adopt_isotropic_grid((1.25, 8.3, 8.3)))
+
+        grid = storage.config.storage_voxel_size[0]
+        self.assertGreaterEqual(grid, 8.3)
+        self.assertAlmostEqual(grid, 50.0 / 6)  # 8.333
+
+    def test_the_grid_still_divides_the_display_voxel_exactly(self):
+        """Otherwise the storage->display block reduction drifts."""
+        for sampling in ((1.0, 8.3, 8.3), (2.0, 3.1, 3.1), (0.5, 17.0, 17.0)):
+            with self.subTest(sampling=sampling):
+                storage = self._storage()
+                storage.adopt_isotropic_grid(sampling)
+
+                grid = storage.config.storage_voxel_size[0]
+                ratio = 50.0 / grid
+                self.assertAlmostEqual(ratio, round(ratio), places=9)
+                self.assertGreaterEqual(grid, max(sampling))
+
+    def test_it_never_makes_the_grid_finer(self):
+        storage = self._storage()
+        self.assertFalse(storage.adopt_isotropic_grid((0.3, 0.3, 0.3)))
+        self.assertEqual(storage.config.storage_voxel_size[0], 5.0)
+
+    def test_refuses_once_storage_holds_data(self):
+        """Voxel keys index the old grid; changing it would corrupt them."""
+        storage = self._storage()
+        storage.storage_data[0].merge(
+            np.array([1, 2, 3]), np.array([1, 2, 3], np.uint16), "maximum"
+        )
+
+        self.assertFalse(storage.adopt_isotropic_grid((1.0, 8.3, 8.3)))
+        self.assertEqual(storage.config.storage_voxel_size[0], 5.0)
+
+    def test_storage_dims_shrink_with_the_grid(self):
+        storage = self._storage()
+        before = storage.storage_dims
+        storage.adopt_isotropic_grid((1.25, 8.3, 8.3))
+
+        self.assertTrue(all(a > b for a, b in zip(before, storage.storage_dims)))
+
+    # The rig's tile geometry: frames are downsampled to 100x100 BEFORE they
+    # reach storage, so the lateral spacing is already ~8.3 µm.
+    _PX_UM = 8.3
+    _N_FRAMES = 150
+    _LATERAL = 60
+    _CENTER = (19250.0, 7000.0, 6655.0)
+
+    def _fill_like_a_tile(self, storage, z_span_um=750.0):
+        """Write a dense lattice at the real stored-pixel spacing."""
+        yy, xx = np.meshgrid(
+            np.arange(self._LATERAL), np.arange(self._LATERAL), indexing="ij"
+        )
+        lat_y = (yy.ravel() - self._LATERAL / 2) * self._PX_UM + self._CENTER[1]
+        lat_x = (xx.ravel() - self._LATERAL / 2) * self._PX_UM + self._CENTER[2]
+        n = lat_y.size
+        for i in range(self._N_FRAMES):
+            z = self._CENTER[0] - z_span_um / 2 + z_span_um * i / (self._N_FRAMES - 1)
+            storage.update_storage(
+                0,
+                np.column_stack([np.full(n, z), lat_y, lat_x]),
+                np.full(n, 100, np.uint16),
+                1.0,
+                "maximum",
+            )
+        return len(storage.storage_data[0])
+
+    def _tile_storage(self):
+        storage = self._storage()
+        storage.config.sample_region_center = self._CENTER
+        return storage
+
+    def test_the_grid_reduction_is_linear_not_cubic_for_tile_data(self):
+        """~1.7x, and the reason matters.
+
+        Coarsening 5 -> 8.33 µm looks like it should save (8.33/5)^3 = 4.6x,
+        but it cannot merge points that were already further apart than either
+        grid. Tile frames arrive pre-downsampled to 100x100, i.e. ~8.3 µm
+        laterally, so XY gains nothing; the whole saving comes from Z, where
+        1600 planes were being held on a 5 µm grid. Expect ~5/8.33 = 1.67x.
+
+        Data arriving at native lateral resolution WOULD get the cubic win —
+        this path does not, and that is a property of the input, not the grid.
+        """
+        n_fine = self._fill_like_a_tile(self._tile_storage())
+
+        coarse = self._tile_storage()
+        coarse.adopt_isotropic_grid((5.0, self._PX_UM, self._PX_UM))
+        n_coarse = self._fill_like_a_tile(coarse)
+
+        reduction = n_fine / n_coarse
+        self.assertGreater(reduction, 1.5, f"{n_fine} -> {n_coarse}")
+        self.assertLess(reduction, 2.0, f"{n_fine} -> {n_coarse}")
+
+    def test_lateral_occupancy_is_unchanged_by_the_coarser_grid(self):
+        """Pins the reason the saving is linear: XY cannot merge."""
+        flat = self._tile_storage()
+        n_fine = self._fill_like_a_tile(flat, z_span_um=0.0)  # single Z plane
+
+        coarse = self._tile_storage()
+        coarse.adopt_isotropic_grid((5.0, self._PX_UM, self._PX_UM))
+        n_coarse = self._fill_like_a_tile(coarse, z_span_um=0.0)
+
+        # Points spaced 8.3 µm stay distinct on an 8.33 µm grid.
+        self.assertGreater(n_coarse / n_fine, 0.9)
+
+    def test_the_logged_estimate_is_not_the_cubic_figure(self):
+        """The log must predict ~1.7x for tile geometry, not 4.6x."""
+        storage = self._tile_storage()
+        with self.assertLogs(
+            "py2flamingo.visualization.dual_resolution_storage", level=logging.INFO
+        ) as logs:
+            storage.adopt_isotropic_grid((5.0, self._PX_UM, self._PX_UM))
+
+        line = next(m for m in logs.output if "isotropic" in m)
+        predicted = float(line.split("roughly ")[1].split("x")[0])
+        self.assertGreater(predicted, 1.4)
+        self.assertLess(predicted, 2.0, line)
+
+
+@unittest.skipUnless(HAS_HEAVY_DEPS, "requires scipy/sparse")
+class TestToggleDoesNotDestroyCacheOnlyChannels(unittest.TestCase):
+    """Session-loaded and stitched channels live ONLY in the display cache.
+
+    They have no sparse store to rebuild from, so the toggle has to convert
+    the cache rather than reallocate it — otherwise flipping the checkbox
+    blanks a loaded dataset with nothing to restore it from.
+    """
+
+    def _storage(self):
+        return DualResolutionVoxelStorage(
+            DualResolutionConfig(
+                display_voxel_size=(50, 50, 50),
+                chamber_dimensions=(2000, 2000, 2000),
+            )
+        )
+
+    def test_a_loaded_channel_survives_the_toggle(self):
+        storage = self._storage()
+        volume = np.zeros(storage.display_dims, dtype=np.uint16)
+        volume[1:4, 1:4, 1:4] = 30000
+        storage.store_display_volume(0, volume)
+        storage._session_loaded_channels.add(0)
+
+        storage.set_memory_efficient(True)
+
+        cache = storage.display_cache[0]
+        self.assertEqual(cache.dtype, np.uint8)
+        self.assertGreater(int(cache.max()), 0)
+        self.assertAlmostEqual(
+            storage.raw_from_display(0, int(cache.max())), 30000, delta=200
+        )
+
+    def test_a_round_trip_lands_back_near_the_original_counts(self):
+        storage = self._storage()
+        volume = np.zeros(storage.display_dims, dtype=np.uint16)
+        volume[0, 0, 0] = 30000
+        storage.store_display_volume(0, volume)
+        storage._session_loaded_channels.add(0)
+
+        storage.set_memory_efficient(True)
+        storage.set_memory_efficient(False)
+
+        cache = storage.display_cache[0]
+        self.assertEqual(cache.dtype, np.uint16)
+        # Quantised by the 8-bit round trip, not zeroed.
+        self.assertAlmostEqual(int(cache[0, 0, 0]), 30000, delta=200)
+
+    def test_a_channel_with_sparse_data_is_marked_for_rebuild(self):
+        storage = self._storage()
+        storage.storage_data[0].merge(
+            np.array([1]), np.array([500], np.uint16), "maximum"
+        )
+
+        storage.set_memory_efficient(True)
+
+        self.assertTrue(storage.display_dirty[0])
+        self.assertFalse(storage.display_dirty[1])  # empty channel, nothing to do
+
+
+@unittest.skipUnless(HAS_HEAVY_DEPS, "requires scipy/sparse")
+class TestTileWorkerAdoptsTheGrid(unittest.TestCase):
+    """The grid has to be chosen from the data, on the first tile, before writes."""
+
+    def _worker_and_storage(self, memory_efficient):
+        from py2flamingo.visualization.tile_processing_worker import (
+            TileFrameBuffer,
+            TileProcessingWorker,
+        )
+
+        storage = DualResolutionVoxelStorage(
+            DualResolutionConfig(
+                storage_voxel_size=(5, 5, 5),
+                display_voxel_size=(50, 50, 50),
+                chamber_dimensions=(4000, 4000, 4000),
+                sample_region_center=(2000, 2000, 2000),
+                sample_region_radius=1000,
+            )
+        )
+        storage.memory_efficient = memory_efficient
+        worker = TileProcessingWorker(
+            storage,
+            {"sample_chamber": {"sample_region_center_um": [2000, 2000, 2000]}},
+        )
+        # 40 planes over a 1 mm sweep -> 25.6 µm Z step; frames pre-downsampled
+        # to 40x40, so ~8 µm laterally at a 2048 px sensor.
+        buffer = TileFrameBuffer(
+            tile_key=(2.0, 2.0),
+            position={"x": 2.0, "y": 2.0, "z": 2.0},
+            channels=[0],
+            z_min=1.5,
+            z_max=2.5,
+            reference_position={"x": 2.0, "y": 2.0, "z": 2.0, "r": 0.0},
+            planes_per_channel=40,
+            source_frame_shape=(2048, 2048),
+        )
+        for i in range(40):
+            buffer.append(np.full((40, 40), 500, dtype=np.uint16), i)
+        return worker, storage, buffer
+
+    def test_grid_is_adopted_when_memory_efficient(self):
+        worker, storage, buffer = self._worker_and_storage(True)
+        before = storage.config.storage_voxel_size[0]
+
+        worker._process_tile(buffer)
+
+        self.assertGreater(storage.config.storage_voxel_size[0], before)
+        self.assertFalse(storage.storage_data[0].is_empty)  # and it still stored data
+
+    def test_grid_is_left_alone_when_the_option_is_off(self):
+        worker, storage, buffer = self._worker_and_storage(False)
+
+        worker._process_tile(buffer)
+
+        self.assertEqual(storage.config.storage_voxel_size[0], 5.0)
+        self.assertFalse(storage.storage_data[0].is_empty)
+
+    def test_a_second_tile_does_not_re_snap_the_grid(self):
+        """Voxel keys index the grid chosen for tile one."""
+        worker, storage, buffer = self._worker_and_storage(True)
+        worker._process_tile(buffer)
+        adopted = storage.config.storage_voxel_size[0]
+
+        worker._process_tile(buffer)
+
+        self.assertEqual(storage.config.storage_voxel_size[0], adopted)

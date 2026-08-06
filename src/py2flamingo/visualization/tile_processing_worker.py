@@ -297,6 +297,18 @@ class TileProcessingWorker(QObject):
             px_um_x = 0.5182 * 1000 / W
             px_um_y = 0.5182 * 1000 / H
 
+        # Memory-efficient mode: match the storage grid to what this
+        # acquisition actually resolves before the first voxel is written.
+        # Only lands on the first tile of a run — adopt_isotropic_grid()
+        # refuses once storage holds data, since voxel keys index the old grid.
+        if getattr(self._voxel_storage, "memory_efficient", False):
+            z_step_um = (
+                z_range * 1000.0 / max(1, frames_per_channel - 1)
+                if frames_per_channel > 1
+                else px_um_y
+            )
+            self._voxel_storage.adopt_isotropic_grid((z_step_um, px_um_y, px_um_x))
+
         camera_x = (x_indices - W / 2) * px_um_x
         camera_y = (y_indices - H / 2) * px_um_y
         camera_coords_2d = np.column_stack([camera_x.ravel(), camera_y.ravel()])

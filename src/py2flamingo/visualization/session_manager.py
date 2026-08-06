@@ -927,7 +927,9 @@ class SessionManager:
             if ch < voxel_storage.num_channels:
                 # Ensure shapes match
                 if data.shape == voxel_storage.display_dims:
-                    voxel_storage.display_cache[ch] = data.astype(np.uint16)
+                    # Through the storage so an 8-bit cache rescales instead of
+                    # wrapping modulo 256.
+                    voxel_storage.store_display_volume(ch, data)
                     voxel_storage.display_dirty[ch] = False
 
                     # Update max value tracking
@@ -1385,9 +1387,11 @@ def _load_single_channel(data: np.ndarray, voxel_storage, channel_id: int):
         else:
             data = data.astype(np.uint16)
 
-    # Load into display cache
-    voxel_storage.display_cache[channel_id] = data
+    # Load into display cache (rescales when the cache is 8-bit)
+    voxel_storage.store_display_volume(channel_id, data)
     voxel_storage.display_dirty[channel_id] = False
-    voxel_storage.channel_max_values[channel_id] = int(np.max(data))
+    voxel_storage.channel_max_values[channel_id] = int(
+        np.max(voxel_storage.display_cache[channel_id])
+    )
 
     logger.info(f"Loaded channel {channel_id}: shape={data.shape}, max={np.max(data)}")

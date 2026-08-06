@@ -474,6 +474,14 @@ class DualResolutionVoxelStorage:
         self.display_dirty: Dict[int, bool] = {}  # Track which channels need update
         self._display_epoch: Dict[int, int] = {}  # Incremented on each storage write
 
+        # Memory-efficient display: 8-bit dense caches, rescaled per channel.
+        # Halves display_cache, the transform cache and napari's own copies.
+        # channel_display_scale keeps the mapping back to raw counts so hover
+        # readouts and statistics can still report the original 16-bit value.
+        self.memory_efficient = False
+        self.display_dtype = np.uint16
+        self.channel_display_scale: Dict[int, float] = {}
+
         # Transform caching and stage position tracking
         self.transform_cache: Dict[int, np.ndarray] = (
             {}
@@ -625,8 +633,11 @@ class DualResolutionVoxelStorage:
             self.storage_data[ch] = SparseChannelStore()
 
             # Low-res display cache (dense for napari)
-            self.display_cache[ch] = np.zeros(self.display_dims, dtype=np.uint16)
+            self.display_cache[ch] = np.zeros(
+                self.display_dims, dtype=self.display_dtype
+            )
             self.display_dirty[ch] = False
+            self.channel_display_scale[ch] = 1.0
 
             # Initialize max value tracking
             self.channel_max_values[ch] = 0
@@ -785,6 +796,186 @@ class DualResolutionVoxelStorage:
                 logger.debug(f"Transform cache invalidated for channel {channel_id}")
 
         self._check_storage_budget()
+
+    # ========== Memory-efficient display ==========
+
+    def set_memory_efficient(self, enabled: bool) -> bool:
+        """Turn 8-bit display caches on or off. Returns True if anything changed.
+
+        Only the *display* side changes dtype. The sparse store stays 16-bit,
+        deliberately: its cost is dominated by the int64 voxel index, so an
+        8-bit value would save ~10% there, while the dense caches (display
+        cache, transform cache, and napari's copies) halve outright.
+
+        Keeping the store at full depth also means the rescale can use the
+        real peak — it is computed when the display volume is built, not
+        guessed at write time — and toggling this back off restores full
+        precision without recollecting anything.
+        """
+        enabled = bool(enabled)
+        if enabled == self.memory_efficient:
+            return False
+
+        with self._storage_lock:
+            self.memory_efficient = enabled
+            self.display_dtype = np.uint8 if enabled else np.uint16
+            for ch in range(self.num_channels):
+                # Convert in place rather than reallocate. Channels rebuilt
+                # from the sparse store would not care, but session-loaded and
+                # stitched channels live ONLY in this cache — zeroing it would
+                # blank the view with nothing to restore it from.
+                cache = self.display_cache[ch]
+                old_scale = self.channel_display_scale.get(ch, 1.0)
+                if enabled:
+                    peak = int(cache.max()) if cache.size else 0
+                    scale = max(1.0, peak / 255.0)
+                    self.display_cache[ch] = np.clip(
+                        np.rint(cache / scale), 0, 255
+                    ).astype(np.uint8)
+                    self.channel_display_scale[ch] = old_scale * scale
+                else:
+                    # Precision already spent is not recoverable, but undoing
+                    # the scale puts the values back on the raw-count axis.
+                    self.display_cache[ch] = np.clip(
+                        np.rint(cache * old_scale), 0, 65535
+                    ).astype(np.uint16)
+                    self.channel_display_scale[ch] = 1.0
+                self.display_dirty[ch] = not self.storage_data[ch].is_empty
+                self.channel_max_values[ch] = int(self.display_cache[ch].max())
+            self.transform_cache.clear()
+
+        logger.info(
+            f"Display precision set to {'8-bit' if enabled else '16-bit'} "
+            f"({self.display_bytes() / 2**20:.0f} MB of dense display cache)"
+        )
+        return True
+
+    def display_bytes(self) -> int:
+        """Bytes held by the dense display caches."""
+        return int(sum(c.nbytes for c in self.display_cache.values()))
+
+    def _set_display_scale(self, channel_id: int, block: np.ndarray) -> float:
+        """Pick and record the channel's raw -> display divisor.
+
+        In 8-bit mode the channel's full range is mapped onto 0-255 and the
+        divisor is recorded in ``channel_display_scale``, so
+        :meth:`raw_from_display` can undo it. A straight ``>> 8`` would be
+        simpler but would erase dim channels outright — a channel spanning
+        110-235 counts collapses to 0-1.
+        """
+        if self.display_dtype == np.uint16:
+            scale = 1.0
+        else:
+            peak = int(block.max()) if block.size else 0
+            scale = max(1.0, peak / 255.0)
+        self.channel_display_scale[channel_id] = scale
+        return scale
+
+    def _apply_display_scale(self, block: np.ndarray, scale: float) -> np.ndarray:
+        if scale == 1.0 and block.dtype == self.display_dtype:
+            return block
+        if self.display_dtype == np.uint16:
+            return np.clip(block, 0, 65535).astype(np.uint16)
+        return np.clip(np.rint(block / scale), 0, 255).astype(np.uint8)
+
+    def _to_display_dtype(self, channel_id: int, block: np.ndarray) -> np.ndarray:
+        """Convert a volume in raw counts to the display cache dtype."""
+        return self._apply_display_scale(
+            block, self._set_display_scale(channel_id, block)
+        )
+
+    def raw_from_display(self, channel_id: int, value: float) -> float:
+        """Undo the 8-bit rescale: displayed value -> original counts.
+
+        Exact in 16-bit mode. In 8-bit mode the result is quantised to the
+        channel's scale factor — it reports what the raw count was to within
+        one display step, not a value that survived unchanged.
+        """
+        return float(value) * self.channel_display_scale.get(channel_id, 1.0)
+
+    def store_display_volume(self, channel_id: int, volume: np.ndarray, dst=None):
+        """Write a volume (in raw counts) into the display cache.
+
+        Every path that populates the cache from outside — session restore,
+        Zarr restore, stitched-volume load — must go through here, or a
+        16-bit array assigned into an 8-bit cache would silently wrap modulo
+        256 instead of being rescaled.
+        """
+        cache = self.display_cache[channel_id]
+        converted = self._to_display_dtype(channel_id, np.asarray(volume))
+        if dst is None:
+            cache[...] = converted
+        else:
+            cache[dst] = converted
+        return cache
+
+    # ========== Isotropic storage grid ==========
+
+    def adopt_isotropic_grid(self, sampling_um: Tuple[float, float, float]) -> bool:
+        """Coarsen the storage grid to the coarsest real sampling axis.
+
+        The storage grid is a fixed 5 µm cube by default, regardless of what
+        the data actually resolves. Light-sheet data is strongly anisotropic —
+        sub-µm in one axis, several µm in another — so a fixed fine grid holds
+        detail that only one axis has, and pays for it in every axis. Snapping
+        to ``max(sampling)`` keeps everything the data genuinely resolves.
+
+        The grid is then rounded *down* to a value that divides the display
+        voxel exactly, so the storage->display block reduction stays an integer
+        ratio and placement does not drift.
+
+        Only ever coarsens, and only while storage is empty (voxel keys are
+        indices into the old grid). Returns True if the grid changed.
+
+        Args:
+            sampling_um: effective (Z, Y, X) sample spacing of the incoming
+                data, in micrometers.
+        """
+        needed = float(max(sampling_um))
+        if not np.isfinite(needed) or needed <= 0:
+            return False
+
+        current = float(self.config.storage_voxel_size[0])
+        if needed <= current:
+            logger.debug(
+                f"Isotropic grid: data resolves {needed:.2f} µm, grid is already "
+                f"{current:.2f} µm — leaving it alone"
+            )
+            return False
+
+        display_um = float(self.config.display_voxel_size[0])
+        ratio = max(1, int(display_um // needed))
+        iso = display_um / ratio
+
+        with self._storage_lock:
+            if any(not store.is_empty for store in self.storage_data.values()):
+                logger.warning(
+                    "Isotropic grid requested but storage already holds data — "
+                    "keeping the current grid (clear the view to apply it)"
+                )
+                return False
+
+            old_dims = self.storage_dims
+            self.config.storage_voxel_size = (iso, iso, iso)
+            self.storage_dims = self.config.storage_dimensions
+            self._initialize_storage()
+            self._storage_budget_exceeded = False
+
+        # Deliberately NOT reported as (iso/current)^3. Coarsening only merges
+        # voxels along axes where the data samples FINER than the grid; an axis
+        # already sampled more coarsely than either grid gains nothing. For
+        # tile collection the frames arrive pre-downsampled to ~8 µm laterally,
+        # so the whole saving comes from Z and is linear (~1.7x), not cubic.
+        per_axis = [max(1.0, iso / s) if s > 0 else 1.0 for s in sampling_um]
+        expected = float(np.prod([min(a, iso / current) for a in per_axis]))
+        logger.info(
+            f"Storage grid {current:.2f} µm -> {iso:.2f} µm isotropic "
+            f"(data resolves {needed:.2f} µm; display voxel {display_um:.0f} µm "
+            f"/ {ratio}). Dims {old_dims} -> {self.storage_dims}. Sampling "
+            f"(Z,Y,X) = {tuple(round(s, 2) for s in sampling_um)} µm, so expect "
+            f"roughly {expected:.1f}x fewer occupied voxels."
+        )
+        return True
 
     def _check_storage_budget(self):
         """Stop growing storage before the process runs out of memory.
@@ -991,16 +1182,23 @@ class DualResolutionVoxelStorage:
         logger.debug(f"  Dest shape: {valid_end - valid_start}")
         logger.debug(f"  Source shape: {src_end - src_start}")
 
-        # Copy to display cache
+        # Copy to display cache, rescaling if the cache is 8-bit. The scale is
+        # taken from the whole downsampled block, not the clipped sub-region,
+        # so it stays consistent with what raw_from_display() reports.
+        scale = self._set_display_scale(channel_id, downsampled)
+        region = self._apply_display_scale(
+            downsampled[
+                src_start[0] : src_end[0],
+                src_start[1] : src_end[1],
+                src_start[2] : src_end[2],
+            ],
+            scale,
+        )
         self.display_cache[channel_id][
             valid_start[0] : valid_end[0],
             valid_start[1] : valid_end[1],
             valid_start[2] : valid_end[2],
-        ] = downsampled[
-            src_start[0] : src_end[0],
-            src_start[1] : src_end[1],
-            src_start[2] : src_end[2],
-        ]
+        ] = region
 
         # Track max value from DISPLAY data (what user sees in napari)
         # PERFORMANCE: Only log significant changes (>20%) to reduce log spam
@@ -1167,6 +1365,8 @@ class DualResolutionVoxelStorage:
             "display_voxels": np.prod(self.display_dims) * self.num_channels,
             "storage_budget_mb": self.max_storage_bytes / (1024 * 1024),
             "storage_budget_exceeded": self._storage_budget_exceeded,
+            "memory_efficient": self.memory_efficient,
+            "storage_voxel_um": float(self.config.storage_voxel_size[0]),
         }
 
     def add_data_with_position(
@@ -1940,9 +2140,11 @@ class DualResolutionVoxelStorage:
 
                     # Check dimensions match
                     if data.shape == self.display_dims:
-                        self.display_cache[ch] = data.astype(np.uint16)
+                        self.store_display_volume(ch, data)
                         self.display_dirty[ch] = False
-                        self.channel_max_values[ch] = int(np.max(data))
+                        self.channel_max_values[ch] = int(
+                            np.max(self.display_cache[ch])
+                        )
                         logger.debug(
                             f"Loaded channel {ch} from Zarr: max={self.channel_max_values[ch]}"
                         )

@@ -788,6 +788,29 @@ class SampleView(QWidget):
         self.fast_transform_cb.toggled.connect(self._on_transform_quality_changed)
         quality_row.addWidget(self.fast_transform_cb)
 
+        self.memory_efficient_cb = QCheckBox("Memory Efficient")
+        self.memory_efficient_cb.setChecked(False)
+        self.memory_efficient_cb.setToolTip(
+            "Trade display precision for memory. Does two things:\n"
+            "\n"
+            "1. 8-bit display. The dense display volumes, the rotation cache "
+            "and napari's copies are held at 8 bits instead of 16 — half the "
+            "memory. Each channel is rescaled onto 0-255 so dim channels stay "
+            "visible; hover readouts still report the original counts, "
+            "quantised to one display step.\n"
+            "\n"
+            "2. Isotropic storage grid. Instead of a fixed 5 µm cube, the grid "
+            "is snapped to the coarsest axis the data actually resolves. "
+            "Light-sheet data is anisotropic, so a fine fixed grid stores "
+            "detail only one axis has and pays for it in all three.\n"
+            "\n"
+            "Nothing saved to disk changes. The grid is chosen from the first "
+            "tile of a run, so set this before collecting; toggling the 8-bit "
+            "half is safe at any time and is reversible without recollecting."
+        )
+        self.memory_efficient_cb.toggled.connect(self._on_memory_efficient_changed)
+        quality_row.addWidget(self.memory_efficient_cb)
+
         quality_row.addStretch()
         layout.addLayout(quality_row)
 
@@ -2702,7 +2725,7 @@ class SampleView(QWidget):
                 if self.channel_layers:
                     layer = self.channel_layers.get(right_ch)
                     if layer is not None:
-                        layer.contrast_limits = [val[0], val[1]]
+                        self._apply_contrast(layer, right_ch, val[0], val[1])
 
             # Sync spinboxes
             left_min = self.channel_min_spins.get(left_ch)
@@ -2765,7 +2788,7 @@ class SampleView(QWidget):
             if self.channel_layers:
                 layer = self.channel_layers.get(right_ch)
                 if layer is not None:
-                    layer.contrast_limits = [min_val, max_val]
+                    self._apply_contrast(layer, right_ch, min_val, max_val)
 
     def _on_channel_contrast_changed(self, channel: int, value: tuple) -> None:
         """Handle channel contrast range slider change.
@@ -2792,7 +2815,7 @@ class SampleView(QWidget):
         if self.channel_layers:
             layer = self.channel_layers.get(channel)
             if layer is not None:
-                layer.contrast_limits = [min_val, max_val]
+                self._apply_contrast(layer, channel, min_val, max_val)
 
         self.logger.debug(f"Channel {channel} contrast range: [{min_val}, {max_val}]")
 
@@ -2849,13 +2872,37 @@ class SampleView(QWidget):
         if self.channel_layers:
             layer = self.channel_layers.get(channel)
             if layer is not None:
-                layer.contrast_limits = [min_val, max_val]
+                self._apply_contrast(layer, channel, min_val, max_val)
 
         # Mirror to paired channel when sides are linked
         if self._link_sides and channel < 4:
             self._mirror_to_right(channel, contrast=(min_val, max_val))
 
         self._update_plane_views()
+
+    def _display_scale(self, ch_id: int) -> float:
+        """Raw counts per displayed unit for a channel (1.0 unless 8-bit)."""
+        if not self.voxel_storage:
+            return 1.0
+        return float(
+            getattr(self.voxel_storage, "channel_display_scale", {}).get(ch_id, 1.0)
+        )
+
+    def _apply_contrast(self, layer, ch_id: int, min_raw, max_raw) -> None:
+        """Set a layer's contrast from limits expressed in RAW counts.
+
+        The sliders and spinboxes always speak raw camera counts, so the
+        numbers a user tunes mean the same thing whether or not Memory
+        Efficient is on. Only the value handed to napari is divided by the
+        channel's display scale.
+        """
+        scale = self._display_scale(ch_id)
+        if scale != 1.0:
+            min_raw = min_raw / scale
+            max_raw = max_raw / scale
+            if max_raw <= min_raw:
+                max_raw = min_raw + 1
+        layer.contrast_limits = [min_raw, max_raw]
 
     def _auto_contrast_channels(self) -> None:
         """Calculate and apply contrast based on actual data statistics."""
@@ -2883,15 +2930,19 @@ class SampleView(QWidget):
             if len(non_zero) == 0:
                 continue
 
-            min_val = int(np.percentile(non_zero, 5))
-            max_val = int(np.percentile(non_zero, 99.9))
+            # Percentiles come from layer data, which is in DISPLAY units;
+            # convert back to raw counts so the sliders below (and everything
+            # else in this class) keep speaking one unit.
+            scale = self._display_scale(ch_id)
+            min_val = int(np.percentile(non_zero, 5) * scale)
+            max_val = int(np.percentile(non_zero, 99.9) * scale)
 
             # Ensure min < max
             if max_val <= min_val:
-                max_val = min_val + 10
+                max_val = min_val + max(10, int(scale))
 
             # Update layer contrast
-            layer.contrast_limits = (min_val, max_val)
+            self._apply_contrast(layer, ch_id, min_val, max_val)
 
             # Update UI slider and labels
             if ch_id in self.channel_contrast_sliders:
@@ -3590,15 +3641,21 @@ class SampleView(QWidget):
 
             cache = self.voxel_storage.display_cache[ch_id]
             cache.fill(0)
-            cache[
-                dst_start[0] : dst_end[0],
-                dst_start[1] : dst_end[1],
-                dst_start[2] : dst_end[2],
-            ] = resampled[
-                src_start[0] : src_end[0],
-                src_start[1] : src_end[1],
-                src_start[2] : src_end[2],
-            ]
+            # Through the storage so an 8-bit cache rescales the raw counts
+            # instead of wrapping them modulo 256.
+            self.voxel_storage.store_display_volume(
+                ch_id,
+                resampled[
+                    src_start[0] : src_end[0],
+                    src_start[1] : src_end[1],
+                    src_start[2] : src_end[2],
+                ],
+                dst=(
+                    slice(dst_start[0], dst_end[0]),
+                    slice(dst_start[1], dst_end[1]),
+                    slice(dst_start[2], dst_end[2]),
+                ),
+            )
 
             # Mark as session-loaded so has_data() returns True and
             # display_dirty=False so the downsampler won't overwrite us.
@@ -4848,7 +4905,10 @@ class SampleView(QWidget):
 
         try:
             stats = self.voxel_storage.get_memory_usage()
-            self.memory_label.setText(f"Memory: {stats['total_mb']:.1f} MB")
+            suffix = " (8-bit)" if stats.get("memory_efficient") else ""
+            if stats.get("storage_budget_exceeded"):
+                suffix += " — LIMIT"
+            self.memory_label.setText(f"Memory: {stats['total_mb']:.1f} MB{suffix}")
             voxels = stats["storage_voxels"]
             if voxels >= 1_000_000:
                 self.voxel_label.setText(f"Voxels: {voxels/1_000_000:.1f}M")
@@ -4858,6 +4918,45 @@ class SampleView(QWidget):
                 self.voxel_label.setText(f"Voxels: {voxels:,}")
         except Exception as e:
             self.logger.debug(f"Error updating data stats: {e}")
+
+    def _on_memory_efficient_changed(self, enabled: bool) -> None:
+        """Handle Memory Efficient checkbox toggle.
+
+        The 8-bit half applies immediately — every channel is rebuilt from the
+        (still 16-bit) sparse store, so this is reversible without recollecting.
+        The isotropic-grid half is picked up by the tile worker on the next
+        run, since changing the grid would invalidate voxels already stored.
+        """
+        try:
+            if not self.voxel_storage:
+                return
+            if not self.voxel_storage.set_memory_efficient(enabled):
+                return
+
+            # Only rebuild channels that have a sparse store to rebuild FROM.
+            # Session-loaded and stitched channels exist only in the display
+            # cache, which set_memory_efficient() has already converted.
+            for ch_id in list(self.channel_layers):
+                store = self.voxel_storage.storage_data.get(ch_id)
+                if store is not None and not store.is_empty:
+                    self.voxel_storage.downsample_to_display(ch_id, force=True)
+            self._update_visualization()
+            self._auto_contrast_channels()
+            self._update_data_stats()
+
+            mb = self.voxel_storage.display_bytes() / (1024 * 1024)
+            self.logger.info(
+                f"Memory Efficient {'ON' if enabled else 'OFF'}: display cache "
+                f"now {mb:.0f} MB"
+                + (
+                    " — the isotropic storage grid applies from the next tile "
+                    "collection"
+                    if enabled
+                    else ""
+                )
+            )
+        except Exception as e:
+            self.logger.error(f"Error toggling memory-efficient display: {e}")
 
     def _on_transform_quality_changed(self, fast_mode: bool) -> None:
         """Handle Fast Transform checkbox toggle."""
