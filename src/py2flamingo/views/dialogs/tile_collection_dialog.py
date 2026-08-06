@@ -339,10 +339,9 @@ class TileCollectionDialog(PersistentDialog):
         summary_group = self._create_summary_section()
         container_layout.addWidget(summary_group)
 
-        # Rotation angle — which pose to re-collect at. Only meaningful for the
-        # single-view case; the dual-view path below already picks per panel.
-        if not self._has_dual_view:
-            container_layout.addWidget(self._create_rotation_section())
+        # Rotation angle — states what the data holds in every case, and is
+        # editable when there is a single pose to edit.
+        container_layout.addWidget(self._create_rotation_section())
 
         # Primary direction section (only shown when both views have tiles)
         if self._has_dual_view:
@@ -675,28 +674,46 @@ class TileCollectionDialog(PersistentDialog):
         return sorted(seen)
 
     def _create_rotation_section(self) -> QGroupBox:
-        """Let the user pick the collection angle, showing what the data holds.
+        """Show which angle(s) the data holds, and let the user pick when there
+        is a choice to make.
 
-        Previously the angle was fixed at whatever was passed in — which was
-        always 0.0, because the overview never populated it. Even with that
-        fixed, the choice belongs to the user: re-collecting at a different
-        pose than the overview is sometimes exactly the intent.
+        Three shapes reach this dialog and they are genuinely different:
+
+        * **MIP overview** — always exactly one angle. Its second panel is
+          "New Acquisition Results" (a re-acquisition shown for comparison),
+          never a second pose, and it always passes ``right_tiles=[]``. The
+          ``right_rotation`` argument is vestigial there, inherited from the
+          LED path.
+        * **LED overview, single view** — one angle (``starting_r``), because
+          the +90° view was skipped.
+        * **LED overview, two views** — two angles, ``starting_r`` and
+          ``starting_r + 90``. Which one leads is the "Primary view" selector's
+          job, so here the angles are reported but not edited.
+
+        Previously the angle was fixed at whatever was passed in — always 0.0,
+        because the overview never populated it.
         """
         group = QGroupBox("Rotation angle")
         layout = QVBoxLayout()
 
         observed = self._observed_tile_angles()
-        if observed:
-            shown = ", ".join(f"{a:.1f}°" for a in observed)
-            info = QLabel(f"Overview data was collected at: {shown}")
-        else:
-            info = QLabel(
-                "The overview records no rotation angle — it predates angle "
-                "tracking, or the tile metadata is missing."
-            )
+        info = QLabel(self._describe_observed_angles(observed))
         info.setStyleSheet("color: #666; font-size: 11px;")
         info.setWordWrap(True)
         layout.addWidget(info)
+
+        if self._has_dual_view:
+            # Two poses: the "Primary view" selector already chooses between
+            # them, so offering a free-text angle here would just contradict it.
+            note = QLabel(
+                "Both views will be collected, each at its own angle. Use "
+                "“Primary view” above to choose which one leads."
+            )
+            note.setStyleSheet("color: #666; font-size: 11px;")
+            note.setWordWrap(True)
+            layout.addWidget(note)
+            group.setLayout(layout)
+            return group
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Collect at R:"))
@@ -718,9 +735,23 @@ class TileCollectionDialog(PersistentDialog):
         row.addWidget(self._rotation_spin)
         row.addStretch()
         layout.addLayout(row)
+        self._on_rotation_angle_changed(default_angle)
 
         group.setLayout(layout)
         return group
+
+    def _describe_observed_angles(self, observed: List[float]) -> str:
+        """One line stating what the overview actually contains."""
+        if not observed:
+            return (
+                "The overview records no rotation angle — it predates angle "
+                "tracking, or the tile metadata is missing. Set the angle "
+                "yourself before collecting."
+            )
+        if len(observed) == 1:
+            return f"Overview data was collected at a single angle: {observed[0]:.1f}°"
+        shown = ", ".join(f"{a:.1f}°" for a in observed)
+        return f"Overview data spans {len(observed)} angles: {shown}"
 
     def _on_rotation_angle_changed(self, value: float) -> None:
         """Keep the collection angles in step with the user's choice."""

@@ -226,3 +226,59 @@ class TestStageAngleHelper(unittest.TestCase):
         from py2flamingo.views.dialogs.mip_overview_dialog import current_stage_angle
 
         self.assertIsNone(current_stage_angle(None))
+
+
+class TestAngleDescriptionCoversEveryOverviewShape(unittest.TestCase):
+    """Three genuinely different shapes reach the Collect Tiles dialog.
+
+    * MIP overview — always exactly ONE angle. Its second panel is "New
+      Acquisition Results" (a re-acquisition shown for comparison), never a
+      second pose, and it always passes right_tiles=[]. `right_rotation` is
+      vestigial there, inherited from the LED path.
+    * LED overview, single view — one angle (the +90 view was skipped).
+    * LED overview, two views — starting_r and starting_r + 90.
+    """
+
+    def _describe(self, angles):
+        from py2flamingo.views.dialogs.tile_collection_dialog import (
+            TileCollectionDialog,
+        )
+
+        stub = TileCollectionDialog.__new__(TileCollectionDialog)
+        return TileCollectionDialog._describe_observed_angles(stub, angles)
+
+    def test_mip_overview_single_angle_reads_as_single(self):
+        text = self._describe([-147.0])
+
+        self.assertIn("single angle", text)
+        self.assertIn("-147.0", text)
+
+    def test_led_single_view_reads_the_same_way(self):
+        text = self._describe([30.0])
+
+        self.assertIn("single angle", text)
+        self.assertIn("30.0", text)
+
+    def test_led_two_view_names_both_angles(self):
+        text = self._describe([30.0, 120.0])
+
+        self.assertIn("2 angles", text)
+        self.assertIn("30.0", text)
+        self.assertIn("120.0", text)
+
+    def test_no_recorded_angle_says_so_and_tells_the_user_to_set_it(self):
+        text = self._describe([])
+
+        self.assertIn("no rotation angle", text)
+        self.assertIn("yourself", text)
+
+    def test_a_single_angle_is_never_described_as_a_span(self):
+        """Guards the MIP case specifically — it can only ever be one."""
+        self.assertNotIn("spans", self._describe([0.0]))
+
+    def test_the_led_pair_is_ninety_degrees_apart_in_the_text(self):
+        """Sanity: the two LED angles come from starting_r and starting_r+90."""
+        text = self._describe([-147.0, -57.0])
+
+        self.assertIn("-147.0", text)
+        self.assertIn("-57.0", text)
