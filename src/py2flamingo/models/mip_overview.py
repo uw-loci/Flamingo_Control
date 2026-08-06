@@ -353,6 +353,47 @@ def read_tile_z_range(tile_folder: Path) -> Optional[Tuple[float, float]]:
     return (min(z_min, z_max), max(z_min, z_max))
 
 
+_ANGLE_RE = re.compile(
+    r"<Start Position>.*?Angle \(degrees\)[^\S\r\n]*=[^\S\r\n]*([-\d.]+)",
+    re.DOTALL,
+)
+
+
+def read_tile_rotation_angle(tile_folder: Path) -> Optional[float]:
+    """Read the rotation-stage angle (degrees) a tile was acquired at.
+
+    Like :func:`read_tile_z_range`, the folder name carries only X and Y, so
+    the angle has to come from the tile's own ``*_Settings.txt`` (or the
+    ``Workflow.txt`` beside it).
+
+    This is not cosmetic. "Acquire Tiles" re-collects at the angle carried by
+    the overview, and that angle was never populated — every MIPTileResult and
+    MIPOverviewConfig left ``rotation_angle`` at its 0.0 default, so tiles
+    planned from an overview of a sample at any non-zero angle were
+    re-acquired at R=0: the right XY grid over the wrong view of the sample.
+
+    Returns None when no angle is recorded, so callers can tell "not stated"
+    apart from a genuine 0°.
+    """
+    candidates = sorted(tile_folder.glob("*_Settings.txt"))
+    wf = tile_folder / "Workflow.txt"
+    if wf.is_file():
+        candidates.append(wf)
+
+    for path in candidates:
+        try:
+            match = _ANGLE_RE.search(path.read_text(errors="ignore"))
+        except Exception as e:  # noqa: BLE001 - metadata must never break a load
+            logger.debug(f"Could not read rotation angle from {path}: {e}")
+            continue
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                continue
+    return None
+
+
 def load_invert_x_setting() -> bool:
     """Load the X-axis inversion setting from visualization config.
 

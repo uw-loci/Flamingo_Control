@@ -58,6 +58,7 @@ from py2flamingo.models.mip_overview import (
     load_tile_mip,
     parse_coords_from_folder,
     read_tile_overlap_from_workflow,
+    read_tile_rotation_angle,
     read_tile_z_range,
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
@@ -94,6 +95,28 @@ def _pick_tile_source(tile_folder: Path) -> Optional[Path]:
         if not is_mip_file(p)
     ]
     return stacks[0] if stacks else None
+
+
+def _flat_tile_angle(fi, channel_id: int) -> float:
+    """Rotation angle for a flat-layout tile, 0.0 when not recorded."""
+    try:
+        folder = fi.channel_files[channel_id].parent
+    except Exception:  # noqa: BLE001
+        return 0.0
+    angle = read_tile_rotation_angle(folder)
+    return 0.0 if angle is None else angle
+
+
+def _tiles_rotation_angle(tiles) -> float:
+    """The angle these tiles were acquired at (0.0 when not recorded).
+
+    Tiles of one acquisition share an angle; if they disagree, the largest
+    magnitude wins so a mixed set can never silently collapse to 0.
+    """
+    angles = [float(getattr(t, "rotation_angle", 0.0) or 0.0) for t in tiles]
+    if not angles:
+        return 0.0
+    return max(angles, key=abs)
 
 
 class MIPOverviewDialog(PersistentDialog):
@@ -480,6 +503,9 @@ class MIPOverviewDialog(PersistentDialog):
             # tile collection to show / reuse the acquired Z range).
             z_range = read_tile_z_range(tile_folder)
             z_min, z_max = z_range if z_range else (0.0, 0.0)
+            # The angle this tile was ACQUIRED at. Without it, "Acquire Tiles"
+            # re-collects at R=0 regardless of where the sample actually was.
+            tile_angle = read_tile_rotation_angle(tile_folder)
 
             tile = MIPTileResult(
                 x=x,
@@ -491,6 +517,7 @@ class MIPOverviewDialog(PersistentDialog):
                 folder_path=tile_folder,
                 z_stack_min=z_min,
                 z_stack_max=z_max,
+                rotation_angle=tile_angle if tile_angle is not None else 0.0,
             )
             tiles.append(tile)
 
@@ -521,6 +548,7 @@ class MIPOverviewDialog(PersistentDialog):
             downsample_factor=4,
             invert_x=load_invert_x_setting(),
             layout_type="subfolder",
+            rotation_angle=_tiles_rotation_angle(tiles),
         )
 
         self._tiles = tiles
@@ -602,6 +630,7 @@ class MIPOverviewDialog(PersistentDialog):
             downsample_factor=4,
             invert_x=load_invert_x_setting(),
             layout_type="flat",
+            rotation_angle=_tiles_rotation_angle(tiles),
             display_channel=display_channel,
             available_channels=all_channels,
         )
@@ -656,6 +685,7 @@ class MIPOverviewDialog(PersistentDialog):
                             folder_path=fi.channel_files[channel_id].parent,
                             z_stack_min=fi.z_min_mm,
                             z_stack_max=fi.z_max_mm,
+                            rotation_angle=_flat_tile_angle(fi, channel_id),
                         )
                     )
                     continue
@@ -681,6 +711,7 @@ class MIPOverviewDialog(PersistentDialog):
                     folder_path=fi.channel_files[channel_id].parent,
                     z_stack_min=fi.z_min_mm,
                     z_stack_max=fi.z_max_mm,
+                    rotation_angle=_flat_tile_angle(fi, channel_id),
                 )
             )
 
@@ -1047,6 +1078,9 @@ class MIPOverviewDialog(PersistentDialog):
             )
             return
 
+        if not self._confirm_rotation_angle():
+            return
+
         # Launch TileCollectionDialog with selected tiles
         dialog = TileCollectionDialog(
             left_tiles=selected_tr,
@@ -1063,6 +1097,65 @@ class MIPOverviewDialog(PersistentDialog):
         dialog.accepted.connect(self._on_collection_complete)
 
         dialog.exec_()
+
+    def _current_stage_angle(self) -> Optional[float]:
+        """Live rotation-stage angle in degrees, or None if unavailable."""
+        for path in (
+            ("_app", "position_controller"),
+            ("_app", "movement_controller"),
+        ):
+            obj = self
+            try:
+                for attr in path:
+                    obj = getattr(obj, attr)
+                pos = obj.get_current_position()
+                r = pos.get("r") if isinstance(pos, dict) else getattr(pos, "r", None)
+                if r is not None:
+                    return float(r)
+            except Exception:  # noqa: BLE001 - best effort, never block collection
+                continue
+        return None
+
+    def _confirm_rotation_angle(self) -> bool:
+        """Warn when the stage is not at the angle this overview was taken at.
+
+        Tiles are re-collected at the overview's angle. If the sample has since
+        been rotated — or the overview came from an acquisition at a different
+        angle — the XY grid is still right but it covers a different view of
+        the sample, and that is only obvious hours later in the stitched
+        result. Warn, but let the user proceed: deliberately re-imaging the
+        same XY footprint at a new angle is a legitimate thing to want.
+
+        Returns False only if the user chooses to cancel.
+        """
+        planned = float(getattr(self._config, "rotation_angle", 0.0) or 0.0)
+        current = self._current_stage_angle()
+        if current is None or abs(current - planned) <= 0.5:
+            return True
+
+        answer = QMessageBox.warning(
+            self,
+            "Rotation angle mismatch",
+            f"This overview was acquired at R = {planned:.1f}°, but the stage "
+            f"is now at R = {current:.1f}°.\n\n"
+            "Collecting now re-images the same XY grid at the overview's "
+            f"angle ({planned:.1f}°) — a different view of the sample than "
+            "you are looking at.\n\n"
+            "Rotate the stage back, or continue if that is what you intend.",
+            QMessageBox.Ok | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if answer != QMessageBox.Ok:
+            logger.info(
+                f"Tile collection cancelled: overview R={planned:.1f}° vs "
+                f"stage R={current:.1f}°"
+            )
+            return False
+        logger.warning(
+            f"Proceeding despite rotation mismatch: overview R={planned:.1f}°, "
+            f"stage R={current:.1f}°"
+        )
+        return True
 
     def _infer_local_drive_root(self) -> Optional[str]:
         """Local mount of the save drive, for post-collection reorganization.
