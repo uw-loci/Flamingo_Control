@@ -398,8 +398,20 @@ class LED2DOverviewDialog(PersistentDialog):
         self.starting_r.setDecimals(1)
         self.starting_r.setSingleStep(1.0)
         self.starting_r.setSuffix("°")
-        self.starting_r.setValue(0.0)
-        self.starting_r.setToolTip("First rotation angle (second will be +90°)")
+        # Seed from where the stage actually IS, not 0. Defaulting to 0 meant a
+        # sample posed at, say, -147° was scanned at 0° and 90° instead —
+        # geometrically valid, but a view of the sample nobody asked for, and
+        # only obvious once the overview came back wrong.
+        from py2flamingo.views.dialogs.mip_overview_dialog import current_stage_angle
+
+        _live_r = current_stage_angle(self._app)
+        self.starting_r.setValue(0.0 if _live_r is None else float(_live_r))
+        self.starting_r.setToolTip(
+            "First rotation angle (the second is +90° unless the single-view "
+            "option is on).\n"
+            "Pre-filled from the CURRENT stage rotation — change it only if you "
+            "want to scan a different pose than the one the sample is in."
+        )
         layout.addWidget(self.starting_r, 0, 1)
 
         # Get current R button

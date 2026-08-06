@@ -135,3 +135,94 @@ class TestConfigCarriesTheAngle(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCollectionAngleIsSelectable(unittest.TestCase):
+    """The user picks the collection angle, told what the data actually holds.
+
+    Even with the angle plumbed through, the choice belongs to the user: an
+    overview can hold more than one pose (the 2D overview scans R and R+90),
+    and re-collecting at a different angle than the overview is sometimes the
+    intent. Previously the angle was fixed at whatever was passed in.
+    """
+
+    def _observed(self, angles):
+        from py2flamingo.views.dialogs.tile_collection_dialog import (
+            TileCollectionDialog,
+        )
+
+        class _T:
+            def __init__(self, a):
+                self.rotation_angle = a
+
+        stub = TileCollectionDialog.__new__(TileCollectionDialog)
+        stub._left_tiles = [_T(a) for a in angles]
+        stub._right_tiles = []
+        return TileCollectionDialog._observed_tile_angles(stub)
+
+    def test_a_single_pose_is_reported_once(self):
+        self.assertEqual(self._observed([-147.0, -147.0, -147.0]), [-147.0])
+
+    def test_two_poses_are_both_offered(self):
+        self.assertEqual(self._observed([0.0, 90.0, 0.0, 90.0]), [0.0, 90.0])
+
+    def test_near_identical_angles_are_not_split_by_float_noise(self):
+        self.assertEqual(len(self._observed([-147.0, -147.02, -146.99])), 1)
+
+    def test_no_tiles_reports_nothing_rather_than_a_fake_zero(self):
+        self.assertEqual(self._observed([]), [])
+
+    def test_angles_come_back_sorted(self):
+        self.assertEqual(self._observed([90.0, -147.0, 0.0]), [-147.0, 0.0, 90.0])
+
+
+class TestStageAngleHelper(unittest.TestCase):
+    """Pre-filling an angle must never be able to break a dialog."""
+
+    def _app(self, pos):
+        class _MC:
+            def get_position(self_inner):
+                return pos
+
+        class _SV:
+            movement_controller = _MC()
+
+        class _App:
+            sample_view = _SV()
+
+        return _App()
+
+    def test_reads_r_from_a_position_object(self):
+        from py2flamingo.views.dialogs.mip_overview_dialog import current_stage_angle
+
+        class _P:
+            r = -147.0
+
+        self.assertAlmostEqual(current_stage_angle(self._app(_P())), -147.0)
+
+    def test_reads_r_from_a_dict(self):
+        from py2flamingo.views.dialogs.mip_overview_dialog import current_stage_angle
+
+        self.assertAlmostEqual(
+            current_stage_angle(self._app({"x": 1, "y": 2, "z": 3, "r": 45.0})), 45.0
+        )
+
+    def test_none_position_yields_none(self):
+        from py2flamingo.views.dialogs.mip_overview_dialog import current_stage_angle
+
+        self.assertIsNone(current_stage_angle(self._app(None)))
+
+    def test_a_raising_controller_yields_none(self):
+        from py2flamingo.views.dialogs.mip_overview_dialog import current_stage_angle
+
+        class _Boom:
+            @property
+            def sample_view(self):
+                raise RuntimeError("not connected")
+
+        self.assertIsNone(current_stage_angle(_Boom()))
+
+    def test_no_app_at_all_yields_none(self):
+        from py2flamingo.views.dialogs.mip_overview_dialog import current_stage_angle
+
+        self.assertIsNone(current_stage_angle(None))

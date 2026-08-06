@@ -119,6 +119,27 @@ def _tiles_rotation_angle(tiles) -> float:
     return max(angles, key=abs)
 
 
+def current_stage_angle(app) -> Optional[float]:
+    """Live rotation-stage angle in degrees, or None when unreadable.
+
+    Best-effort by design: every caller uses this to pre-fill or sanity-check
+    an angle, and none of them should fail because the stage could not be
+    reached.
+    """
+    try:
+        controller = app.sample_view.movement_controller
+        pos = controller.get_position()
+    except Exception:  # noqa: BLE001 - never block on a stage read
+        return None
+    if pos is None:
+        return None
+    r = pos.get("r") if isinstance(pos, dict) else getattr(pos, "r", None)
+    try:
+        return None if r is None else float(r)
+    except (TypeError, ValueError):
+        return None
+
+
 class MIPOverviewDialog(PersistentDialog):
     """Dialog for loading and viewing MIP tile overviews.
 
@@ -1099,22 +1120,12 @@ class MIPOverviewDialog(PersistentDialog):
         dialog.exec_()
 
     def _current_stage_angle(self) -> Optional[float]:
-        """Live rotation-stage angle in degrees, or None if unavailable."""
-        for path in (
-            ("_app", "position_controller"),
-            ("_app", "movement_controller"),
-        ):
-            obj = self
-            try:
-                for attr in path:
-                    obj = getattr(obj, attr)
-                pos = obj.get_current_position()
-                r = pos.get("r") if isinstance(pos, dict) else getattr(pos, "r", None)
-                if r is not None:
-                    return float(r)
-            except Exception:  # noqa: BLE001 - best effort, never block collection
-                continue
-        return None
+        """Live rotation-stage angle in degrees, or None if unavailable.
+
+        Uses the same path the rest of the dialogs use to read the stage
+        (``app.sample_view.movement_controller.get_position()``).
+        """
+        return current_stage_angle(self._app)
 
     def _confirm_rotation_angle(self) -> bool:
         """Warn when the stage is not at the angle this overview was taken at.

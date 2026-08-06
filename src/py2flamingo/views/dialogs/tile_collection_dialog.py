@@ -339,6 +339,11 @@ class TileCollectionDialog(PersistentDialog):
         summary_group = self._create_summary_section()
         container_layout.addWidget(summary_group)
 
+        # Rotation angle — which pose to re-collect at. Only meaningful for the
+        # single-view case; the dual-view path below already picks per panel.
+        if not self._has_dual_view:
+            container_layout.addWidget(self._create_rotation_section())
+
         # Primary direction section (only shown when both views have tiles)
         if self._has_dual_view:
             direction_group = self._create_direction_section()
@@ -654,6 +659,74 @@ class TileCollectionDialog(PersistentDialog):
             "Each angle collects only its good sector; fuse with the stitcher's "
             "multi-view option. (Rotation sign/center are rig-validated.)"
         )
+
+    def _observed_tile_angles(self) -> List[float]:
+        """Distinct rotation angles the SELECTED tiles were acquired at.
+
+        The user needs this to choose: an overview can hold tiles from more
+        than one pose (the 2D overview scans R and R+90), and re-collecting at
+        the wrong one images a different view of the sample.
+        """
+        seen: List[float] = []
+        for tile in list(self._left_tiles) + list(self._right_tiles):
+            angle = float(getattr(tile, "rotation_angle", 0.0) or 0.0)
+            if not any(abs(angle - a) <= 0.05 for a in seen):
+                seen.append(angle)
+        return sorted(seen)
+
+    def _create_rotation_section(self) -> QGroupBox:
+        """Let the user pick the collection angle, showing what the data holds.
+
+        Previously the angle was fixed at whatever was passed in — which was
+        always 0.0, because the overview never populated it. Even with that
+        fixed, the choice belongs to the user: re-collecting at a different
+        pose than the overview is sometimes exactly the intent.
+        """
+        group = QGroupBox("Rotation angle")
+        layout = QVBoxLayout()
+
+        observed = self._observed_tile_angles()
+        if observed:
+            shown = ", ".join(f"{a:.1f}°" for a in observed)
+            info = QLabel(f"Overview data was collected at: {shown}")
+        else:
+            info = QLabel(
+                "The overview records no rotation angle — it predates angle "
+                "tracking, or the tile metadata is missing."
+            )
+        info.setStyleSheet("color: #666; font-size: 11px;")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Collect at R:"))
+        self._rotation_spin = QDoubleSpinBox()
+        self._rotation_spin.setRange(-720.0, 720.0)
+        self._rotation_spin.setDecimals(1)
+        self._rotation_spin.setSingleStep(1.0)
+        self._rotation_spin.setSuffix("°")
+        default_angle = observed[0] if observed else float(self._left_rotation or 0.0)
+        if observed and any(abs(self._left_rotation - a) <= 0.05 for a in observed):
+            default_angle = float(self._left_rotation)
+        self._rotation_spin.setValue(default_angle)
+        self._rotation_spin.setToolTip(
+            "The rotation the tiles will be RE-COLLECTED at.\n"
+            "Defaults to the angle the overview data was acquired at. Change it "
+            "only to deliberately image the same XY footprint from another pose."
+        )
+        self._rotation_spin.valueChanged.connect(self._on_rotation_angle_changed)
+        row.addWidget(self._rotation_spin)
+        row.addStretch()
+        layout.addLayout(row)
+
+        group.setLayout(layout)
+        return group
+
+    def _on_rotation_angle_changed(self, value: float) -> None:
+        """Keep the collection angles in step with the user's choice."""
+        self._left_rotation = float(value)
+        self._right_rotation = float(value)
+        logger.info(f"Tile collection rotation angle set to {value:.1f} deg")
 
     def _create_summary_section(self) -> QGroupBox:
         """Create the selected tiles summary section."""
