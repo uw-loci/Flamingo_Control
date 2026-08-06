@@ -222,13 +222,29 @@ class LaserLEDService(MicroscopeCommandService):
                 )
                 return -1.0
 
+            # The scope answers a level query it cannot satisfy with an error
+            # STRING in the same field a number would arrive in — e.g.
+            # b'getLevel error'. That is the device declining, not a parsing
+            # bug on our side, and reporting it as "could not convert string to
+            # float" sent people looking in the wrong place on a run that had
+            # otherwise completed fine.
+            if "error" in power_str.lower():
+                self.logger.warning(
+                    f"Laser {laser_index}: the scope could not report its level "
+                    f"(replied {power_str!r}). This is the device declining the "
+                    "query — commonly the laser is off or not fitted — not a "
+                    "client-side parse failure. Power reported as unknown."
+                )
+                return -1.0
+
             actual_power = float(power_str)
             self.logger.info(f"Laser {laser_index} actual power: {actual_power:.2f}%")
             return actual_power
 
         except (ValueError, UnicodeDecodeError) as e:
             self.logger.error(
-                f"Failed to parse laser power from response: buffer={buffer_data!r}, error={e}"
+                f"Laser {laser_index}: unreadable power response "
+                f"buffer={buffer_data!r}, error={e}"
             )
             return -1.0
 
