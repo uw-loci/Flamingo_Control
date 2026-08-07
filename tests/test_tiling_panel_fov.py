@@ -76,3 +76,38 @@ def test_two_point_tile_count_scales_with_fov(qapp, monkeypatch):
     tiles_16x = panel.get_tiles_x() * panel.get_tiles_y()
 
     assert tiles_16x > tiles_5x  # stale small FOV over-tiles the same area
+
+
+def test_two_point_tile_count_matches_the_server(qapp):
+    """The panel's count drives the size/time estimate, so it must be the
+    server's count.
+
+    Position A/B are corner-tile CENTERS, so the server images half a FOV beyond
+    each and rounds up: ceil((range + FOV) / step). The old client formula,
+    floor(range / step) + 1, gave 4x7=28 for the case below while the scope
+    images 5x8=40 — under-reporting the run by a third.
+    """
+    from py2flamingo.utils.tile_geometry import compute_tile_geometry
+
+    panel = TilingPanel()
+    panel.set_tile_size(2145.4)
+    panel._overlap.setValue(10.0)
+    panel.set_from_positions(0.0, 6.0, 0.0, 12.0)
+
+    expected = compute_tile_geometry(
+        start_x=0.0,
+        end_x=6.0,
+        start_y=0.0,
+        end_y=12.0,
+        start_z=0.0,
+        end_z=0.0,
+        fov_x_mm=2.1454,
+        fov_y_mm=2.1454,
+        x_overlap_percent=10.0,
+        y_overlap_percent=10.0,
+    )
+    assert (panel.get_tiles_x(), panel.get_tiles_y()) == (
+        expected.tiles_x,
+        expected.tiles_y,
+    )
+    assert (panel.get_tiles_x(), panel.get_tiles_y()) == (5, 8)

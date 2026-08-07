@@ -364,15 +364,16 @@ class WorkflowView(QWidget):
         self._check_btn.clicked.connect(self._on_check_clicked)
         btn_layout.addWidget(self._check_btn)
 
-        # Diagnostic: compare the client's tile count vs the server's
-        # (CheckStackTile) count for the current corners/overlap, so divergent
-        # inputs can be hunted down before the transmitted-field fix lands.
+        # Diagnostic: report the grid the server (CheckStackTile) will actually
+        # image for the current corners/overlap, including any tile that reaches
+        # past a stage hard limit.
         self._check_tiling_btn = QPushButton("Check Tiling")
         self._check_tiling_btn.setMinimumHeight(40)
         self._check_tiling_btn.setToolTip(
-            "Show the expected tile count computed two ways — the app's math and "
-            "the server's (CheckStackTile) math — for the current Position A/B, "
-            "overlap and FOV. Use it to find inputs where they differ."
+            "Show the tile grid the microscope will image for the current "
+            "Position A/B, overlap and FOV — count, centre-to-centre step, "
+            "region covered, and any tile outside the stage hard limits. "
+            "Computed locally; nothing is sent to the scope."
         )
         self._check_tiling_btn.setStyleSheet("""
             QPushButton {
@@ -526,10 +527,19 @@ class WorkflowView(QWidget):
         self._on_settings_changed()
 
     def _save_workflow_type(self, index: int) -> None:
-        """Persist workflow type selection."""
+        """Persist workflow type selection.
+
+        ``save_dialog_state`` REPLACES the whole blob, so writing only the type
+        index here erased ``workflow_dict`` — which is why the tab restored fine
+        and then forgot everything a moment later: the type-changed handler fires
+        during startup, right after the restore. Merge instead of overwrite.
+        """
         gm = _default_geometry_manager
-        if gm:
-            gm.save_dialog_state("WorkflowView", {"workflow_type_index": index})
+        if not gm:
+            return
+        state = dict(gm.restore_dialog_state("WorkflowView") or {})
+        state["workflow_type_index"] = index
+        gm.save_dialog_state("WorkflowView", state)
 
     def _restore_workflow_type(self) -> None:
         """Restore persisted workflow type selection, defaulting to Tile Scan."""
@@ -1046,6 +1056,13 @@ class WorkflowView(QWidget):
                 "workflow_dict": self.get_workflow_dict(),
             }
             gm.save_dialog_state("WorkflowView", state)
+            # save_dialog_state only mutates the manager's in-memory dict. Until
+            # this call, the ONLY flush to disk was MainWindow.closeEvent, so a
+            # crash, a kill, or a hung shutdown lost the entire tab — which is
+            # why the save format and camera AOI kept reappearing as defaults.
+            # Cheap enough to do here: this method is already debounced (600 ms)
+            # and the JSON is small.
+            gm.save_all()
         except Exception as e:  # noqa: BLE001 - persistence is best-effort
             self._logger.debug("Could not persist workflow state: %s", e)
 
@@ -1260,12 +1277,30 @@ class WorkflowView(QWidget):
         self.check_workflow_requested.emit()
         self._logger.info("Check workflow requested")
 
-    def _on_check_tiling_clicked(self) -> None:
-        """Show the client-vs-server tile count for the current corners/overlap.
+    def _stage_limits_for_tiling(self) -> Optional[Dict[str, Dict[str, float]]]:
+        """Stage hard limits for the tile-range check, or None if unavailable.
 
-        Diagnostic for the settings-field / count-math mismatch: it does not send
-        anything to the scope, just computes both tile counts locally so divergent
-        inputs can be found and then checked against the real server.
+        Without them the summary still reports the grid; it just cannot say
+        whether the server will reject it for reaching past a limit.
+        """
+        try:
+            controller = self._controller
+            config_service = getattr(controller, "config_service", None) or getattr(
+                getattr(controller, "app", None), "config_service", None
+            )
+            if config_service is None:
+                return None
+            return config_service.get_stage_limits()
+        except Exception as e:  # noqa: BLE001 - diagnostic must not fail the click
+            self._logger.debug("Stage limits unavailable for tiling check: %s", e)
+            return None
+
+    def _on_check_tiling_clicked(self) -> None:
+        """Show the grid the server will image for the current corners/overlap.
+
+        Local only — nothing is sent to the scope. Reports the tile count, pitch,
+        covered region, and any tile that would fall outside a stage hard limit
+        (which makes the server reject the workflow outright).
         """
         try:
             x_min, x_max, y_min, y_max = self._position_panel.get_xy_range()
@@ -1274,7 +1309,15 @@ class WorkflowView(QWidget):
         overlap = self._tiling_panel.get_overlap_percent()
         fov_mm = self._tiling_panel.get_tile_fov_mm()
         self._estimate_display.setHtml(
-            format_tiling_comparison_html(x_min, x_max, y_min, y_max, fov_mm, overlap)
+            format_tiling_summary_html(
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                fov_mm,
+                overlap,
+                stage_limits=self._stage_limits_for_tiling(),
+            )
         )
         self._estimate_display.setVisible(True)
         self._logger.info(
@@ -1681,31 +1724,39 @@ def _format_duration(seconds: float) -> str:
         return f"{hours} hr {mins} min"
 
 
-def format_tiling_comparison_html(
+def format_tiling_summary_html(
     x_min: float,
     x_max: float,
     y_min: float,
     y_max: float,
     fov_mm: float,
     overlap_percent: float,
+    *,
+    stage_limits: Optional[Dict[str, Dict[str, float]]] = None,
 ) -> str:
-    """HTML comparing the client vs server (CheckStackTile) tile counts.
+    """HTML describing the grid the microscope will actually image.
 
-    Both use the same corners/FOV/overlap so the numbers isolate the *algorithm*
-    difference: the app uses ``floor(range/step)+1``; the server uses
-    ``ceil((range+FOV)/step)`` with the corners as tile centers. When they
-    disagree, this is where to check what the microscope actually produces.
+    This used to show the app's count beside the server's for the same inputs,
+    because the two used different formulas (``floor(range/step)+1`` vs the
+    server's ``ceil((range+FOV)/step)`` over corner-tile *centers*) and nobody
+    knew which the scope obeyed. The Tiling panel now uses the server's math
+    directly, so there is only one number to report — showing two would compare
+    the live formula against a dead one and warn forever.
+
+    What is worth reporting instead is what that grid costs: pitch, covered
+    region, and any tile that lands outside a stage hard limit (which makes the
+    server reject the whole workflow).
     """
-    from py2flamingo.utils.tile_geometry import (
-        client_tile_count_1d,
-        compute_tile_geometry,
-    )
+    from py2flamingo.utils.tile_geometry import compute_tile_geometry
 
     x_range = abs(x_max - x_min)
     y_range = abs(y_max - y_min)
 
-    client_x = client_tile_count_1d(x_range, fov_mm, overlap_percent)
-    client_y = client_tile_count_1d(y_range, fov_mm, overlap_percent)
+    limits = stage_limits or {}
+
+    def _limit(axis: str, which: str) -> Optional[float]:
+        value = limits.get(axis, {}).get(which)
+        return float(value) if value is not None else None
 
     geom = compute_tile_geometry(
         start_x=x_min,
@@ -1718,16 +1769,16 @@ def format_tiling_comparison_html(
         fov_y_mm=fov_mm,
         x_overlap_percent=overlap_percent,
         y_overlap_percent=overlap_percent,
+        hard_limit_min_x=_limit("x", "min"),
+        hard_limit_max_x=_limit("x", "max"),
+        hard_limit_min_y=_limit("y", "min"),
+        hard_limit_max_y=_limit("y", "max"),
     )
-    server_x, server_y = geom.tiles_x, geom.tiles_y
 
-    differs = (client_x != server_x) or (client_y != server_y)
-
-    def _row(label, gx, gy, color):
+    def _row(label: str, value: str) -> str:
         return (
-            f"<tr><td style='padding:2px 10px 2px 0;color:{color};'><b>{label}</b>"
-            f"</td><td style='padding:2px 10px;'>{gx} × {gy}</td>"
-            f"<td style='padding:2px 10px;'>{gx * gy}</td></tr>"
+            f"<tr><td style='padding:2px 10px 2px 0;color:#7f8c8d;'>{label}</td>"
+            f"<td style='padding:2px 10px;'><b>{value}</b></td></tr>"
         )
 
     parts = [
@@ -1738,20 +1789,34 @@ def format_tiling_comparison_html(
             f"FOV {fov_mm:.4f} mm, overlap {overlap_percent:.1f}%"
         ),
         "<table style='margin-top:4px;'>",
-        "<tr><td></td><td style='padding:0 10px;'><b>tiles (X×Y)</b></td>"
-        "<td style='padding:0 10px;'><b>total</b></td></tr>",
-        _row("App (client)", client_x, client_y, "#3498db"),
-        _row("Server (CheckStackTile)", server_x, server_y, "#8e44ad"),
+        _row(
+            "Tiles (X × Y)",
+            f"{geom.tiles_x} × {geom.tiles_y} = {geom.total_tiles}",
+        ),
+        _row(
+            "Step (centre-to-centre)",
+            f"{geom.step_x_mm:.4f} × {geom.step_y_mm:.4f} mm",
+        ),
+        _row(
+            "Region covered",
+            f"{geom.tile_region_x_mm:.3f} × {geom.tile_region_y_mm:.3f} mm",
+        ),
         "</table>",
     ]
-    if differs:
+    if geom.has_limit_errors:
+        shown = geom.violations[:5]
+        detail = "<br>".join(v.describe() for v in shown)
+        if len(geom.violations) > len(shown):
+            detail += f"<br>… and {len(geom.violations) - len(shown)} more"
         parts.append(
-            "<div style='color:#f39c12;margin-top:4px;'>⚠ Counts differ — "
-            "run this on the microscope and note which matches.</div>"
+            f"<div style='color:#e74c3c;margin-top:4px;'>⚠ "
+            f"{len(geom.violations)} tile(s) outside the stage hard limits — the "
+            f"server will reject this workflow:<br>{detail}</div>"
         )
     else:
         parts.append(
-            "<div style='color:#27ae60;margin-top:4px;'>✓ Both methods agree.</div>"
+            "<div style='color:#27ae60;margin-top:4px;'>✓ This is the grid the "
+            "server (CheckStackTile) will produce; every tile is in range.</div>"
         )
     parts.append("</div>")
     return "".join(parts)

@@ -437,7 +437,31 @@ class ConfigurationService:
     THRESHOLDER_PRESET_PATH_KEY = "thresholder_preset_path"
     STITCHED_DATA_PATH_KEY = "stitched_data_path"
     WEBCAM_SESSION_PATH_KEY = "webcam_overview_session_path"
+    # Dict of Workflow-tab widget states the user expects to survive a restart
+    # (save format, camera AOI, ...). One persisted key holding many sub-keys,
+    # so adding a remembered control does not mean touching this service.
+    WORKFLOW_PREFS_KEY = "workflow_panel_prefs"
     _SESSION_PATHS_FILE = "session_paths.json"
+
+    def _persisted_keys(self) -> tuple:
+        """The ONLY config keys written to / read from disk.
+
+        A key absent from here stays in the in-memory ``config`` and is silently
+        lost on restart — which is how "last used save drive" appeared to stick
+        for a session and never came back. Resolved at call time because some of
+        these constants are defined further down the class body.
+        """
+        return (
+            self.LED_2D_SESSION_PATH_KEY,
+            self.MIP_SESSION_PATH_KEY,
+            self.ZARR_SESSION_PATH_KEY,
+            self.THRESHOLDER_PRESET_PATH_KEY,
+            self.MIP_BROWSE_PATH_KEY,
+            self.SAMPLE_3D_DATA_PATH_KEY,
+            self.STITCHED_DATA_PATH_KEY,
+            self.WEBCAM_SESSION_PATH_KEY,
+            self.WORKFLOW_PREFS_KEY,
+        )
 
     def _session_paths_file(self) -> Path:
         """Path to the session paths JSON file."""
@@ -452,16 +476,7 @@ class ConfigurationService:
             with open(path, "r") as f:
                 data = json.load(f)
             # Load each session path key
-            for key in [
-                self.LED_2D_SESSION_PATH_KEY,
-                self.MIP_SESSION_PATH_KEY,
-                self.ZARR_SESSION_PATH_KEY,
-                self.THRESHOLDER_PRESET_PATH_KEY,
-                self.MIP_BROWSE_PATH_KEY,
-                self.SAMPLE_3D_DATA_PATH_KEY,
-                self.STITCHED_DATA_PATH_KEY,
-                self.WEBCAM_SESSION_PATH_KEY,
-            ]:
+            for key in self._persisted_keys():
                 if key in data:
                     self.config[key] = data[key]
             self.logger.info(f"Loaded session paths from {path}")
@@ -472,16 +487,7 @@ class ConfigurationService:
         """Save session paths to JSON file on disk."""
         path = self._session_paths_file()
         data = {}
-        for key in [
-            self.LED_2D_SESSION_PATH_KEY,
-            self.MIP_SESSION_PATH_KEY,
-            self.ZARR_SESSION_PATH_KEY,
-            self.THRESHOLDER_PRESET_PATH_KEY,
-            self.MIP_BROWSE_PATH_KEY,
-            self.SAMPLE_3D_DATA_PATH_KEY,
-            self.STITCHED_DATA_PATH_KEY,
-            self.WEBCAM_SESSION_PATH_KEY,
-        ]:
+        for key in self._persisted_keys():
             if key in self.config:
                 data[key] = self.config[key]
         try:
@@ -623,6 +629,31 @@ class ConfigurationService:
         self.config[self.WEBCAM_SESSION_PATH_KEY] = path
         self._save_session_paths()
         self.logger.info(f"Set webcam session path: {path}")
+
+    # Workflow-tab panel preferences (save format, camera AOI, save drive, ...)
+    def get_workflow_prefs(self) -> Dict[str, Any]:
+        """Remembered Workflow-tab control states.
+
+        Returns:
+            The stored preferences dict (empty if nothing has been saved yet).
+        """
+        prefs = self.config.get(self.WORKFLOW_PREFS_KEY)
+        return dict(prefs) if isinstance(prefs, dict) else {}
+
+    def set_workflow_pref(self, key: str, value: Any) -> None:
+        """Remember one Workflow-tab control state and write it to disk.
+
+        Args:
+            key: Preference name, e.g. ``"save_format"`` or ``"aoi_width"``
+            value: JSON-serialisable value to store
+        """
+        prefs = self.get_workflow_prefs()
+        if prefs.get(key) == value:
+            return  # No change: skip the disk write.
+        prefs[key] = value
+        self.config[self.WORKFLOW_PREFS_KEY] = prefs
+        self._save_session_paths()
+        self.logger.debug(f"Saved workflow preference {key}={value!r}")
 
     # Thresholder preset path (for Save/Load Preset in Union of Thresholders)
     def get_thresholder_preset_path(self) -> Optional[str]:

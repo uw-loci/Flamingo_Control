@@ -106,8 +106,14 @@ class SavePanel(QWidget):
         try:
             config_service = getattr(self._app, "config_service", None)
             if config_service is not None:
-                # Check if config has the last used drive stored
+                # config[...] is in-memory only; the persisted copy lives in the
+                # workflow prefs (see _save_last_used_drive). Prefer whatever
+                # this session already set, else fall back to disk.
                 last_used = config_service.config.get(LAST_USED_DRIVE_KEY, "")
+                if not last_used:
+                    getter = getattr(config_service, "get_workflow_prefs", None)
+                    if getter is not None:
+                        last_used = getter().get(LAST_USED_DRIVE_KEY, "")
                 if last_used:
                     self._logger.info(f"Loaded last used save drive: {last_used}")
                     return last_used
@@ -129,6 +135,12 @@ class SavePanel(QWidget):
             config_service = getattr(self._app, "config_service", None)
             if config_service is not None:
                 config_service.config[LAST_USED_DRIVE_KEY] = drive
+                # config[...] alone never reaches disk — only keys in the
+                # service's persisted-key list do — so this looked saved for a
+                # whole session and came back empty on the next launch.
+                setter = getattr(config_service, "set_workflow_pref", None)
+                if setter is not None:
+                    setter(LAST_USED_DRIVE_KEY, drive)
                 self._logger.info(f"Saved last used save drive: {drive}")
         except Exception as e:
             self._logger.warning(f"Could not save last used drive: {e}")
@@ -287,6 +299,8 @@ class SavePanel(QWidget):
         self._format_combo = QComboBox()
         for display_name, _ in SAVE_FORMATS:
             self._format_combo.addItem(display_name)
+        # First-launch default only — WorkflowView restores the last session's
+        # format over this via set_workflow_dict().
         self._format_combo.setCurrentIndex(0)  # Default to TIFF
         self._format_combo.setFixedWidth(90)
         self._format_combo.currentIndexChanged.connect(self._on_settings_changed)

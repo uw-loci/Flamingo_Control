@@ -368,18 +368,29 @@ class TilingPanel(QWidget):
 
         # FOV is tile size (from the calibration-aware hardware config)
         fov_mm = self._current_tile_size_um() / 1000.0
-        overlap_factor = 1.0 - self._overlap.value() / 100.0
-        effective_step = fov_mm * overlap_factor
 
-        # Calculate tiles needed to cover range
-        # Formula: tiles = ceil(range / effective_step) + 1
-        # But at minimum we need 1 tile
-        if effective_step > 0:
-            tiles_x = max(1, int(x_range_mm / effective_step) + 1)
-            tiles_y = max(1, int(y_range_mm / effective_step) + 1)
-        else:
-            tiles_x = 1
-            tiles_y = 1
+        # Use the SERVER's tile-count math (CheckStackTile parity), not the old
+        # client formula floor(range/step)+1. Position A/B are corner-tile
+        # CENTERS, so the server images half a FOV beyond each and rounds up:
+        # ceil((range + FOV) / step). The two disagree often — 6x12 mm at 2.1454
+        # mm FOV and 10% overlap is 4x7 by the client formula and 5x8 on the
+        # scope — and this count drives the acquisition size/time estimate, so
+        # the old number under-reported the run by a third.
+        from py2flamingo.utils.tile_geometry import compute_tile_geometry
+
+        geom = compute_tile_geometry(
+            start_x=x_min,
+            end_x=x_max,
+            start_y=y_min,
+            end_y=y_max,
+            start_z=0.0,
+            end_z=0.0,
+            fov_x_mm=fov_mm,
+            fov_y_mm=fov_mm,
+            x_overlap_percent=self._overlap.value(),
+            y_overlap_percent=self._overlap.value(),
+        )
+        tiles_x, tiles_y = geom.tiles_x, geom.tiles_y
 
         # Update spinboxes
         self._tiles_x.blockSignals(True)

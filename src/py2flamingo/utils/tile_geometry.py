@@ -92,12 +92,18 @@ class TileGeometry:
 
 
 def client_tile_count_1d(range_mm: float, fov_mm: float, overlap_percent: float) -> int:
-    """The client's historical 1-D tile count (``tiling_panel.set_from_positions``).
+    """The client's historical 1-D tile count. **Superseded — do not use.**
 
-    ``floor(range / (FOV * (1 - overlap))) + 1`` — differs from the server, which
-    uses ``ceil((range + FOV) / (FOV * (1 - overlap)))`` (see
-    :func:`compute_tile_geometry`). Exposed so a "Check Tiling" diagnostic can
-    show both counts and surface the inputs where they disagree.
+    ``floor(range / (FOV * (1 - overlap))) + 1``. This is what
+    ``tiling_panel.set_from_positions`` used until it was switched to
+    :func:`compute_tile_geometry`, and it under-counts: it treats the corners as
+    the edges of the imaged region rather than as corner-tile *centers*, and it
+    rounds down. For a 6 x 12 mm region at 2.1454 mm FOV and 10% overlap it says
+    4x7=28 while the scope images 5x8=40 — a third of the run unaccounted for in
+    the size and time estimates.
+
+    Kept only so the divergence stays documented and testable; nothing in the
+    application calls it.
     """
     step = fov_mm * (1.0 - overlap_percent / 100.0)
     if step <= 0:

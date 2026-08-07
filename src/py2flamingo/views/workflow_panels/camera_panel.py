@@ -74,7 +74,9 @@ class CameraPanel(QWidget):
         self._exposure_us = 10000.0  # Default 10ms
         self._frame_rate = 40.0  # Default (will be calculated from exposure)
 
-        # Advanced settings (stored here, edited via dialog)
+        # Advanced settings (stored here, edited via dialog). These are the
+        # first-launch defaults only — WorkflowView restores the last session's
+        # values over them via set_workflow_dict().
         self._aoi_width = 2048
         self._aoi_height = 2048
         self._cam1_percentage = 100

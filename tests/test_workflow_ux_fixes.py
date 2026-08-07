@@ -148,11 +148,17 @@ def test_format_validation_result_html_has_estimates_and_warnings(qapp):
     assert "<b" in html  # it is HTML
 
 
-def test_format_tiling_comparison_html_flags_divergence(qapp):
-    from py2flamingo.views.workflow_view import format_tiling_comparison_html
+def test_format_tiling_summary_html_reports_the_server_grid(qapp):
+    """Reports one authoritative grid, not two competing formulas.
 
-    # client floor+1 (=2) vs server ceil((range+FOV)/step) (=4) -> differ.
-    html = format_tiling_comparison_html(
+    The Tiling panel now uses the server's math, so the old client-vs-server
+    comparison would have compared the live formula against a dead one and
+    warned forever.
+    """
+    from py2flamingo.views.workflow_view import format_tiling_summary_html
+
+    # 3.793 x 3.602 mm at 2.1454 mm FOV, 10% overlap -> server ceil() gives 4x3.
+    html = format_tiling_summary_html(
         x_min=5.707,
         x_max=9.5,
         y_min=21.398,
@@ -160,24 +166,26 @@ def test_format_tiling_comparison_html_flags_divergence(qapp):
         fov_mm=2.1454,
         overlap_percent=10.0,
     )
-    assert "App (client)" in html
-    assert "Server (CheckStackTile)" in html
-    assert "differ" in html  # the two methods disagree here
+    assert "4 × 3 = 12" in html
+    assert "App (client)" not in html  # the legacy formula is gone
+    assert "every tile is in range" in html
 
 
-def test_format_tiling_comparison_html_agrees_when_equal(qapp):
-    from py2flamingo.views.workflow_view import format_tiling_comparison_html
+def test_format_tiling_summary_html_flags_out_of_range_tiles(qapp):
+    """Tiles past a hard limit make the server reject the workflow — say so."""
+    from py2flamingo.views.workflow_view import format_tiling_summary_html
 
-    # Zero span -> both methods yield 1x1.
-    html = format_tiling_comparison_html(
-        x_min=7.0,
-        x_max=7.0,
-        y_min=12.0,
-        y_max=12.0,
+    html = format_tiling_summary_html(
+        x_min=5.707,
+        x_max=9.5,
+        y_min=21.398,
+        y_max=25.0,
         fov_mm=2.1454,
         overlap_percent=10.0,
+        stage_limits={"x": {"min": 0.0, "max": 26.0}, "y": {"min": 24.0, "max": 26.0}},
     )
-    assert "agree" in html
+    assert "outside the stage hard limits" in html
+    assert "hard limit min 24.000 mm" in html
 
 
 def test_format_validation_result_html_shows_errors(qapp):
