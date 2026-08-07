@@ -98,7 +98,9 @@ class PositionPanel(QWidget):
         # R (rotation) position
         grid.addWidget(QLabel("R (deg):"), 1, 2)
         self.r_spinbox = QDoubleSpinBox()
-        self.r_spinbox.setRange(0.0, 360.0)
+        # Match the stage's own R limits (-720..720): negative sample angles such
+        # as -147 are ordinary, and clamping to 0..360 silently rewrote them.
+        self.r_spinbox.setRange(-720.0, 720.0)
         self.r_spinbox.setDecimals(1)
         self.r_spinbox.setSingleStep(1.0)
         self.r_spinbox.valueChanged.connect(self._on_position_changed)

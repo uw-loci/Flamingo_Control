@@ -153,7 +153,8 @@ class DualPositionPanel(QWidget):
         r_label = QLabel("R (deg):")
         grid.addWidget(r_label, 1, 2)
         r_spin = QDoubleSpinBox()
-        r_spin.setRange(0.0, 360.0)
+        # Match the stage's own R limits (-720..720) — see position_panel.
+        r_spin.setRange(-720.0, 720.0)
         r_spin.setDecimals(1)
         r_spin.setSingleStep(1.0)
         r_spin.valueChanged.connect(lambda: self._on_position_changed(suffix))
