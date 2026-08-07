@@ -129,6 +129,44 @@ def plan_microscope_change(active, new, has_data):
     return "ask" if has_data else "reinit"
 
 
+logger = logging.getLogger(__name__)
+
+
+def _stitched_channel_slot(ch_id) -> int:
+    """Map a stitched channel id to a viewer channel slot.
+
+    The stitcher labels split-illumination output channels ``"<ch>_I<side>"``
+    ("3_I0", "3_I1") — one output channel per light path from a single laser.
+    Those are strings, and the viewer's ``display_cache`` is keyed by INTEGER
+    slots, so every such channel failed the ``ch_id not in display_cache``
+    test and was skipped. The load then reported success having loaded
+    nothing: "Loaded 0 channel(s): []". Not Imaris-specific — it hit any
+    split-illumination stitch, OME-Zarr included.
+
+    The viewer already has side-aware slots for exactly this: 0-3 are the
+    left-side lasers, 4-7 the same lasers on the right path, 8 the LED. So
+    ``3_I0`` -> 3 and ``3_I1`` -> 7, matching ``_raw_file_key``'s
+    ``channel + 4 * illum``. Anything unrecognised falls back to 0 rather than
+    dropping the channel — a mis-slotted volume is visible and fixable, a
+    silently discarded one is neither.
+    """
+    if isinstance(ch_id, (int, np.integer)):
+        return int(ch_id)
+    text = str(ch_id).strip()
+    if "_I" in text:
+        base, _, side = text.partition("_I")
+        try:
+            return int(base) + 4 * int(side)
+        except ValueError:
+            logger.warning(f"Unparseable stitched channel id {ch_id!r}; using slot 0")
+            return 0
+    try:
+        return int(text)
+    except ValueError:
+        logger.warning(f"Unparseable stitched channel id {ch_id!r}; using slot 0")
+        return 0
+
+
 class SampleView(QWidget):
     """
     Integrated sample viewing and interaction window.
@@ -3506,6 +3544,22 @@ class SampleView(QWidget):
 
             progress.close()
 
+            if not ch_ids_loaded:
+                # "Loaded 0 channel(s): []" under a "Data Loaded" heading is a
+                # success message for a failure. Every channel was skipped —
+                # say so, and say what was actually in the file.
+                found = ", ".join(str(c.get("ch_id")) for c in channels) or "none"
+                QMessageBox.warning(
+                    self,
+                    "Nothing Loaded",
+                    f"The stitched data was read, but none of its channels "
+                    f"could be placed in the viewer.\n\n"
+                    f"Channels in the file: {found}\n"
+                    f"From: {output_dir}\n\n"
+                    "See the log for which channel was rejected and why.",
+                )
+                return
+
             QMessageBox.information(
                 self,
                 "Stitched Data Loaded",
@@ -3584,7 +3638,7 @@ class SampleView(QWidget):
         world_bbox_max = np.array([-np.inf, -np.inf, -np.inf])
 
         for ch_info in channels:
-            ch_id = ch_info["ch_id"]
+            ch_id = _stitched_channel_slot(ch_info["ch_id"])
             volume = np.asarray(ch_info["volume"])
             voxel_um = np.asarray(ch_info["voxel_size_um"], dtype=float)
 
