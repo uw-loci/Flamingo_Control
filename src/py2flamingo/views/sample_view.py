@@ -3663,14 +3663,29 @@ class SampleView(QWidget):
         sc_x, sc_y, sc_z = sample_region[0], sample_region[1], sample_region[2]
         chamber_origin = np.array(self.voxel_storage.config.chamber_origin)
 
-        # Use channel 0 to compute the stitch center in stage mm
+        # Use channel 0 to compute the stitch center in stage mm.
+        #
+        # This MUST use the same arithmetic as the per-channel placement below,
+        # or the data is drawn in one place and the transform anchored to
+        # another: the moment a real stage position arrives, the volume jumps by
+        # the difference. `origin_um` read literally is not always a stage
+        # coordinate — tile placement can negate stage X, so the reported file
+        # has origin_um.x = -8350 for a mosaic spanning stage X 2.34-8.35 mm,
+        # putting the reference at -4.809 mm and the data at +4.809 mm: a 9.6 mm
+        # error in X. acquired_center_xyz_um() undoes the declared negation.
         first = channels[0]
         o_z0, o_y0, o_x0 = first["origin_um"]
         v_z0, v_y0, v_x0 = first["voxel_size_um"]
         sh0 = first["volume"].shape
-        stitch_center_x_mm = (o_x0 + sh0[2] * v_x0 / 2) / 1000
-        stitch_center_y_mm = (o_y0 + sh0[1] * v_y0 / 2) / 1000
-        stitch_center_z_mm = (o_z0 + sh0[0] * v_z0 / 2) / 1000
+        acq_center0 = acquired_center_xyz_um(metadata, sh0, first["voxel_size_um"])
+        if acq_center0 is not None:
+            stitch_center_x_mm = acq_center0[0] / 1000
+            stitch_center_y_mm = acq_center0[1] / 1000
+            stitch_center_z_mm = acq_center0[2] / 1000
+        else:
+            stitch_center_x_mm = (o_x0 + sh0[2] * v_x0 / 2) / 1000
+            stitch_center_y_mm = (o_y0 + sh0[1] * v_y0 / 2) / 1000
+            stitch_center_z_mm = (o_z0 + sh0[0] * v_z0 / 2) / 1000
 
         # The rotation the sample was physically at. Falling back to the
         # viewer's CURRENT rotation (the old behaviour) draws a volume acquired

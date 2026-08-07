@@ -101,5 +101,45 @@ class TestAcquisitionAngle(unittest.TestCase):
         self.assertEqual(acquired_angle_deg({"angles_deg": [0.0]}), 0.0)
 
 
+class TestReferenceMatchesPlacement(unittest.TestCase):
+    """The transform anchor and the placement must use the SAME arithmetic.
+
+    _load_stitched_into_voxel_storage places each channel at
+    acquired_center_xyz_um(), but computed its reference stage position from
+    origin_um read literally. For the reported file that put the reference at
+    x = -4.809 mm and the data at x = +4.809 mm, so the volume jumped 9.6 mm in
+    X the moment a real stage position arrived — data drawn in one place,
+    anchored to another.
+    """
+
+    def _literal_center_mm(self, meta, shape, voxel):
+        """What the load path used to compute (and still does with no frame)."""
+        o_z, o_y, o_x = meta["origin_um"]
+        v_z, v_y, v_x = voxel
+        return (
+            (o_x + shape[2] * v_x / 2) / 1000,
+            (o_y + shape[1] * v_y / 2) / 1000,
+            (o_z + shape[0] * v_z / 2) / 1000,
+        )
+
+    def test_a_negated_x_axis_makes_the_literal_origin_disagree(self):
+        """The bug this guards: the two disagree, so they must not be mixed."""
+        acquired = acquired_center_xyz_um(REPORTED, SHAPE, VOXEL)
+        literal = self._literal_center_mm(REPORTED, SHAPE, VOXEL)
+
+        self.assertAlmostEqual(acquired[0] / 1000, 4.809, places=3)
+        self.assertAlmostEqual(literal[0], -4.809, places=3)
+        # ~9.6 mm apart -- far more than any tolerance.
+        self.assertGreater(abs(acquired[0] / 1000 - literal[0]), 9.0)
+
+    def test_un_negated_axes_agree(self):
+        """Y and Z were never negated, so both routes must land identically."""
+        acquired = acquired_center_xyz_um(REPORTED, SHAPE, VOXEL)
+        literal = self._literal_center_mm(REPORTED, SHAPE, VOXEL)
+
+        self.assertAlmostEqual(acquired[1] / 1000, literal[1], places=6)
+        self.assertAlmostEqual(acquired[2] / 1000, literal[2], places=6)
+
+
 if __name__ == "__main__":
     unittest.main()
