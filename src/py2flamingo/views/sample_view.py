@@ -3663,16 +3663,23 @@ class SampleView(QWidget):
         sc_x, sc_y, sc_z = sample_region[0], sample_region[1], sample_region[2]
         chamber_origin = np.array(self.voxel_storage.config.chamber_origin)
 
-        # Use channel 0 to compute the stitch center in stage mm.
+        # WHICH stage position anchors the volume.
         #
-        # This MUST use the same arithmetic as the per-channel placement below,
-        # or the data is drawn in one place and the transform anchored to
-        # another: the moment a real stage position arrives, the volume jumps by
-        # the difference. `origin_um` read literally is not always a stage
-        # coordinate — tile placement can negate stage X, so the reported file
-        # has origin_um.x = -8350 for a mosaic spanning stage X 2.34-8.35 mm,
-        # putting the reference at -4.809 mm and the data at +4.809 mm: a 9.6 mm
-        # error in X. acquired_center_xyz_um() undoes the declared negation.
+        # A mosaic is painted in across MANY stage positions — the live view
+        # shows exactly that during acquisition — so "the" acquisition position
+        # has to be chosen, not read off. The choice is the stage position of
+        # the volume's own geometric CENTRE: origin + extent/2. That is the
+        # position at which the middle of the mosaic sat at the focal point, so
+        # driving the stage back there re-centres the volume in the chamber,
+        # matching what was painted live. Every other tile follows from the
+        # rigid-body delta.
+        #
+        # This has to be the same point the volume is centred on below, or the
+        # data is drawn in one place and anchored to another. `origin_um` read
+        # literally is not always a stage coordinate: tile placement can negate
+        # stage X, so the reported file carries origin_um.x = -8350 for a mosaic
+        # spanning stage X 1.27-8.35 mm. acquired_center_xyz_um() undoes the
+        # declared negation and returns a real stage coordinate.
         first = channels[0]
         o_z0, o_y0, o_x0 = first["origin_um"]
         v_z0, v_y0, v_x0 = first["voxel_size_um"]
@@ -3746,24 +3753,33 @@ class SampleView(QWidget):
             # display axis. Legacy orientation => the old Z(always)/X(not-invert_x)
             # flips + (Z,Y,X) bbox, bit-for-bit. chamber_origin is already ordered
             # per display axis (voxel_storage_factory).
-            # Where to put it. A file that describes its own frame goes where
-            # it was ACQUIRED; one that doesn't stays centred in the chamber,
-            # because a position derived from an undescribed frame is a guess.
-            acq_center = acquired_center_xyz_um(metadata, volume.shape, voxel_um)
-            place_center = acq_center if acq_center is not None else (sc_x, sc_y, sc_z)
-            if acq_center is not None and ch_id not in _placement_logged:
+            # Placed at the focal point, ALWAYS — same convention as live tile
+            # acquisition (tile_processing_worker: base_display =
+            # sample_region_center, and the stage position enters only as
+            # `pos - ref`). "Where it was acquired" is expressed by the
+            # reference stage position, not by an absolute chamber coordinate:
+            # return the stage to the acquisition position and the volume sits
+            # centred, exactly as the live tiles did; move away and it slides
+            # rigidly, clipping at the chamber edge.
+            #
+            # Feeding the acquired stage centre in here instead double-counts
+            # the offset. It also treats a stage coordinate as a chamber one —
+            # for a mosaic acquired at stage Y 18.8 mm that puts 93% of the
+            # volume outside a 14 mm chamber before the stage has moved at all.
+            if ch_id not in _placement_logged:
                 _placement_logged.add(ch_id)
                 self.logger.info(
-                    f"Stitched channel {ch_id}: placing at its acquired stage "
-                    f"position (x={acq_center[0] / 1000:.2f} "
-                    f"y={acq_center[1] / 1000:.2f} z={acq_center[2] / 1000:.2f} mm)"
+                    f"Stitched channel {ch_id}: placed at the focal point, "
+                    f"anchored to the acquisition stage position "
+                    f"(x={stitch_center_x_mm:.2f} y={stitch_center_y_mm:.2f} "
+                    f"z={stitch_center_z_mm:.2f} mm, R={current_r:.1f} deg)"
                 )
 
             resampled, world_min, world_max = orient_stitched_volume(
                 resampled,
                 volume.shape,
                 voxel_um,
-                place_center,
+                (sc_x, sc_y, sc_z),
                 self.voxel_storage.config.axis_orientation(),
             )
 

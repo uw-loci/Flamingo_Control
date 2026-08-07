@@ -141,5 +141,87 @@ class TestReferenceMatchesPlacement(unittest.TestCase):
         self.assertAlmostEqual(acquired[2] / 1000, literal[2], places=6)
 
 
+class TestPlacementConvention(unittest.TestCase):
+    """Data is placed at the FOCAL POINT; the acquisition position is the anchor.
+
+    This mirrors live tile acquisition exactly (tile_processing_worker:
+    ``base_display = sample_region_center`` and the stage position enters only
+    as ``pos - ref``). The goal is real-world coordinates for the data: an
+    initial position, plus an affine driven by the stage position relative to
+    the original stage position.
+
+    Feeding the acquired stage centre in as the placement instead double-counts
+    that offset AND treats a stage coordinate as a chamber one. The chamber is a
+    fixed 14 mm window; the stage reaches 25 mm. A mosaic acquired at stage
+    Y 18.8 mm then lands almost entirely outside the chamber before the stage
+    has moved at all.
+    """
+
+    CHAMBER_ORIGIN = (12500.0, 0.0, 1000.0)  # display order (depth, vert, horiz) um
+    CHAMBER_EXTENT = (13500.0, 14000.0, 11300.0)
+    FOCAL_POINT = (6655.0, 7000.0, 19250.0)  # sample_region_center, (x, y, z) um
+
+    def _fraction_inside(self, centre_xyz):
+        import numpy as np
+
+        from py2flamingo.views.sample_view import orient_stitched_volume
+        from py2flamingo.visualization.axis_orientation import AxisOrientation
+
+        ori = AxisOrientation.legacy(invert_x=True)
+        _, wmin, wmax = orient_stitched_volume(
+            np.zeros((2, 2, 2), dtype=np.uint16), SHAPE, VOXEL, centre_xyz, ori
+        )
+        origin = np.asarray(self.CHAMBER_ORIGIN)
+        far = origin + np.asarray(self.CHAMBER_EXTENT)
+        inside = np.maximum(np.minimum(wmax, far) - np.maximum(wmin, origin), 0.0)
+        return float(np.prod(inside) / np.prod(wmax - wmin))
+
+    def test_the_focal_point_keeps_the_volume_in_the_chamber(self):
+        self.assertAlmostEqual(self._fraction_inside(self.FOCAL_POINT), 1.0, places=6)
+
+    def test_the_acquired_stage_centre_would_push_it_out(self):
+        """Why the acquired centre must NOT be used as the placement."""
+        acquired = acquired_center_xyz_um(REPORTED, SHAPE, VOXEL)
+        self.assertLess(self._fraction_inside(acquired), 0.10)
+
+
+class TestWhichStagePositionIsTheAnchor(unittest.TestCase):
+    """A mosaic spans many stage positions; exactly one anchors the transform.
+
+    The choice is the stage position of the volume's geometric CENTRE
+    (origin + extent/2). That is the position at which the middle of the mosaic
+    was at the focal point, so returning the stage there re-centres the volume
+    in the chamber -- consistent with what the live view painted in as the
+    stage swept. Any other choice leaves the volume offset by a fixed error.
+    """
+
+    def test_the_anchor_is_the_centre_of_the_swept_stage_range(self):
+        cx, cy, cz = acquired_center_xyz_um(REPORTED, SHAPE, VOXEL)
+
+        # The stage ranges the mosaic actually swept, in mm.
+        # X is negated in the file: origin.x = -8350 -> stage 1.269 .. 8.350
+        ext_x = SHAPE[2] * VOXEL[2] / 1000  # 7.081 mm
+        ext_y = SHAPE[1] * VOXEL[1] / 1000  # 11.154 mm
+        ext_z = SHAPE[0] * VOXEL[0] / 1000  # 8.000 mm
+        x_lo, x_hi = 8.350 - ext_x, 8.350
+        y_lo, y_hi = 13.210, 13.210 + ext_y
+        z_lo, z_hi = 13.000, 13.000 + ext_z
+
+        self.assertAlmostEqual(cx / 1000, (x_lo + x_hi) / 2, places=3)
+        self.assertAlmostEqual(cy / 1000, (y_lo + y_hi) / 2, places=3)
+        self.assertAlmostEqual(cz / 1000, (z_lo + z_hi) / 2, places=3)
+
+    def test_the_anchor_is_a_reachable_stage_position(self):
+        """Sanity: an anchor outside the stage's travel cannot be a stage pos.
+
+        The un-negated -4.809 mm failed this, which is what exposed the bug.
+        """
+        cx, cy, cz = acquired_center_xyz_um(REPORTED, SHAPE, VOXEL)
+
+        self.assertGreater(cx / 1000, 1.0)  # stage X travel is 1.0 .. 12.31 mm
+        self.assertLess(cx / 1000, 12.31)
+        self.assertLess(cy / 1000, 25.0)  # y_stage_max_mm
+
+
 if __name__ == "__main__":
     unittest.main()
