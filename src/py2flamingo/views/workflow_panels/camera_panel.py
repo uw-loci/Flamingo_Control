@@ -145,6 +145,36 @@ class CameraPanel(QWidget):
         # Update display with default values
         self._update_detected_display()
 
+    def _max_frame_rate(self) -> float:
+        """Frame-rate ceiling for the CURRENT AOI, in frames/second.
+
+        Was a hardcoded 40.0, which is the FULL-FRAME figure. A rolling-shutter
+        sCMOS reads one row at a time, so a 1024-row AOI runs at roughly twice
+        that. Since ``z_velocity = z_step * frame_rate``, capping at 40 while
+        the camera actually ran at 80 halved the Z sweep for every cropped-AOI
+        acquisition.
+
+        Falls back to 40 fps scaled by the AOI if the hardware config cannot be
+        read, so the panel keeps working offline.
+        """
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            hw = get_hardware_config()
+            # The panel's AOI is what the workflow will request, which may not
+            # be what the camera currently reports — prefer ours.
+            rows = int(self._aoi_height) if self._aoi_height else hw.active_height_px
+            base = float(hw.max_frame_rate_hz_full_frame or 40.0)
+            full = int(hw.sensor_height_px or 2048)
+        except Exception as e:  # noqa: BLE001 - config best-effort; keep UI alive
+            self._logger.debug(f"Hardware config unavailable for frame rate: {e!r}")
+            rows = int(self._aoi_height) if self._aoi_height else 2048
+            base, full = 40.0, 2048
+
+        if rows <= 0 or full <= 0:
+            return base
+        return base * (float(full) / float(rows))
+
     def _update_detected_display(self) -> None:
         """Update the detected settings display."""
         self._detected_label.setText(
@@ -199,10 +229,10 @@ class CameraPanel(QWidget):
             exposure_us = camera_service.get_exposure()
             self._exposure_us = exposure_us
 
-            # Calculate frame rate (capped at 40 fps)
+            # Calculate frame rate (capped at the camera's ceiling for this AOI)
             if exposure_us > 0:
                 exposure_s = exposure_us / 1_000_000.0
-                self._frame_rate = min(1.0 / exposure_s, 40.0)
+                self._frame_rate = min(1.0 / exposure_s, self._max_frame_rate())
 
             self._auto_detected = True
             self._detection_warning = ""
@@ -244,17 +274,21 @@ class CameraPanel(QWidget):
         if dialog.exec_() == dialog.Accepted:
             settings = dialog.get_settings()
 
-            # Update exposure if changed
-            if "exposure_us" in settings:
-                self._exposure_us = settings["exposure_us"]
-                # Recalculate frame rate
-                if self._exposure_us > 0:
-                    exposure_s = self._exposure_us / 1_000_000.0
-                    self._frame_rate = min(1.0 / exposure_s, 40.0)
-                self._update_detected_display()
-
+            # AOI FIRST: it sets the frame-rate ceiling, so applying it after
+            # would cap a newly-cropped AOI at the old (lower) full-frame rate.
             self._aoi_width = settings["aoi_width"]
             self._aoi_height = settings["aoi_height"]
+
+            if "exposure_us" in settings:
+                self._exposure_us = settings["exposure_us"]
+
+            # Re-derive the rate against the AOI just applied, whether the user
+            # changed the exposure, the AOI, or both.
+            if self._exposure_us > 0:
+                exposure_s = self._exposure_us / 1_000_000.0
+                self._frame_rate = min(1.0 / exposure_s, self._max_frame_rate())
+            self._update_detected_display()
+
             self._cam1_percentage = settings["cam1_capture_percentage"]
             self._cam1_mode = settings["cam1_capture_mode"]
             self._cam2_percentage = settings["cam2_capture_percentage"]
@@ -304,11 +338,28 @@ class CameraPanel(QWidget):
             # Recalculate frame rate from exposure
             if self._exposure_us > 0:
                 exposure_s = self._exposure_us / 1_000_000.0
-                self._frame_rate = min(1.0 / exposure_s, 40.0)
+                self._frame_rate = min(1.0 / exposure_s, self._max_frame_rate())
 
         if "frame_rate" in settings:
-            # Override with stored frame rate if provided
-            self._frame_rate = settings["frame_rate"]
+            # Override with the stored frame rate — but only if it is a real
+            # rate. Callers pass a 0.0 default when a workflow file omits
+            # "Frame rate (f/s)" from BOTH Camera and Experiment Settings, and
+            # the key is always present, so an absent field used to zero the
+            # rate outright: z_velocity = z_step * 0 then floored at 0.001 mm/s,
+            # a 100x slower sweep from a silently missing value. Keep whatever
+            # the exposure implied instead.
+            stored_rate = settings["frame_rate"]
+            try:
+                stored_rate = float(stored_rate)
+            except (TypeError, ValueError):
+                stored_rate = 0.0
+            if stored_rate > 0:
+                self._frame_rate = stored_rate
+            else:
+                self._logger.debug(
+                    "Ignoring non-positive stored frame rate "
+                    f"({settings['frame_rate']!r}); keeping {self._frame_rate:.1f} fps"
+                )
 
         if "aoi_width" in settings:
             self._aoi_width = settings["aoi_width"]
@@ -341,7 +392,7 @@ class CameraPanel(QWidget):
         # Recalculate frame rate
         if exposure_us > 0:
             exposure_s = exposure_us / 1_000_000.0
-            self._frame_rate = min(1.0 / exposure_s, 40.0)
+            self._frame_rate = min(1.0 / exposure_s, self._max_frame_rate())
         self._update_detected_display()
 
     def set_aoi(self, width: int, height: int) -> None:

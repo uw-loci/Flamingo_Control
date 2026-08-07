@@ -16,6 +16,14 @@ camera:
   sensor_width_px: 2048
   sensor_height_px: 2048
 
+  # Maximum frame rate at the FULL sensor height, in frames/second.
+  # A rolling-shutter sCMOS reads one row at a time, so the ceiling scales
+  # inversely with the number of rows in the AOI: a 1024-row AOI runs at
+  # roughly twice this. Code that needs the ceiling for the CURRENT AOI must
+  # use HardwareConfig.max_frame_rate_hz rather than hardcoding a constant —
+  # a fixed 40 fps silently halved the Z sweep velocity at a cropped AOI.
+  max_frame_rate_hz_full_frame: 40.0
+
 optics:
   # --- FALLBACK ONLY: auto-synced from the microscope on connect ---
   # The objective and tube lens change per objective/project, and the scope

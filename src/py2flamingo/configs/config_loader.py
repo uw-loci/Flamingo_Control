@@ -54,6 +54,9 @@ class HardwareConfig:
     sensor_pixel_size_um: float = 6.5
     sensor_width_px: int = 2048
     sensor_height_px: int = 2048
+    # Camera ceiling at the FULL sensor height. See max_frame_rate_hz for why
+    # this is a full-frame figure rather than the usable rate.
+    max_frame_rate_hz_full_frame: float = 40.0
 
     # Optics
     objective_magnification: float = 16.0
@@ -132,6 +135,22 @@ class HardwareConfig:
         return int(self.aoi_height_px) if self.aoi_height_px else self.sensor_height_px
 
     @property
+    def max_frame_rate_hz(self) -> float:
+        """Camera frame-rate ceiling for the CURRENT AOI, in frames/second.
+
+        A rolling-shutter sCMOS reads one row at a time, so the ceiling scales
+        inversely with the number of rows: cropping 2048 -> 1024 roughly
+        doubles it. Anything deriving a frame rate must use this rather than a
+        constant — a hardcoded 40 fps halved the Z sweep velocity whenever the
+        camera ran at a cropped AOI, since z_velocity = z_step * frame_rate.
+        """
+        base = float(self.max_frame_rate_hz_full_frame or 40.0)
+        rows = self.active_height_px
+        if rows <= 0 or self.sensor_height_px <= 0:
+            return base
+        return base * (float(self.sensor_height_px) / float(rows))
+
+    @property
     def fov_mm(self) -> float:
         """Field of view (width) in mm at the *active AOI*.
 
@@ -186,6 +205,9 @@ class HardwareConfig:
             sensor_pixel_size_um=camera.get("sensor_pixel_size_um", 6.5),
             sensor_width_px=camera.get("sensor_width_px", 2048),
             sensor_height_px=camera.get("sensor_height_px", 2048),
+            max_frame_rate_hz_full_frame=camera.get(
+                "max_frame_rate_hz_full_frame", 40.0
+            ),
             objective_magnification=optics.get("objective_magnification", 16.0),
             tube_lens_focal_length_mm=optics.get("tube_lens_focal_length_mm", 321.0),
             reference_tube_lens_mm=optics.get("reference_tube_lens_mm", 200.0),
