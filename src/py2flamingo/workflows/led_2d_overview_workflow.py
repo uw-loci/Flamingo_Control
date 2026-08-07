@@ -142,6 +142,27 @@ class LED2DOverviewWorkflow(QObject):
                 "Use Tools > Calibrate to enable second rotation."
             )
 
+    def _tile_overlap_percent(self) -> float:
+        """Requested tile overlap, clamped to the server's [0, 50] tiling limit.
+
+        Older saved configurations predate the field, so a missing value falls
+        back to the dataclass default rather than to zero — zero was the bug.
+        """
+        from py2flamingo.utils.tile_geometry import (
+            OVERLAP_PERCENT_MAX,
+            OVERLAP_PERCENT_MIN,
+        )
+
+        try:
+            value = float(getattr(self._config, "tile_overlap_percent", 10.0))
+        except (TypeError, ValueError):
+            return 10.0
+        return max(OVERLAP_PERCENT_MIN, min(OVERLAP_PERCENT_MAX, value))
+
+    def _tile_overlap_fraction(self) -> float:
+        """Tile overlap as a fraction of a FOV (0.0-0.5)."""
+        return self._tile_overlap_percent() / 100.0
+
     def _calculate_actual_fov(self) -> Optional[float]:
         """Calculate the actual field of view from microscope settings.
 
@@ -418,10 +439,15 @@ class LED2DOverviewWorkflow(QObject):
         # Use actual FOV calculated from microscope settings
         fov = self._actual_fov_mm
 
-        # No overlap - tiles are adjacent
-        step = fov
+        # Tiles SHARE a fraction of a FOV. Butting them edge-to-edge (the old
+        # `step = fov`) leaves the stitcher nothing to register on and turns any
+        # stage-repeatability error into a visible seam.
+        step = fov * (1.0 - self._tile_overlap_fraction())
 
-        logger.debug(f"Tile step size: {step:.4f} mm (FOV={fov:.4f} mm)")
+        logger.debug(
+            f"Tile step size: {step:.4f} mm "
+            f"(FOV={fov:.4f} mm, overlap={self._tile_overlap_percent():.1f}%)"
+        )
 
         # Generate X positions (using effective tile_x range)
         x_positions = []
@@ -573,18 +599,27 @@ class LED2DOverviewWorkflow(QObject):
         # return it here when the scan ends (completion, cancel, or error).
         self._capture_origin_position()
 
-        # Calculate total tiles across both rotations using actual FOV
+        # Calculate total tiles across both rotations using actual FOV. Must use
+        # the same step as _generate_tile_positions, or the progress bar's total
+        # is short by the overlap and the run appears to overshoot 100%.
         total_tiles = 0
         fov = self._actual_fov_mm
+        step = fov * (1.0 - self._tile_overlap_fraction())
         for i in range(len(self._rotation_angles)):
             eff_bbox = self._get_effective_bbox(i)
-            tiles_x = max(1, int((eff_bbox.tile_x_max - eff_bbox.tile_x_min) / fov) + 1)
-            tiles_y = max(1, int((eff_bbox.tile_y_max - eff_bbox.tile_y_min) / fov) + 1)
+            tiles_x = max(
+                1, int((eff_bbox.tile_x_max - eff_bbox.tile_x_min) / step) + 1
+            )
+            tiles_y = max(
+                1, int((eff_bbox.tile_y_max - eff_bbox.tile_y_min) / step) + 1
+            )
             total_tiles += tiles_x * tiles_y
 
         logger.info(
             f"Starting LED 2D Overview: ~{total_tiles} total tiles, "
-            f"rotations: {self._rotation_angles}, FOV: {fov:.4f} mm"
+            f"rotations: {self._rotation_angles}, FOV: {fov:.4f} mm, "
+            f"overlap: {self._tile_overlap_percent():.1f}% "
+            f"(step {step:.4f} mm)"
         )
 
         # Lock microscope controls during acquisition

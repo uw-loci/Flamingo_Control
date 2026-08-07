@@ -31,6 +31,7 @@ from py2flamingo.services.progress_estimator import (
     ProgressEstimator,
     TimingCache,
 )
+from py2flamingo.utils.tile_geometry import OVERLAP_PERCENT_MAX, OVERLAP_PERCENT_MIN
 from py2flamingo.views.colors import ERROR_COLOR, WARNING_COLOR
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,12 @@ class ScanConfiguration:
     # quick tests; the result then has a single view, so tile collection falls
     # back to per-tile / manually-set Z instead of the 90° intersection.
     single_rotation: bool = False
+    # Percent of a FOV that neighbouring tiles share. The grid step is
+    # fov * (1 - overlap/100). This was hardcoded to zero ("No overlap - tiles
+    # are adjacent"), which leaves nothing for the stitcher to register on and
+    # a hairline gap wherever the stage repeats imperfectly. Clamped to the
+    # server's own [0, 50] tiling limit.
+    tile_overlap_percent: float = 10.0
 
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
@@ -433,6 +440,24 @@ class LED2DOverviewDialog(PersistentDialog):
         )
         self.z_step_size.valueChanged.connect(self._update_scan_info)
         layout.addWidget(self.z_step_size, 1, 1)
+
+        # Tile overlap — the grid step is FOV * (1 - overlap/100)
+        layout.addWidget(QLabel("Tile Overlap:"), 1, 2)
+        self.tile_overlap = QDoubleSpinBox()
+        self.tile_overlap.setRange(OVERLAP_PERCENT_MIN, OVERLAP_PERCENT_MAX)
+        self.tile_overlap.setDecimals(1)
+        self.tile_overlap.setSingleStep(5.0)
+        self.tile_overlap.setSuffix(" %")
+        self.tile_overlap.setValue(10.0)
+        self.tile_overlap.setToolTip(
+            "Percent of a field of view that neighbouring tiles share.\n"
+            "Tiles step by FOV × (1 − overlap), so 0% butts them edge-to-edge:\n"
+            "the stitcher then has nothing to register on and any stage\n"
+            "repeatability error shows up as a seam. 10% is a sane default.\n\n"
+            "The server clamps this to 0–50%."
+        )
+        self.tile_overlap.valueChanged.connect(self._update_scan_info)
+        layout.addWidget(self.tile_overlap, 1, 3)
 
         # Focus stacking checkbox
         self.focus_stacking_checkbox = QCheckBox("Use focus stacking (slower)")
@@ -915,8 +940,21 @@ class LED2DOverviewDialog(PersistentDialog):
         except Exception:
             return None
 
+    def _tile_step_mm(self) -> Optional[float]:
+        """Centre-to-centre tile pitch, or None if the FOV is unknown.
+
+        The single source of the step for every count/preview in this dialog,
+        so none of them can drift from what the workflow actually scans.
+        """
+        fov = self._get_actual_fov()
+        if fov is None:
+            return None
+        overlap = getattr(self, "tile_overlap", None)
+        pct = overlap.value() if overlap is not None else 10.0
+        return fov * (1.0 - pct / 100.0)
+
     def _calculate_tile_count(self, bbox: BoundingBox) -> Optional[Tuple[int, int]]:
-        """Calculate number of tiles needed (no overlap).
+        """Calculate number of tiles needed at the configured overlap.
 
         Args:
             bbox: Bounding box for scan region
@@ -924,13 +962,12 @@ class LED2DOverviewDialog(PersistentDialog):
         Returns:
             Tuple of (tiles_x, tiles_y), or None if FOV is unknown
         """
-        fov = self._get_actual_fov()
-        if fov is None:
+        step = self._tile_step_mm()
+        if step is None or step <= 0:
             return None
 
-        # No overlap - tiles are adjacent
-        tiles_x = max(1, int((bbox.width / fov) + 1))
-        tiles_y = max(1, int((bbox.height / fov) + 1))
+        tiles_x = max(1, int((bbox.width / step) + 1))
+        tiles_y = max(1, int((bbox.height / step) + 1))
 
         return tiles_x, tiles_y
 
@@ -996,10 +1033,12 @@ class LED2DOverviewDialog(PersistentDialog):
             return
 
         z_step = self.z_step_size.value()
+        # Tiles step by FOV x (1 - overlap), not by a full FOV.
+        step = self._tile_step_mm() or fov
 
         # Rotation 1 (R): tile across X-Y, Z-stack through Z
-        tiles_x_r1 = max(1, int((bbox.width / fov) + 1))
-        tiles_y_r1 = max(1, int((bbox.height / fov) + 1))
+        tiles_x_r1 = max(1, int((bbox.width / step) + 1))
+        tiles_y_r1 = max(1, int((bbox.height / step) + 1))
         tiles_r1 = tiles_x_r1 * tiles_y_r1
         z_depth_r1 = bbox.z_max - bbox.z_min
         z_planes_r1 = max(1, int(z_depth_r1 / z_step) + 1)
@@ -1026,7 +1065,7 @@ class LED2DOverviewDialog(PersistentDialog):
             new_z_max = max(c[1] for c in rotated)
 
             # Rotation 2 (R+90): transformed bbox
-            tiles_x_r2 = max(1, int(((new_x_max - new_x_min) / fov) + 1))
+            tiles_x_r2 = max(1, int(((new_x_max - new_x_min) / step) + 1))
             tiles_y_r2 = tiles_y_r1  # Y unchanged
             tiles_r2 = tiles_x_r2 * tiles_y_r2
             z_depth_r2 = new_z_max - new_z_min
@@ -1333,6 +1372,7 @@ class LED2DOverviewDialog(PersistentDialog):
             z_step_size=self.z_step_size.value(),
             use_focus_stacking=self.focus_stacking_checkbox.isChecked(),
             single_rotation=self.single_rotation_checkbox.isChecked(),
+            tile_overlap_percent=self.tile_overlap.value(),
         )
 
     def _load_previous_scan(self):
@@ -1472,6 +1512,7 @@ class LED2DOverviewDialog(PersistentDialog):
             f"        Y [{bbox.y_min:.2f} to {bbox.y_max:.2f}] mm\n"
             f"        Z [{bbox.z_min:.2f} to {bbox.z_max:.2f}] mm\n\n"
             f"Tiles: {tiles_x} x {tiles_y} = {tiles_x * tiles_y} per rotation\n"
+            f"Tile overlap: {config.tile_overlap_percent:.1f}%\n"
             f"{rotation_text}\n\n"
             f"Total: {total_tiles} tiles\n\n"
             "Continue?",
