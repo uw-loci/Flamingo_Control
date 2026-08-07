@@ -132,6 +132,58 @@ def plan_microscope_change(active, new, has_data):
 logger = logging.getLogger(__name__)
 
 
+def acquired_center_xyz_um(metadata: dict, shape_zyx, voxel_zyx):
+    """Stage-frame centre (x, y, z) µm of a stitched volume, or None.
+
+    Returns None when the file does not describe its own coordinate frame, in
+    which case the caller should fall back to centring the data in the chamber
+    — guessing a position from an undescribed frame is how a volume ends up
+    mirrored and metres from where it belongs.
+
+    The frame descriptor (``world_frame``, stitcher v0.9.20+) matters because
+    tile placement can NEGATE world X or Y: a mosaic spanning stage X
+    2.34-8.35 mm is written with ``origin_um.x = -8350``. Undo that here and
+    the origin is a real stage coordinate again.
+    """
+    frame = (metadata or {}).get("world_frame")
+    origin = (metadata or {}).get("origin_um")
+    if not isinstance(frame, dict) or not origin or len(origin) != 3:
+        return None
+    try:
+        o_z, o_y, o_x = (float(v) for v in origin)
+        ext_z = float(shape_zyx[0]) * float(voxel_zyx[0])
+        ext_y = float(shape_zyx[1]) * float(voxel_zyx[1])
+        ext_x = float(shape_zyx[2]) * float(voxel_zyx[2])
+    except (TypeError, ValueError, IndexError):
+        return None
+
+    # Centre in the WORLD frame the stitcher wrote...
+    cx, cy, cz = o_x + ext_x / 2.0, o_y + ext_y / 2.0, o_z + ext_z / 2.0
+    # ...then back to stage coordinates.
+    if frame.get("x_axis_negated"):
+        cx = -cx
+    if frame.get("y_axis_negated"):
+        cy = -cy
+    return (cx, cy, cz)
+
+
+def acquired_angle_deg(metadata: dict):
+    """The rotation the sample was physically at, or None if not recorded."""
+    frame = (metadata or {}).get("world_frame")
+    if isinstance(frame, dict) and frame.get("acquisition_angle_deg") is not None:
+        try:
+            return float(frame["acquisition_angle_deg"])
+        except (TypeError, ValueError):
+            return None
+    angles = (metadata or {}).get("angles_deg")
+    if isinstance(angles, (list, tuple)) and len(angles) == 1:
+        try:
+            return float(angles[0])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def _stitched_channel_slot(ch_id) -> int:
     """Map a stitched channel id to a viewer channel slot.
 
@@ -3529,7 +3581,7 @@ class SampleView(QWidget):
             # populate voxel_storage and render via get_display_volume_transformed.
             # The loader also updates last_stage_position, holder, and sliders
             # to the stitch center.
-            ch_ids_loaded = self._load_stitched_into_voxel_storage(channels)
+            ch_ids_loaded = self._load_stitched_into_voxel_storage(channels, metadata)
 
             if ch_ids_loaded:
                 for ch_id in ch_ids_loaded:
@@ -3574,7 +3626,9 @@ class SampleView(QWidget):
                 self, "Load Error", f"Error loading stitched data:\n{e}"
             )
 
-    def _load_stitched_into_voxel_storage(self, channels: list) -> list:
+    def _load_stitched_into_voxel_storage(
+        self, channels: list, metadata: Optional[dict] = None
+    ) -> list:
         """Populate voxel_storage display cache with stitched volumes.
 
         Uses the same code path as save-session restore, so rotation and
@@ -3618,7 +3672,17 @@ class SampleView(QWidget):
         stitch_center_y_mm = (o_y0 + sh0[1] * v_y0 / 2) / 1000
         stitch_center_z_mm = (o_z0 + sh0[0] * v_z0 / 2) / 1000
 
-        current_r = self.current_rotation.get("ry", 0.0)
+        # The rotation the sample was physically at. Falling back to the
+        # viewer's CURRENT rotation (the old behaviour) draws a volume acquired
+        # at -147 deg as though it were acquired at whatever the stage happens
+        # to read now — i.e. straight on.
+        acq_r = acquired_angle_deg(metadata)
+        current_r = acq_r if acq_r is not None else self.current_rotation.get("ry", 0.0)
+        if acq_r is not None:
+            self.logger.info(
+                f"Stitched data was acquired at R={acq_r:.2f} deg; using that as "
+                "the reference rotation"
+            )
 
         # Clear voxel_storage and set the reference to the stitch center so
         # get_display_volume_transformed() puts data at sample_region_center
@@ -3634,6 +3698,7 @@ class SampleView(QWidget):
         )
 
         ch_ids_loaded: list = []
+        _placement_logged: set = set()
         world_bbox_min = np.array([np.inf, np.inf, np.inf])
         world_bbox_max = np.array([-np.inf, -np.inf, -np.inf])
 
@@ -3666,11 +3731,24 @@ class SampleView(QWidget):
             # display axis. Legacy orientation => the old Z(always)/X(not-invert_x)
             # flips + (Z,Y,X) bbox, bit-for-bit. chamber_origin is already ordered
             # per display axis (voxel_storage_factory).
+            # Where to put it. A file that describes its own frame goes where
+            # it was ACQUIRED; one that doesn't stays centred in the chamber,
+            # because a position derived from an undescribed frame is a guess.
+            acq_center = acquired_center_xyz_um(metadata, volume.shape, voxel_um)
+            place_center = acq_center if acq_center is not None else (sc_x, sc_y, sc_z)
+            if acq_center is not None and ch_id not in _placement_logged:
+                _placement_logged.add(ch_id)
+                self.logger.info(
+                    f"Stitched channel {ch_id}: placing at its acquired stage "
+                    f"position (x={acq_center[0] / 1000:.2f} "
+                    f"y={acq_center[1] / 1000:.2f} z={acq_center[2] / 1000:.2f} mm)"
+                )
+
             resampled, world_min, world_max = orient_stitched_volume(
                 resampled,
                 volume.shape,
                 voxel_um,
-                (sc_x, sc_y, sc_z),
+                place_center,
                 self.voxel_storage.config.axis_orientation(),
             )
 
