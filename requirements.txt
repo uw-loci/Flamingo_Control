@@ -29,8 +29,16 @@ tifffile>=2023.2.0,<2027
 zarr>=3.1.4,<4
 numcodecs>=0.14.0,<1
 
-# Stitching pipeline
-multiview-stitcher>=0.1.37,<0.2
+# Stitching pipeline.
+# 0.1.57 is a correctness floor, not a preference: every version through 0.1.56
+# fuses each dask chunk with a zero-pixel halo, so whenever a tile's translation
+# is not a whole number of output voxels (the normal case — stage positions are
+# arbitrary relative to the output grid) it writes zeros at every block
+# boundary. The fused volume comes out with a regular grid of black one-voxel
+# lines that looks like a tile-seam artifact. Affects blend AND max fusion.
+# Verified across releases: 0.1.44/0.1.48/0.1.49/0.1.52/0.1.56 produce the
+# lines; 0.1.57+ do not. Matches MIN_SAFE_MVS_VERSION in flamingo-stitcher.
+multiview-stitcher>=0.1.57,<0.2
 # multiview-stitcher's registration imports pandas but declares it only as an
 # optional dep, so without this the stitcher silently falls back to metadata-only
 # positions mid-run ("Missing optional dependency 'pandas'").
