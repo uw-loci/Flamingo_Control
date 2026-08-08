@@ -925,6 +925,77 @@ class LED2DOverviewWorkflow(QObject):
             return False
         return True
 
+    def _capture_plane(
+        self,
+        stage_service,
+        camera_controller,
+        z_pos: float,
+        *,
+        settle_timeout_s: float = 2.0,
+        frame_timeout_s: float = 1.0,
+    ) -> Optional[tuple]:
+        """Move Z to ``z_pos``, wait for arrival, and return a FRESH frame.
+
+        Returns ``(image, frame_number)``, or None if no frame could be read.
+
+        The Z sweep used to do::
+
+            stage_service.move_to_position(AxisCode.Z_AXIS, z_pos)
+            time.sleep(0.015)
+            frame_data = camera_controller.get_latest_frame()
+
+        Both halves of that are wrong, and together they are why "Best Focus"
+        picked a plane that is not the sharpest:
+
+        * ``move_to_position`` is asynchronous — its own docstring says so — and
+          15-20 ms is not enough for the stage to arrive. The frame is captured
+          mid-travel, so it is motion-blurred and belongs to no particular Z.
+        * ``get_latest_frame`` returns ``_frame_buffer[-1]`` with no freshness
+          check. At 40 fps a frame arrives every 25 ms, so a 15 ms sleep returns
+          the SAME frame as the previous plane more often than not. The stack
+          then contains duplicates, its focus scores are duplicated with them,
+          and the true best-focus plane may never have been sampled at all.
+
+        Waiting on the real per-axis position fixes the first; waiting for the
+        frame counter to advance fixes the second. The frame number is returned
+        so the caller can detect and report any plane that still had to reuse a
+        frame rather than silently scoring it.
+        """
+        from py2flamingo.services.stage_service import AxisCode
+
+        stage_service.move_to_position(AxisCode.Z_AXIS, z_pos)
+
+        before = camera_controller.get_latest_frame()
+        last_number = before[2] if before is not None else None
+
+        # Poll the actual Z position — a small step settles fast, so poll tight.
+        self._wait_for_axes_settled(
+            stage_service,
+            {AxisCode.Z_AXIS: z_pos},
+            tolerance_mm=0.002,
+            timeout_s=settle_timeout_s,
+            poll_interval_s=0.01,
+            broadcast=False,
+        )
+        self._broadcast_stage_position(z=z_pos)
+
+        # Then wait for a frame that started AFTER the stage stopped.
+        deadline = time.monotonic() + frame_timeout_s
+        frame_data = camera_controller.get_latest_frame()
+        while time.monotonic() < deadline:
+            if self._cancelled:
+                break
+            frame_data = camera_controller.get_latest_frame()
+            if frame_data is not None and frame_data[2] != last_number:
+                return frame_data[0], frame_data[2]
+            time.sleep(0.005)
+
+        if frame_data is None:
+            return None
+        # Timed out waiting for a new frame: hand back what there is, but tell
+        # the caller its number so the reuse is reported instead of hidden.
+        return frame_data[0], frame_data[2]
+
     def _get_stage_limits(self) -> dict:
         """Stage soft limits {axis: {'min','max'}}, cached. Empty if unavailable."""
         if self._stage_limits_cache is not None:
@@ -1158,24 +1229,36 @@ class LED2DOverviewWorkflow(QObject):
                 z_step = self._config.z_step_size
                 z_values = self._z_sweep_positions(z_min, z_max, z_step, z_sweep_up)
 
+                seen_frame_numbers = set()
+                reused = 0
                 for z_pos in z_values:
                     # Check for cancellation during Z sweep
                     if self._cancelled:
                         self._finish_cancelled()
                         return
 
-                    # Move Z (non-blocking conceptually - we grab frame immediately)
-                    stage_service.move_to_position(AxisCode.Z_AXIS, z_pos)
-                    # Follow the sweep on the sliders + 3D view (throttled ~10 Hz).
-                    self._broadcast_stage_position(z=z_pos)
-                    time.sleep(0.015)  # Minimal delay
+                    captured = self._capture_plane(
+                        stage_service, camera_controller, z_pos
+                    )
+                    if captured is None:
+                        continue
+                    image, frame_number = captured
+                    if frame_number in seen_frame_numbers:
+                        # Same frame as an earlier plane: scoring it again would
+                        # let a stale image win "best focus" for this tile.
+                        reused += 1
+                        continue
+                    seen_frame_numbers.add(frame_number)
+                    focus_score = variance_of_laplacian(image)
+                    frames.append((z_pos, image.copy(), focus_score))
 
-                    # Grab frame
-                    frame_data = camera_controller.get_latest_frame()
-                    if frame_data is not None:
-                        image = frame_data[0]
-                        focus_score = variance_of_laplacian(image)
-                        frames.append((z_pos, image.copy(), focus_score))
+                if reused:
+                    logger.warning(
+                        f"Tile ({x_pos:.2f}, {y_pos:.2f}): {reused}/{len(z_values)} "
+                        "planes reused an earlier frame and were dropped — the "
+                        "camera is not keeping up with the Z sweep, so best-focus "
+                        "is chosen from fewer planes than requested"
+                    )
 
                 # Compute projections from captured frames
                 if frames:
@@ -1364,22 +1447,29 @@ class LED2DOverviewWorkflow(QObject):
         frames_captured = 0
         frames_failed = 0
 
+        seen_frame_numbers = set()
+        frames_reused = 0
         for z_pos in z_positions:
-            # Move to Z using stage service directly
-            stage_service.move_to_position(AxisCode.Z_AXIS, z_pos)
-            # Follow the Z-stack on the sliders + 3D view (throttled ~10 Hz).
-            self._broadcast_stage_position(z=z_pos)
-            time.sleep(0.02)  # Minimal delay - just grab live frame
-
-            # Capture frame from live view
-            frame_data = camera_controller.get_latest_frame()
-            if frame_data is not None:
-                image = frame_data[0]
-                focus_score = variance_of_laplacian(image)
-                frames.append((z_pos, image.copy(), focus_score))
-                frames_captured += 1
-            else:
+            captured = self._capture_plane(stage_service, camera_controller, z_pos)
+            if captured is None:
                 frames_failed += 1
+                continue
+            image, frame_number = captured
+            if frame_number in seen_frame_numbers:
+                # A repeat of an earlier plane's frame — see _capture_plane.
+                frames_reused += 1
+                continue
+            seen_frame_numbers.add(frame_number)
+            focus_score = variance_of_laplacian(image)
+            frames.append((z_pos, image.copy(), focus_score))
+            frames_captured += 1
+
+        if frames_reused:
+            logger.warning(
+                f"Tile ({x:.2f}, {y:.2f}): {frames_reused}/{len(z_positions)} "
+                "planes reused an earlier frame and were dropped — best-focus is "
+                "chosen from fewer planes than requested"
+            )
 
         # Log capture results
         if frames_failed > 0:
