@@ -17,6 +17,7 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -441,8 +442,66 @@ class LED2DOverviewDialog(PersistentDialog):
         self.z_step_size.valueChanged.connect(self._update_scan_info)
         layout.addWidget(self.z_step_size, 1, 1)
 
-        # Tile overlap — the grid step is FOV * (1 - overlap/100)
-        layout.addWidget(QLabel("Tile Overlap:"), 1, 2)
+        # Tile overlap gets its own full-width, framed row rather than a slot in
+        # the grid. It is the one setting on this dialog that CANNOT be changed
+        # later: the overview fixes the tile grid step (FOV × (1 − overlap)) and
+        # every downstream acquisition re-images those same stage positions.
+        # Choosing 0% here silently commits the whole sample to edge-to-edge
+        # tiles — which is exactly how a 104-tile brain got acquired with 0.013%
+        # overlap, leaving the stitcher nothing to register on.
+        layout.addWidget(self._create_tile_overlap_row(), 2, 0, 1, 4)
+
+        # Focus stacking checkbox
+        self.focus_stacking_checkbox = QCheckBox("Use focus stacking (slower)")
+        self.focus_stacking_checkbox.setToolTip(
+            "If checked, combines best-focused regions from all Z planes.\n"
+            "If unchecked, uses single best-focused frame per tile."
+        )
+        self.focus_stacking_checkbox.setChecked(False)
+        layout.addWidget(self.focus_stacking_checkbox, 3, 0, 1, 3)
+
+        # Single-rotation (quick test) checkbox
+        self.single_rotation_checkbox = QCheckBox(
+            "Skip the second 90° view (quick test)"
+        )
+        self.single_rotation_checkbox.setToolTip(
+            "Scan only the starting rotation instead of R and R+90.\n"
+            "Roughly halves the run — useful for a quick look.\n\n"
+            "The result then has one view, so tile collection can't use the\n"
+            "90° intersection for Z; set the Z range there instead."
+        )
+        self.single_rotation_checkbox.setChecked(False)
+        self.single_rotation_checkbox.toggled.connect(self._update_scan_info)
+        layout.addWidget(self.single_rotation_checkbox, 4, 0, 1, 3)
+
+        group.setLayout(layout)
+        return group
+
+    # Below this, overlap is treated as "effectively none" and the row turns red.
+    LOW_OVERLAP_WARN_PERCENT = 5.0
+
+    def _create_tile_overlap_row(self) -> QFrame:
+        """The tile-overlap control, deliberately made the loudest thing here.
+
+        This is a one-way door. The overview walks a grid whose step is
+        ``FOV × (1 − overlap)``, and tile collection re-images those exact stage
+        positions — so overlap chosen here is inherited by every later
+        acquisition and cannot be raised afterwards without shifting the whole
+        grid (which would invalidate the overview the tiles were picked from).
+        Hence the framed row, the (!!) explainer, and the red state below
+        ``LOW_OVERLAP_WARN_PERCENT``.
+        """
+        frame = QFrame()
+        frame.setObjectName("tileOverlapRow")
+        frame.setFrameShape(QFrame.StyledPanel)
+        row = QHBoxLayout(frame)
+        row.setContentsMargins(8, 6, 8, 6)
+        row.setSpacing(8)
+
+        title = QLabel("Tile Overlap:")
+        title.setStyleSheet("font-weight: bold;")
+        row.addWidget(title)
+
         self.tile_overlap = QDoubleSpinBox()
         self.tile_overlap.setRange(OVERLAP_PERCENT_MIN, OVERLAP_PERCENT_MAX)
         self.tile_overlap.setDecimals(1)
@@ -457,33 +516,85 @@ class LED2DOverviewDialog(PersistentDialog):
             "The server clamps this to 0–50%."
         )
         self.tile_overlap.valueChanged.connect(self._update_scan_info)
-        layout.addWidget(self.tile_overlap, 1, 3)
+        self.tile_overlap.valueChanged.connect(self._update_tile_overlap_warning)
+        row.addWidget(self.tile_overlap)
 
-        # Focus stacking checkbox
-        self.focus_stacking_checkbox = QCheckBox("Use focus stacking (slower)")
-        self.focus_stacking_checkbox.setToolTip(
-            "If checked, combines best-focused regions from all Z planes.\n"
-            "If unchecked, uses single best-focused frame per tile."
+        # (!!) explainer — same affordance as the (?) helpers in Sample View,
+        # coloured to say "read me before you run this", not "optional detail".
+        self._overlap_help_btn = QPushButton("!!")
+        self._overlap_help_btn.setFixedSize(24, 24)
+        self._overlap_help_btn.setCursor(Qt.WhatsThisCursor)
+        self._overlap_help_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #c62828;
+                color: white;
+                border-radius: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #e53935; }
+            """)
+        self._overlap_help_btn.setToolTip(
+            "This choice is PERMANENT for this sample.\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "The overview walks a tile grid whose step is FOV × (1 − overlap).\n"
+            "Collect Tiles later re-images those SAME stage positions, so the\n"
+            "overlap you pick now is inherited by every acquisition built from\n"
+            "this overview — full tile collections included.\n\n"
+            "It cannot be increased afterwards: doing so would move every tile\n"
+            "position, and the tiles you selected on the overview would no\n"
+            "longer correspond to what gets acquired.\n\n"
+            "At 0% the tiles butt edge-to-edge. Stitching then has no shared\n"
+            "content to register on and falls back to raw stage positions, and\n"
+            "each frame's edge falloff lands directly on the seam — visible as\n"
+            "a brightness step at every tile boundary.\n\n"
+            "10% is the sane default. Below 5% is flagged."
         )
-        self.focus_stacking_checkbox.setChecked(False)
-        layout.addWidget(self.focus_stacking_checkbox, 2, 0, 1, 3)
+        self._overlap_help_btn.clicked.connect(self._show_tile_overlap_help)
+        row.addWidget(self._overlap_help_btn)
 
-        # Single-rotation (quick test) checkbox
-        self.single_rotation_checkbox = QCheckBox(
-            "Skip the second 90° view (quick test)"
-        )
-        self.single_rotation_checkbox.setToolTip(
-            "Scan only the starting rotation instead of R and R+90.\n"
-            "Roughly halves the run — useful for a quick look.\n\n"
-            "The result then has one view, so tile collection can't use the\n"
-            "90° intersection for Z; set the Z range there instead."
-        )
-        self.single_rotation_checkbox.setChecked(False)
-        self.single_rotation_checkbox.toggled.connect(self._update_scan_info)
-        layout.addWidget(self.single_rotation_checkbox, 3, 0, 1, 3)
+        self._overlap_warning_label = QLabel()
+        self._overlap_warning_label.setWordWrap(True)
+        row.addWidget(self._overlap_warning_label, 1)
 
-        group.setLayout(layout)
-        return group
+        self._update_tile_overlap_warning()
+        return frame
+
+    def _update_tile_overlap_warning(self) -> None:
+        """Colour the overlap row by whether the value is usable."""
+        # Called from _create_tile_overlap_row before the attributes exist on
+        # some restore paths, so stay defensive rather than break the dialog.
+        frame = self.findChild(QFrame, "tileOverlapRow")
+        label = getattr(self, "_overlap_warning_label", None)
+        spin = getattr(self, "tile_overlap", None)
+        if label is None or spin is None:
+            return
+
+        value = spin.value()
+        if value < self.LOW_OVERLAP_WARN_PERCENT:
+            label.setText(
+                f"⚠ {value:.1f}% is too little to stitch — this is permanent "
+                f"for every acquisition from this overview."
+            )
+            label.setStyleSheet("color: #c62828; font-weight: bold;")
+            if frame is not None:
+                frame.setStyleSheet(
+                    "#tileOverlapRow { border: 2px solid #c62828; "
+                    "background-color: rgba(198, 40, 40, 40); border-radius: 4px; }"
+                )
+        else:
+            label.setText("Applies to every acquisition from this overview.")
+            label.setStyleSheet("color: gray;")
+            if frame is not None:
+                frame.setStyleSheet(
+                    "#tileOverlapRow { border: 1px solid palette(mid); "
+                    "border-radius: 4px; }"
+                )
+
+    def _show_tile_overlap_help(self) -> None:
+        """Click target for (!!) — the tooltip text as a dismissable dialog."""
+        QMessageBox.information(
+            self, "Tile overlap is permanent", self._overlap_help_btn.toolTip()
+        )
 
     def _create_imaging_group(self) -> QGroupBox:
         """Create the imaging (LED) display group."""

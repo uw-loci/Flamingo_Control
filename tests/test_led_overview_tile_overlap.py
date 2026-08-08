@@ -159,3 +159,80 @@ class TestTheRealGridUsesTheOverlap:
 
     def test_more_overlap_yields_more_tiles(self):
         assert len(self._positions(25.0)) > len(self._positions(0.0))
+
+
+class TestOverlapIsUnmissableInTheUI:
+    """The setting is a one-way door, so the UI has to say so.
+
+    The overview fixes the tile grid step; Collect Tiles re-images those exact
+    stage positions. Overlap chosen here is therefore inherited by every later
+    acquisition and cannot be raised afterwards without moving every tile — at
+    which point the tiles the user selected on the overview no longer match
+    what would be acquired. A quiet spin box in the corner of a grid was not
+    enough: a 104-tile brain was acquired at 0.013% overlap and nobody saw it
+    until the stitch came back with seams.
+
+    One QApplication and one dialog for the class: constructing this dialog
+    per-test and letting Qt garbage-collect it segfaults the interpreter.
+    """
+
+    @classmethod
+    def setup_class(cls):
+        pytest.importorskip("PyQt5")
+        from PyQt5.QtWidgets import QApplication
+
+        from py2flamingo.views.dialogs.led_2d_overview_dialog import (
+            LED2DOverviewDialog,
+        )
+
+        # Held on the class so neither is collected mid-run.
+        cls._qapp = QApplication.instance() or QApplication([])
+        cls._dlg = LED2DOverviewDialog(app=None)
+
+    @classmethod
+    def teardown_class(cls):
+        dlg = getattr(cls, "_dlg", None)
+        if dlg is not None:
+            dlg.deleteLater()
+            cls._dlg = None
+
+    def test_overlap_defaults_to_ten_percent_not_zero(self):
+        assert self._dlg.tile_overlap.value() == pytest.approx(10.0)
+
+    def test_it_has_its_own_framed_row_not_a_grid_cell(self):
+        from PyQt5.QtWidgets import QFrame
+
+        assert self._dlg.findChild(QFrame, "tileOverlapRow") is not None
+
+    def test_there_is_a_bang_bang_explainer(self):
+        btn = self._dlg._overlap_help_btn
+        assert btn.text() == "!!"
+        tip = btn.toolTip()
+        # It must actually say the two things that were missed.
+        assert "PERMANENT" in tip
+        assert "cannot be increased afterwards" in tip
+
+    @pytest.mark.parametrize("value", [0.0, 1.0, 4.9])
+    def test_below_five_percent_goes_red(self, value):
+        self._dlg.tile_overlap.setValue(value)
+        label = self._dlg._overlap_warning_label
+        assert "#c62828" in label.styleSheet()
+        assert "too little to stitch" in label.text()
+
+    @pytest.mark.parametrize("value", [5.0, 10.0, 30.0])
+    def test_five_percent_and_above_is_calm(self, value):
+        self._dlg.tile_overlap.setValue(value)
+        assert "#c62828" not in self._dlg._overlap_warning_label.styleSheet()
+
+    def test_the_row_border_tracks_the_same_threshold(self):
+        from PyQt5.QtWidgets import QFrame
+
+        frame = self._dlg.findChild(QFrame, "tileOverlapRow")
+        self._dlg.tile_overlap.setValue(0.0)
+        assert "#c62828" in frame.styleSheet()
+        self._dlg.tile_overlap.setValue(10.0)
+        assert "#c62828" not in frame.styleSheet()
+
+    def test_the_resting_message_still_states_the_consequence(self):
+        self._dlg.tile_overlap.setValue(10.0)
+        assert "every acquisition" in self._dlg._overlap_warning_label.text()
