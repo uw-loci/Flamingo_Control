@@ -432,6 +432,24 @@ class TileCollectionDialog(PersistentDialog):
         self._add_to_sample_view_checkbox.setChecked(True)  # Default enabled
         container_layout.addWidget(self._add_to_sample_view_checkbox)
 
+        # Reading the .raw files back needs a LOCAL path; the server share alone
+        # is not enough. Only the MIP Overview entry point can infer one (it has
+        # a browsed folder to work back from) — from the 2D Overview, webcam, or
+        # threshold paths there is no acquisition on disk yet, so unless the
+        # Save Panel already maps this drive the feature silently switched
+        # itself off with nothing but a log line. Say so where the box is.
+        self._sample_view_status = QLabel()
+        self._sample_view_status.setWordWrap(True)
+        self._sample_view_status.setIndent(20)
+        container_layout.addWidget(self._sample_view_status)
+        self._add_to_sample_view_checkbox.toggled.connect(
+            self._update_sample_view_status
+        )
+        self._save_panel.settings_changed.connect(
+            lambda _=None: self._update_sample_view_status()
+        )
+        self._update_sample_view_status()
+
         container_layout.addStretch()
         scroll.setWidget(container)
         layout.addWidget(scroll, stretch=1)
@@ -1810,6 +1828,38 @@ class TileCollectionDialog(PersistentDialog):
         logger.info(f"Folder reorganization: {result.summary()}")
         return result
 
+    def _configured_local_path(self) -> Optional[str]:
+        """Local path the 3D build would read .raw files from, if any.
+
+        Asks the Save Panel rather than ``self._local_path``: that attribute is
+        only populated once workflow creation has started, but the user needs to
+        know whether the feature will work *before* pressing the button.
+        """
+        try:
+            return self._save_panel.get_settings().get("local_path") or None
+        except Exception:  # a half-built panel must not break the dialog
+            return None
+
+    def _update_sample_view_status(self) -> None:
+        """Say whether 3D building will actually happen, next to the checkbox."""
+        label = getattr(self, "_sample_view_status", None)
+        if label is None:
+            return
+        if not self._add_to_sample_view_checkbox.isChecked():
+            label.clear()
+            return
+        if self._configured_local_path():
+            label.setText("Tiles will load into Sample View as each run finishes.")
+            label.setStyleSheet("color: gray;")
+        else:
+            label.setText(
+                "⚠ No local path configured — 3D building will be SKIPPED. "
+                "Set one in the Save Panel above (tick 'local access' and "
+                "Browse to the drive), or load the data afterwards with "
+                "Sample View → Load Raw Data."
+            )
+            label.setStyleSheet("color: #c62828; font-weight: bold;")
+
     def _reorganization_preflight(self, save_settings: dict) -> Optional[str]:
         """Return why post-run reorganization will not happen, or None.
 
@@ -1835,12 +1885,32 @@ class TileCollectionDialog(PersistentDialog):
         add_to_sample_view = self._add_to_sample_view_checkbox.isChecked()
 
         if add_to_sample_view:
-            # Disk-based 3D building requires a local path to read .raw files
+            # Disk-based 3D building requires a local path to read .raw files.
+            # This used to drop the user's request with only a log line, so the
+            # box stayed ticked and nothing was ever built — indistinguishable
+            # from the feature being broken. Ask instead: the run is about to
+            # take hours, and configuring the path now is a few seconds.
             if not getattr(self, "_local_path", None):
                 logger.warning(
                     "3D volume building disabled — no local path configured. "
                     "Use 'Load Raw Data' in Sample View after acquisition."
                 )
+                choice = QMessageBox.question(
+                    self,
+                    "3D volume building will be skipped",
+                    "'Build 3D volume from saved tiles' is ticked, but no local "
+                    "path is configured, so the tiles cannot be read back and "
+                    "nothing will be built.\n\n"
+                    "Set a local path in the Save Panel (tick 'local access' and "
+                    "Browse to the drive), or load the data afterwards with "
+                    "Sample View → Load Raw Data.\n\n"
+                    "Start the acquisition anyway, without 3D building?",
+                    QMessageBox.Yes | QMessageBox.Cancel,
+                    QMessageBox.Cancel,
+                )
+                if choice != QMessageBox.Yes:
+                    logger.info("Run cancelled so a local path can be configured")
+                    return
                 add_to_sample_view = False
 
         if add_to_sample_view:
