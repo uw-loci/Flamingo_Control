@@ -6,6 +6,7 @@ that loads config and creates DualResolutionVoxelStorage + coordinate transforme
 """
 
 import logging
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -242,12 +243,37 @@ def create_voxel_storage(
                 "sample_region_half_width_z_um",
             ]
         ):
+            hw_x = float(config["sample_chamber"]["sample_region_half_width_x_um"])
+            hw_y = float(config["sample_chamber"]["sample_region_half_width_y_um"])
+            hw_z = float(config["sample_chamber"]["sample_region_half_width_z_um"])
+
+            # The stage rotates the sample about the VERTICAL (Y) axis, so X and
+            # Z sweep into one another: a feature 7 mm deep in Z at R=0 sits 7 mm
+            # out in X at R=90. Sizing each axis to its own chamber extent gives
+            # a box that only holds the sample at one rotation.
+            #
+            # It fails exactly as you would expect once it fails at all. On
+            # 2026-08-08 a 213 degree acquisition put every tile at world
+            # X = 13.6-14.7 mm against an X ceiling of 12.65 mm, and all 51,062
+            # tile chunks were rejected as "outside storage bounds" — the whole
+            # dataset dropped, while the sample never came near the chamber wall.
+            #
+            # Both in-plane axes therefore get the circumscribed radius, which is
+            # the smallest bound that holds the sample at EVERY rotation. Storage
+            # is sparse (flat-index keyed), so this widens the index space, not
+            # the allocation — memory still tracks occupied voxels only.
+            in_plane = math.hypot(hw_x, hw_z)
+            if in_plane > max(hw_x, hw_z):
+                logger.info(
+                    "Storage X/Z half-widths widened for rotation: "
+                    f"X ±{hw_x:.0f} / Z ±{hw_z:.0f} → ±{in_plane:.0f} µm "
+                    "(circumscribed radius about the vertical axis, so a sample "
+                    "that fits at R=0 also fits at every other R)"
+                )
+            hw_x = hw_z = in_plane
+
             half_widths = orientation.order_by_display(
-                {
-                    "x": config["sample_chamber"]["sample_region_half_width_x_um"],
-                    "y": config["sample_chamber"]["sample_region_half_width_y_um"],
-                    "z": config["sample_chamber"]["sample_region_half_width_z_um"],
-                }
+                {"x": hw_x, "y": hw_y, "z": hw_z}
             )
 
         # Reorder sample_region_center (config X,Y,Z) into display (depth,vert,
